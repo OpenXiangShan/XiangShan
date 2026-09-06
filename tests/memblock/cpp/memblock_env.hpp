@@ -3575,6 +3575,7 @@ public:
         std::uint64_t l2_requests = 0;
         std::uint64_t l3_requests = 0;
         std::array<std::uint64_t, 32> l2_source_counts{};
+        std::array<std::vector<std::uint64_t>, 32> l2_addresses_by_source{};
         std::array<std::uint64_t, 32> last_l2_addr_by_source{};
         std::array<std::uint64_t, 32> last_l2_cycle_by_source{};
         std::uint64_t last_l2_addr = 0;
@@ -3729,6 +3730,39 @@ public:
             std::uint64_t{0});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.ImmSet(
             enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency.ImmSet(
+            std::uint64_t{0});
+        return run_cycles(4);
+    }
+
+    bool configure_sms_pht_prefetch(bool output_enable)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_train_on_hit.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_agt.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_pht.ImmSet(
+            output_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_threshold.ImmSet(
+            std::uint64_t{12});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_stride.ImmSet(
+            std::uint64_t{30});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_stride.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_store_only.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.ImmSet(
+            std::uint64_t{1});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable.ImmSet(
             std::uint64_t{1});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable.ImmSet(
@@ -8980,6 +9014,9 @@ private:
                 ++hardware_prefetch_stats_.l2_requests;
                 ++hardware_prefetch_stats_.l2_source_counts[
                     hardware_prefetch.l2_source];
+                hardware_prefetch_stats_.l2_addresses_by_source[
+                    hardware_prefetch.l2_source].push_back(
+                        hardware_prefetch.l2_addr);
                 hardware_prefetch_stats_.last_l2_addr_by_source[
                     hardware_prefetch.l2_source] = hardware_prefetch.l2_addr;
                 hardware_prefetch_stats_.last_l2_cycle_by_source[

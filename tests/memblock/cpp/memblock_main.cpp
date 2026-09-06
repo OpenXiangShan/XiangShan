@@ -4754,9 +4754,145 @@ int run_hardware_prefetch(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment sms_environment(argc, argv);
+    constexpr std::uint64_t sms_base =
+        memblock::kDefaultMemoryBase + 0x500000;
+    constexpr std::uint64_t sms_trigger_base = sms_base + 0x1000;
+    constexpr std::uint64_t sms_pc = 0x18000;
+    constexpr std::uint8_t sms_source = 10;
+    constexpr std::uint16_t expected_sms_offset_bitmap = 0x07e0;
+    constexpr std::uint64_t expected_sms_requests = 6;
+    constexpr std::array<unsigned, 12> sms_training_offsets{
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+    sms_environment.memory().fill_incrementing(sms_base, 0x8000, 0x6d);
+    if (!sms_environment.reset() ||
+        !sms_environment.configure_sms_pht_prefetch(false) ||
+        !sms_environment.expect_l2_prefetch_control(true, true)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << sms_environment.cycle()
+                  << " phase=sms-setup reason="
+                  << sms_environment.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < sms_training_offsets.size(); ++index) {
+        const memblock::LoadTransaction transaction{
+            .address = sms_base + sms_training_offsets[index] * 64,
+            .pc = sms_pc,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(index + 1),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        sms_environment.expect_load(transaction);
+        if (!sms_environment.enqueue_load(transaction) ||
+            !sms_environment.issue_load(transaction, 256) ||
+            !sms_environment.run_until_complete(2048) ||
+            !sms_environment.run_until_lq_retired(1024) ||
+            !sms_environment.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << sms_environment.cycle()
+                      << " phase=sms-train index=" << index
+                      << " reason=" << sms_environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (sms_environment.hardware_prefetch_stats()
+            .l2_source_counts[sms_source] != 0 ||
+        !sms_environment.configure_sms_pht_prefetch(true)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << sms_environment.cycle()
+                  << " phase=sms-enable source10_before="
+                  << sms_environment.hardware_prefetch_stats()
+                         .l2_source_counts[sms_source]
+                  << " reason=" << sms_environment.error() << '\n';
+        return 1;
+    }
+    const auto sms_before = sms_environment.hardware_prefetch_stats()
+                                .l2_source_counts[sms_source];
+    const memblock::LoadTransaction sms_trigger{
+        .address = sms_trigger_base,
+        .pc = sms_pc,
+        .op = memblock::LoadOp::ld,
+        .rob = static_cast<std::uint8_t>(sms_training_offsets.size()),
+        .lq = static_cast<std::uint8_t>(sms_training_offsets.size()),
+        .pdest = static_cast<std::uint8_t>(sms_training_offsets.size() + 1),
+        .lane = sms_training_offsets.size() % memblock::kScalarLoadLanes,
+    };
+    sms_environment.expect_load(sms_trigger);
+    if (!sms_environment.enqueue_load(sms_trigger) ||
+        !sms_environment.issue_load(sms_trigger, 256) ||
+        !sms_environment.run_until_complete(2048) ||
+        !sms_environment.run_until_lq_retired(1024) ||
+        !sms_environment.run_cycles(256)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << sms_environment.cycle()
+                  << " phase=sms-trigger reason="
+                  << sms_environment.error() << '\n';
+        return 1;
+    }
+    const auto &sms_stats = sms_environment.hardware_prefetch_stats();
+    const auto &sms_addresses =
+        sms_stats.l2_addresses_by_source[sms_source];
+    const auto sms_after = sms_stats.l2_source_counts[sms_source];
+    bool sms_addresses_valid = sms_addresses.size() == sms_after;
+    std::uint16_t sms_offset_bitmap = 0;
+    for (std::size_t index = sms_before;
+         index < sms_addresses.size(); ++index) {
+        const std::uint64_t address = sms_addresses[index];
+        const bool learned_offset = std::any_of(
+            sms_training_offsets.begin(), sms_training_offsets.end(),
+            [&](unsigned offset) {
+                return offset != 0 &&
+                    address == sms_trigger_base + offset * 64;
+            });
+        const bool offset_is_representable =
+            address >= sms_trigger_base &&
+            (address - sms_trigger_base) % 64 == 0 &&
+            (address - sms_trigger_base) / 64 < 16;
+        const unsigned offset = offset_is_representable
+            ? static_cast<unsigned>((address - sms_trigger_base) / 64)
+            : 0;
+        const std::uint16_t offset_bit = offset_is_representable
+            ? static_cast<std::uint16_t>(std::uint16_t{1} << offset)
+            : 0;
+        const bool unique = offset_is_representable &&
+            (sms_offset_bitmap & offset_bit) == 0;
+        sms_addresses_valid =
+            sms_addresses_valid && learned_offset && unique;
+        sms_offset_bitmap |= offset_bit;
+    }
+    if (sms_after != sms_before + expected_sms_requests ||
+        sms_offset_bitmap != expected_sms_offset_bitmap ||
+        sms_stats.last_l2_addr_by_source[sms_source] !=
+            sms_trigger_base + 10 * 64 ||
+        !sms_addresses_valid ||
+        sms_stats.l2_source_counts[stream_source] != 0 ||
+        sms_stats.l2_source_counts[stride_source] != 0 ||
+        sms_stats.l3_requests != 0) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << sms_environment.cycle()
+                  << " phase=sms-oracle source10_before=" << sms_before
+                  << " source10_after=" << sms_after
+                  << " bitmap=0x" << std::hex << sms_offset_bitmap
+                  << " expected_bitmap=0x" << expected_sms_offset_bitmap
+                  << " addresses=";
+        for (std::size_t index = sms_before;
+             index < sms_addresses.size(); ++index) {
+            std::cerr << "0x" << std::hex << sms_addresses[index] << ',';
+        }
+        std::cerr << std::dec
+                  << " stream=" << sms_stats.l2_source_counts[stream_source]
+                  << " stride=" << sms_stats.l2_source_counts[stride_source]
+                  << " l3_total=" << sms_stats.l3_requests << '\n';
+        return 1;
+    }
+    const std::uint64_t sms_pht_requests = sms_after - sms_before;
+
     std::cout << "MEMBLOCK_HARDWARE_PREFETCH_PASS"
               << " cycle="
-              << environment.cycle() + stream_environment.cycle()
+              << environment.cycle() + stream_environment.cycle() +
+                    sms_environment.cycle()
               << " stride_cycles=" << environment.cycle()
               << " stream_cycles=" << stream_environment.cycle()
               << " training_loads=" << training_loads
@@ -4772,6 +4908,11 @@ int run_hardware_prefetch(int argc, char **argv)
               << expected_stream_last << std::dec
               << " stream_priority_loads=" << priority_training_loads
               << " stream_priority_l2=" << stream_priority_requests
+              << " sms_training_loads=" << sms_training_offsets.size()
+              << " sms_pht_l2=" << sms_pht_requests
+              << " sms_last=0x" << std::hex
+              << sms_stats.last_l2_addr_by_source[sms_source]
+              << " sms_bitmap=0x" << sms_offset_bitmap << std::dec
               << " stride_suppressed=1 l2_control_defaults=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

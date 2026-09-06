@@ -523,11 +523,13 @@ confidence while requiring four exact `Prefetch2L2Stream` requests at the
 configured 640-line lookahead. It then crosses into the active neighboring
 region and trains a fixed-PC stride for six misses; stream requests must
 continue while source 12 remains suppressed, checking the RTL's stream-over-
-stride priority. The present build elaborates L3 stream prefetch disabled, so
-the L3 output is monitored and required to remain idle instead of being
-reported as positive functional coverage. SMS source-10 attribution remains
-open: direct AGT generation is hard-disabled in this RTL and the PHT path has
-no independent state observation at the MemBlock boundary.
+stride priority. A third phase disables PHT output while twelve same-PC cold
+lines train SMS state, then enables PHT and accesses the same offset in a new
+region. It requires six unique source-10 requests at relative block offsets
+5..10 (`bitmap=0x7e0`), with no source-11/12 traffic. Direct AGT request
+generation remains hard-disabled by this RTL. The present build elaborates L3
+stream prefetch disabled, so the L3 output is monitored and required to remain
+idle instead of being reported as positive functional coverage.
 The same fixed-PC stream is available through the common `random-mixed`
 `stride-stream` constraint. It runs alongside the configured operation,
 translation, miss/refill, Probe, and response-latency mix and requires an L2

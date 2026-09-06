@@ -741,6 +741,20 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_hardware_prefetch_has_positive_sms_pht_causality(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "configure_sms_pht_prefetch(false)",
+            "configure_sms_pht_prefetch(true)",
+            "l2_addresses_by_source",
+            "sms_training_offsets",
+            '" phase=sms-oracle source10_before="',
+            '" sms_pht_l2="',
+            "address == sms_trigger_base + offset * 64",
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

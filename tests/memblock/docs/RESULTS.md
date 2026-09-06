@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `c2b1fba5d7f3f5ca451b36fdbec873d6a34acb74c7d329bafc89d8f34d188c9c`
+- Current rebuilt and frozen UT executable SHA-256: `9d47d48bc7e78e813c2b69ff8c7d7df0e143e2fb6ffd0fad5385410d902f7b95`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `2a430318feefb5f4ece21f14aea02896e542e1dfa081cbd954a67442a47868a6`
+- Frozen runtime manifest SHA-256: `e6d024bdc044c03b8be0a46946aa1891702ebf29f2797f0b53033144ab71258a`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -439,7 +439,8 @@ three instruction-prefetch outputs respectively. The independently verified
 artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
 `d053e833417b505d8c7bdcb27be366ce33f1ddb9c491701f640067fea0e182ab`.
 
-The five L2/L3 hardware-prefetch sender pins were then sampled directly.
+The five L2/L3 hardware-prefetch sender pins were then sampled directly. The
+three isolated environments completed in 3,255 aggregate cycles.
 `hardware-prefetch` first used eight fixed-PC, 128-byte-stride cold loads;
 these produced exactly three L2 stride-prefetch outputs, each with source 12
 and the independently calculated `current address + 4096` target. Three more
@@ -450,10 +451,14 @@ final address was `0x8030a380`, the exact end of the RTL-defined four-line
 window beginning 640 lines beyond the final training access. Six fixed-PC
 misses in the now-active neighboring region then produced nine further stream
 requests and no source-12 output, confirming stream-over-stride priority at
-the exposed sender. No source-10 request appeared in these isolated phases.
-Direct SMS AGT generation is hard-disabled by the current RTL; its PHT path
-remains an open state-observability problem rather than claimed positive
-coverage. L3 remained idle as required because this RTL build's
+the exposed sender. A third environment held PHT output disabled while twelve
+same-PC cold misses trained offsets 0..11, then enabled it and accessed offset
+zero in a different region. That trigger produced exactly six unique
+source-10 requests at relative offsets 5..10 (`bitmap=0x7e0`), ending at
+`0x80501280`; source 11/12 remained absent in this isolated phase. Direct SMS
+AGT generation is hard-disabled by the current RTL, but PHT source-10
+causality is now positive executable coverage. L3 remained idle as required
+because this RTL build's
 `enableL3StreamPrefetch` elaboration constant is false; positive L3 coverage
 requires a configuration built with that feature enabled.
 
