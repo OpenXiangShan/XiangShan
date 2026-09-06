@@ -13473,7 +13473,7 @@ int run_vector_addressing(int argc, char **argv)
     auto run_matrix_load = [&] (
         memblock::Environment &matrix,
         const std::vector<memblock::VectorMemoryTransaction> &uops,
-        const char *phase, unsigned &uop_counter) {
+        const char *phase, unsigned &uop_counter, bool reverse_issue) {
         std::size_t begin = 0;
         while (begin < uops.size()) {
             std::size_t end = begin;
@@ -13503,8 +13503,11 @@ int run_vector_addressing(int argc, char **argv)
                     return false;
                 }
             }
-            for (auto uop = window.rbegin(); uop != window.rend(); ++uop) {
-                if (!matrix.issue_vector(*uop, 1024)) {
+            for (std::size_t offset = 0; offset < window.size(); ++offset) {
+                const std::size_t issue_index = reverse_issue
+                    ? window.size() - offset - 1
+                    : offset;
+                if (!matrix.issue_vector(window[issue_index], 1024)) {
                     std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
                               << matrix.cycle() << " phase=" << phase
                               << " reason=" << matrix.error() << '\n';
@@ -13527,7 +13530,7 @@ int run_vector_addressing(int argc, char **argv)
     auto run_matrix_store = [&] (
         memblock::Environment &matrix,
         const std::vector<memblock::VectorMemoryTransaction> &uops,
-        const char *phase, unsigned &uop_counter) {
+        const char *phase, unsigned &uop_counter, bool reverse_issue) {
         std::size_t begin = 0;
         while (begin < uops.size()) {
             std::size_t end = begin;
@@ -13550,9 +13553,11 @@ int run_vector_addressing(int argc, char **argv)
                     return false;
                 }
             }
-            for (auto store = window.rbegin(); store != window.rend();
-                 ++store) {
-                if (!matrix.issue_vector(*store, 1024)) {
+            for (std::size_t offset = 0; offset < window.size(); ++offset) {
+                const std::size_t issue_index = reverse_issue
+                    ? window.size() - offset - 1
+                    : offset;
+                if (!matrix.issue_vector(window[issue_index], 1024)) {
                     std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
                               << matrix.cycle() << " phase=" << phase
                               << " reason=" << matrix.error() << '\n';
@@ -13622,7 +13627,7 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0x21 + case_index));
                 if (!run_matrix_load(
                         lmul_matrix, loads, "lmul-emul-load",
-                        lmul_load_uops)) {
+                        lmul_load_uops, true)) {
                     return 1;
                 }
 
@@ -13635,7 +13640,7 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0x81 + case_index));
                 if (!run_matrix_store(
                         lmul_matrix, stores, "lmul-emul-store",
-                        lmul_store_uops)) {
+                        lmul_store_uops, true)) {
                     return 1;
                 }
 
@@ -13648,7 +13653,7 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0xe1 + case_index));
                 if (!run_matrix_load(
                         lmul_matrix, readbacks, "lmul-emul-readback",
-                        lmul_load_uops)) {
+                        lmul_load_uops, true)) {
                     return 1;
                 }
             }
@@ -13739,7 +13744,7 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0x43 + case_index));
                 if (!run_matrix_load(
                         strided_matrix, loads, "strided-lmul-emul-load",
-                        strided_load_uops)) {
+                        strided_load_uops, true)) {
                     return 1;
                 }
 
@@ -13751,7 +13756,7 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0xa3 + case_index));
                 if (!run_matrix_store(
                         strided_matrix, stores, "strided-lmul-emul-store",
-                        strided_store_uops)) {
+                        strided_store_uops, true)) {
                     return 1;
                 }
 
@@ -13763,7 +13768,8 @@ int run_vector_addressing(int argc, char **argv)
                     static_cast<std::uint8_t>(0xc3 + case_index));
                 if (!run_matrix_load(
                         strided_matrix, readbacks,
-                        "strided-lmul-emul-readback", strided_load_uops)) {
+                        "strided-lmul-emul-readback", strided_load_uops,
+                        true)) {
                     return 1;
                 }
             }
@@ -13969,6 +13975,223 @@ int run_vector_addressing(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment indexed_lmul_matrix(argc, argv);
+    constexpr std::uint64_t indexed_lmul_base =
+        memblock::kDefaultMemoryBase + 0x1b0000;
+    indexed_lmul_matrix.memory().fill_incrementing(
+        indexed_lmul_base, 0xa0000, 0x6b);
+    indexed_lmul_matrix.configure_backpressure(
+        0x243f6a8885a308d3ULL, true);
+    if (!indexed_lmul_matrix.reset() ||
+        !indexed_lmul_matrix.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << indexed_lmul_matrix.cycle()
+                  << " phase=indexed-lmul-emul-reset reason="
+                  << indexed_lmul_matrix.error() << '\n';
+        return 1;
+    }
+
+    std::uint64_t indexed_lmul_lq_cursor = 0;
+    std::uint64_t indexed_lmul_sq_cursor = 0;
+    std::uint64_t indexed_lmul_rob_cursor = 0;
+    unsigned indexed_lmul_rob_wraps = 0;
+    unsigned indexed_lmul_configurations = 0;
+    unsigned indexed_lmul_unordered = 0;
+    unsigned indexed_lmul_ordered = 0;
+    unsigned indexed_lmul_special = 0;
+    unsigned indexed_lmul_load_uops = 0;
+    unsigned indexed_lmul_store_uops = 0;
+    auto next_indexed_lmul_rob = [&]() {
+        const std::uint64_t absolute_rob = indexed_lmul_rob_cursor++;
+        indexed_lmul_rob_wraps += absolute_rob != 0 &&
+            absolute_rob % memblock::kRobEntries == 0;
+        return absolute_rob;
+    };
+    auto make_indexed_lmul_uops = [&] (
+        bool store, std::uint64_t address, std::uint64_t absolute_rob,
+        std::uint8_t eew, std::uint8_t vsew, int lmul_log2,
+        int emul_log2, memblock::VectorAddressingMode addressing,
+        unsigned flow_num, std::uint8_t vl, std::uint64_t &queue_cursor,
+        std::uint8_t data_seed) {
+        const unsigned uop_count = 1U << static_cast<unsigned>(
+            std::max({lmul_log2, emul_log2, 0}));
+        const std::uint8_t vlmul = static_cast<std::uint8_t>(
+            lmul_log2 < 0 ? lmul_log2 + 8 : lmul_log2);
+        const unsigned index_bytes = 1U << eew;
+        const unsigned data_bytes = 1U << vsew;
+        const unsigned index_group_bytes_per_uop = emul_log2 < 0
+            ? 16U >> static_cast<unsigned>(-emul_log2)
+            : 16U;
+        const unsigned index_elements_per_vreg =
+            index_group_bytes_per_uop >> eew;
+        const bool special = emul_log2 > lmul_log2;
+        std::vector<memblock::VectorMemoryTransaction> uops;
+        uops.reserve(uop_count);
+        for (unsigned uop = 0; uop < uop_count; ++uop) {
+            const unsigned vd_index = special
+                ? uop >> static_cast<unsigned>(emul_log2 - lmul_log2)
+                : uop;
+            memblock::VectorMemoryTransaction transaction{
+                .store = store,
+                .address = address,
+                .addressing = addressing,
+                .eew = eew,
+                .vsew = vsew,
+                .vl = vl,
+                .rob = static_cast<std::uint8_t>(absolute_rob %
+                    memblock::kRobEntries),
+                .rob_flag = ((absolute_rob /
+                    memblock::kRobEntries) & 1U) != 0,
+                .lq = static_cast<std::uint8_t>(store ? 0 :
+                    queue_cursor % memblock::kVirtualLoadQueueEntries),
+                .lq_flag = !store && ((queue_cursor /
+                    memblock::kVirtualLoadQueueEntries) & 1U) != 0,
+                .sq = static_cast<std::uint8_t>(store ?
+                    queue_cursor % memblock::kStoreQueueEntries : 0),
+                .sq_flag = store && ((queue_cursor /
+                    memblock::kStoreQueueEntries) & 1U) != 0,
+                .pdest = static_cast<std::uint8_t>(64 + vd_index),
+                .lane = uop % memblock::kVectorMemoryLanes,
+                .flow_num = static_cast<std::uint8_t>(flow_num),
+                .vlmul = vlmul,
+                .vuop_idx = static_cast<std::uint8_t>(uop),
+                .last_uop = uop + 1 == uop_count,
+            };
+            for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+                transaction.data[byte] = static_cast<unsigned char>(
+                    data_seed + vd_index * 23 + byte * 11);
+            }
+
+            const unsigned global_first = uop * flow_num;
+            const unsigned index_register_base =
+                global_first / index_elements_per_vreg *
+                index_elements_per_vreg;
+            for (unsigned element = 0;
+                 element < index_elements_per_vreg; ++element) {
+                const std::uint64_t offset =
+                    static_cast<std::uint64_t>(
+                        index_register_base + element) * data_bytes * 2U;
+                for (unsigned byte = 0; byte < index_bytes; ++byte) {
+                    transaction.index[element * index_bytes + byte] =
+                        static_cast<unsigned char>(offset >> (8 * byte));
+                }
+            }
+            uops.push_back(transaction);
+            queue_cursor += flow_num;
+        }
+        return uops;
+    };
+
+    for (const auto mode : indexed_modes) {
+        for (std::uint8_t eew = 0; eew < 4; ++eew) {
+            for (std::uint8_t vsew = 0; vsew < 4; ++vsew) {
+                for (int lmul_log2 = -3; lmul_log2 <= 3; ++lmul_log2) {
+                    const int emul_log2 = static_cast<int>(eew) -
+                        static_cast<int>(vsew) + lmul_log2;
+                    if (lmul_log2 < static_cast<int>(vsew) - 3 ||
+                        emul_log2 < -3 || emul_log2 > 3) {
+                        continue;
+                    }
+                    const unsigned vector_bytes = lmul_log2 < 0
+                        ? 16U >> static_cast<unsigned>(-lmul_log2)
+                        : 16U << static_cast<unsigned>(lmul_log2);
+                    const unsigned vlmax = vector_bytes >> vsew;
+                    const unsigned flow_bytes = emul_log2 > lmul_log2
+                        ? (emul_log2 < 0
+                            ? 16U >> static_cast<unsigned>(-emul_log2)
+                            : 16U)
+                        : (lmul_log2 < 0
+                            ? 16U >> static_cast<unsigned>(-lmul_log2)
+                            : 16U);
+                    const unsigned flow_num = flow_bytes >>
+                        (emul_log2 > lmul_log2 ? eew : vsew);
+                    const unsigned case_index =
+                        indexed_lmul_configurations++;
+                    indexed_lmul_unordered +=
+                        mode == memblock::VectorAddressingMode::indexed_unordered;
+                    indexed_lmul_ordered +=
+                        mode == memblock::VectorAddressingMode::indexed_ordered;
+                    indexed_lmul_special += emul_log2 > lmul_log2;
+                    const std::uint64_t case_base =
+                        indexed_lmul_base + case_index * 0x1000;
+                    const std::uint64_t source = case_base + 0x100;
+                    const std::uint64_t destination = case_base + 0x800;
+                    const bool reverse_issue = mode ==
+                        memblock::VectorAddressingMode::indexed_unordered;
+
+                    auto loads = make_indexed_lmul_uops(
+                        false, source, next_indexed_lmul_rob(), eew, vsew,
+                        lmul_log2, emul_log2, mode, flow_num,
+                        static_cast<std::uint8_t>(vlmax),
+                        indexed_lmul_lq_cursor,
+                        static_cast<std::uint8_t>(0x17 + case_index));
+                    if (!run_matrix_load(
+                            indexed_lmul_matrix, loads,
+                            "indexed-lmul-emul-load",
+                            indexed_lmul_load_uops, reverse_issue)) {
+                        return 1;
+                    }
+
+                    auto stores = make_indexed_lmul_uops(
+                        true, destination, next_indexed_lmul_rob(), eew, vsew,
+                        lmul_log2, emul_log2, mode, flow_num,
+                        static_cast<std::uint8_t>(vlmax),
+                        indexed_lmul_sq_cursor,
+                        static_cast<std::uint8_t>(0x57 + case_index));
+                    if (!run_matrix_store(
+                            indexed_lmul_matrix, stores,
+                            "indexed-lmul-emul-store",
+                            indexed_lmul_store_uops, reverse_issue)) {
+                        return 1;
+                    }
+
+                    auto readbacks = make_indexed_lmul_uops(
+                        false, destination, next_indexed_lmul_rob(), eew,
+                        vsew, lmul_log2, emul_log2, mode, flow_num,
+                        static_cast<std::uint8_t>(vlmax),
+                        indexed_lmul_lq_cursor,
+                        static_cast<std::uint8_t>(0x97 + case_index));
+                    if (!run_matrix_load(
+                            indexed_lmul_matrix, readbacks,
+                            "indexed-lmul-emul-readback",
+                            indexed_lmul_load_uops, reverse_issue)) {
+                        return 1;
+                    }
+                }
+            }
+        }
+    }
+    if (indexed_lmul_configurations != 156 ||
+        indexed_lmul_unordered != 78 || indexed_lmul_ordered != 78 ||
+        indexed_lmul_special != 56 || indexed_lmul_load_uops != 1016 ||
+        indexed_lmul_store_uops != 508 || indexed_lmul_rob_wraps != 2 ||
+        indexed_lmul_matrix.lq_allocated() != 4608 ||
+        indexed_lmul_matrix.sq_allocated() != 2304 ||
+        indexed_lmul_matrix.lq_allocated() !=
+            indexed_lmul_matrix.lq_dequeued() +
+                indexed_lmul_matrix.lq_canceled() ||
+        indexed_lmul_matrix.sq_allocated() !=
+            indexed_lmul_matrix.sq_dequeued() +
+                indexed_lmul_matrix.sq_canceled()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << indexed_lmul_matrix.cycle()
+                  << " phase=indexed-lmul-emul-conservation"
+                  << " configurations=" << indexed_lmul_configurations
+                  << " unordered=" << indexed_lmul_unordered
+                  << " ordered=" << indexed_lmul_ordered
+                  << " special=" << indexed_lmul_special
+                  << " load_uops=" << indexed_lmul_load_uops
+                  << " store_uops=" << indexed_lmul_store_uops
+                  << " rob_wraps=" << indexed_lmul_rob_wraps
+                  << " lq=" << indexed_lmul_matrix.lq_allocated() << '/'
+                  << indexed_lmul_matrix.lq_dequeued() << '+'
+                  << indexed_lmul_matrix.lq_canceled()
+                  << " sq=" << indexed_lmul_matrix.sq_allocated() << '/'
+                  << indexed_lmul_matrix.sq_dequeued() << '+'
+                  << indexed_lmul_matrix.sq_canceled() << '\n';
+        return 1;
+    }
+
     memblock::Environment whole(argc, argv);
     constexpr std::uint64_t whole_base =
         memblock::kDefaultMemoryBase + 0x90000;
@@ -14157,17 +14380,20 @@ int run_vector_addressing(int argc, char **argv)
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
               << " cycle=" << environment.cycle() + multi_uop.cycle() +
                     lmul_matrix.cycle() + strided_matrix.cycle() +
-                    indexed_matrix.cycle() + whole.cycle()
+                    indexed_matrix.cycle() + indexed_lmul_matrix.cycle() +
+                    whole.cycle()
               << " load_writebacks=" << environment.vector_load_writebacks() +
                     multi_uop.vector_load_writebacks() +
                     lmul_matrix.vector_load_writebacks() +
                     strided_matrix.vector_load_writebacks() +
                     indexed_matrix.vector_load_writebacks() +
+                    indexed_lmul_matrix.vector_load_writebacks() +
                     whole.vector_load_writebacks()
               << " store_writebacks=" << environment.vector_store_writebacks()
                     + lmul_matrix.vector_store_writebacks() +
                     strided_matrix.vector_store_writebacks() +
                     indexed_matrix.vector_store_writebacks() +
+                    indexed_lmul_matrix.vector_store_writebacks() +
                     whole.vector_store_writebacks()
               << " store_modes=3"
               << " multi_uop_modes=3 multi_uop_writebacks=6"
@@ -14189,6 +14415,18 @@ int run_vector_addressing(int argc, char **argv)
               << " indexed_store_uops=" << indexed_store_uops
               << " indexed_lq_allocated=" << indexed_matrix.lq_allocated()
               << " indexed_sq_allocated=" << indexed_matrix.sq_allocated()
+              << " indexed_lmul_configurations="
+                    << indexed_lmul_configurations
+              << " indexed_lmul_unordered=" << indexed_lmul_unordered
+              << " indexed_lmul_ordered=" << indexed_lmul_ordered
+              << " indexed_lmul_special=" << indexed_lmul_special
+              << " indexed_lmul_load_uops=" << indexed_lmul_load_uops
+              << " indexed_lmul_store_uops=" << indexed_lmul_store_uops
+              << " indexed_lmul_rob_wraps=" << indexed_lmul_rob_wraps
+              << " indexed_lmul_lq_allocated="
+                    << indexed_lmul_matrix.lq_allocated()
+              << " indexed_lmul_sq_allocated="
+                    << indexed_lmul_matrix.sq_allocated()
               << " whole_cases=" << whole_cases
               << " whole_load_uops=" << whole_load_uops
               << " whole_store_uops=" << whole_store_uops
@@ -14199,6 +14437,7 @@ int run_vector_addressing(int argc, char **argv)
                     lmul_matrix.tilelink_requests() +
                     strided_matrix.tilelink_requests() +
                     indexed_matrix.tilelink_requests() +
+                    indexed_lmul_matrix.tilelink_requests() +
                     whole.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

@@ -100,7 +100,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining indexed/segment LMUL/EMUL combinations, remaining PMP/PMA matrices,
+remaining segment LMUL/EMUL combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
@@ -739,6 +739,16 @@ check aliasing; stores use a non-monotonic permutation without ambiguous
 same-address writes. The sparse-memory oracle checks addresses spread across
 cache lines and a Bare 4-KiB boundary, then requires all 120 LQ and 60 SQ
 allocations to drain across queue-pointer wraps.
+
+The indexed LMUL/EMUL phase separately exhausts all 78 legal ELEN=64
+EEW/SEW/LMUL/EMUL configurations for each of ordered and unordered addressing.
+It derives uop count from `max(LMUL, EMUL)`, applies the two
+`GenRealFlowNum` branches, reuses index-register contents when LMUL exceeds
+EMUL, and models the split offset plus shared destination register when EMUL
+exceeds LMUL. Ordered uops issue in program order while unordered uops issue in
+reverse order. Exact load/store/readback checks cover 1,016 load and 508 store
+uops, including 56 special-index configurations, and drain 4,608 LQ plus 2,304
+SQ allocations across ROB and queue wraps.
 
 The same scenario also models `vlr`/`vsr` as distinct whole-register
 operations and executes all 16 combinations of one/two/four/eight registers

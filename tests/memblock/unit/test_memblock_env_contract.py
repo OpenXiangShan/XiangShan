@@ -874,6 +874,75 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '(MulDataSize(emul) >> eew).asUInt, // strided', common
         )
 
+    def test_vector_indexed_lmul_emul_matrix_matches_rtl_contract(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        common = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
+        ).read_text()
+        split = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSplit.scala"
+        ).read_text()
+
+        configurations = 0
+        uops = 0
+        flows = 0
+        special = 0
+        for eew in range(4):
+            for vsew in range(4):
+                for lmul_log2 in range(-3, 4):
+                    emul_log2 = eew - vsew + lmul_log2
+                    if lmul_log2 < vsew - 3 or not -3 <= emul_log2 <= 3:
+                        continue
+                    uop_count = 1 << max(lmul_log2, emul_log2, 0)
+                    if emul_log2 > lmul_log2:
+                        bytes_per_uop = 16 >> max(-emul_log2, 0)
+                        flow_num = bytes_per_uop >> eew
+                        special += 1
+                    else:
+                        bytes_per_uop = 16 >> max(-lmul_log2, 0)
+                        flow_num = bytes_per_uop >> vsew
+                    configurations += 1
+                    uops += uop_count
+                    flows += uop_count * flow_num
+        self.assertEqual(configurations, 78)
+        self.assertEqual(uops, 254)
+        self.assertEqual(flows, 1152)
+        self.assertEqual(special, 28)
+
+        for contract in (
+            "vector_data_eew",
+            "vector_emul_log2",
+            "vector_is_special_indexed",
+            "vector_indexed_vd_index",
+            "vector_indexed_split_offset",
+            "vector_writeback_elements",
+            "make_indexed_lmul_uops",
+            "std::max({lmul_log2, emul_log2, 0})",
+            "indexed_lmul_configurations != 156",
+            "indexed_lmul_unordered != 78",
+            "indexed_lmul_ordered != 78",
+            "indexed_lmul_special != 56",
+            "indexed_lmul_load_uops != 1016",
+            "indexed_lmul_store_uops != 508",
+            "indexed_lmul_matrix.lq_allocated() != 4608",
+            "indexed_lmul_matrix.sq_allocated() != 2304",
+            '<< " indexed_lmul_configurations="',
+        ):
+            self.assertIn(contract, environment + main)
+        for contract in (
+            "Mux(emul.asSInt > lmul.asSInt",
+            "(MulDataSize(emul) >> eew).asUInt",
+            "(MulDataSize(lmul) >> sew(1,0)).asUInt",
+            "object GenVdIdxInField",
+        ):
+            self.assertIn(contract, common)
+        for contract in (
+            "val indexedSplitOffset = Mux(isSpecialIndexed",
+            "isIndexed(s0_mop) && s0_lmul.asSInt > s0_emul.asSInt",
+        ):
+            self.assertIn(contract, split)
+
     def test_vector_whole_register_matrix_matches_rtl_contract(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

@@ -434,6 +434,69 @@ inline std::uint8_t vector_vsew(
     return transaction.vsew.value_or(transaction.eew);
 }
 
+inline bool vector_is_indexed(const VectorMemoryTransaction &transaction)
+{
+    return transaction.addressing == VectorAddressingMode::indexed_unordered ||
+           transaction.addressing == VectorAddressingMode::indexed_ordered;
+}
+
+inline std::uint8_t vector_data_eew(
+    const VectorMemoryTransaction &transaction)
+{
+    return vector_is_indexed(transaction)
+        ? vector_vsew(transaction)
+        : transaction.eew;
+}
+
+inline int vector_lmul_log2(const VectorMemoryTransaction &transaction)
+{
+    const unsigned encoded = transaction.vlmul & 7U;
+    if (encoded == 4U) {
+        throw std::logic_error("reserved vector LMUL encoding");
+    }
+    return encoded >= 5U
+        ? static_cast<int>(encoded) - 8
+        : static_cast<int>(encoded);
+}
+
+inline int vector_emul_log2(const VectorMemoryTransaction &transaction)
+{
+    return static_cast<int>(transaction.eew) -
+           static_cast<int>(vector_vsew(transaction)) +
+           vector_lmul_log2(transaction);
+}
+
+inline bool vector_is_special_indexed(
+    const VectorMemoryTransaction &transaction)
+{
+    return !transaction.segment && vector_is_indexed(transaction) &&
+           vector_emul_log2(transaction) > vector_lmul_log2(transaction);
+}
+
+inline unsigned vector_indexed_vd_index(
+    const VectorMemoryTransaction &transaction)
+{
+    if (!vector_is_special_indexed(transaction)) {
+        return transaction.vuop_idx;
+    }
+    return transaction.vuop_idx >> static_cast<unsigned>(
+        vector_emul_log2(transaction) - vector_lmul_log2(transaction));
+}
+
+inline unsigned vector_indexed_split_offset(
+    const VectorMemoryTransaction &transaction)
+{
+    if (!vector_is_special_indexed(transaction)) {
+        return 0;
+    }
+    const unsigned flows_before_uop =
+        static_cast<unsigned>(transaction.vuop_idx) * transaction.flow_num;
+    const unsigned data_elements_per_vd = 16U >> vector_vsew(transaction);
+    const unsigned flows_before_vd =
+        vector_indexed_vd_index(transaction) * data_elements_per_vd;
+    return flows_before_uop - flows_before_vd;
+}
+
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
     if (transaction.eew > 3 || vector_vsew(transaction) > 3) {
@@ -506,7 +569,7 @@ inline std::uint64_t vector_element_address(
 {
     std::uint64_t base = transaction.oracle_address.value_or(
         transaction.address);
-    const unsigned element_bytes = 1U << transaction.eew;
+    const unsigned element_bytes = 1U << vector_data_eew(transaction);
     if (!transaction.segment) {
         if (transaction.addressing == VectorAddressingMode::unit_stride) {
             base += static_cast<std::uint64_t>(transaction.vuop_idx) * 16U;
@@ -543,9 +606,30 @@ inline std::uint64_t vector_element_address(
     case VectorAddressingMode::indexed_unordered:
     case VectorAddressingMode::indexed_ordered: {
         const unsigned index_bytes = 1U << transaction.eew;
+        unsigned index_element = element;
+        if (!transaction.segment) {
+            const unsigned split_offset =
+                vector_indexed_split_offset(transaction);
+            if (element < split_offset) {
+                throw std::logic_error(
+                    "indexed output element precedes this uop's split range");
+            }
+            const unsigned split_index = element - split_offset;
+            const unsigned global_element =
+                static_cast<unsigned>(transaction.vuop_idx) *
+                    transaction.flow_num + split_index;
+            const int emul_log2 = vector_emul_log2(transaction);
+            const unsigned index_group_bytes = emul_log2 < 0
+                ? 16U >> static_cast<unsigned>(-emul_log2)
+                : 16U;
+            const unsigned index_elements_per_vreg =
+                index_group_bytes >> transaction.eew;
+            index_element = global_element & (index_elements_per_vreg - 1U);
+        }
         std::uint64_t offset = 0;
         for (unsigned byte = 0; byte < index_bytes; ++byte) {
-            offset |= std::uint64_t{transaction.index[element * index_bytes + byte]}
+            offset |= std::uint64_t{
+                          transaction.index[index_element * index_bytes + byte]}
                       << (8 * byte);
         }
         return base + offset + field_offset;
@@ -557,7 +641,28 @@ inline std::uint64_t vector_element_address(
 inline std::uint16_t active_vector_elements(
     const VectorMemoryTransaction &transaction)
 {
-    const unsigned element_count = 16U >> transaction.eew;
+    if (!transaction.segment && vector_is_indexed(transaction)) {
+        const unsigned split_offset =
+            vector_indexed_split_offset(transaction);
+        std::uint16_t result = 0;
+        for (unsigned split_index = 0;
+             split_index < transaction.flow_num; ++split_index) {
+            const unsigned global_element =
+                static_cast<unsigned>(transaction.vuop_idx) *
+                    transaction.flow_num + split_index;
+            const bool in_range = global_element >= transaction.vstart &&
+                                  global_element < transaction.vl;
+            const bool enabled = transaction.vm ||
+                (global_element < 16 &&
+                 ((transaction.mask_bits >> global_element) & 1U) != 0);
+            if (in_range && enabled) {
+                result |= static_cast<std::uint16_t>(
+                    1U << (split_offset + split_index));
+            }
+        }
+        return result;
+    }
+    const unsigned element_count = 16U >> vector_data_eew(transaction);
     const unsigned effective_vl = vector_effective_vl(transaction);
     const unsigned element_base = transaction.segment
         ? 0
@@ -567,6 +672,33 @@ inline std::uint16_t active_vector_elements(
         const unsigned global_element = element_base + element;
         const bool in_range = global_element >= transaction.vstart &&
                               global_element < effective_vl;
+        const bool enabled = transaction.vm ||
+            (global_element < 16 &&
+             ((transaction.mask_bits >> global_element) & 1U) != 0);
+        if (in_range && enabled) {
+            result |= static_cast<std::uint16_t>(1U << element);
+        }
+    }
+    return result;
+}
+
+inline std::uint16_t vector_writeback_elements(
+    const VectorMemoryTransaction &transaction)
+{
+    if (!vector_is_special_indexed(transaction)) {
+        return active_vector_elements(transaction);
+    }
+    const unsigned data_elements_per_vd = 16U >> vector_vsew(transaction);
+    const unsigned global_base =
+        vector_indexed_vd_index(transaction) * data_elements_per_vd;
+    std::uint16_t result = 0;
+    // VSplit forwards (srcMask >> flowsPrevThisVd)[15:0] to the merge
+    // buffer. Bits above the architectural elements in this Vd therefore
+    // remain observable on the top-level writeback mask.
+    for (unsigned element = 0; element < 16; ++element) {
+        const unsigned global_element = global_base + element;
+        const bool in_range = global_element >= transaction.vstart &&
+                              global_element < transaction.vl;
         const bool enabled = transaction.vm ||
             (global_element < 16 &&
              ((transaction.mask_bits >> global_element) & 1U) != 0);
@@ -684,7 +816,7 @@ public:
         const VectorMemoryTransaction &transaction) const
     {
         std::array<unsigned char, 16> result = transaction.data;
-        const unsigned element_bytes = 1U << transaction.eew;
+        const unsigned element_bytes = 1U << vector_data_eew(transaction);
         const std::uint16_t active = active_vector_elements(transaction);
         for (unsigned element = 0; element < 16U / element_bytes; ++element) {
             if (((active >> element) & 1U) == 0) {
@@ -3140,7 +3272,7 @@ public:
                 transaction.store,
                 transaction.segment,
                 data,
-                active_vector_elements(output_transaction),
+                vector_writeback_elements(output_transaction),
                 vector_fu_op_type(transaction),
                 transaction.eew,
                 vector_vsew(transaction),
@@ -3290,7 +3422,11 @@ private:
         if (actual.size() != expected.data.size()) {
             return false;
         }
-        const unsigned element_bytes = 1U << expected.eew;
+        const unsigned element_bytes = 1U <<
+            (expected.addressing == VectorAddressingMode::indexed_unordered ||
+             expected.addressing == VectorAddressingMode::indexed_ordered
+                ? expected.vsew
+                : expected.eew);
         const unsigned elements = expected.data.size() / element_bytes;
         for (unsigned element = 0; element < elements; ++element) {
             bool preserved = true;
@@ -8493,8 +8629,8 @@ public:
         vector_store_sq_targets_.erase(target_it);
         const std::uint64_t address = transaction.oracle_address.value_or(
             transaction.address);
-        const unsigned element_bytes = 1U << transaction.eew;
-        const unsigned elements = 16U >> transaction.eew;
+        const unsigned element_bytes = 1U << vector_data_eew(transaction);
+        const unsigned elements = 16U >> vector_data_eew(transaction);
         const std::uint16_t active = active_vector_elements(transaction);
         for (unsigned element = 0; element < elements; ++element) {
             if (((active >> element) & 1U) == 0) {
@@ -8538,8 +8674,8 @@ public:
     void record_committed_vector_store(
         const VectorMemoryTransaction &transaction)
     {
-        const unsigned element_bytes = 1U << transaction.eew;
-        const unsigned elements = 16U >> transaction.eew;
+        const unsigned element_bytes = 1U << vector_data_eew(transaction);
+        const unsigned elements = 16U >> vector_data_eew(transaction);
         const std::uint16_t active = active_vector_elements(transaction);
         for (unsigned element = 0; element < elements; ++element) {
             if (((active >> element) & 1U) == 0) {

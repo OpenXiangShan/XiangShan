@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `10eb34b2117d891f55bda9139f8ee7266c629d527bfd212c18f00c89e9ad41fc`
+- Current rebuilt and frozen UT executable SHA-256: `99a9722b1ae5204222dc555784b93331bcdc94609e56db1080b74de506324dde`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `693b16e6f3ec79d41404369ee725e192c7b90dd606788e23243a3ac080818e03`
+- Frozen runtime manifest SHA-256: `af062d3446a233f2e71e78b33f33560936b23fd93a4dfca07470a312fe20df98`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1341,7 +1341,7 @@ the historical complete RTL SHA-256 is
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
-| Vector addressing | Pass | Cycle 43,952; all 78 legal ordinary unit-stride and strided EEW/SEW/LMUL/EMUL configurations per mode checked 808 total load/readback and 404 store uops with 3,112 LQ/1,556 SQ allocations, ordered/unordered indexed load/store/readback crossed all four equal-SEW/EEW values with alias/non-monotonic patterns and 120 LQ/60 SQ allocations, all 16 legal whole-register NF/EEW combinations added another 240 LQ/120 SQ allocations, and a representative ordinary LMUL=2 ordered-indexed pair completed; 959 load and 475 store writebacks issued 580 TileLink requests |
+| Vector addressing | Pass | Cycle 99,634; all 78 legal ordinary unit-stride and strided EEW/SEW/LMUL/EMUL configurations plus all 78 configurations for each of indexed-unordered and indexed-ordered passed exact load/store/readback. The indexed matrix covered 1,016 load and 508 store uops, 56 `EMUL>LMUL` shared-Vd configurations, ordered forward issue, unordered reverse issue, 4,608 LQ/2,304 SQ allocations, queue wrap, and two ROB wraps. Directed alias/non-monotonic indexed and all 16 whole-register NF/EEW cases remain included; 1,975 load and 983 store writebacks issued 1,064 TileLink requests |
 | Vector split load | Pass | Three checked writebacks including a split cold-load replay shape |
 | Store forwarding | Pass | Four store widths and four matching scalar loads |
 | Vector forwarding | Pass | Four vector stores and loads with byte-accurate SQ overlay |
