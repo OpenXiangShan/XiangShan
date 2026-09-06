@@ -624,8 +624,11 @@ LR/SC through the atomic store-address/data ports, checks old-value writeback,
 compare success/failure, reservation success/failure, and then verifies cache
 visibility through ordinary scalar loads. It also checks representative
 misaligned D/W atomics for `storeAddrMisaligned`, suppressed exceptional
-`rfWen`, and no DCache request. Atomic uops are intentionally not counted as
-LSQ entries because the RTL routes them through `AtomicsUnit`.
+`rfWen`, and no DCache request. A bare-mode `AMOADD.D` at the last naturally
+aligned device address below DDR checks the fixed PMA `atomic=0` attribute:
+it must report `StoreAccessFault`, preserve memory, and reach neither data
+manager. Atomic uops are intentionally not counted as LSQ entries because the
+RTL routes them through `AtomicsUnit`.
 
 `atomic-dchannel-errors` injects denied and corrupt responses into cold misses
 for all 22 refill-capable W/D operations: LR, the nine AMO ALU operations, and

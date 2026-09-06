@@ -5555,6 +5555,56 @@ int run_atomic_contracts(int argc, char **argv)
         return 1;
     }
 
+    // The last naturally aligned doubleword below the DDR boundary belongs
+    // to a readable/writable device PMA region whose atomic attribute is
+    // clear. An AMO must fault before reaching either external data manager.
+    memblock::Environment pma_atomic(argc, argv);
+    constexpr std::uint64_t pma_atomic_address = 0x7ffffff8ULL;
+    pma_atomic.memory().fill_incrementing(pma_atomic_address, 8, 0xe3);
+    if (!pma_atomic.reset() || !pma_atomic.activate_bare(43)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << pma_atomic.cycle()
+                  << " phase=pma-atomic-configuration reason="
+                  << pma_atomic.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t pma_atomic_initial =
+        pma_atomic.bus_expected_load(pma_atomic_address, memblock::LoadOp::ld);
+    const memblock::AtomicTransaction pma_denied_atomic{
+        .address = pma_atomic_address,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = 0x0102030405060708ULL,
+        .rob = 0,
+        .pdest = 96,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction pma_denied_writeback{
+        .address = pma_atomic_address,
+        .op = memblock::LoadOp::ld,
+        .rob = pma_denied_atomic.rob,
+        .pdest = pma_denied_atomic.pdest,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+        .rf_wen = true,
+    };
+    pma_atomic.expect_load_data(pma_denied_writeback, 0);
+    if (!pma_atomic.set_rob_head(
+            pma_denied_atomic.rob, pma_denied_atomic.rob_flag) ||
+        !pma_atomic.issue_atomic(pma_denied_atomic, 1024) ||
+        !pma_atomic.run_until_complete(8192) ||
+        pma_atomic.tilelink_requests() != 0 ||
+        pma_atomic.uncache_requests() != 0 ||
+        pma_atomic.bus_expected_load(
+            pma_atomic_address, memblock::LoadOp::ld) != pma_atomic_initial) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << pma_atomic.cycle() << " phase=pma-atomic-denied"
+                  << " dcache_requests=" << pma_atomic.tilelink_requests()
+                  << " uncache_requests=" << pma_atomic.uncache_requests()
+                  << " reason=" << pma_atomic.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_ATOMIC_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " amo_d_variants=" << operations.size()
@@ -5562,6 +5612,8 @@ int run_atomic_contracts(int argc, char **argv)
               << " amocas_variants=4"
               << " lr_sc=1 misaligned_d_offsets=7 misaligned_w_offsets=3"
               << " misaligned=10"
+              << " pma_atomic_denied=1"
+              << " pma_atomic_cycles=" << pma_atomic.cycle()
               << " final=0x" << std::hex << model_value << std::dec
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
