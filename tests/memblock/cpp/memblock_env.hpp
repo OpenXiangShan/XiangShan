@@ -386,6 +386,7 @@ struct VectorMemoryTransaction {
     std::uint8_t vuop_idx = 0;
     bool last_uop = true;
     std::uint8_t nf = 0;
+    bool fault_only_first = false;
     bool is_vleff = false;
     bool vl_wen = false;
     // Lane 0 exposes all three debug classes.  Lane 1 is intentionally
@@ -398,12 +399,15 @@ struct VectorMemoryTransaction {
 
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
-    if (transaction.is_vleff) {
+    if (transaction.fault_only_first) {
         if (transaction.store ||
             transaction.addressing != VectorAddressingMode::unit_stride) {
             throw std::logic_error("vleff must be a unit-stride vector load");
         }
         return kVectorLoadFaultOnlyFirst;
+    }
+    if (transaction.is_vleff) {
+        throw std::logic_error("is_vleff requires a fault-only-first load");
     }
     switch (transaction.addressing) {
     case VectorAddressingMode::unit_stride:
@@ -2926,7 +2930,8 @@ public:
                 std::all_of(
                     writeback.vmask.begin(), writeback.vmask.end(),
                     [](unsigned char byte) { return byte == 0xff; });
-            if (lane != 1 || writeback.vec_wen ||
+            if ((expected.segment ? lane != 0 : lane != 1) ||
+                writeback.vec_wen ||
                 writeback.pdest != expected.pdest ||
                 !vl_data_matches || !mask_matches) {
                 fail("mismatched vector FOF fix-VL writeback", lane, writeback,

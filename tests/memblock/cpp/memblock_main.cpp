@@ -6703,6 +6703,7 @@ int run_vector_fault_only_first(int argc, char **argv)
         .expected_trigger = memblock::kVectorWritebackTriggerNone,
         .vuop_idx = 0,
         .last_uop = false,
+        .fault_only_first = true,
         .is_vleff = true,
         .expected_debug_is_mmio = false,
         .expected_debug_is_ncio = false,
@@ -6908,6 +6909,118 @@ int run_vector_segment(int argc, char **argv)
               << " readback_lq_allocated=" << environment.lq_allocated()
               << " readback_lq_dequeued=" << environment.lq_dequeued()
               << " dcache_requests=" << environment.tilelink_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_vector_segment_fault_only_first(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_page = 0x54000000ULL;
+    constexpr std::uint64_t physical_page =
+        memblock::kDefaultMemoryBase + 0x5e000;
+    constexpr std::uint64_t root = 0x97b00000ULL;
+    constexpr std::uint64_t address = virtual_page + 0xff0;
+    constexpr std::uint64_t physical_address = physical_page + 0xff0;
+    environment.memory().fill_incrementing(physical_address, 16, 0x83);
+    environment.configure_backpressure(0x6af8d37295c14e0bULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(address, physical_address, root) ||
+        !environment.activate_sv39(root, 41)) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=configuration reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const auto first_field = memblock::reference_sv39_walk(
+        environment.memory(), root, address);
+    const auto second_field = memblock::reference_sv39_walk(
+        environment.memory(), root, address + 8);
+    const auto next_segment = memblock::reference_sv39_walk(
+        environment.memory(), root, address + 16);
+    if (!first_field.translated || !second_field.translated ||
+        first_field.physical_address != physical_address ||
+        second_field.physical_address != physical_address + 8 ||
+        next_segment.translated) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=reference reason=expected_one_mapped_segment\n";
+        return 1;
+    }
+
+    std::array<memblock::VectorMemoryTransaction, 2> fields{};
+    for (unsigned field = 0; field < fields.size(); ++field) {
+        fields[field] = memblock::VectorMemoryTransaction{
+            .segment = true,
+            .address = address,
+            .oracle_address = physical_address,
+            .eew = 3,
+            .vl = 2,
+            .rob = 76,
+            .pdest = static_cast<std::uint8_t>(124 + field),
+            .lane = 0,
+            .flow_num = 2,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .vuop_idx = static_cast<std::uint8_t>(field),
+            .last_uop = false,
+            .nf = 1,
+            .fault_only_first = true,
+            // DecodeUnit keeps this sideband low when NF is non-zero. The
+            // segment unit recognizes FOF from fuOpType instead.
+            .is_vleff = false,
+        };
+        for (unsigned byte = 0; byte < fields[field].data.size(); ++byte) {
+            fields[field].data[byte] = static_cast<unsigned char>(
+                0xc0 + field * 0x20 + byte);
+        }
+        auto expected = fields[field].data;
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            expected[byte] = environment.memory().read_byte(
+                physical_address + field * 8 + byte);
+        }
+        environment.expect_vector_data(fields[field], expected);
+        if (!environment.issue_vector(fields[field], 512)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                      << environment.cycle() << " phase=data-issue field="
+                      << field << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    auto fix_vl_uop = fields[0];
+    fix_vl_uop.pdest = 126;
+    fix_vl_uop.expected_vl = 1;
+    fix_vl_uop.vuop_idx = 2;
+    fix_vl_uop.last_uop = true;
+    fix_vl_uop.vl_wen = true;
+    environment.expect_vector_data(fix_vl_uop, {});
+    if (!environment.issue_vector(fix_vl_uop, 512) ||
+        !environment.run_until_vector_complete(32768) ||
+        environment.vector_load_writebacks() != 2 ||
+        environment.vector_fof_fix_writebacks() != 1 ||
+        environment.lq_allocated() != 0 || environment.sq_allocated() != 0) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=completion reason=" << environment.error()
+                  << " data_writebacks="
+                  << environment.vector_load_writebacks()
+                  << " fix_writebacks="
+                  << environment.vector_fof_fix_writebacks()
+                  << " lq=" << environment.lq_allocated()
+                  << " sq=" << environment.sq_allocated() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_VECTOR_SEGMENT_FOF_PASS"
+              << " cycle=" << environment.cycle()
+              << " fields=2 original_vl=2 final_vl=1"
+              << " data_writebacks=" << environment.vector_load_writebacks()
+              << " fix_vl_writebacks="
+              << environment.vector_fof_fix_writebacks()
+              << " segment_lsq_allocations=0"
+              << " ptw_requests=" << environment.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -20713,6 +20826,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "vector-segment") {
             return run_vector_segment(argc, argv);
+        }
+        if (options.test == "vector-segment-fof") {
+            return run_vector_segment_fault_only_first(argc, argv);
         }
         if (options.test == "vector-store-forwarding") {
             return run_vector_store_forwarding(argc, argv);

@@ -832,6 +832,27 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("class VSegmentUnit", segment)
         self.assertIn("io.uopwriteback.valid", segment)
 
+    def test_vector_segment_fof_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        segment = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
+        ).read_text()
+        for contract in (
+            "run_vector_segment_fault_only_first",
+            "MEMBLOCK_VECTOR_SEGMENT_FOF_PASS",
+            "fields=2 original_vl=2 final_vl=1",
+            "fix_vl_writebacks=",
+            "vector-segment-fof",
+            ".fault_only_first = true",
+            ".is_vleff = false",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+        self.assertIn("fofBufferValid", segment)
+        self.assertIn("instMicroOp.exceptionVl.bits := segmentIdx", segment)
+
     def test_translation_plan_matches_xiangshan_mode_contract(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala").read_text()
         mmu_constants = (REPO_ROOT / "src/main/scala/xiangshan/cache/mmu/MMUConst.scala").read_text()

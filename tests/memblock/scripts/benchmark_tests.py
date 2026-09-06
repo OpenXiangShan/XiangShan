@@ -46,6 +46,7 @@ SCENARIOS = (
     "vector-split-load",
     "vector-fof",
     "vector-segment",
+    "vector-segment-fof",
     "vector-store-forwarding",
     "store-forwarding",
     "dcache-release",
