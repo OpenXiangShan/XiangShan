@@ -9,8 +9,9 @@ behavior, all vector load and store address modes independently, software
 prefetch, scalar/vector misalignment and cross-page splits, the virtual load and
 store queues, Sv39/Sv48 and all four VS/G-stage two-stage translation pairs,
 exact guest-page-fault metadata, DCache misses/refills and a byte-checked
-dirty-pressure phase, all four store-forwarding directions, PBMT=NC, redirects,
-and queue pressure. D-width AMOs (ADD/XOR/AND/OR/SWAP/MIN/MAX, signed and
+dirty-pressure phase, manager-originated DCache probes, GrantAck handling, all
+four store-forwarding directions, PBMT=NC, redirects, and queue pressure.
+D-width AMOs (ADD/XOR/AND/OR/SWAP/MIN/MAX, signed and
 unsigned) plus LR/SC are covered through the atomic unit, including old-value
 writeback, AMOCAS compare success/failure, reservation success/failure, and
 cache visibility. The L2-to-L1 DTLB and L2 hint input boundaries are checked for
@@ -19,8 +20,8 @@ with concurrent legal TileLink traffic, randomized request/response backpressure
 source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
 denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
-side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, VSegment, and
-manager-originated probes remain explicit boundary gaps; they are not silently
+side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, and VSegment remain explicit
+boundary gaps; they are not silently
 randomized as though they were legal cacheable flows.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
@@ -46,10 +47,11 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 
 - reset and cycle control with registered Picker clock;
 - typed LSQ, scalar load/store, vector load/store, and software-prefetch drivers;
-- coherent TileLink A/D memory agent with randomized ready/response delay;
+- coherent TileLink A/B/C/D/E memory agent with randomized ready/response delay;
 - PTW TileLink agent with independent request and response backpressure;
 - uncache TileLink agent with forced-first and randomized request/response stalls;
-- TileLink C-channel Release/ReleaseData capture, ReleaseAck, and writeback;
+- TileLink B/C/E Probe/ProbeAck/GrantAck plus Release/ReleaseData capture,
+  ReleaseAck, and byte-exact writeback;
 - separate byte-addressed architectural reference and bus backing memories;
 - ISA load formatting plus byte-exact checks on every dirty ReleaseData beat;
 - scalar load/prefetch, scalar store, and vector memory scoreboards;
@@ -185,6 +187,7 @@ make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
 make metadata-contracts PICKER="$PICKER" JOBS=8
 make dcache-errors PICKER="$PICKER" JOBS=8
+make dcache-coherence PICKER="$PICKER" JOBS=8
 make uncache-errors PICKER="$PICKER" JOBS=8
 make uncache-widths PICKER="$PICKER" JOBS=8
 make mmio-contracts PICKER="$PICKER" JOBS=8
@@ -320,6 +323,14 @@ unit tests for exception-vector bit mapping.
 the corresponding scalar load access-fault and hardware-error writebacks with
 RF writes suppressed.
 
+`dcache-coherence` fills a clean line, invalidates it with a manager Probe,
+refills it, requests clean ProbeAckData, refills it again, dirties the line,
+and requires dirty ProbeAckData even when the manager did not explicitly ask
+for data. Every returned byte is compared with the independent line image and
+written into bus memory before a post-probe cold load. The agent also assigns
+and checks every Grant/GrantData sink on E-channel GrantAck and forces at least
+one E-channel stall to check payload stability.
+
 `uncache-errors` injects one denied and one corrupt Uncache response and checks
 the exception contract through the PBMT=NC adapter. This test caught and now
 guards the LoadUnit S1 path that previously discarded response-generated
@@ -412,8 +423,9 @@ dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
 uncache backpressure. Every seed drives all six LSQ dispatch lanes and widths,
 checks committed scalar/vector stores through architectural readback, validates
 dirty ReleaseData before updating the separate bus memory, and meets bounded
-coverage plus final LSQ-accounting gates. Manager-originated coherence traffic
-remains outside this modeled boundary.
+coverage plus final LSQ-accounting gates. The deterministic coherence scenario
+covers manager-originated probes; adding probes as a constrained-random
+dimension remains a follow-on cross-coverage item.
 
 For example, these commands run the same generator in two directions:
 
@@ -517,6 +529,34 @@ the vector forwarding scenario is capped at 24 transactions per invocation to
 avoid reusing an LSQ pointer within a focused scenario. Long-duration pressure
 comes from consecutive seeded invocations. The verifier separately checks the
 requested command value and these bounded completed counts.
+
+For within-seed endurance, the same `random-mixed` generator and constraint
+interface can run one million actions per seed. This is deliberately a target
+configuration, not a second generator:
+
+```sh
+make endurance-regression PICKER="$PICKER" REGRESSION_JOBS=8 \
+  ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000 \
+  ENDURANCE_TIMEOUT_SECONDS=28800 CONSTRAINTS=spec
+make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
+  ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000
+```
+
+On the recorded host, a 16,384-action `spec` seed averaged about 242 seconds.
+Linear scaling therefore puts a one-million-action seed near 4.1 hours, with
+host load and generated traffic mix affecting the actual result. The endurance
+timeout is eight hours per seed; using the ordinary 1,800-second timeout would
+turn the requested pressure into systematic timeouts. Keep shorter multi-seed
+campaigns as well: they explore more random initial states and localize a
+failure faster, while million-action seeds provide much deeper pointer-wrap
+and long-lived state pressure.
+
+`make benchmark-tests` executes every leaf scenario once and writes both JSON
+and Markdown inventories under `build/memblock/test-scale.*`. The table reports
+wall time, cycles, generated actions, load/store completions, DCache A requests,
+AcquireBlock refills, PTW and Uncache requests, Probe traffic, and ReleaseData
+when the scenario exposes each metric. An action is a generator scheduling
+unit, not a synonym for one load/store or one bus request.
 
 Before and after the campaign, the runner verifies the frozen artifacts,
 system libraries, runner source, RTL metadata, the runtime-freeze script, and

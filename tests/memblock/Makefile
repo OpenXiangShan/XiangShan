@@ -15,6 +15,12 @@ EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-mixed-frozen-6h-8192.json
 FINAL_RESULT ?= $(PREPARED_DIR)/final-frozen-8h-16384.json
 LONG_RESULT ?= $(PREPARED_DIR)/final-frozen-12h-32768.json
 STRESS_RESULT ?= $(PREPARED_DIR)/stress-frozen-1h-16384.json
+ENDURANCE_RESULT ?= $(PREPARED_DIR)/endurance-spec-8x1000000.json
+ENDURANCE_TRANSACTIONS ?= 1000000
+ENDURANCE_SEEDS ?= 8
+ENDURANCE_TIMEOUT_SECONDS ?= 28800
+BENCHMARK_RESULT ?= $(PREPARED_DIR)/test-scale.json
+BENCHMARK_MARKDOWN ?= $(PREPARED_DIR)/test-scale.md
 JOBS ?= 8
 PICKER_ROOT := $(PREPARED_DIR)/tools/picker
 PICKER ?= $(PICKER_ROOT)/build/bin/picker
@@ -36,7 +42,7 @@ CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) -
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space frontend-bridge single-load fp-loads trigger-contracts metadata-contracts dcache-errors atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-sv48-sv39x4 translation-inflight-context-all translation-context translation-bare translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space frontend-bridge single-load fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-sv48-sv39x4 translation-inflight-context-all translation-context translation-bare translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
 
@@ -117,6 +123,9 @@ metadata-contracts: $(PICKER_TEST_BINARY)
 
 dcache-errors: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test dcache-errors
+
+dcache-coherence: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test dcache-coherence
 
 atomic-contracts: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test atomic-contracts
@@ -327,6 +336,17 @@ long-final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
+endurance-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(ENDURANCE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(ENDURANCE_SEEDS) --timeout-seconds $(ENDURANCE_TIMEOUT_SECONDS) --scenarios random-mixed --mixed-transactions $(ENDURANCE_TRANSACTIONS) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
+
+verify-endurance-results:
+	$(MAKE) check-rtl
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(ENDURANCE_RESULT) --min-duration-seconds 1 --min-results $(ENDURANCE_SEEDS) --scenario random-mixed --transactions 16384 --mixed-transactions $(ENDURANCE_TRANSACTIONS) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py --allow-finite
+
+benchmark-tests: $(RUNTIME_METADATA)
+	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
+
 verify-extended-results:
 	$(MAKE) check-rtl
 	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario random-mixed --transactions 4096 --mixed-transactions 8192 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
@@ -352,6 +372,7 @@ final-acceptance:
 	$(MAKE) metadata-contracts
 	$(MAKE) fp-loads
 	$(MAKE) dcache-errors
+	$(MAKE) dcache-coherence
 	$(MAKE) uncache-errors
 	$(MAKE) uncache-widths
 	$(MAKE) mmio-contracts

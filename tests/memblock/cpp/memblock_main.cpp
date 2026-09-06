@@ -4007,6 +4007,135 @@ int run_dcache_release(int argc, char **argv)
     return 0;
 }
 
+int run_dcache_coherence(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t line = memblock::kDefaultMemoryBase + 0xd0000;
+    environment.memory().fill_incrementing(line, 64, 0x31);
+    environment.configure_backpressure(0x6a09e667f3bcc909ULL, true);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    unsigned load_index = 0;
+    auto load = [&](std::uint64_t address, std::uint64_t expected) {
+        const memblock::LoadTransaction transaction{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(load_index * 2),
+            .rob_flag = memblock::rob_pointer_flag(load_index * 2),
+            .lq = memblock::lq_pointer_value(load_index),
+            .lq_flag = memblock::lq_pointer_flag(load_index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(8 + load_index),
+            .lane = load_index % memblock::kScalarLoadLanes,
+        };
+        ++load_index;
+        environment.expect_load_data(transaction, expected);
+        return environment.enqueue_load(transaction) &&
+               environment.issue_load(transaction) &&
+               environment.run_until_complete(4096);
+    };
+
+    const std::uint64_t load_address = line + 24;
+    const std::uint64_t initial_data =
+        environment.memory().expected_load(load_address, memblock::LoadOp::ld);
+    if (!load(load_address, initial_data) ||
+        !environment.request_dcache_probe(line, 2, false, 2) ||
+        !environment.run_until_probe_responses(1) ||
+        !load(load_address, initial_data)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle() << " phase=clean_invalidate reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const auto clean_line = environment.memory().read_beat(line, 64);
+    if (!environment.request_dcache_probe(line, 2, true, 2, clean_line) ||
+        !environment.run_until_probe_responses(2) ||
+        !load(load_address, initial_data)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle() << " phase=clean_data reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction store{
+        .address = load_address,
+        .data = 0xdecafbad12345678ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 20,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    environment.expect_store(store);
+    if (!environment.enqueue_store(store, 0) ||
+        !environment.issue_store_data(store) ||
+        !environment.issue_store_address(store) ||
+        !environment.run_until_store_complete(4096) ||
+        !environment.commit_store(store) || !environment.run_cycles(32)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle() << " phase=dirty_store reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const auto dirty_line = environment.memory().read_beat(line, 64);
+    if (!environment.request_dcache_probe(line, 2, false, 1, dirty_line) ||
+        !environment.run_until_probe_responses(3) ||
+        !load(load_address, store.data) || !environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle() << " phase=dirty_invalidate reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t expected_grants =
+        environment.dcache_refills() + environment.dcache_acquire_perms();
+    const bool passed = environment.dcache_probes() == 3 &&
+        environment.dcache_probe_responses() == 3 &&
+        environment.dcache_probe_data() == 2 &&
+        environment.dcache_refills() >= 4 &&
+        environment.dcache_grant_acks() == expected_grants &&
+        environment.dcache_grant_ack_stalls() != 0;
+    if (!passed) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=coverage reason=coherence_count_gate_failed"
+                  << " refills=" << environment.dcache_refills()
+                  << " acquire_perms=" << environment.dcache_acquire_perms()
+                  << " probes=" << environment.dcache_probes()
+                  << " probe_responses=" << environment.dcache_probe_responses()
+                  << " probe_data=" << environment.dcache_probe_data()
+                  << " grant_acks=" << environment.dcache_grant_acks()
+                  << " grant_ack_stalls="
+                  << environment.dcache_grant_ack_stalls() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_DCACHE_COHERENCE_PASS"
+              << " cycle=" << environment.cycle()
+              << " scalar_loads=" << load_index
+              << " scalar_stores=1"
+              << " dcache_a=" << environment.tilelink_requests()
+              << " dcache_gets=" << environment.dcache_gets()
+              << " dcache_refills=" << environment.dcache_refills()
+              << " dcache_acquire_perms="
+              << environment.dcache_acquire_perms()
+              << " probes=" << environment.dcache_probes()
+              << " probe_responses=" << environment.dcache_probe_responses()
+              << " probe_data=" << environment.dcache_probe_data()
+              << " grant_acks=" << environment.dcache_grant_acks()
+              << " grant_ack_stalls="
+              << environment.dcache_grant_ack_stalls()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_store_rdata_order(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -12615,6 +12744,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         coverage.uncache_response_delays = environment.uncache_response_delays();
         if (actions != options.transactions || environment.ptw_requests() < 3 ||
             environment.uncache_requests() < 2 ||
+            !environment.dcache_grants_drained() ||
             environment.tilelink_release_data() <= release_before ||
             environment.lq_dequeued() + environment.lq_canceled() !=
                 environment.lq_allocated() ||
@@ -12675,6 +12805,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " vector_store_writebacks="
               << environment.vector_store_writebacks()
               << " tilelink_requests=" << environment.tilelink_requests()
+              << " dcache_gets=" << environment.dcache_gets()
+              << " dcache_refills=" << environment.dcache_refills()
+              << " dcache_acquire_perms="
+              << environment.dcache_acquire_perms()
+              << " probes=" << environment.dcache_probes()
+              << " grant_acks=" << environment.dcache_grant_acks()
               << " release_data=" << environment.tilelink_release_data()
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
@@ -13331,7 +13467,8 @@ int run_random_stress(int argc, char **argv, const Options &options)
     coverage.uncache_request_stalls = environment.uncache_request_stalls();
     coverage.uncache_response_delays = environment.uncache_response_delays();
     const bool passed = completed_actions == options.transactions &&
-        environment.ok() && coverage.complete() &&
+        environment.ok() && environment.dcache_grants_drained() &&
+        coverage.complete() &&
         coverage.backpressure_complete(options.backpressure) &&
         environment.lq_dequeued() + environment.lq_canceled() == environment.lq_allocated() &&
         environment.sq_dequeued() + environment.sq_canceled() == environment.sq_allocated();
@@ -13356,6 +13493,12 @@ int run_random_stress(int argc, char **argv, const Options &options)
               << " transactions=" << completed_actions
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
+              << " dcache_gets=" << environment.dcache_gets()
+              << " dcache_refills=" << environment.dcache_refills()
+              << " dcache_acquire_perms="
+              << environment.dcache_acquire_perms()
+              << " probes=" << environment.dcache_probes()
+              << " grant_acks=" << environment.dcache_grant_acks()
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " lq=" << environment.lq_dequeued() << '+'
@@ -13577,6 +13720,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "dcache-release") {
             return run_dcache_release(argc, argv);
+        }
+        if (options.test == "dcache-coherence") {
+            return run_dcache_coherence(argc, argv);
         }
         if (options.test == "store-rdata-order") {
             return run_store_rdata_order(argc, argv);

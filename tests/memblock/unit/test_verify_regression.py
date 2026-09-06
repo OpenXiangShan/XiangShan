@@ -151,6 +151,35 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_dcache_grants_require_one_grant_ack_each(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {"dcache_refills": 3, "dcache_acquire_perms": 1, "grant_acks": 4}
+        )
+        result["summary"] += (
+            " dcache_refills=3 dcache_acquire_perms=1 grant_acks=4"
+        )
+        verify_regression._check_result(
+            result,
+            0,
+            {"random-mixed": 64},
+            {"random-mixed": 64},
+        )
+
+        result["grant_acks"] = 3
+        result["summary"] = str(result["summary"]).replace(
+            "grant_acks=4", "grant_acks=3"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "GrantAcks are not conserved"
+        ):
+            verify_regression._check_result(
+                result,
+                0,
+                {"random-mixed": 64},
+                {"random-mixed": 64},
+            )
+
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
         result["constraint_schema"] = 3

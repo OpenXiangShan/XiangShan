@@ -74,7 +74,7 @@ CSR or full-core integration test.
 | Misalignment | Byte concatenation/splitting across 16-byte, line, and page boundaries | Exact value/bytes when enabled; specified address-misaligned exception when disallowed by memory type/control | Partial: common scalar/vector splits are covered |
 | Exception side effects | RISC-V exception contract | Exact exception bit; exceptional scalar load has no integer/FP RF write; software prefetch never raises a load exception or writes an RF | Partial: concurrent priority and full cause matrix are planned |
 | Redirect | ROB age and redirect level supplied by a legal backend transaction | Redirected younger work has no terminal writeback; surviving work completes with the same data | Partial: basic redirect is covered; cancellation observation is driver-accounted |
-| Cache coherence boundary | TileLink opcode/source/size/mask/data reference agent with separate bus and architectural memories | Stable producer payload while stalled, complete refill, ReleaseAck, byte-exact dirty ReleaseData, atomic refill/update, and denied/corrupt D-channel handling | Partial: DCache denied/corrupt load errors and all 22 refill-capable W/D LR/AMO/AMOCAS error paths are executable; `atomic-dchannel-errors` checks poisoned-line installation, persistent denied/corrupt metadata on later load and SC hits, exact exceptions, suppressed `rfWen`, and clean error-state recovery (`dcache-errors`, `atomic-contracts`, `atomic-dchannel-errors`). Manager-originated probes and E-channel behavior remain planned |
+| Cache coherence boundary | TileLink opcode/source/size/mask/data reference agent with separate bus and architectural memories | Stable producer payload while stalled, complete refill, sink-exact GrantAck, clean/dirty ProbeAck(Data), ReleaseAck, byte-exact dirty data, atomic refill/update, and denied/corrupt D-channel handling | Partial: `dcache-coherence` checks clean ProbeAck, requested clean ProbeAckData, mandatory dirty ProbeAckData, invalidation/refill, and E-channel GrantAck with forced backpressure. DCache denied/corrupt load errors and all 22 refill-capable W/D LR/AMO/AMOCAS error paths are also executable. Random Probe overlap, Probe-toB retention, malformed responses, and broader source reuse remain planned |
 | PTW/uncache boundary | TileLink and uncache ready-valid agents with deterministic memory | Stable request/response while stalled, legal source/opcode/size/address/mask, ordered NC/MMIO store data, exact beat/lane load response, denied/corrupt error propagation, and SQ retirement | Partial: legal backpressure, response identity, scalar Uncache width/lane and denied/corrupt propagation are executable (`uncache-widths`, `uncache-errors`); PBMT=IO direct MMIO load/store bypass, metadata/error path, and SQ retirement are executable (`mmio-contracts`); malformed/duplicate/early/late response injection remains planned |
 | Trigger and DynInst sidebands | Independent CSR trigger update plus explicit LSQ enqueue exception/trigger/flush and scalar issue RVC/FTQ/store-set/load-wait fields | Trigger breakpoint cause/action, exception-vector mapping, and no dropped issue sideband | Partial: scalar load breakpoint and scalar issue RVC/FTQ/store-set/load-wait paths are executable; generated enqueue exception-vector mapping is unit-tested, while the top-level issueLda boundary does not expose that vector; debug-mode, chained trigger, and broad sideband randomization remain |
 | Progress | Manager fairness: every observed request is eventually made ready and answered | Every non-canceled modeled operation terminates before the generous scenario deadline | Partial: enqueue/cancel acceptance is currently driver-accounted |
@@ -276,7 +276,7 @@ cacheable tests pass.
 | DCache lookup | warm hit, cold miss, same-line merge, bank conflict, set pressure beyond associativity, synonym/alias | Partial; cold/warm and dirty set pressure implemented |
 | Refill/replay | delayed A/D responses, beat reordering where legal, partial refill, killed request, replay after miss | Partial |
 | Eviction | clean release, dirty ReleaseData, partial byte masks, replacement under pressure, release backpressure | Partial; immutable whole-line snapshot is checked for the dedicated dirty-pressure phase, while broader release/response classes remain planned |
-| TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Partial; load and atomic denied/corrupt D responses are injected with backpressure and checked, while manager-originated probes, malformed responses, source-reuse stress, and E-channel behavior remain planned |
+| TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Partial; `dcache-coherence` executes three manager Probes spanning clean no-data, clean requested-data, and dirty mandatory-data responses, checks byte-exact C beats, forces E backpressure, and matches every GrantAck sink. Load and atomic denied/corrupt D responses are also injected and checked; random Probe overlap, Probe-toB retention, malformed responses, and broader source-reuse stress remain planned |
 | Uncache/MMIO | Get/Put widths, byte enables, side effects, ordering, response delay, denied/error response | Partial; PBMT-NC Get widths/byte lanes and scalar denied/corrupt response propagation are executable (`uncache-widths`, `uncache-errors`); PBMT=IO's direct three-cycle load metadata bypass plus scalar store request/response/SQ-retirement, DCache non-use, denied/corrupt load metadata preservation, and a physical non-DebugModule `c=0` PMA load/store pair are executable (`mmio-contracts`); cacheable CBO.ZERO line-zero/readback is executable (`cbo-zero-contracts`); device side effects and malformed/duplicate/early/late responses remain |
 | ECC/cache errors | correctable/uncorrectable data, error lifetime, retry or architectural exception | Partial; D-channel denied/corrupt metadata persistence and subsequent clean AtomicsUnit recovery are executable in `dcache-errors` and `atomic-dchannel-errors`; physical tag/data-array ECC injection and retry policy remain planned |
 | PTW manager | request/response backpressure, source reuse, malformed/denied response, concurrent walks | Partial; legal backpressure, response identity, and two co-issued distinct-page stage-1/nested walks are implemented. The observed external A/D path legally serializes responses (`max_outstanding=1`), while both DTLB operations remain pending before the first delayed response. Malformed/denied injection and broader source-reuse stress remain |
@@ -356,6 +356,35 @@ provenance, and no unclassified failure. Planned rows remain visible in the
 artifact and in reports until their independent model and observation path are
 implemented.
 
+## Top-Level IO Gap Audit (2026-09-06)
+
+The checked manifest contains 1,335 flattened ports. Structural pin coverage is
+not equivalent to semantic verification, so the review grouped the ports by
+transaction owner and compared each group with a driver, monitor, oracle, and
+coverage gate. The current group sizes are: 532 OOO-to-Mem, 260 Mem-to-OOO,
+351 miscellaneous/control, 88 frontend TileLink, 53 DCache TileLink, 21 PTW
+TileLink, 20 Uncache TileLink, eight performance, and two infrastructure ports.
+
+| Boundary found in TOP IO | Semantic status | Closure action |
+| --- | --- | --- |
+| Frontend ICache, ICache-control, and instruction-Uncache TileLink (88 ports) | Implemented | `frontend-bridge` keeps independent request/response scoreboards and source credits for all three paths |
+| DCache A/B/C/D/E TileLink (53 ports) | Partial | A/C/D refill, error, eviction, and ReleaseData paths plus deterministic B Probe and E GrantAck are implemented. Add legal randomized Probe overlap, toB retention, and multiple outstanding Probe sources to `random-mixed` |
+| PTW and Uncache manager boundaries (41 ports) | Partial | Legal traffic, long latency, and backpressure are implemented. Add malformed/duplicate/early/late responses as explicit negative protocol modes rather than normal workload traffic |
+| IFU-to-Mem ITLB request/response (`io_fetch_to_mem_itlb_*`, 64 ports) | Planned, high priority | Add a typed IFU request driver and response oracle spanning Bare/Sv39/Sv48, nested Sv39/Sv48 x Sv39x4/Sv48x4, miss/fault/PBMT metadata, response backpressure, and concurrent DTLB activity |
+| Backend `memoryViolation` (8), `ldCancel` (3), and wakeup (12) outputs | Planned, high priority | Add monitors keyed by ROB/LQ identity, then generate RAR/RAW violation, replay cancellation, and load wakeup timing crosses. Do not infer these events only from driver accounting |
+| IFU hardware-prefetch training inputs (`io_ifetchPrefetch_*`, 6 ports) | Planned | Generate three-lane legal virtual addresses and cross with translation modes, duplicate lines, cache residency, and DCache pressure |
+| L2/L3 prefetch sender outputs (5 ports) | Planned | Monitor address/source/valid, require exact causal correspondence to training/access streams, and check throttling under miss pressure |
+| Store/vector IQ slow feedback | Partial | STA feedback and VSTU replay fields are sampled; add per-field coverage and same-cycle competition checks for every exposed lane |
+| Performance, trace, interrupt, DFT, hart/reset, and bypass plumbing | Structural or integration-owned | Keep pin/reset sanity in `pin-space`; test architectural interrupt/trace/DFT semantics at their owning integration boundary instead of claiming them from MemBlock data-path tests |
+
+The ordering for the next closure work is: first independently observable
+backend correctness signals (`memoryViolation`, `ldCancel`, wakeup) and the IFU
+ITLB transaction; then random Probe overlap and hardware-prefetch causality;
+then negative protocol injection. Translation mode depth itself is no longer
+the dominant gap: deterministic tests already execute Sv48 and all four
+Sv39/Sv48 x Sv39x4/Sv48x4 nested combinations. The missing IFU path is a
+separate top-level transaction and therefore remains visible in this audit.
+
 ## Interface Assumptions
 
 | Interface family | Environment assumption | Enforced rule |
@@ -363,7 +392,7 @@ implemented.
 | Issue | Legal operation encoding and LSQ/ROB pointer; payload held until `ready` | Typed drivers retain `valid` and payload through acceptance |
 | LSQ dispatch/commit | Allocations and commits are in legal backend order | Drivers allocate the correct scalar/vector count and never commit unallocated work |
 | Redirect | ROB pointer/flag and level describe a legal backend redirect | The scoreboard removes only architecturally younger work |
-| DCache manager | Coherent 64-byte lines on a 256-bit bus; finite randomized delay | Agent drives/observes modeled A/C traffic and timing; independent E/response legality checks are planned |
+| DCache manager | Coherent 64-byte lines on a 256-bit bus; finite randomized delay | Agent drives and observes A/B/C/D/E traffic, distinguishes Get/AcquireBlock/AcquirePerm, checks ProbeAck(Data), ReleaseData, and GrantAck, and applies A/C/D/E timing pressure; random Probe injection and malformed response modes remain planned |
 | PTW manager | PTE memory and response source/size match the programmed roots | Reference page tables and PTW agent share sparse memory; malformed response validation is planned |
 | Uncache manager | Only modeled Get/Put requests receive AccessAck/Data | Ordered byte-level update is modeled; scalar size/address/mask/lane, response identity, denied/corrupt exception checks, and PBMT=IO store request/retirement are executable (`uncache-widths`, `uncache-errors`, `mmio-contracts`); CBO.ZERO is covered through the cacheable SBuffer path (`cbo-zero-contracts`), while malformed/duplicate/early/late responses remain planned |
 

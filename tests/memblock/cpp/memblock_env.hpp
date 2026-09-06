@@ -912,10 +912,14 @@ public:
         ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
         random_state_ = seed == 0 ? 1 : seed;
+        e_random_state_ = (seed ^ 0xd1b54a32d192ed03ULL) == 0
+            ? 1
+            : seed ^ 0xd1b54a32d192ed03ULL;
         random_backpressure_ = enabled;
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
         force_a_stall_ = enabled;
+        force_e_stall_ = enabled;
     }
 
     void inject_next_response_error(bool denied, bool corrupt)
@@ -929,8 +933,26 @@ public:
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
         const bool accept_c = !random_backpressure_ || (next_random() & 3U) != 0;
+        const bool accept_e = !random_backpressure_ ||
+                              (!force_e_stall_ && (next_e_random() & 3U) != 0);
         dut.auto_inner_dcache_client_out_a_ready.ImmSet(accept_a);
         dut.auto_inner_dcache_client_out_c_ready.ImmSet(accept_c);
+        dut.auto_inner_dcache_client_out_e_ready.ImmSet(accept_e);
+        if (b_beats_.empty()) {
+            dut.auto_inner_dcache_client_out_b_valid.ImmSet(std::uint64_t{0});
+        } else {
+            const BBeat &beat = b_beats_.front();
+            dut.auto_inner_dcache_client_out_b_bits_opcode.ImmSet(beat.opcode);
+            dut.auto_inner_dcache_client_out_b_bits_param.ImmSet(beat.param);
+            dut.auto_inner_dcache_client_out_b_bits_size.ImmSet(beat.size);
+            dut.auto_inner_dcache_client_out_b_bits_source.ImmSet(beat.source);
+            dut.auto_inner_dcache_client_out_b_bits_address.ImmSet(beat.address);
+            dut.auto_inner_dcache_client_out_b_bits_mask.ImmSet(beat.mask);
+            auto bytes = beat.data;
+            dut.auto_inner_dcache_client_out_b_bits_data.ImmSetBytes(bytes);
+            dut.auto_inner_dcache_client_out_b_bits_corrupt.ImmSet(beat.corrupt);
+            dut.auto_inner_dcache_client_out_b_valid.ImmSet(std::uint64_t{1});
+        }
         if (d_beats_.empty()) {
             dut.auto_inner_dcache_client_out_d_valid.ImmSet(std::uint64_t{0});
             d_presenting_ = false;
@@ -987,6 +1009,12 @@ public:
                 error_ = "oversized DCache TileLink A request";
             }
         }
+        const bool b_valid = dut.auto_inner_dcache_client_out_b_valid.B();
+        const bool b_ready = dut.auto_inner_dcache_client_out_b_ready.B();
+        if (b_valid && !b_ready) {
+            ++probe_stall_cycles_;
+        }
+        b_fire_ = b_valid && b_ready;
         c_fire_ = dut.auto_inner_dcache_client_out_c_valid.B() &&
                   dut.auto_inner_dcache_client_out_c_ready.B();
         if (c_fire_) {
@@ -997,13 +1025,29 @@ public:
                 static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_c_bits_source.U()),
                 dut.auto_inner_dcache_client_out_c_bits_address.U(),
                 dut.auto_inner_dcache_client_out_c_bits_echo_isKeyword.B(),
+                dut.auto_inner_dcache_client_out_c_bits_corrupt.B(),
                 dut.auto_inner_dcache_client_out_c_bits_data.GetBytes(),
             };
-            if (captured_c_->opcode != 6 && captured_c_->opcode != 7) {
+            if (captured_c_->opcode < 4 || captured_c_->opcode > 7) {
                 error_ = "unsupported DCache TileLink C opcode";
             }
             if (captured_c_->size > 6) {
                 error_ = "oversized DCache TileLink C request";
+            }
+        }
+        const bool e_valid = dut.auto_inner_dcache_client_out_e_valid.B();
+        const bool e_ready = dut.auto_inner_dcache_client_out_e_ready.B();
+        if (e_valid && !e_ready) {
+            ++grant_ack_stall_cycles_;
+            force_e_stall_ = false;
+        }
+        e_fire_ = e_valid && e_ready;
+        if (e_fire_) {
+            if (expected_grant_acks_.empty()) {
+                error_ = "unexpected DCache TileLink E GrantAck";
+            } else if (dut.auto_inner_dcache_client_out_e_bits_sink.U() !=
+                       expected_grant_acks_.front()) {
+                error_ = "DCache TileLink E GrantAck sink mismatch";
             }
         }
         d_fire_ = !d_beats_.empty() &&
@@ -1029,6 +1073,10 @@ public:
 
     void update_after_tick()
     {
+        if (b_fire_) {
+            b_beats_.pop_front();
+            ++probe_request_count_;
+        }
         if (d_fire_) {
             d_beats_.pop_front();
             d_presenting_ = false;
@@ -1039,11 +1087,21 @@ public:
             ++request_count_;
         }
         if (c_fire_ && captured_c_) {
-            accept_release(*captured_c_);
+            if (captured_c_->opcode == 4 || captured_c_->opcode == 5) {
+                accept_probe_response(*captured_c_);
+            } else {
+                accept_release(*captured_c_);
+            }
+        }
+        if (e_fire_ && !expected_grant_acks_.empty()) {
+            expected_grant_acks_.pop_front();
+            ++grant_ack_count_;
         }
         a_fire_ = false;
+        b_fire_ = false;
         c_fire_ = false;
         d_fire_ = false;
+        e_fire_ = false;
         captured_a_.reset();
         captured_c_.reset();
     }
@@ -1051,6 +1109,9 @@ public:
     bool ok() const { return error_.empty(); }
     const std::string &error() const { return error_; }
     std::uint64_t request_count() const { return request_count_; }
+    std::uint64_t get_count() const { return get_count_; }
+    std::uint64_t refill_count() const { return refill_count_; }
+    std::uint64_t acquire_perm_count() const { return acquire_perm_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
     const ResponseLatencyStats &response_latency_stats() const
@@ -1063,6 +1124,52 @@ public:
     {
         return release_data_verified_count_;
     }
+    std::uint64_t probe_request_count() const { return probe_request_count_; }
+    std::uint64_t probe_response_count() const { return probe_response_count_; }
+    std::uint64_t probe_data_count() const { return probe_data_count_; }
+    std::uint64_t probe_stall_cycles() const { return probe_stall_cycles_; }
+    std::uint64_t grant_ack_count() const { return grant_ack_count_; }
+    std::uint64_t grant_ack_stall_cycles() const
+    {
+        return grant_ack_stall_cycles_;
+    }
+
+    bool request_probe(
+        std::uint64_t address, std::uint8_t cap, bool need_data,
+        std::uint8_t expected_report,
+        const std::vector<unsigned char> &expected_data = {})
+    {
+        if ((address & (kLineBytes - 1)) != 0 || cap > 2 ||
+            expected_report > 5 ||
+            (!expected_data.empty() && expected_data.size() != kLineBytes)) {
+            error_ = "invalid DCache Probe request or expectation";
+            return false;
+        }
+        if (!b_beats_.empty() || !probe_responses_.empty()) {
+            error_ = "DCache Probe requested while another probe is outstanding";
+            return false;
+        }
+        std::vector<unsigned char> data(kBeatBytes, 0);
+        // XiangShan carries the virtual-index alias in B.data[2:1] and the
+        // manager's data request in B.data[0]. Bare mappings use PA == VA.
+        data[0] = static_cast<unsigned char>(
+            (need_data ? 1U : 0U) | ((address >> 11) & 0x6U));
+        const std::uint8_t source = next_probe_source_;
+        next_probe_source_ = static_cast<std::uint8_t>(
+            (next_probe_source_ + 1U) & 0x3fU);
+        b_beats_.push_back(BBeat{
+            6, cap, 6, source, address, 0xffffffffU,
+            std::move(data), false});
+        probe_responses_.push_back(ProbeResponseState{
+            address, expected_report, expected_data, 0});
+        return true;
+    }
+
+    bool probes_idle() const
+    {
+        return b_beats_.empty() && probe_responses_.empty();
+    }
+    bool grant_acks_idle() const { return expected_grant_acks_.empty(); }
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes)
     {
@@ -1104,6 +1211,7 @@ public:
 
 private:
     static constexpr std::size_t kBeatBytes = 32;
+    static constexpr std::size_t kLineBytes = 64;
 
     struct ARequest {
         std::uint8_t opcode;
@@ -1127,6 +1235,17 @@ private:
         unsigned delay_before = 0;
     };
 
+    struct BBeat {
+        std::uint8_t opcode;
+        std::uint8_t param;
+        std::uint8_t size;
+        std::uint8_t source;
+        std::uint64_t address;
+        std::uint32_t mask;
+        std::vector<unsigned char> data;
+        bool corrupt;
+    };
+
     struct CRequest {
         std::uint8_t opcode;
         std::uint8_t param;
@@ -1134,6 +1253,7 @@ private:
         std::uint8_t source;
         std::uint64_t address;
         bool keyword;
+        bool corrupt;
         std::vector<unsigned char> data;
     };
 
@@ -1146,6 +1266,13 @@ private:
         std::size_t received = 0;
     };
 
+    struct ProbeResponseState {
+        std::uint64_t base;
+        std::uint8_t report;
+        std::vector<unsigned char> expected_data;
+        std::size_t received;
+    };
+
     void respond(const ARequest &request)
     {
         const bool denied = inject_denied_;
@@ -1156,6 +1283,7 @@ private:
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
         switch (request.opcode) {
         case 4: { // Get -> AccessAckData
+            ++get_count_;
             const std::uint64_t beat_base = request.address & ~(kBeatBytes - 1);
             push_response(DBeat{
                 1, 0, request.size, request.source, 0, request.keyword,
@@ -1164,25 +1292,34 @@ private:
             break;
         }
         case 6: { // AcquireBlock -> GrantData
+            ++refill_count_;
             const std::uint8_t cap = request.param == 0 ? 1 : 0;
+            const std::uint16_t sink =
+                static_cast<std::uint16_t>(1U + request.source);
             const std::size_t beats = static_cast<std::size_t>(
                 transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
             for (std::size_t beat = 0; beat < beats; ++beat) {
                 const std::size_t memory_beat = request.keyword ? beat ^ 1U : beat;
                 push_response(DBeat{
-                    5, cap, request.size, request.source, 1, request.keyword,
+                    5, cap, request.size, request.source, sink, request.keyword,
                     memory_.read_beat(base + memory_beat * kBeatBytes, kBeatBytes),
                     denied, corrupt,
                 }, beat == 0);
             }
+            expected_grant_acks_.push_back(sink);
             break;
         }
-        case 7: // AcquirePerm -> Grant
+        case 7: { // AcquirePerm -> Grant
+            ++acquire_perm_count_;
+            const std::uint16_t sink =
+                static_cast<std::uint16_t>(1U + request.source);
             push_response(DBeat{
-                4, 0, request.size, request.source, 1, request.keyword,
+                4, 0, request.size, request.source, sink, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
             }, true);
+            expected_grant_acks_.push_back(sink);
             break;
+        }
         default: {
             std::ostringstream message;
             message << "unsupported DCache TileLink A opcode "
@@ -1191,6 +1328,49 @@ private:
             break;
         }
         }
+    }
+
+    void accept_probe_response(const CRequest &response)
+    {
+        if (probe_responses_.empty()) {
+            error_ = "unexpected DCache ProbeAck response";
+            return;
+        }
+        ProbeResponseState &expected = probe_responses_.front();
+        const bool with_data = !expected.expected_data.empty();
+        const std::uint8_t expected_opcode = with_data ? 5 : 4;
+        if (response.opcode != expected_opcode || response.param != expected.report ||
+            response.size != 6 || response.address != expected.base ||
+            response.corrupt) {
+            error_ = "DCache ProbeAck identity or permission mismatch";
+            return;
+        }
+        if (with_data) {
+            const std::size_t offset = expected.received * kBeatBytes;
+            if (offset + kBeatBytes > expected.expected_data.size()) {
+                error_ = "DCache ProbeAckData exceeded one cache line";
+                return;
+            }
+            for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
+                if (response.data.at(byte) != expected.expected_data[offset + byte]) {
+                    std::ostringstream message;
+                    message << "DCache ProbeAckData byte mismatch base=0x"
+                            << std::hex << expected.base << " beat=" << std::dec
+                            << expected.received << " byte=" << byte;
+                    error_ = message.str();
+                    return;
+                }
+                memory_.write_byte(
+                    expected.base + offset + byte, response.data.at(byte));
+            }
+            ++expected.received;
+            if (expected.received != kLineBytes / kBeatBytes) {
+                return;
+            }
+            ++probe_data_count_;
+        }
+        probe_responses_.pop_front();
+        ++probe_response_count_;
     }
 
     void accept_release(const CRequest &request)
@@ -1278,6 +1458,14 @@ private:
         return random_state_;
     }
 
+    std::uint64_t next_e_random()
+    {
+        e_random_state_ ^= e_random_state_ << 13;
+        e_random_state_ ^= e_random_state_ >> 7;
+        e_random_state_ ^= e_random_state_ << 17;
+        return e_random_state_;
+    }
+
     unsigned response_delay(bool first_beat)
     {
         if (!random_backpressure_) {
@@ -1305,25 +1493,42 @@ private:
 
     SparseMemory &memory_;
     const SparseMemory &reference_memory_;
+    std::deque<BBeat> b_beats_;
     std::deque<DBeat> d_beats_;
+    std::deque<ProbeResponseState> probe_responses_;
+    std::deque<std::uint16_t> expected_grant_acks_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
     std::optional<ReleaseDataState> release_data_;
     std::unordered_map<std::uint64_t, std::vector<unsigned char>>
         expected_release_lines_;
     bool a_fire_ = false;
+    bool b_fire_ = false;
     bool c_fire_ = false;
     bool d_fire_ = false;
+    bool e_fire_ = false;
     std::uint64_t request_count_ = 0;
+    std::uint64_t get_count_ = 0;
+    std::uint64_t refill_count_ = 0;
+    std::uint64_t acquire_perm_count_ = 0;
     std::uint64_t release_count_ = 0;
     std::uint64_t release_data_count_ = 0;
     std::uint64_t release_data_verified_count_ = 0;
+    std::uint64_t probe_request_count_ = 0;
+    std::uint64_t probe_response_count_ = 0;
+    std::uint64_t probe_data_count_ = 0;
+    std::uint64_t probe_stall_cycles_ = 0;
+    std::uint64_t grant_ack_count_ = 0;
+    std::uint64_t grant_ack_stall_cycles_ = 0;
+    std::uint8_t next_probe_source_ = 0;
     std::uint64_t random_state_ = 1;
+    std::uint64_t e_random_state_ = 1;
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
     ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
     ResponseLatencyStats response_latency_stats_;
     bool force_a_stall_ = false;
+    bool force_e_stall_ = false;
     bool d_presenting_ = false;
     bool inject_denied_ = false;
     bool inject_corrupt_ = false;
@@ -2641,6 +2846,14 @@ public:
     {
         memory_agent_.clear_release_line_expectations();
     }
+    bool request_dcache_probe(
+        std::uint64_t address, std::uint8_t cap, bool need_data,
+        std::uint8_t expected_report,
+        const std::vector<unsigned char> &expected_data = {})
+    {
+        return memory_agent_.request_probe(
+            address, cap, need_data, expected_report, expected_data);
+    }
     void configure_backpressure(
         std::uint64_t seed, bool enabled,
         ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
@@ -2800,6 +3013,12 @@ public:
     }
     std::uint64_t cycle() const { return dut_.xclock.clk; }
     std::uint64_t tilelink_requests() const { return memory_agent_.request_count(); }
+    std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
+    std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
+    std::uint64_t dcache_acquire_perms() const
+    {
+        return memory_agent_.acquire_perm_count();
+    }
     std::uint64_t tilelink_releases() const { return memory_agent_.release_count(); }
     std::uint64_t tilelink_release_data() const
     {
@@ -2808,6 +3027,34 @@ public:
     std::uint64_t tilelink_release_data_verified() const
     {
         return memory_agent_.release_data_verified_count();
+    }
+    std::uint64_t dcache_probes() const
+    {
+        return memory_agent_.probe_request_count();
+    }
+    std::uint64_t dcache_probe_responses() const
+    {
+        return memory_agent_.probe_response_count();
+    }
+    std::uint64_t dcache_probe_data() const
+    {
+        return memory_agent_.probe_data_count();
+    }
+    std::uint64_t dcache_probe_stalls() const
+    {
+        return memory_agent_.probe_stall_cycles();
+    }
+    std::uint64_t dcache_grant_acks() const
+    {
+        return memory_agent_.grant_ack_count();
+    }
+    std::uint64_t dcache_grant_ack_stalls() const
+    {
+        return memory_agent_.grant_ack_stall_cycles();
+    }
+    bool dcache_grants_drained() const
+    {
+        return memory_agent_.grant_acks_idle();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
     std::uint64_t dcache_request_stalls() const
@@ -5867,6 +6114,25 @@ public:
         }
         if (memory_agent_.release_data_count() < target) {
             error_ = "timed out waiting for target DCache ReleaseData count";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_probe_responses(
+        std::uint64_t target, unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout && memory_agent_.probe_response_count() < target;
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (memory_agent_.probe_response_count() < target ||
+            !memory_agent_.probes_idle()) {
+            error_ = "timed out waiting for DCache ProbeAck response";
             return false;
         }
         return check_components();

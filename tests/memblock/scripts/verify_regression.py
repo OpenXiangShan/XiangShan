@@ -564,6 +564,22 @@ def _check_result(
                 result.get(name) == value,
                 f"{prefix} summary disagrees on {name}: {value!r} != {result.get(name)!r}",
             )
+    grant_fields = ("dcache_refills", "dcache_acquire_perms", "grant_acks")
+    if any(name in result for name in grant_fields):
+        _require(
+            all(
+                isinstance(result.get(name), int)
+                and not isinstance(result.get(name), bool)
+                and result[name] >= 0
+                for name in grant_fields
+            ),
+            f"{prefix} has an incomplete DCache grant/ack accounting tuple",
+        )
+        _require(
+            result["grant_acks"]
+            == result["dcache_refills"] + result["dcache_acquire_perms"],
+            f"{prefix} DCache grants and GrantAcks are not conserved",
+        )
     if scenario == "random-mixed":
         _check_mixed_coverage(result, require_backpressure)
     elif scenario == run_regression.STRESS_SCENARIO:
