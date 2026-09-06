@@ -73,6 +73,7 @@ struct RandomConstraints {
         scalar_store,
         vector_load,
         vector_store,
+        vector_segment,
         prefetch,
         atomic,
         noncacheable,
@@ -127,6 +128,7 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
+    unsigned vector_segment_stores_per_mille = 0;
     unsigned probes_per_mille = 0;
     unsigned probe_to_b_per_mille = 0;
     unsigned probe_need_data_per_mille = 0;
@@ -141,7 +143,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "coverage",
                 .operation_weights = {
-                    200, 150, 150, 150, 100, 100, 75, 75, 75},
+                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
@@ -158,6 +160,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_segment_stores_per_mille = 500,
                 .probes_per_mille = 20,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -173,7 +176,7 @@ struct RandomConstraints {
             // not claims about their exact SPEC frequency.
             return RandomConstraints{
                 .name = "spec",
-                .operation_weights = {649, 270, 20, 10, 35, 5, 5, 5, 1},
+                .operation_weights = {648, 270, 20, 10, 1, 35, 5, 5, 5, 1},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
@@ -190,6 +193,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
+                .vector_segment_stores_per_mille = 300,
                 .probes_per_mille = 1,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -206,7 +210,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "corner",
                 .operation_weights = {
-                    125, 125, 125, 125, 125, 125, 125, 125, 125},
+                    125, 125, 125, 125, 125, 125, 125, 125, 125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
@@ -223,6 +227,7 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_segment_stores_per_mille = 500,
                 .probes_per_mille = 100,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -286,6 +291,7 @@ struct RandomConstraints {
                 {"scalar-store", scalar_store},
                 {"vector-load", vector_load},
                 {"vector-store", vector_store},
+                {"vector-segment", vector_segment},
                 {"prefetch", prefetch},
                 {"atomic", atomic},
                 {"nc", noncacheable},
@@ -404,6 +410,8 @@ struct RandomConstraints {
             misaligned_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
+        } else if (key == "vector-segment-store") {
+            vector_segment_stores_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -481,6 +489,7 @@ struct RandomConstraints {
             translation_switches_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
             vector_corner_per_mille > 1000 || probes_per_mille > 1000 ||
+            vector_segment_stores_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
@@ -713,6 +722,9 @@ struct RandomConstraints {
                 actions += direction_classes(nc_stores_per_mille);
             } else if (operation == mmio) {
                 actions += direction_classes(mmio_stores_per_mille);
+            } else if (operation == vector_segment) {
+                actions += std::max(
+                    4U, direction_classes(vector_segment_stores_per_mille));
             } else {
                 ++actions;
             }
@@ -775,7 +787,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=7 constraints=" << name
+        stream << "constraint_schema=8 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -810,6 +822,8 @@ struct RandomConstraints {
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
+               << " target_vector_segment_store="
+               << vector_segment_stores_per_mille
                << " target_probe=" << probes_per_mille
                << " target_probe_to_b=" << probe_to_b_per_mille
                << " target_probe_need_data="
@@ -1024,6 +1038,8 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> atomic_widths{};
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
+    std::array<std::uint64_t, 2> vector_segment_directions{};
+    std::array<std::uint64_t, 4> vector_segment_eews{};
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
     // Atomic operations are pipeline-serializing at the MemBlock boundary;
@@ -1172,6 +1188,15 @@ struct ConstraintCoverage {
                 });
             return operations[operation] != 0 && families_complete;
         }
+        if (operation == RandomConstraints::vector_segment) {
+            return operations[operation] != 0 &&
+                direction_complete(
+                    constraints.vector_segment_stores_per_mille,
+                    vector_segment_directions) &&
+                std::all_of(
+                    vector_segment_eews.begin(), vector_segment_eews.end(),
+                    [](std::uint64_t count) { return count != 0; });
+        }
         if (operation == RandomConstraints::noncacheable) {
             return operations[operation] != 0 && direction_complete(
                 constraints.nc_stores_per_mille, nc_directions);
@@ -1271,6 +1296,12 @@ struct ConstraintCoverage {
                << " actual_hypervisor_family=" << hypervisor_families[0]
                << ',' << hypervisor_families[1] << ','
                << hypervisor_families[2]
+               << " actual_vector_segment_direction="
+               << vector_segment_directions[0] << ','
+               << vector_segment_directions[1]
+               << " actual_vector_segment_eew=" << vector_segment_eews[0]
+               << ',' << vector_segment_eews[1] << ','
+               << vector_segment_eews[2] << ',' << vector_segment_eews[3]
                << " actual_nc_direction=" << nc_directions[0] << ','
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','
@@ -19059,6 +19090,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     mmio_store = true;
                 }
             }
+            bool vector_segment_store = kind == RandomConstraints::vector_segment &&
+                random() % 1000 <
+                    constraints.vector_segment_stores_per_mille;
+            if (kind == RandomConstraints::vector_segment) {
+                if (constraints.vector_segment_stores_per_mille != 1000 &&
+                    constraint_coverage.vector_segment_directions[0] == 0) {
+                    vector_segment_store = false;
+                } else if (
+                    constraints.vector_segment_stores_per_mille != 0 &&
+                    constraint_coverage.vector_segment_directions[1] == 0) {
+                    vector_segment_store = true;
+                }
+            }
             std::optional<unsigned> hypervisor_family;
             if (kind == RandomConstraints::hypervisor) {
                 hypervisor_family =
@@ -19159,6 +19203,96 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                !environment.run_until_queues_retired(8192)))) {
                     return false;
                 }
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::vector_segment) {
+                if (!environment.run_until_all_complete(8192) ||
+                    !environment.run_until_queues_retired(8192)) {
+                    return false;
+                }
+                unsigned eew = random() % 4;
+                for (unsigned candidate = 0;
+                     candidate < constraint_coverage.vector_segment_eews.size();
+                     ++candidate) {
+                    if (constraint_coverage.vector_segment_eews[candidate] == 0) {
+                        eew = candidate;
+                        break;
+                    }
+                }
+                const unsigned elements = 16U >> eew;
+                const bool vector_corner =
+                    random() % 1000 < constraints.vector_corner_per_mille;
+                const std::uint64_t address =
+                    constrained_cacheable_address(1U << eew);
+                const std::uint64_t rob = rob_offset++;
+                const std::uint8_t vl = static_cast<std::uint8_t>(
+                    vector_corner ? 1U + random() % elements : elements);
+                const bool vm = !vector_corner || (random() & 1U) != 0;
+                const std::uint16_t mask_bits =
+                    static_cast<std::uint16_t>(random());
+                const std::uint8_t vstart = vector_corner
+                    ? static_cast<std::uint8_t>(random() % (vl + 1U))
+                    : 0;
+                const std::uint8_t first_pdest =
+                    static_cast<std::uint8_t>(1 + random() % 254);
+                std::array<memblock::VectorMemoryTransaction, 2> fields{};
+                for (unsigned field = 0; field < fields.size(); ++field) {
+                    fields[field] = memblock::VectorMemoryTransaction{
+                        .store = vector_segment_store,
+                        .segment = true,
+                        .address = address,
+                        .eew = static_cast<std::uint8_t>(eew),
+                        .vl = vl,
+                        .rob = memblock::rob_pointer_value(rob),
+                        .rob_flag = memblock::rob_pointer_flag(rob),
+                        .lq = memblock::lq_pointer_value(lq_offset),
+                        .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                        .sq = memblock::sq_pointer_value(sq_offset),
+                        .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                        .pdest = vector_segment_store
+                            ? std::uint8_t{0}
+                            : static_cast<std::uint8_t>(first_pdest + field),
+                        .lane = 0,
+                        .flow_num = static_cast<std::uint8_t>(elements),
+                        .vuop_idx = static_cast<std::uint8_t>(field),
+                        .last_uop = field + 1 == fields.size(),
+                        .nf = 1,
+                    };
+                    fields[field].vm = vm;
+                    fields[field].mask_bits = mask_bits;
+                    fields[field].vstart = vstart;
+                    fields[field].ftq_ptr = random() & 0x3fU;
+                    fields[field].ftq_offset =
+                        static_cast<std::uint8_t>(random() & 7U);
+                    for (auto &byte : fields[field].data) {
+                        byte = static_cast<unsigned char>(random());
+                    }
+                    environment.expect_vector(fields[field]);
+                    if (!environment.issue_vector(fields[field], 4096)) {
+                        return false;
+                    }
+                }
+                if (!environment.run_until_vector_complete(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                for (const auto &field : fields) {
+                    coverage.sample(field);
+                }
+                if (vector_segment_store) {
+                    if (!environment.pulse_sbuffer_flush() ||
+                        !environment.run_until_sbuffer_empty(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    for (const auto &field : fields) {
+                        environment.record_committed_vector_store(field);
+                    }
+                    probe_candidate = address & ~std::uint64_t{63};
+                }
+                ++actions;
+                ++constraint_coverage.vector_segment_directions[
+                    vector_segment_store ? 1 : 0];
+                ++constraint_coverage.vector_segment_eews[eew];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::prefetch) {
                 const auto transaction = make_prefetch(

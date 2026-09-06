@@ -440,6 +440,11 @@ inline std::uint64_t vector_element_address(
     const unsigned element_bytes = 1U << transaction.eew;
     switch (transaction.addressing) {
     case VectorAddressingMode::unit_stride:
+        if (transaction.segment) {
+            return base +
+                (element * (static_cast<unsigned>(transaction.nf) + 1U) +
+                 transaction.vuop_idx) * element_bytes;
+        }
         return base + element * element_bytes;
     case VectorAddressingMode::strided:
         {

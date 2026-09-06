@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4, 5, 6, 7), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4, 5, 6, 7, 8), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -352,8 +352,13 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             )
 
     if schema >= 7:
-        target_operations = _csv_counts(result, "target_ops", 9)
-        actual_operations = _csv_counts(result, "actual_ops", 9)
+        operation_fields = 10 if schema >= 8 else 9
+        target_operations = _csv_counts(
+            result, "target_ops", operation_fields
+        )
+        actual_operations = _csv_counts(
+            result, "actual_ops", operation_fields
+        )
         _require(
             all(
                 weight == 0 or count > 0
@@ -368,7 +373,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_hypervisor = _csv_counts(
             result, "actual_hypervisor_family", 3
         )
-        if target_operations[8] != 0:
+        hypervisor_index = 9 if schema >= 8 else 8
+        if target_operations[hypervisor_index] != 0:
             _require(
                 all(
                     weight == 0 or count > 0
@@ -380,8 +386,41 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 f"{actual_hypervisor}",
             )
             _require(
-                sum(actual_hypervisor) == actual_operations[8],
+                sum(actual_hypervisor) == actual_operations[hypervisor_index],
                 "hypervisor operation/family coverage is not conserved",
+            )
+
+    if schema >= 8:
+        target_segment_store = result.get("target_vector_segment_store")
+        _require(
+            isinstance(target_segment_store, int)
+            and not isinstance(target_segment_store, bool)
+            and 0 <= target_segment_store <= 1000,
+            "target_vector_segment_store is not a per-mille integer: "
+            f"{target_segment_store!r}",
+        )
+        actual_segment_direction = _csv_counts(
+            result, "actual_vector_segment_direction", 2
+        )
+        actual_segment_eew = _csv_counts(
+            result, "actual_vector_segment_eew", 4
+        )
+        if target_operations[4] != 0:
+            _require(
+                (target_segment_store == 1000 or actual_segment_direction[0] > 0)
+                and (target_segment_store == 0 or actual_segment_direction[1] > 0),
+                "actual_vector_segment_direction has an enabled but uncovered "
+                f"class: {actual_segment_direction}",
+            )
+            _require(
+                all(count > 0 for count in actual_segment_eew),
+                "actual_vector_segment_eew has an uncovered class: "
+                f"{actual_segment_eew}",
+            )
+            _require(
+                sum(actual_segment_direction) == actual_operations[4]
+                and sum(actual_segment_eew) == actual_operations[4],
+                "vector segment operation/subclass coverage is not conserved",
             )
 
 
