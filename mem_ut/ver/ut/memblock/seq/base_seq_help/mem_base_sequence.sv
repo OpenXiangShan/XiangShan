@@ -208,6 +208,7 @@ class mem_access_base_sequence extends uvm_sequence;
     extern static function void apply_shared_mem_write(input shared_mem_write_event_t write_event);
     extern static function void commit_shared_mem_write_batch();
     extern static function void begin_shared_mem_sample(input longint unsigned sample_time);
+    extern static function bit audit_shared_memory_drain_state(input string audit_context);
     extern virtual task main_mem_access_task(
         input  mem_addr_t       addr,
         input  bit              is_store,
@@ -1046,6 +1047,42 @@ function void mem_access_base_sequence::begin_shared_mem_sample(input longint un
     end
 endfunction:begin_shared_mem_sample
 
+// 抽象职责：在两个 memory responder 都完成后检查共享写回暂存和 DCache fragment
+// 观察是否已经收敛。该函数只读并报告残留，不删除 queue/map，也不修改 backing/overlay；
+// 返回值用于上层决定是否可以把本轮 responder 生命周期标记为干净结束。
+function bit mem_access_base_sequence::audit_shared_memory_drain_state(input string audit_context);
+    bit clean;
+
+    clean = 1'b1;
+    if (dcache_write_batch.size() != 0) begin
+        uvm_pkg::uvm_report_error("MEM_RESPONDER_AUDIT",
+                                  $sformatf("%s: uncommitted dcache_write_batch size=%0d",
+                                            audit_context, dcache_write_batch.size()),
+                                  UVM_LOW);
+        clean = 1'b0;
+    end
+    if (uncache_write_batch.size() != 0) begin
+        uvm_pkg::uvm_report_error("MEM_RESPONDER_AUDIT",
+                                  $sformatf("%s: uncommitted uncache_write_batch size=%0d",
+                                            audit_context, uncache_write_batch.size()),
+                                  UVM_LOW);
+        clean = 1'b0;
+    end
+    if (dcache_fragment_pending_bytes.num() != 0 ||
+        dcache_fragment_committed_bytes.num() != 0 ||
+        dcache_incomplete_fragment_line_count != 0) begin
+        uvm_pkg::uvm_report_error("MEM_RESPONDER_AUDIT",
+                                  $sformatf("%s: DCache fragment observer not drained pending=%0d committed=%0d incomplete=%0d",
+                                            audit_context,
+                                            dcache_fragment_pending_bytes.num(),
+                                            dcache_fragment_committed_bytes.num(),
+                                            dcache_incomplete_fragment_line_count),
+                                  UVM_LOW);
+        clean = 1'b0;
+    end
+    return clean;
+endfunction:audit_shared_memory_drain_state
+
 task mem_access_base_sequence::main_mem_access_task(
     input  mem_addr_t       addr,
     input  bit              is_store,
@@ -1207,6 +1244,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
 
     localparam bit [2:0] TL_LINE_SIZE              = 3'd6;
     localparam bit [5:0] TL_CBO_SOURCE             = 6'd17;
+    localparam int unsigned DCACHE_STOP_DRAIN_TIMEOUT_CYCLES = 10000;
 
     typedef enum int unsigned {
         DCACHE_PENDING_D_NONE        = 0,
@@ -1279,6 +1317,11 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     bit c_accept_armed;
     dcache_agent_agent_xaction armed_a_req_xact;
     dcache_agent_agent_xaction armed_c_req_xact;
+    // 中文注释：global stop 前已经观察到、但因 C/probe 优先级或容量尚未打开 A.ready 的唯一 A 请求快照。
+    // 置位：非 stop sample 首次看到未 fire 的 A.valid 时冻结完整 payload；清零：该 A.fire、valid 撤销或 reset。
+    // 作用：global stop 后只允许这份已存在的请求继续 A.fire 并自然 drain，不能借此接受 stop 后新出现的 A。
+    bit pre_stop_a_snapshot_valid;
+    dcache_agent_agent_xaction pre_stop_a_snapshot;
 
     // 中文注释：DCache response record 保存已真实 fire、尚未完成最后一个 D beat 的回复。
     // 同一张表同时服务 Grant/GrantData、CBOAck 和 ReleaseAck；current_d_record 是从表中
@@ -1406,6 +1449,46 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     // 该 reservation 防止 16 笔表接近满时第二 beat 收齐后没有空间建立 ReleaseAck。
     bit c_assembly_response_reserved;
 
+    // 中文注释：stop-prepare 只在“新请求或状态真正推进”时重置 quiet window，不能因为
+    // 一个已卡住的 record 每拍仍存在而无限重置。该快照只保存 O(1) 的 lifecycle 摘要，
+    // 不包含 cached_line_by_addr，也不扫描 main table；前后拍不同表示 responder 出现了
+    // 可见进展。第一次进入 prepare 只建立基线，公共 common_data 已在同拍启动计时。
+    typedef struct packed {
+        bit                         sampled_a_valid;
+        bit                         sampled_c_valid;
+        bit                         sampled_e_valid;
+        bit                         sampled_l2_flush_en;
+        bit                         a_accept_armed;
+        bit                         c_accept_armed;
+        bit                         pre_stop_a_snapshot_valid;
+        bit                         current_d_valid;
+        int unsigned                dcache_rsp_q_size;
+        bit                         dcache_rsp_timer_active;
+        longint unsigned            dcache_rsp_timer_due_cycle;
+        int unsigned                dcache_write_batch_size;
+        int unsigned                uncache_write_batch_size;
+        int unsigned                dcache_fragment_pending_line_count;
+        int unsigned                dcache_fragment_committed_line_count;
+        longint unsigned             dcache_incomplete_fragment_line_count;
+        int unsigned                grant_ack_wait_q_size;
+        int unsigned                dcache_hint_q_size;
+        int unsigned                probe_record_q_size;
+        bit                         probe_b_hold_valid;
+        dcache_c_owner_e            c_assembly_owner;
+        int unsigned                c_assembly_received_beats;
+        bit                         c_assembly_response_reserved;
+        bit                         cbo_context_valid;
+        bit                         cbo_response_reserved;
+        bit                         pending_cbo_probe_valid;
+        dcache_l2_flush_state_e     l2_flush_state;
+        int unsigned                l2_flush_snapshot_line_q_size;
+        int unsigned                deferred_response_reservation_count;
+        bit [MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING-1:0] grant_sink_reserved;
+    } dcache_stop_prepare_state_t;
+
+    bit                          dcache_stop_prepare_state_valid;
+    dcache_stop_prepare_state_t dcache_stop_prepare_state;
+
     `uvm_object_utils(dcache_mem__access_base_sequence)
 
     extern function new(string name = "dcache_mem__access_base_sequence");
@@ -1414,6 +1497,20 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     extern virtual function void clear_c_assembly_state();
     extern virtual function void clear_cbo_context();
     extern virtual function void clear_runtime_state(bit clear_cache_map = 1'b1);
+    extern virtual function bit dcache_transient_drain_complete();
+    extern virtual function bit audit_dcache_responder_state(
+        input bit sampled_a_valid,
+        input bit sampled_c_valid,
+        input bit sampled_e_valid,
+        input bit sampled_l2_flush_en,
+        input string audit_context
+    );
+    extern virtual function dcache_stop_prepare_state_t sample_dcache_stop_prepare_state(
+        input bit sampled_a_valid,
+        input bit sampled_c_valid,
+        input bit sampled_e_valid,
+        input bit sampled_l2_flush_en
+    );
     extern virtual function void build_dcache_idle_xaction(output dcache_agent_agent_xaction rsp_xact);
     extern virtual function void capture_dcache_a_xaction(output dcache_agent_agent_xaction req_xact);
     extern virtual function void check_dcache_c_payload_known();
@@ -1603,6 +1700,10 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
     c_accept_armed           = 1'b0;
     armed_a_req_xact         = null;
     armed_c_req_xact         = null;
+    pre_stop_a_snapshot_valid = 1'b0;
+    pre_stop_a_snapshot       = null;
+    dcache_stop_prepare_state_valid = 1'b0;
+    dcache_stop_prepare_state       = '0;
     probe_record_q.delete();
     next_probe_token                    = 1;
     next_probe_batch_id                 = 1;
@@ -1624,6 +1725,199 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
         cached_line_by_addr.delete();
     end
 endfunction:clear_runtime_state
+
+// 抽象职责：只判断 DCache map 中是否还留有协议中间 lifecycle，不要求正常 ACTIVE
+// resident line 被清空。它由 terminal drain audit 使用，明确结束审计只拒绝未完成的
+// transient state，而不把正常 resident cache line 误判为残留。
+function bit dcache_mem__access_base_sequence::dcache_transient_drain_complete();
+    mem_addr_t line_addr;
+    dcache_cached_line_record_t line_record;
+
+    foreach (cached_line_by_addr[line_addr]) begin
+        line_record = cached_line_by_addr[line_addr];
+        if (!line_record.alias_valid ||
+            line_record.lifecycle_state != DCACHE_LINE_ACTIVE ||
+            line_record.deferred_acquire_valid ||
+            line_record.deferred_response_reserved ||
+            line_record.deferred_acquire != null) begin
+            return 1'b0;
+        end
+    end
+    return 1'b1;
+endfunction:dcache_transient_drain_complete
+
+// 抽象职责：把 DCache 的有限 transient lifecycle 压缩为一份前后拍可比较的摘要。
+// 调用者只在 stop-prepare 期间比较该摘要；稳定占用不会被误判为持续 progress，真实
+// queue/state/valid 转换才会刷新 quiet window。它不读取 cached_line_by_addr 或主表。
+function dcache_mem__access_base_sequence::dcache_stop_prepare_state_t
+    dcache_mem__access_base_sequence::sample_dcache_stop_prepare_state(
+    input bit sampled_a_valid,
+    input bit sampled_c_valid,
+    input bit sampled_e_valid,
+    input bit sampled_l2_flush_en
+);
+    dcache_stop_prepare_state_t state;
+
+    state = '0;
+    state.sampled_a_valid                    = sampled_a_valid;
+    state.sampled_c_valid                    = sampled_c_valid;
+    state.sampled_e_valid                    = sampled_e_valid;
+    state.sampled_l2_flush_en                = sampled_l2_flush_en;
+    state.a_accept_armed                     = a_accept_armed;
+    state.c_accept_armed                     = c_accept_armed;
+    state.pre_stop_a_snapshot_valid          = pre_stop_a_snapshot_valid;
+    state.current_d_valid                    = current_d_valid;
+    state.dcache_rsp_q_size                  = dcache_rsp_q.size();
+    state.dcache_rsp_timer_active            = dcache_rsp_timer_active;
+    state.dcache_rsp_timer_due_cycle         = dcache_rsp_timer_due_cycle;
+    state.dcache_write_batch_size            = dcache_write_batch.size();
+    state.uncache_write_batch_size           = uncache_write_batch.size();
+    state.dcache_fragment_pending_line_count = dcache_fragment_pending_bytes.num();
+    state.dcache_fragment_committed_line_count = dcache_fragment_committed_bytes.num();
+    state.dcache_incomplete_fragment_line_count = dcache_incomplete_fragment_line_count;
+    state.grant_ack_wait_q_size               = grant_ack_wait_q.size();
+    state.dcache_hint_q_size                  = dcache_hint_q.size();
+    state.probe_record_q_size                 = probe_record_q.size();
+    state.probe_b_hold_valid                  = probe_b_hold_valid;
+    state.c_assembly_owner                    = c_assembly_owner;
+    state.c_assembly_received_beats           = c_assembly_received_beats;
+    state.c_assembly_response_reserved        = c_assembly_response_reserved;
+    state.cbo_context_valid                   = cbo_context_valid;
+    state.cbo_response_reserved               = cbo_response_reserved;
+    state.pending_cbo_probe_valid             = pending_cbo_probe_valid;
+    state.l2_flush_state                      = l2_flush_state;
+    state.l2_flush_snapshot_line_q_size       = l2_flush_snapshot_line_q.size();
+    state.deferred_response_reservation_count = deferred_response_reservation_count;
+    foreach (grant_sink_reserved[i]) begin
+        state.grant_sink_reserved[i]           = grant_sink_reserved[i];
+    end
+    return state;
+endfunction:sample_dcache_stop_prepare_state
+
+// 抽象职责：在 DCache responder 宣布结束前，对所有协议 transient owner 做最终只读审计。
+// 该函数不负责推进 D/C/E、释放 sink 或删除 queue；任何残留都以 UVM_ERROR 报告，供
+// 调用者保留现场并让上层 testcase 失败，而不是用清空动作掩盖未完成请求。
+function bit dcache_mem__access_base_sequence::audit_dcache_responder_state(
+    input bit sampled_a_valid,
+    input bit sampled_c_valid,
+    input bit sampled_e_valid,
+    input bit sampled_l2_flush_en,
+    input string audit_context
+);
+    bit clean;
+    bit sink_reserved;
+
+    clean = 1'b1;
+    if (sampled_a_valid) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: sampled A.valid remains asserted", audit_context))
+        clean = 1'b0;
+    end
+    if (sampled_c_valid) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: sampled C.valid remains asserted", audit_context))
+        clean = 1'b0;
+    end
+    if (sampled_e_valid) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: sampled E.valid remains asserted", audit_context))
+        clean = 1'b0;
+    end
+    if (sampled_l2_flush_en || l2_flush_state != DCACHE_L2_FLUSH_IDLE ||
+        l2_flush_snapshot_line_q.size() != 0) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: L2 flush state not idle en=%0d state=%0d snapshot=%0d",
+                             audit_context, sampled_l2_flush_en, l2_flush_state,
+                             l2_flush_snapshot_line_q.size()))
+        clean = 1'b0;
+    end
+    if (a_accept_armed || armed_a_req_xact != null) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: armed A owner remains armed=%0d snapshot_null=%0d",
+                             audit_context, a_accept_armed, armed_a_req_xact == null))
+        clean = 1'b0;
+    end
+    if (c_accept_armed || armed_c_req_xact != null) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: armed C owner remains armed=%0d snapshot_null=%0d",
+                             audit_context, c_accept_armed, armed_c_req_xact == null))
+        clean = 1'b0;
+    end
+    if (pre_stop_a_snapshot_valid || pre_stop_a_snapshot != null) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: pre-stop A snapshot remains valid=%0d snapshot_null=%0d",
+                             audit_context, pre_stop_a_snapshot_valid, pre_stop_a_snapshot == null))
+        clean = 1'b0;
+    end
+    if (current_d_valid) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: current D response remains valid kind=%0d source=%0d",
+                             audit_context, current_d_record.kind, current_d_record.source))
+        clean = 1'b0;
+    end
+    if (dcache_rsp_q.size() != 0 || dcache_rsp_timer_active) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: D response queue/timer remains queue=%0d timer=%0d due=%0d",
+                             audit_context, dcache_rsp_q.size(), dcache_rsp_timer_active,
+                             dcache_rsp_timer_due_cycle))
+        clean = 1'b0;
+    end
+    if (grant_ack_wait_q.size() != 0) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: GrantAck wait queue remains size=%0d",
+                             audit_context, grant_ack_wait_q.size()))
+        clean = 1'b0;
+    end
+    if (dcache_hint_q.size() != 0) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: Hint queue remains size=%0d", audit_context, dcache_hint_q.size()))
+        clean = 1'b0;
+    end
+    if (probe_b_hold_valid || probe_record_q.size() != 0) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: Probe state remains hold=%0d records=%0d",
+                             audit_context, probe_b_hold_valid, probe_record_q.size()))
+        clean = 1'b0;
+    end
+    if (c_assembly_owner != DCACHE_C_OWNER_NONE || c_assembly_response_reserved) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: C assembly remains owner=%0d reserved=%0d beats=%0d",
+                             audit_context, c_assembly_owner, c_assembly_response_reserved,
+                             c_assembly_received_beats))
+        clean = 1'b0;
+    end
+    if (cbo_context_valid || cbo_response_reserved || pending_cbo_probe_valid) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: CBO state remains context=%0d response_resv=%0d probe=%0d",
+                             audit_context, cbo_context_valid, cbo_response_reserved,
+                             pending_cbo_probe_valid))
+        clean = 1'b0;
+    end
+    // ACTIVE resident line 是完成后的持久 cache 模型状态，不要求 map 为空；但
+    // GrantAck、alias conflict、Probe 或 deferred Acquire 等中间生命周期绝不能
+    // 越过 responder 的 terminal idle 边界。
+    if (!dcache_transient_drain_complete()) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: unresolved cached-line lifecycle remains", audit_context))
+        clean = 1'b0;
+    end
+    if (deferred_response_reservation_count != 0) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: deferred response reservations remain=%0d",
+                             audit_context, deferred_response_reservation_count))
+        clean = 1'b0;
+    end
+    sink_reserved = 1'b0;
+    foreach (grant_sink_reserved[i]) begin
+        sink_reserved |= grant_sink_reserved[i];
+    end
+    if (sink_reserved) begin
+        `uvm_error("DCACHE_RESPONDER_AUDIT",
+                   $sformatf("%s: Grant sink reservation remains set", audit_context))
+        clean = 1'b0;
+    end
+    return clean;
+endfunction:audit_dcache_responder_state
 
 function void dcache_mem__access_base_sequence::build_dcache_idle_xaction(output dcache_agent_agent_xaction rsp_xact);
     rsp_xact = dcache_agent_agent_xaction::type_id::create("dcache_idle_xact");
@@ -3621,6 +3915,8 @@ task dcache_mem__access_base_sequence::body();
     bit                        e_fire;
     int unsigned               stop_wait_cycles;
     int unsigned               response_visible_count;
+    dcache_stop_prepare_state_t current_stop_prepare_state;
+    bit                        stop_drain_timeout_reported;
 
     if (!uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, get_full_name(), "vif", dcache_vif) &&
         !uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, "uvm_test_top.env.u_dcache_agent_agent*", "vif", dcache_vif)) begin
@@ -3654,6 +3950,7 @@ task dcache_mem__access_base_sequence::body();
     service_cycle    = 0;
     last_drive_cycle = 0;
     stop_wait_cycles = 0;
+    stop_drain_timeout_reported = 1'b0;
     clear_runtime_state(1'b1);
 
     forever begin
@@ -3763,15 +4060,57 @@ task dcache_mem__access_base_sequence::body();
                 accept_dcache_a_request(fired_a_req_xact, last_drive_cycle);
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
+                pre_stop_a_snapshot_valid = 1'b0;
+                pre_stop_a_snapshot = null;
             end else if (a_accept_armed && !sampled_a_valid) begin
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
+                pre_stop_a_snapshot_valid = 1'b0;
+                pre_stop_a_snapshot = null;
             end
+        end
+
+        // 中文注释：主表 terminal 前仍可能有已从 StoreQueue/LoadQueue 退出、但尚在 DCache
+        // 内部流水的请求。C/probe 优先级暂时阻塞 A.ready 时，在 stop 前冻结该 A；stop 后只能
+        // 用同一快照继续握手，不能把之后新出现的请求误当成可 drain owner。
+        if (!reset_active && !data.is_global_stop_requested() &&
+            sampled_a_valid && !a_fire && !pre_stop_a_snapshot_valid) begin
+            capture_dcache_a_xaction(pre_stop_a_snapshot);
+            pre_stop_a_snapshot_valid = 1'b1;
+        // snapshot 在 stop 前建立，但 DUT 仍可能在 stop 后、A.ready 生效前撤销
+        // valid。该 A 没有形成 fire，必须立即释放 snapshot；否则 terminal drain 会把
+        // 已不存在的尾请求永久当作 owner 等待。
+        end else if (!reset_active && !sampled_a_valid && !a_accept_armed) begin
+            pre_stop_a_snapshot_valid = 1'b0;
+            pre_stop_a_snapshot = null;
         end
 
         // 中文注释：flush request 是 level sideband。先结算上一拍已 fire 的 A/C/D/E/B，
         // 再推进本地 flush 状态，保证 request 到来前已经接受的 owner 自然 drain，之后才关闭新 A.ready。
         service_l2_flush(sampled_l2_flush_en);
+
+        // 中文注释：每个非 reset sample 都保留 O(1) 的上一拍 lifecycle 基线；prepare
+        // 中才用它比较新 A/C/E/flush、实际 channel fire 或状态推进。这样 prepare
+        // 刚置位后的第一个 sample 也能识别“本半拍刚到”的请求/进展，稳定停住的
+        // record 则不会每拍重置 1us；stop 前 A owner 仍由 pre_stop_a_snapshot 在
+        // stop 后继续自然 drain。
+        if (!reset_active) begin
+            current_stop_prepare_state = sample_dcache_stop_prepare_state(
+                sampled_a_valid, sampled_c_valid, sampled_e_valid, sampled_l2_flush_en);
+            if (data.is_global_stop_prepare_requested()) begin
+                data.note_global_stop_prepare_responder_sample(1'b1);
+                if ((dcache_stop_prepare_state_valid &&
+                     (dcache_stop_prepare_state !== current_stop_prepare_state)) ||
+                    a_fire || b_fire || c_fire || d_fire || e_fire) begin
+                    data.note_global_stop_prepare_activity();
+                end
+            end
+            dcache_stop_prepare_state       = current_stop_prepare_state;
+            dcache_stop_prepare_state_valid = 1'b1;
+        end
+        else begin
+            dcache_stop_prepare_state_valid = 1'b0;
+        end
 
         // global stop 表示主表已经全部终态；只允许本拍已经通过上一 item
         // ready 形成的 A.fire 进入 drain。stop 后新出现、未握手的 A 请求没有
@@ -3779,7 +4118,7 @@ task dcache_mem__access_base_sequence::body();
         if (data.is_global_stop_requested() &&
             (l2_flush_state == DCACHE_L2_FLUSH_IDLE) &&
             !sampled_l2_flush_en &&
-            sampled_a_valid && !a_fire) begin
+            sampled_a_valid && !a_fire && !pre_stop_a_snapshot_valid) begin
             `uvm_fatal(get_type_name(),
                        "new DCache A.valid observed after global stop without a sampled fire")
         end
@@ -3802,10 +4141,14 @@ task dcache_mem__access_base_sequence::body();
             (probe_record_q.size() == 0) &&
             (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
             !c_assembly_response_reserved &&
+            !pre_stop_a_snapshot_valid &&
             !a_accept_armed &&
             !c_accept_armed &&
             !sampled_a_valid &&
-            !sampled_c_valid) begin
+            !sampled_c_valid &&
+            !sampled_e_valid &&
+            (dcache_write_batch.size() == 0) &&
+            (uncache_write_batch.size() == 0)) begin
             `uvm_info(get_type_name(),
                       $sformatf("DCache responder draining complete at service_cycle=%0d cached_lines=%0d",
                                 service_cycle, cached_line_by_addr.num()),
@@ -3815,6 +4158,13 @@ task dcache_mem__access_base_sequence::body();
             last_cycle_valid = 1'b1;
             last_drive_cycle = service_cycle;
             service_cycle++;
+            // terminal idle 已通过 sequencer/driver 交付后才执行只读 audit；此处
+            // 不调用 clear_runtime_state()，因此任何残留仍可完整打印。
+            void'(audit_dcache_responder_state(sampled_a_valid,
+                                               sampled_c_valid,
+                                               sampled_e_valid,
+                                               sampled_l2_flush_en,
+                                               "terminal idle published"));
             memblock_sync_pkg::dcache_responder_done = 1'b1;
             release_dcache_observer_owner();
             `uvm_info(get_type_name(), "DCache responder published terminal idle and stopped", UVM_LOW)
@@ -3822,9 +4172,21 @@ task dcache_mem__access_base_sequence::body();
         end
         else if (data.is_global_stop_requested()) begin
             stop_wait_cycles++;
+            if (stop_wait_cycles >= DCACHE_STOP_DRAIN_TIMEOUT_CYCLES &&
+                !stop_drain_timeout_reported) begin
+                void'(audit_dcache_responder_state(sampled_a_valid,
+                                                   sampled_c_valid,
+                                                   sampled_e_valid,
+                                                   sampled_l2_flush_en,
+                                                   "global-stop drain timeout"));
+                `uvm_error(get_type_name(),
+                           $sformatf("DCache responder did not drain within %0d cycles; queues are preserved for audit",
+                                     DCACHE_STOP_DRAIN_TIMEOUT_CYCLES))
+                stop_drain_timeout_reported = 1'b1;
+            end
             if ((stop_wait_cycles % 1000) == 0) begin
                 `uvm_warning(get_type_name(),
-                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d cbo_ctx=%0d cbo_resv=%0d cbo_probe=%0d probe_hold=%0d probe_records=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
+                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d cbo_ctx=%0d cbo_resv=%0d cbo_probe=%0d probe_hold=%0d probe_records=%0d c_owner=%0d c_resv=%0d pre_stop_a=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
                                        stop_wait_cycles,
                                        current_d_valid,
                                        dcache_rsp_q.size(),
@@ -3838,6 +4200,7 @@ task dcache_mem__access_base_sequence::body();
                                        probe_record_q.size(),
                                        c_assembly_owner,
                                        c_assembly_response_reserved,
+                                       pre_stop_a_snapshot_valid,
                                        a_accept_armed,
                                        c_accept_armed,
                                        sampled_a_valid,
@@ -3846,6 +4209,7 @@ task dcache_mem__access_base_sequence::body();
         end
         else begin
             stop_wait_cycles = 0;
+            stop_drain_timeout_reported = 1'b0;
         end
 
         service_dcache_response_scheduler(service_cycle, response_visible_count);
@@ -3918,9 +4282,17 @@ task dcache_mem__access_base_sequence::body();
         else if (probe_b_hold_valid) begin
             build_probe_b_xaction(cycle_xact);
         end
-        else if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid &&
+        else if (!a_fire && sampled_a_valid &&
+                 (!data.is_global_stop_requested() || pre_stop_a_snapshot_valid) &&
                  !l2_flush_blocks_a_request(sampled_l2_flush_en)) begin
             capture_dcache_a_xaction(sampled_req_xact);
+            if (data.is_global_stop_requested()) begin
+                if (pre_stop_a_snapshot == null) begin
+                    `uvm_fatal(get_type_name(), "global-stop DCache A admission lost its pre-stop snapshot")
+                end
+                check_a_payload_stable(pre_stop_a_snapshot, sampled_req_xact);
+                sampled_req_xact = pre_stop_a_snapshot;
+            end
             case (sampled_req_xact.auto_inner_dcache_client_out_a_bits_opcode)
                 TL_A_OPCODE_ACQUIRE_BLOCK,
                 TL_A_OPCODE_ACQUIRE_PERM,
@@ -3942,6 +4314,7 @@ task dcache_mem__access_base_sequence::body();
         end
         else begin
             try_start_probe(!data.is_global_stop_requested() &&
+                            !data.is_global_stop_prepare_requested() &&
                             (l2_flush_state == DCACHE_L2_FLUSH_IDLE) &&
                             !sampled_l2_flush_en);
             if (probe_b_hold_valid) begin
@@ -3971,6 +4344,7 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     localparam bit [3:0] UNCACHE_D_OPCODE_ACCESS_ACK    = 4'd0;
     localparam bit [3:0] UNCACHE_D_OPCODE_ACCESS_ACKDATA = 4'd1;
     localparam int unsigned UNCACHE_D_READY_WARN_CYCLES = 1000;
+    localparam int unsigned UNCACHE_STOP_DRAIN_TIMEOUT_CYCLES = 10000;
 
     typedef enum int unsigned {
         UNCACHE_RESPONSE_STORE_ACK = 0,
@@ -3994,6 +4368,11 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     // valid 撤销或 reset。作用：只有 A.fire 后才允许生成 response 或把 store 写入 shared batch。
     bit a_accept_armed;
     sbuffer_agent_agent_xaction armed_a_req_xact;
+    // 中文注释：与 DCache 的 pre-stop A owner 对称。Uncache A 在 stop-prepare 期间
+    // 已经可见但因 response capacity 尚未可用时，global stop 后只能让这份快照继续
+    // handshake；不能把 stop 后新出现的 A.valid 当作旧请求接收。
+    bit pre_stop_a_snapshot_valid;
+    sbuffer_agent_agent_xaction pre_stop_a_snapshot;
     // 中文注释：Uncache response record 队列与当前 D hold 分离。A.fire 后先创建 record；
     // 只有 scheduler 选中后才成为 current D hold。D.ready=0 时保持 current payload 不重采样。
     uncache_response_record_t uncache_rsp_q[$];
@@ -4004,13 +4383,41 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     longint unsigned          service_cycle;
     int unsigned              d_hold_cycles;
     bit                       d_hold_timeout_reported;
+    int unsigned              stop_wait_cycles;
+    bit                       stop_drain_timeout_reported;
     sbuffer_agent_agent_xaction last_cycle_xact;
     bit last_cycle_valid;
+
+    // 中文注释：只记录 Uncache 影响 stop-prepare 的有限状态摘要。前后拍差异代表
+    // 新 request、response 调度或实际 lifecycle 进展；同一个 pending record 持续
+    // 存在不会让 quiet timer 无限重置。
+    typedef struct packed {
+        bit              sampled_a_valid;
+        bit              a_accept_armed;
+        bit              pre_stop_a_snapshot_valid;
+        bit              current_d_valid;
+        int unsigned     uncache_rsp_q_size;
+        bit              uncache_rsp_timer_active;
+        longint unsigned uncache_rsp_timer_due_cycle;
+        int unsigned     dcache_write_batch_size;
+        int unsigned     uncache_write_batch_size;
+    } sbuffer_stop_prepare_state_t;
+
+    bit                          sbuffer_stop_prepare_state_valid;
+    sbuffer_stop_prepare_state_t sbuffer_stop_prepare_state;
 
     `uvm_object_utils(sbuffer_mem_access_base_sequence)
 
     extern function new(string name = "sbuffer_mem_access_base_sequence");
     extern virtual function void clear_runtime_state();
+    extern virtual function bit audit_sbuffer_responder_state(
+        input bit sampled_a_valid,
+        input bit sampled_d_valid,
+        input string audit_context
+    );
+    extern virtual function sbuffer_stop_prepare_state_t sample_sbuffer_stop_prepare_state(
+        input bit sampled_a_valid
+    );
     extern virtual function void build_sbuffer_idle_xaction(output sbuffer_agent_agent_xaction rsp_xact);
     extern virtual function void capture_sbuffer_a_xaction(output sbuffer_agent_agent_xaction req_xact);
     extern virtual function void check_sbuffer_a_payload_stable(
@@ -4073,6 +4480,8 @@ endfunction:new
 function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     a_accept_armed = 1'b0;
     armed_a_req_xact = null;
+    pre_stop_a_snapshot_valid = 1'b0;
+    pre_stop_a_snapshot = null;
     uncache_rsp_q.delete();
     current_d_valid            = 1'b0;
     current_d_record           = '{default:'0};
@@ -4082,7 +4491,78 @@ function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     d_hold_timeout_reported    = 1'b0;
     last_cycle_xact = null;
     last_cycle_valid = 1'b0;
+    sbuffer_stop_prepare_state_valid = 1'b0;
+    sbuffer_stop_prepare_state       = '0;
 endfunction:clear_runtime_state
+
+// 抽象职责：采样 Uncache responder 的有限 lifecycle 摘要，供 stop-prepare 用前后拍
+// 比较识别真实进展。它不读取 shared backing memory，也不把稳定 pending state 当作 progress。
+function sbuffer_mem_access_base_sequence::sbuffer_stop_prepare_state_t
+    sbuffer_mem_access_base_sequence::sample_sbuffer_stop_prepare_state(
+    input bit sampled_a_valid
+);
+    sbuffer_stop_prepare_state_t state;
+
+    state = '0;
+    state.sampled_a_valid           = sampled_a_valid;
+    state.a_accept_armed            = a_accept_armed;
+    state.pre_stop_a_snapshot_valid = pre_stop_a_snapshot_valid;
+    state.current_d_valid           = current_d_valid;
+    state.uncache_rsp_q_size        = uncache_rsp_q.size();
+    state.uncache_rsp_timer_active  = uncache_rsp_timer_active;
+    state.uncache_rsp_timer_due_cycle = uncache_rsp_timer_due_cycle;
+    state.dcache_write_batch_size   = dcache_write_batch.size();
+    state.uncache_write_batch_size  = uncache_write_batch.size();
+    return state;
+endfunction:sample_sbuffer_stop_prepare_state
+
+// 抽象职责：在 SBuffer/Uncache responder 退出前只读检查 A owner、D hold、response
+// queue/timer 及 stop 前快照。它不消费或清除任何 queue；残留状态统一报告为 UVM_ERROR。
+function bit sbuffer_mem_access_base_sequence::audit_sbuffer_responder_state(
+    input bit sampled_a_valid,
+    input bit sampled_d_valid,
+    input string audit_context
+);
+    bit clean;
+
+    clean = 1'b1;
+    if (sampled_a_valid) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: sampled A.valid remains asserted", audit_context))
+        clean = 1'b0;
+    end
+    if (sampled_d_valid) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: sampled D.valid remains asserted", audit_context))
+        clean = 1'b0;
+    end
+    if (a_accept_armed || armed_a_req_xact != null) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: armed A owner remains armed=%0d snapshot_null=%0d",
+                             audit_context, a_accept_armed, armed_a_req_xact == null))
+        clean = 1'b0;
+    end
+    if (pre_stop_a_snapshot_valid || pre_stop_a_snapshot != null) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: pre-stop A snapshot remains valid=%0d snapshot_null=%0d",
+                             audit_context, pre_stop_a_snapshot_valid, pre_stop_a_snapshot == null))
+        clean = 1'b0;
+    end
+    if (current_d_valid) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: current D response remains valid source=%0d address=0x%0h",
+                             audit_context, current_d_record.source, current_d_record.address))
+        clean = 1'b0;
+    end
+    if (uncache_rsp_q.size() != 0 || uncache_rsp_timer_active) begin
+        `uvm_error("SBUFFER_RESPONDER_AUDIT",
+                   $sformatf("%s: response queue/timer remains queue=%0d timer=%0d due=%0d",
+                             audit_context, uncache_rsp_q.size(), uncache_rsp_timer_active,
+                             uncache_rsp_timer_due_cycle))
+        clean = 1'b0;
+    end
+    return clean;
+endfunction:audit_sbuffer_responder_state
 
 function void sbuffer_mem_access_base_sequence::build_sbuffer_idle_xaction(output sbuffer_agent_agent_xaction rsp_xact);
     rsp_xact = sbuffer_agent_agent_xaction::type_id::create("sbuffer_idle_xact");
@@ -4487,6 +4967,7 @@ task sbuffer_mem_access_base_sequence::body();
     bit d_fire;
     common_data_transaction data;
     int unsigned response_visible_count;
+    sbuffer_stop_prepare_state_t current_stop_prepare_state;
 
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
         !uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, "uvm_test_top.env.u_sbuffer_agent_agent*", "vif", sbuffer_vif)) begin
@@ -4497,6 +4978,7 @@ task sbuffer_mem_access_base_sequence::body();
         `uvm_fatal(get_type_name(), "failed to get common_data_transaction for SBuffer responder")
     end
     seq_csr_common::init();
+    memblock_sync_pkg::sbuffer_responder_done = 1'b0;
     // 中文注释：legacy default topology 未经过 real-smoke vseq 时由首个 responder 兜底初始化。
     // real-smoke 已提前完成初始化时只读取静态状态，绝不重复清空 shared backing/overlay。
     if (!is_shared_memory_lifecycle_initialized()) begin
@@ -4506,6 +4988,8 @@ task sbuffer_mem_access_base_sequence::body();
     end
     clear_runtime_state();
     service_cycle = 0;
+    stop_wait_cycles = 0;
+    stop_drain_timeout_reported = 1'b0;
 
     forever begin
         // 中文注释：先在 drv_cb 边界确认上一轮驱动的 A.ready/D.valid 是否真实握手，
@@ -4545,6 +5029,14 @@ task sbuffer_mem_access_base_sequence::body();
                     check_sbuffer_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
                     a_fire = 1'b1;
                     create_uncache_response_record(fired_a_req_xact, service_cycle);
+                    pre_stop_a_snapshot_valid = 1'b0;
+                    pre_stop_a_snapshot = null;
+                end
+                else begin
+                    // DUT 在 ready 生效前撤销 valid 时，该 A 没有形成 fire；此前
+                    // 冻结的 pre-stop owner 也必须失效，不能让下一笔 A 继承它。
+                    pre_stop_a_snapshot_valid = 1'b0;
+                    pre_stop_a_snapshot = null;
                 end
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
@@ -4559,9 +5051,45 @@ task sbuffer_mem_access_base_sequence::body();
             service_uncache_d_hold_watchdog(d_fire);
         end
 
+        // 中文注释：stop 前若 A.valid 已经可见但本拍没有 fire，冻结完整 payload；
+        // stop 后仅允许该 owner 继续 handshake。valid 撤销时清除快照，避免把
+        // 后续独立 A 请求错误继承为尾请求。
+        if (!reset_active && !data.is_global_stop_requested() &&
+            sampled_a_valid && !a_fire && !pre_stop_a_snapshot_valid) begin
+            capture_sbuffer_a_xaction(pre_stop_a_snapshot);
+            pre_stop_a_snapshot_valid = 1'b1;
+        // 与 DCache 对称：stop 后 valid 撤销代表冻结 A 从未握手，不能遗留
+        // pre-stop owner 阻塞 SBuffer terminal idle。
+        end else if (!reset_active && !sampled_a_valid && !a_accept_armed) begin
+            pre_stop_a_snapshot_valid = 1'b0;
+            pre_stop_a_snapshot = null;
+        end
+
+        // 中文注释：每个非 reset sample 都保留 Uncache 的上一拍轻量基线；prepare
+        // 中才对新 A、A/D 调度或摘要变化重置 quiet timer。这样首个 prepare
+        // sample 也不会漏掉刚进入的 A；持续卡住的 response record 仍不会被当作
+        // 每拍 progress。
+        if (!reset_active) begin
+            current_stop_prepare_state = sample_sbuffer_stop_prepare_state(sampled_a_valid);
+            if (data.is_global_stop_prepare_requested()) begin
+                data.note_global_stop_prepare_responder_sample(1'b0);
+                if ((sbuffer_stop_prepare_state_valid &&
+                     (sbuffer_stop_prepare_state !== current_stop_prepare_state)) ||
+                    a_fire || d_fire) begin
+                    data.note_global_stop_prepare_activity();
+                end
+            end
+            sbuffer_stop_prepare_state       = current_stop_prepare_state;
+            sbuffer_stop_prepare_state_valid = 1'b1;
+        end
+        else begin
+            sbuffer_stop_prepare_state_valid = 1'b0;
+        end
+
         // 中文注释：global stop 后只能 drain 已由前一拍 A.ready 接受的请求；若此时出现
         // 新的未 fire A.valid，继续保持 A.ready=0 会让 DUT 与 responder 永久互等，必须 fail-fast。
-        if (!reset_active && data.is_global_stop_requested() && sampled_a_valid && !a_fire) begin
+        if (!reset_active && data.is_global_stop_requested() && sampled_a_valid && !a_fire &&
+            !pre_stop_a_snapshot_valid) begin
             `uvm_fatal(get_type_name(),
                        "new Uncache A.valid observed after global stop without a sampled fire")
         end
@@ -4572,18 +5100,52 @@ task sbuffer_mem_access_base_sequence::body();
         end
         else if (data.is_global_stop_requested() && !current_d_valid &&
                  (uncache_rsp_q.size() == 0) && !uncache_rsp_timer_active &&
-                 !a_accept_armed && !sampled_a_valid) begin
+                 !a_accept_armed && !pre_stop_a_snapshot_valid && !sampled_a_valid &&
+                 (dcache_write_batch.size() == 0) &&
+                 (uncache_write_batch.size() == 0)) begin
             send_sbuffer_xaction(idle_xact);
             last_cycle_xact  = idle_xact;
             last_cycle_valid = 1'b1;
             service_cycle++;
+            // 与 DCache 对称：先交付最后一个 idle item，再只读检查本 responder
+            // 的私有 owner/queue；audit 绝不删除残留。
+            void'(audit_sbuffer_responder_state(sampled_a_valid,
+                                                current_d_valid,
+                                                "terminal idle published"));
+            memblock_sync_pkg::sbuffer_responder_done = 1'b1;
+            `uvm_info(get_type_name(), "SBuffer responder published terminal idle and stopped", UVM_LOW)
             break;
         end
         else begin
+            if (data.is_global_stop_requested()) begin
+                stop_wait_cycles++;
+                if (stop_wait_cycles >= UNCACHE_STOP_DRAIN_TIMEOUT_CYCLES &&
+                    !stop_drain_timeout_reported) begin
+                    void'(audit_sbuffer_responder_state(sampled_a_valid,
+                                                        current_d_valid,
+                                                        "global-stop drain timeout"));
+                    `uvm_error(get_type_name(),
+                               $sformatf("SBuffer responder did not drain within %0d cycles; queues are preserved for final audit",
+                                         UNCACHE_STOP_DRAIN_TIMEOUT_CYCLES))
+                    stop_drain_timeout_reported = 1'b1;
+                end
+            end
+            else begin
+                stop_wait_cycles = 0;
+                stop_drain_timeout_reported = 1'b0;
+            end
             service_uncache_response_scheduler(service_cycle, response_visible_count);
             build_current_uncache_d_xaction(idle_xact);
-            if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid) begin
+            if (!a_fire && sampled_a_valid &&
+                (!data.is_global_stop_requested() || pre_stop_a_snapshot_valid)) begin
                 capture_sbuffer_a_xaction(req_xact);
+                if (data.is_global_stop_requested()) begin
+                    if (pre_stop_a_snapshot == null) begin
+                        `uvm_fatal(get_type_name(), "global-stop Uncache A admission lost its pre-stop snapshot")
+                    end
+                    check_sbuffer_a_payload_stable(pre_stop_a_snapshot, req_xact);
+                    req_xact = pre_stop_a_snapshot;
+                end
                 void'(decode_uncache_a_opcode(req_xact));
                 if (has_uncache_response_capacity()) begin
                     armed_a_req_xact = req_xact;
