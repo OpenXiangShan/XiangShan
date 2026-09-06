@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `5143f912838d826cb273b73d12e1eaeed91899b2b0a4ae205e62be463b7fec7c`
+- Current rebuilt and frozen UT executable SHA-256: `ff6132ad86ca09d9be3fe268da7cfe77f9ce0d3e89867d5b375e04be816e7eef`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `fb1c81cb25fc0cbf96c18e5c74ba3d01049b7b3296e9e19a825c6d4abc6f07b5`
+- Frozen runtime manifest SHA-256: `76b5f482afe2b0a320aea053265a3b20f26ee59b2fbc98536a0498180ab4bec2`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -180,7 +180,7 @@ no CPU defect was observed.
 
 ## Concurrent Exception Priority
 
-The expanded `exception-contracts` scenario passed in 623 aggregate cycles on
+The expanded `exception-contracts` scenario passed in 982 aggregate cycles on
 complete RTL SHA-256
 `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 Three load page faults were issued together with increasing LQ indices but ROB
@@ -197,9 +197,15 @@ continued to report `0x50008011`, selecting load reported its exact
 architectural base. Uop 1 faulted first at `0x52000018`; the later-issued but
 older uop 0 then replaced the retained address with `0x52000008`. Both exact
 vector exception writebacks completed. This closes the legal wrapped ROB,
-disagreeing queue-order, and same-ROB `uopIdx` stimuli; mixed simultaneous
-exception causes and scalar/vector competition remain open. No current RTL
-defect was observed.
+disagreeing queue-order, and same-ROB `uopIdx` stimuli. It also co-issued an
+unmapped page fault and an older PBMT-NC misaligned fault with reversed LQ
+order; both exact writebacks completed and the retained VA selected the older
+misaligned operation. Finally, a younger scalar page fault was retained before
+an older vector fault replaced it, then a separate environment checked the
+opposite vector-first/scalar-replacement direction. The complete scenario
+produced 11 scalar-load and four vector-load exception writebacks. Additional
+cause pairs, same-operation multi-cause priority, and store/vector competition
+remain open. No current RTL defect was observed.
 
 ## Data-Side PMP Contracts
 

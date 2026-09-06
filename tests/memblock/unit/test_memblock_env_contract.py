@@ -466,6 +466,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "same_rob_uop_priority=2",
             "younger_uop.vuop_idx = 1",
             "vector_element_address(younger_uop, 0)",
+            "different_cause_faults",
+            "cross_cause_priority=2",
+            "scalar_vector_priority=2",
+            "phase=older-vector-replacement",
+            "phase=older-scalar-replacement",
         ):
             self.assertIn(contract, environment + main)
 

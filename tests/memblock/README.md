@@ -550,7 +550,10 @@ and store exception buffers populated, the test then switches
 `isStoreException` in both directions and checks the exact retained address
 after the two-register output path. A separate LMUL=2 vector pair shares one
 ROB identity, issues `vuopIdx=1` before `vuopIdx=0`, and requires the older uop
-to replace the younger uop's retained page-fault VA.
+to replace the younger uop's retained page-fault VA. A page fault and a
+PBMT-NC misaligned fault then arrive together with queue order opposed to ROB
+age. Two further pairs retain a younger scalar or vector page fault first and
+require the later-arriving older fault from the other source to replace it.
 
 `vector-addressing` checks exact unit-stride, strided, indexed-unordered, and
 indexed-ordered data plus vector-store readback. Its ordinary LMUL=2 phase

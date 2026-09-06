@@ -10028,6 +10028,201 @@ int run_exception_contracts(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment cross_cause(argc, argv);
+    constexpr std::uint64_t cross_cause_virtual = 0x55000000ULL;
+    constexpr std::uint64_t cross_cause_physical = 0xa5000000ULL;
+    constexpr std::uint64_t cross_cause_root = 0x92700000ULL;
+    cross_cause.memory().fill_incrementing(
+        cross_cause_physical, 0x1000, 0x75);
+    const std::vector<memblock::LoadTransaction> different_cause_faults{
+        memblock::LoadTransaction{
+            .address = cross_cause_virtual + 0x3000,
+            .op = memblock::LoadOp::ld,
+            .rob = 61,
+            .lq = 0,
+            .pdest = 48,
+            .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        },
+        memblock::LoadTransaction{
+            .address = cross_cause_virtual + 0x1001,
+            .oracle_address = cross_cause_physical + 1,
+            .op = memblock::LoadOp::ld,
+            .rob = 60,
+            .lq = 1,
+            .pdest = 49,
+            .lane = 1,
+            .expected_exception_mask =
+                memblock::kExceptionLoadAddressMisaligned,
+        },
+    };
+    for (const auto &fault : different_cause_faults) {
+        cross_cause.expect_load(fault);
+    }
+    const auto &oldest_cross_cause = different_cause_faults.back();
+    if (!cross_cause.reset() ||
+        !cross_cause.enable_misaligned_accesses() ||
+        !cross_cause.map_sv39_4k(
+            cross_cause_virtual + 0x1000,
+            cross_cause_physical,
+            cross_cause_root,
+            true,
+            true,
+            false,
+            false,
+            true) ||
+        !cross_cause.activate_sv39(cross_cause_root, 24) ||
+        !cross_cause.set_rob_head(
+            oldest_cross_cause.rob, oldest_cross_cause.rob_flag) ||
+        !cross_cause.enqueue_load_batch(different_cause_faults, {0, 1}) ||
+        !cross_cause.issue_load_batch(different_cause_faults, 256, true) ||
+        !cross_cause.run_until_complete(8192) ||
+        !cross_cause.run_cycles(8) ||
+        cross_cause.exception_vaddr() != oldest_cross_cause.address ||
+        cross_cause.tilelink_requests() != 0 ||
+        cross_cause.uncache_requests() != 0 ||
+        !cross_cause.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << cross_cause.cycle()
+                  << " phase=cross-cause-priority expected_vaddr=0x"
+                  << std::hex << oldest_cross_cause.address
+                  << " actual_vaddr=0x" << cross_cause.exception_vaddr()
+                  << std::dec << " reason=" << cross_cause.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment vector_over_scalar(argc, argv);
+    constexpr std::uint64_t vector_over_scalar_root = 0x92500000ULL;
+    constexpr std::uint64_t vector_over_scalar_base = 0x53000000ULL;
+    const memblock::LoadTransaction younger_scalar{
+        .address = vector_over_scalar_base + 0x1000,
+        .op = memblock::LoadOp::ld,
+        .rob = 91,
+        .lq = 0,
+        .pdest = 50,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    const memblock::VectorMemoryTransaction older_vector{
+        .address = vector_over_scalar_base + 0x2000,
+        .eew = 3,
+        .vl = 2,
+        .rob = 90,
+        .lq = 1,
+        .pdest = 51,
+        .lane = 1,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    if (!vector_over_scalar.reset() ||
+        !vector_over_scalar.activate_sv39(vector_over_scalar_root, 25) ||
+        !vector_over_scalar.set_rob_head(
+            older_vector.rob, older_vector.rob_flag) ||
+        !vector_over_scalar.enqueue_load(younger_scalar) ||
+        !vector_over_scalar.enqueue_vector(older_vector)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << vector_over_scalar.cycle()
+                  << " phase=vector-over-scalar-configuration reason="
+                  << vector_over_scalar.error() << '\n';
+        return 1;
+    }
+    vector_over_scalar.expect_load(younger_scalar);
+    if (!vector_over_scalar.issue_load(younger_scalar, 512) ||
+        !vector_over_scalar.run_until_complete(8192) ||
+        !vector_over_scalar.run_cycles(8) ||
+        vector_over_scalar.exception_vaddr() != younger_scalar.address) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << vector_over_scalar.cycle()
+                  << " phase=younger-scalar-first expected_vaddr=0x"
+                  << std::hex << younger_scalar.address
+                  << " actual_vaddr=0x"
+                  << vector_over_scalar.exception_vaddr() << std::dec
+                  << " reason=" << vector_over_scalar.error() << '\n';
+        return 1;
+    }
+    vector_over_scalar.expect_vector(older_vector);
+    if (!vector_over_scalar.issue_vector(older_vector, 512) ||
+        !vector_over_scalar.run_until_vector_complete_with_replays(
+            older_vector, 16384) ||
+        !vector_over_scalar.run_cycles(8) ||
+        vector_over_scalar.exception_vaddr() != older_vector.address ||
+        !vector_over_scalar.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << vector_over_scalar.cycle()
+                  << " phase=older-vector-replacement expected_vaddr=0x"
+                  << std::hex << older_vector.address
+                  << " actual_vaddr=0x"
+                  << vector_over_scalar.exception_vaddr() << std::dec
+                  << " reason=" << vector_over_scalar.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment scalar_over_vector(argc, argv);
+    constexpr std::uint64_t scalar_over_vector_root = 0x92600000ULL;
+    constexpr std::uint64_t scalar_over_vector_base = 0x54000000ULL;
+    const memblock::VectorMemoryTransaction younger_vector{
+        .address = scalar_over_vector_base + 0x1000,
+        .eew = 3,
+        .vl = 2,
+        .rob = 101,
+        .lq = 0,
+        .pdest = 52,
+        .lane = 1,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    const memblock::LoadTransaction older_scalar{
+        .address = scalar_over_vector_base + 0x2000,
+        .op = memblock::LoadOp::ld,
+        .rob = 100,
+        .lq = 2,
+        .pdest = 53,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    if (!scalar_over_vector.reset() ||
+        !scalar_over_vector.activate_sv39(scalar_over_vector_root, 26) ||
+        !scalar_over_vector.set_rob_head(
+            older_scalar.rob, older_scalar.rob_flag) ||
+        !scalar_over_vector.enqueue_vector(younger_vector) ||
+        !scalar_over_vector.enqueue_load(older_scalar)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << scalar_over_vector.cycle()
+                  << " phase=scalar-over-vector-configuration reason="
+                  << scalar_over_vector.error() << '\n';
+        return 1;
+    }
+    scalar_over_vector.expect_vector(younger_vector);
+    if (!scalar_over_vector.issue_vector(younger_vector, 512) ||
+        !scalar_over_vector.run_until_vector_complete_with_replays(
+            younger_vector, 16384) ||
+        !scalar_over_vector.run_cycles(8) ||
+        scalar_over_vector.exception_vaddr() != younger_vector.address) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << scalar_over_vector.cycle()
+                  << " phase=younger-vector-first expected_vaddr=0x"
+                  << std::hex << younger_vector.address
+                  << " actual_vaddr=0x"
+                  << scalar_over_vector.exception_vaddr() << std::dec
+                  << " reason=" << scalar_over_vector.error() << '\n';
+        return 1;
+    }
+    scalar_over_vector.expect_load(older_scalar);
+    if (!scalar_over_vector.issue_load(older_scalar, 512) ||
+        !scalar_over_vector.run_until_complete(8192) ||
+        !scalar_over_vector.run_cycles(8) ||
+        scalar_over_vector.exception_vaddr() != older_scalar.address ||
+        !scalar_over_vector.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << scalar_over_vector.cycle()
+                  << " phase=older-scalar-replacement expected_vaddr=0x"
+                  << std::hex << older_scalar.address
+                  << " actual_vaddr=0x"
+                  << scalar_over_vector.exception_vaddr() << std::dec
+                  << " reason=" << scalar_over_vector.error() << '\n';
+        return 1;
+    }
+
     memblock::Environment store_priority(argc, argv);
     constexpr std::uint64_t store_priority_root = 0x92400000ULL;
     constexpr std::uint64_t store_priority_virtual = virtual_base + 0x8000;
@@ -10198,24 +10393,37 @@ int run_exception_contracts(int argc, char **argv)
 
     std::cout << "MEMBLOCK_EXCEPTION_CONTRACTS_PASS"
               << " cycle=" << environment.cycle() + load_priority.cycle() +
-                    uop_priority.cycle() + store_priority.cycle()
+                    uop_priority.cycle() + cross_cause.cycle() +
+                    vector_over_scalar.cycle() + scalar_over_vector.cycle() +
+                    store_priority.cycle()
               << " load_writebacks="
               << environment.writebacks() + load_priority.writebacks() +
-                    store_priority.writebacks()
+                    cross_cause.writebacks() +
+                    vector_over_scalar.writebacks() +
+                    scalar_over_vector.writebacks() + store_priority.writebacks()
               << " store_writebacks=" << store_priority.store_writebacks()
               << " vector_writebacks="
-              << uop_priority.vector_load_writebacks()
+              << uop_priority.vector_load_writebacks() +
+                    vector_over_scalar.vector_load_writebacks() +
+                    scalar_over_vector.vector_load_writebacks()
               << " prefetch_writebacks=" << environment.prefetch_writebacks()
               << " load_priority=3 same_rob_uop_priority=2"
+              << " cross_cause_priority=2 scalar_vector_priority=2"
               << " store_priority=2 selector_cross=1"
               << " load_oldest=0x" << std::hex
               << oldest_load_fault.address
               << " store_oldest=0x" << oldest_store_fault.address << std::dec
               << " ptw_requests="
               << environment.ptw_requests() + load_priority.ptw_requests() +
+                    vector_over_scalar.ptw_requests() +
+                    scalar_over_vector.ptw_requests() +
                     store_priority.ptw_requests()
               << " uncache_requests="
-              << environment.uncache_requests() + load_priority.uncache_requests() +
+              << environment.uncache_requests() +
+                    load_priority.uncache_requests() +
+                    cross_cause.uncache_requests() +
+                    vector_over_scalar.uncache_requests() +
+                    scalar_over_vector.uncache_requests() +
                     store_priority.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
