@@ -425,6 +425,34 @@ requests, 10 Probes, and 140 ReleaseData beats. The full per-scenario table is
 `build/memblock/test-scale.md`; its JSON artifact SHA-256 is
 `acfc2594634a2b2beb4ef174f1dfbdae286cddfd4b0b3b3d50517cf5d37f8c10`.
 
+### Million-Action-Per-Seed Endurance Campaign
+
+The post-Probe frozen runtime completed eight independent `spec` seeds from
+2026-09-06 11:02 to 15:31 Asia/Shanghai. Every seed completed exactly
+1,000,000 constrained-random actions, for 8,000,000 total actions and
+325,904,665 simulated cycles in 16,159.999208 seconds. All eight results
+passed with backpressure enabled; the DCache, PTW, and Uncache response-latency
+models each reached 400 cycles (one seed reached 398/399 on the latter two).
+
+Aggregate architectural traffic included 5,362,645 scalar-load writebacks,
+2,081,291 scalar-store writebacks, 371,751 vector-load writebacks, 186,225
+vector-store writebacks, and 364,932 software-prefetch writebacks. Manager
+traffic included 402,722 DCache refills/GrantAcks, 1,031,235 PTW requests,
+74,633 Uncache requests, 2,860 Probes across 1,902 constrained Probe sequences,
+and 135,825 dirty ReleaseData beats. The run also exercised 17,436 scalar and
+7,700 store misaligned cases plus 24 directed exception-prefix cases.
+
+The complete RTL SHA-256 was
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+The frozen executable, model, xspcomm, resolved libraries, runtime metadata,
+runner, and all eight controller inputs had identical before/after hashes.
+`make verify-endurance-results` independently accepted seeds 1 through 8 and
+all 8,000,000 actions. The artifact is
+`build/memblock/endurance-spec-8x1000000.json`, SHA-256
+`1393a96664b47a5cdeb3ba8624ee9c2b648afb7a4bc080b692ee1bda8198c321`.
+No assertion, scoreboard, timeout, process, provenance, coverage-gate, or RTL
+failure occurred, and this campaign did not expose a new CPU bug.
+
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
 stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
