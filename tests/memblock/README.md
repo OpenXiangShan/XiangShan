@@ -558,6 +558,9 @@ SoC's non-DebugModule `c=0` PMA interval and requires physical PMA MMIO
 classification for both load and store. The same scenario accesses the guarded
 DebugModule PMA interval outside Debug Mode, requires an exact load access fault
 with no manager request, and proves every speculative load wakeup is canceled.
+Two exact bare-mode loads straddle the `0x80000000` PMA boundary: the last
+aligned 64-bit device access below it must use Uncache, while the first DDR
+access must use DCache.
 A side-effecting device model remains a planned boundary. `cbo-zero-contracts`
 drives the `CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache

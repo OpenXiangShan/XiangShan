@@ -7135,6 +7135,10 @@ int run_mmio_contracts(int argc, char **argv)
     std::uint64_t pma_denied_cancels = 0;
     unsigned pma_debug_load_count = 0;
     unsigned pma_debug_store_count = 0;
+    unsigned pma_edge_load_count = 0;
+    std::uint64_t pma_edge_dcache_requests = 0;
+    std::uint64_t pma_edge_uncache_requests = 0;
+    std::uint64_t pma_cycles = 0;
     {
         memblock::Environment pma_environment(argc, argv);
         constexpr std::uint64_t pma_physical_base = 0x35000000ULL;
@@ -7143,6 +7147,10 @@ int run_mmio_contracts(int argc, char **argv)
             pma_physical_base, 64, 0x63);
         pma_environment.memory().fill_incrementing(
             debug_physical_base, 64, 0x91);
+        pma_environment.memory().fill_incrementing(
+            0x7ffffff8ULL, 8, 0xb3);
+        pma_environment.memory().fill_incrementing(
+            0x80000000ULL, 8, 0xc7);
         pma_environment.configure_backpressure(
             0x5a17c3e9d2b84f61ULL, true);
         if (!pma_environment.reset() ||
@@ -7383,6 +7391,70 @@ int run_mmio_contracts(int argc, char **argv)
             return 1;
         }
         ++pma_debug_store_count;
+
+        auto run_pma_edge_load = [&pma_environment, &pma_edge_load_count,
+                                  &pma_edge_dcache_requests,
+                                  &pma_edge_uncache_requests](
+                                     const char *name,
+                                     std::uint64_t address,
+                                     std::uint8_t rob,
+                                     std::uint8_t lq,
+                                     std::uint8_t pdest,
+                                     bool expected_mmio) {
+            const memblock::LoadTransaction transaction{
+                .address = address,
+                .oracle_address = address,
+                .op = memblock::LoadOp::ld,
+                .rob = rob,
+                .lq = lq,
+                .pdest = pdest,
+                .lane = static_cast<unsigned>(lq % memblock::kScalarLoadLanes),
+                .expected_debug_is_mmio = expected_mmio,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            const std::uint64_t dcache_before =
+                pma_environment.tilelink_requests();
+            const std::uint64_t uncache_before =
+                pma_environment.uncache_requests();
+            pma_environment.expect_load(transaction);
+            if (!pma_environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !pma_environment.enqueue_load(transaction) ||
+                !pma_environment.issue_load(transaction, 2048) ||
+                (expected_mmio && !pma_environment.wait_for_mmio_request(
+                    transaction.rob, transaction.rob_flag, 4096)) ||
+                !pma_environment.run_until_complete(8192) ||
+                !pma_environment.run_until_lq_retired(2048)) {
+                std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                          << pma_environment.cycle() << " phase=" << name
+                          << " reason=" << pma_environment.error() << '\n';
+                return false;
+            }
+            const std::uint64_t dcache_delta =
+                pma_environment.tilelink_requests() - dcache_before;
+            const std::uint64_t uncache_delta =
+                pma_environment.uncache_requests() - uncache_before;
+            if (dcache_delta != (expected_mmio ? 0U : 1U) ||
+                uncache_delta != (expected_mmio ? 1U : 0U)) {
+                std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                          << pma_environment.cycle() << " phase=" << name
+                          << " dcache_delta=" << dcache_delta
+                          << " uncache_delta=" << uncache_delta << '\n';
+                return false;
+            }
+            ++pma_edge_load_count;
+            pma_edge_dcache_requests += dcache_delta;
+            pma_edge_uncache_requests += uncache_delta;
+            return true;
+        };
+        if (!run_pma_edge_load(
+                "pma-edge-device", 0x7ffffff8ULL, 5, 3, 161, true) ||
+            !run_pma_edge_load(
+                "pma-edge-ddr", 0x80000000ULL, 6, 4, 162, false)) {
+            return 1;
+        }
+        pma_cycles = pma_environment.cycle();
     }
 
     std::cout << "MEMBLOCK_MMIO_CONTRACTS_PASS"
@@ -7397,6 +7469,10 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_denied_cancels=" << pma_denied_cancels
               << " pma_debug_loads=" << pma_debug_load_count
               << " pma_debug_stores=" << pma_debug_store_count
+              << " pma_edge_loads=" << pma_edge_load_count
+              << " pma_edge_dcache=" << pma_edge_dcache_requests
+              << " pma_edge_uncache=" << pma_edge_uncache_requests
+              << " pma_cycles=" << pma_cycles
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';

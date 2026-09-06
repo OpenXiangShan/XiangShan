@@ -852,6 +852,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         new_csr = (
             REPO_ROOT / "src/main/scala/xiangshan/backend/fu/NewCSR/NewCSR.scala"
         ).read_text()
+        soc = (REPO_ROOT / "src/main/scala/system/SoC.scala").read_text()
         for contract in (
             "pte_pbmt_io",
             "pulse_pending_load",
@@ -883,6 +884,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=pma-debug-store",
             "pma_debug_loads=",
             "pma_debug_stores=",
+            "pma-edge-device",
+            "pma-edge-ddr",
+            "pma_edge_loads=",
+            "pma_edge_dcache=",
+            "pma_edge_uncache=",
+            "pma_cycles=",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)
@@ -890,6 +897,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(
             "Mux(addr >= debugStart.U && addr <= debugEnd.U, debug, true.B)",
             pma,
+        )
+        self.assertIn(
+            "PMAConfigEntry(0x80000000L, a = 1, w = true, r = true)",
+            soc,
         )
 
     def test_fp_loads_cover_data_paths_and_exception_suppression(self) -> None:
