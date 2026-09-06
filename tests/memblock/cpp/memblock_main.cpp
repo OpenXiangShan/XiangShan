@@ -7441,6 +7441,401 @@ int run_exception_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_hypervisor_contracts(int argc, char **argv)
+{
+    constexpr std::uint64_t guest_virtual = 0x60000000ULL;
+    constexpr std::uint64_t guest_physical = 0x9e000000ULL;
+    constexpr std::uint64_t host_physical = 0xc5000000ULL;
+    constexpr std::uint64_t vs_root = 0xb0000000ULL;
+    constexpr std::uint64_t g_root = 0xb2000000ULL;
+    constexpr std::uint8_t pmp_napot_read = 0x19;
+    constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
+
+    auto configure = [](
+                         memblock::Environment &environment,
+                         const memblock::ReferencePtePermissions &vs,
+                         const memblock::ReferencePtePermissions &g,
+                         memblock::ReferencePrivilegeMode spvp,
+                         bool mxr, bool vmxr, bool vsum) {
+        bool ready = environment.reset() &&
+            environment.map_sv39_leaf(
+                guest_virtual, guest_physical, 0, vs_root,
+                vs.readable, vs.writable, vs.executable, vs.user, false,
+                vs.accessed, vs.dirty);
+        for (unsigned page = 0; ready && page < 3; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            ready = environment.map_sv39x4_4k(
+                address, address, g_root, true, true, false);
+        }
+        return ready && environment.map_sv39x4_leaf(
+                            guest_physical, host_physical, 0, g_root,
+                            g.readable, g.writable, g.executable,
+                            g.accessed, g.dirty, g.user) &&
+            environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                vs_root, g_root, 61, 71) &&
+            environment.set_hypervisor_access_permissions(
+                spvp, mxr, vmxr, vsum);
+    };
+
+    std::uint64_t total_cycles = 0;
+    std::uint64_t total_ptw_requests = 0;
+    std::uint64_t total_dcache_requests = 0;
+    unsigned load_cases = 0;
+    unsigned store_cases = 0;
+    unsigned page_faults = 0;
+    unsigned guest_page_faults = 0;
+    unsigned access_faults = 0;
+
+    auto run_load_case = [&](
+                             const char *name,
+                             memblock::LoadOp op,
+                             const memblock::ReferencePtePermissions &vs,
+                             const memblock::ReferencePtePermissions &g,
+                             memblock::ReferencePrivilegeMode spvp,
+                             bool mxr = false,
+                             bool vmxr = false,
+                             bool vsum = false,
+                             bool pmp_execute_denied = false) {
+        const bool hlvx = op == memblock::LoadOp::hlvxhu ||
+                          op == memblock::LoadOp::hlvxwu;
+        const bool vs_permitted = hlvx
+            ? memblock::reference_hlvx_permitted(vs, spvp, vsum)
+            : memblock::reference_load_permitted(
+                  vs, spvp, vsum, mxr || vmxr);
+        const bool g_permitted = hlvx
+            ? memblock::reference_hlvx_permitted(
+                  g, memblock::ReferencePrivilegeMode::supervisor, false, true)
+            : memblock::reference_load_permitted(
+                  g, memblock::ReferencePrivilegeMode::supervisor, false,
+                  mxr, true);
+        const std::uint32_t expected_exception = !vs_permitted
+            ? memblock::kExceptionLoadPageFault
+            : !g_permitted
+                ? memblock::kExceptionLoadGuestPageFault
+                : pmp_execute_denied
+                    ? memblock::kExceptionLoadAccessFault
+                    : 0U;
+
+        memblock::Environment environment(argc, argv);
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0x31);
+        if (!configure(environment, vs, g, spvp, mxr, vmxr, vsum)) {
+            std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        if (pmp_execute_denied) {
+            const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+                return (base | (size / 2 - 1)) >> 2;
+            };
+            if (!environment.configure_pmp(
+                    {napot_address(host_physical, 0x1000), ~std::uint64_t{0}},
+                    {pmp_napot_read, pmp_napot_read_write_execute})) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << "-pmp reason=" << environment.error() << '\n';
+                return false;
+            }
+        }
+        const memblock::LoadTransaction transaction{
+            .address = guest_virtual + 0x180,
+            .oracle_address = host_physical + 0x180,
+            .op = op,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 40,
+            .lane = 0,
+            .expected_exception_mask = expected_exception,
+        };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const auto feedback_before =
+            environment.scalar_load_feedback_stats();
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << "-execution expected_exception=0x" << std::hex
+                      << expected_exception << std::dec << " reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+        const auto &feedback_after =
+            environment.scalar_load_feedback_stats();
+        std::uint64_t wakeups = 0;
+        std::uint64_t cancels = 0;
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            wakeups += feedback_after.wakeups[lane] -
+                       feedback_before.wakeups[lane];
+            cancels += feedback_after.ld2_cancels[lane] -
+                       feedback_before.ld2_cancels[lane];
+        }
+        if (expected_exception != 0 &&
+            (environment.uncache_requests() != uncache_before ||
+             (!pmp_execute_denied &&
+              environment.tilelink_requests() != dcache_before) ||
+             cancels == 0 || wakeups != cancels)) {
+            std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << " reason=faulting-load-side-effect"
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after=" << environment.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after=" << environment.uncache_requests()
+                      << " wakeups=" << wakeups
+                      << " cancels=" << cancels << '\n';
+            return false;
+        }
+        ++load_cases;
+        page_faults += expected_exception == memblock::kExceptionLoadPageFault;
+        guest_page_faults +=
+            expected_exception == memblock::kExceptionLoadGuestPageFault;
+        access_faults +=
+            expected_exception == memblock::kExceptionLoadAccessFault;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+        total_dcache_requests += environment.tilelink_requests();
+        return true;
+    };
+
+    auto run_store_case = [&](
+                              const char *name,
+                              memblock::StoreOp op,
+                              const memblock::ReferencePtePermissions &vs,
+                              const memblock::ReferencePtePermissions &g,
+                              memblock::ReferencePrivilegeMode spvp,
+                              bool vsum,
+                              std::uint64_t data) {
+        const bool vs_permitted =
+            memblock::reference_store_permitted(vs, spvp, vsum);
+        const bool g_permitted = memblock::reference_store_permitted(
+            g, memblock::ReferencePrivilegeMode::supervisor, false, true);
+        const std::uint32_t expected_exception = !vs_permitted
+            ? memblock::kExceptionStorePageFault
+            : !g_permitted
+                ? memblock::kExceptionStoreGuestPageFault
+                : 0U;
+
+        memblock::Environment environment(argc, argv);
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
+        if (!configure(environment, vs, g, spvp, false, false, vsum)) {
+            std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        const memblock::StoreTransaction transaction{
+            .address = guest_virtual + 0x280,
+            .oracle_address = host_physical + 0x280,
+            .data = data,
+            .op = op,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_exception_mask = expected_exception,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.expect_store(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_store(transaction, 0) ||
+            !environment.issue_store_address_until_tlb_hit(transaction, 16384) ||
+            !environment.issue_store_data(transaction, 2048) ||
+            !environment.run_until_store_complete(32768)) {
+            std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << "-execution expected_exception=0x" << std::hex
+                      << expected_exception << std::dec << " reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+        if (expected_exception == 0) {
+            const unsigned size =
+                1U << (static_cast<unsigned>(transaction.op) & 3U);
+            const std::uint64_t mask = size == 8
+                ? ~std::uint64_t{0}
+                : (std::uint64_t{1} << (size * 8)) - 1;
+            const std::array<memblock::LoadOp, 4> read_ops{{
+                memblock::LoadOp::hlvbu, memblock::LoadOp::hlvhu,
+                memblock::LoadOp::hlvwu, memblock::LoadOp::hlvd,
+            }};
+            if (!environment.commit_store(transaction, 16384) ||
+                !environment.run_until_sbuffer_empty(16384)) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << "-commit reason=" << environment.error()
+                          << '\n';
+                return false;
+            }
+            const memblock::LoadTransaction readback{
+                .address = transaction.address,
+                .oracle_address = transaction.oracle_address,
+                .op = read_ops[static_cast<unsigned>(transaction.op) & 3U],
+                .rob = 1,
+                .lq = 0,
+                .pdest = 41,
+                .lane = 1,
+            };
+            environment.expect_load_data(readback, data & mask);
+            if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 4096) ||
+                !environment.run_until_complete(32768) ||
+                !environment.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << "-hlv-readback expected=0x" << std::hex
+                          << (data & mask) << std::dec << " reason="
+                          << environment.error() << '\n';
+                return false;
+            }
+        } else {
+            if (environment.tilelink_requests() != dcache_before ||
+                environment.uncache_requests() != uncache_before ||
+                !environment.account_sq_cancellation(1)) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << " reason=faulting-store-reached-data-manager\n";
+                return false;
+            }
+        }
+        ++store_cases;
+        page_faults += expected_exception == memblock::kExceptionStorePageFault;
+        guest_page_faults +=
+            expected_exception == memblock::kExceptionStoreGuestPageFault;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+        total_dcache_requests += environment.tilelink_requests();
+        return true;
+    };
+
+    const memblock::ReferencePtePermissions rw_supervisor{};
+    const memblock::ReferencePtePermissions rw_user{.user = true};
+    const memblock::ReferencePtePermissions g_rw_user{.user = true};
+    const memblock::ReferencePtePermissions x_supervisor{
+        .readable = false, .writable = false, .executable = true,
+        .dirty = false,
+    };
+    const memblock::ReferencePtePermissions g_x_user{
+        .readable = false, .writable = false, .executable = true,
+        .user = true, .dirty = false,
+    };
+
+    const std::array<memblock::LoadOp, 9> load_ops{{
+        memblock::LoadOp::hlvb, memblock::LoadOp::hlvh,
+        memblock::LoadOp::hlvw, memblock::LoadOp::hlvd,
+        memblock::LoadOp::hlvbu, memblock::LoadOp::hlvhu,
+        memblock::LoadOp::hlvwu, memblock::LoadOp::hlvxhu,
+        memblock::LoadOp::hlvxwu,
+    }};
+    for (unsigned index = 0; index < load_ops.size(); ++index) {
+        const bool hlvx = index >= 7;
+        if (!run_load_case(
+                hlvx ? "hlvx-encoding" : "hlv-encoding", load_ops[index],
+                hlvx ? x_supervisor : rw_supervisor,
+                hlvx ? g_x_user : g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor)) {
+            return 1;
+        }
+    }
+
+    if (!run_load_case(
+            "spvp-user-user-page", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user) ||
+        !run_load_case(
+            "spvp-user-supervisor-page", memblock::LoadOp::hlvd,
+            rw_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::user) ||
+        !run_load_case(
+            "spvp-supervisor-user-vsum0", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor) ||
+        !run_load_case(
+            "spvp-supervisor-user-vsum1", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, true) ||
+        !run_load_case(
+            "hlv-xonly-vmxr0", memblock::LoadOp::hlvd,
+            x_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor) ||
+        !run_load_case(
+            "hlv-xonly-vmxr1", memblock::LoadOp::hlvd,
+            x_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, true) ||
+        !run_load_case(
+            "hlvx-readonly-vs", memblock::LoadOp::hlvxwu,
+            rw_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor) ||
+        !run_load_case(
+            "hlvx-readonly-g", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor) ||
+        !run_load_case(
+            "hlvx-pmp-execute-denied", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, true)) {
+        return 1;
+    }
+
+    const std::array<memblock::StoreOp, 4> store_ops{{
+        memblock::StoreOp::hsvb, memblock::StoreOp::hsvh,
+        memblock::StoreOp::hsvw, memblock::StoreOp::hsvd,
+    }};
+    for (unsigned index = 0; index < store_ops.size(); ++index) {
+        if (!run_store_case(
+                "hsv-encoding", store_ops[index], rw_supervisor, g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor, false,
+                0x8877665544332211ULL + index)) {
+            return 1;
+        }
+    }
+    if (!run_store_case(
+            "hsv-spvp-user-supervisor-page", memblock::StoreOp::hsvd,
+            rw_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::user, false,
+            0x1020304050607080ULL) ||
+        !run_store_case(
+            "hsv-supervisor-user-vsum0", memblock::StoreOp::hsvd,
+            rw_user, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor, false,
+            0x1122334455667788ULL) ||
+        !run_store_case(
+            "hsv-supervisor-user-vsum1", memblock::StoreOp::hsvd,
+            rw_user, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor, true,
+            0x99aabbccddeeff00ULL)) {
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
+              << " cases=" << load_cases + store_cases
+              << " load_cases=" << load_cases
+              << " store_cases=" << store_cases
+              << " page_faults=" << page_faults
+              << " guest_page_faults=" << guest_page_faults
+              << " access_faults=" << access_faults
+              << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
+              << " cycles=" << total_cycles
+              << " ptw_requests=" << total_ptw_requests
+              << " dcache_a=" << total_dcache_requests
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pmp_contracts(int argc, char **argv)
 {
     constexpr std::uint8_t pmp_tor_read = 0x09;
@@ -17986,6 +18381,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "pmp-contracts") {
             return run_pmp_contracts(argc, argv);
+        }
+        if (options.test == "hypervisor-contracts") {
+            return run_hypervisor_contracts(argc, argv);
         }
         if (options.test == "l2-tlb-contracts") {
             return run_l2_tlb_contracts(argc, argv);

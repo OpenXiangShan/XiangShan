@@ -12,6 +12,27 @@ REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
 class MemBlockEnvironmentContractTest(unittest.TestCase):
+    def test_hypervisor_load_store_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+
+        for contract in (
+            "hlvb = 0x10",
+            "hlvxwu = 0x1e",
+            "hsvb = 0x10",
+            "hsvd = 0x13",
+            "constexpr unsigned scalar_store_bytes(StoreOp op)",
+            "static_cast<unsigned>(op) & 3U",
+            "op == StoreOp::cbo_zero",
+            "reference_hlvx_permitted",
+            "set_hypervisor_access_permissions",
+            "hypervisor-contracts",
+            "hlvx-pmp-execute-denied",
+            "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()

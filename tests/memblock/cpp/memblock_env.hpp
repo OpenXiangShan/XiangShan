@@ -117,6 +117,15 @@ enum class LoadOp : std::uint16_t {
     lbu = 4,
     lhu = 5,
     lwu = 6,
+    hlvb = 0x10,
+    hlvh = 0x11,
+    hlvw = 0x12,
+    hlvd = 0x13,
+    hlvbu = 0x14,
+    hlvhu = 0x15,
+    hlvwu = 0x16,
+    hlvxhu = 0x1d,
+    hlvxwu = 0x1e,
 };
 
 enum class StoreOp : std::uint16_t {
@@ -125,7 +134,24 @@ enum class StoreOp : std::uint16_t {
     sw = 2,
     sd = 3,
     cbo_zero = 7,
+    hsvb = 0x10,
+    hsvh = 0x11,
+    hsvw = 0x12,
+    hsvd = 0x13,
 };
+
+constexpr unsigned scalar_store_bytes(StoreOp op)
+{
+    return op == StoreOp::cbo_zero
+        ? 64U
+        : 1U << (static_cast<unsigned>(op) & 3U);
+}
+
+static_assert(scalar_store_bytes(StoreOp::sb) == 1U);
+static_assert(scalar_store_bytes(StoreOp::sd) == 8U);
+static_assert(scalar_store_bytes(StoreOp::hsvb) == 1U);
+static_assert(scalar_store_bytes(StoreOp::hsvd) == 8U);
+static_assert(scalar_store_bytes(StoreOp::cbo_zero) == 64U);
 
 enum class PrefetchOp : std::uint16_t {
     instruction = 0x8,
@@ -575,6 +601,20 @@ inline bool reference_store_permitted(
             : !permissions.user || sum;
     return mode_permitted && permissions.accessed && permissions.dirty &&
            permissions.writable;
+}
+
+inline bool reference_hlvx_permitted(
+    const ReferencePtePermissions &permissions,
+    ReferencePrivilegeMode privilege,
+    bool sum,
+    bool guest_stage = false)
+{
+    const bool mode_permitted = guest_stage
+        ? permissions.user
+        : privilege == ReferencePrivilegeMode::user
+            ? permissions.user
+            : !permissions.user || sum;
+    return mode_permitted && permissions.accessed && permissions.executable;
 }
 
 inline unsigned reference_page_levels(ReferencePageMode mode)
@@ -5120,6 +5160,26 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool set_hypervisor_access_permissions(
+        ReferencePrivilegeMode spvp,
+        bool mxr = false,
+        bool vmxr = false,
+        bool vsum = false)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(
+            static_cast<std::uint64_t>(ReferencePrivilegeMode::supervisor));
+        dut_.io_ooo_to_mem_tlbCsr_priv_virt.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_tlbCsr_priv_spvp.ImmSet(
+            static_cast<std::uint64_t>(spvp));
+        dut_.io_ooo_to_mem_tlbCsr_priv_mxr.ImmSet(mxr);
+        dut_.io_ooo_to_mem_tlbCsr_priv_vmxr.ImmSet(vmxr);
+        dut_.io_ooo_to_mem_tlbCsr_priv_vsum.ImmSet(vsum);
+        dut_.io_ooo_to_mem_tlbCsr_priv_virt_changed.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_tlbCsr_priv_virt_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
     bool configure_pmp(
         const std::vector<std::uint64_t> &encoded_addresses,
         const std::vector<std::uint8_t> &config_bytes)
@@ -6703,9 +6763,7 @@ public:
             : raw_address;
         // CBO.ZERO is encoded as 0x7 but architecturally covers one cache
         // line, not a 128-byte scalar transfer.
-        const unsigned bytes = transaction.op == StoreOp::cbo_zero
-            ? 64U
-            : 1U << static_cast<unsigned>(transaction.op);
+        const unsigned bytes = scalar_store_bytes(transaction.op);
         for (unsigned byte = 0; byte < bytes; ++byte) {
             memory_.write_reference_byte(
                 address + byte,
@@ -6778,7 +6836,7 @@ public:
     {
         const std::uint64_t address = transaction.oracle_address.value_or(
             transaction.address);
-        const unsigned bytes = 1U << static_cast<unsigned>(transaction.op);
+        const unsigned bytes = scalar_store_bytes(transaction.op);
         for (unsigned byte = 0; byte < bytes; ++byte) {
             memory_.write_reference_byte(
                 address + byte,
