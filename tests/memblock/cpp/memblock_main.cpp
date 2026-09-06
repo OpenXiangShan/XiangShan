@@ -2137,7 +2137,7 @@ int run_memory_violation(int argc, char **argv)
     }
 
     const auto &stats = environment.memory_violation_stats();
-    const auto &violation = stats.last;
+    const auto violation = stats.last;
     if (stats.count != violations_before + 1 || !violation.valid ||
         violation.is_rvc != oldest_load.predecode_rvc ||
         violation.rob_flag != oldest_load.rob_flag ||
@@ -2159,12 +2159,196 @@ int run_memory_violation(int argc, char **argv)
         return 1;
     }
 
+    const auto wait_for_single_violation = [&environment](
+        const char *phase, bool expected_rvc, bool expected_rob_flag,
+        std::uint8_t expected_rob, std::uint64_t expected_ftq,
+        std::uint8_t expected_ftq_offset) {
+        for (unsigned cycle = 0;
+             cycle < 512 && environment.memory_violation_stats().count == 0;
+             ++cycle) {
+            if (!environment.run_cycles(1)) {
+                std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                          << environment.cycle() << " phase=" << phase
+                          << "-wait reason=" << environment.error() << '\n';
+                return false;
+            }
+        }
+        if (!environment.run_cycles(32)) {
+            std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << "-settle reason=" << environment.error() << '\n';
+            return false;
+        }
+        const auto &result = environment.memory_violation_stats();
+        const auto &redirect = result.last;
+        if (result.count != 1 || !redirect.valid ||
+            redirect.is_rvc != expected_rvc ||
+            redirect.rob_flag != expected_rob_flag ||
+            redirect.rob_value != expected_rob || redirect.ftq_flag ||
+            redirect.ftq_value != expected_ftq ||
+            redirect.ftq_offset != expected_ftq_offset || !redirect.level) {
+            std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << "-check count=" << result.count
+                      << " is_rvc=" << redirect.is_rvc
+                      << " rob=" << redirect.rob_flag << ':'
+                      << static_cast<unsigned>(redirect.rob_value)
+                      << " ftq=" << redirect.ftq_flag << ':'
+                      << static_cast<unsigned>(redirect.ftq_value)
+                      << " ftq_offset="
+                      << static_cast<unsigned>(redirect.ftq_offset)
+                      << " level=" << redirect.level << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    constexpr std::uint64_t vector_line = base + 0x1000;
+    constexpr std::uint64_t vector_conflict = vector_line + 24;
+    environment.memory().fill_incrementing(vector_line, 64, 0x75);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle() << " phase=vector-reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction vector_older_store{
+        .address = vector_conflict,
+        .data = 0xfedcba9876543210ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 48,
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+    };
+    const memblock::VectorMemoryTransaction vector_younger_load{
+        .address = vector_conflict,
+        .eew = 3,
+        .vl = 1,
+        .rob = 49,
+        .lq = 0,
+        .sq = 1,
+        .pdest = 91,
+        .lane = 0,
+        .flow_num = 1,
+        .ftq_ptr = 52,
+        .ftq_offset = 9,
+    };
+    environment.expect_store(vector_older_store);
+    environment.expect_vector(vector_younger_load);
+    if (!environment.enqueue_store(vector_older_store, 0) ||
+        !environment.enqueue_vector(vector_younger_load) ||
+        !environment.issue_store_data(vector_older_store, 256) ||
+        !environment.issue_vector(vector_younger_load, 256) ||
+        !environment.run_until_vector_complete(4096) ||
+        !environment.issue_store_address(vector_older_store, 256) ||
+        !environment.run_until_store_complete(512) ||
+        !wait_for_single_violation(
+            "vector-redirect", false, vector_younger_load.rob_flag,
+            vector_younger_load.rob, vector_younger_load.ftq_ptr,
+            vector_younger_load.ftq_offset)) {
+        if (!environment.error().empty()) {
+            std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                      << environment.cycle() << " phase=vector-trigger reason="
+                      << environment.error() << '\n';
+        }
+        return 1;
+    }
+
+    constexpr std::uint64_t concurrent_line_a = base + 0x2000;
+    constexpr std::uint64_t concurrent_line_b = base + 0x3000;
+    constexpr std::uint64_t concurrent_address_a = concurrent_line_a + 8;
+    constexpr std::uint64_t concurrent_address_b = concurrent_line_b + 40;
+    environment.memory().fill_incrementing(concurrent_line_a, 64, 0x83);
+    environment.memory().fill_incrementing(concurrent_line_b, 64, 0x91);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle() << " phase=concurrent-reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::vector<memblock::StoreTransaction> concurrent_stores{
+        {
+            .address = concurrent_address_a,
+            .data = 0x0102030405060708ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 62,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 0,
+        },
+        {
+            .address = concurrent_address_b,
+            .data = 0x1112131415161718ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 63,
+            .sq = 1,
+            .address_lane = 1,
+            .data_lane = 1,
+        },
+    };
+    const std::vector<memblock::LoadTransaction> concurrent_loads{
+        {
+            .address = concurrent_address_a,
+            .op = memblock::LoadOp::ld,
+            .rob = 65,
+            .lq = 0,
+            .sq = 2,
+            .pdest = 92,
+            .lane = 1,
+            .predecode_rvc = true,
+            .ftq_ptr = 53,
+            .ftq_offset = 10,
+        },
+        {
+            .address = concurrent_address_b,
+            .op = memblock::LoadOp::ld,
+            .rob = 64,
+            .lq = 1,
+            .sq = 2,
+            .pdest = 93,
+            .lane = 2,
+            .ftq_ptr = 54,
+            .ftq_offset = 11,
+        },
+    };
+    for (const auto &store : concurrent_stores) {
+        environment.expect_store(store);
+    }
+    for (const auto &load : concurrent_loads) {
+        environment.expect_load(load);
+    }
+    const auto &concurrent_oldest = concurrent_loads.back();
+    if (!environment.enqueue_store(concurrent_stores[0], 0) ||
+        !environment.enqueue_store(concurrent_stores[1], 1) ||
+        !environment.enqueue_load_batch(concurrent_loads, {0, 1}) ||
+        !environment.issue_store_data(concurrent_stores[0], 256) ||
+        !environment.issue_store_data(concurrent_stores[1], 256) ||
+        !environment.issue_load_batch(concurrent_loads, 256) ||
+        !environment.run_until_complete(4096) ||
+        !environment.issue_store_address_batch(concurrent_stores, 256) ||
+        !environment.run_until_store_complete(512) ||
+        !wait_for_single_violation(
+            "concurrent-redirect", concurrent_oldest.predecode_rvc,
+            concurrent_oldest.rob_flag, concurrent_oldest.rob,
+            concurrent_oldest.ftq_ptr, concurrent_oldest.ftq_offset)) {
+        if (!environment.error().empty()) {
+            std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=concurrent-trigger reason="
+                      << environment.error() << '\n';
+        }
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_MEMORY_VIOLATION_PASS"
               << " cycle=" << environment.cycle()
-              << " violations=" << stats.count
+              << " violations=3"
               << " non_overlap=1"
               << " candidates=" << younger_loads.size()
               << " rob_wrap=1"
+              << " vector_candidate=1"
+              << " concurrent_sources=2"
               << " rob=" << violation.rob_flag << ':'
               << static_cast<unsigned>(violation.rob_value)
               << " ftq=" << violation.ftq_flag << ':'

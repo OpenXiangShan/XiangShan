@@ -5715,6 +5715,68 @@ public:
         return false;
     }
 
+    bool issue_store_address_batch(
+        const std::vector<StoreTransaction> &transactions,
+        unsigned timeout = 64)
+    {
+        if (transactions.empty() || transactions.size() > kScalarStoreLanes) {
+            error_ = "scalar store-address batch must contain one or two transactions";
+            return false;
+        }
+        std::array<bool, kScalarStoreLanes> lane_used{};
+        std::vector<generated::ScalarStoreIssue> issues(transactions.size());
+        for (std::size_t index = 0; index < transactions.size(); ++index) {
+            const auto &transaction = transactions[index];
+            if (transaction.address_lane >= kScalarStoreLanes ||
+                lane_used[transaction.address_lane]) {
+                error_ = "scalar store-address batch lanes must be unique";
+                return false;
+            }
+            lane_used[transaction.address_lane] = true;
+            auto &issue = issues[index];
+            issue.fu_type = kFuTypeStore;
+            issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+            issue.rob_flag = transaction.rob_flag;
+            issue.rob_value = transaction.rob;
+            issue.sq_flag = transaction.sq_flag;
+            issue.sq_value = transaction.sq;
+            issue.src = transaction.address;
+        }
+
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            for (std::size_t index = 0; index < transactions.size(); ++index) {
+                generated::drive_scalar_store_address(
+                    dut_, transactions[index].address_lane, issues[index]);
+            }
+            dut_.RefreshComb();
+            const bool all_ready = std::all_of(
+                transactions.begin(), transactions.end(), [&](const auto &transaction) {
+                    return generated::scalar_store_address_ready(
+                        dut_, transaction.address_lane);
+                });
+            if (all_ready) {
+                for (const auto &transaction : transactions) {
+                    if (!store_scoreboard_.mark_address_issued(
+                            transaction, this->cycle())) {
+                        generated::clear_scalar_store_issue_valids(dut_);
+                        return false;
+                    }
+                }
+                tick();
+                generated::clear_scalar_store_issue_valids(dut_);
+                return check_components();
+            }
+            generated::clear_scalar_store_issue_valids(dut_);
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        generated::clear_scalar_store_issue_valids(dut_);
+        error_ = "scalar store-address batch timed out waiting for same-cycle ready";
+        return false;
+    }
+
     // Atomics enter the store-address port but are handled by AtomicsUnit,
     // rather than StoreQueue.  They therefore do not have an LSQ allocation
     // or StoreScoreboard entry; the scalar-load scoreboard observes their

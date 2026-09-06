@@ -342,7 +342,12 @@ three younger same-byte loads whose ROB identities cross the 159-to-0 wrap,
 and resolves the store address. It requires exactly one RAW replay redirect,
 selects the oldest of the three loads across the circular pointer boundary,
 and compares every exposed `memoryViolation` field against that load's
-independently chosen ROB, FTQ, RVC, and flush-level metadata.
+independently chosen ROB, FTQ, RVC, and flush-level metadata. A vector-load
+flow is then completed behind an unresolved scalar store and must produce the
+same exact RAW redirect contract. Finally, both scalar store-address lanes are
+accepted in one cycle so that they produce distinct rollback candidates; the
+candidate on lane 1 is intentionally older, proving the top-level arbiter uses
+ROB age rather than port priority.
 `rar-violation` enables the architectural load-load check, lets a younger load
 complete first, drains an older store so the line is dirty, and forces a DCache
 writeback/release with a Probe before issuing the older load. It requires the

@@ -39,18 +39,22 @@ verification plan.
 The `memory-violation` scenario first completed a same-line byte-disjoint load
 before resolving an older store and observed no redirect. It then completed
 three same-byte candidate loads behind a store at ROB 158; the candidate ROB
-identities crossed the circular boundary at 159, 0, and 1. Current RTL passed
-in 364 cycles, produced exactly one top-level redirect, and selected the oldest
-candidate with independently assigned metadata: `rob=0:159`, `ftq=0:37`,
-`ftqOffset=6`, `isRVC=1`, and `level=flush`. This closes scalar RAW non-overlap,
-oldest-of-three selection, ROB wraparound, and all eight exposed output pins.
+identities crossed the circular boundary at 159, 0, and 1. It next completed a
+vector-load flow behind an unresolved scalar store, then accepted both scalar
+store-address lanes in one cycle so that two distinct loads became rollback
+candidates. The lane-1 candidate was deliberately older than lane 0. Current
+RTL passed all three redirect cases in 590 cycles, selected the oldest candidate
+rather than the lower-numbered source, and preserved independently assigned
+ROB, FTQ, RVC, and `flush` metadata. This closes scalar RAW non-overlap,
+oldest-of-three selection, ROB wraparound, vector-flow participation,
+cross-source arbitration, and all eight exposed output pins.
 
 The companion `rar-violation` scenario enables `ldld_vio_check`, completes a
 younger load, forces its dirty cache line through a one-Probe writeback/release,
 and then executes the older load. Current RTL passed in 365 cycles with exactly
 one redirect identifying `rob=0:30`, `ftq=0:43`, `ftqOffset=5`, `isRVC=1`, and
-`level=flushAfter`. Multiple-candidate arbitration, pointer wraparound, vector,
-and concurrent redirect crosses remain open.
+`level=flushAfter`. RAR-specific multiple-candidate and pointer-wrap crosses,
+plus independently classified cancellation causes, remain open.
 
 The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
 classification: these are three LoadUnit outputs carrying software
