@@ -8,19 +8,19 @@
   `f8bb99518` (Uncache exception preservation), `e1424686a` (exceptional
   atomic `rfWen` suppression), `7045fa175` (exceptional scalar FP-load
   `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
-  address selection).
+  address selection), and `9feb8279e` (vector-segment redirect cancellation).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
-- MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
-- Complete ordered RTL SHA-256: `a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173`
-- Current rebuilt and frozen UT executable SHA-256: `b0bd45d43f0e41ea9999f3b49fdf5908dba1abf9464ac39db57906066531b977`
+- MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
+- Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
+- Current rebuilt and frozen UT executable SHA-256: `9486c3ead42ecd560e9f18a1d312b3e5ebbcda6a74250f94396a939f0def0d1c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `efef075f2d7a057647fcb1edafcadb2a897eefbb00d5690ead592fee95f7d807`
+- Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen RTL metadata SHA-256: `dccfa4494f8db1313ff59c540c28128994d796a3e0398de5f913ba51cd2713da`
-- Frozen runtime manifest SHA-256: `52dff85bcd1fa1c26ca07a69a0190daf5556bb2835a3433229c390dcae25f83e`
+- Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
+- Frozen runtime manifest SHA-256: `f4fbcf675573c51c472e5947469aa14077b9c9b22f9a0948678855980d11717f`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -49,7 +49,7 @@ MMIO cases emitted five Uncache requests and zero DCache requests.
 
 On 2026-09-07, the expanded `trigger-contracts` scenario passed 25 cases in
 1,433 aggregate cycles on complete RTL SHA-256
-`a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173`.
+`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
 All four enable slots produced a positive scalar-load breakpoint. EQ, GE, and
 LT each exercised their qualifying boundary, while GE/LT misses plus disabled,
 load/store-mismatched, `select=1`, breakpoint-gated, and current-debug-mode
@@ -72,10 +72,32 @@ returned `vstart=1` for a field in segment 0. Repair commit `d159ebdbd` connects
 the trigger to the same current `tlbReqVaddr` used by the DTLB. The repaired
 case returns `vstart=0` after one prefix refill. Full details are in
 `CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`. Short controls on this same
-model passed: `vector-segment` in 397 cycles, `vector-segment-fof` in 304,
+model passed: `vector-segment` in 3,275 aggregate cycles,
+`vector-segment-fof` in 304,
 `vector-load` in 163, and `misaligned-stores` in 1,200. The frozen runtime
 replayed the complete 25-case trigger scenario with the same 1,433-cycle
 summary.
+
+## Vector Segment Redirect Cancellation
+
+On 2026-09-07, a new delayed-refill redirect phase exposed a confirmed CPU
+RTL defect. After a self-flushing redirect for ROB 83, `VSegmentUnit` ignored
+the connected redirect and produced a normal `pdest=104` vector writeback.
+The pre-fix failure occurred at cycle 304 after exactly one accepted DCache
+request; `VSegmentUnit.scala` contained no use of `io.redirect`.
+
+Repair commit `9feb8279e` now applies `RobPtr.needFlush` at enqueue, resident
+state, DTLB/DCache/SBuffer request, FOF buffer, exception/feedback, and
+registered writeback boundaries. On complete RTL SHA-256
+`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`,
+the frozen `vector-segment` scenario passed in 3,275 aggregate cycles with 18
+DCache requests. It canceled an ordinary segment load behind one accepted
+128-cycle refill, completed both fields of a distinct successor, canceled both
+FOF data uops plus the fix-VL uop, and canceled a segment store before a
+successor load returned the unchanged original bytes. All redirect phases
+produced zero stale writeback and segment traffic allocated no LQ/SQ entries.
+The exact reproducer and RTL analysis are in
+`CPU_BUG_VECTOR_SEGMENT_REDIRECT_IGNORED.md`.
 
 ## Side-Effecting MMIO Device Model
 

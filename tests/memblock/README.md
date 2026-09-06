@@ -43,6 +43,13 @@ as ordinary LSQ traffic.
 fault suppresses the exception and shortens VL, while a first-element fault
 retains the exception and fault VA and leaves VL unchanged.
 
+`vector-segment` also redirects a two-field load behind an accepted 128-cycle
+refill and requires zero stale writeback, then completes a distinct successor.
+A separate FOF redirect cancels both data uops and the buffered fix-VL uop;
+an early segment-store redirect must leave the original bytes visible to a
+successor segment load. Its terminal summary reports aggregate cycles and
+DCache requests across every sub-environment.
+
 `pmp-contracts` programs the distributed PMP CSR input and checks data-side
 TOR and NAPOT regions, exact lower/upper edges, R/W and AMO denial, overlapping
 entry priority, M-mode unlocked bypass, locked-entry enforcement, and locked
@@ -93,7 +100,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining segment LMUL/whole-register/redirect combinations, remaining PMP/PMA matrices,
+remaining segment LMUL/whole-register combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
@@ -105,8 +112,9 @@ UT harness, oracle, regression-controller, and provenance fixes are recorded in
 normal commits and consolidated documentation only; they do not receive a
 per-fix Markdown report. The confirmed reports currently retained are
 `CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`,
-`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`, `CPU_BUG_FP_EXCEPTION_FP_WEN.md`, and
-`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`.
+`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`, `CPU_BUG_FP_EXCEPTION_FP_WEN.md`,
+`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`, and
+`CPU_BUG_VECTOR_SEGMENT_REDIRECT_IGNORED.md`.
 
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:

@@ -52,24 +52,28 @@ can drain it; its data is discarded after the FSM cancellation.
 
 ## Validation Status
 
-After fresh DefaultConfig elaboration and a full Picker rebuild, the complete
+The repair is commit `9feb8279e`. After fresh DefaultConfig elaboration and a
+full Picker rebuild, the complete
 ordered RTL SHA-256 is
 `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
 The repaired `vector-segment` test passed its original load/store/addressing
-checks plus both redirect phases:
+checks plus all three redirect phases:
 
 ```text
-MEMBLOCK_VECTOR_SEGMENT_PASS cycle=397 fields=2 elements=2
+MEMBLOCK_VECTOR_SEGMENT_PASS cycle=3275 fields=2 elements=2
 segment_load_writebacks=2 segment_store_writebacks=2 addressed_modes=3
 addressed_load_writebacks=12 addressed_store_writebacks=6
-segment_lsq_allocations=0 redirect_cancellations=1
+segment_lsq_allocations=0 dcache_requests=18 redirect_cancellations=1
 redirect_survivor_writebacks=2 fof_redirect_cancellations=1
+store_redirect_cancellations=1 store_redirect_survivor_writebacks=2
 rtl_sha256=e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8
 ```
 
 ROB 83 now produces no stale result after the single accepted delayed refill,
 and ROB 84 completes both successor fields. A separate FOF segment cancellation
-produces neither its two data writebacks nor its fix-VL writeback. The existing
+produces neither its two data writebacks nor its fix-VL writeback. An early
+segment-store cancellation also produces no store writeback, and its successor
+load returns the unchanged original bytes. The existing
 `trigger-contracts`, `vector-segment-fof`, `vector-load`, and
 `misaligned-stores` controls also pass on the repaired model. Frozen runtime
 hashes are recorded in `RESULTS.md` after the accompanying UT update.

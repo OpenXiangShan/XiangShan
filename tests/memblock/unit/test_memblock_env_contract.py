@@ -1301,11 +1301,29 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "addressed_load_writebacks",
             "addressed_store_writebacks",
             "segment_lsq_allocations=0",
+            "phase=redirect-cancel",
+            "redirect_cancellations=1 redirect_survivor_writebacks=2",
+            "phase=fof-redirect-cancel",
+            "fof_redirect_cancellations=1",
+            "phase=store-redirect-cancel",
+            "store_redirect_cancellations=1",
+            "store_redirect_survivor_writebacks=2",
+            "aggregate_cycles",
+            "aggregate_dcache_requests",
             "vector-segment",
         ):
             self.assertIn(contract, environment + main + makefile + benchmark)
-        self.assertIn("class VSegmentUnit", segment)
-        self.assertIn("io.uopwriteback.valid", segment)
+        for rtl_contract in (
+            "class VSegmentUnit",
+            "val activeNeedCancel",
+            "val enqNeedCancel",
+            "fofBuffer.robIdx.needFlush(io.redirect)",
+            "io.dtlb.req_kill                    := activeNeedCancel",
+            "activeNeedCancel,",
+            "!io.uopwriteback.bits.uop.robIdx.needFlush(io.redirect)",
+            "!io.feedback.bits.robIdx.needFlush(io.redirect)",
+        ):
+            self.assertIn(rtl_contract, segment)
 
     def test_vector_segment_fof_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
