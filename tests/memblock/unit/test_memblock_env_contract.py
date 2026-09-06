@@ -16,6 +16,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        tlb = (
+            REPO_ROOT / "src/main/scala/xiangshan/cache/mmu/TLB.scala"
+        ).read_text()
 
         for contract in (
             "hlvb = 0x10",
@@ -34,9 +37,17 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pbmt_combinations=",
             "pbmt_family_cases=",
             "misaligned_family_cases=",
+            "physical_pmp_cases=",
+            "ReferencePrivilegeMode::machine",
+            "pmp_napot_read_execute",
+            "required_pmp_permission = hlvx ? 0x5U : 0x1U",
             "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
+            "machine_spvp_pmp=1",
         ):
             self.assertIn(contract, environment + driver + makefile)
+        self.assertIn(
+            "Mux(req_out(i).isPrefetch, mode_tmp, mode(i))", tlb
+        )
 
     def test_pointer_masking_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()

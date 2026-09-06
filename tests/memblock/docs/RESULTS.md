@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `393f65b97e5c0255ea85fa323e43b6e12546a22dce119b83d979bbad4a3d1d24`
+- Current rebuilt and frozen UT executable SHA-256: `4379a83d0f44ee4b041fcca62786a9208033a691b9af02de6782a4e2bad6d9d0`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `4df6125930f2713f28efbbdf14aeaf74b2be961d49da2df32525b2aedf88f5ec`
+- Frozen runtime manifest SHA-256: `98526cda54521c214e546e3b3c78c1e5922132c5a96d535ea9ab568cb4fd817c`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -113,19 +113,26 @@ the original VL of 2.
 
 ## Hypervisor Memory Operation Mode Matrix
 
-The expanded `hypervisor-contracts` scenario passed 55 directed cases in 12,880
+The expanded `hypervisor-contracts` scenario passed 67 directed cases in 15,534
 aggregate cycles on complete RTL SHA-256
-`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 In addition to every exposed HLV/HLVX/HSV encoding and the existing privilege,
 permission, fault, and PMP checks, it executed one HLV, one HLVX, and one HSV
 under each of `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, and
 `Sv48->Sv48x4`. Five further PBMT combinations crossed every operation family
 with final PMA, NC, and IO manager selection plus VS-over-G priority. The run
 also completed misaligned cacheable HLV.D, HLVX.WU, and HSV.D through the
-split/replay paths with exact data and store readback. It observed 488 PTW
-requests and 36 data DCache requests; successful stores were committed and read
-back through HLV. No CPU defect was observed. Physical PMA-device
-classification and the broader hypervisor PMP cross remain open.
+split/replay paths with exact data and store readback. Twelve new cases execute
+HLV, HLVX, and HSV while the current mode is M and SPVP selects U or S, under
+R-only, X-only, RW, and RX physical PMP entries. The independent oracle requires
+R for HLV, both R and X for HLVX, and W for HSV; seven new denials plus the
+existing HLVX denial produced exact access faults. The run observed 584 PTW
+requests and 43 data DCache requests. Ordinary PMP denials reached neither data
+manager; HLVX with R allowed/X denied exposed the current pipeline's single
+early cacheable DCache request but produced no RF effect or Uncache request.
+Successful stores were committed and read back through HLV. No confirmed CPU
+defect was observed. Physical PMA-device classification and locked/edge
+hypervisor PMP cases remain open.
 
 ## Scalar Load Feedback Boundary
 
@@ -228,8 +235,10 @@ verified to behave as the specified minimum 4-KiB NAPOT region. Separate
 M-mode runs observed unlocked-entry bypass, locked-entry enforcement, and
 rejection of later address/config rewrites to a locked entry. The complete run
 reported 15 load/atomic writebacks, two store writebacks, and eight permitted
-DCache requests. No CPU defect was observed. Instruction X permission,
-the broader hypervisor PMP cross, and the fixed-PMA matrix remain explicit gaps.
+DCache requests. No CPU defect was observed. The separate hypervisor scenario
+now covers the SPVP-selected R/R+X/W permission matrix under M-mode execution;
+remaining instruction PMP, locked/edge hypervisor PMP, and fixed-PMA cases stay
+explicit gaps.
 
 ## RAW Memory Violation Boundary
 
@@ -1079,6 +1088,7 @@ the historical complete RTL SHA-256 is
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
 | Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |
+| Hypervisor memory operations | Pass | 67 cases in 15,534 aggregate cycles: all encodings, four nested mode pairs, five PBMT combinations, misaligned split paths, and 12 M-mode/SPVP physical-PMP crosses. HLV required R, HLVX required R+X, and HSV required W across R/X/RW/RX regions; eight total access faults, 584 PTW requests, and 43 DCache requests matched the oracle |
 | Concurrent exception priority | Pass | Cycle 1,351; wrapped/reversed queue age, same-ROB vector-uop order, cross-cause and scalar/vector replacement all passed. Two additional vector-load/store pairs populated the exception buffers in opposite arrival orders; toggling `isStoreException` selected and restored each exact source VA. Totals were 11 scalar-load, six vector-load, and six scalar-store writebacks |
 | Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |

@@ -677,6 +677,7 @@ inline ReferencePbmt reference_two_stage_pbmt(
 enum class ReferencePrivilegeMode : std::uint8_t {
     user = 0,
     supervisor = 1,
+    machine = 3,
 };
 
 struct ReferencePtePermissions {
@@ -5574,10 +5575,12 @@ public:
         ReferencePrivilegeMode spvp,
         bool mxr = false,
         bool vmxr = false,
-        bool vsum = false)
+        bool vsum = false,
+        ReferencePrivilegeMode current_privilege =
+            ReferencePrivilegeMode::supervisor)
     {
         dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(
-            static_cast<std::uint64_t>(ReferencePrivilegeMode::supervisor));
+            static_cast<std::uint64_t>(current_privilege));
         dut_.io_ooo_to_mem_tlbCsr_priv_virt.ImmSet(std::uint64_t{0});
         dut_.io_ooo_to_mem_tlbCsr_priv_spvp.ImmSet(
             static_cast<std::uint64_t>(spvp));

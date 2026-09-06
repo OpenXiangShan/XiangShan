@@ -11107,6 +11107,9 @@ int run_hypervisor_contracts(int argc, char **argv)
     constexpr std::uint64_t vs_root = 0xb0000000ULL;
     constexpr std::uint64_t g_root = 0xb2000000ULL;
     constexpr std::uint8_t pmp_napot_read = 0x19;
+    constexpr std::uint8_t pmp_napot_execute = 0x1c;
+    constexpr std::uint8_t pmp_napot_read_write = 0x1b;
+    constexpr std::uint8_t pmp_napot_read_execute = 0x1d;
     constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
 
     auto configure = [](
@@ -11122,7 +11125,9 @@ int run_hypervisor_contracts(int argc, char **argv)
                          memblock::ReferencePbmt vs_pbmt =
                              memblock::ReferencePbmt::pma,
                          memblock::ReferencePbmt g_pbmt =
-                             memblock::ReferencePbmt::pma) {
+                             memblock::ReferencePbmt::pma,
+                         memblock::ReferencePrivilegeMode current_privilege =
+                             memblock::ReferencePrivilegeMode::supervisor) {
         const bool vs_nc = vs_pbmt == memblock::ReferencePbmt::nc;
         const bool vs_io = vs_pbmt == memblock::ReferencePbmt::io;
         const bool g_nc = g_pbmt == memblock::ReferencePbmt::nc;
@@ -11161,7 +11166,7 @@ int run_hypervisor_contracts(int argc, char **argv)
                 vs_mode, g_mode,
                 vs_root, g_root, 61, 71) &&
             environment.set_hypervisor_access_permissions(
-                spvp, mxr, vmxr, vsum) &&
+                spvp, mxr, vmxr, vsum, current_privilege) &&
             environment.enable_misaligned_accesses();
     };
 
@@ -11178,6 +11183,7 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned pbmt_combinations = 0;
     unsigned pbmt_family_cases = 0;
     unsigned misaligned_family_cases = 0;
+    unsigned physical_pmp_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -11197,7 +11203,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                                  memblock::ReferencePbmt::pma,
                              memblock::ReferencePbmt g_pbmt =
                                  memblock::ReferencePbmt::pma,
-                             std::uint64_t address_offset = 0x180) {
+                             std::uint64_t address_offset = 0x180,
+                             std::optional<std::uint8_t> physical_pmp_config =
+                                 std::nullopt,
+                             memblock::ReferencePrivilegeMode current_privilege =
+                                 memblock::ReferencePrivilegeMode::supervisor) {
         const bool hlvx = op == memblock::LoadOp::hlvxhu ||
                           op == memblock::LoadOp::hlvxwu;
         const bool vs_permitted = hlvx
@@ -11210,11 +11220,19 @@ int run_hypervisor_contracts(int argc, char **argv)
             : memblock::reference_load_permitted(
                   g, memblock::ReferencePrivilegeMode::supervisor, false,
                   mxr, true);
+        const std::optional<std::uint8_t> active_pmp_config =
+            pmp_execute_denied
+                ? std::optional<std::uint8_t>{pmp_napot_read}
+                : physical_pmp_config;
+        const std::uint8_t required_pmp_permission = hlvx ? 0x5U : 0x1U;
+        const bool physical_pmp_denied = active_pmp_config.has_value() &&
+            (*active_pmp_config & required_pmp_permission) !=
+                required_pmp_permission;
         const std::uint32_t expected_exception = !vs_permitted
             ? memblock::kExceptionLoadPageFault
             : !g_permitted
                 ? memblock::kExceptionLoadGuestPageFault
-                : pmp_execute_denied
+                : physical_pmp_denied
                     ? memblock::kExceptionLoadAccessFault
                     : 0U;
         const auto final_pbmt =
@@ -11226,20 +11244,21 @@ int run_hypervisor_contracts(int argc, char **argv)
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x31);
         if (!configure(
                 environment, vs, g, spvp, mxr, vmxr, vsum,
-                vs_mode, g_mode, vs_pbmt, g_pbmt)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
                       << '\n';
             return false;
         }
-        if (pmp_execute_denied) {
+        if (active_pmp_config.has_value()) {
             const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
                 return (base | (size / 2 - 1)) >> 2;
             };
             if (!environment.configure_pmp(
                     {napot_address(host_physical, 0x1000), ~std::uint64_t{0}},
-                    {pmp_napot_read, pmp_napot_read_write_execute})) {
+                    {*active_pmp_config,
+                     pmp_napot_read_write_execute})) {
                 std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                           << environment.cycle() << " phase=" << name
                           << "-pmp reason=" << environment.error() << '\n';
@@ -11289,10 +11308,21 @@ int run_hypervisor_contracts(int argc, char **argv)
             cancels += feedback_after.ld2_cancels[lane] -
                        feedback_before.ld2_cancels[lane];
         }
+        // HLVX maps to a read-execute PMP command. If R is allowed but X is
+        // denied, the load pipeline raises the correct access fault through
+        // pmp.instr, while its DCache kill path sees neither pmp.ld nor pmp.st.
+        // Pin that unique externally visible early lookup instead of allowing
+        // arbitrary DCache traffic for every physical PMP fault.
+        const bool hlvx_execute_only_fault =
+            expected_exception == memblock::kExceptionLoadAccessFault &&
+            hlvx && active_pmp_config.has_value() &&
+            ((*active_pmp_config & 0x1U) != 0) &&
+            ((*active_pmp_config & 0x4U) == 0);
+        const std::uint64_t expected_fault_dcache = dcache_before +
+            (hlvx_execute_only_fault ? 1U : 0U);
         if (expected_exception != 0 &&
             (environment.uncache_requests() != uncache_before ||
-             (!pmp_execute_denied &&
-              environment.tilelink_requests() != dcache_before) ||
+             environment.tilelink_requests() != expected_fault_dcache ||
              cancels == 0 || wakeups != cancels)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
@@ -11350,15 +11380,23 @@ int run_hypervisor_contracts(int argc, char **argv)
                                   memblock::ReferencePbmt::pma,
                               memblock::ReferencePbmt g_pbmt =
                                   memblock::ReferencePbmt::pma,
-                              std::uint64_t address_offset = 0x280) {
+                              std::uint64_t address_offset = 0x280,
+                              std::optional<std::uint8_t> physical_pmp_config =
+                                  std::nullopt,
+                              memblock::ReferencePrivilegeMode current_privilege =
+                                  memblock::ReferencePrivilegeMode::supervisor) {
         const bool vs_permitted =
             memblock::reference_store_permitted(vs, spvp, vsum);
         const bool g_permitted = memblock::reference_store_permitted(
             g, memblock::ReferencePrivilegeMode::supervisor, false, true);
+        const bool physical_pmp_denied = physical_pmp_config.has_value() &&
+            (*physical_pmp_config & 0x2U) == 0;
         const std::uint32_t expected_exception = !vs_permitted
             ? memblock::kExceptionStorePageFault
             : !g_permitted
                 ? memblock::kExceptionStoreGuestPageFault
+                : physical_pmp_denied
+                    ? memblock::kExceptionStoreAccessFault
                 : 0U;
         const auto final_pbmt =
             memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
@@ -11373,12 +11411,26 @@ int run_hypervisor_contracts(int argc, char **argv)
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
         if (!configure(
                 environment, vs, g, spvp, false, false, vsum,
-                vs_mode, g_mode, vs_pbmt, g_pbmt)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
                       << '\n';
             return false;
+        }
+        if (physical_pmp_config.has_value()) {
+            const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+                return (base | (size / 2 - 1)) >> 2;
+            };
+            if (!environment.configure_pmp(
+                    {napot_address(host_physical, 0x1000), ~std::uint64_t{0}},
+                    {*physical_pmp_config,
+                     pmp_napot_read_write_execute})) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << "-pmp reason=" << environment.error() << '\n';
+                return false;
+            }
         }
         const memblock::StoreTransaction transaction{
             .address = guest_virtual + address_offset,
@@ -11508,6 +11560,8 @@ int run_hypervisor_contracts(int argc, char **argv)
         page_faults += expected_exception == memblock::kExceptionStorePageFault;
         guest_page_faults +=
             expected_exception == memblock::kExceptionStoreGuestPageFault;
+        access_faults +=
+            expected_exception == memblock::kExceptionStoreAccessFault;
         total_cycles += environment.cycle();
         total_ptw_requests += environment.ptw_requests();
         total_dcache_requests += environment.tilelink_requests();
@@ -11520,6 +11574,10 @@ int run_hypervisor_contracts(int argc, char **argv)
     const memblock::ReferencePtePermissions x_supervisor{
         .readable = false, .writable = false, .executable = true,
         .dirty = false,
+    };
+    const memblock::ReferencePtePermissions x_user{
+        .readable = false, .writable = false, .executable = true,
+        .user = true, .dirty = false,
     };
     const memblock::ReferencePtePermissions g_x_user{
         .readable = false, .writable = false, .executable = true,
@@ -11727,6 +11785,65 @@ int run_hypervisor_contracts(int argc, char **argv)
     }
     misaligned_family_cases += 3;
 
+    struct HypervisorPmpCase {
+        const char *name;
+        std::uint8_t config;
+        memblock::ReferencePrivilegeMode spvp;
+        const memblock::ReferencePtePermissions *vs_load;
+        const memblock::ReferencePtePermissions *vs_hlvx;
+    };
+    const std::array<HypervisorPmpCase, 4> hypervisor_pmp_cases{{
+        {"pmp-r", pmp_napot_read,
+         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user},
+        {"pmp-x", pmp_napot_execute,
+         memblock::ReferencePrivilegeMode::supervisor,
+         &rw_supervisor, &x_supervisor},
+        {"pmp-rw", pmp_napot_read_write,
+         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user},
+        {"pmp-rx", pmp_napot_read_execute,
+         memblock::ReferencePrivilegeMode::supervisor,
+         &rw_supervisor, &x_supervisor},
+    }};
+    for (unsigned index = 0; index < hypervisor_pmp_cases.size(); ++index) {
+        const auto &item = hypervisor_pmp_cases[index];
+        const std::string hlv_name = std::string(item.name) + "-hlv";
+        const std::string hlvx_name = std::string(item.name) + "-hlvx";
+        const std::string hsv_name = std::string(item.name) + "-hsv";
+        if (!run_load_case(
+                hlv_name.c_str(), memblock::LoadOp::hlvd,
+                *item.vs_load, g_rw_user, item.spvp,
+                false, false, false, false,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePbmt::pma,
+                memblock::ReferencePbmt::pma, 0x180,
+                item.config,
+                memblock::ReferencePrivilegeMode::machine) ||
+            !run_load_case(
+                hlvx_name.c_str(), memblock::LoadOp::hlvxwu,
+                *item.vs_hlvx, g_x_user, item.spvp,
+                false, false, false, false,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePbmt::pma,
+                memblock::ReferencePbmt::pma, 0x184,
+                item.config,
+                memblock::ReferencePrivilegeMode::machine) ||
+            !run_store_case(
+                hsv_name.c_str(), memblock::StoreOp::hsvd,
+                *item.vs_load, g_rw_user, item.spvp, false,
+                0xface000000000000ULL + index,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePbmt::pma,
+                memblock::ReferencePbmt::pma, 0x280,
+                item.config,
+                memblock::ReferencePrivilegeMode::machine)) {
+            return 1;
+        }
+        physical_pmp_cases += 3;
+    }
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -11739,7 +11856,9 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " pbmt_combinations=" << pbmt_combinations
               << " pbmt_family_cases=" << pbmt_family_cases
               << " misaligned_family_cases=" << misaligned_family_cases
+              << " physical_pmp_cases=" << physical_pmp_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
+              << " machine_spvp_pmp=1"
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests
               << " dcache_a=" << total_dcache_requests
