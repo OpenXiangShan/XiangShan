@@ -51,8 +51,8 @@ NA4 is not independently selectable: an `A=2` write is WARL-coerced to NAPOT
 and is checked as a 4-KiB minimum region. Instruction X permission, HLVX
 physical R+X permission, M-mode/SPVP hypervisor PMP selection, and DebugModule
 access are covered by focused tests. HLV/HLVX/HSV also cross one fixed PMA
-device mapping; locked hypervisor PMP regions and broader PMA region/edge
-matrices remain gaps.
+device mapping and locked R/RWX PMP entries; broader hypervisor PMP region-edge
+and PMA matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks request-field acceptance, L1 miss responses for both

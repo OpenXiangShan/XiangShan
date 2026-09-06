@@ -11280,6 +11280,8 @@ int run_hypervisor_contracts(int argc, char **argv)
     constexpr std::uint8_t pmp_napot_read_write = 0x1b;
     constexpr std::uint8_t pmp_napot_read_execute = 0x1d;
     constexpr std::uint8_t pmp_napot_read_write_execute = 0x1f;
+    constexpr std::uint8_t pmp_locked_napot_read = 0x99;
+    constexpr std::uint8_t pmp_locked_napot_read_write_execute = 0x9f;
 
     auto configure = [](
                          memblock::Environment &environment,
@@ -11356,6 +11358,7 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned pbmt_family_cases = 0;
     unsigned misaligned_family_cases = 0;
     unsigned physical_pmp_cases = 0;
+    unsigned locked_physical_pmp_cases = 0;
     unsigned physical_pma_cases = 0;
 
     auto run_load_case = [&](
@@ -11982,18 +11985,24 @@ int run_hypervisor_contracts(int argc, char **argv)
         memblock::ReferencePrivilegeMode spvp;
         const memblock::ReferencePtePermissions *vs_load;
         const memblock::ReferencePtePermissions *vs_hlvx;
+        bool locked;
     };
-    const std::array<HypervisorPmpCase, 4> hypervisor_pmp_cases{{
+    const std::array<HypervisorPmpCase, 6> hypervisor_pmp_cases{{
         {"pmp-r", pmp_napot_read,
-         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user},
+         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user, false},
         {"pmp-x", pmp_napot_execute,
          memblock::ReferencePrivilegeMode::supervisor,
-         &rw_supervisor, &x_supervisor},
+         &rw_supervisor, &x_supervisor, false},
         {"pmp-rw", pmp_napot_read_write,
-         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user},
+         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user, false},
         {"pmp-rx", pmp_napot_read_execute,
          memblock::ReferencePrivilegeMode::supervisor,
-         &rw_supervisor, &x_supervisor},
+         &rw_supervisor, &x_supervisor, false},
+        {"pmp-locked-r", pmp_locked_napot_read,
+         memblock::ReferencePrivilegeMode::user, &rw_user, &x_user, true},
+        {"pmp-locked-rwx", pmp_locked_napot_read_write_execute,
+         memblock::ReferencePrivilegeMode::supervisor,
+         &rw_supervisor, &x_supervisor, true},
     }};
     for (unsigned index = 0; index < hypervisor_pmp_cases.size(); ++index) {
         const auto &item = hypervisor_pmp_cases[index];
@@ -12033,6 +12042,7 @@ int run_hypervisor_contracts(int argc, char **argv)
             return 1;
         }
         physical_pmp_cases += 3;
+        locked_physical_pmp_cases += item.locked ? 3 : 0;
     }
 
     constexpr std::uint64_t pma_device_physical = 0x35000000ULL;
@@ -12084,9 +12094,11 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " pbmt_family_cases=" << pbmt_family_cases
               << " misaligned_family_cases=" << misaligned_family_cases
               << " physical_pmp_cases=" << physical_pmp_cases
+              << " locked_physical_pmp_cases="
+              << locked_physical_pmp_cases
               << " physical_pma_cases=" << physical_pma_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
-              << " machine_spvp_pmp=1"
+              << " machine_spvp_pmp=1 locked_spvp_pmp=1"
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests
               << " dcache_a=" << total_dcache_requests

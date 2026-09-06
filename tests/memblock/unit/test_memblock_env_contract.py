@@ -70,14 +70,17 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pbmt_family_cases=",
             "misaligned_family_cases=",
             "physical_pmp_cases=",
+            "locked_physical_pmp_cases=",
             "physical_pma_cases=",
             "ReferencePrivilegeMode::machine",
             "pmp_napot_read_execute",
+            "pmp_locked_napot_read",
+            "pmp_locked_napot_read_write_execute",
             "required_pmp_permission = hlvx ? 0x5U : 0x1U",
             "pma_device_physical = 0x35000000ULL",
             "pma-device-hlvx",
             "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
-            "machine_spvp_pmp=1",
+            "machine_spvp_pmp=1 locked_spvp_pmp=1",
         ):
             self.assertIn(contract, environment + driver + makefile)
         self.assertIn(
