@@ -2227,6 +2227,29 @@ int run_trace_bridge_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_dft_bridge_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.reset() || !environment.check_dft_bridge_space() ||
+        !environment.reset() || !environment.check_idle(2) ||
+        environment.dft_bridge_patterns() != 1024) {
+        std::cerr << "MEMBLOCK_DFT_BRIDGE_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " patterns=" << environment.dft_bridge_patterns()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_DFT_BRIDGE_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " inputs=10 patterns=" << environment.dft_bridge_patterns()
+              << " frontend_outputs=10 backend_outputs=4"
+              << " digest=0x" << std::hex << environment.dft_bridge_digest()
+              << std::dec
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pin_space(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -24104,6 +24127,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "trace-bridge-contracts") {
             return run_trace_bridge_contracts(argc, argv);
+        }
+        if (options.test == "dft-bridge-contracts") {
+            return run_dft_bridge_contracts(argc, argv);
         }
         if (options.test == "pin-space") {
             return run_pin_space(argc, argv);

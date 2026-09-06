@@ -265,6 +265,36 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, memblock)
 
+    def test_dft_bridge_exhausts_combinational_input_space(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+
+        for contract in (
+            "check_dft_bridge_space",
+            "pattern < 1024",
+            "DFT bridge mismatch pattern=0x",
+            "dft-bridge-contracts",
+            "inputs=10",
+            "frontend_outputs=10",
+            "backend_outputs=4",
+        ):
+            self.assertIn(contract, environment + driver + makefile + benchmark)
+        for contract in (
+            "sig.ram_hold := dft.ram_hold",
+            "sig.ram_bypass := dft.ram_bypass",
+            "sig.cgen := dft.cgen",
+            "io.dft_frnt.zip(sigFromSrams)",
+            "io.dft_reset_frnt.zip(io.dft_reset)",
+            "io.dft_bcknd.zip(sigFromSrams)",
+            "io.dft_reset_bcknd.zip(io.dft_reset)",
+        ):
+            self.assertIn(contract, memblock)
+
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

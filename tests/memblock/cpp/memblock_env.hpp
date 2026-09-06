@@ -6050,6 +6050,83 @@ public:
         return trace_bridge_checks_;
     }
 
+    bool check_dft_bridge_space()
+    {
+        dft_bridge_patterns_ = 0;
+        dft_bridge_digest_ = 1469598103934665603ULL;
+        dut_.reset.ImmSet(std::uint64_t{1});
+        for (unsigned pattern = 0; pattern < 1024; ++pattern) {
+            const bool ram_hold = (pattern & (1U << 0)) != 0;
+            const bool ram_bypass = (pattern & (1U << 1)) != 0;
+            const bool ram_bp_clken = (pattern & (1U << 2)) != 0;
+            const bool ram_aux_clk = (pattern & (1U << 3)) != 0;
+            const bool ram_aux_ckbp = (pattern & (1U << 4)) != 0;
+            const bool ram_mcp_hold = (pattern & (1U << 5)) != 0;
+            const bool cgen = (pattern & (1U << 6)) != 0;
+            const bool lgc_rst_n = (pattern & (1U << 7)) != 0;
+            const bool reset_mode = (pattern & (1U << 8)) != 0;
+            const bool scan_mode = (pattern & (1U << 9)) != 0;
+            dut_.io_dft_ram_hold.ImmSet(ram_hold);
+            dut_.io_dft_ram_bypass.ImmSet(ram_bypass);
+            dut_.io_dft_ram_bp_clken.ImmSet(ram_bp_clken);
+            dut_.io_dft_ram_aux_clk.ImmSet(ram_aux_clk);
+            dut_.io_dft_ram_aux_ckbp.ImmSet(ram_aux_ckbp);
+            dut_.io_dft_ram_mcp_hold.ImmSet(ram_mcp_hold);
+            dut_.io_dft_cgen.ImmSet(cgen);
+            dut_.io_dft_reset_lgc_rst_n.ImmSet(lgc_rst_n);
+            dut_.io_dft_reset_mode.ImmSet(reset_mode);
+            dut_.io_dft_reset_scan_mode.ImmSet(scan_mode);
+            dut_.RefreshComb();
+            const bool matches =
+                dut_.io_dft_frnt_ram_hold.B() == ram_hold &&
+                dut_.io_dft_frnt_ram_bypass.B() == ram_bypass &&
+                dut_.io_dft_frnt_ram_bp_clken.B() == ram_bp_clken &&
+                dut_.io_dft_frnt_ram_aux_clk.B() == ram_aux_clk &&
+                dut_.io_dft_frnt_ram_aux_ckbp.B() == ram_aux_ckbp &&
+                dut_.io_dft_frnt_ram_mcp_hold.B() == ram_mcp_hold &&
+                dut_.io_dft_frnt_cgen.B() == cgen &&
+                dut_.io_dft_bcknd_cgen.B() == cgen &&
+                dut_.io_dft_reset_frnt_lgc_rst_n.B() == lgc_rst_n &&
+                dut_.io_dft_reset_frnt_mode.B() == reset_mode &&
+                dut_.io_dft_reset_frnt_scan_mode.B() == scan_mode &&
+                dut_.io_dft_reset_bcknd_lgc_rst_n.B() == lgc_rst_n &&
+                dut_.io_dft_reset_bcknd_mode.B() == reset_mode &&
+                dut_.io_dft_reset_bcknd_scan_mode.B() == scan_mode;
+            if (!matches) {
+                std::ostringstream message;
+                message << "DFT bridge mismatch pattern=0x" << std::hex
+                        << pattern;
+                error_ = message.str();
+                return false;
+            }
+            ++dft_bridge_patterns_;
+            dft_bridge_digest_ ^= pattern;
+            dft_bridge_digest_ *= 1099511628211ULL;
+        }
+        dut_.io_dft_ram_hold.ImmSet(std::uint64_t{0});
+        dut_.io_dft_ram_bypass.ImmSet(std::uint64_t{0});
+        dut_.io_dft_ram_bp_clken.ImmSet(std::uint64_t{0});
+        dut_.io_dft_ram_aux_clk.ImmSet(std::uint64_t{0});
+        dut_.io_dft_ram_aux_ckbp.ImmSet(std::uint64_t{0});
+        dut_.io_dft_ram_mcp_hold.ImmSet(std::uint64_t{0});
+        dut_.io_dft_cgen.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{1});
+        dut_.io_dft_reset_mode.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_scan_mode.ImmSet(std::uint64_t{0});
+        dut_.RefreshComb();
+        return true;
+    }
+
+    std::uint64_t dft_bridge_patterns() const
+    {
+        return dft_bridge_patterns_;
+    }
+
+    std::uint64_t dft_bridge_digest() const
+    {
+        return dft_bridge_digest_;
+    }
+
     bool set_sbuffer_timeout(std::uint32_t cycles)
     {
         constexpr std::uint32_t timeout_width = 22;
@@ -8688,6 +8765,8 @@ private:
     bool trace_privilege_initialized_ = false;
     bool trace_trap_initialized_ = false;
     std::uint64_t trace_bridge_checks_ = 0;
+    std::uint64_t dft_bridge_patterns_ = 0;
+    std::uint64_t dft_bridge_digest_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

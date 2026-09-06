@@ -221,6 +221,7 @@ make topdown-contracts PICKER="$PICKER" JOBS=8
 make l2-flush-contracts PICKER="$PICKER" JOBS=8
 make top-control-contracts PICKER="$PICKER" JOBS=8
 make trace-bridge-contracts PICKER="$PICKER" JOBS=8
+make dft-bridge-contracts PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
@@ -439,6 +440,12 @@ and trap-only cause/tval updates for Exception and Interrupt itypes. Thirty-two
 patterns cover every three-group valid combination, all 16 itypes and FTQ
 offsets, all eight privilege encodings, both trap classes, and hold intervals.
 This checks the MemBlock bridge, not architectural trace generation.
+`dft-bridge-contracts` holds the functional design in external reset while
+exhausting all 1,024 combinations of the seven SRAM-broadcast and three
+DFT-reset input bits. It checks the ten elaborated frontend outputs and four
+backend outputs combinationally, restores the idle DFT values, then performs a
+fresh functional reset. This checks MemBlock routing only; MBIST, scan, SRAM,
+and reset-tree behavior remain integration responsibilities.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
