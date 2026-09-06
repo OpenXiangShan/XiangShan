@@ -7188,10 +7188,154 @@ int run_vector_segment(int argc, char **argv)
         }
     }
 
+    const std::array<memblock::VectorAddressingMode, 3> addressing_modes{{
+        memblock::VectorAddressingMode::strided,
+        memblock::VectorAddressingMode::indexed_unordered,
+        memblock::VectorAddressingMode::indexed_ordered,
+    }};
+    unsigned addressing_load_writebacks = 0;
+    unsigned addressing_store_writebacks = 0;
+    for (unsigned mode_index = 0; mode_index < addressing_modes.size();
+         ++mode_index) {
+        memblock::Environment mode_environment(argc, argv);
+        const auto mode = addressing_modes[mode_index];
+        const std::uint64_t mode_load_base =
+            memblock::kDefaultMemoryBase + 0x60000 + mode_index * 0x1000;
+        const std::uint64_t mode_store_base = mode_load_base + 0x400;
+        mode_environment.memory().fill_incrementing(
+            mode_load_base, 0x800, static_cast<std::uint8_t>(0x43 + mode_index));
+        mode_environment.configure_backpressure(
+            0x3c6ef372fe94f82bULL ^ mode_index, true);
+        if (!mode_environment.reset()) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL phase=addressing-reset"
+                      << " mode=" << mode_index << " reason="
+                      << mode_environment.error() << '\n';
+            return 1;
+        }
+
+        const auto make_addressed_field = [&](bool store, std::uint64_t base,
+                                               std::uint8_t rob,
+                                               unsigned field) {
+            memblock::VectorMemoryTransaction transaction{
+                .store = store,
+                .segment = true,
+                .address = base,
+                .stride = 24,
+                .addressing = mode,
+                .eew = 2,
+                .vl = 4,
+                .rob = rob,
+                .pdest = static_cast<std::uint8_t>(100 + field),
+                .lane = 0,
+                .flow_num = 4,
+                .expected_trigger = memblock::kVectorWritebackTriggerNone,
+                .vuop_idx = static_cast<std::uint8_t>(field),
+                .last_uop = field == 1,
+                .nf = 1,
+            };
+            for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+                transaction.data[byte] = static_cast<unsigned char>(
+                    0x90 + mode_index * 0x10 + field * 0x20 + byte);
+            }
+            for (unsigned element = 0; element < 4; ++element) {
+                const std::uint32_t offset = element * 32;
+                for (unsigned byte = 0; byte < 4; ++byte) {
+                    transaction.index[element * 4 + byte] =
+                        static_cast<unsigned char>(offset >> (8 * byte));
+                }
+            }
+            return transaction;
+        };
+
+        std::array<memblock::VectorMemoryTransaction, 2> mode_loads{{
+            make_addressed_field(false, mode_load_base, 80, 0),
+            make_addressed_field(false, mode_load_base, 80, 1),
+        }};
+        for (const auto &load : mode_loads) {
+            mode_environment.expect_vector(load);
+            if (!mode_environment.issue_vector(load, 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                          << " phase=addressed-load-issue mode=" << mode_index
+                          << " reason=" << mode_environment.error() << '\n';
+                return 1;
+            }
+        }
+        if (!mode_environment.run_until_vector_complete(32768) ||
+            mode_environment.vector_load_writebacks() != 2) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                      << " phase=addressed-load-complete mode=" << mode_index
+                      << " reason=" << mode_environment.error() << '\n';
+            return 1;
+        }
+
+        std::array<memblock::VectorMemoryTransaction, 2> mode_stores{{
+            make_addressed_field(true, mode_store_base, 81, 0),
+            make_addressed_field(true, mode_store_base, 81, 1),
+        }};
+        for (const auto &store : mode_stores) {
+            mode_environment.expect_vector(store);
+            if (!mode_environment.issue_vector(store, 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                          << " phase=addressed-store-issue mode=" << mode_index
+                          << " reason=" << mode_environment.error() << '\n';
+                return 1;
+            }
+        }
+        if (!mode_environment.run_until_vector_complete(32768) ||
+            mode_environment.vector_store_writebacks() != 2) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                      << " phase=addressed-store-complete mode=" << mode_index
+                      << " reason=" << mode_environment.error() << '\n';
+            return 1;
+        }
+        for (const auto &store : mode_stores) {
+            mode_environment.record_committed_vector_store(store);
+        }
+        if (!mode_environment.pulse_sbuffer_flush() ||
+            !mode_environment.run_until_sbuffer_empty(32768)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                      << " phase=addressed-store-drain mode=" << mode_index
+                      << " reason=" << mode_environment.error() << '\n';
+            return 1;
+        }
+
+        std::array<memblock::VectorMemoryTransaction, 2> mode_readbacks{{
+            make_addressed_field(false, mode_store_base, 82, 0),
+            make_addressed_field(false, mode_store_base, 82, 1),
+        }};
+        for (const auto &readback : mode_readbacks) {
+            mode_environment.expect_vector(readback);
+            if (!mode_environment.issue_vector(readback, 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                          << " phase=addressed-readback-issue mode="
+                          << mode_index << " reason="
+                          << mode_environment.error() << '\n';
+                return 1;
+            }
+        }
+        if (!mode_environment.run_until_vector_complete(32768) ||
+            mode_environment.vector_load_writebacks() != 4 ||
+            mode_environment.lq_allocated() != 0 ||
+            mode_environment.sq_allocated() != 0) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL"
+                      << " phase=addressed-readback-complete mode="
+                      << mode_index << " reason=" << mode_environment.error()
+                      << " lq=" << mode_environment.lq_allocated()
+                      << " sq=" << mode_environment.sq_allocated() << '\n';
+            return 1;
+        }
+        addressing_load_writebacks += 4;
+        addressing_store_writebacks += 2;
+    }
+
     std::cout << "MEMBLOCK_VECTOR_SEGMENT_PASS"
               << " cycle=" << environment.cycle()
               << " fields=2 elements=2"
               << " segment_load_writebacks=2 segment_store_writebacks=2"
+              << " addressed_modes=3 addressed_load_writebacks="
+              << addressing_load_writebacks
+              << " addressed_store_writebacks="
+              << addressing_store_writebacks
               << " segment_lsq_allocations=0"
               << " readback_lq_allocated=" << environment.lq_allocated()
               << " readback_lq_dequeued=" << environment.lq_dequeued()

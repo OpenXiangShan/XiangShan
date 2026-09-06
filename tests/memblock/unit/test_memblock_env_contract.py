@@ -859,6 +859,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_vector_segment",
             "segment_load_writebacks=2",
             "segment_store_writebacks=2",
+            "const std::uint64_t field_offset = transaction.segment",
+            "VectorAddressingMode::indexed_ordered",
+            "addressed_modes=3",
+            "addressed_load_writebacks",
+            "addressed_store_writebacks",
             "segment_lsq_allocations=0",
             "vector-segment",
         ):

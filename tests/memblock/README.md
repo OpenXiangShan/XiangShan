@@ -22,8 +22,8 @@ denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
 side effects and CMO CLEAN/FLUSH/INVAL remain explicit boundary gaps.
 `hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, and PMP
-execute behavior. Vector FOF and unit-stride segment load/store takeover are
-covered by focused tests; the common constrained tail mixes segment operations
+execute behavior. Vector FOF and unit-stride, strided, indexed-unordered, and
+indexed-ordered segment load/store takeover are covered by focused tests; the common constrained tail mixes segment operations
 across load/store, EEW 8/16/32/64, and NF 1..7. Unsupported segment shapes are
 not silently randomized as ordinary LSQ traffic.
 
@@ -75,7 +75,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for MMIO device side effects,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining segment address/LMUL/redirect combinations, remaining PMP/PMA matrices,
+remaining segment LMUL/whole-register/redirect combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, same-ROB/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those

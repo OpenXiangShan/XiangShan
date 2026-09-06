@@ -442,6 +442,9 @@ inline std::uint64_t vector_element_address(
     const std::uint64_t base = transaction.oracle_address.value_or(
         transaction.address);
     const unsigned element_bytes = 1U << transaction.eew;
+    const std::uint64_t field_offset = transaction.segment
+        ? static_cast<std::uint64_t>(transaction.vuop_idx) * element_bytes
+        : 0;
     switch (transaction.addressing) {
     case VectorAddressingMode::unit_stride:
         if (transaction.segment) {
@@ -455,8 +458,9 @@ inline std::uint64_t vector_element_address(
             const std::int64_t delta =
                 transaction.stride * static_cast<std::int64_t>(element);
             return delta >= 0
-                ? base + static_cast<std::uint64_t>(delta)
-                : base - static_cast<std::uint64_t>(-(delta + 1)) - 1U;
+                ? base + static_cast<std::uint64_t>(delta) + field_offset
+                : base - static_cast<std::uint64_t>(-(delta + 1)) - 1U +
+                    field_offset;
         }
     case VectorAddressingMode::indexed_unordered:
     case VectorAddressingMode::indexed_ordered: {
@@ -466,7 +470,7 @@ inline std::uint64_t vector_element_address(
             offset |= std::uint64_t{transaction.index[element * index_bytes + byte]}
                       << (8 * byte);
         }
-        return base + offset;
+        return base + offset + field_offset;
     }
     }
     throw std::logic_error("unknown vector addressing mode");

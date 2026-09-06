@@ -38,6 +38,17 @@ one external Uncache error pulse at the 64-byte-aligned physical line address,
 no DCache error pulse, exact architectural exception metadata, and balanced SQ
 accounting.
 
+## Vector Segment Addressing
+
+On 2026-09-06, the extended `vector-segment` scenario passed all four segment
+address modes on complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+The original unit-stride two-field load/store case remained green. Strided,
+indexed-unordered, and indexed-ordered cases added 12 checked load writebacks,
+six checked store writebacks, and exact post-flush readback at every calculated
+element/field address. Segment traffic allocated no LQ or SQ entries. No CPU
+defect was observed.
+
 ## Scalar Load Feedback Boundary
 
 The `load-feedback` scenario now samples every top-level scalar load wakeup and
