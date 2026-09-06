@@ -1467,6 +1467,26 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, driver)
 
+    def test_scalar_misaligned_keeps_rar_pressure_behind_pending_splits(
+        self,
+    ) -> None:
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        scenario = driver[
+            driver.index("int run_scalar_misaligned"):
+            driver.index("int run_misaligned_stores")
+        ]
+        for contract in (
+            "pressure_load_count = 60",
+            "pending_split",
+            "pressure.enqueue_load(transaction)",
+            "pressure.issue_load_batch(batch, 256, true)",
+            "pressure.set_rob_head(transaction.rob, transaction.rob_flag)",
+            "pressure.memory_violation_stats().count != pressure_violations_before",
+            "pressure.writebacks() != pressure_load_count + pending_split.size()",
+            '" rar_pressure_loads="',
+        ):
+            self.assertIn(contract, scenario)
+
     def test_random_mixed_drops_directed_release_snapshots_before_random_tail(
         self,
     ) -> None:

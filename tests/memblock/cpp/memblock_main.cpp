@@ -9417,11 +9417,144 @@ int run_scalar_misaligned(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment pressure(argc, argv);
+    constexpr unsigned pressure_load_count = 60;
+    constexpr std::uint64_t pressure_base =
+        memblock::kDefaultMemoryBase + 0x80000;
+    pressure.memory().fill_incrementing(pressure_base, 0x8000, 0x6d);
+    pressure.configure_backpressure(0x36a5f19c7d4e82b1ULL, true);
+    if (!pressure.reset() || !pressure.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                  << pressure.cycle()
+                  << " phase=rar-pressure-reset reason="
+                  << pressure.error() << '\n';
+        return 1;
+    }
+
+    const std::array<memblock::LoadTransaction, 3> pending_split{{
+        {
+            .address = pressure_base + 0x1003,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(0),
+            .rob_flag = memblock::rob_pointer_flag(0),
+            .lq = memblock::lq_pointer_value(0),
+            .lq_flag = memblock::lq_pointer_flag(0),
+            .pdest = 40,
+            .lane = 0,
+        },
+        {
+            .address = pressure_base + 0x107d,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(1),
+            .rob_flag = memblock::rob_pointer_flag(1),
+            .lq = memblock::lq_pointer_value(1),
+            .lq_flag = memblock::lq_pointer_flag(1),
+            .pdest = 41,
+            .lane = 1,
+        },
+        {
+            .address = pressure_base + 0x1ffd,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(2),
+            .rob_flag = memblock::rob_pointer_flag(2),
+            .lq = memblock::lq_pointer_value(2),
+            .lq_flag = memblock::lq_pointer_flag(2),
+            .pdest = 42,
+            .lane = 2,
+        },
+    }};
+    for (const auto &transaction : pending_split) {
+        if (!pressure.enqueue_load(transaction)) {
+            std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                      << pressure.cycle()
+                      << " phase=rar-pressure-split-enqueue reason="
+                      << pressure.error() << '\n';
+            return 1;
+        }
+    }
+
+    std::vector<memblock::LoadTransaction> younger_loads;
+    younger_loads.reserve(pressure_load_count);
+    for (unsigned index = 0; index < pressure_load_count; ++index) {
+        const unsigned pointer = pending_split.size() + index;
+        younger_loads.push_back(memblock::LoadTransaction{
+            .address = pressure_base + 0x4000 + index * 64 + 16,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(pointer),
+            .rob_flag = memblock::rob_pointer_flag(pointer),
+            .lq = memblock::lq_pointer_value(pointer),
+            .lq_flag = memblock::lq_pointer_flag(pointer),
+            .pdest = static_cast<std::uint8_t>(48 + index % 64),
+            .lane = index % memblock::kScalarLoadLanes,
+        });
+        if (!pressure.enqueue_load(younger_loads.back())) {
+            std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                      << pressure.cycle()
+                      << " phase=rar-pressure-load-enqueue index=" << index
+                      << " reason=" << pressure.error() << '\n';
+            return 1;
+        }
+    }
+    for (unsigned begin = 0; begin < pressure_load_count;
+         begin += memblock::kScalarLoadLanes) {
+        std::vector<memblock::LoadTransaction> batch;
+        for (unsigned offset = 0; offset < memblock::kScalarLoadLanes;
+             ++offset) {
+            const auto &transaction = younger_loads[begin + offset];
+            pressure.expect_load(transaction);
+            batch.push_back(transaction);
+        }
+        if (!pressure.issue_load_batch(batch, 256, true) ||
+            !pressure.run_until_complete(4096)) {
+            std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                      << pressure.cycle()
+                      << " phase=rar-pressure-fill index=" << begin
+                      << " reason=" << pressure.error() << '\n';
+            return 1;
+        }
+    }
+
+    const auto pressure_violations_before =
+        pressure.memory_violation_stats().count;
+    for (std::size_t index = 0; index < pending_split.size(); ++index) {
+        const auto &transaction = pending_split[index];
+        pressure.expect_load(transaction);
+        if (!pressure.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !pressure.issue_load(transaction, 256) ||
+            !pressure.run_until_complete(8192)) {
+            std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                      << pressure.cycle()
+                      << " phase=rar-pressure-split index=" << index
+                      << " reason=" << pressure.error() << '\n';
+            return 1;
+        }
+    }
+    if (!pressure.run_until_lq_retired(8192) ||
+        pressure.memory_violation_stats().count != pressure_violations_before ||
+        pressure.writebacks() != pressure_load_count + pending_split.size()) {
+        std::cerr << "MEMBLOCK_SCALAR_MISALIGNED_FAIL cycle="
+                  << pressure.cycle()
+                  << " phase=rar-pressure-check writebacks="
+                  << pressure.writebacks() << " expected_writebacks="
+                  << pressure_load_count + pending_split.size()
+                  << " violations="
+                  << pressure.memory_violation_stats().count
+                  << " expected_violations=" << pressure_violations_before
+                  << " reason=" << pressure.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_SCALAR_MISALIGNED_PASS"
               << " cycle=" << environment.cycle()
               << " writebacks=" << environment.writebacks()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " ptw_requests=" << environment.ptw_requests()
+              << " rar_pressure_loads=" << pressure_load_count
+              << " pending_splits=" << pending_split.size()
+              << " pressure_writebacks=" << pressure.writebacks()
+              << " pressure_violations="
+              << pressure.memory_violation_stats().count
+              << " pressure_cycle=" << pressure.cycle()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

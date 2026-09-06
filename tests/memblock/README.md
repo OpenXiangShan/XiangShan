@@ -544,6 +544,14 @@ accounts each canceled queue entry, changes the post-reset address or page-table
 root, and requires three survivor loads to return the new data. Any stale
 pre-reset manager response or architectural writeback fails the scenario.
 
+`scalar-misaligned` checks scalar splits within a 16-byte beat and across cache
+lines and translated pages. Its queue-pressure phase first leaves three split
+loads pending at the LQ/ROB head, then completes 60 younger aligned loads on
+all three load lanes so their RAR state remains live behind the unfinished
+head. The test advances `pendingPtr` through the three split loads in program
+order and requires all 63 exact data writebacks, complete LQ drain, and no
+spurious load-load violation.
+
 `exception-contracts` checks exact scalar load exception bits, RF-write
 suppression, software-prefetch fault suppression, and PBMT-NC misalignment. It
 also reverses queue order against program order: three simultaneous load page
