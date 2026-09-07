@@ -27,12 +27,12 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import utility._
-import utility.InstSeqNum
 import utility.PerfCCT
 import xiangshan._
 import xiangshan.frontend._
-import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ifu._
+import xiangshan.frontend.ibuffer.{IBufEntry, IBufExceptionEntry, IBufOutEntry, PredInstAccept, PredUopNum}
+import xiangshan.backend.decode.VTypeGen
 
 /**
  * Sim Frontend/Ideal Frontend
@@ -69,6 +69,8 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     val out_ftqPc       = Output(UInt(64.W))
 
     val updatePtrCount = Input(UInt(32.W))
+    val fetchOffset    = Input(UInt(4.W))
+    val fetchCount     = Input(UInt(4.W))
 
     val robCommitValid    = Input(Bool())
     val robCommitFtqFlag  = Input(UInt(1.W))
@@ -120,36 +122,38 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     "  input         clock,",
     "  input         reset,",
     "",
-    "  output [63:0] io_out_0_pc,",
-    "  output [31:0] io_out_0_instr,",
-    "  output [63:0] io_out_1_pc,",
-    "  output [31:0] io_out_1_instr,",
-    "  output [63:0] io_out_2_pc,",
-    "  output [31:0] io_out_2_instr,",
-    "  output [63:0] io_out_3_pc,",
-    "  output [31:0] io_out_3_instr,",
-    "  output [63:0] io_out_4_pc,",
-    "  output [31:0] io_out_4_instr,",
-    "  output [63:0] io_out_5_pc,",
-    "  output [31:0] io_out_5_instr,",
-    "  output [63:0] io_out_6_pc,",
-    "  output [31:0] io_out_6_instr,",
-    "  output [63:0] io_out_7_pc,",
-    "  output [31:0] io_out_7_instr,",
-    "  output [31:0] io_out_0_preDecode,",
-    "  output [31:0] io_out_1_preDecode,",
-    "  output [31:0] io_out_2_preDecode,",
-    "  output [31:0] io_out_3_preDecode,",
-    "  output [31:0] io_out_4_preDecode,",
-    "  output [31:0] io_out_5_preDecode,",
-    "  output [31:0] io_out_6_preDecode,",
-    "  output [31:0] io_out_7_preDecode,",
-    "  output [63:0] io_out_newestPc,",
-    "  output [31:0] io_out_newestPreDecode,",
-    "  output [63:0] io_out_ftqPc,",
-    "  output [31:0] io_out_ftqPackData,",
+    "  output logic [63:0] io_out_0_pc,",
+    "  output logic [31:0] io_out_0_instr,",
+    "  output logic [63:0] io_out_1_pc,",
+    "  output logic [31:0] io_out_1_instr,",
+    "  output logic [63:0] io_out_2_pc,",
+    "  output logic [31:0] io_out_2_instr,",
+    "  output logic [63:0] io_out_3_pc,",
+    "  output logic [31:0] io_out_3_instr,",
+    "  output logic [63:0] io_out_4_pc,",
+    "  output logic [31:0] io_out_4_instr,",
+    "  output logic [63:0] io_out_5_pc,",
+    "  output logic [31:0] io_out_5_instr,",
+    "  output logic [63:0] io_out_6_pc,",
+    "  output logic [31:0] io_out_6_instr,",
+    "  output logic [63:0] io_out_7_pc,",
+    "  output logic [31:0] io_out_7_instr,",
+    "  output logic [31:0] io_out_0_preDecode,",
+    "  output logic [31:0] io_out_1_preDecode,",
+    "  output logic [31:0] io_out_2_preDecode,",
+    "  output logic [31:0] io_out_3_preDecode,",
+    "  output logic [31:0] io_out_4_preDecode,",
+    "  output logic [31:0] io_out_5_preDecode,",
+    "  output logic [31:0] io_out_6_preDecode,",
+    "  output logic [31:0] io_out_7_preDecode,",
+    "  output logic [63:0] io_out_newestPc,",
+    "  output logic [31:0] io_out_newestPreDecode,",
+    "  output logic [63:0] io_out_ftqPc,",
+    "  output logic [31:0] io_out_ftqPackData,",
     "",
     "  input  [31:0] io_updatePtrCount,",
+    "  input  [3:0]  io_fetchOffset,",
+    "  input  [3:0]  io_fetchCount,",
     "  input         io_robCommitValid,",
     "  input         io_robCommitFtqFlag,",
     "  input  [5:0]  io_robCommitFtqValue,",
@@ -162,20 +166,37 @@ class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
     ");",
     "",
     "",
+    "task automatic fetch_lane;",
+    "  input integer offset;",
+    "  input integer enabled;",
+    "  output logic [63:0] pc;",
+    "  output logic [31:0] instr;",
+    "  output logic [31:0] preDecode;",
+    "  begin",
+    "    if (enabled != 0) begin",
+    "      SimFrontFetch(offset, pc, instr, preDecode);",
+    "    end else begin",
+    "      pc = 0;",
+    "      instr = 0;",
+    "      preDecode = 0;",
+    "    end",
+    "  end",
+    "endtask",
+    "",
     "always @(posedge clock or posedge reset) begin",
     "  if (!reset) begin",
     "    SimFrontUpdatePtr(io_updatePtrCount);",
     "",
     "    SimFrontRedirect(io_redirect, io_redirectFtqFlag, io_redirectFtqValue, io_redirectType, io_redirectPc, io_redirectTarget);",
     "",
-    "    SimFrontFetch(0, io_out_0_pc, io_out_0_instr, io_out_0_preDecode);",
-    "    SimFrontFetch(1, io_out_1_pc, io_out_1_instr, io_out_1_preDecode);",
-    "    SimFrontFetch(2, io_out_2_pc, io_out_2_instr, io_out_2_preDecode);",
-    "    SimFrontFetch(3, io_out_3_pc, io_out_3_instr, io_out_3_preDecode);",
-    "    SimFrontFetch(4, io_out_4_pc, io_out_4_instr, io_out_4_preDecode);",
-    "    SimFrontFetch(5, io_out_5_pc, io_out_5_instr, io_out_5_preDecode);",
-    "    SimFrontFetch(6, io_out_6_pc, io_out_6_instr, io_out_6_preDecode);",
-    "    SimFrontFetch(7, io_out_7_pc, io_out_7_instr, io_out_7_preDecode);",
+    "    fetch_lane(io_fetchOffset + 0, io_fetchCount > 0, io_out_0_pc, io_out_0_instr, io_out_0_preDecode);",
+    "    fetch_lane(io_fetchOffset + 1, io_fetchCount > 1, io_out_1_pc, io_out_1_instr, io_out_1_preDecode);",
+    "    fetch_lane(io_fetchOffset + 2, io_fetchCount > 2, io_out_2_pc, io_out_2_instr, io_out_2_preDecode);",
+    "    fetch_lane(io_fetchOffset + 3, io_fetchCount > 3, io_out_3_pc, io_out_3_instr, io_out_3_preDecode);",
+    "    fetch_lane(io_fetchOffset + 4, io_fetchCount > 4, io_out_4_pc, io_out_4_instr, io_out_4_preDecode);",
+    "    fetch_lane(io_fetchOffset + 5, io_fetchCount > 5, io_out_5_pc, io_out_5_instr, io_out_5_preDecode);",
+    "    fetch_lane(io_fetchOffset + 6, io_fetchCount > 6, io_out_6_pc, io_out_6_instr, io_out_6_preDecode);",
+    "    fetch_lane(io_fetchOffset + 7, io_fetchCount > 7, io_out_7_pc, io_out_7_instr, io_out_7_preDecode);",
     "",
     "    SimFrontGetFtqToBackEnd(io_out_ftqPc, io_out_ftqPackData, io_out_newestPc, io_out_newestPreDecode);",
     "",
@@ -196,13 +217,60 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   io <> WireDefault(0.U.asTypeOf(io))
 
   val fetchHelper = Module(new SimFrontFetchHelper)
+  val predInstAccept = Module(new PredInstAccept)
+  val predUopNum     = Module(new PredUopNum)
+  val vtypeGen       = Module(new VTypeGen)
 
-  val readyCount = Mux(io.backend.toIBuf.decodeCanAccept, PopCount(io.backend.cfVec.map(_.valid)), 0.U)
+  private val holdEntries = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+  private val fetchPending = RegInit(false.B)
+  private val holdValidNum = PriorityMuxDefault(
+    holdEntries.map(_.valid).zip(Seq.range(1, DecodeWidth + 1).map(_.U)).reverse,
+    0.U
+  )
+
+  private val redirect = io.backend.toFtq.redirect.valid
+  private val presentationEnable = !fetchPending && !io.backend.toIBuf.resumingVType && !redirect
+  private val presentationEntries = Wire(Vec(DecodeWidth, Valid(new IBufOutEntry)))
+  private val emptyException = 0.U.asTypeOf(new IBufExceptionEntry)
+
+  for (i <- 0 until DecodeWidth) {
+    predUopNum.in.valid(i) := holdEntries(i).valid && presentationEnable
+    predUopNum.in.inst(i)  := holdEntries(i).bits.inst
+    predUopNum.in.vtype(i) := vtypeGen.out.vtype(i)
+  }
+  predUopNum.in.fromCSR := io.backend.toIBuf.fromCSR
+  predUopNum.in.vstart  := io.backend.toIBuf.vstart
+
+  for (i <- 0 until DecodeWidth) {
+    presentationEntries(i).valid := holdEntries(i).valid && presentationEnable
+    presentationEntries(i).bits := holdEntries(i).bits.toIBufOutEntry(
+      emptyException,
+      vtypeGen.out.vtype(i),
+      vtypeGen.out.oldVType(i),
+      predUopNum.out.uopNumOH(i)
+    )
+  }
+
+  predInstAccept.in.outputEntries := presentationEntries
+  predInstAccept.in.flush         := redirect
+  predInstAccept.in.decodeAccept  := io.backend.toIBuf.decodeCanAccept && presentationEnable
+
+  private val predAccNum = Mux(
+    io.backend.toIBuf.decodeCanAccept && presentationEnable,
+    predInstAccept.out.predAccNum.min(holdValidNum),
+    0.U
+  )
+  private val holdKeepNum = holdValidNum - predAccNum
+  private val issueFetch = redirect || (!fetchPending && !io.backend.toIBuf.resumingVType && holdKeepNum =/= DecodeWidth.U)
+  private val fetchOffset = Mux(redirect, 0.U, holdKeepNum)
+  private val fetchCount = Mux(redirect, DecodeWidth.U, DecodeWidth.U - holdKeepNum)
 
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
 
-  fetchHelper.io.updatePtrCount := readyCount
+  fetchHelper.io.updatePtrCount := Mux(redirect, 0.U, predAccNum)
+  fetchHelper.io.fetchOffset := Mux(issueFetch, fetchOffset, 0.U)
+  fetchHelper.io.fetchCount := Mux(issueFetch, fetchCount, 0.U)
 
   // For now, there is only one type, but for the sake of scalability, let's write it this way.
   object RedirectType {
@@ -230,39 +298,71 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   fetchHelper.io.robCommitFtqFlag  := io.backend.toFtq.commit.bits.flag
   fetchHelper.io.robCommitFtqValue := io.backend.toFtq.commit.bits.value
 
-  io.backend.cfVec.zip(fetchHelper.io.out).zipWithIndex.foreach { case ((cfVec, fetchOut), idx) =>
+  val fetchResponse = Wire(Vec(DecodeWidth, Valid(new IBufEntry)))
+  fetchResponse.zip(fetchHelper.io.out).foreach { case (response, fetchOut) =>
     val rvcExpanders = Module(new RvcExpander)
 
     rvcExpanders.io.in      := fetchOut.instr
     rvcExpanders.io.fsIsOff := io.csrCtrl.fsIsOff
 
-    cfVec.bits.pc     := fetchOut.pc
-    cfVec.bits.foldpc := XORFold(fetchOut.pc(VAddrBits - 1, 1), MemPredPCWidth)
-    cfVec.bits.instr  := Mux(rvcExpanders.io.ill, fetchOut.instr, rvcExpanders.io.out.bits)
-    cfVec.valid       := fetchOut.preDecode(0)
+    response := 0.U.asTypeOf(response)
+    response.valid := fetchOut.preDecode(0)
+    response.bits.pc := fetchOut.pc(VAddrBits - 1, 0)
+    response.bits.foldpc := XORFold(fetchOut.pc(VAddrBits - 1, 1), MemPredPCWidth)
+    response.bits.inst := Mux(rvcExpanders.io.ill, fetchOut.instr, rvcExpanders.io.out.bits)
+    response.bits.isRvc := fetchOut.preDecode(1)
+    response.bits.fixedTaken := fetchOut.preDecode(6)
+    response.bits.predTaken := fetchOut.preDecode(6)
+    response.bits.ftqPtr.value := fetchOut.preDecode(12, 7)
+    response.bits.ftqPtr.flag := fetchOut.preDecode(13)
+    response.bits.isLastInFtqEntry := fetchOut.preDecode(14)
+    response.bits.instrEndOffset := fetchOut.preDecode(18, 15)
+    response.bits.triggered := TriggerAction.None
+    response.bits.vtypeEntry := VTypeGen.Entry.fromInst(response.bits.inst)
+  }
 
-    cfVec.bits.trigger := TriggerAction.None
+  when (redirect) {
+    holdEntries := VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry)))
+  }.elsewhen(fetchPending) {
+    for (i <- 0 until DecodeWidth) {
+      holdEntries(i) := Mux(
+        i.U < holdValidNum,
+        holdEntries(i),
+        fetchResponse(i.U - holdValidNum)
+      )
+    }
+  }.otherwise {
+    for (i <- 0 until DecodeWidth) {
+      holdEntries(i) := Mux(
+        i.U < holdKeepNum,
+        holdEntries(i.U + predAccNum),
+        0.U.asTypeOf(holdEntries(i))
+      )
+    }
+  }
+  fetchPending := Mux(redirect, true.B, Mux(fetchPending, false.B, issueFetch))
 
-    cfVec.bits.isRvc := fetchOut.preDecode(1)
-
-    cfVec.bits.fixedTaken := fetchOut.preDecode(6)
-    cfVec.bits.predTaken  := fetchOut.preDecode(6)
-
-    cfVec.bits.ftqPtr.value := fetchOut.preDecode(12, 7)
-    cfVec.bits.ftqPtr.flag  := fetchOut.preDecode(13)
-
-    cfVec.bits.isLastInFtqEntry := fetchOut.preDecode(14)
-    cfVec.bits.ftqOffset        := fetchOut.preDecode(18, 15)
-
-    cfVec.bits.debug_seqNum := 0.U.asTypeOf(new InstSeqNum)
+  io.backend.cfVec.zip(presentationEntries).zipWithIndex.foreach { case ((cfVec, entry), idx) =>
+    cfVec.valid := entry.valid
+    cfVec.bits := entry.bits.toCtrlFlow
     cfVec.bits.debug_seqNum.seqNum := PerfCCT.createInstMetaAtFetch(
       (idx + 1).U,
-      fetchOut.pc,
-      fetchOut.instr,
-      io.backend.toIBuf.decodeCanAccept && cfVec.valid,
+      entry.bits.pc.toUInt,
+      entry.bits.inst,
+      predAccNum > idx.U,
       clock,
       reset
     )
+  }
+
+  vtypeGen.in.canUpdateVType  := !io.backend.toIBuf.resumingVType && !redirect
+  vtypeGen.in.walkToArchVType := io.backend.toIBuf.walkToArchVType
+  vtypeGen.in.walkVType       := io.backend.toIBuf.walkVType
+  vtypeGen.in.vsetvlVType     := io.backend.toIBuf.vsetvlVType
+  vtypeGen.in.commitVType     := io.backend.toIBuf.commitVType
+  vtypeGen.in.validNum        := predAccNum
+  for (i <- 0 until DecodeWidth) {
+    vtypeGen.in.vtypeEntries(i) := VTypeGen.Entry.fromInst(holdEntries(i).bits.inst)
   }
 
   io.backend.fromFtq.wen     := fetchHelper.io.out_ftqPackData(6)
