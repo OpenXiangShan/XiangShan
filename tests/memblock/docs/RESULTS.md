@@ -8,7 +8,8 @@
   `f8bb99518` (Uncache exception preservation), `e1424686a` (exceptional
   atomic `rfWen` suppression), `7045fa175` (exceptional scalar FP-load
   `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
-  address selection), and `39a7b9629` (PTW D-channel error propagation).
+  address selection), `39a7b9629` (PTW D-channel error propagation), and
+  `42152f6ba` (CMO D-channel error propagation).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
 - Retracted segment redirect changes: `9feb8279e` and `73096f6b9` treated an
@@ -19,13 +20,13 @@
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
-- Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `302e7c119a39c656d310f13ab4b8306d5b7b2160f1ca312e36db18a61c24fdde`
+- Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
+- Current rebuilt and frozen UT executable SHA-256: `617765d886f1d3760548c769a0a3eaff5190ba79203f024d2112c362d9d5ad19`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
+- Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `e6b8ffe8aa8b835c043438ce63ae7e73fdc121cd059aa027719c41c49dcb4deb`
+- Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
+- Frozen runtime manifest SHA-256: `fb9d46944a825f2cfb9606e6ae4031c1c3fbe91b5a32f4e8b495d749d9bca8d3`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1853,6 +1854,41 @@ the independent verifier accepted
 The frozen executable SHA-256 was
 `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`.
 No CPU RTL defect was observed.
+
+## CMO Functional And Error Closure
+
+On 2026-09-07 the DCache agent added the custom TileLink CMO operations
+`CBOClean=12`, `CBOFlush=13`, `CBOInval=14`, and `CBOAck=8`. It checks fixed
+source 17, size 64, line alignment, source lifetime through Ack, delayed
+completion, and the manager-derived B/C permission transition. The focused
+scenario delays CBOAck by 1,024 cycles so the expected Probe must complete
+first. Dirty CLEAN returns exact TtoB ProbeAckData and retains a readable line;
+dirty FLUSH returns exact TtoN ProbeAckData and forces a refill; clean INVAL
+returns BtoN ProbeAck without data and also forces a refill.
+Both dirty cases begin with a committed store still buffered and apply no
+testbench flush; the exact Probe data and final empty boundary prove that CMO
+execution drained the stores before completing.
+
+The first denied case exposed a CPU RTL bug: StoreQueue mentioned
+`cmoOpResp.denied/corrupt`, but those assignments were nested under an
+unrelated Uncache response handshake. Pre-fix complete RTL hash
+`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
+wrote back CLEAN with zero exception instead of StoreAccessFault. The root
+cause, CPU impact, reproducer, and fix are recorded in
+`CPU_BUG_CMO_DCHANNEL_ERROR.md`. The fixed complete RTL hash is
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+The fixed run produced:
+
+```text
+MEMBLOCK_CMO_CONTRACTS_PASS operations=3 dirty_probe_data=2 automatic_sbuffer_drains=2 retained_hits=1 invalidation_refills=2 denied_cases=3 corrupt_cases=3 positive_cycles=4398 error_cycles=2455 cmo_ack_delay=1024 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
+```
+
+All six operation/error crosses preserve bus memory, report the exact
+StoreAccessFault or HardwareError, complete with `flushPipe=1`, bypass Uncache,
+and conserve SQ entries. `mmio-contracts`, `uncache-errors`,
+`cbo-zero-contracts`, and `dcache-coherence` passed on the same regenerated
+model. The RTL fix is isolated in commit `42152f6ba`.
 
 ## DCache Per-Beat Error And MSHR Isolation Closure
 

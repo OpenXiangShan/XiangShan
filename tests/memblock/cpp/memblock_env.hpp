@@ -33,6 +33,8 @@ constexpr unsigned kLqEnqueueHeadroom = 6;
 constexpr unsigned kSqEnqueueHeadroom = 4;
 constexpr unsigned kEnqueueSettleCycles = 16;
 constexpr unsigned kRobEntries = 160;
+constexpr unsigned kDcacheMissEntries = 16;
+constexpr unsigned kDcacheCmoSource = kDcacheMissEntries + 1;
 constexpr std::uint64_t kFuTypeLoad = std::uint64_t{1} << 15;
 constexpr std::uint64_t kFuTypeStore = std::uint64_t{1} << 16;
 constexpr std::uint64_t kFuTypeAtomic = std::uint64_t{1} << 17;
@@ -202,15 +204,36 @@ enum class StoreOp : std::uint16_t {
     sw = 2,
     sd = 3,
     cbo_zero = 7,
+    cbo_clean = 0x0c,
+    cbo_flush = 0x0d,
+    cbo_inval = 0x0e,
     hsvb = 0x10,
     hsvh = 0x11,
     hsvw = 0x12,
     hsvd = 0x13,
 };
 
+constexpr bool is_cbo_zero(StoreOp op)
+{
+    return op == StoreOp::cbo_zero;
+}
+
+constexpr bool is_cmo(StoreOp op)
+{
+    return op == StoreOp::cbo_clean || op == StoreOp::cbo_flush ||
+        op == StoreOp::cbo_inval;
+}
+
+constexpr unsigned cmo_operation_index(StoreOp op)
+{
+    return is_cmo(op)
+        ? static_cast<unsigned>(op) - static_cast<unsigned>(StoreOp::cbo_clean)
+        : 3U;
+}
+
 constexpr unsigned scalar_store_bytes(StoreOp op)
 {
-    return op == StoreOp::cbo_zero
+    return is_cbo_zero(op)
         ? 64U
         : 1U << (static_cast<unsigned>(op) & 3U);
 }
@@ -220,6 +243,12 @@ static_assert(scalar_store_bytes(StoreOp::sd) == 8U);
 static_assert(scalar_store_bytes(StoreOp::hsvb) == 1U);
 static_assert(scalar_store_bytes(StoreOp::hsvd) == 8U);
 static_assert(scalar_store_bytes(StoreOp::cbo_zero) == 64U);
+static_assert(is_cmo(StoreOp::cbo_clean));
+static_assert(is_cmo(StoreOp::cbo_flush));
+static_assert(is_cmo(StoreOp::cbo_inval));
+static_assert(cmo_operation_index(StoreOp::cbo_clean) == 0U);
+static_assert(cmo_operation_index(StoreOp::cbo_flush) == 1U);
+static_assert(cmo_operation_index(StoreOp::cbo_inval) == 2U);
 
 enum class PrefetchOp : std::uint16_t {
     instruction = 0x8,
@@ -310,6 +339,7 @@ struct StoreTransaction {
     std::uint32_t input_exception_mask = 0;
     std::uint8_t input_trigger = kTriggerNone;
     bool input_flush_pipe = false;
+    std::optional<bool> expected_output_flush_pipe;
     std::optional<std::uint8_t> expected_trigger;
     // Store-address writeback exposes the memory-class debug bits.  Keep
     // these optional because existing callers may not model the translation
@@ -1701,6 +1731,7 @@ public:
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
         forced_next_response_delay_.reset();
+        forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
@@ -1723,6 +1754,11 @@ public:
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
+    }
+
+    void force_next_cmo_response_delay(unsigned cycles)
+    {
+        forced_next_cmo_response_delay_ = cycles;
     }
 
     void force_next_interbeat_delay(unsigned cycles)
@@ -1748,6 +1784,7 @@ public:
         d_gap_ = 0;
         d_presenting_ = false;
         forced_next_response_delay_.reset();
+        forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
         pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
@@ -1833,12 +1870,20 @@ public:
                 dut.auto_inner_dcache_client_out_a_bits_address.U(),
                 dut.auto_inner_dcache_client_out_a_bits_echo_isKeyword.B(),
             };
+            const bool cmo_opcode = captured_a_->opcode >= 12 &&
+                captured_a_->opcode <= 14;
             if (captured_a_->opcode != 4 && captured_a_->opcode != 6 &&
-                captured_a_->opcode != 7) {
+                captured_a_->opcode != 7 && !cmo_opcode) {
                 error_ = "unsupported DCache TileLink A opcode";
             }
             if (captured_a_->size > 6) {
                 error_ = "oversized DCache TileLink A request";
+            }
+            if (cmo_opcode &&
+                (captured_a_->size != 6 ||
+                 captured_a_->source != kDcacheCmoSource ||
+                 (captured_a_->address & (kLineBytes - 1)) != 0)) {
+                error_ = "malformed DCache CMO request identity";
             }
         }
         const bool b_valid = dut.auto_inner_dcache_client_out_b_valid.B();
@@ -1927,6 +1972,7 @@ public:
             corrupt_d_beat_count_ += response.corrupt;
             const bool completes_a = response.opcode == 1 ||
                 response.opcode == 4 ||
+                response.opcode == 8 ||
                 (response.opcode == 5 && response.last_beat);
             if (completes_a) {
                 if (response.source >= active_request_sources_.size() ||
@@ -1991,6 +2037,12 @@ public:
         return nonkeyword_refill_count_;
     }
     std::uint64_t acquire_perm_count() const { return acquire_perm_count_; }
+    std::uint64_t cmo_count(unsigned operation) const
+    {
+        return operation < cmo_counts_.size() ? cmo_counts_[operation] : 0;
+    }
+    std::uint64_t last_cmo_address() const { return last_cmo_address_; }
+    std::uint8_t last_cmo_source() const { return last_cmo_source_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
     const ResponseLatencyStats &response_latency_stats() const
@@ -2279,6 +2331,20 @@ private:
             expected_grant_acks_.push_back(sink);
             break;
         }
+        case 12: // CBOClean -> CBOAck
+        case 13: // CBOFlush -> CBOAck
+        case 14: { // CBOInval -> CBOAck
+            const unsigned operation = request.opcode - 12U;
+            ++cmo_counts_.at(operation);
+            last_cmo_address_ = request.address;
+            last_cmo_source_ = request.source;
+            push_response(DBeat{
+                8, 0, request.size, request.source, 0, request.keyword,
+                std::vector<unsigned char>(kBeatBytes, 0), denied, corrupt,
+            }, true, forced_next_cmo_response_delay_);
+            forced_next_cmo_response_delay_.reset();
+            break;
+        }
         default: {
             std::ostringstream message;
             message << "unsupported DCache TileLink A opcode "
@@ -2488,10 +2554,17 @@ private:
         return delay;
     }
 
-    void push_response(DBeat response, bool first_beat)
+    void push_response(
+        DBeat response, bool first_beat,
+        std::optional<unsigned> forced_delay = std::nullopt)
     {
         const bool was_empty = d_beats_.empty();
-        response.delay_before = response_delay(first_beat);
+        if (first_beat && forced_delay) {
+            response.delay_before = *forced_delay;
+            response_latency_stats_.sample(*forced_delay);
+        } else {
+            response.delay_before = response_delay(first_beat);
+        }
         d_beats_.push_back(std::move(response));
         if (was_empty) {
             d_presenting_ = false;
@@ -2522,6 +2595,9 @@ private:
     std::uint64_t keyword_refill_count_ = 0;
     std::uint64_t nonkeyword_refill_count_ = 0;
     std::uint64_t acquire_perm_count_ = 0;
+    std::array<std::uint64_t, 3> cmo_counts_{};
+    std::uint64_t last_cmo_address_ = 0;
+    std::uint8_t last_cmo_source_ = 0;
     std::uint64_t release_count_ = 0;
     std::uint64_t release_data_count_ = 0;
     std::uint64_t release_data_verified_count_ = 0;
@@ -2556,6 +2632,7 @@ private:
     std::array<bool, 64> active_request_sources_{};
     std::optional<PendingResponseError> pending_response_error_;
     std::optional<unsigned> forced_next_response_delay_;
+    std::optional<unsigned> forced_next_cmo_response_delay_;
     std::optional<unsigned> forced_next_interbeat_delay_;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
@@ -3573,7 +3650,8 @@ public:
                 0,
                 0,
                 transaction.expected_trigger,
-                transaction.input_flush_pipe,
+                transaction.expected_output_flush_pipe.value_or(
+                    transaction.input_flush_pipe),
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
             });
@@ -4569,6 +4647,11 @@ public:
         memory_agent_.force_next_response_delay(cycles);
     }
 
+    void force_next_cmo_response_delay(unsigned cycles)
+    {
+        memory_agent_.force_next_cmo_response_delay(cycles);
+    }
+
     void force_next_dcache_interbeat_delay(unsigned cycles)
     {
         memory_agent_.force_next_interbeat_delay(cycles);
@@ -5043,6 +5126,18 @@ public:
     std::uint64_t dcache_acquire_perms() const
     {
         return memory_agent_.acquire_perm_count();
+    }
+    std::uint64_t dcache_cmo_requests(StoreOp operation) const
+    {
+        return memory_agent_.cmo_count(cmo_operation_index(operation));
+    }
+    std::uint64_t dcache_last_cmo_address() const
+    {
+        return memory_agent_.last_cmo_address();
+    }
+    std::uint8_t dcache_last_cmo_source() const
+    {
+        return memory_agent_.last_cmo_source();
     }
     std::uint64_t tilelink_releases() const { return memory_agent_.release_count(); }
     std::uint64_t tilelink_release_data() const
@@ -9044,6 +9139,37 @@ public:
         return check_components();
     }
 
+    bool wait_for_cmo_store_request(
+        const StoreTransaction &transaction, std::uint64_t target,
+        unsigned timeout = 4096)
+    {
+        if (!is_cmo(transaction.op)) {
+            error_ = "CMO request wait requires CLEAN, FLUSH, or INVAL";
+            return false;
+        }
+        const unsigned operation = cmo_operation_index(transaction.op);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(transaction.rob);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(transaction.rob_flag);
+        // StoreQueue samples pendingst as a level while the CMO remains at
+        // the ROB head and may still be draining SBuffer.
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
+        for (unsigned elapsed = 0;
+             elapsed < timeout && memory_agent_.cmo_count(operation) < target;
+             ++elapsed) {
+            tick();
+            if (!check_components()) {
+                dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
+                return false;
+            }
+        }
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
+        if (memory_agent_.cmo_count(operation) < target) {
+            error_ = "timed out waiting for target DCache CMO request count";
+            return false;
+        }
+        return check_components();
+    }
+
     bool run_until_ptw_request_covering(
         std::uint64_t address,
         std::uint64_t first_request,
@@ -9506,9 +9632,12 @@ public:
             return false;
         }
         scalar_store_sq_targets_.erase(target_it);
+        if (is_cmo(transaction.op)) {
+            return true;
+        }
         const std::uint64_t raw_address = transaction.oracle_address.value_or(
             transaction.address);
-        const std::uint64_t address = transaction.op == StoreOp::cbo_zero
+        const std::uint64_t address = is_cbo_zero(transaction.op)
             ? raw_address & ~std::uint64_t{63}
             : raw_address;
         // CBO.ZERO is encoded as 0x7 but architecturally covers one cache
@@ -9517,7 +9646,7 @@ public:
         for (unsigned byte = 0; byte < bytes; ++byte) {
             memory_.write_reference_byte(
                 address + byte,
-                transaction.op == StoreOp::cbo_zero
+                is_cbo_zero(transaction.op)
                     ? 0
                     : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         }
@@ -9584,13 +9713,21 @@ public:
     // commits without issuing a second commit pulse for every store.
     void record_committed_store(const StoreTransaction &transaction)
     {
-        const std::uint64_t address = transaction.oracle_address.value_or(
+        if (is_cmo(transaction.op)) {
+            return;
+        }
+        const std::uint64_t raw_address = transaction.oracle_address.value_or(
             transaction.address);
+        const std::uint64_t address = is_cbo_zero(transaction.op)
+            ? raw_address & ~std::uint64_t{63}
+            : raw_address;
         const unsigned bytes = scalar_store_bytes(transaction.op);
         for (unsigned byte = 0; byte < bytes; ++byte) {
             memory_.write_reference_byte(
                 address + byte,
-                static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+                is_cbo_zero(transaction.op)
+                    ? 0
+                    : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         }
     }
 

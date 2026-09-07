@@ -455,6 +455,54 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main + environment + makefile)
 
+    def test_cmo_encodings_manager_model_and_oracles_are_registered(self) -> None:
+        package = (REPO_ROOT / "src/main/scala/xiangshan/package.scala").read_text()
+        tilelink = (
+            REPO_ROOT / "rocket-chip/src/main/scala/tilelink/Bundles.scala"
+        ).read_text()
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        for name, bits, opcode in (
+            ("clean", "1100", 12),
+            ("flush", "1101", 13),
+            ("inval", "1110", 14),
+        ):
+            self.assertRegex(package, rf'def\s+cbo_{name}\s*=\s*"b{bits}"\.U')
+            self.assertRegex(environment, rf'cbo_{name}\s*=\s*0x0?{opcode:x}')
+        for name, opcode in (
+            ("CBOClean", 12),
+            ("CBOFlush", 13),
+            ("CBOInval", 14),
+            ("CBOAck", 8),
+        ):
+            self.assertRegex(tilelink, rf'def\s+{name}\s*=\s*{opcode}\.U')
+        for contract in (
+            "kDcacheCmoSource = kDcacheMissEntries + 1",
+            "wait_for_cmo_store_request",
+            "force_next_cmo_response_delay",
+            "malformed DCache CMO request identity",
+            "CBOClean -> CBOAck",
+            "response.opcode == 8",
+            "expected_output_flush_pipe",
+            "run_cmo_contracts",
+            "probe-before-ack",
+            "dirty_probe_data=",
+            "automatic_sbuffer_drains=",
+            "retained_hits=",
+            "invalidation_refills=",
+            "denied_cases=",
+            "corrupt_cases=",
+            "cmo-contracts",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+        cmo_scenario = main.split("int run_cmo_contracts", 1)[1].split(
+            "int run_wfi_safety", 1
+        )[0]
+        self.assertNotIn("pulse_sbuffer_flush", cmo_scenario)
+        self.assertIn("environment.sbuffer_empty()", cmo_scenario)
+
     def test_l2_tlb_boundary_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

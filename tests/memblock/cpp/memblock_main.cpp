@@ -11587,6 +11587,357 @@ int run_cbo_zero_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_cmo_contracts(int argc, char **argv)
+{
+    struct CmoCase {
+        const char *name;
+        memblock::StoreOp op;
+        std::uint8_t probe_cap;
+        std::uint8_t expected_report;
+        bool dirty;
+        bool expect_probe_data;
+        bool expect_resident;
+    };
+    const std::array<CmoCase, 3> cases{{
+        {"clean", memblock::StoreOp::cbo_clean, 1, 0, true, true, true},
+        {"flush", memblock::StoreOp::cbo_flush, 2, 1, true, true, false},
+        {"inval", memblock::StoreOp::cbo_inval, 2, 2, false, false, false},
+    }};
+
+    unsigned dirty_probe_data = 0;
+    unsigned automatic_sbuffer_drains = 0;
+    unsigned retained_hits = 0;
+    unsigned invalidation_refills = 0;
+    std::uint64_t positive_cycles = 0;
+    for (unsigned index = 0; index < cases.size(); ++index) {
+        const CmoCase &test = cases[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t line =
+            memblock::kDefaultMemoryBase + 0x3c0000 + index * 0x1000;
+        const std::uint64_t address = line + 24;
+        environment.memory().fill_incrementing(
+            line, 64, static_cast<std::uint8_t>(0x41 + index * 0x19));
+        environment.configure_backpressure(
+            0x243f6a8885a308d3ULL ^ (std::uint64_t{index} << 32), true,
+            memblock::ResponseLatencyProfile::spec);
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction warm{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(180 + index * 3),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        const std::uint64_t warm_refills = environment.dcache_refills();
+        environment.expect_load(warm);
+        if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+            !environment.enqueue_load(warm) ||
+            !environment.issue_load(warm, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048) ||
+            environment.dcache_refills() != warm_refills + 1) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-warm reason=" << environment.error()
+                      << " refills=" << environment.dcache_refills() - warm_refills
+                      << '\n';
+            return 1;
+        }
+
+        std::optional<memblock::StoreTransaction> dirty_store;
+        if (test.dirty) {
+            dirty_store = memblock::StoreTransaction{
+                .address = address,
+                .data = 0xdecafbad12345678ULL ^
+                    (std::uint64_t{index} * 0x1111111111111111ULL),
+                .op = memblock::StoreOp::sd,
+                .rob = 1,
+                .sq = 0,
+                .address_lane = index % memblock::kScalarStoreLanes,
+                .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+            };
+            environment.expect_store(*dirty_store);
+            if (!environment.set_rob_head(
+                    dirty_store->rob, dirty_store->rob_flag) ||
+                !environment.enqueue_store(*dirty_store, 0) ||
+                !environment.issue_store_data(*dirty_store, 2048) ||
+                !environment.issue_store_address(*dirty_store, 2048) ||
+                !environment.run_until_store_complete(4096) ||
+                !environment.commit_store(*dirty_store, 8192) ||
+                environment.sbuffer_empty() ||
+                !environment.dcache_responses_idle() ||
+                !environment.dcache_grants_drained()) {
+                std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << test.name
+                          << "-dirty reason=" << environment.error() << '\n';
+                return 1;
+            }
+        }
+
+        const std::vector<unsigned char> expected_line =
+            environment.memory().read_beat(line, 64);
+        const memblock::StoreTransaction cmo{
+            .address = line + 37,
+            .oracle_address = line,
+            .data = 0xa5a55a5af00dcafeULL,
+            .op = test.op,
+            .rob = static_cast<std::uint8_t>(test.dirty ? 2 : 1),
+            .sq = static_cast<std::uint8_t>(test.dirty ? 1 : 0),
+            .address_lane = (index + 1) % memblock::kScalarStoreLanes,
+            .data_lane = index % memblock::kScalarStoreLanes,
+            .expected_output_flush_pipe = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t cmo_before =
+            environment.dcache_cmo_requests(cmo.op);
+        const std::uint64_t probes_before = environment.dcache_probes();
+        const std::uint64_t probe_responses_before =
+            environment.dcache_probe_responses();
+        const std::uint64_t probe_data_before =
+            environment.dcache_probe_data();
+        const std::uint64_t completed_stores_before =
+            environment.store_writebacks();
+        environment.expect_store(cmo);
+        if (!environment.enqueue_store(cmo, 0) ||
+            !environment.issue_store_address(cmo, 2048) ||
+            !environment.issue_store_data(cmo, 2048)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-issue reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        // A real L2 completes a CMO only after the derived upper Probe has
+        // returned. Hold CBOAck far enough away to exercise that ordering.
+        environment.force_next_cmo_response_delay(1024);
+        if (!environment.wait_for_cmo_store_request(cmo, cmo_before + 1, 8192) ||
+            environment.dcache_last_cmo_address() != line ||
+            environment.dcache_last_cmo_source() != memblock::kDcacheCmoSource ||
+            environment.uncache_requests() != 0 ||
+            !environment.request_dcache_probe(
+                line, test.probe_cap, false, test.expected_report,
+                test.expect_probe_data
+                    ? expected_line
+                    : std::vector<unsigned char>{}) ||
+            !environment.run_until_probe_responses(
+                probe_responses_before + 1, 4096) ||
+            environment.dcache_probes() != probes_before + 1 ||
+            environment.dcache_probe_data() !=
+                probe_data_before + (test.expect_probe_data ? 1U : 0U) ||
+            environment.store_writebacks() != completed_stores_before ||
+            environment.pending_scalar_stores() != 1) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-probe-before-ack reason=" << environment.error()
+                      << " cmo_address=0x" << std::hex
+                      << environment.dcache_last_cmo_address()
+                      << " expected=0x" << line << std::dec
+                      << " source="
+                      << static_cast<unsigned>(environment.dcache_last_cmo_source())
+                      << " pending_stores="
+                      << environment.pending_scalar_stores() << '\n';
+            return 1;
+        }
+        automatic_sbuffer_drains += dirty_store.has_value();
+
+        if (!environment.run_until_store_complete(16384) ||
+            !environment.commit_store(cmo, 8192) ||
+            !environment.run_cycles(16) ||
+            !environment.dcache_responses_idle() ||
+            environment.dcache_cmo_requests(cmo.op) != cmo_before + 1 ||
+            !environment.sbuffer_empty() ||
+            environment.sq_dequeued() != environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-completion reason=" << environment.error()
+                      << " sq=" << environment.sq_dequeued() << '/'
+                      << environment.sq_allocated() << '\n';
+            return 1;
+        }
+
+        if (dirty_store &&
+            environment.bus_expected_load(address, memblock::LoadOp::ld) !=
+                dirty_store->data) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-dirty-writeback bus=0x" << std::hex
+                      << environment.bus_expected_load(
+                             address, memblock::LoadOp::ld)
+                      << " expected=0x" << dirty_store->data << std::dec
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t refills_before_readback =
+            environment.dcache_refills();
+        const memblock::LoadTransaction readback{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(cmo.rob + 1),
+            .lq = 1,
+            .sq = cmo.sq,
+            .pdest = static_cast<std::uint8_t>(181 + index * 3),
+            .lane = (index + 1) % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(readback);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-readback reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t readback_refills =
+            environment.dcache_refills() - refills_before_readback;
+        if (readback_refills != (test.expect_resident ? 0U : 1U)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-line-state readback_refills=" << readback_refills
+                      << " expected=" << (test.expect_resident ? 0 : 1)
+                      << '\n';
+            return 1;
+        }
+        dirty_probe_data += test.expect_probe_data;
+        retained_hits += test.expect_resident;
+        invalidation_refills += !test.expect_resident;
+        positive_cycles += environment.cycle();
+    }
+
+    unsigned denied_cases = 0;
+    unsigned corrupt_cases = 0;
+    std::uint64_t error_cycles = 0;
+    for (unsigned operation = 0; operation < cases.size(); ++operation) {
+        for (unsigned error_kind = 0; error_kind < 2; ++error_kind) {
+            const CmoCase &test = cases[operation];
+            const bool denied = error_kind == 0;
+            const bool corrupt = !denied;
+            memblock::Environment environment(argc, argv);
+            const std::uint64_t line = memblock::kDefaultMemoryBase +
+                0x400000 + operation * 0x2000 + error_kind * 0x1000;
+            environment.memory().fill_incrementing(
+                line, 64,
+                static_cast<std::uint8_t>(0x91 + operation * 9 + error_kind));
+            environment.configure_backpressure(
+                0x13198a2e03707344ULL ^
+                    (std::uint64_t{operation} << 16) ^ error_kind,
+                true, memblock::ResponseLatencyProfile::spec);
+            if (!environment.reset()) {
+                std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << test.name
+                          << '-' << (denied ? "denied" : "corrupt")
+                          << "-reset reason=" << environment.error() << '\n';
+                return 1;
+            }
+
+            const memblock::StoreTransaction cmo{
+                .address = line + 55,
+                .oracle_address = line,
+                .data = 0x55aa55aa33cc33ccULL,
+                .op = test.op,
+                .rob = 0,
+                .sq = 0,
+                .address_lane = error_kind,
+                .data_lane = 1 - error_kind,
+                .expected_exception_mask = denied
+                    ? memblock::kExceptionStoreAccessFault
+                    : memblock::kExceptionHardwareError,
+                .expected_output_flush_pipe = true,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+            };
+            const std::uint64_t bus_before = environment.bus_expected_load(
+                line + 24, memblock::LoadOp::ld);
+            const std::uint64_t denied_before =
+                environment.dcache_denied_d_beats();
+            const std::uint64_t corrupt_before =
+                environment.dcache_corrupt_d_beats();
+            const std::uint64_t errors_before =
+                environment.dcache_error_response_requests();
+            environment.expect_store(cmo);
+            environment.inject_dcache_response_error_at(
+                line, denied, corrupt);
+            environment.force_next_cmo_response_delay(256);
+            if (!environment.enqueue_store(cmo, 0) ||
+                !environment.issue_store_address(cmo, 2048) ||
+                !environment.issue_store_data(cmo, 2048) ||
+                !environment.wait_for_cmo_store_request(cmo, 1, 8192) ||
+                !environment.run_until_store_complete(16384) ||
+                !environment.run_cycles(8) ||
+                !environment.redirect_after(cmo.rob, cmo.rob_flag, true) ||
+                !environment.run_cycles(96) ||
+                (environment.sq_dequeued() + environment.sq_canceled() <
+                     environment.sq_allocated() &&
+                 !environment.account_sq_cancellation(1))) {
+                std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << test.name
+                          << '-' << (denied ? "denied" : "corrupt")
+                          << "-execution reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+            if (environment.dcache_cmo_requests(cmo.op) != 1 ||
+                environment.dcache_last_cmo_address() != line ||
+                environment.dcache_last_cmo_source() !=
+                    memblock::kDcacheCmoSource ||
+                environment.dcache_error_response_requests() !=
+                    errors_before + 1 ||
+                environment.dcache_denied_d_beats() !=
+                    denied_before + (denied ? 1U : 0U) ||
+                environment.dcache_corrupt_d_beats() !=
+                    corrupt_before + (corrupt ? 1U : 0U) ||
+                environment.dcache_probes() != 0 ||
+                environment.uncache_requests() != 0 ||
+                environment.bus_expected_load(
+                    line + 24, memblock::LoadOp::ld) != bus_before ||
+                environment.sq_dequeued() + environment.sq_canceled() !=
+                    environment.sq_allocated() ||
+                !environment.dcache_responses_idle()) {
+                std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << test.name
+                          << '-' << (denied ? "denied" : "corrupt")
+                          << "-oracle cmo="
+                          << environment.dcache_cmo_requests(cmo.op)
+                          << " denied_beats="
+                          << environment.dcache_denied_d_beats() - denied_before
+                          << " corrupt_beats="
+                          << environment.dcache_corrupt_d_beats() - corrupt_before
+                          << " sq=" << environment.sq_dequeued() << '+'
+                          << environment.sq_canceled() << '/'
+                          << environment.sq_allocated() << '\n';
+                return 1;
+            }
+            denied_cases += denied;
+            corrupt_cases += corrupt;
+            error_cycles += environment.cycle();
+        }
+    }
+
+    std::cout << "MEMBLOCK_CMO_CONTRACTS_PASS"
+              << " operations=" << cases.size()
+              << " dirty_probe_data=" << dirty_probe_data
+              << " automatic_sbuffer_drains=" << automatic_sbuffer_drains
+              << " retained_hits=" << retained_hits
+              << " invalidation_refills=" << invalidation_refills
+              << " denied_cases=" << denied_cases
+              << " corrupt_cases=" << corrupt_cases
+              << " positive_cycles=" << positive_cycles
+              << " error_cycles=" << error_cycles
+              << " cmo_ack_delay=1024"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_wfi_safety(int argc, char **argv)
 {
     constexpr unsigned response_delay = 256;
@@ -32866,6 +33217,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "cbo-zero-contracts") {
             return run_cbo_zero_contracts(argc, argv);
+        }
+        if (options.test == "cmo-contracts") {
+            return run_cmo_contracts(argc, argv);
         }
         if (options.test == "wfi-safety") {
             return run_wfi_safety(argc, argv);

@@ -21,7 +21,7 @@ with concurrent legal TileLink traffic, randomized request/response backpressure
 source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
 denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
-side effects and CMO CLEAN/FLUSH/INVAL remain explicit boundary gaps.
+side effects and CMO CLEAN/FLUSH/INVAL functional/error paths are covered.
 `hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, PMP
 execute behavior, and each operation family across all four Sv39/Sv48 and
 Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
@@ -116,7 +116,7 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
-reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
+reservation interference, full CMO/fence concurrency ordering,
 ordered side-effecting indexed accesses, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
@@ -130,8 +130,9 @@ normal commits and consolidated documentation only; they do not receive a
 per-fix Markdown report. The confirmed reports currently retained are
 `CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`,
 `CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`, `CPU_BUG_FP_EXCEPTION_FP_WEN.md`, and
-`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`, and
-`CPU_BUG_PTW_DCHANNEL_ERROR_IGNORED.md`.
+`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`,
+`CPU_BUG_PTW_DCHANNEL_ERROR_IGNORED.md`, and
+`CPU_BUG_CMO_DCHANNEL_ERROR.md`.
 
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:
@@ -264,6 +265,7 @@ make sbuffer-flush PICKER="$PICKER" JOBS=8
 make sbuffer-timeout PICKER="$PICKER" JOBS=8
 make mmio-contracts PICKER="$PICKER" JOBS=8
 make cbo-zero-contracts PICKER="$PICKER" JOBS=8
+make cmo-contracts PICKER="$PICKER" JOBS=8
 make wfi-safety PICKER="$PICKER" JOBS=8
 make reset-recovery PICKER="$PICKER" JOBS=8
 make reset-tree-contracts PICKER="$PICKER" JOBS=8
@@ -772,6 +774,20 @@ only the selected high four bytes, then return and clear that stored beat.
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line
 back before updating the reference mirror.
+
+`cmo-contracts` models the custom DCache TileLink CMO exchange end to end.
+It checks line-aligned size-64 `CBO.CLEAN`, `CBO.FLUSH`, and `CBO.INVAL` A
+requests on fixed source 17, delays `CBOAck` by 1024 cycles, and completes the
+manager-derived Probe first. The dirty cases leave a committed store buffered,
+apply no direct flush, and require CMO execution to drain it before the request
+and resulting Probe. Dirty CLEAN and FLUSH require byte-exact
+ProbeAckData; CLEAN downgrades to a resident Branch line, while FLUSH and a
+clean INVAL invalidate and force a checked refill. Every operation is also
+crossed with denied and independent-corrupt `CBOAck`, exact store-access-fault
+or hardware-error writeback, `flushPipe=1`, no Uncache traffic, unchanged bus
+memory on failure, and SQ conservation. This scenario found the confirmed RTL
+defect documented in
+[`docs/CPU_BUG_CMO_DCHANNEL_ERROR.md`](docs/CPU_BUG_CMO_DCHANNEL_ERROR.md).
 
 `reset-recovery` separately asserts reset with an accepted DCache refill, PTW
 walk, and Uncache/MMIO request held outstanding by a 256-cycle response delay.

@@ -87,9 +87,10 @@ No CMO success-path state transition or Uncache behavior is changed.
 The fixed RTL produces:
 
 ```text
-MEMBLOCK_CMO_CONTRACTS_PASS operations=3 dirty_probe_data=2 retained_hits=1
-invalidation_refills=2 denied_cases=3 corrupt_cases=3 positive_cycles=4318
-error_cycles=2455 cmo_ack_delay=1024
+MEMBLOCK_CMO_CONTRACTS_PASS operations=3 dirty_probe_data=2
+automatic_sbuffer_drains=2 retained_hits=1 invalidation_refills=2
+denied_cases=3 corrupt_cases=3 positive_cycles=4398 error_cycles=2455
+cmo_ack_delay=1024
 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
 ```
 
@@ -99,6 +100,8 @@ The executable oracle also covers the success path before testing errors:
   permits a zero-refill resident read;
 - dirty `CBO.FLUSH` returns exact `ProbeAckData`, invalidates the line, and
   requires a cold refill whose data includes the dirty writeback;
+- both dirty operations begin with a committed store still buffered, use no
+  direct testbench flush, and therefore check CMO-driven SBuffer draining;
 - clean `CBO.INVAL` returns a no-data `ProbeAck`, invalidates the line, and
   requires a cold refill;
 - every CMO uses line-aligned TileLink size 64 and fixed source 17, bypasses
