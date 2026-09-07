@@ -30,6 +30,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.vector.{VecIssueQueue, BusyTable => VpBusyTable}
+import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.DataSource
@@ -118,8 +119,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(VlPhyRegIdxWidth.W))))
     val wakeUpAll = new Bundle {
       val wakeUpInt: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
-      val wakeUpFp: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
     }
+    val wakeUpFp: Vec[FltWakeUpBundle] = Input(
+      Vec(backendParams.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
+    )
     val wakeUpVec: Vec[VecIssueQueue.WakeUpBundle] = Input(
       Vec(backendParams.getVpWriteSize, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
     )
@@ -254,7 +257,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   })
   busyTables.zip(wbPregs).zip(allocPregs).map{ case ((b, w), a) => {
     b.io.wakeUpInt := io.wakeUpAll.wakeUpInt
-    b.io.wakeUpFp  := io.wakeUpAll.wakeUpFp
+    b.io.wakeUpFp.zip(io.wakeUpFp).map { case (sink, source) =>
+      sink.valid := source.wen
+      sink.bits := 0.U.asTypeOf(sink.bits)
+      sink.bits.is0Lat := false.B
+      sink.bits.fpWen := source.wen
+      sink.bits.pdest := source.pdest
+      sink.bits.loadDependency := source.loadDependency
+    }
     b.io.og0Cancel := io.og0Cancel
     b.io.ldCancel := io.ldCancel
     b.io.wbPregs := w

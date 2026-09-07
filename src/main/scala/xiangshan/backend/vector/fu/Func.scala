@@ -7,7 +7,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.Latency
-import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.{FuType, FuncUnitFaluInputFromFmul}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.rob.RobPtr
@@ -70,10 +70,13 @@ object Func {
     val ex = Vec(cfg.latency + 1, ValidIO(new InUop))
     val frm = Option.when(cfg.needSrcFrm)(Frm())
     val vxrm = Option.when(cfg.needSrcVxrm)(Vxrm())
+    val FmulToFadd = Option.when(cfg.isFAlu)(ValidIO(new FuncUnitFaluInputFromFmul))
+    val busyTableEmpty = Option.when(cfg.isFdiv)(Bool())
   }
 
   class Out(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
     val ex = Vec(cfg.latency + 1, ValidIO(new OutUop))
+    val FmulToFadd = Option.when(cfg.isFmul)(ValidIO(new FuncUnitFaluInputFromFmul))
   }
 
   class InUop(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
@@ -107,6 +110,7 @@ object Func {
     val vtype     = Option.when(cfg.readVType)(VType())
     val oldVType  = Option.when(cfg.writeVType)(VType())
     val vm        = Option.when(cfg.readVType)(Bool())
+    val frm       = Option.when(cfg.needSrcFrm)(Frm())
   }
 
   class InData(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {

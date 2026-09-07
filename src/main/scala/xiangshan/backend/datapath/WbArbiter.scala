@@ -298,7 +298,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   intWbArbiter.io.flush <> io.flush
   require(intWbArbiter.io.in.size == intArbiterInputsWireY.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all int wb size: ${intArbiterInputsWireY.size}")
   intWbArbiter.io.in.zip(intArbiterInputsWireY).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid && in.bits.toIntRf.map(_.valid).getOrElse(false.B)
+    arbiterIn.valid := in.bits.toIntRf.map(_.valid).getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "int")
   }

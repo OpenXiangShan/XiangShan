@@ -77,11 +77,7 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.valid := i2fFuOut.valid && i2fFuOut.bits.toFpRf.get.valid
     x.bits := i2fFuOut.bits.toFpRf.get.bits
   }
-  io.cross.F2IDataOut.foreach { x =>
-    val f2iFuOut = exus.filter(exu => exu.exuParams.hasf2iFu).head.io.out
-    x.valid := f2iFuOut.valid && f2iFuOut.bits.toIntRf.get.valid
-    x.bits := f2iFuOut.bits.toIntRf.get.bits
-  }
+  io.cross.busyTableI2F.foreach(_ := 0.U)
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))
   }
