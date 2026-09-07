@@ -367,10 +367,10 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+	$(MAKE) -C ./difftest emu-mk NOOP_HOME=$(abspath .) DESIGN_DIR=$(abspath .) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
+	$(MAKE) -C ./difftest emu NOOP_HOME=$(abspath .) DESIGN_DIR=$(abspath .) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
 gsim: sim-chirrtl
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
