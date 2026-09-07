@@ -78,6 +78,24 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         output bit force_s1_pf,
         output bit force_s2_gpf
     );
+    // 中文注释：按 V2 TLB response mux 选择当前访问真正可见的 PBMT。该 helper
+    // 只消费已经命中的 readonly entry 与 UID 冻结上下文，不访问 live runtime CSR。
+    extern function bit observer_get_effective_pbmt(
+        memblock_rm_readonly_api::tlb_entry_view_t entry,
+        memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+        bit s1_active,
+        bit s2_active,
+        output bit [1:0] effective_pbmt
+    );
+    // 中文注释：只对 PMA 已明确为普通可缓存、PBMT=00 且硬件非对齐处理已开启
+    // 的 scalar 访问抑制 address-misaligned expectation；其他路径保持保守旧语义。
+    extern function bit observer_should_expect_addr_misaligned(
+        bit misaligned,
+        bit store_access,
+        memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+        bit all_bytes_pma_pbmt,
+        bit all_bytes_normal_cacheable
+    );
     extern function bit observer_build_commit_item(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
         memblock_rm_readonly_api::status_view_t status_view,
@@ -277,6 +295,62 @@ function bit memblock_rm::observer_eval_pbmt_fault_overlay(
         force_s1_pf, force_s2_gpf);
 endfunction:observer_eval_pbmt_fault_overlay
 
+// 中文注释：V2 TLB.pbmt_check() 在 allStage 中优先非零 S1 PBMT，否则使用
+// S2 PBMT。这里重建同一选择，仅用于 RM 的地址异常建模，不把 raw stage
+// payload 直接当成最终 memory type。
+function bit memblock_rm::observer_get_effective_pbmt(
+    memblock_rm_readonly_api::tlb_entry_view_t entry,
+    memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+    bit s1_active,
+    bit s2_active,
+    output bit [1:0] effective_pbmt
+);
+    effective_pbmt = 2'd0;
+    if (!entry.valid || !tlb_context.valid ||
+        entry.s1_stage_active != s1_active ||
+        entry.s2_stage_active != s2_active ||
+        entry.s2xlate != tlb_context.s2xlate) begin
+        return 1'b0;
+    end
+    case (tlb_context.s2xlate)
+        2'd0,
+        2'd1: begin
+            if (!s1_active || s2_active) return 1'b0;
+            effective_pbmt = entry.s1_entry_pbmt;
+        end
+        2'd2: begin
+            if (s1_active || !s2_active) return 1'b0;
+            effective_pbmt = entry.s2_entry_pbmt;
+        end
+        2'd3: begin
+            if (!s1_active || !s2_active) return 1'b0;
+            effective_pbmt = entry.s1_entry_pbmt != 2'd0 ?
+                             entry.s1_entry_pbmt : entry.s2_entry_pbmt;
+        end
+        default: return 1'b0;
+    endcase
+    return effective_pbmt != 2'b11;
+endfunction:observer_get_effective_pbmt
+
+function bit memblock_rm::observer_should_expect_addr_misaligned(
+    bit misaligned,
+    bit store_access,
+    memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+    bit all_bytes_pma_pbmt,
+    bit all_bytes_normal_cacheable
+);
+    bit hd_misalign_enabled;
+
+    if (!misaligned) return 1'b0;
+    hd_misalign_enabled = store_access ? tlb_context.hd_misalign_st_enable :
+                                         tlb_context.hd_misalign_ld_enable;
+    if (hd_misalign_enabled && all_bytes_pma_pbmt &&
+        all_bytes_normal_cacheable) begin
+        return 1'b0;
+    end
+    return 1'b1;
+endfunction:observer_should_expect_addr_misaligned
+
 function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
     memblock_rm_readonly_api::status_view_t status_view,
@@ -295,7 +369,11 @@ function bit memblock_rm::observer_build_commit_item(
     bit entry_translation_fault;
     bit pbmt_force_s1_pf;
     bit pbmt_force_s2_gpf;
+    bit [1:0] effective_pbmt;
     bit misaligned;
+    bit all_bytes_pma_pbmt;
+    bit all_bytes_normal_cacheable;
+    memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_pma_pmp_view;
     bit store_access;
     bit s1_active;
     bit s2_active;
@@ -308,6 +386,7 @@ function bit memblock_rm::observer_build_commit_item(
     rm_ls_error_e translation_path_error;
 
     item = new(main_view.uid);
+    pma_pmp_view = '{default:'0};
     item.valid = 1'b1;
     item.uid = main_view.uid;
     item.op = main_view.fu_op_type;
@@ -401,6 +480,8 @@ function bit memblock_rm::observer_build_commit_item(
     end
     store_access = item.kind == RM_LS_KIND_STORE;
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
+    all_bytes_pma_pbmt = 1'b1;
+    all_bytes_normal_cacheable = 1'b0;
     // 中文注释：以下三类异常只来自冻结 TLB context/entry；main_view 的
     // tlb_af/tlb_pf/tlb_gpf/pma_af/denied/corrupt 均禁止作为 RM 真源。
     access_fault = 1'b0;
@@ -453,6 +534,16 @@ function bit memblock_rm::observer_build_commit_item(
                               tlb_context.m_pbmt_en, tlb_context.h_pbmt_en));
                 return 1'b0;
             end
+            if (!observer_get_effective_pbmt(
+                    entry, tlb_context, s1_active, s2_active,
+                    effective_pbmt)) begin
+                ls_model.set_error(
+                    RM_LS_ERR_TLB_ENTRY_INCONSISTENT,
+                    $sformatf("uid %0d byte %0d cannot select response-visible PBMT s2xlate=%0d",
+                              item.uid, byte_index, tlb_context.s2xlate));
+                return 1'b0;
+            end
+            all_bytes_pma_pbmt &= effective_pbmt == 2'd0;
             item.expected_pbmt_forced_s1_pf |= pbmt_force_s1_pf;
             item.expected_pbmt_forced_s2_gpf |= pbmt_force_s2_gpf;
             if (byte_index == 0) item.translation_key = tlb_context.entry_key;
@@ -528,6 +619,37 @@ function bit memblock_rm::observer_build_commit_item(
         item.expected_pma_cache_path_fault = pma_pmp_view.pma_cache_path_fault;
         access_fault = store_access ? pma_pmp_view.st_access_fault :
                                        pma_pmp_view.ld_access_fault;
+        // PMA/PMP 的完整尺寸查询继续服务既有 Access-Fault 期望；非对齐放宽
+        // 还必须证明每一个实际 PA byte 都属于普通可缓存区域。单字节查询
+        // 避免只看首地址而跨过 PMA/PMP 边界。
+        all_bytes_normal_cacheable = 1'b1;
+        for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
+            byte_pma_pmp_view = '{default:'0};
+            if (!ro.read_pma_pmp_af_for_rm(
+                    item.uid,
+                    item.dynamic_epoch,
+                    1'b1,
+                    item.pa_by_byte[byte_index][47:0],
+                    1,
+                    pma_pmp_cmd,
+                    byte_pma_pmp_view)) begin
+                ls_model.set_error(
+                    RM_LS_ERR_TRANSLATION_NOT_READY,
+                    $sformatf("uid %0d PMA/PMP byte view unavailable byte=%0d PA=0x%0h epoch=%0d",
+                              item.uid, byte_index, item.pa_by_byte[byte_index],
+                              item.dynamic_epoch));
+                return 1'b0;
+            end
+            if (!byte_pma_pmp_view.valid ||
+                !byte_pma_pmp_view.translation_eligible ||
+                !byte_pma_pmp_view.af_decided ||
+                byte_pma_pmp_view.dcache_fact_needed_for_c ||
+                !byte_pma_pmp_view.normal_cacheable ||
+                (store_access ? byte_pma_pmp_view.st_access_fault :
+                                byte_pma_pmp_view.ld_access_fault)) begin
+                all_bytes_normal_cacheable = 1'b0;
+            end
+        end
         // 当前 V2 smoke 的 U 态默认 PMP 会在基础权限阶段结束；若未来 profile
         // 允许访问且 PMA C=0，需要独立 cache observer 提供 fact 后再补 cache-path AF。
         // 此处不把 C=0/MMIO 分类或未知 fact 猜测成异常，保留模型诊断字段即可。
@@ -546,7 +668,10 @@ function bit memblock_rm::observer_build_commit_item(
     if (access_fault) item.expected_exception[store_access ? 7 : 5] = 1'b1;
     if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
     if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
-    if (item.expected_exception == '0 && misaligned)
+    if (item.expected_exception == '0 &&
+        observer_should_expect_addr_misaligned(
+            misaligned, store_access, tlb_context,
+            all_bytes_pma_pbmt, all_bytes_normal_cacheable))
         item.expected_exception[store_access ? 6 : 4] = 1'b1;
     if (item.expected_exception == '0 &&
         item.pa_valid_mask != required_pa_mask) begin
@@ -558,7 +683,7 @@ function bit memblock_rm::observer_build_commit_item(
     item.translation_valid = 1'b1;
     if (!observer_trace_translation_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRACE_TRANSLATION",
-                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
+                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d hdMisalign=%0d allPbmtPma=%0d allNormalCacheable=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
                             item.uid, item.rob.flag, item.rob.value,
                             observer_kind_name(item.kind),
                             bare_identity ? "BARE_IDENTITY" : "PAGED_ENTRY",
@@ -566,6 +691,10 @@ function bit memblock_rm::observer_build_commit_item(
                             item.pa_by_byte[item.size_bytes - 1], item.pa_valid_mask,
                             tlb_context.s2xlate, tlb_context.m_pbmt_en,
                             tlb_context.h_pbmt_en,
+                            store_access ? tlb_context.hd_misalign_st_enable :
+                                           tlb_context.hd_misalign_ld_enable,
+                            all_bytes_pma_pbmt,
+                            all_bytes_normal_cacheable,
                             item.expected_pbmt_forced_s1_pf,
                             item.expected_pbmt_forced_s2_gpf,
                             item.expected_exception),

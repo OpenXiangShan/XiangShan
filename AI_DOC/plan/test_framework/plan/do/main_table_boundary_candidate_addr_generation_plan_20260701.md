@@ -9,6 +9,12 @@
 
 本文只描述测试框架如何生成有效激励，不实现 DUT 正确性 checker、RM 对比或 coveragent。
 
+> 历史实现说明（2026-09-04）：本文原始方案中的 `final_vaddr < 2^39`、
+> `vaddr[63:39] == 0` 以及自动 boundary 地址不消费 `MAIN_VADDR` 的描述，只对应当时的实现，
+> 已不能作为当前行为依据。Sv39 正 low-half canonical 必须检查 `vaddr[63:38] == 0`；自动
+> boundary 模板现在从 `MAIN_VADDR` 窗口内选择可容纳完整访问的对齐 anchor。当前实现和验证要求以
+> `mem_ut_v2_boundary_vaddr_window_canonical_fix_plan_20260904.md` 及对应 implementation review 为准。
+
 顶层使能原则：
 
 ```text

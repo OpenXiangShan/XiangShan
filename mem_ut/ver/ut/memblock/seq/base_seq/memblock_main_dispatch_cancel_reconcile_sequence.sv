@@ -9,7 +9,8 @@
 `define MEMBLOCK_MAIN_DISPATCH_CANCEL_RECONCILE_SEQUENCE__SV
 
 // 中文注释：该 sequence 只替换 manual main table 的内容，复用父类的真实
-// enqueue/issue/writeback/commit/deq service flow 和 end_test_check。uid0 是
+// enqueue/issue/writeback/commit/deq service flow。最终 end_test_check 由外层
+// virtual sequence 在所有 background responder 完成后统一执行。uid0 是
 // redirect anchor，uid1/uid2 是等待真实 LSQ sample 后由 directed vseq flush 的
 // younger load/store victim；不在这里直接修改运行期 status 或 redirect 状态。
 class memblock_main_dispatch_cancel_reconcile_sequence extends memblock_main_dispatch_manual_main_table_sequence;

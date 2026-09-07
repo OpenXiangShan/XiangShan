@@ -20,8 +20,9 @@ class memblock_rm_readonly_api extends uvm_object;
     typedef mem_access_base_sequence::mem_line_addr_t mem_line_addr_t;
     typedef mem_access_base_sequence::mem_line_data_t mem_line_data_t;
     typedef mem_access_base_sequence::mem_line_mask_t mem_line_mask_t;
-    // 中文注释：RM 只拿到 PMA/PMP 的 Access-Fault 视图；mmio/cacheable/
-    // atomic_allowed 等属性留在模型内部，避免把分类误当成 RM 比较条件。
+    // 中文注释：RM 默认只消费 PMA/PMP 的 Access-Fault 视图。该 view 额外携带
+    // normal_cacheable 窄事实，仅供 scalar 非对齐的硬件拆分资格判断；它不暴露
+    // 或比较 DUT 的 MMIO/NCIO 路由属性。
     typedef pma_pmp_af_view_t pma_pmp_af_view_for_rm_t;
 
     typedef struct packed {

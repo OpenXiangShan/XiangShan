@@ -83,6 +83,7 @@ Dispatch framework 参数分组如下：
 | 分组 | 字段 |
 | --- | --- |
 | 主表与模式 | `MEMBLOCK_MAIN_TRANS_NUM`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` |
+| 静态 Sv39 CSR PBMTE | `MEMBLOCK_MMU_SV39_M_PBMTE_EN`、`MEMBLOCK_MMU_SV39_H_PBMTE_EN` |
 | 入队与流水线runtime使用量 | `MEMBLOCK_ENQ_PER_CYCLE`、`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN`、`MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT`、`MEMBLOCK_ENQ_PER_CYCLE_MIDDLE_WEIGHT`、`MEMBLOCK_ENQ_PER_CYCLE_MAX_WEIGHT`、`MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`、`MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN` |
 | op class 权重 | `MEMBLOCK_OP_CLASS_INT_LOAD_WT`、`MEMBLOCK_OP_CLASS_FP_LOAD_WT`、`MEMBLOCK_OP_CLASS_STORE_WT`、`MEMBLOCK_OP_CLASS_PREFETCH_WT`、`MEMBLOCK_OP_CLASS_AMO_WT`、`MEMBLOCK_OP_CLASS_CBO_WT` |
 | fuOpType 权重 | `MEMBLOCK_LOAD_FUOP_*_WT`、`MEMBLOCK_STORE_FUOP_*_WT`、`MEMBLOCK_PREFETCH_FUOP_*_WT`、`MEMBLOCK_CBO_FUOP_*_WT`、`MEMBLOCK_AMO_FUOP_*_WT` |
@@ -114,16 +115,22 @@ Dispatch framework 参数分组如下：
 fatal、优先级/地址复用概率clamp，以及`apply_runtime_resource_limits()`按编译期真实端口数量
 集中处理enqueue/pipe runtime行为上限。
 
+`MEMBLOCK_MAIN_VADDR_BASE/RANGE` 的 consumer 必须按地址来源区分：normal 自动主表和
+`MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 的自动 boundary 模板都通过 `seq_csr_common` getter
+读取该窗口；后者必须在窗口中选取可容纳完整访问尾部的对齐 anchor。manual directed 地址不被
+全局窗口过滤，以保留 non-canonical、页故障和其它异常激励。
+
 DUT物理LSQ enqueue slot和LOAD/STA/STD pipe数量不属于plus参数，统一由
 `cfg/memblock_compile_params.svh`的`MEMBLOCK_DUT_*`宏配置，并由
 `memblock_dispatch_types.sv`暴露同名typed localparam。五个旧`MEMBLOCK_REAL_*`硬件镜像从
 字段定义、加载、default cfg、runtime快照、getter和consumer完整删除，不保留旧名称检测或
 兼容wrapper。物理循环直接读取compile localparam，runtime plus只能调节本testcase使用量。
 
-`MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只供 `apply_legal_addr_template()` 生成自动主表 normal
-虚拟地址，`MEMBLOCK_PADDR_BASE/RANGE` 继续只供 `tlb_map_builder` 生成翻译后的物理 PPN。
-两组默认值相同只用于兼容既有 Bare smoke，不表示 VA 和 PA 窗口继续耦合。manual directed
-和 boundary profile 地址生成不受 MAIN_VADDR 参数全局限制。
+`MEMBLOCK_MAIN_VADDR_BASE/RANGE` 供 `apply_legal_addr_template()` 的自动 normal 主表和
+`MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 的自动 boundary 模板生成虚拟地址；后者还必须保证
+完整访问尾部留在窗口内。`MEMBLOCK_PADDR_BASE/RANGE` 继续只供 `tlb_map_builder` 生成翻译后的物理
+PPN。两组默认值相同只用于兼容既有 Bare smoke，不表示 VA 和 PA 窗口继续耦合。manual directed
+不受 `MAIN_VADDR` 的全局过滤；只有 automatic boundary 的地址复用最终 span 继续消费该窗口。
 
 `MEMBLOCK_MAIN_MEM_RANGES_EN` 默认值为 `1`，只决定 DCache/Uncache shared sparse memory 是否
 把当前 `MEMBLOCK_PADDR_BASE/RANGE` 作为严格物理访问窗口；为 `0` 时两个 memory-facing responder

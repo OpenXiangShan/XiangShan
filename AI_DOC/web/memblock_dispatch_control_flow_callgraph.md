@@ -256,8 +256,8 @@ import_manual_main_table()
 | `apply_legal_addr_template(tr)` | 主表 transaction | 修正 `src_0/imm/vaddr` | 在 `main_vaddr_base/range` 内选择可容纳完整访问跨度的 64B 对齐起始槽 | `get_main_vaddr_base()`、`get_main_vaddr_range()`、`tr.update_vaddr()` |
 | `choose_rob_start_key()` | 无 | uid0 ROB key | 选择 ROB 起始 value，初始 flag 固定为 0 | `get_rob_start_*()`、`rand_weighted3()` |
 | `choose_addr_ref_window()` | 无 | uid 距离窗口 | 选择 recent queue 保留窗口 | `get_addr_ref_window_*()`、`rand_weighted3()` |
-| `apply_addr_reuse_window()` | 当前 transaction、uid、recent load/store queue | 可能修正类型和 `src_0/imm/vaddr` | 主表生成期按 recent-window 提高地址相关概率；normal 最终访问跨度必须仍在 MAIN_VADDR 内 | `select_addr_reuse_kind()`、`random_pick_recent_uid()`、`set_transaction_ls_kind()`、`fixup_after_addr_reuse()`、`ensure_normal_reused_addr_span()` |
-| `ensure_normal_reused_addr_span()` | 当前 transaction、参考 transaction、调用者 | 必要时修正目标 load/store `fuOpType` | 复制地址后若随机访问尺寸越界，收敛到参考访问尺寸；boundary/manual 不消费 MAIN_VADDR | `derive_size_bytes()`、`default_fuop_by_op_class_and_size()`、`apply_op_class_template()` |
+| `apply_addr_reuse_window()` | 当前 transaction、uid、recent load/store queue | 可能修正类型和 `src_0/imm/vaddr` | 主表生成期按 recent-window 提高地址相关概率；无 reference 的 boundary fallback 按最终 op 重建地址并遵守 Store cross-8B gate | `select_addr_reuse_kind()`、`random_pick_recent_uid()`、`set_transaction_ls_kind()`、`fixup_after_addr_reuse()`、`ensure_reused_addr_span()`、`apply_boundary_addr_template()` |
+| `ensure_reused_addr_span()` | 当前 transaction、参考 transaction、调用者 | 必要时修正目标 load/store `fuOpType` | 复制地址后若随机访问尺寸越界，收敛到参考访问尺寸；boundary 同时检查 MAIN_VADDR/Sv39 canonical，manual directed 不经过该 helper | `derive_size_bytes()`、`default_fuop_by_op_class_and_size()`、`apply_op_class_template()`、`check_boundary_full_vaddr_span()` |
 | `prune_recent_uid_q()` | recent queue、当前 uid、窗口 | 删除过期候选 uid | 确保候选仍在 uid 距离窗口内 | queue `pop_front()` |
 | `push_recent_uid()` | 最终 transaction、uid | 当前 uid 入 load/store recent queue | 让后续 transaction 能复用当前地址 | `is_load_main_tr()`、`is_store_main_tr()` |
 | `init_status_for_main_table()` | 无 | `status_by_uid[]` 初始化 | 每个 uid 建 status 并 snapshot 主表 ROB/LQ/SQ key | `data.init_status_for_uid()` |

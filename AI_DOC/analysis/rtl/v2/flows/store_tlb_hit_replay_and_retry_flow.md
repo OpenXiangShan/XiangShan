@@ -229,6 +229,7 @@ Hybrid Unit 的标量 store fast feedback 直接使用 `!s2_tlb_miss`。因此�
 - [Memory trigger Flow](memory_trigger_flow.md)：Store trigger 如何转为 exception/debug，而非 replay。
 - [Memory flushPipe Flow](memory_flush_pipe_flow.md)：redirect 对 StoreUnit/DCache 前段请求的 kill 边界。
 - [L2 内侧 TileLink 请求、权限与回复 Flow](l2_inner_tilelink_request_response_flow.md)：SBuffer 到 DCache、MissQueue 与外部一致性事务的后续路径。
+- [V2 StoreQueue NC 跨 16B 异常、读指针与 Redirect 恢复设计确认](storequeue_nc_cross16_exception_rdataptr_redirect_design_confirmation.md)：PBMT NC split response 转异常后的 SQ completion、DataBuffer 双计数与 redirect 边界。
 
 ## V2/V3 差异
 

@@ -13,7 +13,21 @@
 - `mem_ut/ver/ut/memblock/env/plus.sv`
 - `mem_ut/ver/ut/memblock/seq/plus_cfg/default.cfg`
 
-## 1. 函数调用 Flow 图
+## 1. 术语与抽象功能说明
+
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
+| --- | --- | --- | --- |
+| boundary profile | 自动主表选择的访问边界类别。 | `main_control_transaction.boundary_profile` | `CROSS_16B_SAME_LINE` 表示访问跨 16B 但不跨 64B cache line。 |
+| anchor | profile 偏移叠加前的对齐虚拟地址基点。 | `random_aligned_vaddr()` 返回值 | cross-16B 先选 64B 对齐 anchor，再加 bank/k 导出的偏移。 |
+| tail offset | 从 anchor 到本次访问最后一个字节的距离。 | `gen_final_vaddr_by_profile()` 局部值 | 4B cross-16B 的 tail 同时覆盖起始偏移和后续 3B。 |
+| full VA | `src_0 + sign_extend(imm)` 后 transaction 和 DUT 实际使用的虚拟地址。 | `tr.vaddr` | 模板回填后用 `tr.update_vaddr()` 重新得到 full VA。 |
+| MAIN_VADDR window | 自动 normal/boundary 地址允许使用的虚拟地址闭区间。 | `seq_csr_common::get_main_vaddr_base/range()` | 本专项 cfg 使用 `0x8000_0000..0x8fff_ffff`。 |
+| manual directed | testcase 显式写入的主表地址，不属于自动 normal/boundary 随机生成。 | `manual_main_table_by_rob` | 有意构造 non-canonical 或 page-fault 地址时不受本模板窗口拦截。 |
+
+抽象功能描述：自动 boundary 地址模板只负责在当前 `MAIN_VADDR` 窗口内构造保持目标 profile 的合法
+full VA；它不建立 TLB entry、不解释 PBMT/PMA/PMP，也不修改 manual directed fault 的地址语义。
+
+### 1.1 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
@@ -40,10 +54,10 @@ flowchart TD
     N --> O["weighted_pick profile -> op_class -> fuOpType"]
     O --> P["apply_op_class_template(tr, fuOpType)"]
     P --> Q["apply_boundary_addr_template(tr, profile, size)"]
-    Q --> R["gen_final_vaddr_by_profile(profile, size, op_class)"]
-    R --> S["random_negative_imm12() / src_0 = final_vaddr - sext(imm12)"]
-    S --> T["tr.update_vaddr()"]
-    T --> U["classify_boundary_profile(vaddr, size)"]
+    Q --> R["profile offset/tail -> random_aligned_vaddr()"]
+    R --> S["MAIN_VADDR 内选对齐 anchor / 生成 final_vaddr"]
+    S --> T["random_negative_imm12() / src_0 = final_vaddr - sext(imm12)"]
+    T --> U["tr.update_vaddr() / full VA 窗口与 canonical 检查"]
     U --> V{"actual == target?"}
     V -->|no| W["UVM_FATAL: template/check bug"]
     V -->|yes| X["check_boundary_profile(tr, caller)"]
@@ -83,7 +97,9 @@ main table boundary_profile 生成主流程：
 
 6. apply_boundary_addr_template() 根据 target boundary_profile 和 size_bytes 构造 final_vaddr。
    final_vaddr 是 RTL 看到的 effective address / virtual address。
-   地址生成不从 MEMBLOCK_PADDR_BASE/RANGE 采样，也不检查 L2TLB/page backing。
+   profile 先确定离散 offset 与完整访问的 tail offset；随后 random_aligned_vaddr() 只从
+   MAIN_VADDR 窗口的合法对齐 anchor 中采样。地址生成不从 MEMBLOCK_PADDR_BASE/RANGE 采样，
+   也不检查 L2TLB/page backing。
 
 7. apply_boundary_addr_template() 生成非 0 的负 imm12，再反推 src_0：
      imm_sext = sign_extend_imm12(imm12);
@@ -91,8 +107,9 @@ main table boundary_profile 生成主流程：
    设置 tr.src_0/tr.imm 后调用 tr.update_vaddr()，要求 tr.vaddr 必须等于 final_vaddr。
 
 8. 地址模板不使用 retry。
-   如果 final_vaddr/end_vaddr 非 Sv39 正 canonical、发生回绕、update_vaddr 不匹配或 classify 结果不是目标 profile，
-   直接 UVM_FATAL。这表示模板规则或实现错误，不 fallback 到 ALIGNED。
+   如果 final_vaddr/end_vaddr 或 update_vaddr 后的 full VA 不满足 Sv39 正 canonical、完整访问越过
+   MAIN_VADDR、发生回绕、update_vaddr 不匹配或 classify 结果不是目标 profile，直接 UVM_FATAL。
+   这表示模板规则或实现错误，不 fallback 到 ALIGNED。
 
 9. boundary 模式下 build_random_main_table() 也会进入 apply_addr_reuse_window()。
    地址复用可能改写 op_class、fuOpType、src_0、imm 和 vaddr。
@@ -108,7 +125,7 @@ main table boundary_profile 生成主流程：
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
-真实逻辑摘要：
+关键源码摘要：
 
 ```systemverilog
 if (seq_csr_common::get_boundary_profile_gen_en()) begin
@@ -176,7 +193,11 @@ end
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
-真实逻辑摘要：
+抽象功能描述：该函数在自动主表构造期尝试建立 load/store 地址关系。命中参考时保留参考地址并交给
+`ensure_reused_addr_span()` 收敛最终访问跨度；没有参考时只重建最终 op 对应的地址，不伪造地址相关性。
+boundary fallback 同时负责保持 profile、窗口和 Store x cross-8B gate 的约束闭环。
+
+关键源码摘要：
 
 ```systemverilog
 if (rand_weighted2(seq_csr_common::get_addr_reuse_en_1_wt(),
@@ -249,9 +270,30 @@ fallback_op_class 只在参考队列为空时使用：
 
 ```systemverilog
 if (!got_ref) begin
+    int unsigned fallback_size_bytes;
+    memblock_boundary_profile_e fallback_profile;
+
     tr.op_class = fallback_op_class;
     apply_minimal_op_template(tr);
-    fixup_after_addr_reuse(tr, null, 1'b0, fallback_caller);
+    if (seq_csr_common::get_boundary_profile_gen_en()) begin
+        fallback_size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+        fallback_profile = tr.boundary_profile;
+        if (!boundary_profile_supported_for_fuop(tr.op_class, tr.fuOpType,
+                                                 fallback_profile, fallback_size_bytes) ||
+            (tr.op_class == MEMBLOCK_OP_CLASS_STORE &&
+             fallback_profile == MEMBLOCK_BOUNDARY_PROFILE_CROSS_8B_WITHIN_16B &&
+             !seq_csr_common::get_store_cross_8b_within_16b_en())) begin
+            fallback_profile = MEMBLOCK_BOUNDARY_PROFILE_ALIGNED;
+        end
+        tr.boundary_profile = fallback_profile;
+        tr.boundary_size_bytes = fallback_size_bytes;
+        apply_boundary_addr_template(tr, fallback_profile, fallback_size_bytes);
+        check_boundary_profile(tr, fallback_caller);
+        validate_main_table_entry(tr, fallback_caller);
+    end else begin
+        apply_legal_addr_template(tr);
+        validate_main_table_entry(tr, fallback_caller);
+    end
     return;
 end
 
@@ -289,8 +331,12 @@ fixup_after_addr_reuse(tr, ref_tr, 1'b1, reuse_caller);
 如果没有选到 ref_tr：
   设置 tr.op_class 为 fallback_op_class；
   调用 apply_minimal_op_template() 按该 op_class 和 fuOpType 权重生成合法 op 模板；
-  调用 fixup_after_addr_reuse() 更新 vaddr 并做主表合法性检查；
-  由于 copy_addr=0，不会复制任何参考地址；
+  由于没有参考地址，不调用 copy-address fixup，也不伪造地址相关性。
+  如果是 normal 模式，调用 apply_legal_addr_template() 以最终 op 的访问大小重建窗口内地址；
+  如果是 boundary 模式，先从最终 fuOpType 派生 size，再检查旧 profile 是否仍支持该 op/size。
+    对最终 STORE x CROSS_8B_WITHIN_16B，额外读取 STORE cross-8B gate；gate 为 0 时改成 ALIGNED。
+    调用 apply_boundary_addr_template() 以最终 profile/size 重建地址，并调用 check_boundary_profile()
+    和 validate_main_table_entry() 校验最终标签与 op 模板。
   然后返回。
 
 如果选到 ref_tr：
@@ -329,7 +375,10 @@ fixup_after_addr_reuse(tr, ref_tr, 1'b1, reuse_caller);
 - `apply_minimal_op_template()`：按目标 op_class 和 fuOpType 权重生成合法 op 模板。
 - `derive_size_bytes()`：从 op_class/fuOpType 派生访问 size。
 - `choose_fuop_by_op_class_and_size()`：在目标 op_class 中选择与 ref_size 相同的合法 fuOpType。
-- `fixup_after_addr_reuse()`：按需复制参考地址，更新 vaddr，并调用主表合法性检查。
+- `fixup_after_addr_reuse()`：有 reference 时复制参考地址、更新 vaddr，并调用主表合法性检查。
+- `ensure_reused_addr_span()`：有 reference 时复核完整 span；若新的访问大小不适配 copied address，
+  收敛到 reference size，同时在 boundary 模式检查 `MAIN_VADDR` 与 Sv39 canonical。
+- `apply_boundary_addr_template()`：无 reference 的 boundary fallback 用最终 profile/size 重新生成地址。
 
 ### 2.2 `sync_boundary_profile_after_addr_reuse()` 标签同步子流程
 
@@ -348,6 +397,7 @@ if (size_bytes == 0) begin
 end
 
 tr.update_vaddr();
+check_boundary_full_vaddr_span(tr, size_bytes, caller);
 actual_profile = classify_boundary_profile(tr.vaddr, size_bytes);
 if (actual_profile == MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN) begin
     `uvm_fatal(get_type_name(), ...)
@@ -360,7 +410,9 @@ validate_main_table_entry(tr, caller);
 
 功能解释：
 
-boundary 模式下，地址复用可能覆盖初始 boundary 地址和 op 模板。该函数不恢复旧 profile，也不重新生成地址；它只根据最终写入 main table 前的 transaction 重新计算 `boundary_size_bytes` 和 `boundary_profile`。
+boundary 模式下，地址复用可能覆盖初始 boundary 地址和 op 模板。该函数不恢复旧 profile，也不重建
+已经存在的 reference 地址；它先检查最终 full span，再根据最终写入 main table 前的 transaction
+重新计算 `boundary_size_bytes` 和 `boundary_profile`。
 
 输入/输出：
 
@@ -382,6 +434,10 @@ boundary 模式下，地址复用可能覆盖初始 boundary 地址和 op 模板
 调用 tr.update_vaddr()：
   用最终 src_0/imm 重新计算 vaddr；
   这是为了确保标签同步基于最终地址，而不是复用前的旧地址。
+
+调用 check_boundary_full_vaddr_span()：
+  检查最终完整访问没有回绕，起始和末字节均在 MAIN_VADDR 窗口内且满足 Sv39 正 canonical；
+  失败说明自动 boundary 复用分支破坏了地址构造约束，直接 fatal，而不是静默改标签。
 
 调用 classify_boundary_profile()：
   用最终 vaddr 和最终 size 重新分类；
@@ -670,6 +726,10 @@ tr.boundary_size_bytes = fuop_entry.size_bytes;
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
+抽象功能描述：该函数由自动 boundary 主表生成调用，把已确定的 profile 和访问大小转换为可驱动的
+`src_0/imm/full VA`。它消费 helper 返回的合法地址并做回填后的完整跨度校验；不负责全局主表过滤、
+TLB/PBMT 建表或 RM 预期计算。
+
 真实逻辑摘要：
 
 ```systemverilog
@@ -694,6 +754,20 @@ tr.imm   = imm12;
 tr.update_vaddr();
 
 if (tr.vaddr != final_vaddr) begin
+    `uvm_fatal(get_type_name(), ...)
+end
+main_vaddr_base = seq_csr_common::get_main_vaddr_base();
+main_vaddr_range = seq_csr_common::get_main_vaddr_range();
+main_vaddr_limit = {1'b0, main_vaddr_base} + {1'b0, main_vaddr_range};
+if (main_vaddr_range == 0 || main_vaddr_limit[64]) begin
+    `uvm_fatal(get_type_name(), ...)
+end
+main_vaddr_upper = main_vaddr_limit[63:0] - 64'd1;
+full_end_vaddr = tr.vaddr + size_minus_one;
+if (full_end_vaddr < tr.vaddr || tr.vaddr < main_vaddr_base ||
+    full_end_vaddr > main_vaddr_upper ||
+    !is_sv39_positive_canonical(tr.vaddr) ||
+    !is_sv39_positive_canonical(full_end_vaddr)) begin
     `uvm_fatal(get_type_name(), ...)
 end
 if (classify_boundary_profile(tr.vaddr, size_bytes) != profile) begin
@@ -722,7 +796,8 @@ end
 
 计算 end_vaddr：
   如果 end_vaddr 小于 final_vaddr，说明加法回绕，直接 fatal；
-  如果 final_vaddr 或 end_vaddr 不满足 Sv39 正 canonical，直接 fatal。
+  如果 final_vaddr 或 end_vaddr 不满足 Sv39 正 canonical，直接 fatal。Sv39 低半区的检查范围是
+  `[63:38]`，不能遗漏符号位 bit38。
 
 生成非 0 的负 imm12：
   random_negative_imm12() 只返回 0x800 到 0xfff；
@@ -736,6 +811,11 @@ end
   设置 tr.src_0 和 tr.imm；
   调用 tr.update_vaddr()，让 transaction 自己计算 vaddr；
   如果 tr.vaddr 不等于 final_vaddr，说明 src_0/imm 拆分或 update_vaddr 规则错误，fatal。
+
+重新检查 DUT 实际看到的 full VA：
+  读取 MAIN_VADDR base/range，以宽位加法取得窗口上界；窗口为空或 64-bit 回绕时 fatal。
+  计算 full_end_vaddr；如果完整访问回绕、起始或末字节不在窗口内、或两者不是 Sv39 正 canonical，fatal。
+  这一步只在自动 boundary 模板内执行，不改动 manual directed transaction 的地址语义。
 
 最后调用 classify_boundary_profile()：
   如果实际分类不等于目标 profile，说明模板规则或支持矩阵错误，fatal；
@@ -753,48 +833,77 @@ end
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
+抽象功能描述：该函数保持既有 boundary 分类语义，但将每个 profile 的离散偏移先固定下来，再由
+`random_aligned_vaddr()` 在可容纳访问尾部的 `MAIN_VADDR` 槽中选择 anchor。它不随机重试、不改变
+profile 权重，也不处理 manual directed 地址。
+
 真实逻辑摘要：
 
 ```systemverilog
 case (profile)
     MEMBLOCK_BOUNDARY_PROFILE_ALIGNED: begin
         align_bytes = (size_bytes >= 64) ? 64 : size_bytes;
-        return random_aligned_vaddr(align_bytes);
+        anchor = random_aligned_vaddr(align_bytes, size_bytes - 1);
+        return anchor;
     end
     MEMBLOCK_BOUNDARY_PROFILE_MISALIGN_WITHIN_8B: begin
-        base = random_aligned_vaddr(8);
-        ...
-        return base + offset;
+        if (size_bytes == 2) begin
+            case ($urandom_range(2, 0))
+                0: offset = 1;
+                1: offset = 3;
+                default: offset = 5;
+            endcase
+        end else begin
+            offset = $urandom_range(3, 1);
+        end
+        final_offset = offset;
+        tail_offset = final_offset + size_bytes - 1;
+        anchor = random_aligned_vaddr(64'd8, tail_offset);
+        final_vaddr = anchor + final_offset;
+        return final_vaddr;
     end
     MEMBLOCK_BOUNDARY_PROFILE_CROSS_8B_WITHIN_16B: begin
-        base = random_aligned_vaddr(16);
         k = $urandom_range(size_bytes - 1, k_min);
-        return base + 8 - k;
+        final_offset = 64'd8 - k;
+        tail_offset = final_offset + size_bytes - 1;
+        anchor = random_aligned_vaddr(64'd16, tail_offset);
+        final_vaddr = anchor + final_offset;
+        return final_vaddr;
     end
     MEMBLOCK_BOUNDARY_PROFILE_CROSS_16B_SAME_LINE: begin
-        line_base = random_aligned_vaddr(64);
         bank = $urandom_range(2, 0);
         k = $urandom_range(size_bytes - 1, 1);
-        return line_base + bank * 16 + 16 - k;
+        final_offset = bank * 16 + 16 - k;
+        tail_offset = final_offset + size_bytes - 1;
+        anchor = random_aligned_vaddr(64'd64, tail_offset);
+        final_vaddr = anchor + final_offset;
+        return final_vaddr;
     end
     MEMBLOCK_BOUNDARY_PROFILE_CROSS_CACHELINE_SAME_4K: begin
-        page_base = random_aligned_vaddr(4096);
         line = $urandom_range(62, 0);
         k = $urandom_range(size_bytes - 1, 1);
-        return page_base + line * 64 + 64 - k;
+        final_offset = line * 64 + 64 - k;
+        tail_offset = final_offset + size_bytes - 1;
+        anchor = random_aligned_vaddr(64'd4096, tail_offset);
+        final_vaddr = anchor + final_offset;
+        return final_vaddr;
     end
     MEMBLOCK_BOUNDARY_PROFILE_CROSS_4K: begin
         k = $urandom_range(size_bytes - 1, 1);
-        page_count = (64'h0000_0080_0000_0000 - size_bytes + k) >> 12;
-        page_base = (random64() % page_count) << 12;
-        return page_base + 4096 - k;
+        final_offset = 64'd4096 - k;
+        tail_offset = final_offset + size_bytes - 1;
+        anchor = random_aligned_vaddr(64'd4096, tail_offset);
+        final_vaddr = anchor + final_offset;
+        return final_vaddr;
     end
 endcase
 ```
 
 功能解释：
 
-该函数用构造式模板生成目标虚拟地址。每个 profile 都直接在合法边界附近采样，避免“纯随机地址 + 检查 + retry”。
+该函数用构造式模板生成目标虚拟地址。每个 profile 先选择影响边界形态的离散 offset，再把 anchor
+到访问末字节的距离作为 tail offset 传给 helper；helper 因此能够在不改变 profile 的前提下从当前
+MAIN_VADDR 窗口选择合法 anchor。整个流程避免“纯随机地址 + 检查 + retry”。
 
 输入/输出：
 
@@ -809,42 +918,103 @@ endcase
 
 ALIGNED：
   按 size 选择对齐粒度，size>=64 时用 64B 对齐；
-  调用 random_aligned_vaddr() 在 Sv39 正地址空间内取对齐 vaddr。
+  以 size-1 作为 tail offset，调用 random_aligned_vaddr() 在 MAIN_VADDR 窗口内取对齐 anchor。
 
 MISALIGN_WITHIN_8B：
   只允许 size 2/4；
-  先取 8B 对齐 base；
   size=2 时只选 offset 1/3/5，保证非自然对齐且不跨 8B；
   size=4 时选 offset 1..3，保证非自然对齐且不跨 8B。
+  offset 和 size 先折算成 tail offset，再取 8B 对齐 anchor。
 
 CROSS_8B_WITHIN_16B：
   只允许 size 2/4/8；
-  先取 16B 对齐 base；
   在 8B 边界前选择 k，使访问跨 8B 但仍落在同一 16B block 内。
+  将 8-k 与 size 合成 tail offset 后，再取 16B 对齐 anchor。
 
 CROSS_16B_SAME_LINE：
   只允许 size 2/4/8；
-  先取 64B 对齐 line_base；
   bank 只在 0..2 中选，避免最后一个 16B bank 升级成跨 cacheline；
   在 16B 边界前选择 k，使访问跨 16B 但不跨 64B。
+  bank/k 先确定，再按其 tail offset 选择 64B 对齐 line anchor。
 
 CROSS_CACHELINE_SAME_4K：
   只允许 size 2/4/8；
-  先取 4K 对齐 page_base；
   line 只在 0..62 中选，避免最后一条 cacheline 升级成跨 4K；
   在 64B 边界前选择 k，使访问跨 cacheline 但不跨页。
+  line/k 先确定，再按其 tail offset 选择 4KB 对齐 page anchor。
 
 CROSS_4K：
   只允许 size 2/4/8；
   先选 k，使访问从页尾跨到下一页；
-  page_count 按 Sv39 正 canonical 上界扣掉 tail 空间；
-  随机选择 page_base 后返回 page_base + 4096 - k。
+  以 4096-k 和 size 合成 tail offset，在同一 MAIN_VADDR helper 中选择 page anchor；不再硬编码
+  `2^39` 页数。
 ```
 
 内部子调用：
 
-- `random_aligned_vaddr()`：在 `[0, 2^39)` 内生成指定粒度对齐虚拟地址。
+- `random_aligned_vaddr()`：在 MAIN_VADDR 窗口内生成能容纳 tail offset 的指定粒度对齐 anchor。
 - `random64()`：提供 64-bit 随机数，供大范围取模使用。
+
+### 7.1 `random_aligned_vaddr()`
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
+
+抽象功能描述：该 helper 是自动 boundary 模板的唯一 anchor 选择器。它读取统一的
+`MAIN_VADDR` 参数快照，在不越过窗口和访问尾部的前提下返回指定粒度的对齐地址；它不修改
+transaction、profile、TLB 表或任何运行期队列。
+
+关键源码摘要：
+
+```systemverilog
+main_vaddr_limit = {1'b0, main_vaddr_base} + {1'b0, main_vaddr_range};
+if (main_vaddr_range == 0 || main_vaddr_limit[64]) begin
+    `uvm_fatal(get_type_name(), ...)
+end
+main_vaddr_upper = main_vaddr_limit[63:0] - 64'd1;
+if (main_vaddr_range <= tail_offset) begin
+    `uvm_fatal(get_type_name(), ...)
+end
+latest_anchor = main_vaddr_upper - tail_offset;
+wide_aligned_first = {1'b0, main_vaddr_base} + {1'b0, align_mask};
+aligned_first = wide_aligned_first[63:0] & ~align_mask;
+aligned_last = latest_anchor & ~align_mask;
+
+wide_slot_count = (({1'b0, aligned_last} - {1'b0, aligned_first}) /
+                   {1'b0, align_bytes}) + 65'd1;
+slot_pick = random64() % wide_slot_count[63:0];
+slot_product = {66'd0, slot_pick} * {66'd0, align_bytes};
+wide_candidate = {1'b0, aligned_first} + slot_product[64:0];
+wide_access_end = {1'b0, wide_candidate[63:0]} + {1'b0, tail_offset};
+if (wide_candidate[64] || wide_access_end[64] ||
+    wide_access_end[63:0] > main_vaddr_upper) begin
+    `uvm_fatal(get_type_name(), ...)
+end
+return wide_candidate[63:0];
+```
+
+中文伪代码：该 helper 首先拒绝空窗口、窗口加法回绕、非二次幂对齐、无法容纳 tail 的窗口和对齐后
+没有合法槽的配置。随后它把能容纳 tail 的最后 anchor 向下对齐，得到第一个和最后一个可选槽；只在
+这个闭区间内随机选择一个槽。槽索引乘法显式扩到 130 位，确保乘法截断会被 fatal 检查捕获；候选
+anchor 和其访问末字节还会再次在宽位上校验。成功时只返回 anchor，调用者仍负责叠加 profile 偏移。
+
+### 7.2 `is_sv39_positive_canonical()`
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
+
+抽象功能描述：该纯值 helper 用于自动 boundary 模板的低半区 Sv39 地址检查。它不改写输入，也不把
+非 canonical 地址转换成 fault；有意构造异常地址的 manual directed 路径不会调用它。
+
+关键源码摘要：
+
+```systemverilog
+function bit memblock_dispatch_base_sequence::is_sv39_positive_canonical(input bit [63:0] vaddr);
+    return vaddr[63:38] == '0;
+endfunction:is_sv39_positive_canonical
+```
+
+中文伪代码：Sv39 的符号位是 bit38。低半区地址要求 bit38 以及所有更高位均为零，因此 helper 检查
+`[63:38]`，而不是旧实现的 `[63:39]`；这样 `bit38=1`、高位仍为零的非法洞不会进入自动 normal
+测试输入。
 
 ## 8. `classify_boundary_profile()` / `check_boundary_profile()`
 
@@ -1105,11 +1275,15 @@ seq_csr_common.sv 在 load_from_plus() 中读取 plus 最终值。
 当前实现边界：
 
 - `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=0` 时默认旧路径完全保留。
+- `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 时，自动 boundary 地址使用 `MAIN_VADDR` 窗口：所有 profile
+  都先确定 offset/tail，再从可容纳完整访问的对齐 anchor 中采样。此局部约束不施加到 manual directed
+  地址，因此异常测试仍可主动使用窗口外或非 canonical VA。
 - boundary 模式启用既有地址复用窗口；复用后同步最终 `boundary_profile/boundary_size_bytes`。
 - boundary 地址生成不检查 `MEMBLOCK_PADDR_BASE/RANGE`，不检查 L2TLB/page backing。
 - boundary 地址生成不 retry，check 失败直接 `UVM_FATAL`。
 - PREFETCH/CBO/AMO 第一版只支持 `ALIGNED`。
-- STORE x `CROSS_8B_WITHIN_16B` 需要 `MEMBLOCK_STORE_CROSS_8B_WITHIN_16B_EN=1` 才进入候选表。
+- STORE x `CROSS_8B_WITHIN_16B` 需要 `MEMBLOCK_STORE_CROSS_8B_WITHIN_16B_EN=1` 才能进入候选表；
+  无 reference fallback 从 Load 改成 Store 时也复用同一 gate，关闭时必须改为 `ALIGNED`。
 - 逐 fuOpType 权重已通过 plus/default.cfg/seq_csr_common getter 落地，normal 和 boundary 路径共用同一组权重。
 - 地址复用命中后可通过 `MEMBLOCK_ADDR_REUSE_KEEP_REF_SIZE_EN_*` 控制是否保持参考 transaction 的 size。
 

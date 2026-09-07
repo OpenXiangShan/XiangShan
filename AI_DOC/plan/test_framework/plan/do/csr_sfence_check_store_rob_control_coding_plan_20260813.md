@@ -719,6 +719,30 @@ worker 主循环：
 
 影响范围：`memblock_dispatch_base_sequence` 的内部初始化边界和专项仿真；不改变任何 worker、ROB、CSR、SFence、flushSb 或 L2 flush 对外状态机。
 
+## IMPLEMENTATION_DELTA：real-smoke 静态 Sv39 CSR
+
+`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0` 的
+`basicTest + memblock_dispatch_real_smoke_vseq` 保持本 plan 定义的 disabled topology：不启动
+CSR/SFence control worker，也不创建 control barrier。该场景新增的
+`memblock_mmu_sv39_csr_sequence` 由 VSEQ 直接在 `csr_ctrl_sqr` 启动，并在主表初始化后持续
+驱动稳定 payload：`satp.MODE=8`、`satp.PPN=MEMBLOCK_PADDR_BASE[55:12]`、非虚拟化 U 态
+`imode=dmode=0`；其余 CSR 字段采用 Scala V2 复位值，所有 translation changed pulse 为 0。
+
+静态 sequence 是 disabled topology 下 `csr_ctrl_sqr` 的唯一 producer。`basicTest` 对该 VSEQ
+同时安装 CSR/Fence 的无 producer default sequence，防止 agent fallback 在同一 sequencer 上插入随机
+CSR 或 SFence。`MEMBLOCK_CSR_CONTROL_ENABLE=0` 和 `MEMBLOCK_SFENCE_CONTROL_ENABLE=0` 只关闭
+动态控制，不影响静态 Sv39 baseline。L2TLB lifecycle 在主表 ready 后还要等待 CSR monitor 已发布
+Sv39/PPN/U 态 runtime mirror，避免 responder 以 Bare/M 态 snapshot 接收首笔 DTLB request。
+
+专项 preset 为 `seq/plus_cfg/tc_dispatch_real_mmu_sv39_smoke.cfg`，其中
+`MEMBLOCK_MAIN_TRANS_NUM=10000`，并为可支持的随机维度提供非零权重；V2 尚未支持的 AMO/CBO
+父类保持 0。场景选择通过 Makefile 的 `ts`，不在 cfg 中写 `+VSEQ_MAIN`：
+
+```bash
+make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=base_fun \
+  cfg=tc_dispatch_real_mmu_sv39_smoke
+```
+
 ## 与初步 plan 差异说明
 
 本章只记录相对于两份 flow 草案和现有框架行为的功能实现差异，coding 时以正文前述最终 flow 为准。

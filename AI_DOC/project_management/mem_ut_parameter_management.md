@@ -67,7 +67,11 @@
   memory-facing responder 都按 48-bit 物理地址懒分配。该开关不改变 TLB PPN 生成、主表虚拟地址
   或任何 DUT 接口宽度。
 - 两组参数默认数值可以相同以保持 Bare smoke 兼容，但参数语义和 consumer 必须独立；translated testcase 可以配置不同 VA/PA 窗口。
-- manual directed 和 boundary profile 地址不由 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 全局拦截，避免破坏异常地址和边界地址构造。
+- `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 时，自动 boundary profile 是 `MAIN_VADDR` 的一个 consumer：
+  它从窗口内选择对齐 anchor，并保证本次访问的末字节仍在窗口内。该局部约束同时避免 Sv39
+  low-half canonical 边界附近的非法自动输入。
+- manual directed 不由 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 全局拦截；仅自动 boundary 路径消费该窗口，
+  因此有意构造的 non-canonical、page-fault 或其它异常地址仍可进入测试框架。
 
 ### 2.2.1 DUT物理结构、runtime行为限制和集中收敛规则
 

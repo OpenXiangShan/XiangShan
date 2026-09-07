@@ -2,7 +2,7 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_dispatch_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv`
 
 ## 1. 文件定位
 
@@ -40,7 +40,7 @@
 
 第一步，`pre_body()` 做公共初始化。它读取 plus 配置快照，拿到 `common_data_transaction` 单例，创建或绑定所有 helper。后续真实接口 sequence 和软件 smoke sequence 都使用同一份 helper 与公共数据表，因此不会出现多个 sequence 各自维护一套状态的问题。
 
-第二步，`build_main_table()` 生成测试输入。如果打开手动主表模式，就从 `manual_main_table_by_rob` 按 ROB 顺序导入；否则按权重随机生成指定数量的 transaction。每条 transaction 都会分配 uid 和 ROB key，并补齐 op class、fuType/fuOpType、地址、send priority、delay 等字段。
+第二步，`build_main_table()` 生成测试输入。如果打开手动主表模式，就从 `manual_main_table_by_rob` 按 ROB 顺序导入；否则按权重随机生成指定数量的 transaction。`MEMBLOCK_BOUNDARY_PROFILE_GEN_EN=1` 时，随机路径先从候选表选择 profile/op，再用 `MAIN_VADDR` 窗口内的 anchor 构造完整访问；关闭时继续使用普通地址模板。每条 transaction 都会分配 uid 和 ROB key，并补齐 op class、fuType/fuOpType、地址、send priority、delay 等字段。
 
 第三步，随机主表边生成边维护 recent-window 地址复用队列。每条 transaction 完成基础随机后，`build_random_main_table()` 会先按 uid 距离淘汰 `recent_load_uid_q/recent_store_uid_q` 里的过期候选，再按 `MEMBLOCK_ADDR_REUSE_EN_*` 和四类 `MEMBLOCK_ADDR_REUSE_*` 权重决定是否复用窗口内地址。命中时只复制参考 transaction 的 `src_0/imm` 并重新更新 `vaddr`，随后把当前 transaction 写入主表并按最终 load/store 类型重新入 recent queue。最后 `init_status_for_main_table()` 给每个 uid 建 status 表项。
 
@@ -95,6 +95,10 @@ pass/fault/IQ feedback 状态；redirect/replay/fault 进入 `exception_event_q`
 | `select_op_class_by_weight()` | 无显式参数；读取 int load/fp load/store/prefetch/AMO 权重。 | `memblock_op_class_e`。 | 按 plus 权重选择操作大类。所有权重为 0 时底层 `rand_weighted5()` fatal。 |
 | `apply_minimal_op_template(tr)` | `tr`：已选好 `op_class` 的 transaction。 | 无返回；修改 `tr.fuType/tr.lsq_flow/tr.fuOpType/numLsElem`。 | 根据 op class 套最小合法模板：load/prefetch 走 LDU+LOAD 且 `numLsElem=1`，store 走 STU+STORE 且 `numLsElem=1`，AMO 走 MOU+ATOMIC 且当前 `numLsElem=0`；地址复用改类型时也依赖它清掉旧模板残留。 |
 | `apply_legal_addr_template(tr)` | `tr`：待填地址 transaction。 | 无返回；修改 `tr.src_0/tr.imm/vaddr`。 | 在 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 虚拟地址窗口内挑选能容纳完整访问跨度的 64B 对齐起始地址，写到 `src_0`，清 `imm` 后更新并核对 `vaddr`；PADDR 参数不在该函数消费。 |
+| `apply_boundary_addr_template(tr, profile, size_bytes)` | 自动 boundary transaction、目标 profile、访问大小。 | 无返回；回填 `src_0/imm/vaddr` 并做完整跨度检查。 | 只用于自动 boundary 路径；先生成目标 full VA，再以非零负 imm 拆回 `src_0/imm`，并确认回填后的 full VA 仍在 `MAIN_VADDR` 且满足 Sv39 低半区 canonical。 |
+| `gen_final_vaddr_by_profile(profile, size_bytes, op_class)` | profile、访问大小、操作类别。 | `bit [63:0] final_vaddr`。 | 先选择各 profile 的离散偏移，再把到访问末字节的距离传给 anchor helper，从而保留原有边界分类且不跨出窗口。 |
+| `random_aligned_vaddr(align_bytes, tail_offset)` | 对齐粒度和 anchor 到访问尾部的距离。 | `bit [63:0] anchor`。 | 从 `MAIN_VADDR` 的对齐槽中随机选择一个能容纳整笔访问的 anchor；用宽位算术检查窗口、对齐和槽乘法回绕。 |
+| `is_sv39_positive_canonical(vaddr)` | 64-bit VA。 | `bit`。 | 自动 boundary 防御性检查 helper；低半区要求 `vaddr[63:38] == 0`，包含 Sv39 符号位 bit38。 |
 | `random_load_fuoptype()` | 无。 | 9-bit load `fuOpType`。 | 在 LB/LH/LW/LD/LBU/LHU/LWU 中随机选一个。 |
 | `random_store_fuoptype()` | 无。 | 9-bit store `fuOpType`。 | 在 SB/SH/SW/SD 中随机选一个。 |
 | `random_prefetch_fuoptype()` | 无。 | 9-bit prefetch `fuOpType`。 | 在 PREFETCH_I/PREFETCH_R/PREFETCH_W 中随机选一个。 |
@@ -111,10 +115,10 @@ pass/fault/IQ feedback 状态；redirect/replay/fault 进入 `exception_event_q`
 |---|---|---|---|
 | `choose_rob_start_key()` | 无显式参数；读取 ROB start 固定值或随机权重。 | `memblock_rob_key_t`。 | 选择随机主表 uid0 的 ROB 起始 value，初始 flag 固定为 0，后续仍由 `rob_advance()` 连续推进。 |
 | `choose_addr_ref_window()` | 无显式参数；读取 fixed/small/medium/large 窗口参数。 | `int unsigned` uid 距离窗口。 | 选择本轮 random main table 的地址复用窗口，最终上限为 `min(MEMBLOCK_LQ_SIZE, MEMBLOCK_SQ_SIZE)`。 |
-| `apply_addr_reuse_window(tr, cur_uid, recent_load_uid_q, recent_store_uid_q)` | 当前 transaction、当前 uid、窗口内 load/store uid queue。 | 无返回；可能修正 `tr.op_class/fuType/fuOpType/lsq_flow/src_0/imm/vaddr`。 | 每个 uid 只随机一次 enable，命中后按四类 after 枚举选择一个参考队列，在主表写入前完成类型修正和地址复制。 |
+| `apply_addr_reuse_window(tr, cur_uid, recent_load_uid_q, recent_store_uid_q)` | 当前 transaction、当前 uid、窗口内 load/store uid queue。 | 无返回；可能修正 `tr.op_class/fuType/fuOpType/lsq_flow/src_0/imm/vaddr`。 | 每个 uid 只随机一次 enable，命中参考时完成类型修正和地址复制；无参考时按最终 op 重建地址，boundary fallback 同时遵守 profile 支持矩阵和 Store x cross-8B gate。 |
 | `set_transaction_ls_kind(tr, make_load)` | transaction 和目标 load/store 类型。 | 无返回；修正 op class 和最小合法模板。 | 第一层类型修正 helper，保证 `fuType/fuOpType/lsq_flow/numLsElem` 与最终 load/store 类型一致。 |
-| `fixup_after_addr_reuse(tr, ref_tr, copy_addr, caller)` | 当前 transaction、可选参考 transaction、是否复制地址。 | 无返回；更新 `vaddr` 并校验。 | 第二层复用后 fixup helper，负责复制 `src_0/imm`、重算 `vaddr`；normal 复制地址时调用 `ensure_normal_reused_addr_span()`，再调用 `validate_main_table_entry()`。 |
-| `ensure_normal_reused_addr_span(tr, ref_tr, caller)` | 当前 transaction、参考 transaction、调用者。 | 无返回；必要时修正最终 `fuOpType`。 | 只用于 normal 自动主表：若复制地址后的随机访问跨度越过 MAIN_VADDR 窗口，则保留参考地址并把目标 load/store opcode 收敛到参考访问大小；boundary/manual 不消费该窗口。 |
+| `fixup_after_addr_reuse(tr, ref_tr, copy_addr, caller)` | 当前 transaction、可选参考 transaction、是否复制地址。 | 无返回；更新 `vaddr` 并校验。 | 第二层复用后 fixup helper，负责复制 `src_0/imm`、重算 `vaddr`；复制地址时调用 `ensure_reused_addr_span()`，再调用 `validate_main_table_entry()`。 |
+| `ensure_reused_addr_span(tr, ref_tr, caller)` | 当前 transaction、参考 transaction、调用者。 | 无返回；必要时修正最终 `fuOpType`。 | 自动主表复制地址后的统一 span 收敛：若随机访问尺寸越界，则保留参考地址并把目标 load/store opcode 收敛到参考访问大小；boundary 同时检查 `MAIN_VADDR` 和 Sv39 canonical，manual directed 不经过该 helper。 |
 | `prune_recent_uid_q(uid_q, cur_uid, addr_ref_window)` | recent uid queue、当前 uid、窗口。 | 无返回；删除过期 uid。 | 从队头淘汰 `cur_uid - ref_uid > addr_ref_window` 的候选，避免用已经离当前太远的 LSQ entry。 |
 | `random_pick_recent_uid(uid_q, ref_uid, delete_after_pick)` | recent uid queue、输出 ref uid、是否删除。 | `bit`：是否选到候选。 | 从窗口内候选随机取 uid；同类型复用会删除队列项，跨类型复用保留队列项。 |
 | `push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q)` | 最终 transaction 和 uid。 | 无返回；把 uid 推入 load 或 store recent queue。 | 当前项写入主表后按最终类型入队，供后续 uid 使用。 |
@@ -151,6 +155,8 @@ base sequence 不再保留 `assign_main_issue_fields()`、`assign_issue_dep_fiel
 - `data` 为空时，大多数入口会重新取 `common_data_transaction::get()`；但主表相关 API 仍要求调用顺序正确。
 - `build_random_main_table()` 和 `import_manual_main_table()` 都会先 `reset_all_tables()`，因此一轮测试内应先建表再驱动真实接口。
 - 地址复用只在 `build_random_main_table()` 生成单条 transaction 后、写入主表前执行；手动主表不再有旧后处理入口。
+- 自动 boundary 模板不会从全局 `[0, 2^39)` 采样；它只从 `MAIN_VADDR` 窗口中选择能容纳 `tail_offset` 的对齐 anchor。`MAIN_VADDR` 的全局拦截仍不施加到 manual directed 地址。
+- Sv39 自动 low-half 检查必须覆盖 `[63:38]`；只检查 `[63:39]` 会遗漏 bit38，允许 DUT 正确拒绝但 RM 未必预期的非 canonical 输入。
 - 手动主表模式下，`manual_main_table_by_rob` 不能为空，且每个 transaction 不能为空。
 - `validate_main_table_entry()` 是主表入口的最后防线：ROB 越界、vector LS、op class 和 fuType/fuOpType/lsq_flow 不匹配、`numLsElem` 不符合 op behavior 都会 fatal。
 - 随机权重工具 `rand_weighted2()` / `rand_weighted3()` / `rand_weighted4()` / `rand_weighted5()` 不允许全部权重为 0，避免随机结果没有定义。

@@ -68,7 +68,7 @@ endif
 #-----------------------------------------#
 #top tb name                              #
 #-----------------------------------------#
-SIM_TOOLS = xrun
+SIM_TOOLS = vcs
 TOP_NAME = top_tb
 
 TIMESCALE = 1ns/1ps

@@ -99,7 +99,7 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [mem_ut_test_framework_logic_build_rule.md](AI_DOC/project_management/mem_ut_test_framework_logic_build_rule.md)
 
-当前 `mem_ut` 测试框架 plan 生成与评审规则为：
+当前 `mem_ut` 测试框架 plan 生成、评审与正式整理规则为：
 
 - [mem_ut_test_framework_plan_review_rule.md](AI_DOC/project_management/mem_ut_test_framework_plan_review_rule.md)
 

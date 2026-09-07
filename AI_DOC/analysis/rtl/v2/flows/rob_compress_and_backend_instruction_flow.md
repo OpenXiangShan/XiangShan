@@ -711,6 +711,7 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：说明 `flushPipe` 如何进入 ExceptionGen/ROB 并在 ROB head 产生精确 redirect。
 - [Memory trigger flow](memory_trigger_flow.md)：说明 memory trigger 如何通过写回和 ROB 形成精确异常或 Debug Mode。
 - [LSQ 入队与 Redirect 恢复 flow](lsq_enqueue_redirect_flow.md)：说明 `robIdx.needFlush` 如何影响 LSQ 入队、取消和 redirect 恢复。
+- [V2 正常向量访存 uop 与 flow 拆分](vector_memory_uop_flow_decomposition.md)：说明普通 vector LS 如何由多个 flow 在 merge buffer 收敛为一次 uop writeback。
 - [Int writeback agent 接口知识](../../../interface/v2/agents/int_writeback_agent.md)：LDA/STA/STD split 顶层字段和 lane capability。
 
 ## V2/V3 差异
@@ -799,6 +800,23 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 
 ## 知识修订记录
 
+### 已验证的 NC 跨 16B 读指针缺陷
+
+在 V2 `mem_ut_uvm_v2` 的 `88dec8f6eb51d94b7cd9521dd84bc9278fe5ae9c` 核验中，发现
+`StoreQueue` 的“每个 fault store 都可经 DataBuffer/SBuffer fault drain”有一个已确认的例外：
+前一物理 SQ entry 同时为 `nc`、`unaligned`、`cross16Byte` 且已 `completed` 时，跨 16B 分支可让
+同一 entry 的 DataBuffer lane1 fire 与 lane0 的 `completed && nc` 同时进入
+`readyReadGoVec`。`StoreQueue.scala:320-331` 对该向量直接 `PopCount`，所以 `rdataPtrExt` 可前进
+两项并跳过中间尚未完成的 SQ entry。被跳过的 scalar fault store 即使之后已置
+`hasException` 和 `committed`，也无法进入 DataBuffer，`completed` 和 `sqDeq` 均不会产生。
+
+该结论来自 UID 11 (`ROB=0/124,SQ=0/4`) 的 Sv39/U 态回归波形，并已与 UID 2 的正常 scalar
+fault drain 对照。它不是 `pendingPtr`、`isStoreException`、RM 或 UVM 生命周期建模错误。完整的
+波形路径、时序和 RTL 修改建议见
+[V2 StoreQueue NC 跨 16B 双计数跳过 fault SQ 表项问题](../storequeue_nc_cross16_rdataptr_skip_rtl_issue_20260830.md)。
+MAB exception、ROB redirect、SQ cancel 和 redirect 后 slot reuse 的详细设计确认见
+[V2 StoreQueue NC 跨 16B 异常、读指针与 Redirect 恢复设计确认](storequeue_nc_cross16_exception_rdataptr_redirect_design_confirmation.md)。
+
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 首次建立，无旧结论修订 | 建立 V2 ROB entry 字段语义、RAB/ExceptionGen 信息归属、后端指令流转和 ROB 压缩条件/上限 | 用户要求将 ROB/RAB/压缩讨论总结并扩展成 RTL 后端分析文档 | V2 Decode/Rename/Dispatch/ROB/RAB/ExceptionGen/LSQ/Commit |
@@ -813,6 +831,7 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | “没有看到 deq”可能被笼统理解为 fault 没有完成路径，且错误将 early scalar MMIO 与 CBO 合并 | 区分 scalar MMIO exception drain 与 CBO `wline` 无完成路径；普通 scalar load exception 强制 LDU-to-LQ `updateAddrValid`，仅 replay/redirect/vector/纯软件伪造 fault 不形成该 LQ 释放 | 用户追问 fault load 的 LQ 条件，以及 early MMIO/CBO store 如何避免残留 | V2 LoadUnit/VirtualLoadQueue/StoreUnit/StoreQueue 与 standalone fault-drain 分类 |
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | fault 释放讨论只覆盖 scalar，并容易把 vector/AMO 的架构 redirect 与本地资源释放混为同一条件 | 明确普通 vector load 由 merge feedback 使 VLQ 自然 `lqDeq`；vector store 可按 pendingPtr 异常 drain 或 redirect cancel；segment 与 MOU 不分配普通 LSQ，分别由本地 finish/writeback 释放；所有 ROB 可见 fault 仍需精确 redirect 完成架构恢复 | 用户追问 vector LS、AMO/MOU fault 是否都必须依靠 ROB exception redirect/cancel 才能释放 | V2 VMergeBuffer/VLQ/StoreQueue/VSegmentUnit/AtomicsUnit/ExceptionGen/ROB |
 | 2026-07-28 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只记录 `isStoreException` 选择 SQ/LQ exception address，未说明它是脉冲还是保持值 | 明确 ROB 只在 `exceptionHappen` 时 RegEnable 新 `commitType`，Backend 持续输出 bit0，普通下一拍、commit、deq、redirect 或纯 flushPipe 都不清零；只有后续 exception 捕获 bit0=0 才变为 0 | 用户要求结合 Scala 确认 store fault 后是否应下一拍清 0 | V2 ROB/Backend/XSCore/MemBlock/LSQWrapper exception address 时序 |
+| 2026-08-30 | `88dec8f6eb51d94b7cd9521dd84bc9278fe5ae9c` | 先前将 scalar fault 的 DataBuffer/SBuffer drain 描述为通用完成路径，未覆盖 NC 跨 16B read-pointer 重复推进。 | 确认 NC 跨 16B entry 的 DataBuffer fire 与 NC completed 条件可被 `PopCount` 双计数，进而跳过中间 fault SQ entry，使其永远无法 `completed/sqDeq`。 | Sv39/U 态 10000 笔回归在 UID 11 卡死，独立 RTL 复核确认组合路径与波形一致。 | V2 StoreQueue `rdataPtrExt`、DataBuffer、NC、跨 16B、fault SQ drain。 |
 
 ## 待确认项
 

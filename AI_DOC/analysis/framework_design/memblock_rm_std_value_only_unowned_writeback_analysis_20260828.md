@@ -2,13 +2,14 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 正在复现与取证，尚未判定 RTL 问题 |
+| 状态 | 已完成波形取证，确认是 UVM framework 的 issue-fire 记账时序问题；尚未发现 RTL 问题 |
 | 适用版本 | V2，分支 `mem_ut_uvm_v2` |
 | 首次失败场景 | `basicTest` / `memblock_dispatch_real_smoke_vseq` / `tc_dispatch_real_mmu_sv39_smoke` / seed `666666` |
-| 失败日志 | `mem_ut/ver/ut/memblock/sim/rm_sv39_10k_20260828/log/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_dispatch_real_mmu_sv39_smoke_seed=666666_rtl.log` |
+| 失败日志 | `mem_ut/ver/ut/memblock/sim/rm_sv39_10k_std_diag_20260828/log/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_dispatch_real_mmu_sv39_smoke_seed=666666_rtl.log` |
 | 首次失败时刻 | `397.800ns` |
 | 关联目标 | Sv39、U 态、10000 笔主表请求回归 |
-| RTL 修改 | 禁止；本分析仅涉及 UVM 测试框架的 event 归属逻辑 |
+| 波形 | `mem_ut/ver/ut/memblock/sim/rm_sv39_10k_std_diag_20260828/wave/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_dispatch_real_mmu_sv39_smoke_seed=666666_rtl.fsdb` |
+| RTL 修改 | 禁止；本分析仅涉及 UVM 测试框架的 issue-fire 与 event 归属逻辑 |
 
 ## 1. 术语与判定范围
 
@@ -57,65 +58,99 @@ UVM_FATAL @ 397.800ns
 4. V2 `writebackStd` 顶层没有 ROB flag。软件不能在 active map 已删除后仅凭 value 重新推导完整
    UID；把 value 盲目匹配到新实例会造成更严重的误记账。
 
-## 4. 不能直接判定为 redirect 或 RTL 的原因
+## 4. 修正后的波形取证
 
-首次日志没有 `request_redirect_flush()`、`apply_redirect_flush()` 或 redirect drive 的可见记录，
-只有 `EXC_REDIRECT` 类对 fault recovery event 的消费记录。该类名不等价于发生了真实 redirect。
-因此当前有三种尚未排除的来源：
-
-| 假设 | 含义 | 目前证据 | 后续判定方式 |
-| --- | --- | --- | --- |
-| H1：已终结旧实例的迟到 STD | fault retire 或真正 redirect 已删 active map，但旧 execution output 晚到。 | 与 value-only 接口限制一致。 | 打印/波形确认该 value 对应 UID 的 `std_dispatched`、终结原因和 map 删除时序。 |
-| H2：测试框架生命周期或归属缺陷 | framework 过早删除 map，或没有为 fault/redirect 后的 value-only output 保留有限证明。 | 当前 fatal 发生在 adapter，而非 RM compare。 | 诊断显示 raw 可唯一关联到已终结且确实发射过 STD 的旧实例。 |
-| H3：RTL 无法解释的输出 | DUT 在没有任何曾发射、可证明已终结的 STD owner 时输出 valid。 | 当前证据不足。 | 诊断和 FSDB 均无法将 raw value 关联到有效历史实例时，启动独立 subagent 做 RTL review。 |
-
-## 5. 本轮取证与波形计划
-
-第一次命令使用了 `wave=1`，而 VCS Makefile 只有 `wave=on` 才传入 FSDB/UCLI 参数，因此原目录
-`rm_sv39_10k_20260828/wave/` 为空，不能据此得出无波形结论。
-
-本轮先增加不改变行为的 diagnostic fatal 信息，至少输出：
-
-- raw STD value、raw sample flush epoch、当前 global flush epoch；
-- flag=0/1 的 active ROB map 是否存在；
-- 若存在，UID 的 `active/enq/std_dispatched/std_writeback/fault/terminal/flushed/redirect_pending/issue_killed`；
-- 对应 `std_issue_epoch` 和 STD instance flush epoch；
-- 当前 active redirect 和 cancel record 数量。
-
-然后以 `wave=on` 重跑同一 seed，保留以下路径的 FSDB：
+本轮实际读取的 VCD 为：
 
 ```text
-mem_ut/ver/ut/memblock/sim/rm_sv39_10k_std_diag_20260828/wave/
+/tmp/memblock_std_diag_20260828.vcd
 ```
 
-波形至少检查：
+此前把 `dut_inst.sv` 内用于连接的顶层 `reg` 误当作 DUT-facing 信号。实际应观察
+`top_tb.U_MEMBLOCK` 层级中的端口。对应 VCD identifier 如下：
+
+| 信号 | VCD identifier | 关键变化 |
+| --- | --- | --- |
+| `top_tb.U_MEMBLOCK.io_ooo_to_mem_issueStd_0_valid` | `I7` | `390.300ns` 置 1，`395.300ns` 清 0。 |
+| `top_tb.U_MEMBLOCK.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value` | `L7` | 发射 payload 的 ROB value 为 `10`。 |
+| `top_tb.U_MEMBLOCK.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value` | `N7` | 同一 payload 带 SQ value `12`。 |
+| `top_tb.U_MEMBLOCK.io_mem_to_ooo_writebackStd_0_valid` | `z*` | `390.300ns` 为 1，`395.300ns` 清 0。 |
+| `top_tb.U_MEMBLOCK.io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value` | `{*` | 同一写回携带 value `10`。 |
+
+时序事实为：
 
 ```text
-top_tb.u_memblock__io_mem_to_ooo_int_wb_agent_if.io_mem_to_ooo_writebackStd_0_valid
-top_tb.u_memblock__io_mem_to_ooo_int_wb_agent_if.io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value
-top_tb.u_memblock__io_mem_to_ooo_int_wb_agent_if.io_mem_to_ooo_writebackStd_1_valid
-top_tb.u_memblock__io_mem_to_ooo_int_wb_agent_if.io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value
-top_tb.u_memblock__lintsissue_agent_if.io_ooo_to_mem_issueStd_0_valid
-top_tb.u_memblock__lintsissue_agent_if.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value
-top_tb.u_memblock__lintsissue_agent_if.io_ooo_to_mem_issueStd_1_valid
-top_tb.u_memblock__lintsissue_agent_if.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value
+390.300ns  DUT-facing issueStd_0_valid=1，ROB value=10；writebackStd_0_valid 同时为 1。
+395.300ns  driver 观察到 valid&&ready，打印 "dispatch issue fire std_port=0"，并撤销 valid。
+397.800ns  main service 消费 raw STD writeback；value-only resolver 找到 flag=1/10 的 UID 57，
+           但 status.std_dispatched=0、std_issue_epoch=0、std_instance_flush_epoch_valid=0，触发 fatal。
 ```
 
-实际 hierarchy 以 FSDB signal list 为准；上述端口名来自当前 `dut_inst.sv`/interface 连接。
+`UID 57` 在 fatal 时仍为 `active=1`、`enq=1`、`terminal=0`、`flushed=0`、
+`redirect_pending=0`、`issue_killed=0`。因此该事件不是 active map 已删除后的旧实例，
+也不是真正 redirect 后的迟到输出。`EXC_REDIRECT` 日志只表示 fault recovery 消费器的类别名，
+本次没有 `request_redirect_flush()` 或 `apply_redirect_flush()` 证据。
 
-## 6. 候选最优修复及安全边界
+## 5. 根因：真实握手与状态记账的时序断层
 
-若 H1/H2 得到确认，最优方案是在 `common_data_transaction` 的生命周期 owner 内保存受硬件 ROB
-容量约束的 STD tombstone，而不是在 adapter 中对所有零候选 warning/drop：
+`lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports()` 在 `valid && ready` 观察点调用
+`record_dispatch_issue_fire()`，当前只回填 `tr.memblock_dispatch_fired_mask`。真正写入下列 framework
+状态的调用发生在 `memblock_issue_dispatch_base_sequence::send_issue_cycle()` 的 `finish_item(tr)` 返回之后：
 
-1. 在 active ROB/SQ map 删除前，只为“已经 `std_dispatched` 但尚未完成 STD writeback”的旧实例登记完整 ROB key、UID、SQ key、dynamic/replay/issue epoch、实例 flush epoch 和终结原因。
-2. 重新激活任意相同 ROB value 的新实例时删除该 value 的历史，避免 value-only raw 被旧记录错误吸收。
-3. adapter 在两个 current candidate 都不存在时才查询该表；只有两个 flag 中恰好一个 tombstone 与 raw sample epoch、旧实例 issue epoch 和终结边界一致，且没有当前 active owner 时，记录 `INT_WB_STD_STALE_DROP` 并丢弃。
-4. 两个历史候选、存在新的 active owner、sample epoch 不在旧实例有效区间、或没有历史候选，全部保留 fatal。这保证未知 DUT output 不会被静默吞掉。
-5. 表按完整 ROB key 关联存储，最大键空间受 `2 * MEMBLOCK_ROB_SIZE` 约束；查询固定两次 map probe，不扫描 10000 笔主表。
+```text
+issue_queue_scheduler::mark_issue_fire()
+  -> common_data_transaction::mark_issue_snapshot()
+  -> delete_issue_queue_entry()
+  -> status.std_dispatched = 1
+```
 
-H3 得到确认前不得按“RTL 问题”结束；若满足 H3，必须启动独立 subagent 复核 RTL，再在本文补充出错信号、时间、FSDB 路径和复核结论，且不修改 RTL。
+在本失败中，DUT output monitor 已经在 driver 返回 `finish_item()` 之前采到 STD writeback；main service
+在 `397.800ns` 处理它时，sequence 侧还没有执行 `mark_fired_items()`。因此 adapter 对 UID 57 的严格
+检查正确地拒绝了“尚未 dispatched”的候选，`INT_WB_STD_KEY` 是 framework 时序缺陷的暴露点，
+不是 RM 期望模型或 RTL functional mismatch。
 
-## 7. 当前结论
+## 6. 已排除的 tombstone 方向
 
-当前是测试框架 event 归属 fatal，尚无足够证据证明 RTL 行为非法。下一步先完成同 seed 的诊断与波形复现；只有诊断证明某一终结实例可唯一解释 raw 时才实施 tombstone 修复，否则转入 RTL 独立复核流程。
+原先的 tombstone 方案只适用于“已经终结且曾真实发射的旧 STD 实例在 map 删除后迟到写回”。本次
+取证与此前假设相反：candidate 仍是当前 active UID，且尚未被标记为真实发射。因此添加 tombstone
+会掩盖真正的 issue bookkeeping 延迟，并不能建立 `std_issue_epoch`、target instance flush epoch 或
+STD 的状态所有权。
+
+本问题不采用 tombstone。value-only resolver 继续保留严格的双 flag/current-status 检查，避免未知
+DUT 输出被静默丢弃。
+
+## 7. 最优修复方案
+
+关联可执行 plan：
+
+```text
+AI_DOC/plan/test_framework/plan/undo/memblock_dispatch_issue_fire_boundary_bookkeeping_plan_20260828.md
+```
+
+方案把状态更新移动到真实 `valid && ready` 的逻辑边界，但不允许 driver 直接写
+`common_data_transaction`：
+
+1. 复用每个 lintsissue xaction 已有的 `memblock_dispatch_fired_mask`，作为 driver 到当前 sequence 的
+   持久 fire 状态。
+2. driver 在 `record_dispatch_issue_fire()` 设置 fired mask；该点仍是唯一的真实 handshake 判定点。
+3. sequence 在 `finish_item()` 前启动 watcher。watcher 等待“candidate 内且尚未记账”的 fired bit，
+   因此不会因 UVM 同一 delta 的瞬时 event 调度顺序漏掉 fire；随后它使用本轮已冻结的
+   `memblock_issue_q_item_t` candidate descriptor 调用原有
+   `issue_queue_scheduler::mark_issue_fire()` 或 redirect 场景的
+   `mark_issue_fire_already_accepted()`。
+4. `finish_item()` 返回后只对未被 watcher 处理的 fired bit 做一次幂等补偿；不再为已处理 port 分配
+   第二个 issue epoch、重复出队或重复置 `*_dispatched`。
+5. issue xaction 固定 `pre_pkt_gap=0` 与 `post_pkt_gap=0`，使本框架周期 item 不携带无关随机 gap。
+
+该方案不增加全表扫描、全局 raw queue 或第二套 UID map。每次 watcher 唤醒只遍历当前周期最多的 scalar
+issue port candidate，状态真源仍是既有 `common_data_transaction` 和 `issue_queue_scheduler`。
+
+## 8. 后续判定规则
+
+修复后重新运行相同的 10000 笔 Sv39/U 态场景：
+
+- 若出现新的 RM/framework 报错，继续在分析文档中记录日志、波形路径、根因和修复方案，然后修改
+  非 RTL 测试代码并重跑。
+- 只有当波形证明 DUT 在没有任何真实 `valid && ready` 输入、且 framework 已完成当前实例记账的前提下
+  仍产生无法归属的输出，才把问题升级为候选 RTL 问题；届时必须启动独立 subagent 复核。
+- RTL 代码保持不修改；若 subagent 确认 RTL 问题，本任务只记录出错点、波形路径和分析结论后结束。

@@ -89,6 +89,7 @@ package seq_pkg;
     `include "soft_test_memblock_dispatch_smoke_sequence.sv"
     `include "soft_test_memblock_dispatch_fault_smoke_sequence.sv"
     `include "soft_test_memblock_dispatch_replay_smoke_sequence.sv"
+    `include "soft_test_boundary_addr_reuse_gate_sequence.sv"
     `include "soft_test_l2tlb_range_lookup_sequence.sv"
     `include "soft_test_memblock_pending_mmio_directed_sequence.sv"
     `include "memblock_lsqenq_dispatch_base_sequence.sv"
@@ -99,13 +100,16 @@ package seq_pkg;
     `include "memblock_sfence_control_base_sequence.sv"
     `include "memblock_redirect_dispatch_base_sequence.sv"
     `include "memblock_l2tlb_base_sequence.sv"
+    // memblock_main_dispatch_auto_build_main_table_base_sequence 的终态审计
+    // 需要调用 mem_access_base_sequence 的共享 memory helper；先声明 responder
+    // 基类，再声明依赖它的 main orchestration class。
+    `include "mem_base_sequence.sv"
     `include "soft_test_l2tlb_pbmt_csr_gate_sequence.sv"
     `include "memblock_main_dispatch_auto_build_main_table_base_sequence.sv"
     `include "memblock_main_dispatch_manual_main_table_sequence.sv"
     `include "memblock_main_dispatch_manual_control_main_table_sequence.sv"
     `include "memblock_main_dispatch_cancel_reconcile_sequence.sv"
     `include "memblock_main_dispatch_pbmt_response_fault_sequence.sv"
-    `include "mem_base_sequence.sv"
     `include "memblock_rm_dut_writeback_observer.sv"
     `include "memblock_rm_readonly_api.sv"
     `include "soft_test_rm_pbmt_effective_fault_sequence.sv"

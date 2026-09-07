@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` |
+| 核验 commit | `1464c5066b54b044a6bc0aea2c69a546e192c944` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-08-11` |
+| 最后核验日期 | `2026-08-27` |
 
 ## Flow 范围
 
@@ -645,6 +645,26 @@ miss queue，终止 PTW/LLPTW/HPTW 活动状态，并用 `flush_latch` 让 flush
 相关的 in-flight/filter 状态。后续 translation 使用变化后的 `priv_virt` 决定 S1/S2 stage 与 ASID/VMID
 匹配语义。
 
+### 静态 Sv39/U 态验证基线
+
+V2 `SatpMode.Sv39` 的编码为 `8`。`satp` 的 Scala 复位值为 `MODE=Bare`、`ASID=0`、
+`PPN=0`；`vsatp` 和 `hgatp` 同样复位为 Bare、标识符和 PPN 为 0。NewCSR 的特权状态
+复位为 `PRVM=M`、虚拟化关闭，因此即使 `satp.MODE` 被写为 Sv39，M 态仍会由
+`instrAddrTransType.bare` 的优先条件强制选择 Bare。
+
+为验证非虚拟化 Sv39，`memblock_mmu_sv39_csr_sequence` 以完整 Scala V2 复位 payload 为
+基线，只覆盖 `satp.MODE=8`、`satp.PPN=MEMBLOCK_PADDR_BASE[55:12]`，并把当前
+instruction/data privilege 驱动为 U 态（`imode=dmode=0`）。`priv_virt=0` 保持非虚拟化，
+所以 NewCSR 的 `!isModeM && !isVirtual && satp.MODE==Sv39` 分支可生效。这一 U 态是验证
+覆盖，不是 Scala 的复位值；其余可见 CSR 字段仍对应复位语义，包括 `mstatus` 的
+`FS=Off`、`MXR=SUM=MPRV=0`，以及 custom CSR 的预取、分支预测、SBuffer、L2 flush
+控制复位值。
+
+该静态启动不产生动态翻译上下文事件：`satp_changed`、`vsatp_changed`、`hgatp_changed` 和
+`priv_virt_changed` 均保持 0，CSR/SFence 动态控制也关闭。这样 CSR monitor 发布的是首份
+稳定 Sv39 runtime snapshot，而不是一次需要按 C4 清理 outstanding 请求的 context flush；
+L2TLB responder 必须在该 snapshot 已发布后才开放 request ready。
+
 ## 关联文档
 
 - [memory trigger flow](memory_trigger_flow.md)：同一 MemExuOutput 写回中的 trigger 异常路径。
@@ -721,6 +741,7 @@ miss queue，终止 PTW/LLPTW/HPTW 活动状态，并用 `flush_latch` 让 flush
 | 2026-08-05 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只概括“ROB 提交后产生 flushAfter”，未给出队头、ExceptionGen、异常优先级和其它 producer 的精确条件 | 明确 ROB 仅在队头同 key 完成、无异常且 `flushPipe/replayInst` 时发 `flushOut`；`flushPipe` 对应 `flushAfter`，replay/异常/interrupt 对应 `flush`；分支误预测和 `xRET` 也可直接产生 `flushAfter` | 用户追问 ROB 提交后的 flushAfter redirect 的行为和场景 | V2 ROB/CtrlBlock/Fence/Branch/CSR |
 | 2026-08-06 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只说明 filter 会在延迟后清空 state，未把 `PTWNewFilter` 对同拍 response valid、response-time CSR matcher 与 responder 完成边界写清楚 | 明确 response fire 在 filter flush due sample 不产生可信 DTLB completion；CSR change 的 response matcher 在 C2 已切换到 top C-2 context、C4 才清 entry；同 sample CSR/fence 在验证 lifecycle 中共用一个 barrier，但 RTL 输入事件仍独立 | 复查 L2TLB undo plan 的 C4 严格截止和 CSR/fence barrier 语义 | V2 PTWNewFilter、L2TLB responder、CSR/fence flush timing |
 | 2026-08-11 | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` | translation CSR changed 未区分 `priv_virt_changed` 的产生条件与 cache/queue 实际清除范围 | 明确 `priv_virt_changed=DataChanged(dvirt)`，并记录 MPRV/MPV 覆盖、C4 filter 清理、L2TLB outstanding/miss queue/walker 清理、late memory response 抑制 refill，以及不产生 ROB/LSQ/DCache 全局 flush 的边界 | 用户要求结合 Scala 分析该信号的 flush 影响 | V2 CSR、MemBlock DTLB、PTW、L2TLB |
+| 2026-08-27 | `1464c5066b54b044a6bc0aea2c69a546e192c944` | 未记录 Sv39 静态验证时 M 态强制 Bare 与 U 态测试覆盖的关系 | 明确 `Sv39=8`、satp/vsatp/hgatp 复位值、U 态 `imode/dmode=0` 的必要性，以及 changed pulse 为 0 时不触发动态 context flush | 新增 V2 Sv39 static CSR smoke | V2 NewCSR、MemBlock DTLB、L2TLB responder |
 
 ## 待确认项
 

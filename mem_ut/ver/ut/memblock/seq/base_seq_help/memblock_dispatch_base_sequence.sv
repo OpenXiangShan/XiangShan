@@ -88,6 +88,9 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function void apply_boundary_addr_template(input main_control_transaction tr,
                                                               input memblock_boundary_profile_e profile,
                                                               input int unsigned size_bytes);
+    extern virtual function void check_boundary_full_vaddr_span(input main_control_transaction tr,
+                                                                 input int unsigned size_bytes,
+                                                                 input string caller);
     extern virtual function bit [63:0] gen_final_vaddr_by_profile(input memblock_boundary_profile_e profile,
                                                                    input int unsigned size_bytes,
                                                                    input memblock_op_class_e op_class);
@@ -124,7 +127,9 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function int weighted_pick_index(input int unsigned weights[$]);
     extern virtual function bit is_sv39_positive_canonical(input bit [63:0] vaddr);
     extern virtual function bit [63:0] random64();
-    extern virtual function bit [63:0] random_aligned_vaddr(input bit [63:0] align_bytes);
+    extern virtual function bit [63:0] random_aligned_vaddr(
+        input bit [63:0] align_bytes,
+        input bit [63:0] tail_offset);
     extern virtual function bit [63:0] random_negative_imm12();
     extern virtual function string boundary_profile_name(input memblock_boundary_profile_e profile);
     extern virtual function string op_class_name(input memblock_op_class_e op_class);
@@ -148,9 +153,9 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
                                                         input main_control_transaction ref_tr,
                                                         input bit copy_addr,
                                                         input string caller);
-    extern virtual function void ensure_normal_reused_addr_span(input main_control_transaction tr,
-                                                                input main_control_transaction ref_tr,
-                                                                input string caller);
+    extern virtual function void ensure_reused_addr_span(input main_control_transaction tr,
+                                                         input main_control_transaction ref_tr,
+                                                         input string caller);
     extern virtual function void apply_addr_reuse_window(input main_control_transaction tr,
                                                          input memblock_uid_t cur_uid,
                                                          ref memblock_uid_t recent_load_uid_q[$],
@@ -1176,6 +1181,10 @@ function void memblock_dispatch_base_sequence::apply_boundary_addr_template(inpu
                    $sformatf("boundary update_vaddr mismatch uid=%0d expect=0x%0h actual=0x%0h",
                              tr.uid, final_vaddr, tr.vaddr))
     end
+    check_boundary_full_vaddr_span(tr,
+                                   size_bytes,
+                                   $sformatf("boundary template uid=%0d profile=%s",
+                                             tr.uid, boundary_profile_name(profile)));
     if (classify_boundary_profile(tr.vaddr, size_bytes) != profile) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("boundary classify mismatch uid=%0d target=%s actual=%s vaddr=0x%0h size=%0d",
@@ -1187,17 +1196,65 @@ function void memblock_dispatch_base_sequence::apply_boundary_addr_template(inpu
     end
 endfunction:apply_boundary_addr_template
 
+// 中文注释：只验证自动 boundary transaction 的最终 full VA span。该 helper
+// 不调用主表全局校验，因此不会改变 manual directed fault 的地址语义。
+function void memblock_dispatch_base_sequence::check_boundary_full_vaddr_span(
+    input main_control_transaction tr,
+    input int unsigned size_bytes,
+    input string caller
+);
+    bit [63:0] main_vaddr_base;
+    bit [63:0] main_vaddr_range;
+    bit [63:0] main_vaddr_upper;
+    bit [63:0] size_minus_one;
+    bit [63:0] full_end_vaddr;
+    bit [64:0] main_vaddr_limit;
+
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
+    end
+    if (!seq_csr_common::get_boundary_profile_gen_en()) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s called while boundary generation is disabled", caller))
+    end
+    if (size_bytes == 0) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s uid=%0d got zero access size", caller, tr.uid))
+    end
+
+    tr.update_vaddr();
+    main_vaddr_base = seq_csr_common::get_main_vaddr_base();
+    main_vaddr_range = seq_csr_common::get_main_vaddr_range();
+    main_vaddr_limit = {1'b0, main_vaddr_base} + {1'b0, main_vaddr_range};
+    if (main_vaddr_range == 0 || main_vaddr_limit[64]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s has invalid MAIN_VADDR window base=0x%0h range=0x%0h",
+                             caller, main_vaddr_base, main_vaddr_range))
+    end
+    main_vaddr_upper = main_vaddr_limit[63:0] - 64'd1;
+    size_minus_one = size_bytes - 1;
+    full_end_vaddr = tr.vaddr + size_minus_one;
+    if (full_end_vaddr < tr.vaddr ||
+        tr.vaddr < main_vaddr_base ||
+        full_end_vaddr > main_vaddr_upper ||
+        !is_sv39_positive_canonical(tr.vaddr) ||
+        !is_sv39_positive_canonical(full_end_vaddr)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s uid=%0d full VA is outside legal Sv39 window vaddr=0x%0h end=0x%0h window=[0x%0h,0x%0h] size=%0d",
+                             caller, tr.uid, tr.vaddr, full_end_vaddr,
+                             main_vaddr_base, main_vaddr_upper, size_bytes))
+    end
+endfunction:check_boundary_full_vaddr_span
+
 function bit [63:0] memblock_dispatch_base_sequence::gen_final_vaddr_by_profile(input memblock_boundary_profile_e profile,
                                                                                  input int unsigned size_bytes,
                                                                                  input memblock_op_class_e op_class);
-    bit [63:0] base;
-    bit [63:0] line_base;
-    bit [63:0] page_base;
+    bit [63:0] anchor;
+    bit [63:0] final_offset;
+    bit [63:0] tail_offset;
+    bit [63:0] final_vaddr;
     int unsigned offset;
     int unsigned k;
     int unsigned bank;
     int unsigned line;
-    longint unsigned page_count;
 
     if (size_bytes == 0) begin
         `uvm_fatal(get_type_name(), "gen_final_vaddr_by_profile got zero size")
@@ -1210,13 +1267,13 @@ function bit [63:0] memblock_dispatch_base_sequence::gen_final_vaddr_by_profile(
             if (align_bytes == 0) begin
                 align_bytes = 1;
             end
-            return random_aligned_vaddr(align_bytes);
+            anchor = random_aligned_vaddr(align_bytes, size_bytes - 1);
+            return anchor;
         end
         MEMBLOCK_BOUNDARY_PROFILE_MISALIGN_WITHIN_8B: begin
             if (!(size_bytes inside {2, 4})) begin
                 `uvm_fatal(get_type_name(), $sformatf("MISALIGN_WITHIN_8B illegal size=%0d", size_bytes))
             end
-            base = random_aligned_vaddr(8);
             if (size_bytes == 2) begin
                 case ($urandom_range(2, 0))
                     0: offset = 1;
@@ -1226,47 +1283,89 @@ function bit [63:0] memblock_dispatch_base_sequence::gen_final_vaddr_by_profile(
             end else begin
                 offset = $urandom_range(3, 1);
             end
-            return base + offset;
+            final_offset = offset;
+            tail_offset = final_offset + size_bytes - 1;
+            if (tail_offset < final_offset) begin
+                `uvm_fatal(get_type_name(), "MISALIGN_WITHIN_8B tail offset overflow")
+            end
+            anchor = random_aligned_vaddr(64'd8, tail_offset);
+            final_vaddr = anchor + final_offset;
+            if (final_vaddr < anchor) begin
+                `uvm_fatal(get_type_name(), "MISALIGN_WITHIN_8B final VADDR overflow")
+            end
+            return final_vaddr;
         end
         MEMBLOCK_BOUNDARY_PROFILE_CROSS_8B_WITHIN_16B: begin
             int unsigned k_min;
             if (!(size_bytes inside {2, 4, 8})) begin
                 `uvm_fatal(get_type_name(), $sformatf("CROSS_8B_WITHIN_16B illegal size=%0d", size_bytes))
             end
-            base = random_aligned_vaddr(16);
             k_min = (size_bytes > 8) ? (size_bytes - 8) : 1;
             k = $urandom_range(size_bytes - 1, k_min);
-            return base + 8 - k;
+            final_offset = 64'd8 - k;
+            tail_offset = final_offset + size_bytes - 1;
+            if (tail_offset < final_offset) begin
+                `uvm_fatal(get_type_name(), "CROSS_8B_WITHIN_16B tail offset overflow")
+            end
+            anchor = random_aligned_vaddr(64'd16, tail_offset);
+            final_vaddr = anchor + final_offset;
+            if (final_vaddr < anchor) begin
+                `uvm_fatal(get_type_name(), "CROSS_8B_WITHIN_16B final VADDR overflow")
+            end
+            return final_vaddr;
         end
         MEMBLOCK_BOUNDARY_PROFILE_CROSS_16B_SAME_LINE: begin
             if (!(size_bytes inside {2, 4, 8})) begin
                 `uvm_fatal(get_type_name(), $sformatf("CROSS_16B_SAME_LINE illegal size=%0d", size_bytes))
             end
-            line_base = random_aligned_vaddr(64);
             bank = $urandom_range(2, 0);
             k = $urandom_range(size_bytes - 1, 1);
-            return line_base + bank * 16 + 16 - k;
+            final_offset = bank * 16 + 16 - k;
+            tail_offset = final_offset + size_bytes - 1;
+            if (tail_offset < final_offset) begin
+                `uvm_fatal(get_type_name(), "CROSS_16B_SAME_LINE tail offset overflow")
+            end
+            anchor = random_aligned_vaddr(64'd64, tail_offset);
+            final_vaddr = anchor + final_offset;
+            if (final_vaddr < anchor) begin
+                `uvm_fatal(get_type_name(), "CROSS_16B_SAME_LINE final VADDR overflow")
+            end
+            return final_vaddr;
         end
         MEMBLOCK_BOUNDARY_PROFILE_CROSS_CACHELINE_SAME_4K: begin
             if (!(size_bytes inside {2, 4, 8})) begin
                 `uvm_fatal(get_type_name(), $sformatf("CROSS_CACHELINE_SAME_4K illegal size=%0d", size_bytes))
             end
-            page_base = random_aligned_vaddr(4096);
             line = $urandom_range(62, 0);
             k = $urandom_range(size_bytes - 1, 1);
-            return page_base + line * 64 + 64 - k;
+            final_offset = line * 64 + 64 - k;
+            tail_offset = final_offset + size_bytes - 1;
+            if (tail_offset < final_offset) begin
+                `uvm_fatal(get_type_name(), "CROSS_CACHELINE_SAME_4K tail offset overflow")
+            end
+            anchor = random_aligned_vaddr(64'd4096, tail_offset);
+            final_vaddr = anchor + final_offset;
+            if (final_vaddr < anchor) begin
+                `uvm_fatal(get_type_name(), "CROSS_CACHELINE_SAME_4K final VADDR overflow")
+            end
+            return final_vaddr;
         end
         MEMBLOCK_BOUNDARY_PROFILE_CROSS_4K: begin
             if (!(size_bytes inside {2, 4, 8})) begin
                 `uvm_fatal(get_type_name(), $sformatf("CROSS_4K illegal size=%0d", size_bytes))
             end
             k = $urandom_range(size_bytes - 1, 1);
-            page_count = (64'h0000_0080_0000_0000 - size_bytes + k) >> 12;
-            if (page_count == 0) begin
-                `uvm_fatal(get_type_name(), $sformatf("CROSS_4K no legal page for size=%0d k=%0d", size_bytes, k))
+            final_offset = 64'd4096 - k;
+            tail_offset = final_offset + size_bytes - 1;
+            if (tail_offset < final_offset) begin
+                `uvm_fatal(get_type_name(), "CROSS_4K tail offset overflow")
             end
-            page_base = (random64() % page_count) << 12;
-            return page_base + 4096 - k;
+            anchor = random_aligned_vaddr(64'd4096, tail_offset);
+            final_vaddr = anchor + final_offset;
+            if (final_vaddr < anchor) begin
+                `uvm_fatal(get_type_name(), "CROSS_4K final VADDR overflow")
+            end
+            return final_vaddr;
         end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("unsupported boundary profile=%0d", profile))
@@ -1722,28 +1821,103 @@ function int memblock_dispatch_base_sequence::weighted_pick_index(input int unsi
 endfunction:weighted_pick_index
 
 function bit memblock_dispatch_base_sequence::is_sv39_positive_canonical(input bit [63:0] vaddr);
-    return vaddr[63:39] == '0;
+    return vaddr[63:38] == '0;
 endfunction:is_sv39_positive_canonical
 
 function bit [63:0] memblock_dispatch_base_sequence::random64();
     return {$urandom(), $urandom()};
 endfunction:random64
 
-function bit [63:0] memblock_dispatch_base_sequence::random_aligned_vaddr(input bit [63:0] align_bytes);
-    bit [63:0] vaddr_limit;
+function bit [63:0] memblock_dispatch_base_sequence::random_aligned_vaddr(
+    input bit [63:0] align_bytes,
+    input bit [63:0] tail_offset
+);
+    bit [63:0] main_vaddr_base;
+    bit [63:0] main_vaddr_range;
+    bit [63:0] main_vaddr_upper;
+    bit [63:0] align_mask;
+    bit [63:0] latest_anchor;
+    bit [63:0] aligned_first;
+    bit [63:0] aligned_last;
     bit [63:0] slot_count;
     bit [63:0] slot_pick;
+    bit [63:0] candidate;
+    bit [64:0] main_vaddr_limit;
+    bit [64:0] wide_aligned_first;
+    bit [64:0] wide_slot_count;
+    bit [64:0] wide_candidate;
+    bit [64:0] wide_access_end;
+    bit [129:0] slot_product;
 
     if (align_bytes == 0) begin
         `uvm_fatal(get_type_name(), "random_aligned_vaddr got zero alignment")
     end
-    vaddr_limit = 64'h0000_0080_0000_0000;
-    slot_count = vaddr_limit / align_bytes;
-    if (slot_count == 0) begin
-        `uvm_fatal(get_type_name(), $sformatf("random_aligned_vaddr align=%0d leaves no slot", align_bytes))
+    align_mask = align_bytes - 64'd1;
+    if ((align_bytes & align_mask) != 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr align=0x%0h is not a power of two", align_bytes))
     end
+
+    // 中文注释：anchor 与完整访问尾部必须同时受 MAIN_VADDR 窗口约束。65-bit
+    // 加法及 130-bit 槽乘法只用于发现地址运算截断，不进入 transaction 或 DUT 接口。
+    main_vaddr_base = seq_csr_common::get_main_vaddr_base();
+    main_vaddr_range = seq_csr_common::get_main_vaddr_range();
+    main_vaddr_limit = {1'b0, main_vaddr_base} + {1'b0, main_vaddr_range};
+    if (main_vaddr_range == 0 || main_vaddr_limit[64]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr invalid MAIN_VADDR window base=0x%0h range=0x%0h",
+                             main_vaddr_base, main_vaddr_range))
+    end
+    main_vaddr_upper = main_vaddr_limit[63:0] - 64'd1;
+    if (main_vaddr_range <= tail_offset) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr cannot fit tail=0x%0h in MAIN_VADDR window [0x%0h,0x%0h]",
+                             tail_offset, main_vaddr_base, main_vaddr_upper))
+    end
+    latest_anchor = main_vaddr_upper - tail_offset;
+    wide_aligned_first = {1'b0, main_vaddr_base} + {1'b0, align_mask};
+    if (wide_aligned_first[64]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr alignment overflows base=0x%0h align=0x%0h",
+                             main_vaddr_base, align_bytes))
+    end
+    aligned_first = wide_aligned_first[63:0] & ~align_mask;
+    aligned_last = latest_anchor & ~align_mask;
+    if (aligned_first < main_vaddr_base || aligned_first > aligned_last ||
+        aligned_last > latest_anchor) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr has no legal slot window=[0x%0h,0x%0h] align=0x%0h tail=0x%0h",
+                             main_vaddr_base, main_vaddr_upper, align_bytes, tail_offset))
+    end
+
+    wide_slot_count = (({1'b0, aligned_last} - {1'b0, aligned_first}) /
+                       {1'b0, align_bytes}) + 65'd1;
+    if (wide_slot_count[64] || wide_slot_count == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr invalid slot count align=0x%0h first=0x%0h last=0x%0h",
+                             align_bytes, aligned_first, aligned_last))
+    end
+    slot_count = wide_slot_count[63:0];
     slot_pick = random64() % slot_count;
-    return slot_pick * align_bytes;
+
+    // Explicitly widen both operands: SV multiplication otherwise may retain the
+    // operand width and make the following overflow check ineffective.
+    slot_product = {66'd0, slot_pick} * {66'd0, align_bytes};
+    if (slot_product[129:64] != '0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr slot multiplication overflows pick=0x%0h align=0x%0h",
+                             slot_pick, align_bytes))
+    end
+    wide_candidate = {1'b0, aligned_first} + slot_product[64:0];
+    candidate = wide_candidate[63:0];
+    wide_access_end = {1'b0, candidate} + {1'b0, tail_offset};
+    if (wide_candidate[64] || candidate < aligned_first || candidate > aligned_last ||
+        wide_access_end[64] || wide_access_end[63:0] > main_vaddr_upper) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("random_aligned_vaddr selected invalid anchor=0x%0h tail=0x%0h window=[0x%0h,0x%0h]",
+                             candidate, tail_offset, main_vaddr_base, main_vaddr_upper))
+    end
+    return candidate;
 endfunction:random_aligned_vaddr
 
 function bit [63:0] memblock_dispatch_base_sequence::random_negative_imm12();
@@ -1935,9 +2109,9 @@ function void memblock_dispatch_base_sequence::set_transaction_ls_kind(input mai
     tr.update_vaddr();
 endfunction:set_transaction_ls_kind
 
-function void memblock_dispatch_base_sequence::ensure_normal_reused_addr_span(input main_control_transaction tr,
-                                                                               input main_control_transaction ref_tr,
-                                                                               input string caller);
+function void memblock_dispatch_base_sequence::ensure_reused_addr_span(input main_control_transaction tr,
+                                                                        input main_control_transaction ref_tr,
+                                                                        input string caller);
     bit [63:0] base;
     bit [63:0] upper;
     bit [63:0] access_end;
@@ -1951,6 +2125,72 @@ function void memblock_dispatch_base_sequence::ensure_normal_reused_addr_span(in
         `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
     end
     if (seq_csr_common::get_boundary_profile_gen_en()) begin
+        bit [63:0] boundary_base;
+        bit [63:0] boundary_range;
+        bit [63:0] boundary_upper;
+        bit [63:0] boundary_end;
+        bit [63:0] ref_boundary_end;
+        bit [64:0] boundary_limit;
+        bit [8:0] boundary_fitted_fuOpType;
+        int unsigned boundary_size_bytes;
+        int unsigned ref_boundary_size_bytes;
+
+        boundary_base = seq_csr_common::get_main_vaddr_base();
+        boundary_range = seq_csr_common::get_main_vaddr_range();
+        boundary_limit = {1'b0, boundary_base} + {1'b0, boundary_range};
+        if (boundary_range == 0 || boundary_limit[64]) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%s has invalid boundary MAIN_VADDR window base=0x%0h range=0x%0h",
+                                 caller, boundary_base, boundary_range))
+        end
+        boundary_upper = boundary_limit[63:0] - 64'd1;
+        tr.update_vaddr();
+        boundary_size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+        if (boundary_size_bytes == 0) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%s uid=%0d cannot derive boundary reused access size op_class=%s fuOpType=0x%0h",
+                                 caller, tr.uid, op_class_name(tr.op_class), tr.fuOpType))
+        end
+        boundary_end = tr.vaddr + boundary_size_bytes - 1;
+        if (boundary_end >= tr.vaddr && tr.vaddr >= boundary_base &&
+            boundary_end <= boundary_upper &&
+            is_sv39_positive_canonical(tr.vaddr) &&
+            is_sv39_positive_canonical(boundary_end)) begin
+            return;
+        end
+        if (ref_tr == null) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%s uid=%0d boundary reused span is invalid without a reference",
+                                 caller, tr.uid))
+        end
+
+        ref_tr.update_vaddr();
+        ref_boundary_size_bytes = derive_size_bytes(ref_tr.op_class, ref_tr.fuOpType);
+        if (ref_boundary_size_bytes == 0) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%s ref uid=%0d has invalid boundary access size",
+                                 caller, ref_tr.uid))
+        end
+        ref_boundary_end = ref_tr.vaddr + ref_boundary_size_bytes - 1;
+        if (ref_boundary_end < ref_tr.vaddr || ref_tr.vaddr < boundary_base ||
+            ref_boundary_end > boundary_upper ||
+            !is_sv39_positive_canonical(ref_tr.vaddr) ||
+            !is_sv39_positive_canonical(ref_boundary_end)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%s ref uid=%0d boundary span is invalid vaddr=0x%0h end=0x%0h",
+                                 caller, ref_tr.uid, ref_tr.vaddr, ref_boundary_end))
+        end
+
+        // 中文注释：复制地址关系保留；仅把不兼容的当前访问收敛到 reference size。
+        boundary_fitted_fuOpType = default_fuop_by_op_class_and_size(tr.op_class,
+                                                                       ref_boundary_size_bytes);
+        apply_op_class_template(tr, boundary_fitted_fuOpType);
+        boundary_size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+        check_boundary_full_vaddr_span(tr, boundary_size_bytes, caller);
+        `uvm_info(get_type_name(),
+                  $sformatf("%s uid=%0d fitted boundary reused access to ref_size=%0d",
+                            caller, tr.uid, ref_boundary_size_bytes),
+                  UVM_HIGH)
         return;
     end
 
@@ -2002,7 +2242,7 @@ function void memblock_dispatch_base_sequence::ensure_normal_reused_addr_span(in
     `uvm_info(get_type_name(),
               $sformatf("%s uid=%0d fitted reused access to ref_size=%0d", caller, tr.uid, ref_size_bytes),
               UVM_HIGH)
-endfunction:ensure_normal_reused_addr_span
+endfunction:ensure_reused_addr_span
 
 function void memblock_dispatch_base_sequence::fixup_after_addr_reuse(input main_control_transaction tr,
                                                                       input main_control_transaction ref_tr,
@@ -2020,7 +2260,7 @@ function void memblock_dispatch_base_sequence::fixup_after_addr_reuse(input main
     end
     tr.update_vaddr();
     if (copy_addr) begin
-        ensure_normal_reused_addr_span(tr, ref_tr, caller);
+        ensure_reused_addr_span(tr, ref_tr, caller);
     end
     validate_main_table_entry(tr, caller);
 endfunction:fixup_after_addr_reuse
@@ -2082,11 +2322,36 @@ function void memblock_dispatch_base_sequence::apply_addr_reuse_window(input mai
     endcase
 
     if (!got_ref) begin
+        int unsigned fallback_size_bytes;
+        memblock_boundary_profile_e fallback_profile;
+
         fallback_caller = $sformatf("%s fallback uid=%0d", caller_prefix, cur_uid);
         tr.op_class = fallback_op_class;
         apply_minimal_op_template(tr);
         if (seq_csr_common::get_boundary_profile_gen_en()) begin
-            fixup_after_addr_reuse(tr, null, 1'b0, fallback_caller);
+            fallback_size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+            if (fallback_size_bytes == 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%s cannot derive boundary fallback size op_class=%s fuOpType=0x%0h",
+                                     fallback_caller, op_class_name(tr.op_class), tr.fuOpType))
+            end
+            fallback_profile = tr.boundary_profile;
+            if (!boundary_profile_supported_for_fuop(tr.op_class,
+                                                     tr.fuOpType,
+                                                     fallback_profile,
+                                                     fallback_size_bytes) ||
+                (tr.op_class == MEMBLOCK_OP_CLASS_STORE &&
+                 fallback_profile == MEMBLOCK_BOUNDARY_PROFILE_CROSS_8B_WITHIN_16B &&
+                 !seq_csr_common::get_store_cross_8b_within_16b_en())) begin
+                // 中文注释：无 reference fallback 会把初始 load 改成 store；此处必须复用
+                // candidate cache 的 STORE x CROSS_8B gate，避免绕过 testcase 禁用约束。
+                fallback_profile = MEMBLOCK_BOUNDARY_PROFILE_ALIGNED;
+            end
+            tr.boundary_profile = fallback_profile;
+            tr.boundary_size_bytes = fallback_size_bytes;
+            apply_boundary_addr_template(tr, fallback_profile, fallback_size_bytes);
+            check_boundary_profile(tr, fallback_caller);
+            validate_main_table_entry(tr, fallback_caller);
         end else begin
             // No address relationship exists without a reference; regenerate a legal
             // address after the fallback operation type has been selected.
@@ -2145,6 +2410,7 @@ function void memblock_dispatch_base_sequence::sync_boundary_profile_after_addr_
     end
 
     tr.update_vaddr();
+    check_boundary_full_vaddr_span(tr, size_bytes, caller);
     actual_profile = classify_boundary_profile(tr.vaddr, size_bytes);
     if (actual_profile == MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN) begin
         `uvm_fatal(get_type_name(),
