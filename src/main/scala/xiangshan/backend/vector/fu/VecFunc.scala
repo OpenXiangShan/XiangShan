@@ -4,7 +4,6 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.{MuxCase, MuxLookup, Valid}
 import xiangshan._
-import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.datapath.DataConfig.V0Data
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}

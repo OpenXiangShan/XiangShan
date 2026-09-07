@@ -382,16 +382,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // 2 is type of vec
     var k = 2
     val readidx = i * idxRegTypeAll(k).size + idxRegTypeAll(k).indexOf(j)
-    val isDependOldVd = fromRename(i).bits.vpu.isDependOldVd
-    val isWritePartVd = fromRename(i).bits.vpu.isWritePartVd
-    val vta = fromRename(i).bits.vpu.vta
-    val vma = fromRename(i).bits.vpu.vma
-    val vm = fromRename(i).bits.vpu.vm
+    val vta = fromRename(i).bits.vtype.vta
+    val vma = fromRename(i).bits.vtype.vma
+    val vm = fromRename(i).bits.vm
     val vlIsVlmax = vlBusyTable.io_vl_read.vlReadInfo(i).is_vlmax
     val vlIsNonZero = vlBusyTable.io_vl_read.vlReadInfo(i).is_nonzero
-    val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
+    val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma)
     val ignoreWhole = (vm =/= 0.U || vma) && vta
-    ignoreOldVdVec(i) := vlBusyTable.io.read(i).resp && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole) && !FuType.isStore(fromRename(i).bits.fuType)
+    ignoreOldVdVec(i) := vlBusyTable.io.read(i).resp && vlIsNonZero && (ignoreTail || ignoreWhole) && !FuType.isStore(fromRename(i).bits.fuType)
     allSrcState(i)(j)(k) := Mux1H(Seq(
       SrcType.isVp(fromRename(i).bits.srcType(j)) -> (vpBusyTable.out.readResp(readidx) || ignoreOldVdVec(i)),
       SrcType.isImm(fromRename(i).bits.srcType(j)) -> SrcState.rdy,

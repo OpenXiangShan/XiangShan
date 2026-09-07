@@ -157,6 +157,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       x.predTaken := source.bits.predTaken.get
     }
     sink.bits.frm.foreach(_ := source.bits.frm.get)
+    sink.bits.uopIdx.foreach(_ := source.bits.uopIdx.get)
+    sink.bits.lastUop.foreach(_ := source.bits.lastUop.get)
     sink.valid := source.valid
     source.ready := sink.ready
   }

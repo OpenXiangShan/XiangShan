@@ -280,7 +280,6 @@ object Exu {
       exuInput.vecWen.foreach(_ := this.ctrl.vpWen.get)
       exuInput.v0Wen.foreach(_ := this.ctrl.v0Wen.get)
       exuInput.vlWen.foreach(_ := this.ctrl.vlWen.get)
-      exuInput.vpu.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.oldVType.foreach(_ := this.ctrl.oldVType.get)
       exuInput.vtype.foreach(_ := this.ctrl.vtype.get)
       exuInput.flushPipe.foreach(_ := this.ctrl.flushPipe.get)

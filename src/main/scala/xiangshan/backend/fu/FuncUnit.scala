@@ -6,7 +6,7 @@ import chisel3.util._
 import utility._
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.Bundles.VPUCtrlSignals
+import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
@@ -68,7 +68,10 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   })
   val frm         = Option.when(cfg.needInstFrm)(Frm())
   val fflagsWen   = OptionWrapper(cfg.writeFflags, Bool())
-  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val vm          = OptionWrapper(cfg.needVecCtrl, Bool())
+  val uopIdx      = OptionWrapper(cfg.needVecCtrl, UopIdx())
+  val lastUop     = OptionWrapper(cfg.needVecCtrl, Bool())
+  val vtype       = OptionWrapper(cfg.needVecCtrl, VType())
   val oldVType    = Option.when(cfg.writeVType)(VType())
 }
 
@@ -88,7 +91,10 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
   val fflagsWen     = OptionWrapper(cfg.writeFflags, Bool())
-  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val vm            = OptionWrapper(cfg.needVecCtrl, Bool())
+  val uopIdx        = OptionWrapper(cfg.needVecCtrl, UopIdx())
+  val lastUop       = OptionWrapper(cfg.needVecCtrl, Bool())
+  val vtype         = OptionWrapper(cfg.needVecCtrl, VType())
 }
 
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -165,7 +171,10 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := RegEnable(io.in.bits.ctrl.isRVC.get, io.in.fire))
     io.out.bits.ctrl.fflagsWen.foreach(_ := RegEnable(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
-    io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.vm       .foreach(_ := RegEnable(io.in.bits.ctrl.vm.get, io.in.fire))
+    io.out.bits.ctrl.uopIdx   .foreach(_ := RegEnable(io.in.bits.ctrl.uopIdx.get, io.in.fire))
+    io.out.bits.ctrl.lastUop  .foreach(_ := RegEnable(io.in.bits.ctrl.lastUop.get, io.in.fire))
+    io.out.bits.ctrl.vtype    .foreach(_ := RegEnable(io.in.bits.ctrl.vtype.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := RegEnable(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
   }
@@ -182,7 +191,10 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := DataHoldBypass(io.in.bits.ctrl.isRVC.get, io.in.fire))
     io.out.bits.ctrl.fflagsWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
-    io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
+    io.out.bits.ctrl.vm.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vm.get, io.in.fire))
+    io.out.bits.ctrl.uopIdx.foreach(_ := DataHoldBypass(io.in.bits.ctrl.uopIdx.get, io.in.fire))
+    io.out.bits.ctrl.lastUop.foreach(_ := DataHoldBypass(io.in.bits.ctrl.lastUop.get, io.in.fire))
+    io.out.bits.ctrl.vtype.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vtype.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := DataHoldBypass(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := DataHoldBypass(io.in.bits.debug_seqNum.get, io.in.fire))
   }
@@ -199,7 +211,10 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
     io.out.bits.ctrl.fflagsWen.foreach(_ := io.in.bits.ctrl.fflagsWen.get)
-    io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
+    io.out.bits.ctrl.vm.foreach(_ := io.in.bits.ctrl.vm.get)
+    io.out.bits.ctrl.uopIdx.foreach(_ := io.in.bits.ctrl.uopIdx.get)
+    io.out.bits.ctrl.lastUop.foreach(_ := io.in.bits.ctrl.lastUop.get)
+    io.out.bits.ctrl.vtype.foreach(_ := io.in.bits.ctrl.vtype.get)
     io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
     io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
   }
@@ -294,19 +309,11 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.v0Wen.foreach(_ := ctrlVec.last.v0Wen.get)
   io.out.bits.ctrl.vlWen.foreach(_ := ctrlVec.last.vlWen.get)
   io.out.bits.ctrl.fflagsWen.foreach(_ := ctrlVec.last.fflagsWen.get)
-  io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
+  io.out.bits.ctrl.vm.foreach(_ := ctrlVec.last.vm.get)
+  io.out.bits.ctrl.uopIdx.foreach(_ := ctrlVec.last.uopIdx.get)
+  io.out.bits.ctrl.lastUop.foreach(_ := ctrlVec.last.lastUop.get)
   io.out.bits.perfDebugInfo.foreach(_ := fixPerfVec.last.get)
   io.out.bits.debug_seqNum.foreach(_ := fixSeqNumVec.last.get)
-
-  // vstart illegal
-  if (cfg.exceptionOut.nonEmpty) {
-    val outVstart = ctrlVec.last.vpu.get.vstart
-    val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.zeroInit()
-    require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
-      "HasPipelineReg trait with non-empty excptionOut must have illegal instruction exception output")
-    io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
-  }
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)
 

@@ -159,7 +159,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.ftqOffset := robEnq.ftqOffset
     robEntry.isRVC := robEnq.isRVC
     // robEntry.needVTB will be asserted by the first uop, so set it false here
-    robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
+    robEntry.needVTB := robEnq.isVset
     robEntry.isHls := robEnq.isHls
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
