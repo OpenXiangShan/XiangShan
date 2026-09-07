@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `41931d2ec53712fd6ea6740318314160e53e9d4369c619112c8210beda3fcc2e`
+- Current rebuilt and frozen UT executable SHA-256: `84e886c9d57660805e9a642ad1b160db0f8718bac65a28bd31ed6471e799306e`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `efce69d168e3b93d43ca296951c73c8bd0272502e04da30cc22fa038df75c96e`
+- Frozen runtime manifest SHA-256: `9dda54c15486afcb58e96943aaaed0c343b44d605aac7fe557842c502301669a`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -895,7 +895,7 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed 230 deterministic architectural transactions.
+`make translation-faults` passed 258 deterministic architectural transactions.
 Ten canonical-boundary transactions cover valid high-half Sv39/Sv48 loads and
 both sign-extension mismatch directions for each mode as scalar load and store
 page faults. The other four original cases cover an invalid Sv39 root PTE,
@@ -907,13 +907,14 @@ exact load page fault. The same 26 encodings also produced exact store page
 faults with balanced SQ retirement. No faulting access issued a DCache or
 Uncache data request.
 
-Fifty-six added transactions cross stage-1/G-stage, Sv39/Sv48, every PTE level,
-load/store, and PTE PPN bit 36/43, which form physical address bits 48/55
-outside this configuration's 48-bit PA. The independent walker classified each
-valid encoding as an access fault at the exact level and PTE. The 16 leaf, 24
-intermediate, and 16 root transactions issued a walk ending exactly at the
-faulting PTE; stores reused shared legal ancestor PageTableCache entries before
-rereading exactly that AF PTE, for 92 PTW block requests total. G-stage `gaf`
+Eighty-four added transactions cross ordinary stage-1, VS-only with
+`hgatp=Bare`, G-stage, Sv39/Sv48, every PTE level, load/store, and PTE PPN bit
+36/43, which form physical address bits 48/55 outside this configuration's
+48-bit PA. The independent walker classified each valid encoding as an access
+fault at the exact level and PTE. The 24 leaf, 36 intermediate, and 24 root
+transactions issued a walk ending exactly at the faulting PTE; stores reused
+shared legal ancestor PageTableCache entries before rereading that AF PTE, for
+138 PTW block requests total, including 46 on the VS-only path. G-stage `gaf`
 correctly mapped to the original load/store access fault rather than a
 guest-page fault. No case issued a DCache/Uncache request, and every store
 conserved its SQ entry.
