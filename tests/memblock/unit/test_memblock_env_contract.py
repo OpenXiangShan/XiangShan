@@ -1995,6 +1995,27 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
+    def test_translation_faults_cover_physical_ppn_overflow(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "kReferencePhysicalAddressBits = 48",
+            "reference_pte_physical_address_fault",
+            "bool access_fault = false",
+        ):
+            self.assertIn(contract, environment)
+        for contract in (
+            "sv39-ppn-bit36",
+            "sv39-ppn-bit43",
+            "sv48-ppn-bit36",
+            "sv48-ppn-bit43",
+            "kExceptionLoadAccessFault",
+            "kExceptionStoreAccessFault",
+            "ppn_access_fault_cases=",
+            "ppn_access_fault_ptw_requests=",
+        ):
+            self.assertIn(contract, main)
+
     def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

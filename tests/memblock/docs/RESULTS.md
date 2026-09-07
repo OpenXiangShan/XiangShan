@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `14e1de1bf4b0364f0e4d1571f55744e847ea25bcb4f3263d9f26874f0311e5e7`
+- Current rebuilt and frozen UT executable SHA-256: `2d9aab36e9c173bea1df4588eada12a8aafc41ecdc75d7f998f5d0a9bbb6c20b`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `58683512acf412f9bd017602d28c7c927245a5edbee640a7436b5954705c6b85`
+- Frozen runtime manifest SHA-256: `0010ebb6797b87f4e414a0ba5d31e811054b87d7e0a0cf524beb90bf28232396`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -895,7 +895,7 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed 118 deterministic architectural transactions.
+`make translation-faults` passed 126 deterministic architectural transactions.
 Ten canonical-boundary transactions cover valid high-half Sv39/Sv48 loads and
 both sign-extension mismatch directions for each mode as scalar load and store
 page faults. The other four original cases cover an invalid Sv39 root PTE,
@@ -906,6 +906,15 @@ invalid NAPOT encoding. Each case matched the independent failing PTE/level and
 exact load page fault. The same 26 encodings also produced exact store page
 faults with balanced SQ retirement. No faulting access issued a DCache or
 Uncache data request.
+
+Eight added transactions cross Sv39/Sv48, load/store, and PTE PPN bit 36/43,
+which form physical address bits 48/55 outside this configuration's 48-bit PA.
+The independent walker classified each valid leaf encoding as an access fault
+at level 0 and identified its exact PTE. Each load issued the complete 3/4-level
+cold walk; the corresponding store used the shared non-leaf PageTableCache
+entries and reread exactly the AF leaf, for 18 PTW block requests total. Every
+transaction produced the access-type-specific fault with no DCache/Uncache
+request, and every store conserved its SQ entry.
 
 The first canonical-boundary run incorrectly required a noncanonical store to
 issue no PTW request. The RTL returned the exact `StorePageFault`, issued no

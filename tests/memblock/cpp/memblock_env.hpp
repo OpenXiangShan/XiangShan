@@ -930,7 +930,13 @@ struct ReferenceStageWalkResult {
     std::uint64_t physical_address = 0;
     std::uint64_t faulting_pte_address = 0;
     unsigned fault_level = 0;
+    bool access_fault = false;
 };
+
+// Must remain identical to PAddrBits for the MemBlock configuration.  A
+// Sv39/Sv48 PTE carries a 44-bit PPN even when the implementation exposes a
+// narrower physical address, so valid PTE encodings can still raise AF.
+inline constexpr unsigned kReferencePhysicalAddressBits = 48;
 
 // RISC-V satp/hgatp mode encodings used by the MemBlock CSR interface.
 // Keeping the encoding here avoids accidentally testing a mode with a
@@ -1061,6 +1067,14 @@ inline std::uint64_t reference_pte_ppn(std::uint64_t pte)
     return (pte >> 10) & ((std::uint64_t{1} << 44) - 1);
 }
 
+inline bool reference_pte_physical_address_fault(std::uint64_t pte)
+{
+    constexpr unsigned page_offset_bits = 12;
+    return (pte & 1U) != 0 &&
+           (reference_pte_ppn(pte) >>
+            (kReferencePhysicalAddressBits - page_offset_bits)) != 0;
+}
+
 inline bool reference_pte_is_invalid(std::uint64_t pte)
 {
     const bool valid = (pte & 1U) != 0;
@@ -1155,6 +1169,15 @@ inline ReferenceStageWalkResult reference_page_walk(
         if (reference_pte_encoding_fault(
                 pte, static_cast<unsigned>(level), pbmte)) {
             return {false, 0, pte_address, static_cast<unsigned>(level)};
+        }
+        if (reference_pte_physical_address_fault(pte)) {
+            return {
+                false,
+                0,
+                pte_address,
+                static_cast<unsigned>(level),
+                true,
+            };
         }
         if (reference_pte_is_leaf(pte)) {
             return {

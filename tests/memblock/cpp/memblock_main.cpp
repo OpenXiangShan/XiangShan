@@ -22368,7 +22368,11 @@ int run_ptw_errors(int argc, char **argv)
 int run_translation_faults(int argc, char **argv)
 {
     unsigned canonical_boundary_cases = 0;
+    unsigned ppn_access_fault_cases = 0;
+    unsigned lowest_high_ppn_cases = 0;
+    unsigned highest_high_ppn_cases = 0;
     std::uint64_t noncanonical_ptw_requests = 0;
+    std::uint64_t ppn_access_fault_ptw_requests = 0;
     struct CanonicalAddressCase {
         const char *name;
         memblock::ReferencePageMode mode;
@@ -22738,6 +22742,158 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
+    struct PpnAccessFaultCase {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        std::uint64_t physical_address;
+        bool highest_ppn_bit;
+    };
+    constexpr std::array<PpnAccessFaultCase, 4> ppn_access_fault_tests{{
+        {"sv39-ppn-bit36", memblock::ReferencePageMode::sv39,
+         std::uint64_t{1} << 48, false},
+        {"sv39-ppn-bit43", memblock::ReferencePageMode::sv39,
+         std::uint64_t{1} << 55, true},
+        {"sv48-ppn-bit36", memblock::ReferencePageMode::sv48,
+         std::uint64_t{1} << 48, false},
+        {"sv48-ppn-bit43", memblock::ReferencePageMode::sv48,
+         std::uint64_t{1} << 55, true},
+    }};
+    for (std::size_t index = 0; index < ppn_access_fault_tests.size(); ++index) {
+        const auto &test = ppn_access_fault_tests[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t virtual_address =
+            test.mode == memblock::ReferencePageMode::sv48
+                ? 0xffff900020000188ULL
+                : 0x78000188ULL;
+        const std::uint64_t root = 0xb0000000ULL + index * 0x100000ULL;
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-reset reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t virtual_page =
+            virtual_address & ~std::uint64_t{0xfff};
+        const bool mapped = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48_4k(
+                  virtual_page, test.physical_address, root)
+            : environment.map_sv39_4k(
+                  virtual_page, test.physical_address, root);
+        const auto leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), root, virtual_address, test.mode, 0);
+        const auto reference = memblock::reference_page_walk(
+            environment.memory(), root, virtual_address, test.mode);
+        if (!mapped || !leaf_pte.has_value() || reference.translated ||
+            !reference.access_fault || reference.fault_level != 0 ||
+            reference.faulting_pte_address != *leaf_pte) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name
+                      << "-reference reason=PPN access fault not identified\n";
+            return 1;
+        }
+        const bool activated = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.activate_sv48(root, 53 + index)
+            : environment.activate_sv39(root, 53 + index);
+        if (!activated) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const memblock::LoadTransaction load{
+            .address = virtual_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(210 + index),
+            .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        };
+        environment.expect_load(load);
+        if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+            !environment.enqueue_load(load) ||
+            !environment.issue_load(load, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096) ||
+            environment.ptw_requests() !=
+                ptw_before + memblock::reference_page_levels(test.mode) ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-load reason="
+                      << (environment.error().empty()
+                              ? "wrong PTW count or data-manager side effect"
+                              : environment.error())
+                      << " ptw=" << ptw_before << '/'
+                      << environment.ptw_requests()
+                      << " dcache=" << dcache_before << '/'
+                      << environment.tilelink_requests()
+                      << " uncache=" << uncache_before << '/'
+                      << environment.uncache_requests() << '\n';
+            return 1;
+        }
+        ++ppn_access_fault_cases;
+
+        const std::uint64_t store_ptw_before = environment.ptw_requests();
+        const memblock::StoreTransaction store{
+            .address = virtual_address,
+            .data = 0x5566778899aabbccULL ^ index,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(
+                index % memblock::kScalarStoreLanes),
+            .data_lane = static_cast<unsigned>(
+                (index + 1) % memblock::kScalarStoreLanes),
+            .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete_with_replay(store, 16384) ||
+            // Load/store L1 TLBs are distinct, while the shared page-table
+            // cache retains valid non-leaf entries.  The store must therefore
+            // re-read exactly the AF leaf PTE.
+            environment.ptw_requests() != store_ptw_before + 1 ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before ||
+            (environment.sq_dequeued() + environment.sq_canceled() <
+                 environment.sq_allocated() &&
+             !environment.account_sq_cancellation(1)) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-store reason="
+                      << (environment.error().empty()
+                              ? "wrong PTW count, AF changed, reached memory, or left SQ unbalanced"
+                              : environment.error())
+                      << " ptw=" << store_ptw_before << '/'
+                      << environment.ptw_requests()
+                      << " dcache=" << dcache_before << '/'
+                      << environment.tilelink_requests()
+                      << " uncache=" << uncache_before << '/'
+                      << environment.uncache_requests()
+                      << " sq=" << environment.sq_dequeued() << '+'
+                      << environment.sq_canceled() << '/'
+                      << environment.sq_allocated() << '\n';
+            return 1;
+        }
+        ++ppn_access_fault_cases;
+        ppn_access_fault_ptw_requests +=
+            environment.ptw_requests() - ptw_before;
+        if (test.highest_ppn_bit) {
+            highest_high_ppn_cases += 2;
+        } else {
+            lowest_high_ppn_cases += 2;
+        }
+    }
+
     struct PteEncodingCase {
         const char *name;
         memblock::ReferencePageMode mode;
@@ -23083,9 +23239,15 @@ int run_translation_faults(int argc, char **argv)
     }
 
     std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
-              << canonical_boundary_cases + 4 + pte_encoding_cases.size() * 4
+              << canonical_boundary_cases + 4 + ppn_access_fault_cases +
+                    pte_encoding_cases.size() * 4
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
+              << " ppn_access_fault_cases=" << ppn_access_fault_cases
+              << " lowest_high_ppn_cases=" << lowest_high_ppn_cases
+              << " highest_high_ppn_cases=" << highest_high_ppn_cases
+              << " ppn_access_fault_ptw_requests="
+              << ppn_access_fault_ptw_requests
               << " stage1_pte_encoding_cases=" << pte_encoding_cases.size()
               << " gstage_pte_encoding_cases=" << pte_encoding_cases.size()
               << " stage1_store_pte_encoding_cases="
