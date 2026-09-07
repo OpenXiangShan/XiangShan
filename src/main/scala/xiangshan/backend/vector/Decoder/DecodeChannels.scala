@@ -196,6 +196,7 @@ class DecodeChannels(
   val vsetDecodeChannelsIn: Seq[VsetDecoder.In] = vsetDecodeChannels.map(_.in)
   vsetDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
+    modIn.vsIsOff := in.mops(i).bits.info.fromCSR.illegalInst.vsIsOff
   }
 
   val simDecodeChannelsIn: Seq[DecodeChannelInput] = simpleDecodeChannels.map(_.in)
@@ -336,6 +337,7 @@ class DecodeChannelOutput extends Bundle {
   val vlWen = Bool()
   val vxsatWen = Bool()
   val fflagsWen = Bool()
+  val dirtyVs = Bool()
 
   val frm = Frm()
   val frmIll = Bool()
@@ -404,6 +406,7 @@ object DecodeChannelOutput {
     uop.vlWen := vuop.renameInfo.vlWen
     uop.vxsatWen := vuop.renameInfo.vxsatWen
     uop.fflagsWen := vuop.fflagsWen
+    uop.dirtyVs := vuop.dirtyVs
     uop.ldest := vuop.src.dest
 
     uop.frm := vuop.frm
@@ -464,6 +467,7 @@ object DecodeChannelOutput {
     uop.vlWen := vuop.renameInfo.bits.vlWen
     uop.vxsatWen := vuop.renameInfo.bits.vxsatWen
     uop.fflagsWen := false.B
+    uop.dirtyVs := true.B
 
     uop.ldest := vuop.src.dest
 
@@ -491,7 +495,7 @@ object DecodeChannelOutput {
     uop.src12Rev := false.B
 
     uop.isMove := false.B
-    uop.exceptionII := false.B
+    uop.exceptionII := vuop.illegal
     uop.exceptionVI := false.B
 
     uop
@@ -524,6 +528,7 @@ object DecodeChannelOutput {
     uop.vlWen := false.B
     uop.vxsatWen := false.B
     uop.fflagsWen := suop.fflagsWen
+    uop.dirtyVs := false.B
 
     uop.ldest := suop.ldest
 
@@ -585,6 +590,7 @@ object DecodeChannelOutput {
     uop.vlWen := false.B
     uop.vxsatWen := false.B
     uop.fflagsWen := false.B
+    uop.dirtyVs := false.B
 
     uop.ldest := puop.ldest
 

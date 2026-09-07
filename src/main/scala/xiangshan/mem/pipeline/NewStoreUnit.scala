@@ -27,6 +27,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.ExceptionNO._
@@ -873,6 +874,8 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   // Writeback
   val stout = new MemWriteBack(param)
   val exceptionInfo = ValidIO(new MemExceptionInfo)
+  val perfRobHeadPtr = Input(new RobPtr)
+  val writebackAtRobHead = Output(Bool())
 
   val debugInfo = Output(new DebugLsInfoBundle)
 }
@@ -932,6 +935,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // s3
   s3.io.redirect := io.redirect
   io.stout := s3.io.stout
+  io.writebackAtRobHead := io.stout.toRob.valid && io.stout.toRob.bits.robIdx === io.perfRobHeadPtr
   io.exceptionInfo := s3.io.exceptionInfo
 }
 

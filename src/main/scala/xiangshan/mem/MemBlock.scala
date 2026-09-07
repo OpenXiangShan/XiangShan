@@ -61,23 +61,17 @@ trait HasMemBlockParameters extends HasXSParameter {
   val hyaParams = intMemExeUnitParams.filter(_.hasHyldaFu)
   val mouParam = intMemExeUnitParams.filter(_.hasMouFu).head
   val moudParam = intMemExeUnitParams.filter(_.hasMoudFu).head
-  val vlduParams = vecMemExeUnitParams.filter(_.hasVLoadFu)
-  val vstuParams = vecMemExeUnitParams.filter(_.hasVStoreFu)
-
 
   val LduCnt  = backendParams.LduCnt
   val StaCnt  = backendParams.StaCnt
   val StdCnt  = backendParams.StdCnt
   val HyuCnt  = backendParams.HyuCnt
-  val VlduCnt = backendParams.VlduCnt
-  val VstuCnt = backendParams.VstuCnt
 
   val LdExuCnt  = LduCnt + HyuCnt
   val StAddrCnt = StaCnt + HyuCnt
   val StDataCnt = StdCnt
   val MemExuCnt = LduCnt + HyuCnt + StaCnt + StdCnt
   val MemAddrExtCnt = LdExuCnt + StaCnt
-  val MemVExuCnt = VlduCnt + VstuCnt
 
   val AtomicWBPort   = 0
   val MisalignWBPort = 1
@@ -468,7 +462,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueLda = intIssue.filter(_.bits.params.hasLoadFu)
   val issueSta = intIssue.filter(_.bits.params.hasStoreAddrFu)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
-  val issueVldu = intIssue.filter(_.bits.params.hasVLoadFu)
   val vstdStoreData: Seq[ValidIO[StoreQueueDataWrite]] = io.ooo_to_mem.vstdStoreData.flatten
 
   val intWriteback: Seq[MemWriteBack] = io.mem_to_ooo.intWriteback.flatten
@@ -520,6 +513,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val storeUnits = Seq.tabulate(StaCnt)(i => Module(new NewStoreUnit(staParams(i))))
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
 
+  val stdDataWriteNow = stdExeUnits.map(_.io.sqData)
+  val stdDataWritePrev = stdDataWriteNow.map { now =>
+    val prev = Wire(Valid(new SqPtr))
+    prev.valid := RegNext(now.valid, false.B)
+    prev.bits := RegEnable(now.bits.sqIdx, now.valid)
+    prev
+  }
+  newLoadUnits.foreach { ldu =>
+    ldu.io.stdDataWrite.current.zip(stdDataWriteNow).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits.sqIdx
+    }
+    ldu.io.stdDataWrite.previous.zip(stdDataWritePrev).foreach { case (sink, source) =>
+      sink := source
+    }
+  }
+
   wakeupToLRQCancel.take(StaCnt).zip(storeUnits).zip(io.ooo_to_mem.wakeupToLRQCancel.take(StaCnt)).foreach {
     case ((sink, stu), source) =>
       sink.og0Cancel := source.og0Cancel
@@ -542,6 +552,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   newLoadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
+  storeUnits.foreach(_.io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr)
+  stdExeUnits.foreach(_.io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr)
+  XSPerfAccumulate("store_addr_writeback_rob_head", PopCount(storeUnits.map(_.io.writebackAtRobHead)))
+  XSPerfAccumulate("store_data_writeback_rob_head", PopCount(stdExeUnits.map(_.io.writebackAtRobHead)))
+
+  for (i <- 0 until LoadEntrance.num) {
+    val sourceName = LoadEntrance.findNameById(i)
+    val eventCount = PopCount(newLoadUnits.map(_.io.sourceExecuteFailRobHead(i)))
+    XSPerfAccumulate(s"${sourceName}_execute_fail_rob_head", eventCount)
+  }
 
   writebackLda.zipWithIndex.foreach { case (wb, i) =>
     if (i == AtomicWBPort) {
@@ -870,7 +890,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val rrBankConflictFastReplay = newLoadUnits.map(_.io.rrBankConflictFastReplay)
   val rrBankConflictFastReplayCandidates = rrBankConflictFastReplay.map(_.candidate)
-  val rrBankConflictFastReplayArb = Module(new RRArbiterInit(Bool(), LduCnt))
+  val rrBankConflictFastReplayArb = Module(new TwoLevelRRArbiter(Bool(), LduCnt))
   rrBankConflictFastReplayArb.suggestName("rr_bank_conflict_fast_replay_arb")
   rrBankConflictFastReplayArb.io.out.ready := true.B
   rrBankConflictFastReplayArb.io.in.zip(rrBankConflictFastReplayCandidates).foreach { case (in, candidate) =>
@@ -948,6 +968,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     newLoadUnits(i).io.csrTrigger.triggerCanRaiseBpExp := triggerCanRaiseBpExp
     newLoadUnits(i).io.csrTrigger.debugMode := debugMode
   }
+
+  lsq.io.fast_tlb_hint <> dtlbRepeater.io.fastHint
 
   lsq.io.cmoOpReq <> dcache.io.cmoOpReq
   lsq.io.cmoOpResp <> dcache.io.cmoOpResp
@@ -1140,8 +1162,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
   }
-
-  issueVldu.foreach(_.ready := false.B)
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl

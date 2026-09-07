@@ -31,7 +31,7 @@ class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg)
       mod.io.in.bits.info.vsew := VMoveOpcode.getElemWidth
       mod.io.in.bits.vs2 := ex0vs2
       mod.io.in.bits.vs1 := ex0vs1
-      mod.io.in.bits.mask := ex(0).data.v0.get // Todo: use 16b mask instead
+      mod.io.in.bits.mask := Fill(mod.io.in.bits.mask.getWidth, ex(0).bits.ctrl.vm.get) | ex(0).data.v0.get // Todo: use 16b mask instead
   }
 
   out.ex(0).data.int.foreach(_ := vMove.io.out.bits.vd)

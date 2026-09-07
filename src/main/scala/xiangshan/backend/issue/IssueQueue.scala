@@ -403,19 +403,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
     entriesIO.simpEntryDeqSelVec.foreach(_                      := VecInit(simpEntryOldestSel.get.takeRight(params.numEnq).map(_.bits)))
-    if (params.isVecMemIQ){
-      entries.io.enq.zipWithIndex.map{ case(enqData, i) =>
-        val enqPayload = enqData.bits.payload.og1Payload
-        enqPayload.sqIdx.get := s0_enqBits(i).sqIdx.get
-        enqPayload.lqIdx.get := s0_enqBits(i).lqIdx.get
 
-        val isFirstLoad = s0_enqBits(i).lqIdx.get <= io.memIO.get.lqDeqPtr.get
-        val isVleff = s0_enqBits(i).vpu.get.isVleff
-        enqData.bits.status.blocked := !isFirstLoad && isVleff
-      }
-    }
-    entries.io.vecMemIn.foreach(_.sqDeqPtr := io.memIO.get.sqDeqPtr.get)
-    entries.io.vecMemIn.foreach(_.lqDeqPtr := io.memIO.get.lqDeqPtr.get)
     //output
     fuTypeVec                                                   := entriesIO.fuType
     deqEntryVec                                                 := entriesIO.deqEntry
@@ -623,7 +611,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqResp.bits.failed := false.B
     deqResp.bits.finalSuccess := false.B
     deqResp.bits.fuType := deqBeforeDly(i).bits.fuType
-    deqResp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
     deqResp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
     deqResp.bits.isFmac := false.B
   }
@@ -1208,7 +1195,4 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
   // load wakeup
   val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new MemWakeUpBundle)))
-  // vector
-  val sqDeqPtr = Option.when(params.isVecMemIQ)(Input(new SqPtr))
-  val lqDeqPtr = Option.when(params.isVecMemIQ)(Input(new LqPtr))
 }

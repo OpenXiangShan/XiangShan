@@ -232,3 +232,71 @@ class SelectOldest[T <: Data](gen: T, numIn: Int, f: (T, T) => Bool) extends Mod
   io.out.bits := oldest._2.head
 
 }
+
+class skidBufferConnect[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val in = Flipped(DecoupledIO(gen.cloneType))
+    val flush = Input(Bool())
+    val enqEnable = Input(Bool())
+    val out = DecoupledIO(gen.cloneType)
+    val occupied = Output(Bool())
+  })
+
+  val (_, occupied) = skidBuffer.connect(io.in, io.out, io.flush, io.enqEnable)
+  io.occupied := occupied
+}
+
+object skidBuffer {
+  /*
+   * Skid Buffer used to break timing path of ready
+   */
+  def connect[T <: Data](
+    in: DecoupledIO[T],
+    out: DecoupledIO[T],
+    flush: Bool,
+    enqEnable: Bool = true.B
+  ): (T, Bool) = {
+    val empty :: skid :: Nil = Enum(2)
+    val state = RegInit(empty)
+    val stateNext = WireInit(empty)
+    val dataBuffer = RegEnable(in.bits, !out.ready && in.fire)
+
+    when(state === empty) {
+      stateNext := Mux(!out.ready && in.fire && !flush, skid, empty)
+    }.elsewhen(state === skid) {
+      stateNext := Mux(out.ready || flush, empty, skid)
+    }
+    state := stateNext
+
+    in.ready := state === empty && enqEnable
+    out.bits := Mux(state === skid, dataBuffer, in.bits)
+    out.valid := state === skid || (state === empty && enqEnable && in.valid)
+
+    (dataBuffer, state === skid)
+  }
+
+  def apply[T <: Data](
+    in: DecoupledIO[T],
+    out: DecoupledIO[T],
+    flush: Bool,
+    moduleName: String
+  ): Unit = {
+    apply(in, out, flush, moduleName, true.B)
+  }
+
+  def apply[T <: Data](
+    in: DecoupledIO[T],
+    out: DecoupledIO[T],
+    flush: Bool,
+    moduleName: String,
+    enqEnable: Bool
+  ): Bool = {
+    val buffer = Module(new skidBufferConnect(in.bits))
+    buffer.suggestName(moduleName)
+    buffer.io.in <> in
+    buffer.io.flush := flush
+    buffer.io.enqEnable := enqEnable
+    out <> buffer.io.out
+    buffer.io.occupied
+  }
+}

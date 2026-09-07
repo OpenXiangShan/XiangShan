@@ -1,15 +1,12 @@
 package xiangshan.backend.fu.vector
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
-import xiangshan.backend.fu.vector.Bundles.VConfig
-import xiangshan.backend.fu.vector.utils.ScalaDupToVector
-import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import xiangshan.ExceptionNO
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
-import yunsuan.VialuFixType
+import xiangshan.backend.fu.{FuConfig, FuncUnit}
 
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with VecFuncUnitAlias

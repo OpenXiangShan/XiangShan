@@ -651,7 +651,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && !fromIQ(iqIdx)(iuIdx).ready
           og0resp.failed              := og0FailedVec2(iqIdx)(iuIdx)
           og0resp.finalSuccess        := false.B
-          og0resp.sqIdx.foreach(_     := 0.U.asTypeOf(new SqPtr))
           og0resp.lqIdx.foreach(_     := 0.U.asTypeOf(new LqPtr))
           og0resp.fuType              := fromIQ(iqIdx)(iuIdx).bits.fuType
           og0resp.isFmac              := false.B
@@ -666,7 +665,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
             og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
           }
           og1resp.failed          := og1FailedVec2(iqIdx)(iuIdx)
-          og1resp.sqIdx.foreach(_ :=  0.U.asTypeOf(new SqPtr))
           og1resp.lqIdx.foreach(_ :=  0.U.asTypeOf(new LqPtr))
           og1resp.finalSuccess    := (
             if (toIU.issueQueueParams match { case x => x.isLdAddrIQ || x.isStAddrIQ || x.isStdIQ || x.isHyAddrIQ || x.inVfSchd})

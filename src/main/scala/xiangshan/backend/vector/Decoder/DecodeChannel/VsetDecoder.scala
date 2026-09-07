@@ -114,6 +114,7 @@ class VsetDecoder extends Module {
   out.bits.renameInfo.valid := legalInst
   out.bits.renameInfo.bits := uop
   out.bits.renameInfo.bits.gpWen := uop.gpWen && instFields.RD =/= 0.U
+  out.bits.illegal := legalInst && in.vsIsOff
   out.bits.src.src1 := instFields.RS1
   out.bits.src.src2 := instFields.RS2
   out.bits.src.dest := instFields.RD
@@ -412,6 +413,7 @@ object VsetDecoder {
 
   class In extends Bundle {
     val rawInst = UInt(32.W)
+    val vsIsOff = Bool()
   }
 
   class Out extends Bundle {
@@ -423,6 +425,7 @@ object VsetDecoder {
     val imm = UInt(32.W)
     val flushPipe = Bool()
     val isVSETVL = Bool()
+    val illegal = Bool()
   }
 }
 

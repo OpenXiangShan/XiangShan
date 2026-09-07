@@ -179,7 +179,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s2Resp.get.head.fuType := 0.U
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
-    imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
     imp.io.s2Resp.get.head.isFmac := false.B
   }
   val stDataIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
@@ -198,7 +197,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s1Resp.get.head.fuType := 0.U
     imp.io.s1Resp.get.head.isFmac := false.B
     imp.io.s1Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
-    imp.io.s1Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
 
   // other wakeup, int vec need WB wakeup
@@ -535,8 +533,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         if (toMem(i)(j).bits.params.hasLoadFu){
-          toMemExuInput.ready := toMem(i)(j).ready
           val toMemValidReg = RegInit(Bool(), false.B)
+          toMemExuInput.ready := toMem(i)(j).ready || !toMemValidReg
           toMemValidReg := toMemValidAfterCancel && (!toMemValidReg || toMem(i)(j).fire) ||
                            toMemValidReg && !toMem(i)(j).fire && !toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last)
           toMem(i)(j).valid := toMemValidReg
@@ -547,7 +545,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
           thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
-          thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
           thisIQ.io.s0Resp.get(j).isFmac := false.B
         }
@@ -556,7 +553,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.snResp.get(j).failed := false.B
           thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
-          thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
           thisIQ.io.snResp.get(j).isFmac := false.B
         }

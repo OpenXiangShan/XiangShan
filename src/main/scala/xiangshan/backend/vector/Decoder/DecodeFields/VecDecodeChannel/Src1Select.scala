@@ -27,14 +27,15 @@ object Src1SelectEnum extends Enumeration {
   def UInt(): UInt = chisel3.UInt(width.W)
 
   // Todo: if treat CONST and NONE as the same
-  val NONE             = Src1Val("000") // no vs1
-  val INC1             = Src1Val("001") // vs1|0,1,2,3,4,5,6,7
-  val INCF2            = Src1Val("010") // vs1|0,0,1,1,2,2,3,3
-  val INCF4            = Src1Val("011") // vs1|0,0,0,0,1,1,1,1
-  val CONST            = Src1Val("100") // vs1|0
-  val S1MINx1_DCONST   = Src1Val("101") // vs1|0,vd|0,0,0,0,0,0,0
-  val S2MAXx1_DCONST   = Src1Val("110") // vs2|7,vd|0,0,0,0,0,0,0
-  val S2MAXF2x1_DCONST = Src1Val("111") // vs2|3,vd|0,0,0,0,0,0,0
+  val NONE             = Src1Val("0000") // no vs1
+  val INC1             = Src1Val("0001") // vs1|0,1,2,3,4,5,6,7
+  val INCF2            = Src1Val("0010") // vs1|0,0,1,1,2,2,3,3
+  val INCF4            = Src1Val("0011") // vs1|0,0,0,0,1,1,1,1
+  val CONST            = Src1Val("0100") // vs1|0
+  val S1MINx1_DCONST   = Src1Val("0101") // vs1|0,vd|0,0,0,0,0,0,0
+  val S2MAXx1_DCONST   = Src1Val("0110") // vs2|7,vd|0,0,0,0,0,0,0
+  val S2MAXF2x1_DCONST = Src1Val("0111") // vs2|3,vd|0,0,0,0,0,0,0
+  val S2INC2P1         = Src1Val("1000") // vs2|1,3,5,7
 }
 
 object Src1SelectField extends DecodeField[
@@ -54,6 +55,13 @@ object Src1SelectField extends DecodeField[
     pattern.category.rawString match {
       case VecInstPattern.Category.OPIVX | VecInstPattern.Category.OPMVX => CONST
       case _ => default
+    }
+  }
+
+  private def fpWideSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
+    pattern.category.rawString match {
+      case VecInstPattern.Category.OPFVF => CONST
+      case _ => INCF2
     }
   }
 
@@ -123,13 +131,13 @@ object Src1SelectField extends DecodeField[
               case VecFpOp3VVVPattern() => fpSrc1Sel(vfi, INC1)
               case VecFpRedPattern() => S2MAXx1_DCONST
               case VecFpWRedPattern() => S2MAXF2x1_DCONST
-              case VecFpOp2VVWPattern() => fpSrc1Sel(vfi, INCF2)
-              case VecFpOp2WVWPattern() => fpSrc1Sel(vfi, INCF2)
-              case VecFpOp3VVWPattern() => fpSrc1Sel(vfi, INCF2)
+              case VecFpOp2VVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp2WVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp3VVWPattern() => fpWideSrc1Sel(vfi)
               case VecFpS2VPattern() => NONE
               case VecFpS2VVWPattern() => NONE
-              case VecFpS2WVIntPattern() => NONE
-              case VecFpS2WVFpPattern() => NONE
+              case VecFpS2WVIntPattern() => S2INC2P1
+              case VecFpS2WVFpPattern() => S2INC2P1
               case VecFpS2APattern() => NONE
               case VecFpS1VPattern() => CONST
             }

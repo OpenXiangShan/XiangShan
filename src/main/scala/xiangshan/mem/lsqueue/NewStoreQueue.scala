@@ -831,7 +831,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val sqDeqCnt        = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
       val rdataPtrExt     = Input(Vec(EnsbufferWidth, new SqPtr))
       val deqPtrExt       = Input(Vec(EnsbufferWidth, new SqPtr))
-      val validCnt        = Input(UInt(log2Ceil(StoreQueuePhysicalSize + 1).W))
+      val validCnt        = Input(UInt(log2Ceil(StoreQueueSize + 1).W))
       val fromVirtualStoreQueue = Flipped(new VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr))
       val fromUnalignQueue = Flipped(DecoupledIO(new Bundle {
         val paddr         = UInt(PAddrBits.W)
@@ -1568,7 +1568,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   deqModule.io.fromUnalignQueue <> unalignQueue.io.toDeqModule
   deqModule.io.deqPtrExt        := deqPtrExt
   deqModule.io.rdataPtrExt      := rdataPtrExt
-  deqModule.io.validCnt         := validCount
+  deqModule.io.validCnt         := virtualValidCount
   io.exceptionInfo              := deqModule.io.exceptionInfo
 
   // unalignQueue connection
@@ -1692,12 +1692,9 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     /*============================================== vector ctrl =====================================================*/
     /*================================================================================================================*/
 
-    val vecIncativCommit = commitPtrExt.map(ptr => !ctrlEntries(i).addrValid && !ctrlEntries(i).dataValid && ptr.isBefore(virtualStoreQueueRetiredPtr) && ptr.value === i.U).reduce(_ || _)
-    when(vecIncativCommit) { //TODO: will be fixed in the future
-      ctrlEntries(i).vecInactive := true.B
-    }.elsewhen(deqCancel || needCancel(i)) {
-      ctrlEntries(i).vecInactive := false.B
-    }
+    // Todo[vector]: support vector non-continuous store
+    // Set it always false because continuous store should not set it.
+    ctrlEntries(i).vecInactive := false.B
 
     XSError(ctrlEntries(i).vecInactive && staSetValid, s"inactive vector element allocate! index: ${i}\n")
 

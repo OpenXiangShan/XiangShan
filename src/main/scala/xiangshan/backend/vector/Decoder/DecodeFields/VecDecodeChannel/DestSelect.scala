@@ -111,8 +111,8 @@ object DestSelectField extends DecodeField[
               case VecFpOp3VVWPattern() => INC1
               case VecFpS2VPattern() => INC1
               case VecFpS2VVWPattern() => INC1
-              case VecFpS2WVIntPattern() => INCF2
-              case VecFpS2WVFpPattern() => INCF2
+              case VecFpS2WVIntPattern() => INC1
+              case VecFpS2WVFpPattern() => INC1
               case VecFpS2APattern() => CONST
               case VecFpS1VPattern() => INC1
             }

@@ -97,14 +97,13 @@ case class ExeUnitParams(
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
-  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR || this.hasVLoadFu
+  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR
   def needFtqPtrOffset: Boolean = needFtqPtr || this.aluNeedPc
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val needVIaluCtrl: Boolean = fuConfigs.map(_.needVIaluCtrl).reduce(_ || _)
   val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
@@ -320,14 +319,6 @@ case class ExeUnitParams(
 
   def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
 
-  def hasVLoadFu = fuConfigs.map(_.fuType == FuType.vldu).reduce(_ || _)
-
-  def hasVStoreFu = fuConfigs.map(_.fuType == FuType.vstu).reduce(_ || _)
-
-  def hasVecLsFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vldu, FuType.vstu))).reduce(_ || _)
-
-  def hasVSegFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vsegldu, FuType.vsegstu))).reduce(_ || _)
-
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
   def hasStdFu = fuConfigs.map(_.name == "std").reduce(_ || _)
@@ -338,7 +329,7 @@ case class ExeUnitParams(
 
   def hasStoreFu = hasStoreAddrFu || hasStdFu || hasVStdFu
 
-  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasHyldaFu || hasHystaFu || hasVLoadFu || hasVStoreFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasHyldaFu || hasHystaFu
 
   def hasMemFu = hasMemAddrFu || hasStdFu || hasVStdFu
 
@@ -350,11 +341,7 @@ case class ExeUnitParams(
 
   def hasStoreAddrExu = hasStoreAddrFu || hasHystaFu
 
-  def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
-
   def hasVStdFu = fuConfigs.map(_.name == "vstd").reduce(_ || _)
-
-  def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialuF).reduce(_ || _)
 
   def CanCompress = !hasBrhFu || (hasBrhFu && hasi2vFu)
 

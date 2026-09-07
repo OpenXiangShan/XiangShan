@@ -58,11 +58,12 @@ class IssuePipe(
   /**
    * is0 stage
    */
+  val is0FlushNext: Bool = is0Next.bits.robIdx.needFlush(in.flush)
   val is0Failed: Bool = in.is0RdFail && in.is0LdCancel
   is0Resp.fail := is0.valid && is0Failed
   is0Resp.success := false.B // Todo
 
-  is0.valid := is0Next.valid
+  is0.valid := is0Next.valid && !is0FlushNext
   when (is0Next.valid) {
     is0.bits := is0Next.bits
   }
@@ -181,6 +182,12 @@ class IssuePipe(
       ).reduce(_ ++ _))
   }
 
+  //to do
+  is2Next.bits.data.vfma.foreach { vfma =>
+    vfma.fpAIsFpCanonicalNAN.foreach(_ := false.B)
+    vfma.fpBIsFpCanonicalNAN.foreach(_ := false.B)
+    vfma.fpCIsFpCanonicalNAN.foreach(_ := false.B)
+  }
   is2Next.bits.data.v0.foreach(_ := 0.U)
   is2Next.bits.data.vl.foreach(_ := in.is2VlRdDataNext.head.data)
 

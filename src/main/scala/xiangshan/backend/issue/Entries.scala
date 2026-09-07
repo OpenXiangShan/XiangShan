@@ -64,7 +64,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val fuTypeVec           = Wire(Vec(params.numEntries, FuType()))
   val isFirstIssueVec     = Wire(Vec(params.numEntries, Bool()))
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(params.issueTimerWidth.W)))
-  val sqIdxVec            = OptionWrapper(params.needFeedBackSqIdx, Wire(Vec(params.numEntries, new SqPtr())))
   val lqIdxVec            = OptionWrapper(params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new LqPtr())))
   val validVecRegNext     = Wire(Vec(params.numEntries, Bool()))
   val issuedVecRegNext    = Wire(Vec(params.numEntries, Bool()))
@@ -418,7 +417,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.simpEntryEnqSelVec.foreach(_   := finalSimpTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(SimpEntryNum, x._2.valid)))
   io.compEntryEnqSelVec.foreach(_   := finalCompTransSelVec.get.zip(compEnqVec.get).map(x => x._1 & Fill(CompEntryNum, x._2.valid)))
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
-  io.robIdx.foreach(_               := robIdxVec)
   io.validRegNext                   := validVecRegNext.asUInt
   io.issuedRegNext                  := issuedVecRegNext.asUInt
   io.debugRobIdxVec.foreach(_       := robIdxVec)
@@ -439,7 +437,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     in.deqSel                   := deqSelVec(entryIdx)
     in.deqPortIdxWrite          := deqPortIdxWriteVec(entryIdx)
     in.issueResp                := issueRespVec(entryIdx)
-    in.vecMemIn.foreach(_       := io.vecMemIn.get)
     validVec(entryIdx)          := out.valid
     issuedVec(entryIdx)         := out.issued
     canIssueVec(entryIdx)       := out.canIssue
@@ -455,7 +452,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     cancelBypassVec(entryIdx)   := out.cancelBypass
     exuSourceVec.foreach(_(entryIdx) := out.exuSources.get)
     lqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.og1Payload.lqIdx.get)
-    sqIdxVec.foreach(_(entryIdx) := out.entry.bits.payload.og1Payload.sqIdx.get)
     entryInValidVec(entryIdx)       := out.entryInValid
     entryOutDeqValidVec(entryIdx)   := out.entryOutDeqValid
     entryOutTransValidVec(entryIdx) := out.entryOutTransValid
@@ -593,13 +589,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val deqOg1Payload       = Output(MixedVec(params.exuBlockParams.map(x => new IssueQueueDeqOg1Payload(x))))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
   val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
-
-  // vec mem only
-  val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
-    val sqDeqPtr          = Input(new SqPtr)
-    val lqDeqPtr          = Input(new LqPtr)
-  })
-  val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
 
   // trans
   val simpEntryDeqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Input(UInt(params.numSimp.W))))

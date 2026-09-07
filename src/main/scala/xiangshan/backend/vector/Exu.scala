@@ -5,25 +5,22 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan._
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.RdConfig.IntRD
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
-import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm, _}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
-import xiangshan.{ExceptSparseVec, Redirect, TriggerAction, XSBundle}
-import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.mem.SqPtr
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
+import xiangshan._
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 
@@ -52,13 +49,13 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   inEx.valid := in.uop.valid
   inEx.bits :<#= in.uop.bits
   inEx.bits.fuSel := VecInit(param.fuConfigs.map(_.fuSel2(in.uop.bits)))
+  inEx.bits.data.src := bypass.out.src
 
   ex zip (inEx +: ex) foreach {
     case (sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]) =>
       sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush)
       when(source.valid) {
         sink.bits := source.bits
-        sink.bits.data.src := bypass.out.src
       }
   }
 
@@ -100,17 +97,34 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
   }
 
+  private val isWidenEx = mgus.indices.map {
+    case i =>
+      Mux1H(fus.flatMap(_.out.ex.lift(i)).map(fuOut =>
+        fuOut.valid -> fuOut.bits.data.vec.flatMap(_.isWiden).getOrElse(false.B)
+      ))
+  }
+
+  private val eewOHEx = mgus.indices.map {
+    case i =>
+      val normalEewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width)
+      Mux(
+        isWidenEx(i),
+        Cat(normalEewOH.tail(1), 0.U(1.W)),
+        normalEewOH
+      )
+  }
+
   mgus.zipWithIndex.foreach {
     case (mgu, i) =>
       val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
-      // Todo: widen uop should use 2x value
-      val eewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width).suggestName(s"ex${i}_eewOH")
       val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
-      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOH)(3, 0) // 4 bits 0~8
-      val end = elemIdxMapElemE8Idx(vl, eewOH)
+      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOHEx(i))(3, 0) // 4 bits 0~8
+      val end = elemIdxMapElemE8Idx(vl, eewOHEx(i))
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
+      val isWholeVMove = FuType.FuTypeOrR(ex(i).bits.ctrl.fuType, Seq(FuType.vmove)) &&
+        Opcode.VMoveOpcodes.isNR(ex(i).bits.ctrl.opcode)
 
       mgu.in.valid := ex(i).valid
       mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
@@ -118,11 +132,15 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
       // since vstart is always 0 for vector arith instruction, begin is always 0
       mgu.in.data.begin := 0.U
-      mgu.in.data.end := Mux1H(Seq(
-        (vdIdx > vlMapVdIdx) -> 0.U,
-        (vdIdx === vlMapVdIdx) -> end,
-        (vdIdx < vlMapVdIdx) -> vlenb.U,
-      ))
+      mgu.in.data.end := Mux(
+        isWholeVMove,
+        vlenb.U,
+        Mux1H(Seq(
+          (vdIdx > vlMapVdIdx) -> 0.U,
+          (vdIdx === vlMapVdIdx) -> end,
+          (vdIdx < vlMapVdIdx) -> vlenb.U,
+        )),
+      )
       mgu.in.data.oldVd := ex(i).bits.data.src(2).toByteVec
       mgu.in.data.vd := vd.toByteVec
   }
@@ -252,7 +270,6 @@ object Exu {
       exuInput.vpu.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.oldVType.foreach(_ := this.ctrl.oldVType.get)
       exuInput.vtype.foreach(_ := this.ctrl.vtype.get)
-      exuInput.vialuCtrl.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.flushPipe.foreach(_ := this.ctrl.flushPipe.get)
       exuInput.rasAction.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.pc.foreach(x => x := 0.U.asTypeOf(x))
@@ -265,7 +282,6 @@ object Exu {
       exuInput.storeSetHit.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.loadWaitStrict.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.ssid.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.numLsElem.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.sqIdx.foreach(x => x := this.ctrl.sqIdx.get)
       exuInput.dataSources.foreach(x => x := 0.U.asTypeOf(x))
@@ -304,6 +320,7 @@ object Exu {
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)
       sink.imm                         := this.data.imm.getOrElse(0.U)
+      sink.vfma       .foreach(x => x := this.data.vfma.get)
     }
 
     def <#=:(sink: Func.InUop) : Unit = {
@@ -438,6 +455,7 @@ object Exu {
     val vl  = Option.when(param.readVlRf)(Vl())
     val imm = Option.when(param.needImm)(UInt(param.immWidth.W))
     val pc  = Option.when(param.needPc)(UInt(VAddrData().dataWidth.W))
+    val vfma = Option.when(param.fuConfigs.exists(_.fuType == FuType.vfma))(new Func.VFMacInfo)
   }
 
   class InBypassCtrl(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
@@ -483,71 +501,6 @@ object Exu {
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
-    def toOldExuOutput(implicit p: Parameters): xiangshan.backend.Bundles.ExuOutput = {
-      val exuOutput = Wire(new Bundles.ExuOutput(param.getExeUnitParams()))
-
-      exuOutput.data.foreach(_ := 0.U)
-      exuOutput.pdest := 0.U
-      exuOutput.pdestV0.foreach(_ := 0.U)
-      exuOutput.pdestVl.foreach(_ := 0.U)
-      exuOutput.robIdx := this.robIdx
-      exuOutput.intWen.foreach(_ := false.B)
-      exuOutput.fpWen.foreach(_ := false.B)
-      exuOutput.vecWen.foreach(_ := false.B)
-      exuOutput.v0Wen.foreach(_ := false.B)
-      exuOutput.vlWen.foreach(_ := false.B)
-      exuOutput.redirect.foreach(_ := this.redirect.get)
-      exuOutput.fflagsWen.foreach(_ := this.fflags.get.orR)
-      exuOutput.fflags.foreach(_ := this.fflags.get)
-      exuOutput.vxsat.foreach(_ := this.vxsat.get)
-      exuOutput.exceptionVec := this.exceptionVec
-      exuOutput.flushPipe.foreach(_ := this.flushPipe.get)
-      exuOutput.replay.foreach(_ := this.replay.get)
-      exuOutput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.sqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.trigger.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.isRVC.foreach(_ := false.B)
-      exuOutput.vls.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.isFromLoadUnit.foreach(_ := false.B)
-      exuOutput.debug := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(exuOutput.debug))
-      exuOutput.perfDebugInfo.foreach(_ := this.debug.get.perfDebugInfo)
-      exuOutput.debug_seqNum.foreach(_ := this.debug.get.seqNum)
-
-      exuOutput
-    }
-
-    def toNewExuOutput(valid: Bool)(implicit p: Parameters): xiangshan.backend.Bundles.NewExuOutput = {
-      val exuOutput = Wire(new Bundles.NewExuOutput(param.getExeUnitParams()))
-
-      exuOutput.toRob.valid := valid
-      exuOutput.toRob.bits.robIdx := this.robIdx
-      exuOutput.toRob.bits.fflags      .foreach(_ := this.fflags.get)
-      exuOutput.toRob.bits.fflagsWen   .foreach(_ := this.fflags.get.orR)
-      exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
-      exuOutput.toRob.bits.exceptionVec := this.exceptionVec
-      exuOutput.toRob.bits.flushPipe   .foreach(_ := this.flushPipe.get)
-      exuOutput.toRob.bits.trigger     .foreach(_ := this.trigger.get)
-      exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
-      exuOutput.toRob.bits.lqIdx       .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toRob.bits.sqIdx       .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toRob.bits.vls         .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.pdest                                  := 0.U
-      exuOutput.pdestV0                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.pdestVl                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toIntRf                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toFpRf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toVecRf                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toV0Rf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toVlRf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.redirect               .foreach(_ := this.redirect.get)
-      exuOutput.isFromLoadUnit         .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.debug                             := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(exuOutput.debug))
-      exuOutput.perfDebugInfo          .foreach(_ := this.debug.get.perfDebugInfo)
-      exuOutput.debug_seqNum           .foreach(_ := this.debug.get.seqNum)
-
-      exuOutput
-    }
-
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
       val toRob = Wire(new Bundles.WriteBackRobBundle(param.getExeUnitParams(), backendParams))
 
@@ -562,7 +515,6 @@ object Exu {
       toRob.lqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.sqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.trigger       .foreach(x => x := 0.U.asTypeOf(x))
-      toRob.vls           .foreach(x => x := 0.U.asTypeOf(x))
       toRob.data          := 0.U
       toRob.pdest         := 0.U
       toRob.vecWen        .foreach(_ := false.B)

@@ -49,9 +49,9 @@ case class IssueBlockParams(
 
   def inVfSchd: Boolean = schdType == VecScheduler()
 
-  def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
+  def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || HyuCnt > 0
 
-  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0 || VStdCnt > 0
+  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || HyuCnt > 0 || VStdCnt > 0
 
   def isLdAddrIQ: Boolean = LduCnt > 0
 
@@ -63,19 +63,11 @@ case class IssueBlockParams(
 
   def isHyAddrIQ: Boolean = HyuCnt > 0
 
-  def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0
-
-  def isVecStuIQ: Boolean = (VstuCnt + VsegstuCnt) > 0
-
   def isVecStdIQ: Boolean = VStdCnt > 0
 
-  def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
+  def needLqIdx: Boolean = isLdAddrIQ
 
-  def needLqIdx: Boolean = isLdAddrIQ || isVecMemIQ
-
-  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ || isVecStdIQ
-
-  def needFeedBackSqIdx: Boolean = isVecStuIQ
+  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isLdAddrIQ || isVecStdIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
   def needFeedBackLqIdx: Boolean = isLdAddrIQ
@@ -216,16 +208,6 @@ case class IssueBlockParams(
 
   def LdExuCnt = LduCnt + HyuCnt
 
-  def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
-
-  def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
-
-  def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
-
-  def VseglduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegldu)).sum
-
-  def VsegstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegstu)).sum
-
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
   def numWriteRegCache: Int = exuBlockParams.map(x => if (x.needWriteRegCache) 1 else 0).sum
@@ -250,7 +232,7 @@ case class IssueBlockParams(
 
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
-  def needS0Resp = this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ
+  def needS0Resp = this.isStAddrIQ || this.isStdIQ
 
   def needFakeS1Resp = this.isStAddrIQ
 
@@ -258,7 +240,7 @@ case class IssueBlockParams(
 
   def needS2Resp = this.isStAddrIQ
 
-  def needSnResp = this.isVecStuIQ || this.isLdAddrIQ
+  def needSnResp = this.isLdAddrIQ
 
   // TODO needOg0Resp needOg1Resp
   def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, (needFakeS1Resp || needS1Resp), needS2Resp, needSnResp).count(_ == true)
