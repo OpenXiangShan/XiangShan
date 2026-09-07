@@ -33,6 +33,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
 
@@ -247,6 +248,10 @@ class VecRegionImp(
       pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
+      out.toFltRegion.is1FpRdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1FpRdAddrNext
+      // TODO
+      out.toFltRegion.fpWbNext := 0.U.asTypeOf(out.toFltRegion.fpWbNext)
+      out.toFltRegion.fpWbM3Wakeup := 0.U.asTypeOf(out.toFltRegion.fpWbM3Wakeup)
       pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
@@ -575,6 +580,13 @@ object VecRegionModule {
       val vstdCanAccept: MixedVec[Vec[Bool]] = MixedVec(
         param.issueParams.filter(_.hasVStd).map(x => Vec(x.numEnq, Bool()))
       )
+    }
+
+    val toFltRegion = new Bundle {
+      val is1FpRdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] =
+        param.genRfRdAddrBundle(backendParams.fpPregParams)
+      val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
+      val fpWbM3Wakeup = Vec(param.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
     }
 
     val toMem = new OutToMem

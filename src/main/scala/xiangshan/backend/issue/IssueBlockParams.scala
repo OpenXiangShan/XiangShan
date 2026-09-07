@@ -194,8 +194,6 @@ case class IssueBlockParams(
 
   def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vset)).sum
 
-  def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
-
   def fDivSqrtCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
   def LduCnt: Int = exuBlockParams.count(x => x.hasLoadFu && !x.hasStoreAddrFu)

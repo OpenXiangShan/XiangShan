@@ -975,6 +975,8 @@ object Opcode {
     val vfsqrt_fp32: Opcode = DvSvlS2vS1(FSQRT, FP32, V)
     val vfdiv_fp64 : Opcode = DvSvlS2vS1(FDIV , FP64, V)
     val vfsqrt_fp64: Opcode = DvSvlS2vS1(FSQRT, FP64, V)
+
+    def getFormat(implicit op: UInt): UInt = op(2, 1)
   }
 
   object FDivOpcodes extends FDivOpcodes
