@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -203,6 +203,62 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         "actual_nested_pairs has an enabled but uncovered pair: "
                         f"{actual_nested}",
                     )
+
+    if schema >= 12:
+        target_stage1_napot = result.get("target_stage1_napot")
+        target_nested_vs_napot = result.get("target_nested_vs_napot")
+        target_nested_g_napot = result.get("target_nested_g_napot")
+        for name, value in (
+            ("target_stage1_napot", target_stage1_napot),
+            ("target_nested_vs_napot", target_nested_vs_napot),
+            ("target_nested_g_napot", target_nested_g_napot),
+        ):
+            _require(
+                isinstance(value, int) and not isinstance(value, bool)
+                and 0 <= value <= 1000,
+                f"{name} is not a per-mille integer: {value!r}",
+            )
+
+        actual_stage1_leaf = _csv_counts(result, "actual_stage1_leaf", 2)
+        actual_nested_leaf = _csv_counts(
+            result, "actual_nested_leaf_topology", 4
+        )
+        if target_translation[1] != 0:
+            _require(
+                (target_stage1_napot == 1000 or actual_stage1_leaf[0] > 0)
+                and (target_stage1_napot == 0 or actual_stage1_leaf[1] > 0),
+                "actual_stage1_leaf has an enabled but uncovered class: "
+                f"{actual_stage1_leaf}",
+            )
+        else:
+            _require(
+                actual_stage1_leaf == [0, 0],
+                "disabled stage-1 translation has leaf observations: "
+                f"{actual_stage1_leaf}",
+            )
+        if target_translation[2] != 0:
+            for vs_napot in range(2):
+                for g_napot in range(2):
+                    vs_enabled = (
+                        target_nested_vs_napot != 0
+                        if vs_napot else target_nested_vs_napot != 1000
+                    )
+                    g_enabled = (
+                        target_nested_g_napot != 0
+                        if g_napot else target_nested_g_napot != 1000
+                    )
+                    count = actual_nested_leaf[vs_napot * 2 + g_napot]
+                    _require(
+                        (count > 0) == (vs_enabled and g_enabled),
+                        "actual_nested_leaf_topology does not match enabled "
+                        f"classes: {actual_nested_leaf}",
+                    )
+        else:
+            _require(
+                actual_nested_leaf == [0, 0, 0, 0],
+                "disabled nested translation has leaf observations: "
+                f"{actual_nested_leaf}",
+            )
 
     target_fence = _csv_counts(result, "target_fence_kind", 3)
     target_scope = _csv_counts(result, "target_fence_scope", 2)

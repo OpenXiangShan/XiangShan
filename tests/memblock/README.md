@@ -856,9 +856,10 @@ can add legal NC/MMIO load overlap, then randomizes issue order, store
 address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
-AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
-Sv48 and all four nested VS/G mode pairs, translation switch and legal fence
-kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
+   AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
+   Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus independent
+   nested VS/G NAPOT placement, translation switch and legal fence kind/scope,
+   manager Probe rate/toB/need-data crosses, and DCache, PTW, and
 Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
 training pressure on the L1 stride prefetcher. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
@@ -933,6 +934,15 @@ enabled, while the scoreboard classifies each inactive byte from the uop's
 global element number and accepts only the architectural retained/all-ones
 outcomes. A fixed policy combination that cannot coexist with an enabled shape
 is rejected before cycle 0.
+
+Schema 12 adds `translation-stage1-napot`, `translation-vs-napot`, and
+`translation-g-napot`. The first selects ordinary 4-KiB versus legal 64-KiB
+Svnapot leaves for host translation; the latter two independently select the
+VS-stage and G-stage leaves, producing all four nested leaf topologies. Each
+NAPOT topology uses a distinct aligned work region, is checked by the
+independent page-table walker before traffic starts, and has an observed
+per-seed coverage gate. Zero and 1000 fix a stage to ordinary or NAPOT leaves;
+intermediate values require both enabled classes.
 
 For a reproducible local pressure run:
 

@@ -1802,3 +1802,34 @@ the independent verifier accepted
 The frozen executable SHA-256 was
 `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`.
 No CPU RTL defect was observed.
+
+## Schema 12 Random Svnapot Closure
+
+On 2026-09-07 the common `random-mixed` generator added independent host
+stage-1, nested VS-stage, and nested G-stage Svnapot constraints. Four distinct
+64-KiB-aligned work regions keep ordinary, VS-only, G-only, and simultaneous
+VS/G NAPOT leaves externally distinguishable. The independent software walker
+checks every prepared region under both Sv39/Sv48 stage-1 modes and all four
+VS/G mode pairs before the first randomized request.
+
+Coverage seed 1 completed 256 actions in 19,179 cycles against complete RTL
+SHA-256
+`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
+It issued 145 PTW requests and 180 DCache refills. Observed host stage-1 leaf
+counts were `33,15` for ordinary/NAPOT. Nested leaf-topology counts were
+`20,11,20,10` for ordinary, G-only NAPOT, VS-only NAPOT, and simultaneous
+VS/G NAPOT. The regression controller preserved the run in
+`build/memblock/schema12-regression.json`; the independent verifier accepted
+the artifact with SHA-256
+`90c0218779891b2881c26dd45747f0d7f1168eae1bceb70f00972b9f06892726`.
+All schema-12 per-seed coverage gates passed. No CPU RTL defect was observed;
+this result closes a verification-environment gap.
+
+SPEC-profile seed 2 also completed 256 actions, with the 1-per-mille targets
+returning to ordinary traffic after mandatory closure: host leaf counts were
+`41,7`, nested topology counts were `95,1,1,1`, PTW requests were 85, and the
+long-tail DCache latency reached 384 cycles. A fixed-NAPOT seed 3 disabled Bare
+translation and set all three NAPOT controls to 1000; it completed 256 actions
+with host leaf counts `0,66` and nested topology counts `0,0,0,54`. This proves
+that fixed constraints suppress disabled leaf classes rather than merely adding
+NAPOT traffic to the pre-existing 4-KiB generator.

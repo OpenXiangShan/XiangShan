@@ -121,6 +121,9 @@ struct RandomConstraints {
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
     std::array<unsigned, 2> g_mode_weights{};
+    unsigned stage1_napot_per_mille = 0;
+    unsigned nested_vs_napot_per_mille = 0;
+    unsigned nested_g_napot_per_mille = 0;
     std::array<unsigned, fence_kind_count> fence_kind_weights{};
     std::array<unsigned, 2> fence_scope_weights{};
     unsigned concurrent_actions_per_mille = 1000;
@@ -169,6 +172,9 @@ struct RandomConstraints {
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
                 .g_mode_weights = {1, 1},
+                .stage1_napot_per_mille = 500,
+                .nested_vs_napot_per_mille = 500,
+                .nested_g_napot_per_mille = 500,
                 .fence_kind_weights = {1, 1, 1},
                 .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 1000,
@@ -218,6 +224,9 @@ struct RandomConstraints {
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
                 .g_mode_weights = {1, 1},
+                .stage1_napot_per_mille = 1,
+                .nested_vs_napot_per_mille = 1,
+                .nested_g_napot_per_mille = 1,
                 .fence_kind_weights = {98, 1, 1},
                 .fence_scope_weights = {95, 5},
                 .concurrent_actions_per_mille = 100,
@@ -268,6 +277,9 @@ struct RandomConstraints {
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
                 .g_mode_weights = {1, 1},
+                .stage1_napot_per_mille = 500,
+                .nested_vs_napot_per_mille = 500,
+                .nested_g_napot_per_mille = 500,
                 .fence_kind_weights = {1, 1, 1},
                 .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 500,
@@ -519,6 +531,18 @@ struct RandomConstraints {
         }
         if (key == "g-sv48x4") {
             g_mode_weights[1] = parsed;
+            return;
+        }
+        if (key == "translation-stage1-napot") {
+            stage1_napot_per_mille = parsed;
+            return;
+        }
+        if (key == "translation-vs-napot") {
+            nested_vs_napot_per_mille = parsed;
+            return;
+        }
+        if (key == "translation-g-napot") {
+            nested_g_napot_per_mille = parsed;
             return;
         }
         const std::array<std::pair<std::string_view, FenceKind>,
@@ -827,6 +851,9 @@ struct RandomConstraints {
         if (concurrent_actions_per_mille > 1000 ||
             special_concurrent_per_mille > 1000 ||
             translation_switches_per_mille > 1000 ||
+            stage1_napot_per_mille > 1000 ||
+            nested_vs_napot_per_mille > 1000 ||
+            nested_g_napot_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
             vector_corner_per_mille > 1000 || probes_per_mille > 1000 ||
             vector_masked_per_mille > 1000 || vector_vma_per_mille > 1000 ||
@@ -910,6 +937,25 @@ struct RandomConstraints {
             translation_weights[translation_nested] == 0) {
             throw std::invalid_argument(
                 "hypervisor traffic requires nested translation");
+        }
+        const bool non_hypervisor_napot_access = std::any_of(
+            operation_weights.begin(), operation_weights.begin() + atomic,
+            [](unsigned weight) { return weight != 0; });
+        if (translation_weights[translation_stage1] != 0 &&
+            stage1_napot_per_mille != 0 &&
+            !non_hypervisor_napot_access) {
+            throw std::invalid_argument(
+                "host stage-1 NAPOT traffic requires a scalar, vector, "
+                "segment, or prefetch operation weight");
+        }
+        if (translation_weights[translation_nested] != 0 &&
+            (nested_vs_napot_per_mille != 0 ||
+             nested_g_napot_per_mille != 0) &&
+            !non_hypervisor_napot_access &&
+            operation_weights[hypervisor] == 0) {
+            throw std::invalid_argument(
+                "nested NAPOT traffic requires a scalar, vector, segment, "
+                "prefetch, or hypervisor operation weight");
         }
         const std::uint64_t non_hypervisor_weight = std::accumulate(
             operation_weights.begin(), operation_weights.end(), 0ULL) -
@@ -995,6 +1041,21 @@ struct RandomConstraints {
     unsigned choose_g_mode(std::uint64_t random) const
     {
         return choose_weighted(g_mode_weights, random);
+    }
+
+    bool choose_stage1_napot(std::uint64_t random) const
+    {
+        return random % 1000 < stage1_napot_per_mille;
+    }
+
+    bool choose_nested_vs_napot(std::uint64_t random) const
+    {
+        return random % 1000 < nested_vs_napot_per_mille;
+    }
+
+    bool choose_nested_g_napot(std::uint64_t random) const
+    {
+        return random % 1000 < nested_g_napot_per_mille;
     }
 
     unsigned choose_fence_scope(std::uint64_t random) const
@@ -1107,9 +1168,11 @@ struct RandomConstraints {
         unsigned translation_actions =
             translation_weights[translation_bare] != 0;
         if (translation_weights[translation_stage1] != 0) {
-            translation_actions += static_cast<unsigned>(std::count_if(
+            const unsigned modes = static_cast<unsigned>(std::count_if(
                 stage1_mode_weights.begin(), stage1_mode_weights.end(),
                 [](unsigned weight) { return weight != 0; }));
+            translation_actions += std::max(
+                modes, direction_classes(stage1_napot_per_mille));
         }
         if (translation_weights[translation_nested] != 0) {
             const unsigned vs_modes = static_cast<unsigned>(std::count_if(
@@ -1118,7 +1181,11 @@ struct RandomConstraints {
             const unsigned g_modes = static_cast<unsigned>(std::count_if(
                 g_mode_weights.begin(), g_mode_weights.end(),
                 [](unsigned weight) { return weight != 0; }));
-            translation_actions += vs_modes * g_modes;
+            const unsigned leaf_topologies =
+                direction_classes(nested_vs_napot_per_mille) *
+                direction_classes(nested_g_napot_per_mille);
+            translation_actions += std::max(
+                vs_modes * g_modes, leaf_topologies);
         }
         unsigned fence_actions = 0;
         if (tlb_flushes_per_mille != 0) {
@@ -1177,7 +1244,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=11 constraints=" << name
+        stream << "constraint_schema=12 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1200,6 +1267,9 @@ struct RandomConstraints {
                << vs_mode_weights[1]
                << " target_g_mode=" << g_mode_weights[0] << ','
                << g_mode_weights[1]
+               << " target_stage1_napot=" << stage1_napot_per_mille
+               << " target_nested_vs_napot=" << nested_vs_napot_per_mille
+               << " target_nested_g_napot=" << nested_g_napot_per_mille
                << " target_fence_kind=" << fence_kind_weights[0] << ','
                << fence_kind_weights[1] << ',' << fence_kind_weights[2]
                << " target_fence_scope=" << fence_scope_weights[0] << ','
@@ -1321,6 +1391,18 @@ struct TranslationContext {
     bool operator!=(const TranslationContext &other) const
     {
         return !(*this == other);
+    }
+};
+
+struct TranslationLeafTopology {
+    bool stage1_napot = false;
+    bool vs_napot = false;
+    bool g_napot = false;
+
+    unsigned nested_index() const
+    {
+        return static_cast<unsigned>(vs_napot) * 2U +
+            static_cast<unsigned>(g_napot);
     }
 };
 
@@ -1501,6 +1583,8 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> vs_modes{};
     std::array<std::uint64_t, 2> g_modes{};
     std::array<std::uint64_t, 4> nested_mode_pairs{};
+    std::array<std::uint64_t, 2> stage1_leaf_types{};
+    std::array<std::uint64_t, 4> nested_leaf_topologies{};
     std::array<std::array<std::uint64_t, 2>, RandomConstraints::fence_kind_count>
         fences{};
     std::uint64_t translation_switches = 0;
@@ -1528,18 +1612,23 @@ struct ConstraintCoverage {
 
     void sample_translation(
         const TranslationContext &context,
+        const TranslationLeafTopology &leaf,
         std::uint64_t ptw_requests_before,
         std::uint64_t ptw_requests_after,
-        unsigned action_count = 1)
+        unsigned action_count = 1,
+        unsigned leaf_action_count = 1)
     {
         translation_regimes.at(context.regime) += action_count;
         if (context.regime == RandomConstraints::translation_stage1) {
             stage1_modes.at(context.stage1_mode) += action_count;
+            stage1_leaf_types.at(leaf.stage1_napot ? 1U : 0U) +=
+                leaf_action_count;
         } else if (context.regime == RandomConstraints::translation_nested) {
             vs_modes.at(context.vs_mode) += action_count;
             g_modes.at(context.g_mode) += action_count;
             nested_mode_pairs.at(context.vs_mode * 2 + context.g_mode) +=
                 action_count;
+            nested_leaf_topologies.at(leaf.nested_index()) += leaf_action_count;
         }
         if (context.regime != RandomConstraints::translation_bare) {
             ++(ptw_requests_after > ptw_requests_before
@@ -1565,6 +1654,11 @@ struct ConstraintCoverage {
                     return false;
                 }
             }
+            if (!binary_complete(
+                    constraints.stage1_napot_per_mille,
+                    stage1_leaf_types)) {
+                return false;
+            }
         }
         if (constraints.translation_weights[
                 RandomConstraints::translation_nested] != 0) {
@@ -1573,6 +1667,21 @@ struct ConstraintCoverage {
                     if (constraints.vs_mode_weights[vs] != 0 &&
                         constraints.g_mode_weights[g] != 0 &&
                         nested_mode_pairs[vs * 2 + g] == 0) {
+                        return false;
+                    }
+                }
+            }
+            for (unsigned vs_napot = 0; vs_napot < 2; ++vs_napot) {
+                for (unsigned g_napot = 0; g_napot < 2; ++g_napot) {
+                    const bool vs_enabled = vs_napot
+                        ? constraints.nested_vs_napot_per_mille != 0
+                        : constraints.nested_vs_napot_per_mille != 1000;
+                    const bool g_enabled = g_napot
+                        ? constraints.nested_g_napot_per_mille != 0
+                        : constraints.nested_g_napot_per_mille != 1000;
+                    const bool observed =
+                        nested_leaf_topologies[vs_napot * 2 + g_napot] != 0;
+                    if (observed != (vs_enabled && g_enabled)) {
                         return false;
                     }
                 }
@@ -1886,6 +1995,13 @@ struct ConstraintCoverage {
                << " actual_nested_pairs=" << nested_mode_pairs[0] << ','
                << nested_mode_pairs[1] << ',' << nested_mode_pairs[2] << ','
                << nested_mode_pairs[3]
+               << " actual_stage1_leaf=" << stage1_leaf_types[0] << ','
+               << stage1_leaf_types[1]
+               << " actual_nested_leaf_topology="
+               << nested_leaf_topologies[0] << ','
+               << nested_leaf_topologies[1] << ','
+               << nested_leaf_topologies[2] << ','
+               << nested_leaf_topologies[3]
                << " actual_fences=" << fences[0][0] << ',' << fences[0][1]
                << ',' << fences[1][0] << ',' << fences[1][1] << ','
                << fences[2][0] << ',' << fences[2][1]
@@ -26408,6 +26524,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t mmio_physical = 0x90038000ULL;
     constexpr std::uint64_t sv39_root = 0x90000000ULL;
     constexpr std::uint64_t atomic_base = cache0_base + 0xa0000;
+    constexpr std::uint64_t stage1_napot_base = cache0_base + 0xb0000;
+    constexpr std::uint64_t nested_vs_napot_base = cache0_base + 0xc0000;
+    constexpr std::uint64_t nested_g_napot_base = cache0_base + 0xd0000;
+    constexpr std::uint64_t nested_both_napot_base = cache0_base + 0xe0000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -26427,6 +26547,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
     environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
     environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
+    environment.memory().fill_incrementing(stage1_napot_base, 0x40000, 0xe1);
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
@@ -26605,7 +26726,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const std::uint64_t offset = random() % span;
         return region + ((offset / alignment) * alignment);
     };
-    auto constrained_cacheable_address = [&](unsigned alignment) {
+    auto constrained_cacheable_address = [&] (
+        unsigned alignment, const TranslationContext &translation,
+        const TranslationLeafTopology &leaf) {
         unsigned locality = constraints.choose_locality(random());
         for (unsigned candidate = 0;
              candidate < constraint_coverage.locality.size(); ++candidate) {
@@ -26626,7 +26749,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             // making the line sequence trivially ascending.
             line = (constrained_cold_line++ * 4051U) % 8192;
         }
-        std::uint64_t address = cache0_base + 0x10000 + line * 64;
+        std::uint64_t region_base = cache0_base + 0x10000;
+        if (translation.regime == RandomConstraints::translation_stage1 &&
+            leaf.stage1_napot) {
+            region_base = stage1_napot_base;
+        } else if (translation.regime == RandomConstraints::translation_nested) {
+            constexpr std::array<std::uint64_t, 4> nested_regions{{
+                0,
+                nested_g_napot_base,
+                nested_vs_napot_base,
+                nested_both_napot_base,
+            }};
+            const std::uint64_t nested_region =
+                nested_regions[leaf.nested_index()];
+            if (nested_region != 0) {
+                region_base = nested_region;
+            }
+        }
+        if (region_base != cache0_base + 0x10000) {
+            // Leave 4 KiB on either side for negative strides, indexed
+            // elements, and multi-uop segment address expansion.
+            line = 64 + line % 896;
+        }
+        std::uint64_t address = region_base + line * 64;
         const bool misaligned = alignment > 1 &&
             random() % 1000 < constraints.misaligned_per_mille;
         if (misaligned) {
@@ -26926,6 +27071,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   guest_physical_address, host_physical_address, root,
                   true, true, executable);
     };
+    const auto map_stage_napot = [&](unsigned mode, std::uint64_t root,
+                                     std::uint64_t virtual_base) {
+        return mode == 0
+            ? environment.map_sv39_napot64k(
+                  virtual_base, virtual_base, root, true, true, true)
+            : environment.map_sv48_napot64k(
+                  virtual_base, virtual_base, root, true, true, true);
+    };
+    const auto map_g_napot = [&](unsigned mode, std::uint64_t root,
+                                 std::uint64_t guest_physical_base) {
+        return mode == 0
+            ? environment.map_sv39x4_napot64k(
+                  guest_physical_base, guest_physical_base, root,
+                  true, true, true)
+            : environment.map_sv48x4_napot64k(
+                  guest_physical_base, guest_physical_base, root,
+                  true, true, true);
+    };
     const auto prepare_random_translation_contexts = [&]() {
         const auto map_all_contexts = [&](std::uint64_t virtual_address,
                                           std::uint64_t physical_address,
@@ -26953,6 +27116,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         for (std::uint64_t page = cache0_base + 0xf000;
              page <= cache0_base + 0x92000; page += 0x1000) {
             if (!map_all_contexts(page, page, false, false, true)) {
+                return false;
+            }
+        }
+        for (std::uint64_t page = stage1_napot_base;
+             page < stage1_napot_base + 0x40000; page += 0x1000) {
+            if (!map_all_contexts(page, page, false, false, true)) {
+                return false;
+            }
+        }
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            if (!map_stage_napot(
+                    mode, random_stage1_roots[mode], stage1_napot_base) ||
+                !map_stage_napot(
+                    mode, random_vs_roots[mode], nested_vs_napot_base) ||
+                !map_stage_napot(
+                    mode, random_vs_roots[mode], nested_both_napot_base) ||
+                !map_g_napot(
+                    mode, random_g_roots[mode], nested_g_napot_base) ||
+                !map_g_napot(
+                    mode, random_g_roots[mode], nested_both_napot_base)) {
                 return false;
             }
         }
@@ -27016,6 +27199,39 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << ":expected=0x" << physical_address
                                << ":actual=0x" << walk.physical_address;
                         phase = detail.str();
+                        return false;
+                    }
+                }
+            }
+        }
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            const auto walk = memblock::reference_page_walk(
+                environment.memory(), random_stage1_roots[mode],
+                stage1_napot_base + 0xa188, page_mode(mode));
+            if (!walk.translated ||
+                walk.physical_address != stage1_napot_base + 0xa188) {
+                phase = "random-stage1-napot-reference";
+                return false;
+            }
+        }
+        constexpr std::array<std::uint64_t, 4> nested_leaf_regions{{
+            cache0_base + 0x10000,
+            nested_g_napot_base,
+            nested_vs_napot_base,
+            nested_both_napot_base,
+        }};
+        for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
+            for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
+                for (unsigned topology = 0;
+                     topology < nested_leaf_regions.size(); ++topology) {
+                    const std::uint64_t address =
+                        nested_leaf_regions[topology] + 0xa188;
+                    const auto walk = memblock::reference_two_stage_walk(
+                        environment.memory(), random_vs_roots[vs_mode],
+                        random_g_roots[g_mode], address,
+                        page_mode(vs_mode), page_mode(g_mode));
+                    if (!walk.translated || walk.physical_address != address) {
+                        phase = "random-nested-napot-reference";
                         return false;
                     }
                 }
@@ -27941,6 +28157,63 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             return context;
         };
+        const auto binary_class_enabled = [](unsigned true_per_mille,
+                                             bool value) {
+            return value ? true_per_mille != 0 : true_per_mille != 1000;
+        };
+        const auto random_translation_leaf = [&](const TranslationContext &context) {
+            TranslationLeafTopology leaf;
+            if (context.regime == RandomConstraints::translation_stage1) {
+                leaf.stage1_napot =
+                    constraints.choose_stage1_napot(random());
+            } else if (context.regime == RandomConstraints::translation_nested) {
+                leaf.vs_napot =
+                    constraints.choose_nested_vs_napot(random());
+                leaf.g_napot = constraints.choose_nested_g_napot(random());
+            }
+            return leaf;
+        };
+        const auto required_translation_leaf = [&] (
+            const TranslationContext &context)
+            -> std::optional<TranslationLeafTopology> {
+            if (context.regime == RandomConstraints::translation_stage1) {
+                for (unsigned napot = 0; napot < 2; ++napot) {
+                    if (binary_class_enabled(
+                            constraints.stage1_napot_per_mille, napot != 0) &&
+                        constraint_coverage.stage1_leaf_types[napot] == 0) {
+                        TranslationLeafTopology leaf;
+                        leaf.stage1_napot = napot != 0;
+                        return leaf;
+                    }
+                }
+            } else if (context.regime == RandomConstraints::translation_nested) {
+                for (unsigned vs_napot = 0; vs_napot < 2; ++vs_napot) {
+                    for (unsigned g_napot = 0; g_napot < 2; ++g_napot) {
+                        const unsigned topology = vs_napot * 2 + g_napot;
+                        if (binary_class_enabled(
+                                constraints.nested_vs_napot_per_mille,
+                                vs_napot != 0) &&
+                            binary_class_enabled(
+                                constraints.nested_g_napot_per_mille,
+                                g_napot != 0) &&
+                            constraint_coverage.nested_leaf_topologies[
+                                topology] == 0) {
+                            TranslationLeafTopology leaf;
+                            leaf.vs_napot = vs_napot != 0;
+                            leaf.g_napot = g_napot != 0;
+                            return leaf;
+                        }
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+        const auto choose_translation_leaf = [&](const TranslationContext &context) {
+            if (const auto required = required_translation_leaf(context)) {
+                return *required;
+            }
+            return random_translation_leaf(context);
+        };
         const auto required_translation_context = [&]()
             -> std::optional<TranslationContext> {
             if (constraints.translation_weights[
@@ -27977,6 +28250,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             return context;
                         }
                     }
+                }
+            }
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_stage1] != 0) {
+                TranslationContext context;
+                context.regime = RandomConstraints::translation_stage1;
+                context.stage1_mode = first_enabled_mode(
+                    constraints.stage1_mode_weights);
+                if (required_translation_leaf(context)) {
+                    return context;
+                }
+            }
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_nested] != 0) {
+                TranslationContext context;
+                context.regime = RandomConstraints::translation_nested;
+                context.vs_mode = first_enabled_mode(constraints.vs_mode_weights);
+                context.g_mode = first_enabled_mode(constraints.g_mode_weights);
+                if (required_translation_leaf(context)) {
+                    return context;
                 }
             }
             if (constraints.uses_translation() &&
@@ -28208,6 +28501,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 translation.regime == RandomConstraints::translation_bare) {
                 translation = translated_context();
             }
+            const TranslationLeafTopology leaf =
+                choose_translation_leaf(translation);
             if (!enter_translation_context(translation) ||
                 !issue_constrained_fence(
                     special_kind.value_or(RandomConstraints::scalar_load))) {
@@ -28218,7 +28513,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             const std::uint64_t requests_at_window_start =
                 environment.tilelink_requests();
             const std::uint64_t window_base =
-                constrained_cacheable_address(64) & ~std::uint64_t{63};
+                constrained_cacheable_address(64, translation, leaf) &
+                ~std::uint64_t{63};
             std::optional<memblock::LoadTransaction> special_load;
             if (special_kind == RandomConstraints::noncacheable) {
                 special_load = make_load(
@@ -28530,8 +28826,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             constraint_coverage.sample_dcache(
                 requests_at_window_start, environment.tilelink_requests());
             constraint_coverage.sample_translation(
-                translation, ptw_at_window_start, environment.ptw_requests(),
-                special_kind ? 8 : 7);
+                translation, leaf, ptw_at_window_start,
+                environment.ptw_requests(), special_kind ? 8 : 7, 7);
             actions += 5;
             coverage.cacheable += 7;
         }
@@ -29170,6 +29466,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 translation.regime == RandomConstraints::translation_bare) {
                 translation = translated_context();
             }
+            const TranslationLeafTopology leaf =
+                choose_translation_leaf(translation);
             if (!enter_translation_context(translation) ||
                 (!closing_stride_stream && !issue_constrained_fence(kind))) {
                 return false;
@@ -29179,6 +29477,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.ptw_requests();
             const std::uint64_t requests_before = environment.tilelink_requests();
             bool sample_dcache = true;
+            bool leaf_addressed = false;
+            bool ordinary_leaf_addressed = false;
+            const auto action_cacheable_address = [&](unsigned alignment) {
+                leaf_addressed = true;
+                return constrained_cacheable_address(
+                    alignment, translation, leaf);
+            };
             std::optional<std::uint64_t> probe_candidate;
             if (kind == RandomConstraints::scalar_load) {
                 const auto op = static_cast<memblock::LoadOp>(random() % 7);
@@ -29187,12 +29492,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const bool stride_shaped = closing_stride_stream ||
                     (constraints.stride_stream_per_mille != 0 &&
                      random() % 1000 < constraints.stride_stream_per_mille);
+                ordinary_leaf_addressed = stride_shaped;
                 auto transaction = make_load(
                     stride_shaped
                         ? random_stride_base +
                               (stride_stream_loads % random_stride_slots) *
                                   random_stride_bytes
-                        : constrained_cacheable_address(size),
+                        : action_cacheable_address(size),
                     op, random() % 3);
                 if (stride_shaped) {
                     const std::uint64_t epoch =
@@ -29209,7 +29515,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const auto op = static_cast<memblock::StoreOp>(random() % 4);
                 const unsigned size = 1U << static_cast<unsigned>(op);
                 const auto transaction = make_store(
-                    constrained_cacheable_address(size), random(), op,
+                    action_cacheable_address(size), random(), op,
                     random() % 2, random() % 2);
                 if (!issue_store(transaction, (random() & 1U) != 0) ||
                     !environment.commit_store(transaction, 8192) ||
@@ -29227,7 +29533,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const bool vector_corner =
                     random() % 1000 < constraints.vector_corner_per_mille;
                 const auto uops = make_random_vector_uops(
-                    store, constrained_cacheable_address(1U << data_eew),
+                    store, action_cacheable_address(1U << data_eew),
                     shape, vector_corner);
                 if (!issue_random_vector_instruction(uops)) {
                     return false;
@@ -29298,7 +29604,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             (1U + random() % 4U));
                     stride = (random() & 1U) == 0 ? magnitude : -magnitude;
                 }
-                std::uint64_t address = constrained_cacheable_address(data_bytes);
+                std::uint64_t address = action_cacheable_address(data_bytes);
                 if (stride < 0) {
                     address += static_cast<std::uint64_t>(-stride) *
                         (vlmax - 1U);
@@ -29439,7 +29745,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::prefetch) {
                 const auto transaction = make_prefetch(
-                    constrained_cacheable_address(8),
+                    action_cacheable_address(8),
                     static_cast<memblock::PrefetchOp>(8 + random() % 3),
                     random() % 3);
                 environment.expect_prefetch(transaction);
@@ -29452,6 +29758,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::atomic) {
+                ordinary_leaf_addressed = true;
                 const std::size_t slot = random() % atomic_values.size();
                 unsigned family = constraints.choose_atomic_family(random());
                 for (unsigned candidate = 0;
@@ -29570,7 +29877,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const auto op = hypervisor_store_operations[
                         random() % hypervisor_store_operations.size()];
                     const auto transaction = make_store(
-                        constrained_cacheable_address(
+                        action_cacheable_address(
                             memblock::scalar_store_bytes(op)),
                         random(), op, random() % 2, random() % 2);
                     if (!issue_store(transaction, (random() & 1U) != 0) ||
@@ -29589,7 +29896,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const unsigned size =
                         1U << (static_cast<unsigned>(op) & 3U);
                     const auto transaction = make_load(
-                        constrained_cacheable_address(size), op, random() % 3);
+                        action_cacheable_address(size), op, random() % 3);
                     if (!issue_load(transaction) ||
                         !environment.run_until_queues_retired(8192)) {
                         return false;
@@ -29601,6 +29908,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.hypervisor_families[*hypervisor_family];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::noncacheable) {
+                ordinary_leaf_addressed = true;
                 const std::uint64_t offset = (random() % 128) * 8;
                 if (!nc_store) {
                     const auto transaction = make_load(
@@ -29623,6 +29931,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.nc_directions[nc_store ? 1 : 0];
                 ++coverage.noncacheable;
             } else {
+                ordinary_leaf_addressed = true;
                 const std::uint64_t offset = (random() % 128) * 8;
                 if (!mmio_store) {
                     auto transaction = make_load(
@@ -29699,8 +30008,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
 
             constraint_coverage.sample_operation(kind);
+            const bool ordinary_leaf_enabled =
+                translation.regime == RandomConstraints::translation_stage1
+                ? constraints.stage1_napot_per_mille != 1000
+                : translation.regime == RandomConstraints::translation_nested
+                ? constraints.nested_vs_napot_per_mille != 1000 &&
+                    constraints.nested_g_napot_per_mille != 1000
+                : false;
+            const bool sample_ordinary_leaf =
+                ordinary_leaf_addressed && ordinary_leaf_enabled;
+            const TranslationLeafTopology observed_leaf = leaf_addressed
+                ? leaf : TranslationLeafTopology{};
             constraint_coverage.sample_translation(
-                translation, ptw_requests_before, environment.ptw_requests());
+                translation, observed_leaf, ptw_requests_before,
+                environment.ptw_requests(), 1,
+                (leaf_addressed || sample_ordinary_leaf) ? 1 : 0);
             if (sample_dcache) {
                 constraint_coverage.sample_dcache(
                     requests_before, environment.tilelink_requests());

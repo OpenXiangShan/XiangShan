@@ -60,6 +60,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `stage1-sv39`, `stage1-sv48` | Relative host stage-1 mode weights |
 | `vs-sv39`, `vs-sv48` | Relative VS-stage mode weights in nested contexts |
 | `g-sv39x4`, `g-sv48x4` | Relative G-stage mode weights in nested contexts |
+| `translation-stage1-napot` | Per-mille share of eligible host stage-1 accesses placed in a legal 64-KiB Svnapot region |
+| `translation-vs-napot`, `translation-g-napot` | Independent per-mille Svnapot selection for the VS and final G leaf of eligible nested accesses; their product generates all four leaf topologies |
 | `translation-switch` | Per-mille chance of choosing a new translation context at a drained action/window boundary |
 | `fence-sfence`, `fence-hfence-vvma`, `fence-hfence-gvma` | Relative weights for fence kinds compatible with the active context |
 | `fence-global`, `fence-selective` | Relative global/selective scope weights for generated translation fences |
@@ -134,7 +136,7 @@ scenario implementations:
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
-| Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
+| Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, and `probe-need-data` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe | Overlap Probes with unrelated misses/refills and support multiple outstanding Probe sources |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
@@ -187,15 +189,16 @@ three managers; `coverage` uses compact latency.
 
 Translation presets use these relative weights and per-mille switch rates:
 
-| Preset | Bare/stage-1/nested | Stage-1 Sv39/Sv48 | VS Sv39/Sv48 | G Sv39x4/Sv48x4 | SFENCE/VVMA/GVMA | Global/selective | Switch |
-| --- | --- | --- | --- | --- | --- | --- | ---: |
-| `coverage` | 1/1/1 | 1/1 | 1/1 | 1/1 | 1/1/1 | 1/1 | 500 |
-| `spec` | 5/990/5 | 95/5 | 1/1 | 1/1 | 98/1/1 | 95/5 | 1 |
-| `corner` | 1/1/1 | 1/1 | 1/1 | 1/1 | 1/1/1 | 1/1 | 750 |
+| Preset | Bare/stage-1/nested | Stage-1 Sv39/Sv48 | VS Sv39/Sv48 | G Sv39x4/Sv48x4 | Stage-1/VS/G NAPOT | SFENCE/VVMA/GVMA | Global/selective | Switch |
+| --- | --- | --- | --- | --- | --- | --- | --- | ---: |
+| `coverage` | 1/1/1 | 1/1 | 1/1 | 1/1 | 500/500/500 | 1/1/1 | 1/1 | 500 |
+| `spec` | 5/990/5 | 95/5 | 1/1 | 1/1 | 1/1/1 | 98/1/1 | 95/5 | 1 |
+| `corner` | 1/1/1 | 1/1 | 1/1 | 1/1 | 500/500/500 | 1/1/1 | 1/1 | 750 |
 
 The mandatory per-seed gate overrides sampling order only until every enabled
-mode, nested pair, and compatible fence kind/scope has appeared. Later choices
-follow the configured weights. At that boundary the generator immediately
+mode, nested pair, enabled ordinary/NAPOT leaf topology, and compatible fence
+kind/scope has appeared. Later choices follow the configured weights. At that
+boundary the generator immediately
 reselects the highest-weight enabled context, so the last mandatory rare mode
 is not retained for the normal low switch interval. Later random context
 switches still select from the configured distribution. This preserves
@@ -256,11 +259,12 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=11`, the resolved target weights,
+Every terminal line prints `constraint_schema=12`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
 addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
-locality, translation regime/mode/pair, fence kind/scope, cold-walk/reuse,
+locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
+kind/scope, cold-walk/reuse,
 TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, L2
 stride-prefetch observations, and per-manager latency counts. Each enabled

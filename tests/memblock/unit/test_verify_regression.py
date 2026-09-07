@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 12
+        result["constraint_schema"] = 13
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -309,6 +309,67 @@ class VerifyRegressionTest(unittest.TestCase):
             }
         )
         verify_regression._check_mixed_coverage(result)
+
+        result.update(
+            {
+                "constraint_schema": 12,
+                "target_stage1_napot": 500,
+                "target_nested_vs_napot": 500,
+                "target_nested_g_napot": 500,
+                "actual_stage1_leaf": "0,0",
+                "actual_nested_leaf_topology": "0,0,0,0",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_stage1_leaf"] = "1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "disabled stage-1"
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_translation": "0,1,1",
+                "actual_translation": "0,2,4",
+                "target_stage1_mode": "1,0",
+                "actual_stage1_mode": "2,0",
+                "target_vs_mode": "1,0",
+                "actual_vs_mode": "4,0",
+                "target_g_mode": "1,0",
+                "actual_g_mode": "4,0",
+                "actual_nested_pairs": "4,0,0,0",
+                "actual_translation_switch": 1,
+                "actual_translation_walk_reuse": "2,4",
+                "actual_stage1_leaf": "1,1",
+                "actual_nested_leaf_topology": "1,1,1,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_nested_leaf_topology"] = "1,1,1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_nested_leaf_topology",
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result.update(
+            {
+                "target_translation": "1,0,0",
+                "actual_translation": "7,0,0",
+                "target_stage1_mode": "0,0",
+                "actual_stage1_mode": "0,0",
+                "target_vs_mode": "0,0",
+                "actual_vs_mode": "0,0",
+                "target_g_mode": "0,0",
+                "actual_g_mode": "0,0",
+                "actual_nested_pairs": "0,0,0,0",
+                "actual_translation_switch": 0,
+                "actual_translation_walk_reuse": "0,0",
+                "actual_stage1_leaf": "0,0",
+                "actual_nested_leaf_topology": "0,0,0,0",
+            }
+        )
+        result["constraint_schema"] = 11
+
         result["actual_vector_vta"] = "3,0"
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "actual_vector_vta"
