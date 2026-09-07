@@ -122,7 +122,8 @@ normal commits and consolidated documentation only; they do not receive a
 per-fix Markdown report. The confirmed reports currently retained are
 `CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`,
 `CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`, `CPU_BUG_FP_EXCEPTION_FP_WEN.md`, and
-`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`.
+`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`, and
+`CPU_BUG_PTW_DCHANNEL_ERROR_IGNORED.md`.
 
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:
@@ -622,6 +623,12 @@ stage-1 or nested root, mode, ASID, or VMID, or issue global and selective
 quiet window with no stale response before an independent cold walk returns
 the exact replacement stage-1 and G-stage mappings.
 This is separate from the data-side TLB translation tests.
+
+`ptw-errors` injects TileLink `denied` and `corrupt` on selected PTW block
+responses. Sixteen cases cross Sv39/Sv48 stage-1, isolated Sv39x4/Sv48x4,
+fully nested walks, bitmap reads, load/store, and root/intermediate/leaf
+locations. Each case requires the original access fault, exact walk cutoff, no
+DCache/Uncache access, and no refill from bad PTE data.
 
 `uncache-errors` injects denied and corrupt Uncache load and store responses.
 Loads check the exception contract through the PBMT=NC adapter. Stores also

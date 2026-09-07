@@ -1290,6 +1290,28 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
+    def test_ptw_manager_errors_are_injectable_by_walk_level(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        for contract in (
+            "inject_response_error_after",
+            "pending_response_error_->clean_requests",
+            "response.denied",
+            "response.corrupt",
+            "ptw_error_response_requests",
+        ):
+            self.assertIn(contract, environment)
+        for contract in (
+            "sv39-load-root-denied",
+            "sv39-load-leaf-corrupt",
+            "sv48-store-middle-corrupt",
+            "sv48-store-leaf-denied",
+            "MEMBLOCK_PTW_ERRORS_PASS",
+        ):
+            self.assertIn(contract, main)
+        self.assertIn("ptw-errors:", makefile)
+
     def test_mixed_commit_boundary_does_not_auto_commit_next_rob(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         self.assertIn("rob_offset - 1", main)

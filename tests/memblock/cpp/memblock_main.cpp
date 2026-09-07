@@ -21636,6 +21636,609 @@ int run_translation_bare(int argc, char **argv)
     return 0;
 }
 
+int run_ptw_errors(int argc, char **argv)
+{
+    struct Case {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        bool store;
+        bool denied;
+        bool corrupt;
+        unsigned clean_requests_before_error;
+    };
+    constexpr std::array<Case, 8> cases{{
+        {"sv39-load-root-denied", memblock::ReferencePageMode::sv39,
+         false, true, false, 0},
+        {"sv39-load-leaf-corrupt", memblock::ReferencePageMode::sv39,
+         false, false, true, 2},
+        {"sv48-load-middle-denied", memblock::ReferencePageMode::sv48,
+         false, true, false, 1},
+        {"sv48-load-leaf-corrupt", memblock::ReferencePageMode::sv48,
+         false, false, true, 3},
+        {"sv39-store-root-corrupt", memblock::ReferencePageMode::sv39,
+         true, false, true, 0},
+        {"sv39-store-leaf-denied", memblock::ReferencePageMode::sv39,
+         true, true, false, 2},
+        {"sv48-store-middle-corrupt", memblock::ReferencePageMode::sv48,
+         true, false, true, 2},
+        {"sv48-store-leaf-denied", memblock::ReferencePageMode::sv48,
+         true, true, false, 3},
+    }};
+
+    unsigned loads = 0;
+    unsigned stores = 0;
+    unsigned denied = 0;
+    unsigned corrupt = 0;
+    unsigned root = 0;
+    unsigned intermediate = 0;
+    unsigned leaf = 0;
+    std::uint64_t total_cycles = 0;
+    std::uint64_t total_ptw_requests = 0;
+    unsigned stage2_cases = 0;
+    unsigned nested_cases = 0;
+    unsigned bitmap_cases = 0;
+
+    for (std::size_t index = 0; index < cases.size(); ++index) {
+        const Case &test = cases[index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x78000000ULL;
+        constexpr std::uint64_t physical_page = 0xce000000ULL;
+        constexpr std::uint64_t root_page = 0xae000000ULL;
+        environment.memory().fill_incrementing(physical_page, 0x1000, 0x4d);
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const bool mapped = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48_4k(
+                  virtual_page, physical_page, root_page)
+            : environment.map_sv39_4k(
+                  virtual_page, physical_page, root_page);
+        const bool activated = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.activate_sv48(root_page, 51 + index)
+            : environment.activate_sv39(root_page, 51 + index);
+        if (!mapped || !activated) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+        environment.inject_ptw_response_error_after(
+            test.clean_requests_before_error, test.denied, test.corrupt);
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const std::uint64_t ptw_before = environment.ptw_requests();
+
+        if (!test.store) {
+            const memblock::LoadTransaction transaction{
+                .address = virtual_page + 0x188,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = static_cast<std::uint8_t>(180 + index),
+                .lane = static_cast<unsigned>(
+                    index % memblock::kScalarLoadLanes),
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            };
+            environment.expect_load(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_load(transaction) ||
+                !environment.issue_load(transaction, 2048) ||
+                !environment.run_until_complete(16384) ||
+                !environment.run_until_lq_retired(4096)) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason=" << environment.error()
+                          << " ptw=" << environment.ptw_requests()
+                          << " error_address=0x" << std::hex
+                          << environment.ptw_last_error_response_address()
+                          << std::dec << " error_source="
+                          << static_cast<unsigned>(
+                                 environment.ptw_last_error_response_source())
+                          << '\n';
+                return 1;
+            }
+            ++loads;
+        } else {
+            const memblock::StoreTransaction transaction{
+                .address = virtual_page + 0x188,
+                .data = 0x1020304050607080ULL + index,
+                .op = memblock::StoreOp::sd,
+                .rob = 0,
+                .sq = 0,
+                .address_lane = static_cast<unsigned>(
+                    index % memblock::kScalarStoreLanes),
+                .data_lane = static_cast<unsigned>(
+                    (index + 1) % memblock::kScalarStoreLanes),
+                .expected_exception_mask =
+                    memblock::kExceptionStoreAccessFault,
+            };
+            environment.expect_store(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_store(transaction, 0) ||
+                !environment.issue_store_address(transaction, 2048) ||
+                !environment.issue_store_data(transaction, 2048) ||
+                !environment.run_until_store_complete_with_replay(
+                    transaction, 16384) ||
+                (environment.sq_dequeued() + environment.sq_canceled() <
+                     environment.sq_allocated() &&
+                 !environment.account_sq_cancellation(1)) ||
+                environment.sq_dequeued() + environment.sq_canceled() !=
+                    environment.sq_allocated()) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason="
+                          << (environment.error().empty()
+                                  ? "faulting store left an unbalanced SQ"
+                                  : environment.error())
+                          << " ptw=" << environment.ptw_requests()
+                          << " sq=" << environment.sq_dequeued() << '+'
+                          << environment.sq_canceled() << '/'
+                          << environment.sq_allocated()
+                          << '\n';
+                return 1;
+            }
+            ++stores;
+        }
+
+        const std::uint64_t expected_ptw_requests =
+            ptw_before + test.clean_requests_before_error + 1;
+        if (environment.ptw_error_response_requests() != 1 ||
+            environment.ptw_requests() != expected_ptw_requests ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-side-effects"
+                      << " injected="
+                      << environment.ptw_error_response_requests()
+                      << " ptw=" << environment.ptw_requests() << '/'
+                      << expected_ptw_requests
+                      << " dcache=" << environment.tilelink_requests() << '/'
+                      << dcache_before
+                      << " uncache=" << environment.uncache_requests() << '/'
+                      << uncache_before << '\n';
+            return 1;
+        }
+        denied += test.denied;
+        corrupt += test.corrupt;
+        const unsigned levels = memblock::reference_page_levels(test.mode);
+        root += test.clean_requests_before_error == 0;
+        leaf += test.clean_requests_before_error + 1 == levels;
+        intermediate += test.clean_requests_before_error != 0 &&
+            test.clean_requests_before_error + 1 != levels;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    struct Stage2Case {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        bool store;
+        bool denied;
+        bool corrupt;
+        unsigned clean_requests_before_error;
+    };
+    constexpr std::array<Stage2Case, 4> stage2_tests{{
+        {"sv39x4-load-root-denied", memblock::ReferencePageMode::sv39,
+         false, true, false, 0},
+        {"sv39x4-store-leaf-corrupt", memblock::ReferencePageMode::sv39,
+         true, false, true, 2},
+        {"sv48x4-load-middle-corrupt", memblock::ReferencePageMode::sv48,
+         false, false, true, 1},
+        {"sv48x4-store-leaf-denied", memblock::ReferencePageMode::sv48,
+         true, true, false, 3},
+    }};
+    for (std::size_t index = 0; index < stage2_tests.size(); ++index) {
+        const auto &test = stage2_tests[index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_page = 0x120000000ULL;
+        constexpr std::uint64_t physical_page = 0xcf000000ULL;
+        constexpr std::uint64_t g_root = 0xaf000000ULL;
+        environment.memory().fill_incrementing(physical_page, 0x1000, 0x6d);
+        bool configured = environment.reset();
+        if (configured) {
+            configured = test.mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      guest_page, physical_page, g_root)
+                : environment.map_sv39x4_4k(
+                      guest_page, physical_page, g_root);
+        }
+        if (configured) {
+            configured = environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::bare, test.mode,
+                0, g_root, 0, static_cast<std::uint16_t>(71 + index));
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+        environment.inject_ptw_response_error_after(
+            test.clean_requests_before_error, test.denied, test.corrupt);
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const std::uint64_t address = guest_page + 0x188;
+        if (!test.store) {
+            const memblock::LoadTransaction transaction{
+                .address = address,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = static_cast<std::uint8_t>(196 + index),
+                .lane = static_cast<unsigned>(
+                    index % memblock::kScalarLoadLanes),
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            };
+            environment.expect_load(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_load(transaction) ||
+                !environment.issue_load(transaction, 2048) ||
+                !environment.run_until_complete(16384) ||
+                !environment.run_until_lq_retired(4096)) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason=" << environment.error()
+                          << " ptw=" << environment.ptw_requests()
+                          << " error_address=0x" << std::hex
+                          << environment.ptw_last_error_response_address()
+                          << std::dec << " error_source="
+                          << static_cast<unsigned>(
+                                 environment.ptw_last_error_response_source())
+                          << '\n';
+                return 1;
+            }
+            ++loads;
+        } else {
+            const memblock::StoreTransaction transaction{
+                .address = address,
+                .data = 0x2030405060708090ULL + index,
+                .op = memblock::StoreOp::sd,
+                .rob = 0,
+                .sq = 0,
+                .address_lane = static_cast<unsigned>(
+                    index % memblock::kScalarStoreLanes),
+                .data_lane = static_cast<unsigned>(
+                    (index + 1) % memblock::kScalarStoreLanes),
+                .expected_exception_mask =
+                    memblock::kExceptionStoreAccessFault,
+            };
+            environment.expect_store(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_store(transaction, 0) ||
+                !environment.issue_store_address(transaction, 2048) ||
+                !environment.issue_store_data(transaction, 2048) ||
+                !environment.run_until_store_complete_with_replay(
+                    transaction, 16384) ||
+                (environment.sq_dequeued() + environment.sq_canceled() <
+                     environment.sq_allocated() &&
+                 !environment.account_sq_cancellation(1)) ||
+                environment.sq_dequeued() + environment.sq_canceled() !=
+                    environment.sq_allocated()) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason=" << environment.error()
+                          << " ptw=" << environment.ptw_requests()
+                          << " error_address=0x" << std::hex
+                          << environment.ptw_last_error_response_address()
+                          << std::dec << " error_source="
+                          << static_cast<unsigned>(
+                                 environment.ptw_last_error_response_source())
+                          << '\n';
+                return 1;
+            }
+            ++stores;
+        }
+        const std::uint64_t expected_requests =
+            test.clean_requests_before_error + 1;
+        if (environment.ptw_error_response_requests() != 1 ||
+            environment.ptw_requests() != expected_requests ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-side-effects injected="
+                      << environment.ptw_error_response_requests()
+                      << " ptw=" << environment.ptw_requests() << '/'
+                      << expected_requests << '\n';
+            return 1;
+        }
+        denied += test.denied;
+        corrupt += test.corrupt;
+        root += test.clean_requests_before_error == 0;
+        leaf += test.clean_requests_before_error + 1 ==
+            memblock::reference_page_levels(test.mode);
+        intermediate += test.clean_requests_before_error != 0 &&
+            test.clean_requests_before_error + 1 !=
+                memblock::reference_page_levels(test.mode);
+        ++stage2_cases;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    struct NestedCase {
+        const char *name;
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        bool store;
+        bool denied;
+        bool corrupt;
+        unsigned clean_requests_before_error;
+    };
+    constexpr std::array<NestedCase, 2> nested_tests{{
+        {"sv39-sv39x4-g-root-denied", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39, false, true, false, 0},
+        {"sv48-sv48x4-vs-root-corrupt", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48, true, false, true, 4},
+    }};
+    for (std::size_t index = 0; index < nested_tests.size(); ++index) {
+        const auto &test = nested_tests[index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_physical = 0x120000000ULL;
+        constexpr std::uint64_t host_physical = 0xc0000000ULL;
+        constexpr std::uint64_t vs_root = 0x94000000ULL;
+        constexpr std::uint64_t g_root = 0x95000000ULL;
+        const std::uint64_t virtual_page =
+            test.vs_mode == memblock::ReferencePageMode::sv48
+                ? 0xffff800012340000ULL : 0x60000000ULL;
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0x7d);
+        bool configured = environment.reset();
+        if (configured) {
+            configured = test.vs_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48_4k(
+                      virtual_page, guest_physical, vs_root)
+                : environment.map_sv39_4k(
+                      virtual_page, guest_physical, vs_root);
+        }
+        const unsigned vs_table_pages =
+            memblock::reference_page_levels(test.vs_mode);
+        for (unsigned page = 0; configured && page < vs_table_pages; ++page) {
+            const std::uint64_t table_page = vs_root + page * 0x1000ULL;
+            configured = test.g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      table_page, table_page, g_root)
+                : environment.map_sv39x4_4k(
+                      table_page, table_page, g_root);
+        }
+        if (configured) {
+            configured = test.g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      guest_physical, host_physical, g_root)
+                : environment.map_sv39x4_4k(
+                      guest_physical, host_physical, g_root);
+        }
+        if (configured) {
+            configured = environment.activate_two_stage_modes(
+                test.vs_mode, test.g_mode, vs_root, g_root,
+                static_cast<std::uint16_t>(81 + index),
+                static_cast<std::uint16_t>(83 + index));
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+        environment.inject_ptw_response_error_after(
+            test.clean_requests_before_error, test.denied, test.corrupt);
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const std::uint64_t address = virtual_page + 0x188;
+        if (!test.store) {
+            const memblock::LoadTransaction transaction{
+                .address = address,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = static_cast<std::uint8_t>(204 + index),
+                .lane = static_cast<unsigned>(index),
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            };
+            environment.expect_load(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_load(transaction) ||
+                !environment.issue_load(transaction, 2048) ||
+                !environment.run_until_complete(32768) ||
+                !environment.run_until_lq_retired(4096)) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason=" << environment.error()
+                          << " ptw=" << environment.ptw_requests()
+                          << " error_address=0x" << std::hex
+                          << environment.ptw_last_error_response_address()
+                          << std::dec << " error_source="
+                          << static_cast<unsigned>(
+                                 environment.ptw_last_error_response_source())
+                          << '\n';
+                return 1;
+            }
+            ++loads;
+        } else {
+            const memblock::StoreTransaction transaction{
+                .address = address,
+                .data = 0x30405060708090a0ULL + index,
+                .op = memblock::StoreOp::sd,
+                .rob = 0,
+                .sq = 0,
+                .address_lane = 0,
+                .data_lane = 1,
+                .expected_exception_mask =
+                    memblock::kExceptionStoreAccessFault,
+            };
+            environment.expect_store(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_store(transaction, 0) ||
+                !environment.issue_store_address(transaction, 2048) ||
+                !environment.issue_store_data(transaction, 2048) ||
+                !environment.run_until_store_complete_with_replay(
+                    transaction, 32768) ||
+                (environment.sq_dequeued() + environment.sq_canceled() <
+                     environment.sq_allocated() &&
+                 !environment.account_sq_cancellation(1)) ||
+                environment.sq_dequeued() + environment.sq_canceled() !=
+                    environment.sq_allocated()) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                          << "-execution reason=" << environment.error()
+                          << " ptw=" << environment.ptw_requests()
+                          << " error_address=0x" << std::hex
+                          << environment.ptw_last_error_response_address()
+                          << std::dec << " error_source="
+                          << static_cast<unsigned>(
+                                 environment.ptw_last_error_response_source())
+                          << '\n';
+                return 1;
+            }
+            ++stores;
+        }
+        const std::uint64_t expected_requests =
+            test.clean_requests_before_error + 1;
+        if (environment.ptw_error_response_requests() != 1 ||
+            environment.ptw_requests() != expected_requests ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << test.name
+                      << "-side-effects injected="
+                      << environment.ptw_error_response_requests()
+                      << " ptw=" << environment.ptw_requests() << '/'
+                      << expected_requests << '\n';
+            return 1;
+        }
+        denied += test.denied;
+        corrupt += test.corrupt;
+        ++nested_cases;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    for (unsigned index = 0; index < 2; ++index) {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x5b000000ULL;
+        constexpr std::uint64_t physical_page = 0x91000000ULL;
+        constexpr std::uint64_t root = 0x97100000ULL;
+        constexpr std::uint64_t bitmap_base = 0x98100000ULL;
+        constexpr std::uint64_t policy_word =
+            memblock::reference_bitmap_word_address(
+                bitmap_base, physical_page);
+        environment.memory().fill_incrementing(physical_page, 0x1000, 0x8d);
+        environment.memory().write_u64(policy_word, 0);
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                virtual_page, physical_page, root) ||
+            !environment.activate_sv39(root, 91 + index) ||
+            !environment.set_mbmc(true, false, bitmap_base)) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=bitmap-"
+                      << index << "-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const bool store = index != 0;
+        const bool denied_response = index == 0;
+        const bool corrupt_response = index != 0;
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.inject_ptw_response_error_after(
+            3, denied_response, corrupt_response);
+        if (!store) {
+            const memblock::LoadTransaction transaction{
+                .address = virtual_page + 0x188,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = 212,
+                .lane = 0,
+                .expected_exception_mask =
+                    memblock::kExceptionLoadAccessFault,
+            };
+            environment.expect_load(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_load(transaction) ||
+                !environment.issue_load(transaction, 4096) ||
+                !environment.run_until_complete(32768) ||
+                !environment.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=bitmap-load"
+                          << "-execution reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+            ++loads;
+        } else {
+            const memblock::StoreTransaction transaction{
+                .address = virtual_page + 0x188,
+                .data = 0x405060708090a0b0ULL,
+                .op = memblock::StoreOp::sd,
+                .rob = 0,
+                .sq = 0,
+                .address_lane = 0,
+                .data_lane = 1,
+                .expected_exception_mask =
+                    memblock::kExceptionStoreAccessFault,
+            };
+            environment.expect_store(transaction);
+            if (!environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) ||
+                !environment.enqueue_store(transaction, 0) ||
+                !environment.issue_store_address(transaction, 4096) ||
+                !environment.issue_store_data(transaction, 4096) ||
+                !environment.run_until_store_complete_with_replay(
+                    transaction, 32768) ||
+                (environment.sq_dequeued() + environment.sq_canceled() <
+                     environment.sq_allocated() &&
+                 !environment.account_sq_cancellation(1)) ||
+                environment.sq_dequeued() + environment.sq_canceled() !=
+                    environment.sq_allocated()) {
+                std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=bitmap-store"
+                          << "-execution reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+            ++stores;
+        }
+        if (environment.ptw_error_response_requests() != 1 ||
+            environment.ptw_requests() != ptw_before + 4 ||
+            environment.ptw_requests_covering_since(
+                policy_word, ptw_before) != 1 ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=bitmap-" << index
+                      << "-side-effects injected="
+                      << environment.ptw_error_response_requests()
+                      << " ptw=" << environment.ptw_requests() << '/'
+                      << ptw_before + 4 << " bitmap="
+                      << environment.ptw_requests_covering_since(
+                             policy_word, ptw_before) << '\n';
+            return 1;
+        }
+        denied += denied_response;
+        corrupt += corrupt_response;
+        ++bitmap_cases;
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests() - ptw_before;
+    }
+
+    std::cout << "MEMBLOCK_PTW_ERRORS_PASS"
+              << " cases="
+              << cases.size() + stage2_cases + nested_cases + bitmap_cases
+              << " stage1=" << cases.size()
+              << " stage2=" << stage2_cases
+              << " nested=" << nested_cases
+              << " bitmap=" << bitmap_cases
+              << " loads=" << loads
+              << " stores=" << stores
+              << " denied=" << denied
+              << " corrupt=" << corrupt
+              << " levels=" << root << ',' << intermediate << ',' << leaf
+              << " ptw_requests=" << total_ptw_requests
+              << " cycles=" << total_cycles
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_translation_faults(int argc, char **argv)
 {
     unsigned canonical_boundary_cases = 0;
@@ -29163,6 +29766,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "translation-bare") {
             return run_translation_bare(argc, argv);
+        }
+        if (options.test == "ptw-errors") {
+            return run_ptw_errors(argc, argv);
         }
         if (options.test == "translation-faults") {
             return run_translation_faults(argc, argv);

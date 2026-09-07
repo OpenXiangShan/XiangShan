@@ -88,6 +88,7 @@ SCENARIOS = (
     "translation-inflight-context-sv48-sv39x4",
     "translation-context",
     "translation-bare",
+    "ptw-errors",
     "translation-faults",
     "translation-permissions",
     "translation-pbmt",

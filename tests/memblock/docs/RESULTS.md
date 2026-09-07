@@ -8,19 +8,24 @@
   `f8bb99518` (Uncache exception preservation), `e1424686a` (exceptional
   atomic `rfWen` suppression), `7045fa175` (exceptional scalar FP-load
   `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
-  address selection).
+  address selection), and `39a7b9629` (PTW D-channel error propagation).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
+- Retracted segment redirect changes: `9feb8279e` and `73096f6b9` treated an
+  active VSegment plus redirect as a legal MemBlock stimulus. Full-core review
+  showed that decode/dispatch/ROB `waitForward`/`blockBackward` serialization
+  and interrupt gating make that state unreachable; the RTL and UT changes
+  were reverted by `d34dca150` and `af35d347c`, respectively.
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
-- MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
-- Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`
+- MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
+- Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
+- Current rebuilt and frozen UT executable SHA-256: `ca3e63281292f85291c4a3d693b34758f1faf1c8450fce72c3aebc578c5e7931`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `efef075f2d7a057647fcb1edafcadb2a897eefbb00d5690ead592fee95f7d807`
+- Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `8d11d3f850e4d521ff5a00fb89e6310c35ef6f97ce8a75c953cff716e2082002`
+- Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
+- Frozen runtime manifest SHA-256: `46f3327c91e13f209ba98f416309b8dcb99d1b5169695273e4d6cab7ea7a5c5f`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1408,7 +1413,7 @@ the historical complete RTL SHA-256 is
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
 | Vector addressing | Pass | Cycle 99,634; all 78 legal ordinary unit-stride and strided EEW/SEW/LMUL/EMUL configurations plus all 78 configurations for each of indexed-unordered and indexed-ordered passed exact load/store/readback. The indexed matrix covered 1,016 load and 508 store uops, 56 `EMUL>LMUL` shared-Vd configurations, ordered forward issue, unordered reverse issue, 4,608 LQ/2,304 SQ allocations, queue wrap, and two ROB wraps. Directed alias/non-monotonic indexed and all 16 whole-register NF/EEW cases remain included; 1,975 load and 983 store writebacks issued 1,064 TileLink requests |
-| Vector segment | Pass | Cycle 906,809; all four addressing modes each covered 338 legal NF 2..8 x EEW/SEW/LMUL/EMUL configurations. The non-indexed pair produced 7,096 load/readback and 3,548 store uops; the indexed pair produced 7,264 load/readback and 3,632 store uops, including 252 index-only uops. Exact data/metadata/readback, 4,704 TileLink requests, zero segment LQ/SQ allocations, 24 matrix ROB wraps, redirect cancellation, FOF cancellation, and survivor checks passed |
+| Vector segment | Pass | Cycle 905,375; all four addressing modes each covered 338 legal NF 2..8 x EEW/SEW/LMUL/EMUL configurations. The non-indexed pair produced 7,096 load/readback and 3,548 store uops; the indexed pair produced 7,264 load/readback and 3,632 store uops, including 252 index-only uops. Exact data/metadata/readback, 4,700 TileLink requests, zero segment LQ/SQ allocations, and 24 matrix ROB wraps passed. Active-segment redirect is intentionally excluded by the full-core serialization contract |
 | Vector split load | Pass | Three checked writebacks including a split cold-load replay shape |
 | Store forwarding | Pass | Four store widths and four matching scalar loads |
 | Vector forwarding | Pass | Four vector stores and loads with byte-accurate SQ overlay |
@@ -1423,6 +1428,7 @@ the historical complete RTL SHA-256 is
 | Concurrent exception priority | Pass | Cycle 1,351; wrapped/reversed queue age, same-ROB vector-uop order, cross-cause and scalar/vector replacement all passed. Two additional vector-load/store pairs populated the exception buffers in opposite arrival orders; toggling `isStoreException` selected and restored each exact source VA. Totals were 11 scalar-load, six vector-load, and six scalar-store writebacks |
 | Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
+| PTW D-channel errors | Pass | 16 cases in 1,894 aggregate cycles: eight stage-1, four isolated G-stage, two fully nested, and two bitmap reads; load/store and denied/corrupt each split 8/8. Exactly 45 PTW requests were issued, the bad PTE block was not cached, and no faulting architectural access reached DCache or Uncache |
 | IFU-to-Mem PTW bridge | Pass | 36 cases in 26,580 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 231 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 185 response-stall cycles passed; RTL SHA-256 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9` |
 | Reset recovery | Pass | 576 aggregate cycles; three repeated-reset phases accepted and canceled DCache-refill, PTW-walk, and Uncache/MMIO traffic under 256-cycle delayed responses, then completed three distinct post-reset survivors with no stale response/writeback |
 | Scalar misalignment under RAR pressure | Pass | The original five within-beat/line/page cases completed in 558 cycles. A separate legal queue-pressure phase held three split loads at the LQ head, completed 60 younger aligned loads on all three lanes, then advanced the split loads in ROB order; all 63 exact writebacks drained in 1,785 cycles with zero `memoryViolation` pulses |
