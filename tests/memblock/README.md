@@ -352,9 +352,10 @@ faults, for ten canonical-boundary transactions. It also covers Sv39x4 and
 Sv48x4 GPAs above their architectural limits, a malformed non-aligned Sv39
 2 MiB leaf, and 52 PTE encoding cases split evenly across Sv39/Sv48 stage-1
 and Sv39x4/Sv48x4 G-stage. Every encoding is exercised by both a scalar load
-and a scalar store. Eight additional stage-1 transactions cross Sv39/Sv48,
-load/store, and the lowest/highest PPN bits above the 48-bit physical-address
-width, for 126 architectural transactions in total. The shared
+and a scalar store. Thirty-two additional transactions cross stage-1/G-stage,
+Sv39/Sv48, leaf/top-level non-leaf, load/store, and the lowest/highest PPN bits
+above the 48-bit physical-address width, for 150 architectural transactions in
+total. The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an
 invalid NAPOT encoding. It checks the independent walk's failing PTE/level,

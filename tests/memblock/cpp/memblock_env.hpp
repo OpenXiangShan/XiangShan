@@ -1260,6 +1260,7 @@ struct ReferenceTwoStageWalkResult {
     bool stage1_page_fault = false;
     std::uint64_t faulting_guest_physical_address = 0;
     bool is_for_vs_nonleaf_pte = false;
+    bool access_fault = false;
 };
 
 inline ReferenceTwoStageWalkResult reference_two_stage_walk(
@@ -1287,7 +1288,15 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
             const auto pte_translation = reference_page_walk(
                 memory, g_root_page_table, pte_gpa, g_mode, true, g_pbmte);
             if (!pte_translation.translated) {
-                return {false, 0, true, false, pte_gpa, true};
+                return {
+                    false,
+                    0,
+                    !pte_translation.access_fault,
+                    false,
+                    pte_gpa,
+                    true,
+                    pte_translation.access_fault,
+                };
             }
 
             const std::uint64_t pte = memory.read_u64(
@@ -1314,7 +1323,15 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
         memory, g_root_page_table, guest_physical_address, g_mode, true,
         g_pbmte);
     if (!final_translation.translated) {
-        return {false, 0, true, false, guest_physical_address, false};
+        return {
+            false,
+            0,
+            !final_translation.access_fault,
+            false,
+            guest_physical_address,
+            false,
+            final_translation.access_fault,
+        };
     }
     return {true, final_translation.physical_address, false, false, 0, false};
 }

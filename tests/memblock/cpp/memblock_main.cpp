@@ -22369,6 +22369,10 @@ int run_translation_faults(int argc, char **argv)
 {
     unsigned canonical_boundary_cases = 0;
     unsigned ppn_access_fault_cases = 0;
+    unsigned stage1_ppn_access_fault_cases = 0;
+    unsigned gstage_ppn_access_fault_cases = 0;
+    unsigned leaf_ppn_access_fault_cases = 0;
+    unsigned nonleaf_ppn_access_fault_cases = 0;
     unsigned lowest_high_ppn_cases = 0;
     unsigned highest_high_ppn_cases = 0;
     std::uint64_t noncanonical_ptw_requests = 0;
@@ -22745,55 +22749,120 @@ int run_translation_faults(int argc, char **argv)
     struct PpnAccessFaultCase {
         const char *name;
         memblock::ReferencePageMode mode;
-        std::uint64_t physical_address;
+        bool gstage;
+        bool nonleaf;
+        unsigned ppn_bit;
         bool highest_ppn_bit;
     };
-    constexpr std::array<PpnAccessFaultCase, 4> ppn_access_fault_tests{{
-        {"sv39-ppn-bit36", memblock::ReferencePageMode::sv39,
-         std::uint64_t{1} << 48, false},
-        {"sv39-ppn-bit43", memblock::ReferencePageMode::sv39,
-         std::uint64_t{1} << 55, true},
-        {"sv48-ppn-bit36", memblock::ReferencePageMode::sv48,
-         std::uint64_t{1} << 48, false},
-        {"sv48-ppn-bit43", memblock::ReferencePageMode::sv48,
-         std::uint64_t{1} << 55, true},
+    constexpr std::array<PpnAccessFaultCase, 16> ppn_access_fault_tests{{
+        {"stage1-sv39-leaf-ppn-bit36", memblock::ReferencePageMode::sv39,
+         false, false, 36, false},
+        {"stage1-sv39-leaf-ppn-bit43", memblock::ReferencePageMode::sv39,
+         false, false, 43, true},
+        {"stage1-sv39-nonleaf-ppn-bit36", memblock::ReferencePageMode::sv39,
+         false, true, 36, false},
+        {"stage1-sv39-nonleaf-ppn-bit43", memblock::ReferencePageMode::sv39,
+         false, true, 43, true},
+        {"stage1-sv48-leaf-ppn-bit36", memblock::ReferencePageMode::sv48,
+         false, false, 36, false},
+        {"stage1-sv48-leaf-ppn-bit43", memblock::ReferencePageMode::sv48,
+         false, false, 43, true},
+        {"stage1-sv48-nonleaf-ppn-bit36", memblock::ReferencePageMode::sv48,
+         false, true, 36, false},
+        {"stage1-sv48-nonleaf-ppn-bit43", memblock::ReferencePageMode::sv48,
+         false, true, 43, true},
+        {"gstage-sv39-leaf-ppn-bit36", memblock::ReferencePageMode::sv39,
+         true, false, 36, false},
+        {"gstage-sv39-leaf-ppn-bit43", memblock::ReferencePageMode::sv39,
+         true, false, 43, true},
+        {"gstage-sv39-nonleaf-ppn-bit36", memblock::ReferencePageMode::sv39,
+         true, true, 36, false},
+        {"gstage-sv39-nonleaf-ppn-bit43", memblock::ReferencePageMode::sv39,
+         true, true, 43, true},
+        {"gstage-sv48-leaf-ppn-bit36", memblock::ReferencePageMode::sv48,
+         true, false, 36, false},
+        {"gstage-sv48-leaf-ppn-bit43", memblock::ReferencePageMode::sv48,
+         true, false, 43, true},
+        {"gstage-sv48-nonleaf-ppn-bit36", memblock::ReferencePageMode::sv48,
+         true, true, 36, false},
+        {"gstage-sv48-nonleaf-ppn-bit43", memblock::ReferencePageMode::sv48,
+         true, true, 43, true},
     }};
     for (std::size_t index = 0; index < ppn_access_fault_tests.size(); ++index) {
         const auto &test = ppn_access_fault_tests[index];
         memblock::Environment environment(argc, argv);
-        const std::uint64_t virtual_address =
-            test.mode == memblock::ReferencePageMode::sv48
+        const std::uint64_t input_address = test.gstage
+            ? 0x7a000188ULL
+            : test.mode == memblock::ReferencePageMode::sv48
                 ? 0xffff900020000188ULL
                 : 0x78000188ULL;
         const std::uint64_t root = 0xb0000000ULL + index * 0x100000ULL;
+        constexpr std::uint64_t valid_physical_address = 0xce000000ULL;
         if (!environment.reset()) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
                       << test.name << "-reset reason="
                       << environment.error() << '\n';
             return 1;
         }
-        const std::uint64_t virtual_page =
-            virtual_address & ~std::uint64_t{0xfff};
-        const bool mapped = test.mode == memblock::ReferencePageMode::sv48
-            ? environment.map_sv48_4k(
-                  virtual_page, test.physical_address, root)
-            : environment.map_sv39_4k(
-                  virtual_page, test.physical_address, root);
-        const auto leaf_pte = memblock::reference_pte_address_at_level(
-            environment.memory(), root, virtual_address, test.mode, 0);
+        const std::uint64_t input_page =
+            input_address & ~std::uint64_t{0xfff};
+        bool mapped = false;
+        if (test.gstage) {
+            mapped = test.mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      input_page, valid_physical_address, root)
+                : environment.map_sv39x4_4k(
+                      input_page, valid_physical_address, root);
+        } else {
+            mapped = test.mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48_4k(
+                      input_page, valid_physical_address, root)
+                : environment.map_sv39_4k(
+                      input_page, valid_physical_address, root);
+        }
+        const unsigned target_level = test.nonleaf
+            ? memblock::reference_page_levels(test.mode) - 1
+            : 0;
+        const auto fault_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), root, input_address, test.mode,
+            target_level, test.gstage);
+        if (mapped && fault_pte.has_value()) {
+            environment.memory().write_u64(
+                *fault_pte,
+                environment.memory().read_u64(*fault_pte) |
+                    (std::uint64_t{1} << (test.ppn_bit + 10)));
+        }
         const auto reference = memblock::reference_page_walk(
-            environment.memory(), root, virtual_address, test.mode);
-        if (!mapped || !leaf_pte.has_value() || reference.translated ||
-            !reference.access_fault || reference.fault_level != 0 ||
-            reference.faulting_pte_address != *leaf_pte) {
+            environment.memory(), root, input_address, test.mode,
+            test.gstage);
+        const auto two_stage_reference = test.gstage
+            ? memblock::reference_two_stage_walk(
+                  environment.memory(), 0, root, input_address,
+                  memblock::ReferencePageMode::bare, test.mode)
+            : memblock::ReferenceTwoStageWalkResult{};
+        if (!mapped || !fault_pte.has_value() || reference.translated ||
+            !reference.access_fault ||
+            reference.fault_level != target_level ||
+            reference.faulting_pte_address != *fault_pte ||
+            (test.gstage &&
+             (two_stage_reference.translated ||
+              !two_stage_reference.access_fault ||
+              two_stage_reference.guest_page_fault ||
+              two_stage_reference.stage1_page_fault ||
+              two_stage_reference.faulting_guest_physical_address !=
+                  input_address))) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
                       << test.name
                       << "-reference reason=PPN access fault not identified\n";
             return 1;
         }
-        const bool activated = test.mode == memblock::ReferencePageMode::sv48
-            ? environment.activate_sv48(root, 53 + index)
-            : environment.activate_sv39(root, 53 + index);
+        const bool activated = test.gstage
+            ? environment.activate_two_stage_modes(
+                  memblock::ReferencePageMode::bare, test.mode,
+                  0, root, 53 + index, 71 + index)
+            : test.mode == memblock::ReferencePageMode::sv48
+                ? environment.activate_sv48(root, 53 + index)
+                : environment.activate_sv39(root, 53 + index);
         if (!activated) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
                       << test.name << "-configuration reason="
@@ -22805,7 +22874,7 @@ int run_translation_faults(int argc, char **argv)
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
         const memblock::LoadTransaction load{
-            .address = virtual_address,
+            .address = input_address,
             .op = memblock::LoadOp::ld,
             .rob = 0,
             .lq = 0,
@@ -22820,7 +22889,9 @@ int run_translation_faults(int argc, char **argv)
             !environment.run_until_complete(16384) ||
             !environment.run_until_lq_retired(4096) ||
             environment.ptw_requests() !=
-                ptw_before + memblock::reference_page_levels(test.mode) ||
+                ptw_before + (test.nonleaf
+                    ? 1U
+                    : memblock::reference_page_levels(test.mode)) ||
             environment.tilelink_requests() != dcache_before ||
             environment.uncache_requests() != uncache_before) {
             std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
@@ -22837,10 +22908,20 @@ int run_translation_faults(int argc, char **argv)
             return 1;
         }
         ++ppn_access_fault_cases;
+        if (test.gstage) {
+            ++gstage_ppn_access_fault_cases;
+        } else {
+            ++stage1_ppn_access_fault_cases;
+        }
+        if (test.nonleaf) {
+            ++nonleaf_ppn_access_fault_cases;
+        } else {
+            ++leaf_ppn_access_fault_cases;
+        }
 
         const std::uint64_t store_ptw_before = environment.ptw_requests();
         const memblock::StoreTransaction store{
-            .address = virtual_address,
+            .address = input_address,
             .data = 0x5566778899aabbccULL ^ index,
             .op = memblock::StoreOp::sd,
             .rob = 1,
@@ -22885,6 +22966,16 @@ int run_translation_faults(int argc, char **argv)
             return 1;
         }
         ++ppn_access_fault_cases;
+        if (test.gstage) {
+            ++gstage_ppn_access_fault_cases;
+        } else {
+            ++stage1_ppn_access_fault_cases;
+        }
+        if (test.nonleaf) {
+            ++nonleaf_ppn_access_fault_cases;
+        } else {
+            ++leaf_ppn_access_fault_cases;
+        }
         ppn_access_fault_ptw_requests +=
             environment.ptw_requests() - ptw_before;
         if (test.highest_ppn_bit) {
@@ -23244,6 +23335,14 @@ int run_translation_faults(int argc, char **argv)
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " ppn_access_fault_cases=" << ppn_access_fault_cases
+              << " stage1_ppn_access_fault_cases="
+              << stage1_ppn_access_fault_cases
+              << " gstage_ppn_access_fault_cases="
+              << gstage_ppn_access_fault_cases
+              << " leaf_ppn_access_fault_cases="
+              << leaf_ppn_access_fault_cases
+              << " nonleaf_ppn_access_fault_cases="
+              << nonleaf_ppn_access_fault_cases
               << " lowest_high_ppn_cases=" << lowest_high_ppn_cases
               << " highest_high_ppn_cases=" << highest_high_ppn_cases
               << " ppn_access_fault_ptw_requests="

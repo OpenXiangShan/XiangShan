@@ -2002,16 +2002,23 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "kReferencePhysicalAddressBits = 48",
             "reference_pte_physical_address_fault",
             "bool access_fault = false",
+            "!pte_translation.access_fault",
+            "!final_translation.access_fault",
         ):
             self.assertIn(contract, environment)
         for contract in (
-            "sv39-ppn-bit36",
-            "sv39-ppn-bit43",
-            "sv48-ppn-bit36",
-            "sv48-ppn-bit43",
+            "stage1-sv39-leaf-ppn-bit36",
+            "stage1-sv48-nonleaf-ppn-bit43",
+            "gstage-sv39-leaf-ppn-bit36",
+            "gstage-sv48-nonleaf-ppn-bit43",
+            "two_stage_reference.access_fault",
             "kExceptionLoadAccessFault",
             "kExceptionStoreAccessFault",
             "ppn_access_fault_cases=",
+            "stage1_ppn_access_fault_cases=",
+            "gstage_ppn_access_fault_cases=",
+            "leaf_ppn_access_fault_cases=",
+            "nonleaf_ppn_access_fault_cases=",
             "ppn_access_fault_ptw_requests=",
         ):
             self.assertIn(contract, main)
