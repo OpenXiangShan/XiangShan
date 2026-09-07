@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | 初始核验 `bd813bc3ed5b39581be966c6518788852890ff6f`；本轮补充核验 `c52d5f98029eb549b2c2a93367d56171ded619bb` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 V2 `memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-17` |
+| 最后核验日期 | `2026-09-04` |
 
 ## Flow 范围
 
@@ -166,6 +166,7 @@ exceptionVec.asUInt.orR || singleStep || TriggerAction.isDmode(trigger)
 ## 关联文档
 
 - [memory flush pipe flow](memory_flush_pipe_flow.md)：trigger 异常与 `flushPipe` 在 ROB 的不同处理方式。
+- [StoreMisalignBuffer 跨 16B Store Trigger 元数据传播缺陷](store_misalign_trigger_metadata_propagation.md)：普通 scalar 非对齐 MAB admission 错误复制计算前 `s1_in.uop.trigger`，使最终 STA0 输出 `0 + !breakpoint`；该项是 V2 DUT metadata 缺陷，不能作为一般 STA0 合法编码放宽 checker。
 - [Int writeback agent 接口知识](../../../interface/v2/agents/int_writeback_agent.md)：LDA/STA/STD 顶层 trigger capability 和 lane 差异。
 - [V2 RTL flow 索引](../index.md)。
 - `AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md`：V2 顶层 CSR trigger 和 writeback trigger 信号矩阵；该文件当前有用户未提交修改，本轮未编辑。
@@ -189,7 +190,7 @@ exceptionVec.asUInt.orR || singleStep || TriggerAction.isDmode(trigger)
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:578-609`：ROB 精确异常判断。
 - `src/main/scala/xiangshan/mem/MemBlock.scala:73-75,515-543`：LDA lane 复用 Atomics/Misaligned/Uncache，STA 写回连接。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:841-849,1054-1060`：STA0 的 uncache/CBO 路径清零 trigger 并动态设置 flushPipe。
-- `build_memblock/rtl/MemBlock.sv:831-950,30250-30510`：V2 split writeback 顶层字段保留差异。
+- `build/rtl/MemBlock.sv:831-950,30250-30510`：V2 split writeback 顶层字段保留差异。
 
 ## 知识修订记录
 
@@ -198,6 +199,7 @@ exceptionVec.asUInt.orR || singleStep || TriggerAction.isDmode(trigger)
 | 2026-07-11 | `5b35ddd8d774b5f11d61333dfbe7638a3f362fad` | 首次建立，无同版本长期 flow 旧结论 | 建立 action 编码、地址匹配、写回和 ROB 消费关系 | 用户要求将本轮源码分析沉淀为 V2 知识 | V2 CSR/MemBlock/Load/Store/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 trigger 编码和 Load/Store 生成，未区分 split writeback capability，也未说明 0 与 None 的边界 | 明确 LDA/STA 有 trigger、STD 无 trigger；`None=15`；补充 STA0 StoreQueue 非规范 0 值及必须联合 exceptionVec 判断的限制 | 结合 V2 Scala、生成 RTL 和 split writeback 端口追踪 plan 中 metadata guard | V2 MemBlock writeback/Trigger/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 文档未明确“置高”不能用于判断 trigger 动作，且未区分 Trace 编码与当前实现 | 补充 0/1/2/3/4/15 全部编码，明确当前 memory generator 只产生 0/1/15，以及 DebugMode/Breakpoint 的数值语义 | 用户追问 `trigger` 什么场景下被置高 | V2 MemTrigger/LoadUnit/StoreUnit/ROB |
+| 2026-09-04 | `c52d5f98029eb549b2c2a93367d56171ded619bb` | 仅记录 StoreQueue uncache/CBO 的 STA0 非规范 `trigger=0`，未区分普通 MAB parent metadata | 记录普通 scalar 跨 16B MAB 路径会把早期 `s1_in=0` 传播到最终 STA0；该值不是 CSR 无匹配结果，属于 DUT metadata 缺陷 | 追踪 StoreUnit S1、MAB parent/child 和 STA0 mux | V2 StoreUnit、MAB、STA0 metadata |
 
 ## 待确认项
 

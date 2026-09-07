@@ -1,0 +1,13 @@
+rmapats_mop.o: rmapats.m
+	@/nfs/tools/synopsys/vcs/Q-2020.03-SP2/linux64/bin/cgmop1  -tls_initexe  -pic -gen_obj rmapats.m rmapats_mop.o; rm -f rmapats.m; touch rmapats.m; touch rmapats_mop.o
+
+rmapats.o: rmapats.c
+	@$(CC_CG) $(CFLAGS_CG) -c -fPIC -x c -o rmapats.o rmapats.c
+rmapats%.o: rmapats%.c
+	@$(CC_CG) $(CFLAGS_CG) -c -fPIC -x c -o $@ $<
+rmar.o: rmar.c
+	@$(CC_CG) $(CFLAGS_CG) -c -fPIC -x c -o rmar.o rmar.c
+rmar%.o: rmar%.c
+	@$(CC_CG) $(CFLAGS_CG) -c -fPIC -x c -o $@ $<
+
+include filelist.hsopt.objs

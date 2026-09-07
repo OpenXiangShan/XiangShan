@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | 初始核验 `bd813bc3ed5b39581be966c6518788852890ff6f`；本轮补充核验 `c52d5f98029eb549b2c2a93367d56171ded619bb` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
-| 权威源码 | `src/main/scala/xiangshan`、`build_memblock/rtl/MemBlock.sv`、V2 `memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-22` |
+| 权威源码 | `src/main/scala/xiangshan`、`build/rtl/MemBlock.sv`、V2 `memblock_rtl_profile.md` |
+| 最后核验日期 | `2026-09-04` |
 
 ## Agent 职责和边界
 
@@ -32,7 +32,10 @@ LDA、STA、STD split writeback。本文只定义 V2 顶层真实字段和 RTL �
 Breakpoint 的异常语义由 `exceptionVec(breakPoint)` 承载，Debug Mode 由 ROB 显式检查
 `TriggerAction.isDmode(trigger)`。STA0 的 StoreQueue uncache/CBO 路径会把 trigger 写成
 0，但同时清 exceptionVec；该非规范默认值不会触发 ROB breakpoint，观察者必须联合来源和
-exceptionVec 判断。
+exceptionVec 判断。另有一项 V2 DUT metadata 缺陷：普通 cacheable 跨 16B MAB writeback 会把
+StoreUnit 计算前 `s1_in.uop.trigger=0` 作为 parent metadata 回送，导致 `trigger=0` 但没有
+breakpoint/MMIO/NCIO/CBO provenance；该组合不能被当成 STA0 的一般合法例外，详见
+[StoreMisalignBuffer 跨 16B Store Trigger 元数据传播缺陷](../../../rtl/v2/flows/store_misalign_trigger_metadata_propagation.md)。
 
 `flushPipe=1` 表示当前指令可以提交，ROB 在精确提交点产生 `flushAfter` 清年轻流水。
 当前 split 端口中合法的动态来源是 STA0 的 StoreQueue CBO/CMO 写回；普通 Load/Store
@@ -98,7 +101,7 @@ Scala 内部使用 `DecoupledIO(new MemExuOutput)`。当前 whole-core 生成的
 - `src/main/scala/xiangshan/mem/pipeline/HybridUnit.scala:1168-1197`：HybridUnit replay producer 条件。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:841-849,1054-1060`：STA0 uncache/CBO metadata。
 - `src/main/scala/xiangshan/backend/Backend.scala:671-703`、`backend/rob/Rob.scala:578-630,1211-1227`：写回到 ExceptionGen/ROB 的消费者。
-- `build_memblock/rtl/MemBlock.sv:831-950,30250-30510`：V2 顶层实际端口和 lane mux。
+- `build/rtl/MemBlock.sv:831-950,30250-30510`：V2 顶层实际端口和 lane mux。
 
 ## 知识修订记录
 
@@ -107,6 +110,7 @@ Scala 内部使用 `DecoupledIO(new MemExuOutput)`。当前 whole-core 生成的
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 首次建立，无旧的 agent 长期文档 | 建立 V2 LDA/STA/STD split writeback metadata capability、运行时语义和 lane 差异 | 用户要求结合 Scala 源码解释 metadata 和端口差异 | V2 MemBlock int writeback agent |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 scalar LDA 的 `replayInst` 恒 0，未交代 Scala 中合法动态 producer 的归属 | 补充 `HybridUnit` 的 forwarding CAM 失配 producer，并明确其属于独立 Hyu writeback、不能套到 LDA0/1/2 | 用户追问 replay/flush/trigger 的置位场景 | V2 int writeback 与 HybridUnit 边界 |
 | 2026-07-22 | 当前 V2 int-WB 适配 coding | 只描述 interface 能力，未同步 raw/adapter 的运行时落点 | `mon_data()` 作为唯一 raw queue push owner；raw 冻结 sample epoch，adapter 负责 current snapshot、STD value-only 反查和 all-or-fatal key/capability 校验；STD 只有真实 writeback 才能完成 | 完成 V2 Int-WB 测试框架适配 | V2 int writeback agent 与 dispatch 公共状态流 |
+| 2026-09-04 | `c52d5f98029eb549b2c2a93367d56171ded619bb` | STA0 的 `0 + !breakpoint` 只列为 StoreQueue uncache/CBO 非规范值 | 区分历史 StoreQueue 例外和普通 MAB metadata 缺陷；后者仍应被 adapter provenance check 报告 | StoreUnit/MAB/STA0 实际字段追踪 | V2 STA0 observer/adapter 边界 |
 
 ## 待确认项
 

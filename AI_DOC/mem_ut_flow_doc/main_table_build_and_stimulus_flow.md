@@ -710,7 +710,8 @@ apply_addr_reuse_window:
     copy ref_tr.src_0/ref_tr.imm，并 update_vaddr；
     normal 路径检查最终访问跨度；如果随机新尺寸越过 MAIN_VADDR 窗口，保留复制地址并选择与 ref size 相同的合法 opcode；
   如果引用队列为空：
-    走 fallback；normal 路径在最终类型确定后重新调用 legal address template，boundary 路径不受 MAIN_VADDR 拦截；
+    走 fallback；normal 路径在最终类型确定后重新调用 legal address template；boundary 路径按最终
+    profile/size 重新生成地址，并检查完整 span、Sv39 canonical 和 Store x cross-8B gate；
   validate_main_table_entry 复核改写后的 transaction。
 ```
 
@@ -719,8 +720,9 @@ apply_addr_reuse_window:
 - `prune_recent_uid_q()`：删除 `cur_uid - old_uid > addr_ref_window` 的历史 uid。
 - `random_pick_recent_uid()`：从历史队列随机选引用 uid，部分模式会删除被引用 uid。
 - `set_transaction_ls_kind()`：把当前 transaction 切成 load 或 store 模板。
-- `fixup_after_addr_reuse()`：复制地址、调用 normal 最终跨度收口并做合法性检查。
-- `ensure_normal_reused_addr_span()`：只在 normal 复制地址场景收敛越界访问大小，不改变地址复用关系。
+- `fixup_after_addr_reuse()`：复制参考地址、调用最终跨度收口并做合法性检查。
+- `ensure_reused_addr_span()`：自动主表复制地址后收敛越界访问大小；boundary 同时检查窗口与 canonical，
+  不改变地址复用关系。
 
 ## 11. `randomize_send_pri_value()`
 
@@ -893,13 +895,18 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
             continue;
         end
         service_monitor_once();
-        if (!data.is_global_stop_requested()) begin
+        if (!data.is_global_stop_requested() &&
+            !data.is_global_stop_prepare_requested()) begin
             route_all_issue_queues();
         end
         void'(all_transactions_terminal_done());
         if (data.is_global_stop_requested() &&
             !data.flushsb_request_pending()) begin
-            break;
+            // 先完成 L2TLB release，再等待两个 memory responder 的 terminal idle
+            // 和一个额外 monitor service 边界；只有共享 memory drain audit 完成后退出。
+            if (memory_responders_ready_for_final_audit()) begin
+                break;
+            end
         end
     end
 endtask:service_real_dispatch_flow
@@ -921,7 +928,8 @@ endtask:service_monitor_once
 输入/输出：
 
 - 输入：`service_vif` 时钟/reset、`reset_backend_done`、主表/status/monitor queues。
-- 输出：monitor/recovery 状态更新、issue queue 补 route、`global_stop_requested` 触发退出。
+- 输出：monitor/recovery 状态更新、issue queue 补 route；全 UID 完成后先进入 stop prepare，
+  仅在 memory responder 静默收敛、terminal idle 和最终审计完成后退出。
 
 文字伪代码：
 
@@ -937,19 +945,25 @@ forever:
     collect_runtime_context_events：先 drain CSR runtime，再 drain sfence；
     collect_monitor_event_batch：收集 writeback/redirect ctrl batch 并做 redirect-first 仲裁；
     exception_redirect_replay_task：消费 pending exception/replay/redirect 事件；
-  如果 global_stop_requested 尚未置位：
+  如果既未进入 global_stop_prepare_requested、也未提交 global_stop_requested：
     route_all_issue_queues 周期性补充 ready uid 到 issue queue；
   调用 all_transactions_terminal_done：
-    request_global_stop_if_done，如果全表 terminal_done 则置 global stop；
+    request_global_stop_if_done；当全表 terminal_done 且公共 runtime work 已排空时，
+    先启动 1us 的 stop prepare 静默窗口；DCache/SBuffer 发现真实 A/B/C/D/E、response、
+    Probe 或本地 lifecycle 进展会重置该窗口，两个 responder 都跨过 quiet deadline 的 sample 后
+    才提交 global stop；
   如果 global_stop_requested=1 且 flushsb_request_pending=0：
-    说明主 transaction 已完成且 flushSb 队列/active waiting 已清空，退出 service loop。
+    先完成 L2TLB 生命周期 release；继续运行 service_monitor_once，直到 DCache 和 SBuffer
+    都交付 terminal idle；再额外运行一个 monitor service 边界并检查 shared memory drain，
+    最后退出 service loop。scenario 生命周期随后调用 end_test_check，最后才关闭 monitor capture。
 ```
 
 内部子调用：
 
 - `ensure_service_vif()`：获取服务循环使用的时钟 vif。
 - `memblock_flushsb_base_sequence::start()`：启动周期 flushSb producer；它只向公共队列入队，不驱动 DUT。
-- `all_transactions_terminal_done()`：推进 terminal_done_uid 并请求 global stop。
+- `all_transactions_terminal_done()`：推进 terminal_done_uid；它通过
+  `request_global_stop_if_done()` 启动或提交两阶段 global stop，不直接结束 responder。
 - `collect_runtime_context_events()`：先同步 CSR runtime latest snapshot，再显式消费 sfence/hfence FIFO。
 - `collect_monitor_event_batch()`：收集并处理 monitor batch。
 - `exception_redirect_replay_task()`：处理 pending recovery 事件。

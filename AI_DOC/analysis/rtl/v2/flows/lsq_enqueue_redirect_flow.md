@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
+| 核验 commit | `4ce3563a01254700ed5828797f288bafcc2b491c` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-27` |
+| 最后核验日期 | `2026-08-21` |
 
 ## Flow 范围
 
@@ -136,6 +136,25 @@ enqLsqIO.req(i).valid := io.fromRename(i).fire &&
 ```
 
 因此普通 LSQ 入队首先受队列容量、ROB、IQ、同组顺序和特殊指令分类影响。
+
+这里的 `req.valid` 是一个共享的 Dispatch-to-LSQ bundle 有效位，不能直接等同于
+“已经有物理 LQ/SQ entry”。`LsqWrapper` 后续还分别计算：
+
+```scala
+loadQueue.io.enq.req(i).valid  := io.enq.needAlloc(i)(0) && io.enq.req(i).valid
+storeQueue.io.enq.req(i).valid := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
+```
+
+因此对于非访存 vector arithmetic 或 `vset*`，NewDispatch 虽可能让共享
+`enqLsq.req.valid` 随 `fromRename.fire` 置高，但 `needAlloc=0`，两条 queue request 都为
+0，也没有 `allocated` entry。相反，普通非 segment `vldu/vstu` 的 `needAlloc=1/2` 且
+request 有效，才会得到连续 LQ/SQ entry。
+
+segment vector LS 是另一个不同的例外：`isSegment=FuType.isVsegls(fuType)` 会令普通
+`enqLsq.req.valid=0`，但 Dispatch 中的 load/store 类别位不应单独解释为“已经分配”。
+LsqEnqCtrl 的指针/计数只统计 `isVNonsegLoad/isVNonsegStore`，MemBlock 则将 segment
+issue 导向 `VSegmentUnit`。普通单 field FOF 也要分开看：真正 data-uop 仍入 LQ，只有
+`isVleff && lastUop` 的 `fix-VL` 尾 uop 被排除。
 
 ### 2. LsqEnqCtrl 接受与寄存边界
 
@@ -385,6 +404,12 @@ SQ 的 `mmio` 标志，使非 CBO entry 按通用 exception drain 释放。early
   `VSegmentUnit` 与 `AtomicsUnit` 的 finish/writeback 路径释放本地状态，不应等待
   `lqDeq/sqDeq`。
 
+这里还有一个不属于 FOF 的 vector-store 边界：StoreQueue 在历史 `enqLsq` 时，仅将宏指令
+末 uop 的 `lastUop` 写入其连续 SQ 预留范围的尾 entry，形成 `vecLastFlow`。若向量 store
+在此边界前发生异常，`vecExceptionFlag` 会抑制同一 `robIdx` 的后续 entry 写入 SBuffer；该
+尾 entry 经 data buffer 时清除 flag。它不决定 `sqDeq/sqCancelCnt` 的所有权，也不是实际
+`flowMask`/active-flow 的计数规则，而是异常后写入抑制的收尾锚点。
+
 所有真正送到 ROB 的架构 fault 仍会在 ROB head 产生 `RedirectLevel.flush`，用于移除 faulting
 ROB entry 和回滚年轻指令。这里说明的是本地资源释放不总以该 redirect 为唯一条件。完整
 源码顺序和 FOF 例外见
@@ -430,6 +455,7 @@ Store entry 不在普通 redirect cancel 范围内，以保持架构可见提交
 
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：说明哪些指令产生 `flushPipe`，以及 ROB 如何生成 `flushAfter`。
 - [Memory trigger flow](memory_trigger_flow.md)：trigger 异常最终也通过 ROB 精确 redirect 影响年轻访存。
+- [V2 正常向量访存 uop 与 flow 拆分](vector_memory_uop_flow_decomposition.md)：说明普通 vector LS 的 `numLsElem` 预留、活跃 flow、merge buffer 收敛及其与 `vl` 的关系。
 - [V2 RTL flow 索引](../index.md)。
 
 ## V2/V3 差异
@@ -458,7 +484,10 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 - `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:122,256,461-545`：CBO `wline`、scalar MMIO exception 时 SQ `mmio` 清除、异常回填。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:830-985,1038-1071,1126-1160,1204-1343,1476-1524`：fault store 的 `committed`/exception drain、NC/MMIO response 条件、`sqDeq` 和 `sqCancelCnt` 两条释放路径。
 - `src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala:112-129,351-417`、`src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:217-230`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1454-1488`：vector LS 的异常 feedback、自然 deq 和 redirect cancel 边界。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:365-405,1202-1249,1351-1405`：`lastUop` 在连续 SQ 范围尾 entry 生成 `vecLastFlow`，并作为向量 store 异常后 `vecExceptionFlag` 的 SBuffer 抑制/清除边界。
 - `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:688-707`、`src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala:870-961`、`src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala:401-431`：segment 与 MOU 不分配普通 LSQ，并由各自 finish/writeback 路径释放本地状态。
+- `src/main/scala/xiangshan/backend/fu/FuType.scala:127-133,182-198`、`src/main/scala/xiangshan/mem/MemBlock.scala:1571-1623,2061-2070`：非访存 vector 类别、普通/segment vector LS 的分类，以及 segment 绕过 LQ/SQ、交给 `VSegmentUnit` 的连接。
+- `src/main/scala/xiangshan/backend/rename/Rename.scala:237-250`、`src/main/scala/xiangshan/mem/vector/VfofBuffer.scala:41-145`：普通 FOF `fix-VL` 尾 uop 的零 `numLsElem`、普通 enqueue 排除和专用 writeback。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:578-630`：`flushPipe`在ROB头生成`flushAfter`。
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:228-231,454-460,490-491`：Fence类指令的`blockBackward/flushPipe`属性。
 
@@ -474,6 +503,8 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只说明 redirect 取消未 committed entry，未说明 ROB exception 的 flush anchor 与 fault store 的另一条 SQ 清理路径 | 补充 exception 使用 `flush` 并覆盖 anchor 自身；未 committed fault store 走 `sqCancelCnt`，已 committed 且 `hasException` 的 fault store 可走无真实 SBuffer 写入的 `sqDeq` | 用户要求结合 V2 Scala 核对 fault、redirect、`scommit` 与 SQ 出队关系 | V2 ROB/CtrlBlock/Backend/MemBlock/StoreQueue/SBuffer |
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只描述完整 Core redirect 下的 fault 释放，未说明 standalone 不驱动 redirect 时哪些 fault 可以等待 raw deq | 明确 NC/cacheable/scalar-MMIO exception completion 与 MMIO response fault 可等待真实 `sqDeq`；只有 early CBO fault 无 natural deq，需 watchdog fail-fast 而非软件 release | 用户要求限定本轮只改测试框架、不新增 RM，并确认 raw deq 等待边界 | V2 StoreUnit/StoreQueue/uncache/MMIO/CBO/standalone mem_ut |
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已分配 entry 的 fault cancel 仅按 scalar store 描述，容易误读为 vector LS 与 MOU 都必须靠 ROB cancel 释放 | 补充 vector load 自然 `lqDeq`、vector store deq/cancel 双路径，以及 segment/MOU 不进入普通 LSQ 的边界 | 用户追问 vector LS、AMO/MOU fault 是否均依赖 ROB exception redirect/cancel | V2 vector merge buffer/VLQ/SQ/VSegmentUnit/AtomicsUnit/ROB redirect |
+| 2026-08-18 | `4ce3563a01254700ed5828797f288bafcc2b491c` | 已说明 segment/MOU 不进入普通 LSQ，但没有把共享 `req.valid`、`needAlloc` 和 queue 侧 `allocated` 的三层关系写清楚，也未列出非访存 vector uop。 | 增加 `req.valid` 与物理 entry 的区分，列出 vector arithmetic/vset、segment、FOF data/tail 的完整分类和源码条件。 | 用户追问哪些向量类型不进入 LSQ。 | V2 NewDispatch、LsqEnqCtrl、LsqWrapper、LQ/SQ、VSegmentUnit、VfofBuffer。 |
+| 2026-08-21 | `4ce3563a01254700ed5828797f288bafcc2b491c` | vector store fault 只按 feedback、`sqDeq` 和 redirect cancel 描述，未说明宏指令尾 `lastUop` 对异常后 SBuffer 写入的影响。 | 增加 `lastUop -> vecLastFlow -> vecExceptionFlag` 的 StoreQueue 收尾链，明确它是同一 `robIdx` 后续 vector-store 写入抑制边界，不替代 deq/cancel 规则。 | 用户追问 FOF 之外的 `lastUop` 影响。 | V2 LsqEnq、StoreQueue、SBuffer、vector store fault。 |
 
 ## 待确认项
 

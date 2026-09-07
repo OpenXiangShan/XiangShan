@@ -16,7 +16,7 @@
 和 LSU/前端异常编码的路径，重点区分：
 
 1. MMU 内部的 `gpf/gaf`、`excp.gpf/excp.af` 是否可以同拍为 1；
-2. 下游物理 PMP/PMA 检查再次写入 `uop.exceptionVec` 后，原始异常向量是否可能同时保留 GPF 与 AF；
+2. 下游物理 PMP/PMA 检查再次写入 `uop.exceptionVec` 后，原始异常向量是否可能同时保留 PF/GPF 与 AF；
 3. 最终 ROB/CSR 选择的架构 trap cause；
 4. PTW/HPTW `level` 的递减方向、Sv39/Sv48 初始层级和 page-table cache 命中后的起始层级；
 5. `PtwCache` L3/L2/L1/L0/SP 的存储结构、cacheline/PTE 回填粒度、tag/sector 切分、翻译上下文、
@@ -41,9 +41,9 @@
 4. 不同 TLB port 的请求可以在同一拍分别出现一个 GPF 和一个 AF；不同指令也可以在不同周期分别出现。
    这不违反“单个请求互斥”的约束。
 5. 访存流水线在 TLB 之后还会把独立的物理 `pmp.ld/st`、MMIO、ECC/TileLink error 等 OR 到
-   `uop.exceptionVec(load/storeAccessFault)`。因此在这些下游 raw vector 上，若已有 TLB GPF 且同拍
-   物理 PMP 结果为 1，代码结构允许 GPF 与 AF 两个 bit 同时保留；这不是 MMU translation response 的
-   合法双 fault。ROB/CSR 最终只选择一个 cause，GPF 的优先级高于同类 AF。
+   `uop.exceptionVec(load/storeAccessFault)`。因此在这些下游 raw vector 上，若已有 TLB PF 或 GPF 且同拍
+   物理 PMP 结果为 1，代码结构允许 PF/GPF 与 AF 两个 bit 同时保留；这不是 MMU translation response 的
+   合法双 fault。ROB/CSR 最终只选择一个 cause，PF/GPF 的优先级均高于同类 AF。
 6. `level` 表示当前页表层级而不是已经执行的翻译次数，数值越大越靠近根页表。无 page-table cache
    命中时，Sv48/Sv48x4 从 `level=3` 开始，Sv39/Sv39x4 从 `level=2` 开始，随后向 `level=0`
    递减；`level=0` 是最低层 L0，而不是通常意义上的第一次翻译。上层 cache 命中时，首个实际 memory
@@ -112,7 +112,7 @@ flowchart TD
    直接生成 af。因此同一个 excp(d) 至多保留一个 fault class。
 5. TlbResp 交给 LSU/前端后，标量 load/store/hybrid/atomic 路径仍可能把物理 PMP/PMA 结果 OR 到 AF
    bit。此时应区分“raw exceptionVec 同时有位”和“MMU 返回同时有位”。
-6. 异常到达 CSR 时，ExceptionNO.priorities 以 GPF 排在同类 AF 之前，regularExceptionNO 只输出一个
+6. 异常到达 CSR 时，ExceptionNO.priorities 以 PF/GPF 排在同类 AF 之前，regularExceptionNO 只输出一个
    cause number；不会产生两个架构 trap。
 ```
 
@@ -474,11 +474,11 @@ s2_exception_vec(loadAccessFault) := s2_vecActive &&
   (s2_in.uop.exceptionVec(loadAccessFault) || s2_pmp.ld || ...)
 ```
 
-如果上一个阶段已经由 TLB 写入 `loadGuestPageFault=1`，且同一后处理周期 `s2_pmp.ld=1`，则
-`s2_exception_vec(loadGuestPageFault)` 与 `s2_exception_vec(loadAccessFault)` 都可能为 1。store/
-hybrid/atomic 有对应的 `st/ld` OR 路径。源码同时注明：翻译已经产生 PF/GPF/AF 后，后续 PMP/PMA
-响应“不可靠”（Load/Store 的 `s2_un_access_exception` 注释）；因此这类双 bit 是下游 raw-vector
-边界现象，不应反推为 MMU 同时返回了 GPF 和 AF。
+如果上一个阶段已经由 TLB 写入 `loadPageFault=1` 或 `loadGuestPageFault=1`，且同一后处理周期
+`s2_pmp.ld=1`，则相应 PF/GPF bit 与 `loadAccessFault` 都可能为 1。store/hybrid/atomic 有对应的
+`st/ld` OR 路径。源码同时注明：翻译已经产生 PF/GPF/AF 后，后续 PMP/PMA 响应“不可靠”（Load/Store 的
+`s2_un_access_exception` 注释）；因此这类双 bit 是下游 raw-vector 边界现象，不应反推为 MMU 同时返回
+了 PF/GPF 和 AF。
 
 向量 segment 在 `VSegmentUnit.scala:503-506` 先用 `exceptionWithPf` 屏蔽后续 PMP 响应；但其 TLB
 返回阶段仍把 `Pbmt.isUncache(pbmt)` 合并到 AF，分析 vector 时应以该模块实际状态机为准。
@@ -496,8 +496,9 @@ hybrid/atomic 有对应的 `st/ld` OR 路径。源码同时注明：翻译已经
 store/load page fault > store/load guest page fault > store/load access fault
 ```
 
-所以即使下游 raw vector 同时有 GPF 与 AF，最终 load/store trap cause 仍选择 GPF（对应指令类型的
-`loadGuestPageFault`/`storeGuestPageFault`），不会同时进入两个 trap handler。
+所以即使下游 raw vector 同时有 PF/GPF 与 AF，最终 load/store trap cause 仍选择 PF/GPF（对应的
+`loadPageFault`/`storePageFault` 或 `loadGuestPageFault`/`storeGuestPageFault`），不会同时进入两个 trap
+handler。
 
 ## L2TLB Response 的四个 fault 与双阶段 PPN 合成
 
@@ -589,7 +590,7 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 
 ## 状态、队列和优先级
 
-| 层次/字段 | 生产者 | 置位条件 | 同时 GPF+AF？ | 最终消费者/优先级 |
+| 层次/字段 | 生产者 | 置位条件 | 同时 PF/GPF+AF？ | 最终消费者/优先级 |
 |---|---|---|---|---|
 | `PtwCache.l3/l3v/l3g/l3h` | PtwCache refill | level-3 非叶且 `canRefill`，或 SFENCE/HFENCE 清 valid | 不适用 | 命中后向 PTW/HPTW 提供下一级 PPN，从 level 2 继续 |
 | `HptwResp.s2.gpf/gaf` | HPTW | `pageFault`、PMP/PMA AF、`ppn_af` | 否 | `TlbPermBundle.applyS2()`；AF 优先 |
@@ -606,7 +607,7 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 - 若仿真模型在 `PtwRespS2` 层同时提供 S2 GPF 候选和**当前翻译模式生效的** S1/S2 AF 候选，L1 TLB
   的预期结果是 AF，而不是 GPF+AF；若同时提供生效的 S1 PF 候选，预期优先保留 PF。`onlyStage2`
   模式不会消费 S1 的 AF/PF 字段。
-- 只有在专门观察 LSU 后处理 raw vector 时，才需要覆盖“TLB GPF + 独立物理 PMP AF”的双 bit 边界；
+- 只有在专门观察 LSU 后处理 raw vector 时，才需要覆盖“TLB PF/GPF + 独立物理 PMP AF”的双 bit 边界；
   该组合不应被反馈为 L2TLB response 的正常双 fault。
 
 ## 异常、回滚与 Flush
@@ -691,6 +692,8 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 - `src/main/scala/xiangshan/cache/mmu/L2TLB.scala:568-589`：difftest 可以观测原始 S2 `perm` payload。
 - `src/main/scala/xiangshan/frontend/FrontendBundle.scala:123-155,177-205`：ITLB fault at-most-one-hot
   与异常 merge。
+- `src/main/scala/xiangshan/backend/fu/PMP.scala:290-316,426-460,593-623`：PMP CSR reset、U/S/M 态默认
+  permission、PMP/PMA response 合并。
 - `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:1206-1228`、`StoreUnit.scala:469-497`：下游
   PMP/PMA AF OR 路径和“不可靠”边界说明。
 - `src/main/scala/xiangshan/package.scala:890-910`、`src/main/scala/xiangshan/backend/fu/CSR.scala:1338-1341`：
@@ -708,6 +711,7 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 前述“stage-local 字段可独立携带”未明确正常 producer 是否允许 S1 AF 与 S2 GAF 双高 | 明确同一路 PTW/HPTW 中 `s2.gaf -> hptw_accessFault -> guestFault -> !s1.af`；双高只能作为主动接口压力注入，不能标记为 Scala-faithful response | 用户追问 GAF 与 AF 是否可同时拉高 | V2 PTW/HPTW/LLPTW、L2TLB response 随机约束 |
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 将 L1 TLB 最终异常收敛优先级误用于 L2TLB raw response producer | 明确普通 PTW、LLPTW PMP-AF、HPTW 与 LLPTW S1-PF/S2-GPF 各有局部优先级；Scala-faithful 随机需保留 fault origin | 用户要求更新 L2TLB 视角四个 PF/AF 字段的优先级表 | V2 L2TLB/PTW/LLPTW/HPTW response 生成 |
 | 2026-08-04 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只说明 S2 `g_perm` 参与 GPF/AF 收敛，未区分其各 bit 的实际消费者 | 明确 `g_perm.pf/af/A/D/R/W/X` 参与 G-stage fault/permission；`g_perm.g`（以及当前 `u/v`）虽可保存或 debug 观察，但不参与 local hit、fence 或 `perm_check()` | 用户追问 S2 `entries.g_perm.g` 是否对相关 fence 或翻译产生实际效果 | V2 HPTW、PtwCache、TLBStorage、L1 TLB |
+| 2026-08-28 | `8fed6fcfd6584e561c2eb3390ce856418a672858` | 旧表述只以 GPF+AF 说明 LSU raw vector 双 bit | 补充实际 Sv39/U 态场景：DTLB 可先给 S1 PF，默认 PMP deny 再使 Load/Store raw vector 带 AF；CSR 仍按 `ExceptionNO.priorities` 选 PF，RM 不能把 raw 双 bit 直接解释为双 trap | 用户要求分析 Sv39 U 态 PF+AF RM 失配 | V2 DTLB、PMPChecker、LoadUnit、StoreUnit、ROB/CSR、mem_ut RM |
 
 ## 待确认项
 

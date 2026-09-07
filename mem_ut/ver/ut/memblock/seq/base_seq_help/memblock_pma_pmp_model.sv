@@ -117,6 +117,10 @@ typedef struct packed {
     bit                  base_instr_access_fault;
     bit                  dcache_fact_needed_for_c;
     bit                  af_decided;
+    // 中文注释：仅向 RM 提供“PMA 是否确认该访问为普通可缓存内存”的窄事实。
+    // 它不表示 DUT 的实际路由，也不用于比较 debug isMMIO/isNCIO；当前唯一消费者
+    // 是 scalar 非对齐异常的硬件拆分资格判断。
+    bit                  normal_cacheable;
     bit                  pmp_ld_fault;
     bit                  pmp_st_fault;
     bit                  pmp_instr_fault;
@@ -875,6 +879,7 @@ function void memblock_pma_pmp_model::make_base_af_view(
     view.ld_access_fault = result.ld_fault;
     view.st_access_fault = result.st_fault;
     view.instr_access_fault = result.instr_fault;
+    view.normal_cacheable = result.cacheable;
     if (view.base_ld_access_fault || view.base_st_access_fault ||
         view.base_instr_access_fault) begin
         view.af_decided = 1'b1;
