@@ -25,6 +25,7 @@ import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -163,16 +164,13 @@ class MainBtbAlignBank(
     raw && e.entry.position >= s1_alignedInstOffset && !s1_crossPage
   })
 
-  // A fully-associative VBTB exposes only the earliest matching entry. Use a
-  // physical-entry priority encoder to break ties at the same position.
-  private val s1_vbtbInvalidPosition = Fill(CfiAlignedPositionWidth, 1.U(1.W))
-  private val s1_vbtbMinPosition = (s1_vbtbHitMask zip s1_vbtbEntries).map { case (hit, e) =>
-    Mux(hit, e.entry.position, s1_vbtbInvalidPosition)
-  }.reduce((a, b) => Mux(a <= b, a, b))
-  private val s1_vbtbMinHitMask = VecInit((s1_vbtbHitMask zip s1_vbtbEntries).map { case (hit, e) =>
-    hit && e.entry.position === s1_vbtbMinPosition
-  })
-  private val s1_vbtbSelectOH    = PriorityEncoderOH(s1_vbtbMinHitMask.asUInt)
+  // A fully-associative VBTB exposes only the earliest matching entry. The
+  // non-strict order makes a lower physical way win when positions are equal.
+  private val s1_vbtbPositionMatrix = CompareMatrix(
+    VecInit(s1_vbtbEntries.map(_.entry.position)),
+    order = (a: UInt, b: UInt) => a <= b
+  )
+  private val s1_vbtbSelectOH    = s1_vbtbPositionMatrix.getLeastElementOH(s1_vbtbHitMask).asUInt
   private val s1_vbtbSelectEntry = Mux1H(s1_vbtbSelectOH, s1_vbtbEntries)
 
   io.read.mbtbResp.positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
