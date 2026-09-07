@@ -3030,6 +3030,8 @@ int run_single_load(int argc, char **argv)
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase;
     environment.memory().fill_incrementing(base, 2 * 64, 0x80);
+    constexpr std::uint64_t immediate_base = base + 0x1000;
+    environment.memory().fill_incrementing(immediate_base, 0x2000, 0x4d);
 
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << environment.cycle()
@@ -3084,6 +3086,52 @@ int run_single_load(int argc, char **argv)
                   << environment.dcache_grant_acks() << " writebacks="
                   << environment.writebacks() << '\n';
         return 1;
+    }
+
+    constexpr std::array<std::int32_t, 5> immediates{
+        0, 1, 2047, -1, -2048,
+    };
+    constexpr std::array<std::uint64_t, 5> immediate_addresses{
+        immediate_base + 0x008,
+        immediate_base + 0x040,
+        immediate_base + 0x800,
+        immediate_base + 0xfc0,
+        immediate_base + 0x1000,
+    };
+    constexpr std::array<std::uint64_t, 5> immediate_values{
+        0x0123456789abcdefULL,
+        0xfedcba9876543210ULL,
+        0x55aa33cc0ff09669ULL,
+        0xa55a5aa5c33c3cc3ULL,
+        0xdeadbeef10293847ULL,
+    };
+    for (unsigned index = 0; index < immediate_addresses.size(); ++index) {
+        environment.memory().write_u64(
+            immediate_addresses[index], immediate_values[index]);
+    }
+    for (unsigned index = 0; index < immediates.size(); ++index) {
+        const memblock::LoadTransaction transaction{
+            .address = immediate_addresses[index],
+            .immediate = immediates[index],
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(16 + index),
+            .lq = static_cast<std::uint8_t>(2 + index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(16 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(transaction);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction) ||
+            !environment.run_until_complete(512)) {
+            std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                      << environment.cycle() << " phase=immediate index="
+                      << index << " immediate=" << immediates[index]
+                      << " effective_address=0x" << std::hex
+                      << transaction.address << std::dec << " reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
     }
 
     memblock::Environment merge(argc, argv);
@@ -3202,6 +3250,8 @@ int run_single_load(int argc, char **argv)
               << " partial_grant_beats="
               << partial.dcache_grant_data_beats()
               << " partial_cycles=" << partial.cycle()
+              << " immediate_loads=" << immediates.size()
+              << " immediate_min=-2048 immediate_max=2047"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -4671,9 +4721,13 @@ int run_ifetch_prefetch(int argc, char **argv)
         return total;
     };
 
+    constexpr std::array<std::int32_t, 3> instruction_immediates{
+        0, -1, -2048,
+    };
     for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
         const memblock::PrefetchTransaction transaction{
             .address = base + lane * 64 + 16,
+            .immediate = instruction_immediates[lane],
             .op = memblock::PrefetchOp::instruction,
             .rob = static_cast<std::uint8_t>(lane),
             .lq = static_cast<std::uint8_t>(lane),
@@ -4721,16 +4775,19 @@ int run_ifetch_prefetch(int argc, char **argv)
         memblock::PrefetchOp::read,
         memblock::PrefetchOp::write,
     };
+    constexpr std::array<std::int32_t, 2> data_immediates{1, 2047};
     const std::uint64_t ifetch_before_data = total_ifetch_requests();
     for (unsigned index = 0; index < data_ops.size(); ++index) {
         const memblock::PrefetchTransaction transaction{
             .address = base + 0x400 + index * 64,
+            .immediate = data_immediates[index],
             .op = data_ops[index],
             .rob = static_cast<std::uint8_t>(3 + index),
             .lq = static_cast<std::uint8_t>(3 + index),
             .sq = 0,
             .lane = index,
         };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
         environment.expect_prefetch(transaction);
         if (!environment.enqueue_prefetch(transaction) ||
             !environment.issue_prefetch(transaction, 256) ||
@@ -4739,6 +4796,21 @@ int run_ifetch_prefetch(int argc, char **argv)
             std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
                       << environment.cycle() << " phase=data-prefetch index="
                       << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t expected_line =
+            transaction.address & ~std::uint64_t{63};
+        if (environment.tilelink_requests() != dcache_before + 1 ||
+            environment.dcache_last_request_address() != expected_line) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=data-prefetch-address index=" << index
+                      << " expected_address=0x" << std::hex << expected_line
+                      << " actual_address=0x"
+                      << environment.dcache_last_request_address() << std::dec
+                      << " requests_before=" << dcache_before
+                      << " requests_after=" << environment.tilelink_requests()
+                      << '\n';
             return 1;
         }
     }
@@ -5202,6 +5274,7 @@ int run_ifetch_prefetch(int argc, char **argv)
               << " mapped_data_dcache=" << mapped_data_dcache_requests
               << " nc_prefetch_dcache=2 nc_prefetch_uncache=0"
               << " io_prefetch_dcache=0 io_prefetch_uncache=0"
+              << " immediate_cases=5 immediate_min=-2048 immediate_max=2047"
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
@@ -8316,6 +8389,9 @@ int run_uncache_errors(int argc, char **argv)
         const std::uint64_t store_root = root + 0x10000;
         store_environment.configure_backpressure(
             0x94d049bb133111ebULL ^ offset, true);
+        store_environment.memory().fill_incrementing(
+            store_physical & ~std::uint64_t{63}, 64,
+            static_cast<std::uint8_t>(0x61U + offset));
         if (!store_environment.reset() ||
             !store_environment.map_sv39_4k(
                 store_virtual, store_physical, store_root,
@@ -8345,6 +8421,9 @@ int run_uncache_errors(int argc, char **argv)
             .expected_debug_is_ncio = false,
         };
         const auto errors_before = store_environment.bus_error_stats();
+        const std::uint64_t bus_data_before =
+            store_environment.bus_expected_load(
+                store_physical, memblock::LoadOp::ld);
         const std::uint64_t dcache_before =
             store_environment.tilelink_requests();
         const std::uint64_t uncache_before =
@@ -8385,6 +8464,8 @@ int run_uncache_errors(int argc, char **argv)
             errors_after.dcache_reports != errors_before.dcache_reports ||
             errors_after.uncache_reports != errors_before.uncache_reports + 1 ||
             errors_after.last_uncache_address != expected_error_address ||
+            store_environment.bus_expected_load(
+                store_physical, memblock::LoadOp::ld) != bus_data_before ||
             store_environment.sq_dequeued() +
                     store_environment.sq_canceled() !=
                 store_environment.sq_allocated()) {
@@ -8407,17 +8488,14 @@ int run_uncache_errors(int argc, char **argv)
 
     if (!run_store_error(
             "denied", 8, true, false,
-            memblock::kExceptionStoreAccessFault) ||
-        !run_store_error(
-            "corrupt", 24, false, true,
-            memblock::kExceptionHardwareError)) {
+            memblock::kExceptionStoreAccessFault)) {
         return 1;
     }
 
     std::cout << "MEMBLOCK_UNCACHE_ERRORS_PASS"
               << " cycle=" << environment.cycle()
               << " load_denied=1 load_corrupt=1"
-              << " store_denied=1 store_corrupt=1"
+              << " store_denied=1 store_corrupt=0"
               << " uncache_error_reports=" << store_error_reports
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
@@ -10127,12 +10205,9 @@ int run_mmio_contracts(int argc, char **argv)
         constexpr std::uint64_t device_base = 0x35000100ULL;
         constexpr std::uint64_t initial_value = 0x8877665544332211ULL;
         constexpr std::uint32_t denied_store_value = 0xdeadbeefU;
-        constexpr std::uint32_t corrupt_store_value = 0x0badf00dU;
         constexpr std::uint32_t store_value = 0xa1b2c3d4U;
         constexpr std::uint64_t denied_store_bus_data =
             (std::uint64_t{denied_store_value} << 32) | denied_store_value;
-        constexpr std::uint64_t corrupt_store_bus_data =
-            (std::uint64_t{corrupt_store_value} << 32) | corrupt_store_value;
         constexpr std::uint64_t store_bus_data =
             (std::uint64_t{store_value} << 32) | store_value;
         constexpr std::uint64_t stored_beat =
@@ -10274,26 +10349,13 @@ int run_mmio_contracts(int argc, char **argv)
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
-        const memblock::StoreTransaction corrupt_device_store{
-            .address = device_base + 4,
-            .oracle_address = device_base + 4,
-            .data = corrupt_store_value,
-            .op = memblock::StoreOp::sw,
-            .rob = 5,
-            .sq = 1,
-            .address_lane = 1,
-            .data_lane = 0,
-            .expected_exception_mask = memblock::kExceptionHardwareError,
-            .expected_debug_is_mmio = true,
-            .expected_debug_is_ncio = false,
-        };
         const memblock::StoreTransaction device_store{
             .address = device_base + 4,
             .oracle_address = device_base + 4,
             .data = store_value,
             .op = memblock::StoreOp::sw,
-            .rob = 6,
-            .sq = 2,
+            .rob = 5,
+            .sq = 1,
             .address_lane = 0,
             .data_lane = 1,
             .expected_debug_is_mmio = true,
@@ -10303,14 +10365,11 @@ int run_mmio_contracts(int argc, char **argv)
                 "device-denied-write", denied_device_store, true, false) ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0 ||
             !run_device_store(
-                "device-corrupt-write", corrupt_device_store, false, true) ||
-            device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0 ||
-            !run_device_store(
                 "device-partial-write", device_store, false, false) ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) !=
                 stored_beat ||
             !run_device_load(
-                "device-read-written", 7, 4, 167, stored_beat, 0,
+                "device-read-written", 6, 4, 167, stored_beat, 0,
                 false, false)) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << device.cycle()
@@ -10324,7 +10383,7 @@ int run_mmio_contracts(int argc, char **argv)
         }
 
         const auto &accesses = device.uncache_device_accesses();
-        if (device.tilelink_requests() != 0 || accesses.size() != 8 ||
+        if (device.tilelink_requests() != 0 || accesses.size() != 7 ||
             accesses[0].sequence != 0 || accesses[0].write ||
             accesses[0].address != device_base || accesses[0].size != 3 ||
             accesses[0].mask != 0xff ||
@@ -10347,23 +10406,18 @@ int run_mmio_contracts(int argc, char **argv)
             accesses[5].sequence != 5 || !accesses[5].write ||
             accesses[5].address != device_base + 4 ||
             accesses[5].size != 2 || accesses[5].mask != 0xf0 ||
-            accesses[5].data != corrupt_store_bus_data ||
-            accesses[6].sequence != 6 || !accesses[6].write ||
-            accesses[6].address != device_base + 4 ||
-            accesses[6].size != 2 || accesses[6].mask != 0xf0 ||
-            accesses[6].data != store_bus_data ||
-            accesses[7].sequence != 7 || accesses[7].write ||
-            accesses[7].address != device_base || accesses[7].size != 3 ||
-            accesses[7].mask != 0xff ||
-            accesses[7].read_data != stored_beat ||
-            !accesses[0].denied || accesses[0].corrupt ||
+            accesses[5].data != store_bus_data ||
+            accesses[6].sequence != 6 || accesses[6].write ||
+            accesses[6].address != device_base || accesses[6].size != 3 ||
+            accesses[6].mask != 0xff ||
+            accesses[6].read_data != stored_beat ||
+            !accesses[0].denied || !accesses[0].corrupt ||
             accesses[1].denied || !accesses[1].corrupt ||
             accesses[2].denied || accesses[2].corrupt ||
             accesses[3].denied || accesses[3].corrupt ||
             !accesses[4].denied || accesses[4].corrupt ||
-            accesses[5].denied || !accesses[5].corrupt ||
+            accesses[5].denied || accesses[5].corrupt ||
             accesses[6].denied || accesses[6].corrupt ||
-            accesses[7].denied || accesses[7].corrupt ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << device.cycle() << " phase=device-access-log"
@@ -10740,7 +10794,7 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_cycles=" << pma_cycles
               << " device_accesses=" << device_access_count
               << " device_read_clear=1 device_partial_write=1"
-              << " device_error_reads=2 device_error_writes=2"
+              << " device_error_reads=2 device_error_writes=1"
               << " device_error_side_effects=0"
               << " device_cycles=" << device_cycles
               << " queued_device_loads=" << queued_device_access_count
@@ -12630,32 +12684,39 @@ int run_store_forwarding(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2000;
-    environment.memory().fill_incrementing(base, 64, 0x10);
+    environment.memory().fill_incrementing(base, 128, 0x10);
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_STORE_FORWARD_FAIL cycle=" << environment.cycle()
                   << " reason=" << environment.error() << '\n';
         return 1;
     }
 
-    constexpr std::array<memblock::StoreOp, 4> store_ops{
+    constexpr std::array<memblock::StoreOp, 5> store_ops{
         memblock::StoreOp::sb,
         memblock::StoreOp::sh,
         memblock::StoreOp::sw,
         memblock::StoreOp::sd,
+        memblock::StoreOp::sd,
     };
-    constexpr std::array<memblock::LoadOp, 4> load_ops{
+    constexpr std::array<memblock::LoadOp, 5> load_ops{
         memblock::LoadOp::lbu,
         memblock::LoadOp::lhu,
         memblock::LoadOp::lwu,
         memblock::LoadOp::ld,
+        memblock::LoadOp::ld,
+    };
+    constexpr std::array<unsigned, 5> sizes{1, 2, 4, 8, 8};
+    constexpr std::array<std::int32_t, 5> immediates{
+        0, 1, 2047, -1, -2048,
     };
     constexpr std::uint64_t store_data = 0xfedcba9876543281ULL;
 
     for (unsigned index = 0; index < store_ops.size(); ++index) {
-        const unsigned size = 1U << index;
+        const unsigned size = sizes[index];
         const std::uint64_t address = base + index * 16 + (8 - size);
         const memblock::StoreTransaction store{
             .address = address,
+            .immediate = immediates[index],
             .data = store_data,
             .op = store_ops[index],
             .rob = static_cast<std::uint8_t>(index * 2),
@@ -12704,6 +12765,8 @@ int run_store_forwarding(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " stores=" << environment.store_writebacks()
               << " loads=" << environment.writebacks()
+              << " immediate_stores=" << immediates.size()
+              << " immediate_min=-2048 immediate_max=2047"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

@@ -436,7 +436,10 @@ co-issues two offsets from one cold line while holding its GrantData response
 for 128 cycles; both loads must complete from one merged AcquireBlock. A third
 phase delays only the noncritical beat of an `isKeyword` refill by 128 cycles.
 The target load must write back after the critical beat, before the second beat
-arrives, and the eventual line drain must not duplicate that writeback.
+arrives, and the eventual line drain must not duplicate that writeback. Five
+additional loads drive `src + imm` with immediates 0, 1, 2047, -1, and -2048,
+including cache-line crossings, while the independent oracle remains keyed by
+the final effective address.
 
 `load-feedback` observes all three backend scalar-load wakeup lanes and all
 three `ld2Cancel` pins. It checks issue-time `rfWen`, `fpWen`, and `pdest`,
@@ -542,6 +545,8 @@ by circular ROB age rather than LoadUnit priority.
 three scalar load-unit lanes and checks the exact per-lane virtual-address
 output to the frontend. Read/write data-prefetch operations are negative
 controls: they must complete without generating an instruction-prefetch pulse.
+The five initial instruction/data operations cross signed immediates 0, 1,
+2047, -1, and -2048 and check the final `src + imm` address.
 An independent Sv39 phase dispatches and issues three unmapped `prefetch.i`
 requests in one cycle and requires one exact VA on each lane with no PTW or
 DCache request. This reflects the RTL ownership boundary: LoadUnit marks
@@ -585,7 +590,10 @@ source-12 observation in every enabled seed.
 the corresponding scalar load access-fault and hardware-error writebacks with
 RF writes suppressed. Its backend feedback oracle independently requires
 nonzero cancellation for each error and no surviving normal wakeup. The same
-all-wakeups-canceled rule is checked by `scalar-guest-fault` for a G-stage fault
+TileLink agent encodes every denied data response with `corrupt=1` and rejects
+corrupt injection on data-less `Grant`, matching the legal D-channel contract.
+The all-wakeups-canceled rule is also checked by `scalar-guest-fault` for a
+G-stage fault
 whose VA, GPA, and VS-non-leaf classification are independently modeled. The
 scenario also fills two lines, waits for every refill beat and GrantAck, proves
 both targets are resident with zero-request hits, and programs the
@@ -656,15 +664,22 @@ clean same-address retry, an exact reread of the failed block, correct data, and
 one DCache request. This distinguishes a permitted L1 fault-result entry from
 forbidden refill of bad response data into the lower page-table caches.
 
-`uncache-errors` injects denied and corrupt Uncache load and store responses.
-Loads check the exception contract through the PBMT=NC adapter. Stores also
-require exactly one external Uncache error report at the 64-byte-aligned
-physical address, no DCache error report, exact exception metadata, and SQ
-conservation. This test caught and now
+`uncache-errors` injects denied and independent-corrupt Uncache load responses
+plus a denied store response. Loads check the exception contract through the
+PBMT=NC adapter. The store also requires exactly one external Uncache error
+report at the 64-byte-aligned physical address, no DCache error report, exact
+exception metadata, SQ conservation, and unchanged initialized backing bytes.
+Denied load data asserts `corrupt` as TileLink requires; corrupt injection on a
+data-less store `AccessAck` is rejected as protocol-illegal. This test caught
+and now
 guards the LoadUnit S1 path that previously discarded response-generated
 exception bits. MMIO uses a distinct S0-to-three-cycle metadata bypass and is
 not implicated by this reproducer. The complete reproducer and root-cause analysis are in
 [`docs/CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`](docs/CPU_BUG_UNCACHE_DCHANNEL_ERROR.md).
+
+`store-forwarding` crosses SB/SH/SW/SD forwarding with signed scalar-store
+immediates 0, 1, 2047, -1, and -2048. Each following load checks the exact
+forwarded bytes at the final effective address before external store drain.
 
 `uncache-widths` exercises all seven scalar load opcodes at every legal byte
 lane for 8-, 16-, 32-, and 64-bit Uncache transfers. The manager returns the
@@ -687,10 +702,11 @@ Two exact bare-mode loads straddle the `0x80000000` PMA boundary: the last
 aligned 64-bit device access below it must use Uncache, while the first DDR
 access must use DCache.
 The Uncache manager also provides a configurable side-effecting device window
-with a structured request log. An eight-access bare-mode sequence first injects
+with a structured request log. A seven-access bare-mode sequence first injects
 denied and corrupt reads and proves that neither clears the device register,
-then injects denied and corrupt writes and proves that neither changes any
-byte. Normal reads still implement read-clear, and a successful 32-bit write at
+then injects a denied write and proves that it changes no byte. Corrupt is
+forbidden on the write's data-less `AccessAck`. Normal reads still implement
+read-clear, and a successful 32-bit write at
 byte offset four has the exact TileLink size, mask, and replicated bus data.
 The final read returns that partial write. The log enforces request order,
 response flags, no duplicate requests, and DCache bypass.

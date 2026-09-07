@@ -21,6 +21,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ).read_text()
 
         for contract in (
+            "scalar_immediate_is_valid",
+            "scalar_issue_base_address",
+            "immediate_loads=",
+            "immediate_min=-2048 immediate_max=2047",
             "keyword_refill_count_",
             "nonkeyword_refill_count_",
             "dcache_keyword_refills()",
@@ -476,7 +480,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "io_uncacheError_ecc_error_valid",
             "last_uncache_address",
             "run_store_error",
-            "store_denied=1 store_corrupt=1",
+            "store_denied=1 store_corrupt=0",
+            "cannot inject corrupt on a data-less Uncache AccessAck",
             "expected_error_address",
             "errors_after.uncache_reports != errors_before.uncache_reports + 1",
         ):
@@ -713,10 +718,26 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "memory_type_prefetches=4",
             "nc_prefetch_dcache=2 nc_prefetch_uncache=0",
             "io_prefetch_dcache=0 io_prefetch_uncache=0",
+            "immediate_cases=5 immediate_min=-2048 immediate_max=2047",
             "ifetch_prefetches=",
             "ifetch-prefetch",
         ):
             self.assertIn(contract, environment + main + makefile + generator)
+
+    def test_scalar_store_immediates_and_error_responses_preserve_memory(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "scalar store immediate exceeds signed 12-bit range",
+            "immediate_stores=",
+            "corrupt || denied",
+            "dcache_last_request_address",
+            "cannot inject corrupt on a data-less DCache Grant",
+            "cannot inject corrupt on a data-less Uncache AccessAck",
+            "if (!denied)",
+            "bus_data_before",
+        ):
+            self.assertIn(contract, environment + main)
 
     def test_hardware_prefetch_outputs_have_a_stride_oracle(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
@@ -1506,10 +1527,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=device-read-error-policy",
             "phase=device-write-error-policy",
             "phase=device-access-log",
-            "accesses.size() != 8",
+            "accesses.size() != 7",
             "device_accesses=",
             "device_read_clear=1 device_partial_write=1",
-            "device_error_reads=2 device_error_writes=2",
+            "device_error_reads=2 device_error_writes=1",
             "device_error_side_effects=0",
             "phase=device-queued-first-delay",
             "phase=device-queued-second-delay",

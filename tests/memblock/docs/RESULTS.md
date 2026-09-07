@@ -20,14 +20,33 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `003514ed0193de4695ba65cf39ed9d3f43c419fa5dca8b91513d51da37592c3e`
+- Current rebuilt and frozen UT executable SHA-256: `b73f037280f68cbd2fefff032371fa4c747ce77e008c953d66f79800b794fe5a`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `8bbdd5fa55994e8421be341944b09e31ed3f1a4fd4ad38c598a4a9bb0e0a90c1`
+- Frozen runtime manifest SHA-256: `d0634516d32f6db1b6dfa5e50ce714e259d3b4bde8896109ded0fcf955776a6b`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
+
+## Scalar Address Immediates And Bus Error Model
+
+On 2026-09-07, the directed scalar address tests began driving the issue
+interface's signed 12-bit immediate instead of leaving every operation at zero.
+`single-load` passed five additional LD cases at immediates 0, 1, 2047, -1,
+and -2048 in 224 aggregate cycles, with seven exact writebacks and seven
+DCache requests. `store-forwarding` passed five SB/SH/SW/SD cases at the same
+immediate values in 232 cycles. `ifetch-prefetch` retained its 840-cycle,
+20-completion result while crossing the same five immediate values. Every
+oracle used the final effective address, independently of the driven base.
+
+The same UT-only change tightened manager behavior. Denied DCache data
+responses now also assert corrupt, denied is propagated on data-less Grant,
+and corrupt-only injection on data-less Grant is rejected. A denied Uncache
+store no longer updates ordinary backing memory, and `uncache-errors`
+requires all initialized bytes to remain unchanged. `dcache-errors`, all 44
+atomic D-channel cases, and all three legal Uncache error cases pass this stricter
+model. No CPU RTL defect was identified by this work.
 
 ## Floating-Point Load Exception Write Enable
 
@@ -39,8 +58,8 @@ exception-vector gate already used by scalar integer loads; details and the
 original failing output are in `CPU_BUG_FP_EXCEPTION_FP_WEN.md`.
 
 After full DefaultConfig re-elaboration and Picker rebuild, `fp-loads` passed
-in 1,753 aggregate cycles on complete RTL SHA-256
-`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+in 1,756 aggregate cycles on complete RTL SHA-256
+`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
 It checked 16 FP writebacks: aligned cacheable and normal PBMT=IO FLH/FLW/FLD,
 cacheable misaligned FLH/FLW/FLD across line/page boundaries, denied FLW,
 corrupt FLD, and independent page, PMP access, stage-1 permission, G-stage
@@ -85,18 +104,21 @@ summary.
 ## Side-Effecting MMIO Device Model
 
 On 2026-09-07, `mmio-contracts` passed its extended side-effecting-device phase
-in 1,003 cycles on
+in 799 cycles on
 complete RTL SHA-256
-`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
-Denied and corrupt 64-bit reads returned the exact load-access/hardware-error
+`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
+Denied and independent-corrupt 64-bit reads returned the exact
+load-access/hardware-error
 exceptions without clearing the initial `0x8877665544332211` register. A clean
 read then returned that value and cleared it, and the next clean read returned
-zero. Denied and corrupt `SW` operations at byte offset four produced the exact
-store-access/hardware-error exceptions without changing any byte. The clean
+zero. A denied `SW` at byte offset four produced the exact store-access
+exception without changing any byte. Corrupt on its data-less `AccessAck` is
+protocol-illegal and is now rejected by the agent instead of counted as CPU
+coverage. The clean
 `SW` emitted size 2, mask `0xf0`, and replicated TileLink data
 `0xa1b2c3d4a1b2c3d4`; the selected bytes produced the exact beat
 `0xa1b2c3d400000000`, which the final read returned before clearing it. The
-eight-entry structured log checked sequence, direction, address, request
+seven-entry structured log checked sequence, direction, address, request
 fields, response data/error flags, and absence of duplicate requests. Every
 access used the SoC PMA device interval and emitted no DCache request. No CPU
 defect was observed.
@@ -292,11 +314,13 @@ and 137 replay-allocation cycles. Filling the 56-entry StoreQueue produced
 seven SQ-full cycles; holding 16 distinct committed store lines behind a
 delayed DCache refill produced two SBuffer-full cycles.
 
-The same build's extended `uncache-errors` scenario passed two load and two
-store response-error cases. Denied and corrupt stores each produced exactly
-one external Uncache error pulse at the 64-byte-aligned physical line address,
-no DCache error pulse, exact architectural exception metadata, and balanced SQ
-accounting.
+The same build's extended `uncache-errors` scenario passed two load and one
+store response-error cases. The denied store produced exactly one external
+Uncache error pulse at the 64-byte-aligned physical line address, no DCache
+error pulse, exact architectural exception metadata, and balanced SQ
+accounting. It also preserved all eight initialized bytes in
+the bus backing memory, closing a prior UT-agent false update on ordinary NC
+memory. This was a harness correction, not a CPU RTL defect.
 
 ## Vector Segment Addressing
 
@@ -413,9 +437,13 @@ separate same-cycle pair injected bit 23 into bank 2 while a bank-5 companion
 returned clean data. Both lanes woke without cancellation, only the target
 address was reported to BEU, neither load issued an external request, and two
 clean survivors proved automatic one-shot clear without an explicit disable
-write. The phase passed in 6,490 cycles with 19 physical-ECC BEU reports, 22
+write. The current phase passed in 6,494 cycles with 19 physical-ECC BEU reports, 22
 wakeups, two cancels, 61 conserved LQ allocations (two canceled), and 56
 conserved SQ allocations. No CPU RTL bug was identified by this closure.
+The DCache agent now also emits TileLink-legal denied data responses with
+`corrupt=1`, propagates denied on data-less Grant, and rejects an impossible
+corrupt-only data-less Grant. The directed DCache and 44-case atomic error
+matrices remain green under that stricter model.
 
 ## Store/Vector IQ Slow Feedback Boundary
 
@@ -534,6 +562,9 @@ instruction-prefetch virtual addresses to the frontend, not IFU training
 inputs. On the current RTL, `ifetch-prefetch` passed in 840 aggregate cycles
 with 20 exact no-RF/no-exception prefetch completions. It first observed one exact
 `prefetch.i` VA on each lane and no IFU pulse for sequential `prefetch.r/w`.
+Those five operations crossed signed immediates 0, 1, 2047, -1, and -2048;
+every IFU pulse and data-manager request was checked against the final effective
+address rather than the issue base.
 A separate empty-Sv39 run issued three unmapped `prefetch.i` requests together;
 all three lanes emitted their VA with no PTW or DCache request, matching the
 explicit `s0_tlb_no_query` path.
@@ -1455,7 +1486,7 @@ the historical complete RTL SHA-256 is
 | PBMT=NC store order | Pass | Two stores, two SQ dequeues, two PTW requests, one uncache request |
 | Uncache D-channel errors | Pass | One denied and one corrupt response each reached scalar exception writeback; two uncache requests |
 | Uncache widths/byte lanes | Pass | 29 scalar NC loads across all seven opcodes and legal 8-byte-beat lanes; 29 uncache requests, two request stalls, 90 response-delay cycles |
-| MMIO metadata/error, PMA edge, and device side effects | Pass | PBMT phase cycle 818: one normal, one denied, and one corrupt IO load plus one cold-TLB IO store. Bare PMA phase cycle 488: a non-DebugModule `c=0` load/store pair passed, guarded DebugModule access faulted with no manager request or uncanceled wakeup, and exact loads at `0x7ffffff8`/`0x80000000` selected one Uncache/one DCache request. A 1,003-cycle eight-access device log proved read-clear behavior, zero side effects for denied/corrupt reads and writes, exact offset-`SW` fields, recovery, no duplicates, and zero DCache requests. An 803-cycle phase queued three reads under 512/128-cycle delays; a 689-cycle phase pre-issued `load -> SW -> load` under two 256-cycle delays. Both required external depth one and exact device state/order |
+| MMIO metadata/error, PMA edge, and device side effects | Pass | PBMT phase cycle 821: one normal, one denied, and one independent-corrupt IO load plus one cold-TLB IO store. Bare PMA phase cycle 488: a non-DebugModule `c=0` load/store pair passed, guarded DebugModule access faulted with no manager request or uncanceled wakeup, and exact loads at `0x7ffffff8`/`0x80000000` selected one Uncache/one DCache request. A 799-cycle seven-access device log proved read-clear behavior, zero side effects for denied/independent-corrupt reads and a denied write, exact offset-`SW` fields, recovery, no duplicates, and zero DCache requests; corrupt data-less `AccessAck` is rejected as illegal. An 803-cycle phase queued three reads under 512/128-cycle delays; a 689-cycle phase pre-issued `load -> SW -> load` under two 256-cycle delays. Both required external depth one and exact device state/order |
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
 | Atomic operations and exception metadata | Pass | Main phase cycle 1,656: all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and a 120-case matrix crossing all 24 exposed encodings with every illegal W/D byte offset plus ROB wrap. LR returned load-misaligned while SC/AMO/AMOCAS returned store-misaligned; all suppressed `rfWen` and added no DCache request. A separate 39-cycle device-PMA `AMOADD.D` produced `StoreAccessFault`, suppressed `rfWen`, preserved memory, and emitted no DCache/Uncache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |

@@ -257,6 +257,7 @@ enum class AtomicOp : std::uint16_t {
 struct LoadTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::int32_t immediate = 0;
     std::optional<std::uint64_t> pc;
     LoadOp op = LoadOp::ld;
     std::uint8_t rob = 0;
@@ -296,6 +297,7 @@ struct LoadTransaction {
 struct StoreTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::int32_t immediate = 0;
     std::uint64_t data = 0;
     StoreOp op = StoreOp::sd;
     std::uint8_t rob = 0;
@@ -347,6 +349,7 @@ struct AtomicTransaction {
 struct PrefetchTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::int32_t immediate = 0;
     PrefetchOp op = PrefetchOp::read;
     std::uint8_t rob = 0;
     bool rob_flag = false;
@@ -363,6 +366,20 @@ struct PrefetchTransaction {
     std::optional<bool> expected_debug_is_ncio;
     std::optional<bool> expected_debug_is_perf_cnt;
 };
+
+inline bool scalar_immediate_is_valid(std::int32_t immediate)
+{
+    return immediate >= -2048 && immediate <= 2047;
+}
+
+inline std::uint64_t scalar_issue_base_address(
+    std::uint64_t effective_address, std::int32_t immediate)
+{
+    const std::int64_t signed_immediate = immediate;
+    return signed_immediate < 0
+        ? effective_address + static_cast<std::uint64_t>(-signed_immediate)
+        : effective_address - static_cast<std::uint64_t>(signed_immediate);
+}
 
 enum class VectorAddressingMode : std::uint8_t {
     unit_stride,
@@ -1687,6 +1704,7 @@ public:
             d_gap_ = d_beats_.empty() ? 0 : d_beats_.front().delay_before;
         }
         if (a_fire_ && captured_a_) {
+            last_request_address_ = captured_a_->address;
             respond(*captured_a_);
             ++request_count_;
         }
@@ -1713,6 +1731,7 @@ public:
     bool ok() const { return error_.empty(); }
     const std::string &error() const { return error_; }
     std::uint64_t request_count() const { return request_count_; }
+    std::uint64_t last_request_address() const { return last_request_address_; }
     std::uint64_t get_count() const { return get_count_; }
     std::uint64_t refill_count() const { return refill_count_; }
     std::uint64_t keyword_refill_count() const
@@ -1913,7 +1932,8 @@ private:
             const std::uint64_t beat_base = request.address & ~(kBeatBytes - 1);
             push_response(DBeat{
                 1, 0, request.size, request.source, 0, request.keyword,
-                memory_.read_beat(beat_base, kBeatBytes), denied, corrupt,
+                memory_.read_beat(beat_base, kBeatBytes), denied,
+                corrupt || denied,
             }, true);
             break;
         }
@@ -1934,7 +1954,7 @@ private:
                 push_response(DBeat{
                     5, cap, request.size, request.source, sink, request.keyword,
                     memory_.read_beat(base + memory_beat * kBeatBytes, kBeatBytes),
-                    denied, corrupt,
+                    denied, corrupt || denied,
                 }, beat == 0);
             }
             expected_grant_acks_.push_back(sink);
@@ -1942,11 +1962,16 @@ private:
         }
         case 7: { // AcquirePerm -> Grant
             ++acquire_perm_count_;
+            if (corrupt) {
+                error_ = "cannot inject corrupt on a data-less DCache Grant";
+                return;
+            }
             const std::uint16_t sink =
                 static_cast<std::uint16_t>(1U + request.source);
             push_response(DBeat{
                 4, 0, request.size, request.source, sink, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
+                denied, false,
             }, true);
             expected_grant_acks_.push_back(sink);
             break;
@@ -2171,6 +2196,7 @@ private:
     bool d_fire_ = false;
     bool e_fire_ = false;
     std::uint64_t request_count_ = 0;
+    std::uint64_t last_request_address_ = 0;
     std::uint64_t get_count_ = 0;
     std::uint64_t refill_count_ = 0;
     std::uint64_t keyword_refill_count_ = 0;
@@ -2851,11 +2877,14 @@ private:
         inject_denied_ = false;
         inject_corrupt_ = false;
         if (request.opcode == 4) {
+            const bool response_corrupt = corrupt || denied;
             const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
             const std::uint64_t read_data = memory_.read_u64(beat_base);
             if (is_device_request(request)) {
-                record_device_access(request, read_data, denied, corrupt);
-                if (device_window_->read_clear && !denied && !corrupt) {
+                record_device_access(
+                    request, read_data, denied, response_corrupt);
+                if (device_window_->read_clear &&
+                    !denied && !response_corrupt) {
                     for (unsigned byte = 0; byte < 8; ++byte) {
                         if (((request.mask >> byte) & 1U) != 0) {
                             memory_.write_byte(beat_base + byte, 0);
@@ -2868,7 +2897,7 @@ private:
                 // TileLink returns the complete 8-byte beat. LoadUnit selects
                 // the requested byte lane later using the physical address.
                 read_data,
-                denied, corrupt,
+                denied, response_corrupt,
             }, true);
             return;
         }
@@ -2879,12 +2908,16 @@ private:
             error_ = message.str();
             return;
         }
+        if (corrupt) {
+            error_ = "cannot inject corrupt on a data-less Uncache AccessAck";
+            return;
+        }
         const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
         const bool device_request = is_device_request(request);
         if (device_request) {
-            record_device_access(request, 0, denied, corrupt);
+            record_device_access(request, 0, denied, false);
         }
-        if (!device_request || (!denied && !corrupt)) {
+        if (!denied) {
             for (unsigned byte = 0; byte < 8; ++byte) {
                 if (((request.mask >> byte) & 1U) != 0) {
                     memory_.write_byte(
@@ -2894,7 +2927,7 @@ private:
             }
         }
         push_response(
-            Response{0, request.size, request.source, 0, denied, corrupt}, true);
+            Response{0, request.size, request.source, 0, denied, false}, true);
     }
 
     std::uint64_t next_random()
@@ -4645,6 +4678,10 @@ public:
     }
     std::uint64_t cycle() const { return dut_.xclock.clk; }
     std::uint64_t tilelink_requests() const { return memory_agent_.request_count(); }
+    std::uint64_t dcache_last_request_address() const
+    {
+        return memory_agent_.last_request_address();
+    }
     std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
     std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
     std::uint64_t dcache_keyword_refills() const
@@ -7678,6 +7715,10 @@ public:
 
     bool issue_load(const LoadTransaction &transaction, unsigned timeout = 32)
     {
+        if (!scalar_immediate_is_valid(transaction.immediate)) {
+            error_ = "scalar load immediate exceeds signed 12-bit range";
+            return false;
+        }
         generated::ScalarLoadIssue issue;
         issue.pc = transaction.pc.value_or(0x1000 + transaction.rob * 4);
         issue.predecode_rvc = transaction.predecode_rvc;
@@ -7698,7 +7739,9 @@ public:
         issue.wait_for_rob_value = transaction.wait_for_rob_value;
         issue.load_wait_bit = transaction.load_wait_bit;
         issue.load_wait_strict = transaction.load_wait_strict;
-        issue.src = transaction.address;
+        issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+        issue.src = scalar_issue_base_address(
+            transaction.address, transaction.immediate);
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             generated::drive_scalar_load_issue(dut_, transaction.lane, issue);
@@ -7735,6 +7778,10 @@ public:
                 error_ = "scalar load batch lanes must be unique";
                 return false;
             }
+            if (!scalar_immediate_is_valid(transaction.immediate)) {
+                error_ = "scalar load immediate exceeds signed 12-bit range";
+                return false;
+            }
             lane_used[transaction.lane] = true;
             auto &issue = issues[index];
             issue.pc = transaction.pc.value_or(
@@ -7757,7 +7804,9 @@ public:
             issue.wait_for_rob_value = transaction.wait_for_rob_value;
             issue.load_wait_bit = transaction.load_wait_bit;
             issue.load_wait_strict = transaction.load_wait_strict;
-            issue.src = transaction.address;
+            issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+            issue.src = scalar_issue_base_address(
+                transaction.address, transaction.immediate);
         }
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
@@ -7915,6 +7964,10 @@ public:
     bool issue_prefetch(
         const PrefetchTransaction &transaction, unsigned timeout = 32)
     {
+        if (!scalar_immediate_is_valid(transaction.immediate)) {
+            error_ = "software-prefetch immediate exceeds signed 12-bit range";
+            return false;
+        }
         generated::ScalarLoadIssue issue;
         issue.pc = 0x1800 + transaction.rob * 4;
         issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
@@ -7927,7 +7980,9 @@ public:
         issue.lq_value = transaction.lq;
         issue.sq_flag = transaction.sq_flag;
         issue.sq_value = transaction.sq;
-        issue.src = transaction.address;
+        issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+        issue.src = scalar_issue_base_address(
+            transaction.address, transaction.immediate);
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             generated::drive_scalar_load_issue(dut_, transaction.lane, issue);
             dut_.RefreshComb();
@@ -7966,6 +8021,10 @@ public:
                 error_ = "software-prefetch batch lanes must be unique";
                 return false;
             }
+            if (!scalar_immediate_is_valid(transaction.immediate)) {
+                error_ = "software-prefetch immediate exceeds signed 12-bit range";
+                return false;
+            }
             lane_used[transaction.lane] = true;
             auto &issue = issues[index];
             issue.pc = 0x1800 + transaction.rob * 4;
@@ -7979,7 +8038,9 @@ public:
             issue.lq_value = transaction.lq;
             issue.sq_flag = transaction.sq_flag;
             issue.sq_value = transaction.sq;
-            issue.src = transaction.address;
+            issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+            issue.src = scalar_issue_base_address(
+                transaction.address, transaction.immediate);
         }
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             for (std::size_t index = 0; index < transactions.size(); ++index) {
@@ -8195,6 +8256,10 @@ public:
         const VectorMemoryTransaction &vector,
         unsigned timeout = 64)
     {
+        if (!scalar_immediate_is_valid(load.immediate)) {
+            error_ = "scalar load immediate exceeds signed 12-bit range";
+            return false;
+        }
         generated::ScalarLoadIssue scalar_issue;
         scalar_issue.pc = load.pc.value_or(0x1000 + load.rob * 4);
         scalar_issue.fu_op_type = static_cast<std::uint16_t>(load.op);
@@ -8207,7 +8272,9 @@ public:
         scalar_issue.lq_value = load.lq;
         scalar_issue.sq_flag = load.sq_flag;
         scalar_issue.sq_value = load.sq;
-        scalar_issue.src = load.address;
+        scalar_issue.imm = static_cast<std::uint32_t>(load.immediate);
+        scalar_issue.src = scalar_issue_base_address(
+            load.address, load.immediate);
 
         const generated::VectorMemoryIssue vector_issue =
             make_vector_memory_issue(vector);
@@ -8251,6 +8318,10 @@ public:
 
     bool issue_store_address(const StoreTransaction &transaction, unsigned timeout = 32)
     {
+        if (!scalar_immediate_is_valid(transaction.immediate)) {
+            error_ = "scalar store immediate exceeds signed 12-bit range";
+            return false;
+        }
         generated::ScalarStoreIssue issue;
         issue.fu_type = kFuTypeStore;
         issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
@@ -8258,7 +8329,9 @@ public:
         issue.rob_value = transaction.rob;
         issue.sq_flag = transaction.sq_flag;
         issue.sq_value = transaction.sq;
-        issue.src = transaction.address;
+        issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+        issue.src = scalar_issue_base_address(
+            transaction.address, transaction.immediate);
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             generated::drive_scalar_store_address(
                 dut_, transaction.address_lane, issue);
@@ -8301,6 +8374,10 @@ public:
                 error_ = "scalar store-address batch lanes must be unique";
                 return false;
             }
+            if (!scalar_immediate_is_valid(transaction.immediate)) {
+                error_ = "scalar store immediate exceeds signed 12-bit range";
+                return false;
+            }
             lane_used[transaction.address_lane] = true;
             auto &issue = issues[index];
             issue.fu_type = kFuTypeStore;
@@ -8309,7 +8386,9 @@ public:
             issue.rob_value = transaction.rob;
             issue.sq_flag = transaction.sq_flag;
             issue.sq_value = transaction.sq;
-            issue.src = transaction.address;
+            issue.imm = static_cast<std::uint32_t>(transaction.immediate);
+            issue.src = scalar_issue_base_address(
+                transaction.address, transaction.immediate);
         }
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
