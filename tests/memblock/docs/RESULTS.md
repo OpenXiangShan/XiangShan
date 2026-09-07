@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `617765d886f1d3760548c769a0a3eaff5190ba79203f024d2112c362d9d5ad19`
+- Current rebuilt and frozen UT executable SHA-256: `88fc39aca6b64790f448378670c2f08cad2e93bafc55a657e45a2d928fc160ba`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `fb9d46944a825f2cfb9606e6ae4031c1c3fbe91b5a32f4e8b495d749d9bca8d3`
+- Frozen runtime manifest SHA-256: `63d06db4ba736822ef68823c1980e91ff03aee7e9cea3cf506d2c1f5dfd30a2a`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1862,10 +1862,11 @@ On 2026-09-07 the DCache agent added the custom TileLink CMO operations
 source 17, size 64, line alignment, source lifetime through Ack, delayed
 completion, and the manager-derived B/C permission transition. The focused
 scenario delays CBOAck by 1,024 cycles so the expected Probe must complete
-first. Dirty CLEAN returns exact TtoB ProbeAckData and retains a readable line;
-dirty FLUSH returns exact TtoN ProbeAckData and forces a refill; clean INVAL
-returns BtoN ProbeAck without data and also forces a refill.
-Both dirty cases begin with a committed store still buffered and apply no
+first. Every operation is crossed with clean and dirty state: CLEAN returns
+TtoB ProbeAckData or no-data BtoB and retains a readable Branch line; FLUSH
+and INVAL return dirty TtoN ProbeAckData or clean no-data BtoN, invalidate,
+and force a refill. All three dirty cases begin with a committed store still
+buffered and apply no
 testbench flush; the exact Probe data and final empty boundary prove that CMO
 execution drained the stores before completing.
 
@@ -1881,7 +1882,7 @@ cause, CPU impact, reproducer, and fix are recorded in
 The fixed run produced:
 
 ```text
-MEMBLOCK_CMO_CONTRACTS_PASS operations=3 dirty_probe_data=2 automatic_sbuffer_drains=2 retained_hits=1 invalidation_refills=2 denied_cases=3 corrupt_cases=3 positive_cycles=4398 error_cycles=2455 cmo_ack_delay=1024 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
+MEMBLOCK_CMO_CONTRACTS_PASS operations=3 line_state_cases=6 dirty_probe_data=3 automatic_sbuffer_drains=3 retained_hits=2 invalidation_refills=4 denied_cases=3 corrupt_cases=3 positive_cycles=8167 error_cycles=2455 cmo_ack_delay=1024 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
 ```
 
 All six operation/error crosses preserve bus memory, report the exact

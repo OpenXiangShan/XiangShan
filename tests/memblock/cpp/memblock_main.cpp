@@ -11589,6 +11589,10 @@ int run_cbo_zero_contracts(int argc, char **argv)
 
 int run_cmo_contracts(int argc, char **argv)
 {
+    struct CmoOperation {
+        const char *name;
+        memblock::StoreOp op;
+    };
     struct CmoCase {
         const char *name;
         memblock::StoreOp op;
@@ -11598,10 +11602,24 @@ int run_cmo_contracts(int argc, char **argv)
         bool expect_probe_data;
         bool expect_resident;
     };
-    const std::array<CmoCase, 3> cases{{
-        {"clean", memblock::StoreOp::cbo_clean, 1, 0, true, true, true},
-        {"flush", memblock::StoreOp::cbo_flush, 2, 1, true, true, false},
-        {"inval", memblock::StoreOp::cbo_inval, 2, 2, false, false, false},
+    const std::array<CmoOperation, 3> operations{{
+        {"clean", memblock::StoreOp::cbo_clean},
+        {"flush", memblock::StoreOp::cbo_flush},
+        {"inval", memblock::StoreOp::cbo_inval},
+    }};
+    const std::array<CmoCase, 6> cases{{
+        {"clean-dirty", memblock::StoreOp::cbo_clean, 1, 0,
+         true, true, true},
+        {"clean-clean", memblock::StoreOp::cbo_clean, 1, 4,
+         false, false, true},
+        {"flush-dirty", memblock::StoreOp::cbo_flush, 2, 1,
+         true, true, false},
+        {"flush-clean", memblock::StoreOp::cbo_flush, 2, 2,
+         false, false, false},
+        {"inval-dirty", memblock::StoreOp::cbo_inval, 2, 1,
+         true, true, false},
+        {"inval-clean", memblock::StoreOp::cbo_inval, 2, 2,
+         false, false, false},
     }};
 
     unsigned dirty_probe_data = 0;
@@ -11817,9 +11835,9 @@ int run_cmo_contracts(int argc, char **argv)
     unsigned denied_cases = 0;
     unsigned corrupt_cases = 0;
     std::uint64_t error_cycles = 0;
-    for (unsigned operation = 0; operation < cases.size(); ++operation) {
+    for (unsigned operation = 0; operation < operations.size(); ++operation) {
         for (unsigned error_kind = 0; error_kind < 2; ++error_kind) {
-            const CmoCase &test = cases[operation];
+            const CmoOperation &test = operations[operation];
             const bool denied = error_kind == 0;
             const bool corrupt = !denied;
             memblock::Environment environment(argc, argv);
@@ -11924,7 +11942,8 @@ int run_cmo_contracts(int argc, char **argv)
     }
 
     std::cout << "MEMBLOCK_CMO_CONTRACTS_PASS"
-              << " operations=" << cases.size()
+              << " operations=" << operations.size()
+              << " line_state_cases=" << cases.size()
               << " dirty_probe_data=" << dirty_probe_data
               << " automatic_sbuffer_drains=" << automatic_sbuffer_drains
               << " retained_hits=" << retained_hits

@@ -488,6 +488,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "expected_output_flush_pipe",
             "run_cmo_contracts",
             "probe-before-ack",
+            "line_state_cases=",
             "dirty_probe_data=",
             "automatic_sbuffer_drains=",
             "retained_hits=",

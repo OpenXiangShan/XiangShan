@@ -780,13 +780,13 @@ It checks line-aligned size-64 `CBO.CLEAN`, `CBO.FLUSH`, and `CBO.INVAL` A
 requests on fixed source 17, delays `CBOAck` by 1024 cycles, and completes the
 manager-derived Probe first. The dirty cases leave a committed store buffered,
 apply no direct flush, and require CMO execution to drain it before the request
-and resulting Probe. Dirty CLEAN and FLUSH require byte-exact
-ProbeAckData; CLEAN downgrades to a resident Branch line, while FLUSH and a
-clean INVAL invalidate and force a checked refill. Every operation is also
-crossed with denied and independent-corrupt `CBOAck`, exact store-access-fault
-or hardware-error writeback, `flushPipe=1`, no Uncache traffic, unchanged bus
-memory on failure, and SQ conservation. This scenario found the confirmed RTL
-defect documented in
+and resulting Probe. Every operation is crossed with clean and dirty line
+state: dirty transitions require byte-exact ProbeAckData, clean transitions
+require no data, CLEAN retains a Branch line, and FLUSH/INVAL invalidate and
+force a checked refill. Every operation is also crossed with denied and
+independent-corrupt `CBOAck`, exact store-access-fault or hardware-error
+writeback, `flushPipe=1`, no Uncache traffic, unchanged bus memory on failure,
+and SQ conservation. This scenario found the confirmed RTL defect documented in
 [`docs/CPU_BUG_CMO_DCHANNEL_ERROR.md`](docs/CPU_BUG_CMO_DCHANNEL_ERROR.md).
 
 `reset-recovery` separately asserts reset with an accepted DCache refill, PTW
