@@ -553,7 +553,10 @@ def _parse_args() -> argparse.Namespace:
         "--tracking",
         default=str(FRONTEND_ROOT / "docs" / "03_funcov_model" / "frontend_design_change_tracking.csv"),
     )
-    parser.add_argument("--artifacts-root", default=str(FRONTEND_ROOT / "data" / "runs"))
+    parser.add_argument(
+        "--artifacts-root",
+        default=str(REPO_ROOT / "build-frontend" / "artifacts"),
+    )
     parser.add_argument("--simulator", default=os.getenv("TB_FRONTEND_SIM", "verilator"))
     parser.add_argument("--output", help="Write the JSON report to this path instead of stdout.")
     return parser.parse_args()

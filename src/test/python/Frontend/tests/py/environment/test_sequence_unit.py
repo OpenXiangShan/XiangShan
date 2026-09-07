@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from env.monitors import Observation
+from env.support import fold_pc
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.sequences import CheckPcSequence, InjectRedirectSequence, LoadGoldenTraceSequence, RunUntilGoldenTraceCompleteSequence
 from env.core.transactions import BackendRedirectClass, GoldenTraceSource, PcSequenceExpectation, RedirectTxn
@@ -24,7 +25,15 @@ class _CheckPcEnv:
         if self._pcs:
             pc = int(self._pcs.pop(0))
             self.monitor.observations.append(
-                Observation(cycle=len(self.monitor.observations), slot=0, pc=pc, instr=0, is_rvc=False, pred_taken=False)
+                Observation(
+                    cycle=len(self.monitor.observations),
+                    slot=0,
+                    pc=pc,
+                    foldpc=fold_pc(pc),
+                    instr=0,
+                    is_rvc=False,
+                    pred_taken=False,
+                )
             )
         return 1
 

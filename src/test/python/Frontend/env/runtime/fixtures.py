@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from .pylib import frontend_pylib_path
+from .pylib import frontend_build_root_path, frontend_pylib_path
 
 _HERE = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _HERE.parents[3]
@@ -41,7 +41,7 @@ logger = getLogger("env.fixtures")
 
 
 def _data_dir() -> Path:
-    p = Path(__file__).resolve().parents[2] / "data"
+    p = frontend_build_root_path() / "artifacts"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -70,7 +70,7 @@ def _funcov_dir() -> Path:
         if artifact_root:
             p = Path(artifact_root) / "funcov"
         else:
-            p = _data_dir() / "runs" / _safe_path_component(_effective_run_id()) / "funcov"
+            p = _data_dir() / _safe_path_component(_effective_run_id()) / "funcov"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -85,7 +85,7 @@ def _artifact_root_dir(request, default_dir: Path) -> Path:
     if raw:
         root = Path(raw)
     else:
-        root = default_dir / "runs" / _safe_path_component(_effective_run_id())
+        root = default_dir / _safe_path_component(_effective_run_id())
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -270,7 +270,7 @@ def _funcov_run_metadata(request, env) -> dict:
     artifact_root = (
         Path(artifact_root_raw)
         if artifact_root_raw
-        else _data_dir() / "runs" / _safe_path_component(run_id)
+        else _data_dir() / _safe_path_component(run_id)
     ).resolve()
     case_log_path = str(
         getattr(getattr(env, "dut", None), "_frontend_case_log_path", "") or ""
@@ -390,14 +390,11 @@ def _drive_external_memory_idle(dut) -> None:
     for name in (
         "auto_inner_icache_client_out_d_valid",
         "auto_inner_icache_client_out_d_bits_opcode",
-        "auto_inner_icache_client_out_d_bits_size",
         "auto_inner_icache_client_out_d_bits_source",
         "auto_inner_icache_client_out_d_bits_denied",
         "auto_inner_icache_client_out_d_bits_data",
         "auto_inner_icache_client_out_d_bits_corrupt",
         "auto_inner_instrUncache_client_out_d_valid",
-        "auto_inner_instrUncache_client_out_d_bits_opcode",
-        "auto_inner_instrUncache_client_out_d_bits_size",
         "auto_inner_instrUncache_client_out_d_bits_source",
         "auto_inner_instrUncache_client_out_d_bits_denied",
         "auto_inner_instrUncache_client_out_d_bits_data",

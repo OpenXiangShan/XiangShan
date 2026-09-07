@@ -22,6 +22,7 @@ from env.funcov.py.ftq.sampler import (
     sample_two_fetch_coverage,
 )
 from env.funcov.py.ftq.two_fetch_funcov import _tf_ptr_at_or_after
+from env.support.pc_utils import fold_pc
 from env.funcov.py.ftq.checker_funcov import (
     COVERAGE_GROUPS as CHECKER_COVERAGE_GROUPS,
     SAMPLER_BIN_KEYS as CHECKER_SAMPLER_BIN_KEYS,
@@ -85,6 +86,9 @@ class _Signal:
 
 
 class _FakeDut:
+    def __init__(self):
+        self.cfvec_pcs = {}
+
     def set(self, name, value):
         signal = getattr(self, str(name), None)
         if signal is None:
@@ -111,7 +115,12 @@ def _set_dual_ibuffer_entries(dut, first_tag: tuple[int, int], second_tag: tuple
     base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     dut.set(f"{base}enqEnable", 0b11)
     for slot, (flag, value) in enumerate((first_tag, second_tag)):
-        dut.set(f"{base}pc_{slot}_addr", 0x80000000 + 4 * slot)
+        pc = 0x80000000 + 4 * slot
+        dut.set(f"{base}foldpc_{slot}", fold_pc(pc))
+        dut.set(
+            f"Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_{slot}_addr",
+            pc >> 1,
+        )
         dut.set(f"{base}isRvc_{slot}", 0)
         dut.set(f"{base}ftqPtr_{slot}_flag", flag)
         dut.set(f"{base}ftqPtr_{slot}_value", value)
@@ -142,7 +151,8 @@ def _set_cfvec_entries(dut, entries):
     for slot, pc, is_rvc, instr in entries:
         base = f"io_backend_cfVec_{int(slot)}_"
         dut.set(base + "valid", 1)
-        dut.set(base + "bits_pc", pc)
+        dut.set(base + "bits_foldpc", fold_pc(pc))
+        dut.cfvec_pcs[int(slot)] = int(pc)
         dut.set(base + "bits_isRvc", is_rvc)
         dut.set(base + "bits_instr", instr)
         dut.set(base + "bits_ftqPtr_flag", 0)
@@ -276,6 +286,7 @@ def _make_recorder(tmp_path, *, target_bin_ids=None, target_tp_ids=None, target_
         dut=dut,
         config=SimpleNamespace(backend=SimpleNamespace(ftq_size=64)),
         memory=_Memory(),
+        observed_cfvec_pc=lambda slot: int(dut.cfvec_pcs[int(slot)]),
     )
     recorder = FunctionalCoverageRecorder.from_pilot_csv(
         default_pilot_csv_path(),
@@ -840,7 +851,8 @@ def test_two_fetch_backend_two_ftq_source_and_mixed_bins(tmp_path):
     for slot, pc, is_rvc, instr, flag, value in entries:
         base = f"io_backend_cfVec_{slot}_"
         dut.set(base + "valid", 1)
-        dut.set(base + "bits_pc", pc)
+        dut.set(base + "bits_foldpc", fold_pc(pc))
+        dut.cfvec_pcs[int(slot)] = int(pc)
         dut.set(base + "bits_isRvc", is_rvc)
         dut.set(base + "bits_instr", instr)
         dut.set(base + "bits_predTaken", 0)
@@ -1121,15 +1133,11 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run():
         encoding="utf-8"
     )
 
-    assert (
-        'ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${RUN_ID}}"'
-        in pipeline_source
-    )
+    assert 'FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"' in pipeline_source
+    assert 'ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}/${RUN_ID}}"' in pipeline_source
     assert "TB_RUN_ID must contain only" in pipeline_source
-    assert (
-        'TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${TB_RUN_ID}}"'
-        in wrapper_source
-    )
+    assert 'FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"' in wrapper_source
+    assert 'TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}/${TB_RUN_ID}}"' in wrapper_source
     assert 'TB_RUN_COMMAND="${TB_RUN_COMMAND% }"' in wrapper_source
     assert (
         'TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES}"'

@@ -14,10 +14,11 @@
 # expected to finish from the finite program input; add an outer timeout only
 # as a whole-pipeline watchdog, using a limit based on measured runtime.
 #
-# Each run creates a unique artifact directory under
-# src/test/python/Frontend/data/runs/ by default. A complete pass reports a
-# completed golden trace with cursor=total, pending_work=0, and
-# monitor_errors=0. See --help for optional paths and runtime controls.
+# Each run creates a unique directory under the selected simulator's artifact
+# root below build-frontend/. A
+# complete pass reports a completed golden trace with cursor=total,
+# pending_work=0, and monitor_errors=0. See --help for optional paths and
+# runtime controls.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +26,7 @@ FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 source "${SCRIPT_DIR}/frontend_pylib.sh"
 FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
+FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"
 PIPELINE_STAGE="init"
 PIPELINE_REASON="not_started"
 
@@ -109,7 +111,7 @@ BIN_BASENAME="$(basename "${BIN_PATH}")"
 BIN_STEM="${BIN_BASENAME%.*}"
 RUN_ID_DEFAULT="frontend_${BIN_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
-ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${RUN_ID}}"
+ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}/${RUN_ID}}"
 TB_RUN_ID="${RUN_ID}"
 TB_ARTIFACT_DIR="${ARTIFACT_ROOT}"
 TB_COVERAGE_DIR="${TB_COVERAGE_DIR:-${ARTIFACT_ROOT}/coverage}"

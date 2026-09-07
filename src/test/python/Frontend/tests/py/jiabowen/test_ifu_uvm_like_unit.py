@@ -3,6 +3,7 @@ from __future__ import annotations
 from env.model.ifu_reference_model import IFUFetchMonitorAdapter, SequentialIFUReferenceModel
 from env.monitors.frontend_monitor import Observation
 from env.sequences import BaremodeSequentialIFUScenario
+from env.support import fold_pc
 
 
 def test_baremode_sequential_ifu_scenario_defines_program_and_expected_pcs() -> None:
@@ -17,9 +18,9 @@ def test_baremode_sequential_ifu_scenario_defines_program_and_expected_pcs() -> 
 
 def test_ifu_fetch_adapter_and_reference_model_match_sequential_stream() -> None:
     observations = [
-        Observation(cycle=1, slot=0, pc=0x80000000, instr=0x13, is_rvc=False, pred_taken=False),
-        Observation(cycle=1, slot=1, pc=0x80000004, instr=0x13, is_rvc=False, pred_taken=False),
-        Observation(cycle=2, slot=0, pc=0x80000008, instr=0x13, is_rvc=False, pred_taken=False),
+        Observation(cycle=1, slot=0, pc=0x80000000, foldpc=fold_pc(0x80000000), instr=0x13, is_rvc=False, pred_taken=False),
+        Observation(cycle=1, slot=1, pc=0x80000004, foldpc=fold_pc(0x80000004), instr=0x13, is_rvc=False, pred_taken=False),
+        Observation(cycle=2, slot=0, pc=0x80000008, foldpc=fold_pc(0x80000008), instr=0x13, is_rvc=False, pred_taken=False),
     ]
 
     txns = IFUFetchMonitorAdapter().from_observations(observations)

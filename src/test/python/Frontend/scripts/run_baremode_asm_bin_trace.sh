@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+source "${SCRIPT_DIR}/frontend_pylib.sh"
+FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"
 
 usage() {
   cat <<'EOF'
@@ -30,7 +32,7 @@ Environment:
   TB_RUN_ID, TB_ARTIFACT_DIR, TB_COVERAGE_DIR, TB_WAVEFORM_DIR,
   TB_FUNCOV_DIR, TB_CASE_LOG_DIR
                Optional run layout overrides. By default all outputs use
-               data/runs/<run_id>/{coverage,waveforms,funcov,logs}.
+               build-frontend/artifacts/<run_id>/{coverage,waveforms,funcov,logs}.
   TB_FUNCOV_TARGET_BINS, TB_FUNCOV_TARGET_TP_IDS,
   TB_FUNCOV_TARGET_TESTCASES
                Optional explicit coverage targets. This coverage-focused
@@ -69,7 +71,7 @@ TB_RESET_VECTOR="${TB_RESET_VECTOR:-${LINK_ADDR}}"
 TB_RUN_DUT="${TB_RUN_DUT:-1}"
 RUN_ID_DEFAULT="frontend_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 TB_RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
-TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${TB_RUN_ID}}"
+TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}/${TB_RUN_ID}}"
 TB_COVERAGE_DIR="${TB_COVERAGE_DIR:-${TB_ARTIFACT_DIR}/coverage}"
 if [[ -z "${TB_FUNCOV_TARGET_TESTCASES+x}" ]]; then
   # Keep active registry cases scoped to their testcase.  Newly added assembly

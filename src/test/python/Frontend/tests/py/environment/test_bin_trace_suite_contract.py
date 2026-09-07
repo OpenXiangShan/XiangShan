@@ -12,8 +12,9 @@ def test_bin_trace_suite_uses_dedicated_active_list_and_pipeline_wrapper() -> No
     assert "--list-file" in suite_source
     assert "run_bin_trace_pipeline.sh" in suite_source
     assert 'TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL="${TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL:-0}"' in suite_source
-    assert 'SUITE_ARTIFACT_DIR="${SUITE_RUNS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"' in suite_source
+    assert 'SUITE_ARTIFACT_DIR="${SUITE_ARTIFACTS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"' in suite_source
     assert 'case_artifact_dir="${SUITE_ARTIFACT_DIR}/cases/${case_stem}"' in suite_source
+    assert 'SUITE_ARTIFACTS_ROOT="${TB_SUITE_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}}"' in suite_source
     assert 'refusing to reuse existing suite root' in suite_source
     assert 'TB_SUITE_DATE must use YYYYMMDD' in suite_source
     assert 'TB_SUITE_TIME must use HHMMSS' in suite_source

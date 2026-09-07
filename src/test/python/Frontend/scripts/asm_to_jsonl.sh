@@ -6,6 +6,7 @@ FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 source "${SCRIPT_DIR}/frontend_pylib.sh"
 FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
+FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"
 
 usage() {
   cat <<'EOF'
@@ -29,7 +30,7 @@ Environment variables:
                   default: <artifact-root>/inputs/<case>.nemu.log
   TB_RUN_ID       Run identifier used by the default trace/log layout
   TB_ARTIFACT_DIR Run artifact root; defaults to
-                  <repo>/src/test/python/Frontend/data/runs/<run-id>
+                  the selected simulator's artifacts root/<run-id>
   PYTHON          Python command used to call the existing converter
                   default: python from the caller's activated environment
   KEEP_ELF        Keep ELF/MAP/raw bin under ready-to-run when set to 1
@@ -68,7 +69,7 @@ TRACE_LIMIT="${TRACE_LIMIT:-0}"
 KEEP_ELF="${KEEP_ELF:-0}"
 RUN_ID_DEFAULT="frontend_trace_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
-ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${RUN_ID}}"
+ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}/${RUN_ID}}"
 
 BIN_PATH="${2:-${FRONTEND_DIR}/tests/asm_cases/generated/${CASE_STEM}.bin}"
 TRACE_JSONL_PATH="${3:-${ARTIFACT_ROOT}/inputs/${CASE_STEM}.trace.jsonl}"

@@ -20,7 +20,7 @@ def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> No
     assert "mapfile -d '' -t DEFAULT_CASES" in suite_source
     assert "-type f -name '*.S' -print0 | sort -z" in suite_source
     assert 'case_run_id="${SUITE_ID}_${case_stem}"' in suite_source
-    assert 'SUITE_ARTIFACT_DIR="${SUITE_RUNS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"' in suite_source
+    assert 'SUITE_ARTIFACT_DIR="${SUITE_ARTIFACTS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"' in suite_source
     assert 'case_artifact_dir="${SUITE_ARTIFACT_DIR}/cases/${case_stem}"' in suite_source
     assert 'suite_report_dir="${SUITE_ARTIFACT_DIR}/report"' in suite_source
     assert '--data-dir "${SUITE_ARTIFACT_DIR}/cases"' in suite_source

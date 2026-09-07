@@ -5,7 +5,7 @@ Frontend verification environment pytest global config.
 This file intentionally stays thin:
   1. add the compiled Frontend pylib to `sys.path`
   2. add the Frontend package root to `sys.path`
-  3. ensure `data/` exists for waveform and coverage artifacts
+  3. ensure the build-frontend artifact directory exists
 """
 
 import os
@@ -14,14 +14,17 @@ import sys
 import pytest
 
 _TEST_ROOT = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR = os.path.join(_TEST_ROOT, 'data')
 
 if _TEST_ROOT not in sys.path:
     sys.path.insert(0, _TEST_ROOT)
 
-from env.runtime.pylib import frontend_pylib_path
+from env.runtime.pylib import (
+    frontend_build_root_path,
+    frontend_pylib_path,
+)
 
 _PYLIB_PATH = str(frontend_pylib_path())
+_DATA_DIR = str(frontend_build_root_path() / "artifacts")
 
 for _path in (_PYLIB_PATH,):
     if _path not in sys.path:

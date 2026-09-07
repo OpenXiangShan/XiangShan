@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+source "${SCRIPT_DIR}/frontend_pylib.sh"
+FRONTEND_ARTIFACTS_ROOT="$(frontend_artifacts_root_path "${REPO_DIR}")"
 
 usage() {
   cat <<'EOF'
@@ -24,7 +26,7 @@ Environment:
   TB_RUN_ID    Optional suite ID prefix. Each case appends its bin stem.
   TB_SUITE_ARTIFACT_DIR
                Root for dated suite directories; defaults to
-               <repo>/src/test/python/Frontend/data/runs.
+               the selected simulator's artifacts root.
   TB_SUITE_DATE
                Optional suite date in YYYYMMDD format; defaults to the
                invocation date.
@@ -128,7 +130,7 @@ fi
 
 SUITE_ID_DEFAULT="frontend_bin_trace_suite_$(date +%Y%m%d_%H%M%S)_$$"
 SUITE_ID="${TB_RUN_ID:-${SUITE_ID_DEFAULT}}"
-SUITE_RUNS_ROOT="${TB_SUITE_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs}"
+SUITE_ARTIFACTS_ROOT="${TB_SUITE_ARTIFACT_DIR:-${FRONTEND_ARTIFACTS_ROOT}}"
 SUITE_DATE="${TB_SUITE_DATE:-$(date +%Y%m%d)}"
 SUITE_TIME="${TB_SUITE_TIME:-$(date +%H%M%S)}"
 TB_LOG_LEVEL="${TB_LOG_LEVEL:-INFO}"
@@ -151,9 +153,9 @@ if ! [[ "${SUITE_TIME}" =~ ^[0-9]{6}$ ]]; then
   exit 2
 fi
 
-mkdir -p "${SUITE_RUNS_ROOT}"
-SUITE_RUNS_ROOT="$(cd "${SUITE_RUNS_ROOT}" && pwd -P)"
-SUITE_ARTIFACT_DIR="${SUITE_RUNS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"
+mkdir -p "${SUITE_ARTIFACTS_ROOT}"
+SUITE_ARTIFACTS_ROOT="$(cd "${SUITE_ARTIFACTS_ROOT}" && pwd -P)"
+SUITE_ARTIFACT_DIR="${SUITE_ARTIFACTS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"
 if [[ -e "${SUITE_ARTIFACT_DIR}" ]]; then
   echo "[frontend-bin-suite][error] refusing to reuse existing suite root: ${SUITE_ARTIFACT_DIR}" >&2
   exit 2
@@ -162,7 +164,7 @@ mkdir -p "${SUITE_ARTIFACT_DIR}/cases"
 
 echo "[frontend-bin-suite] repo: ${REPO_DIR}"
 echo "[frontend-bin-suite] suite_id: ${SUITE_ID}"
-echo "[frontend-bin-suite] runs_root: ${SUITE_RUNS_ROOT}"
+echo "[frontend-bin-suite] artifacts_root: ${SUITE_ARTIFACTS_ROOT}"
 echo "[frontend-bin-suite] suite_dir: ${SUITE_ARTIFACT_DIR}"
 echo "[frontend-bin-suite] case_count: ${#CASES[@]}"
 

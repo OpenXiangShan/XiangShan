@@ -4,17 +4,21 @@ import os
 from pathlib import Path
 
 
-def frontend_pylib_path() -> Path:
-    override = os.getenv("TB_FRONTEND_PYLIB", "").strip()
-    if override:
-        return Path(override).expanduser()
+def frontend_build_root_path() -> Path:
+    repo_root = Path(__file__).resolve().parents[6]
+    return repo_root / "build-frontend"
 
+
+def frontend_itlb_ptw_req_get_gpa_path() -> str:
+    return "Frontend_top.Frontend._inner_itlb_io_ptw_req_0_bits_getGpa"
+
+
+def frontend_pylib_path() -> Path:
     sim = os.getenv("TB_FRONTEND_SIM", "verilator").strip().lower()
     if sim not in {"verilator", "vcs"}:
         raise RuntimeError("TB_FRONTEND_SIM must be one of: verilator vcs")
 
-    repo_root = Path(__file__).resolve().parents[6]
-    return repo_root / "build-frontend" / f"pylib-{sim}"
+    return frontend_build_root_path() / f"pylib-{sim}"
 
 
 def frontend_offset_path() -> Path:

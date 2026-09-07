@@ -11,7 +11,7 @@ from env import api as env_api
 from env.monitors.frontend_monitor import FrontendMonitor as CanonicalFrontendMonitor
 from env.runtime import fixtures
 from env.core.frontend_env import FrontendEnv
-from env.runtime.pylib import frontend_offset_path, frontend_pylib_path
+from env.runtime.pylib import frontend_build_root_path, frontend_offset_path, frontend_pylib_path
 
 
 def test_env_root_contains_only_package_init():
@@ -73,32 +73,26 @@ def test_env_root_re_exports_frontend_monitor():
 
 
 def test_frontend_pylib_path_selects_sim_package(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
     monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
 
+    assert frontend_build_root_path().as_posix().endswith("/build-frontend")
     assert frontend_pylib_path().as_posix().endswith("build-frontend/pylib-vcs")
     assert fixtures._frontend_pylib_path() == frontend_pylib_path()
 
 
-def test_frontend_pylib_path_allows_explicit_override(monkeypatch):
-    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
-    monkeypatch.setenv("TB_FRONTEND_PYLIB", "/custom/frontend/pylib")
-
-    assert frontend_pylib_path().as_posix() == "/custom/frontend/pylib"
-    assert fixtures._frontend_pylib_path() == frontend_pylib_path()
+def test_frontend_artifacts_use_build_frontend_root():
+    assert fixtures._data_dir() == frontend_build_root_path() / "artifacts"
 
 
 def test_frontend_offset_path_uses_selected_sim_package(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
-    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
+    monkeypatch.setenv("TB_FRONTEND_SIM", "verilator")
 
     assert frontend_offset_path().as_posix().endswith(
-        "build-frontend/pylib-vcs/Frontend/Frontend_offset.yaml"
+        "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
     )
 
 
 def test_frontend_pylib_path_rejects_unknown_sim(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
     monkeypatch.setenv("TB_FRONTEND_SIM", "unknown")
 
     with pytest.raises(RuntimeError, match="TB_FRONTEND_SIM"):
