@@ -265,11 +265,10 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   val isFirstSplit       = !curPtr
   val isSecondSplit      = curPtr
-  val activeNeedCancel   = instMicroOpValid && instMicroOp.uop.robIdx.needFlush(io.redirect)
   /**
    * state update
    */
-  state  := Mux(activeNeedCancel, s_idle, stateNext)
+  state  := stateNext
 
   /**
    * state transfer
@@ -375,13 +374,12 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val sew                              = vtype.vsew
   val lmul                             = vtype.vlmul
   val emul                             = EewLog2(eew) - sew + lmul
-  val enqNeedCancel                    = io.in.bits.uop.robIdx.needFlush(io.redirect)
   val vl                               = instMicroOp.vl
   val vm                               = instMicroOp.uop.vpu.vm
   val vstart                           = instMicroOp.uop.vpu.vstart
   val srcMask                          = GenFlowMask(Mux(vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vstart, vl, true)
   // first uop enqueue, we need to latch microOp of segment instruction
-  when(io.in.fire && !enqNeedCancel && !instMicroOpValid && !isEnqFixVlUop){
+  when(io.in.fire && !instMicroOpValid && !isEnqFixVlUop){
     // element number in a vd
     // TODO Rewrite it in a more elegant way.
     val uopFlowNum                    = ZeroExt(GenRealFlowNum(instType, emul, lmul, eew, sew, true), elemIdxBits)
@@ -404,14 +402,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     notCross16ByteReg                 := false.B
   }
   // latch data
-  when(io.in.fire && !enqNeedCancel && !isEnqFixVlUop){
+  when(io.in.fire && !isEnqFixVlUop){
     data(enqPtr.value)                := io.in.bits.src_vs3
     stride(enqPtr.value)              := io.in.bits.src_stride
     uopq(enqPtr.value).uop            := io.in.bits.uop
   }
 
   // update enqptr, only 1 port
-  when(io.in.fire && !enqNeedCancel && !isEnqFixVlUop){
+  when(io.in.fire && !isEnqFixVlUop){
     enqPtr                            := enqPtr + 1.U
   }
 
@@ -452,7 +450,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // query DTLB IO Assign
   io.dtlb.req                         := DontCare
   io.dtlb.resp.ready                  := true.B
-  io.dtlb.req.valid                   := state === s_tlb_req && segmentActive && !activeNeedCancel
+  io.dtlb.req.valid                   := state === s_tlb_req && segmentActive
   io.dtlb.req.bits.cmd                := Mux(isVSegLoad, TlbCmd.read, TlbCmd.write)
   io.dtlb.req.bits.vaddr              := tlbReqVaddr(VAddrBits - 1, 0)
   io.dtlb.req.bits.fullva             := tlbReqVaddr
@@ -464,7 +462,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req.bits.no_translate       := false.B
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
   io.dtlb.req.bits.debug.isFirstIssue := DontCare
-  io.dtlb.req_kill                    := activeNeedCancel
+  io.dtlb.req_kill                    := false.B
 
   val canTriggerException              = segmentIdx === 0.U || !instMicroOp.isFof // only elementIdx = 0 or is not fof can trigger
 
@@ -566,7 +564,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   /**
    * flush sbuffer IO Assign
    */
-  io.flush_sbuffer.valid           := !activeNeedCancel && !sbufferEmpty && (state === s_flush_sbuffer_req || state === s_wait_flush_sbuffer_resp)
+  io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req || state === s_wait_flush_sbuffer_resp)
 
   /**
   * update curPtr
@@ -694,7 +692,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
    */
   io.rdcache.req                    := DontCare
-  io.rdcache.req.valid              := state === s_cache_req && isVSegLoad && !activeNeedCancel
+  io.rdcache.req.valid              := state === s_cache_req && isVSegLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := dcacheReqVaddr
   io.rdcache.req.bits.vaddr_dup     := dcacheReqVaddrDup
@@ -705,9 +703,9 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.rdcache.resp.ready             := true.B
   io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
   io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
-  io.rdcache.s1_kill                := activeNeedCancel
+  io.rdcache.s1_kill                := false.B
   io.rdcache.s1_kill_data_read      := false.B
-  io.rdcache.s2_kill                := RegNext(activeNeedCancel, false.B)
+  io.rdcache.s2_kill                := false.B
   if (env.FPGAPlatform){
     io.rdcache.s0_pc                := DontCare
     io.rdcache.s1_pc                := DontCare
@@ -760,8 +758,8 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   dontTouch(wmask)
   dontTouch(Cross16ByteMask)
   sbufferOut.bits                  := DontCare
-  sbufferOut.valid                 := state === s_send_data && segmentActive && !activeNeedCancel
-  sbufferOut.bits.vecValid         := state === s_send_data && segmentActive && !activeNeedCancel
+  sbufferOut.valid                 := state === s_send_data && segmentActive
+  sbufferOut.bits.vecValid         := state === s_send_data && segmentActive
   sbufferOut.bits.mask             := sbufferMask
   sbufferOut.bits.data             := sbufferData
   sbufferOut.bits.vaddr            := sbufferVaddr
@@ -771,7 +769,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
   NewPipelineConnect(
     sbufferOut, io.sbuffer, io.sbuffer.fire,
-    activeNeedCancel,
+    false.B,
     Option(s"VSegmentUnitPipelineConnect")
   )
 
@@ -812,7 +810,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   // update splitPtr
   when(state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && (fieldActiveWirteFinish || !segmentActive))){
     splitPtr := splitPtrNext
-  }.elsewhen(io.in.fire && !enqNeedCancel && !instMicroOpValid){
+  }.elsewhen(io.in.fire && !instMicroOpValid){
     splitPtr := deqPtr // initial splitPtr
   }
 
@@ -830,7 +828,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   stridePtrReg    := deqPtr + strideOffsetWire
 
   // update fieldIdx
-  when(io.in.fire && !enqNeedCancel && !instMicroOpValid){ // init
+  when(io.in.fire && !instMicroOpValid){ // init
     fieldIdxWire := 0.U
     fieldIdx := fieldIdxWire
   }.elsewhen(state === s_latch_and_merge_data && segmentActive ||
@@ -846,7 +844,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
 
   //update segmentIdx
-  when(io.in.fire && !enqNeedCancel && !instMicroOpValid){
+  when(io.in.fire && !instMicroOpValid){
     segmentIdxWire := 0.U
     segmentIdx := segmentIdxWire
   }.elsewhen(fieldIdx === maxNfields && (state === s_latch_and_merge_data || (state === s_send_data && stateNext =/= s_send_data && fieldActiveWirteFinish)) &&
@@ -870,9 +868,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
 
 
   //update deqPtr
-  when(activeNeedCancel){
-    deqPtr := enqPtr
-  }.elsewhen((state === s_finish) && !isEmpty(enqPtr, deqPtr)){
+  when((state === s_finish) && !isEmpty(enqPtr, deqPtr)){
     deqPtr := deqPtr + 1.U
   }
 
@@ -882,16 +878,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
    *************************************************************************/
 
   //Enq
-  val fofNeedCancel = fofBufferValid && fofBuffer.robIdx.needFlush(io.redirect)
-  when(isEnqFixVlUop && !fofBufferValid && !enqNeedCancel) { fofBuffer := io.in.bits.uop }
-  when(isEnqFixVlUop && !fofBufferValid && !enqNeedCancel) { fofBufferValid := true.B }
+  when(isEnqFixVlUop && !fofBufferValid) { fofBuffer := io.in.bits.uop }
+  when(isEnqFixVlUop && !fofBufferValid) { fofBufferValid := true.B }
 
   //Deq
   val fofFixVlValid                    = state === s_fof_fix_vl && fofBufferValid
 
   when(fofFixVlValid) { fofBuffer      := 0.U.asTypeOf(new DynInst) }
   when(fofFixVlValid) { fofBufferValid := false.B }
-  when(activeNeedCancel || fofNeedCancel) { fofBufferValid := false.B }
 
 
   /*************************************************************************
@@ -903,13 +897,12 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   val maskDataVec: Vec[UInt] = VecDataToMaskDataVec(instMicroOp.mask, realEw)
   val maskUsed      = maskDataVec(vdIdxInField)
 
-  when(activeNeedCancel || stateNext === s_idle){
+  when(stateNext === s_idle){
     instMicroOpValid := false.B
   }
   // writeback to backend
   val writebackOut                     = WireInit(io.uopwriteback.bits)
-  val writebackValid                   = ((state === s_finish) && !isEmpty(enqPtr, deqPtr) || fofFixVlValid) &&
-                                         !activeNeedCancel && !fofNeedCancel
+  val writebackValid                   = (state === s_finish) && !isEmpty(enqPtr, deqPtr) || fofFixVlValid
 
   when(fofFixVlValid) {
     writebackOut.uop                    := fofBuffer
@@ -935,15 +928,14 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
     writebackOut.uop.fuOpType           := instMicroOp.uop.fuOpType
   }
 
-  io.uopwriteback.valid               := RegNext(writebackValid) &&
-                                         !io.uopwriteback.bits.uop.robIdx.needFlush(io.redirect)
+  io.uopwriteback.valid               := RegNext(writebackValid)
   io.uopwriteback.bits                := RegEnable(writebackOut, writebackValid)
 
   dontTouch(writebackValid)
 
   //to RS
   val feedbackOut                      = WireInit(0.U.asTypeOf(io.feedback.bits))
-  val feedbackValid                    = state === s_finish && !isEmpty(enqPtr, deqPtr) && !activeNeedCancel
+  val feedbackValid                    = state === s_finish && !isEmpty(enqPtr, deqPtr)
   feedbackOut.hit                     := true.B
   feedbackOut.robIdx                  := instMicroOp.uop.robIdx
   feedbackOut.sourceType              := DontCare
@@ -952,8 +944,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   feedbackOut.sqIdx                   := uopq(deqPtr.value).uop.sqIdx
   feedbackOut.lqIdx                   := uopq(deqPtr.value).uop.lqIdx
 
-  io.feedback.valid                   := RegNext(feedbackValid) &&
-                                         !io.feedback.bits.robIdx.needFlush(io.redirect)
+  io.feedback.valid                   := RegNext(feedbackValid)
   io.feedback.bits                    := RegEnable(feedbackOut, feedbackValid)
 
   dontTouch(feedbackValid)
@@ -967,6 +958,5 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.gpaddr        := instMicroOp.exceptionGpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := instMicroOp.exceptionIsForVSnonLeafPTE
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
-  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR &&
-                                         !isEmpty(enqPtr, deqPtr) && !activeNeedCancel
+  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
