@@ -173,6 +173,18 @@ guest-page fault, not a stage-1 page fault. Bare/one-stage and stage-2-only
 paths are separate cases and must not be inferred from a successful nested
 case.
 
+The access-aware nested oracle distinguishes the original data access from the
+implicit accesses used to read VS PTEs. Every such PTE read requires G-stage
+U=1 and R=1, plus A=1 under this configuration's fault-on-clear-A policy.
+MXR cannot substitute X for R, and an original store does not turn the implicit
+read into a write or require W/D. If that G-stage
+translation faults, the reported GPA is the exact VS-PTE address and
+`isForVSnonLeafPTE` is asserted for every VS level because the trap is due to
+an implicit VS-translation memory access. The signal name must not be used as
+a literal leaf/non-leaf classifier. By contrast, when a VS PTE was read and
+its PPN then constructs an out-of-range GPA, the existing GPA-width oracle
+uses the failing level to distinguish leaf from non-leaf metadata.
+
 For Svpbmt, a nonzero G-stage PBMT first overrides the physical memory
 attribute. A nonzero VS-stage PBMT then overrides that intermediate result, so
 the independent composition is `VS != PMA ? VS : G`. `translation-pbmt`

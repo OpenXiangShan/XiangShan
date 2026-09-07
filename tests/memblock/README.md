@@ -382,12 +382,19 @@ and store SQ conservation. A noncanonical store
 may still issue an implementation-dependent PTW request before the DTLB reports
 the page fault; PTW request count is recorded as coverage, not correctness.
 
-`translation-permissions` executes 106 independent cases: 16 stage-1 loads, 17
-stage-1 stores, 33 two-stage loads, and 40 two-stage stores. Its table-driven
+`translation-permissions` executes 194 independent cases: 16 stage-1 loads, 17
+stage-1 stores, 75 two-stage loads, and 86 two-stage stores. Its table-driven
 oracle covers Sv39/Sv48 U/S access, SUM, MXR, missing A/D, VS-stage VSUM/VMXR,
 and G-stage R/A/D/U behavior for scalar loads and stores. Every nested load and
-store permission variant runs under all four VS/G-stage mode pairs. Passing
-stores require exact post-commit readback; faulting stores
+store permission variant runs under all four VS/G-stage mode pairs. An
+additional 42-configuration cross applies X-only with MXR, U=0, and A=0 to the
+G-stage mapping of every VS page-table level for both original load and store,
+adding 84 fault transactions. It requires the access-specific implicit GPF,
+exact faulting VS-PTE GPA, asserted `isForVSnonLeafPTE`, no VS-PTE memory read,
+and no data-manager request. Four positive nested stores map every VS
+page-table page R-only with W=0/D=0, proving that the implicit PTE read does
+not inherit the original store's write permission requirement. Passing stores
+require exact post-commit readback; faulting stores
 must not reach DCache or Uncache and must retire or be explicitly canceled so
 SQ accounting remains exact.
 

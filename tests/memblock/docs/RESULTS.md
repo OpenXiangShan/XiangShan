@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `02d8ef801da1ed25136d8ad08c14ba7a9dd0a5cbf93b684a60d9f93290364d09`
+- Current rebuilt and frozen UT executable SHA-256: `ad3cc4a5deb4a62582b94869933d966cc660219ce4e24b1638959ef96971eefe`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `8d602bccece9dbf598e759f567f918c26910f3407e30c6fc9ae288d396f79e7b`
+- Frozen runtime manifest SHA-256: `82d6e9063fd0d7d6590504efa063544f9f682a1e11805b330dcb3399323496f8`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -996,8 +996,8 @@ extension likewise left debug MMIO/NCIO unconstrained for exceptional PTEs,
 while keeping exact architectural exception and side-effect checks. The
 118-transaction rerun and neighboring MMIO/translation regressions passed.
 
-`make translation-permissions` passed 106 fresh-environment permission cases:
-16 stage-1 loads, 17 stage-1 stores, 33 two-stage loads, and 40 two-stage
+`make translation-permissions` passed 194 fresh-environment permission cases:
+16 stage-1 loads, 17 stage-1 stores, 75 two-stage loads, and 86 two-stage
 stores. The independent truth table covered Sv39/Sv48 U/S pages, SUM, MXR,
 missing A/D, VSUM/VMXR, and G-stage R/A/D/U selection. Every nested load and
 store permission variant ran under all four VS/G-stage mode pairs. Both
@@ -1005,6 +1005,16 @@ Sv39x4 and Sv48x4 rejected a store when `D=0` with the exact
 `StoreGuestPageFault`. Passing stores committed and matched exact scalar
 readback; faulting nested loads and all faulting stores issued no DCache/Uncache
 request, and store cases retained exact SQ retirement/cancellation accounting.
+The added 42-configuration implicit-walk cross rejected G-stage X-only even
+with MXR, U=0, and A=0 at every VS PTE level under all four mode pairs. Each
+configuration ran both original load and store, yielding 84 access-specific
+GPF transactions. Every fault reported the original VA, exact PTE GPA, and
+asserted implicit-access marker, stopped before reading the protected VS PTE,
+issued no data request, and preserved SQ accounting. Four positive nested
+stores succeeded with every VS page-table mapping R-only and W=0/D=0,
+committed, and matched exact readback. This confirms that the G-stage access is
+checked as an implicit load rather than as the original store. No CPU RTL
+defect was observed.
 Neighboring 4-pair mode-matrix, 258-case fault, and 266-case superpage/Svnapot
 runs passed on the same complete RTL SHA-256
 `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
@@ -1874,3 +1884,31 @@ translation and set all three NAPOT controls to 1000; it completed 256 actions
 with host leaf counts `0,66` and nested topology counts `0,0,0,54`. This proves
 that fixed constraints suppress disabled leaf classes rather than merely adding
 NAPOT traffic to the pre-existing 4-KiB generator.
+
+## Nested Implicit G-Stage Permission Closure
+
+On 2026-09-07 `translation-permissions` increased from 106 to 194 independent
+fresh-environment cases. The new 42-configuration matrix crosses Sv39/Sv48 VS
+stage, Sv39x4/Sv48x4 G stage, every VS PTE level, and G-stage X-only+MXR, U=0,
+and A=0 mappings. Each configuration runs both an original load and store, so
+84 transactions require the access-specific guest-page fault, exact original
+VA, exact faulting PTE GPA, asserted implicit-access marker, no protected-PTE
+read, no DCache/Uncache request, and exact queue conservation. Four positive
+stores map every VS page-table page R-only with W=0/D=0; all four commit and
+return exact data, proving the implicit read does not inherit the original
+store's W/D requirement. Runtime cardinality gates require exactly 194 total
+cases, 42 configurations, 84 faults split 42/42 by load/store, and four
+positive stores before PASS can be printed.
+
+The frozen run produced:
+
+```text
+MEMBLOCK_TRANSLATION_PERMISSIONS_PASS cases=194 stage1_load_cases=16 stage1_store_cases=17 two_stage_load_cases=75 two_stage_store_cases=86 implicit_g_permission_faults=84 implicit_g_permission_configs=42 implicit_g_load_permission_faults=42 implicit_g_store_permission_faults=42 implicit_g_readonly_store_cases=4 rtl_sha256=97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39
+```
+
+`make unit` passed all 183 tests, and `make check-ports check-rtl` passed. The
+frozen executable SHA-256 was
+`ad3cc4a5deb4a62582b94869933d966cc660219ce4e24b1638959ef96971eefe`;
+the runtime manifest SHA-256 was
+`82d6e9063fd0d7d6590504efa063544f9f682a1e11805b330dcb3399323496f8`.
+No CPU RTL defect was observed.

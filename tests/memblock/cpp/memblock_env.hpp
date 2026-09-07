@@ -1238,6 +1238,86 @@ inline ReferenceStageWalkResult reference_page_walk(
     return {};
 }
 
+inline ReferencePtePermissions reference_pte_permissions(std::uint64_t pte)
+{
+    return {
+        .readable = (pte & (std::uint64_t{1} << 1)) != 0,
+        .writable = (pte & (std::uint64_t{1} << 2)) != 0,
+        .executable = (pte & (std::uint64_t{1} << 3)) != 0,
+        .user = (pte & (std::uint64_t{1} << 4)) != 0,
+        .accessed = (pte & (std::uint64_t{1} << 6)) != 0,
+        .dirty = (pte & (std::uint64_t{1} << 7)) != 0,
+    };
+}
+
+struct ReferencePermissionWalkResult {
+    ReferenceStageWalkResult walk{};
+    std::optional<ReferencePtePermissions> leaf_permissions;
+};
+
+inline ReferencePermissionWalkResult reference_page_walk_permissions(
+    const SparseMemory &memory,
+    std::uint64_t root_page_table,
+    std::uint64_t input_address,
+    ReferencePageMode mode,
+    bool x4 = false,
+    bool pbmte = true)
+{
+    ReferencePermissionWalkResult result{
+        .walk = reference_page_walk(
+            memory, root_page_table, input_address, mode, x4, pbmte),
+    };
+    if (!result.walk.translated || mode == ReferencePageMode::bare) {
+        return result;
+    }
+
+    const unsigned top_level = reference_page_levels(mode) - 1U;
+    std::uint64_t table = root_page_table;
+    for (int level = static_cast<int>(top_level); level >= 0; --level) {
+        const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
+        const std::uint64_t index_mask =
+            x4 && static_cast<unsigned>(level) == top_level ? 0x7ff : 0x1ff;
+        const std::uint64_t index = (input_address >> shift) & index_mask;
+        const std::uint64_t pte = memory.read_u64(table + index * 8);
+        if (reference_pte_is_leaf(pte)) {
+            result.leaf_permissions = reference_pte_permissions(pte);
+            return result;
+        }
+        table = reference_pte_ppn(pte) << 12;
+    }
+    result.walk = {};
+    return result;
+}
+
+enum class ReferenceMemoryAccess : std::uint8_t {
+    load,
+    store,
+};
+
+inline bool reference_memory_access_permitted(
+    ReferenceMemoryAccess access,
+    const ReferencePtePermissions &permissions,
+    ReferencePrivilegeMode privilege,
+    bool sum,
+    bool mxr,
+    bool guest_stage = false)
+{
+    return access == ReferenceMemoryAccess::load
+        ? reference_load_permitted(
+              permissions, privilege, sum, mxr, guest_stage)
+        : reference_store_permitted(
+              permissions, privilege, sum, guest_stage);
+}
+
+inline bool reference_implicit_gstage_read_permitted(
+    const ReferencePtePermissions &permissions)
+{
+    // A VS page-table memory access is always an implicit read through
+    // G-stage. MXR and the original instruction's store direction cannot
+    // replace R or introduce W/D requirements.
+    return permissions.user && permissions.accessed && permissions.readable;
+}
+
 inline std::optional<std::uint64_t> reference_pte_address_at_level(
     const SparseMemory &memory,
     std::uint64_t root_page_table,
@@ -1401,6 +1481,134 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
         };
     }
     return {true, final_translation.physical_address, false, false, 0, false};
+}
+
+inline ReferenceTwoStageWalkResult reference_two_stage_access(
+    const SparseMemory &memory,
+    std::uint64_t vs_root_page_table,
+    std::uint64_t g_root_page_table,
+    std::uint64_t guest_virtual_address,
+    ReferenceMemoryAccess access,
+    ReferencePageMode vs_mode = ReferencePageMode::sv39,
+    ReferencePageMode g_mode = ReferencePageMode::sv39,
+    ReferencePrivilegeMode privilege = ReferencePrivilegeMode::supervisor,
+    bool vsum = false,
+    bool mxr = false,
+    bool vmxr = false,
+    bool vs_pbmte = true,
+    bool g_pbmte = true)
+{
+    if (vs_mode != ReferencePageMode::bare &&
+        !reference_canonical_virtual_address(guest_virtual_address, vs_mode)) {
+        return {false, 0, false, true, 0, false, false};
+    }
+
+    std::uint64_t guest_physical_address = guest_virtual_address;
+    if (vs_mode != ReferencePageMode::bare) {
+        const unsigned top_level = reference_page_levels(vs_mode) - 1U;
+        std::uint64_t vs_table_gpa = vs_root_page_table;
+        for (int level = static_cast<int>(top_level); level >= 0; --level) {
+            const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
+            const std::uint64_t index =
+                (guest_virtual_address >> shift) & 0x1ff;
+            const std::uint64_t pte_gpa = vs_table_gpa + index * 8;
+            const auto pte_translation = reference_page_walk_permissions(
+                memory, g_root_page_table, pte_gpa, g_mode, true, g_pbmte);
+            if (!pte_translation.walk.translated) {
+                return {
+                    false,
+                    0,
+                    !pte_translation.walk.access_fault,
+                    false,
+                    pte_gpa,
+                    true,
+                    pte_translation.walk.access_fault,
+                };
+            }
+            if (pte_translation.leaf_permissions &&
+                !reference_implicit_gstage_read_permitted(
+                    *pte_translation.leaf_permissions)) {
+                return {
+                    false, 0, true, false, pte_gpa, true, false,
+                };
+            }
+
+            const std::uint64_t pte = memory.read_u64(
+                pte_translation.walk.physical_address);
+            if (reference_pte_encoding_fault(
+                    pte, static_cast<unsigned>(level), vs_pbmte)) {
+                return {false, 0, false, true, pte_gpa, false, false};
+            }
+            const std::uint64_t generated_address = reference_leaf_address(
+                pte, guest_virtual_address, static_cast<unsigned>(level));
+            if (g_mode == ReferencePageMode::bare &&
+                reference_pte_physical_address_fault(pte)) {
+                return {
+                    false, 0, false, false, generated_address, false, true,
+                };
+            }
+            if (reference_pte_guest_address_fault(pte, g_mode)) {
+                return {
+                    false,
+                    0,
+                    true,
+                    false,
+                    generated_address,
+                    level != 0,
+                    false,
+                };
+            }
+            if (reference_pte_is_leaf(pte)) {
+                const auto permissions = reference_pte_permissions(pte);
+                if (!reference_memory_access_permitted(
+                        access, permissions, privilege, vsum,
+                        mxr || vmxr)) {
+                    return {false, 0, false, true, 0, false, false};
+                }
+                guest_physical_address = generated_address;
+                break;
+            }
+            if (level == 0) {
+                return {false, 0, false, true, pte_gpa, false, false};
+            }
+            vs_table_gpa = reference_pte_ppn(pte) << 12;
+        }
+    }
+
+    if (g_mode == ReferencePageMode::bare) {
+        return {true, guest_physical_address, false, false, 0, false, false};
+    }
+    const auto final_translation = reference_page_walk_permissions(
+        memory, g_root_page_table, guest_physical_address, g_mode, true,
+        g_pbmte);
+    if (!final_translation.walk.translated) {
+        return {
+            false,
+            0,
+            !final_translation.walk.access_fault,
+            false,
+            guest_physical_address,
+            false,
+            final_translation.walk.access_fault,
+        };
+    }
+    if (final_translation.leaf_permissions &&
+        !reference_memory_access_permitted(
+            access, *final_translation.leaf_permissions,
+            ReferencePrivilegeMode::supervisor, false, mxr, true)) {
+        return {
+            false, 0, true, false, guest_physical_address, false, false,
+        };
+    }
+    return {
+        true,
+        final_translation.walk.physical_address,
+        false,
+        false,
+        0,
+        false,
+        false,
+    };
 }
 
 enum class ResponseLatencyProfile {

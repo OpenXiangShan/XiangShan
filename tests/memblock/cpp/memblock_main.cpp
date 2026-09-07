@@ -25806,12 +25806,470 @@ int run_translation_permissions(int argc, char **argv)
         ++completed;
     }
 
-    std::cout << "MEMBLOCK_TRANSLATION_PERMISSIONS_PASS cases=" << completed
-              << " stage1_load_cases=" << (2 + stage_one_load_cases.size())
-              << " stage1_store_cases=" << (1 + stage_one_store_cases.size())
-              << " two_stage_load_cases=" << (1 + two_stage_load_cases.size())
-              << " two_stage_store_cases=" << two_stage_store_cases.size()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    struct ImplicitGPermissionVariant {
+      const char *name;
+      memblock::ReferencePtePermissions permissions;
+      bool mxr = false;
+    };
+    const std::array<ImplicitGPermissionVariant, 3>
+        implicit_g_permission_variants{{
+            {
+                .name = "xonly-mxr1",
+                .permissions =
+                    {
+                        .readable = false,
+                        .writable = false,
+                        .executable = true,
+                        .user = true,
+                        .dirty = false,
+                    },
+                .mxr = true,
+            },
+            {
+                .name = "user0",
+                .permissions =
+                    {
+                        .writable = false,
+                        .dirty = false,
+                    },
+            },
+            {
+                .name = "accessed0",
+                .permissions =
+                    {
+                        .writable = false,
+                        .user = true,
+                        .accessed = false,
+                        .dirty = false,
+                    },
+            },
+        }};
+    const std::array<memblock::ReferenceMemoryAccess, 2> implicit_g_accesses{{
+        memblock::ReferenceMemoryAccess::load,
+        memblock::ReferenceMemoryAccess::store,
+    }};
+    unsigned implicit_g_permission_configs = 0;
+    unsigned implicit_g_permission_faults = 0;
+    unsigned implicit_g_load_permission_faults = 0;
+    unsigned implicit_g_store_permission_faults = 0;
+    unsigned implicit_g_readonly_store_cases = 0;
+    unsigned implicit_g_fault_case_index = 0;
+    for (const auto vs_mode : permission_modes) {
+      for (const auto g_mode : permission_modes) {
+        const unsigned levels = memblock::reference_page_levels(vs_mode);
+        for (unsigned target_level = 0; target_level < levels; ++target_level) {
+          for (const auto &variant : implicit_g_permission_variants) {
+            for (const auto access : implicit_g_accesses) {
+              memblock::Environment environment(argc, argv);
+              constexpr std::uint64_t guest_virtual = 0x65000000ULL;
+              constexpr std::uint64_t guest_physical = 0x9a000000ULL;
+              constexpr std::uint64_t host_physical = 0xc4200000ULL;
+              constexpr std::uint64_t vs_root = 0xb4000000ULL;
+              constexpr std::uint64_t g_root = 0xb6000000ULL;
+              const std::uint64_t input_address = guest_virtual + 0x188;
+              bool configured = environment.reset();
+              configured = configured &&
+                           (vs_mode == memblock::ReferencePageMode::sv48
+                                ? environment.map_sv48_4k(
+                                      guest_virtual, guest_physical, vs_root)
+                                : environment.map_sv39_4k(
+                                      guest_virtual, guest_physical, vs_root));
+              const auto fault_pte_gpa =
+                  memblock::reference_pte_address_at_level(
+                      environment.memory(), vs_root, input_address, vs_mode,
+                      target_level);
+              for (unsigned page = 0; configured && page < levels; ++page) {
+                const std::uint64_t address = vs_root + page * 0x1000ULL;
+                configured = g_mode == memblock::ReferencePageMode::sv48
+                                 ? environment.map_sv48x4_leaf(address, address,
+                                                               0, g_root)
+                                 : environment.map_sv39x4_leaf(address, address,
+                                                               0, g_root);
+              }
+              const unsigned target_page = levels - 1 - target_level;
+              const std::uint64_t target_page_address =
+                  vs_root + target_page * 0x1000ULL;
+              const auto &permissions = variant.permissions;
+              configured =
+                  configured &&
+                  (g_mode == memblock::ReferencePageMode::sv48
+                       ? environment.map_sv48x4_leaf(
+                             target_page_address, target_page_address, 0,
+                             g_root, permissions.readable, permissions.writable,
+                             permissions.executable, permissions.accessed,
+                             permissions.dirty, permissions.user)
+                       : environment.map_sv39x4_leaf(
+                             target_page_address, target_page_address, 0,
+                             g_root, permissions.readable, permissions.writable,
+                             permissions.executable, permissions.accessed,
+                             permissions.dirty, permissions.user));
+              configured =
+                  configured &&
+                  (g_mode == memblock::ReferencePageMode::sv48
+                       ? environment.map_sv48x4_leaf(guest_physical,
+                                                     host_physical, 0, g_root)
+                       : environment.map_sv39x4_leaf(guest_physical,
+                                                     host_physical, 0, g_root));
+              const auto reference = memblock::reference_two_stage_access(
+                  environment.memory(), vs_root, g_root, input_address, access,
+                  vs_mode, g_mode, memblock::ReferencePrivilegeMode::supervisor,
+                  false, variant.mxr);
+              if (!configured || !fault_pte_gpa.has_value() ||
+                  reference.translated || !reference.guest_page_fault ||
+                  reference.stage1_page_fault || reference.access_fault ||
+                  reference.faulting_guest_physical_address != *fault_pte_gpa ||
+                  !reference.is_for_vs_nonleaf_pte) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                             "phase=implicit-g-reference"
+                          << " case=" << implicit_g_fault_case_index
+                          << " variant=" << variant.name
+                          << " access=" << static_cast<unsigned>(access)
+                          << " vs_mode=" << static_cast<unsigned>(vs_mode)
+                          << " g_mode=" << static_cast<unsigned>(g_mode)
+                          << " level=" << target_level << '\n';
+                return 1;
+              }
+              configured =
+                  configured && environment.activate_two_stage_modes(
+                                    vs_mode, g_mode, vs_root, g_root,
+                                    static_cast<std::uint16_t>(
+                                        211 + implicit_g_fault_case_index),
+                                    static_cast<std::uint16_t>(
+                                        271 + implicit_g_fault_case_index));
+              configured = configured &&
+                           environment.set_translation_permissions(
+                               memblock::ReferencePrivilegeMode::supervisor,
+                               variant.mxr, false);
+              if (!configured) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                             "phase=implicit-g-configuration"
+                          << " case=" << implicit_g_fault_case_index
+                          << " variant=" << variant.name
+                          << " access=" << static_cast<unsigned>(access)
+                          << " reason=" << environment.error() << '\n';
+                return 1;
+              }
+
+              const std::uint64_t ptw_before = environment.ptw_requests();
+              const std::uint64_t dcache_before =
+                  environment.tilelink_requests();
+              const std::uint64_t uncache_before =
+                  environment.uncache_requests();
+              bool executed = false;
+              if (access == memblock::ReferenceMemoryAccess::load) {
+                const memblock::LoadTransaction transaction{
+                    .address = input_address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 0,
+                    .lq = 0,
+                    .pdest = static_cast<std::uint8_t>(
+                        32 + implicit_g_fault_case_index),
+                    .lane = static_cast<unsigned>(implicit_g_fault_case_index %
+                                                  memblock::kScalarLoadLanes),
+                    .expected_exception_mask =
+                        memblock::kExceptionLoadGuestPageFault,
+                };
+                environment.expect_load(transaction);
+                executed = environment.set_rob_head(transaction.rob,
+                                                    transaction.rob_flag) &&
+                           environment.enqueue_load(transaction) &&
+                           environment.issue_load(transaction, 4096) &&
+                           environment.run_until_complete(32768) &&
+                           environment.run_until_lq_retired(8192);
+              } else {
+                const memblock::StoreTransaction transaction{
+                    .address = input_address,
+                    .data = 0x1020304050607080ULL ^ implicit_g_fault_case_index,
+                    .op = memblock::StoreOp::sd,
+                    .rob = 0,
+                    .sq = 0,
+                    .address_lane =
+                        static_cast<unsigned>(implicit_g_fault_case_index %
+                                              memblock::kScalarStoreLanes),
+                    .data_lane = static_cast<unsigned>(
+                        (implicit_g_fault_case_index + 1) %
+                        memblock::kScalarStoreLanes),
+                    .expected_exception_mask =
+                        memblock::kExceptionStoreGuestPageFault,
+                };
+                environment.expect_store(transaction);
+                environment.select_store_exception_address(true);
+                executed =
+                    environment.set_rob_head(transaction.rob,
+                                             transaction.rob_flag) &&
+                    environment.enqueue_store(transaction, 0) &&
+                    environment.issue_store_address(transaction, 4096) &&
+                    environment.issue_store_data(transaction, 4096) &&
+                    environment.run_until_store_complete_with_replay(
+                        transaction, 32768) &&
+                    (environment.sq_dequeued() + environment.sq_canceled() >=
+                         environment.sq_allocated() ||
+                     environment.account_sq_cancellation(1)) &&
+                    environment.sq_dequeued() + environment.sq_canceled() ==
+                        environment.sq_allocated();
+              }
+              if (!executed || environment.ptw_requests() <= ptw_before ||
+                  environment.ptw_requests_covering_since(*fault_pte_gpa,
+                                                          ptw_before) != 0 ||
+                  environment.tilelink_requests() != dcache_before ||
+                  environment.uncache_requests() != uncache_before ||
+                  environment.exception_vaddr() != input_address ||
+                  environment.exception_gpaddr() != *fault_pte_gpa ||
+                  !environment.exception_is_for_vs_nonleaf_pte()) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                             "phase=implicit-g-access"
+                          << " case=" << implicit_g_fault_case_index
+                          << " variant=" << variant.name
+                          << " access=" << static_cast<unsigned>(access)
+                          << " vs_mode=" << static_cast<unsigned>(vs_mode)
+                          << " g_mode=" << static_cast<unsigned>(g_mode)
+                          << " level=" << target_level << " reason="
+                          << (environment.error().empty()
+                                  ? "wrong fault, PTE traffic, metadata, or "
+                                    "data-manager side effect"
+                                  : environment.error())
+                          << " pte_reads="
+                          << environment.ptw_requests_covering_since(
+                                 *fault_pte_gpa, ptw_before)
+                          << " ptw=" << ptw_before << '/'
+                          << environment.ptw_requests() << " vaddr=0x"
+                          << std::hex << environment.exception_vaddr() << "/0x"
+                          << input_address << " gpaddr=0x"
+                          << environment.exception_gpaddr() << "/0x"
+                          << *fault_pte_gpa << " vs_nonleaf=" << std::dec
+                          << environment.exception_is_for_vs_nonleaf_pte()
+                          << '\n';
+                return 1;
+              }
+              ++implicit_g_permission_faults;
+              if (access == memblock::ReferenceMemoryAccess::load) {
+                ++implicit_g_load_permission_faults;
+              } else {
+                ++implicit_g_store_permission_faults;
+              }
+              ++implicit_g_fault_case_index;
+              ++completed;
+            }
+            ++implicit_g_permission_configs;
+          }
+        }
+      }
+    }
+
+    unsigned implicit_g_store_case_index = 0;
+    for (const auto vs_mode : permission_modes) {
+      for (const auto g_mode : permission_modes) {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x67000000ULL;
+        constexpr std::uint64_t guest_physical = 0x9b000000ULL;
+        constexpr std::uint64_t host_physical = 0xc4400000ULL;
+        constexpr std::uint64_t vs_root = 0xb8000000ULL;
+        constexpr std::uint64_t g_root = 0xba000000ULL;
+        const std::uint64_t input_address = guest_virtual + 0x188;
+        bool configured = environment.reset();
+        configured = configured &&
+                     (vs_mode == memblock::ReferencePageMode::sv48
+                          ? environment.map_sv48_4k(guest_virtual,
+                                                    guest_physical, vs_root)
+                          : environment.map_sv39_4k(guest_virtual,
+                                                    guest_physical, vs_root));
+        const unsigned levels = memblock::reference_page_levels(vs_mode);
+        std::vector<std::uint64_t> vs_pte_gpas;
+        vs_pte_gpas.reserve(levels);
+        for (unsigned target_level = 0; target_level < levels; ++target_level) {
+          const auto pte_gpa = memblock::reference_pte_address_at_level(
+              environment.memory(), vs_root, input_address, vs_mode,
+              target_level);
+          if (!pte_gpa.has_value()) {
+            configured = false;
+            break;
+          }
+          vs_pte_gpas.push_back(*pte_gpa);
+        }
+        for (unsigned page = 0; configured && page < levels; ++page) {
+          const std::uint64_t address = vs_root + page * 0x1000ULL;
+          configured =
+              g_mode == memblock::ReferencePageMode::sv48
+                  ? environment.map_sv48x4_leaf(address, address, 0, g_root,
+                                                true, false, false, true, false,
+                                                true)
+                  : environment.map_sv39x4_leaf(address, address, 0, g_root,
+                                                true, false, false, true, false,
+                                                true);
+        }
+        configured =
+            configured && (g_mode == memblock::ReferencePageMode::sv48
+                               ? environment.map_sv48x4_leaf(
+                                     guest_physical, host_physical, 0, g_root)
+                               : environment.map_sv39x4_leaf(
+                                     guest_physical, host_physical, 0, g_root));
+        const auto reference = memblock::reference_two_stage_access(
+            environment.memory(), vs_root, g_root, input_address,
+            memblock::ReferenceMemoryAccess::store, vs_mode, g_mode,
+            memblock::ReferencePrivilegeMode::supervisor);
+        if (!configured || !reference.translated ||
+            reference.physical_address != host_physical + 0x188 ||
+            reference.guest_page_fault || reference.stage1_page_fault ||
+            reference.access_fault) {
+          std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                       "phase=implicit-g-readonly-store-reference"
+                    << " case=" << implicit_g_store_case_index
+                    << " vs_mode=" << static_cast<unsigned>(vs_mode)
+                    << " g_mode=" << static_cast<unsigned>(g_mode) << '\n';
+          return 1;
+        }
+        configured =
+            configured &&
+            environment.activate_two_stage_modes(
+                vs_mode, g_mode, vs_root, g_root,
+                static_cast<std::uint16_t>(311 + implicit_g_store_case_index),
+                static_cast<std::uint16_t>(321 + implicit_g_store_case_index));
+        configured =
+            configured &&
+            environment.set_translation_permissions(
+                memblock::ReferencePrivilegeMode::supervisor, false, false);
+        if (!configured) {
+          std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                       "phase=implicit-g-readonly-store-configuration"
+                    << " case=" << implicit_g_store_case_index
+                    << " reason=" << environment.error() << '\n';
+          return 1;
+        }
+
+        environment.memory().fill_incrementing(
+            host_physical, 0x1000,
+            static_cast<unsigned char>(0xe1 + implicit_g_store_case_index));
+        const memblock::StoreTransaction transaction{
+            .address = input_address,
+            .oracle_address = host_physical + 0x188,
+            .data = 0xfedcba9876543210ULL ^ implicit_g_store_case_index,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(implicit_g_store_case_index %
+                                                  memblock::kScalarStoreLanes),
+            .data_lane =
+                static_cast<unsigned>((implicit_g_store_case_index + 1) %
+                                      memblock::kScalarStoreLanes),
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.expect_store(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_store(transaction, 0) ||
+            !environment.issue_store_address_until_tlb_hit(transaction,
+                                                           16384) ||
+            !environment.issue_store_data(transaction, 2048) ||
+            !environment.pulse_pending_store(transaction.rob,
+                                             transaction.rob_flag) ||
+            !environment.run_until_store_complete(32768) ||
+            !environment.commit_store(transaction, 16384)) {
+          std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                       "phase=implicit-g-readonly-store-execution"
+                    << " case=" << implicit_g_store_case_index
+                    << " reason=" << environment.error() << '\n';
+          return 1;
+        }
+        bool saw_all_vs_ptes = environment.ptw_requests() > ptw_before;
+        for (const std::uint64_t pte_gpa : vs_pte_gpas) {
+          saw_all_vs_ptes =
+              saw_all_vs_ptes &&
+              environment.ptw_requests_covering_since(pte_gpa, ptw_before) != 0;
+        }
+        if (!saw_all_vs_ptes ||
+            environment.uncache_requests() != uncache_before) {
+          std::cerr
+              << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                 "phase=implicit-g-readonly-store-traffic"
+              << " case=" << implicit_g_store_case_index
+              << " reason=missing VS PTE read or unexpected Uncache request"
+              << " ptw=" << ptw_before << '/' << environment.ptw_requests()
+              << " uncache=" << uncache_before << '/'
+              << environment.uncache_requests() << '\n';
+          return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = transaction.address,
+            .oracle_address = transaction.oracle_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .sq = 1,
+            .pdest =
+                static_cast<std::uint8_t>(80 + implicit_g_store_case_index),
+            .lane = static_cast<unsigned>(implicit_g_store_case_index %
+                                          memblock::kScalarLoadLanes),
+        };
+        environment.expect_load_data(readback, transaction.data);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+          std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL "
+                       "phase=implicit-g-readonly-store-readback"
+                    << " case=" << implicit_g_store_case_index << " reason="
+                    << (environment.error().empty()
+                            ? "readback mismatch or unbalanced SQ"
+                            : environment.error())
+                    << '\n';
+          return 1;
+        }
+        ++implicit_g_readonly_store_cases;
+        ++implicit_g_store_case_index;
+        ++completed;
+      }
+    }
+
+    constexpr unsigned expected_implicit_g_permission_configs = 42;
+    constexpr unsigned expected_implicit_g_permission_faults = 84;
+    constexpr unsigned expected_implicit_g_load_permission_faults = 42;
+    constexpr unsigned expected_implicit_g_store_permission_faults = 42;
+    constexpr unsigned expected_implicit_g_readonly_store_cases = 4;
+    constexpr unsigned expected_translation_permission_cases = 194;
+    if (implicit_g_permission_configs !=
+            expected_implicit_g_permission_configs ||
+        implicit_g_permission_faults != expected_implicit_g_permission_faults ||
+        implicit_g_load_permission_faults !=
+            expected_implicit_g_load_permission_faults ||
+        implicit_g_store_permission_faults !=
+            expected_implicit_g_store_permission_faults ||
+        implicit_g_readonly_store_cases !=
+            expected_implicit_g_readonly_store_cases ||
+        completed != expected_translation_permission_cases) {
+      std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=coverage"
+                << " cases=" << completed
+                << " configs=" << implicit_g_permission_configs
+                << " faults=" << implicit_g_permission_faults
+                << " load_faults=" << implicit_g_load_permission_faults
+                << " store_faults=" << implicit_g_store_permission_faults
+                << " readonly_stores=" << implicit_g_readonly_store_cases
+                << '\n';
+      return 1;
+    }
+
+    std::cout
+        << "MEMBLOCK_TRANSLATION_PERMISSIONS_PASS cases=" << completed
+        << " stage1_load_cases=" << (2 + stage_one_load_cases.size())
+        << " stage1_store_cases=" << (1 + stage_one_store_cases.size())
+        << " two_stage_load_cases="
+        << (1 + two_stage_load_cases.size() + implicit_g_load_permission_faults)
+        << " two_stage_store_cases="
+        << (two_stage_store_cases.size() + implicit_g_store_permission_faults +
+            implicit_g_readonly_store_cases)
+        << " implicit_g_permission_faults=" << implicit_g_permission_faults
+        << " implicit_g_permission_configs=" << implicit_g_permission_configs
+        << " implicit_g_load_permission_faults="
+        << implicit_g_load_permission_faults
+        << " implicit_g_store_permission_faults="
+        << implicit_g_store_permission_faults
+        << " implicit_g_readonly_store_cases="
+        << implicit_g_readonly_store_cases
+        << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
 
