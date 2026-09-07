@@ -965,17 +965,18 @@ extension likewise left debug MMIO/NCIO unconstrained for exceptional PTEs,
 while keeping exact architectural exception and side-effect checks. The
 118-transaction rerun and neighboring MMIO/translation regressions passed.
 
-`make translation-permissions` passed 58 fresh-environment permission cases:
-16 stage-1 loads, 11 stage-1 stores, nine two-stage loads, and 22 two-stage
+`make translation-permissions` passed 106 fresh-environment permission cases:
+16 stage-1 loads, 17 stage-1 stores, 33 two-stage loads, and 40 two-stage
 stores. The independent truth table covered Sv39/Sv48 U/S pages, SUM, MXR,
-missing A/D, VSUM/VMXR, all four VS/G-stage mode pairs, and G-stage R/A/D/U
-selection. Both Sv39x4 and Sv48x4 rejected a store when `D=0` with the exact
+missing A/D, VSUM/VMXR, and G-stage R/A/D/U selection. Every nested load and
+store permission variant ran under all four VS/G-stage mode pairs. Both
+Sv39x4 and Sv48x4 rejected a store when `D=0` with the exact
 `StoreGuestPageFault`. Passing stores committed and matched exact scalar
-readback; faulting stores issued no DCache/Uncache request and retained exact
-SQ retirement/cancellation accounting. Neighboring matrix, context, fence,
-Bare, 118-case fault, ten-case superpage, and basic two-stage scenarios passed
-on the same RTL SHA-256
-`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+readback; faulting nested loads and all faulting stores issued no DCache/Uncache
+request, and store cases retained exact SQ retirement/cancellation accounting.
+Neighboring 4-pair mode-matrix, 258-case fault, and 266-case superpage/Svnapot
+runs passed on the same complete RTL SHA-256
+`97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
 
 `make translation-pbmt` passed all 36 valid two-stage PBMT combinations: each
 of the four Sv39/Sv48 and Sv39x4/Sv48x4 mode pairs crossed VS-stage

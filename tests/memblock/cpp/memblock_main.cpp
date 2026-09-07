@@ -24331,13 +24331,20 @@ int run_translation_permissions(int argc, char **argv)
         bool sum;
         bool permitted;
     };
-    const std::array<StageOneStoreCase, 10> stage_one_store_cases{{
+    const std::array<StageOneStoreCase, 16> stage_one_store_cases{{
         {
             .name = "sv39-store-supervisor",
             .mode = memblock::ReferencePageMode::sv39,
             .permissions = {},
             .privilege = memblock::ReferencePrivilegeMode::supervisor,
             .permitted = true,
+        },
+        {
+            .name = "sv39-store-readonly",
+            .mode = memblock::ReferencePageMode::sv39,
+            .permissions = {.writable = false},
+            .privilege = memblock::ReferencePrivilegeMode::supervisor,
+            .permitted = false,
         },
         {
             .name = "sv39-store-accessed0",
@@ -24369,11 +24376,32 @@ int run_translation_permissions(int argc, char **argv)
             .permitted = true,
         },
         {
+            .name = "sv39-store-u-user",
+            .mode = memblock::ReferencePageMode::sv39,
+            .permissions = {.user = true},
+            .privilege = memblock::ReferencePrivilegeMode::user,
+            .permitted = true,
+        },
+        {
+            .name = "sv39-store-u-supervisor-page",
+            .mode = memblock::ReferencePageMode::sv39,
+            .permissions = {},
+            .privilege = memblock::ReferencePrivilegeMode::user,
+            .permitted = false,
+        },
+        {
             .name = "sv48-store-supervisor",
             .mode = memblock::ReferencePageMode::sv48,
             .permissions = {},
             .privilege = memblock::ReferencePrivilegeMode::supervisor,
             .permitted = true,
+        },
+        {
+            .name = "sv48-store-readonly",
+            .mode = memblock::ReferencePageMode::sv48,
+            .permissions = {.writable = false},
+            .privilege = memblock::ReferencePrivilegeMode::supervisor,
+            .permitted = false,
         },
         {
             .name = "sv48-store-accessed0",
@@ -24403,6 +24431,20 @@ int run_translation_permissions(int argc, char **argv)
             .privilege = memblock::ReferencePrivilegeMode::supervisor,
             .sum = true,
             .permitted = true,
+        },
+        {
+            .name = "sv48-store-u-user",
+            .mode = memblock::ReferencePageMode::sv48,
+            .permissions = {.user = true},
+            .privilege = memblock::ReferencePrivilegeMode::user,
+            .permitted = true,
+        },
+        {
+            .name = "sv48-store-u-supervisor-page",
+            .mode = memblock::ReferencePageMode::sv48,
+            .permissions = {},
+            .privilege = memblock::ReferencePrivilegeMode::user,
+            .permitted = false,
         },
     }};
 
@@ -24524,7 +24566,9 @@ int run_translation_permissions(int argc, char **argv)
     }
 
     struct TwoStageLoadCase {
-        const char *name;
+        std::string name;
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
         memblock::ReferencePtePermissions vs_permissions;
         memblock::ReferencePtePermissions g_permissions;
         bool mxr;
@@ -24532,7 +24576,16 @@ int run_translation_permissions(int argc, char **argv)
         bool vsum;
         std::uint32_t exception;
     };
-    const std::array<TwoStageLoadCase, 8> two_stage_load_cases{{
+    struct TwoStageLoadVariant {
+        const char *name;
+        memblock::ReferencePtePermissions vs_permissions;
+        memblock::ReferencePtePermissions g_permissions;
+        bool mxr = false;
+        bool vmxr = false;
+        bool vsum = false;
+        std::uint32_t exception = 0;
+    };
+    const std::array<TwoStageLoadVariant, 8> two_stage_load_variants{{
         {
             .name = "vs-user-vsum0",
             .vs_permissions = {.user = true},
@@ -24604,6 +24657,35 @@ int run_translation_permissions(int argc, char **argv)
             .exception = memblock::kExceptionLoadGuestPageFault,
         },
     }};
+    const std::array<memblock::ReferencePageMode, 2> permission_modes{{
+        memblock::ReferencePageMode::sv39,
+        memblock::ReferencePageMode::sv48,
+    }};
+    const auto permission_mode_name = [](memblock::ReferencePageMode mode) {
+        return mode == memblock::ReferencePageMode::sv48 ? "sv48" : "sv39";
+    };
+    std::vector<TwoStageLoadCase> two_stage_load_cases;
+    two_stage_load_cases.reserve(
+        permission_modes.size() * permission_modes.size() *
+        two_stage_load_variants.size());
+    for (const auto vs_mode : permission_modes) {
+        for (const auto g_mode : permission_modes) {
+            for (const auto &variant : two_stage_load_variants) {
+                two_stage_load_cases.push_back({
+                    .name = std::string(permission_mode_name(vs_mode)) + "-" +
+                        permission_mode_name(g_mode) + "x4-" + variant.name,
+                    .vs_mode = vs_mode,
+                    .g_mode = g_mode,
+                    .vs_permissions = variant.vs_permissions,
+                    .g_permissions = variant.g_permissions,
+                    .mxr = variant.mxr,
+                    .vmxr = variant.vmxr,
+                    .vsum = variant.vsum,
+                    .exception = variant.exception,
+                });
+            }
+        }
+    }
 
     for (std::size_t index = 0; index < two_stage_load_cases.size(); ++index) {
         const auto &test = two_stage_load_cases[index];
@@ -24638,22 +24720,44 @@ int run_translation_permissions(int argc, char **argv)
         const auto &vs = test.vs_permissions;
         const auto &g = test.g_permissions;
         if (!environment.reset() ||
-            !environment.map_sv39_leaf(
-                guest_virtual, guest_physical, 0, vs_root,
-                vs.readable, vs.writable, vs.executable, vs.user, false,
-                vs.accessed, vs.dirty) ||
-            !environment.map_sv39x4_4k(vs_root, vs_root, g_root) ||
-            !environment.map_sv39x4_4k(
-                vs_root + 0x1000, vs_root + 0x1000, g_root) ||
-            !environment.map_sv39x4_4k(
-                vs_root + 0x2000, vs_root + 0x2000, g_root) ||
-            !environment.map_sv39x4_leaf(
-                guest_physical, host_physical, 0, g_root,
-                g.readable, g.writable, g.executable, g.accessed,
-                g.dirty, g.user) ||
-            !environment.activate_two_stage(
-                vs_root, g_root, static_cast<std::uint16_t>(91 + index),
-                static_cast<std::uint16_t>(111 + index)) ||
+            !(test.vs_mode == memblock::ReferencePageMode::sv48
+                  ? environment.map_sv48_leaf(
+                        guest_virtual, guest_physical, 0, vs_root,
+                        vs.readable, vs.writable, vs.executable, vs.user,
+                        false, vs.accessed, vs.dirty)
+                  : environment.map_sv39_leaf(
+                        guest_virtual, guest_physical, 0, vs_root,
+                        vs.readable, vs.writable, vs.executable, vs.user,
+                        false, vs.accessed, vs.dirty))) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                      << test.name << "-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        bool configured = true;
+        const unsigned vs_table_pages =
+            test.vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
+        for (unsigned page = 0; configured && page < vs_table_pages; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            configured = test.g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(address, address, g_root)
+                : environment.map_sv39x4_4k(address, address, g_root);
+        }
+        configured = configured &&
+            (test.g_mode == memblock::ReferencePageMode::sv48
+                 ? environment.map_sv48x4_leaf(
+                       guest_physical, host_physical, 0, g_root,
+                       g.readable, g.writable, g.executable, g.accessed,
+                       g.dirty, g.user)
+                 : environment.map_sv39x4_leaf(
+                       guest_physical, host_physical, 0, g_root,
+                       g.readable, g.writable, g.executable, g.accessed,
+                       g.dirty, g.user));
+        configured = configured && environment.activate_two_stage_modes(
+            test.vs_mode, test.g_mode, vs_root, g_root,
+            static_cast<std::uint16_t>(91 + index),
+            static_cast<std::uint16_t>(111 + index));
+        if (!configured ||
             !environment.set_translation_permissions(
                 memblock::ReferencePrivilegeMode::supervisor,
                 test.mxr, false, test.vmxr, test.vsum)) {
@@ -24672,6 +24776,8 @@ int run_translation_permissions(int argc, char **argv)
             .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
             .expected_exception_mask = test.exception,
         };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
         environment.expect_load(transaction);
         if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
             !environment.enqueue_load(transaction) ||
@@ -24683,192 +24789,114 @@ int run_translation_permissions(int argc, char **argv)
                       << environment.error() << '\n';
             return 1;
         }
+        if (test.exception != 0 &&
+            (environment.tilelink_requests() != dcache_before ||
+             environment.uncache_requests() != uncache_before)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase="
+                      << test.name
+                      << "-side-effect reason=permission fault reached memory manager\n";
+            return 1;
+        }
         ++completed;
     }
 
     struct TwoStageStoreCase {
-      const char *name;
-      memblock::ReferencePageMode vs_mode;
-      memblock::ReferencePageMode g_mode;
-      memblock::ReferencePtePermissions vs_permissions;
-      memblock::ReferencePtePermissions g_permissions;
-      bool vsum;
-      std::uint32_t exception;
+        std::string name;
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        memblock::ReferencePtePermissions vs_permissions;
+        memblock::ReferencePtePermissions g_permissions;
+        bool vsum;
+        std::uint32_t exception;
     };
-    const std::array<TwoStageStoreCase, 22> two_stage_store_cases{{
+    struct TwoStageStoreVariant {
+        const char *name;
+        memblock::ReferencePtePermissions vs_permissions;
+        memblock::ReferencePtePermissions g_permissions;
+        bool vsum = false;
+        std::uint32_t exception = 0;
+    };
+    const std::array<TwoStageStoreVariant, 10> two_stage_store_variants{{
         {
-            .name = "sv39-sv39x4-store-valid",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "valid",
             .vs_permissions = {},
             .g_permissions = {.user = true},
         },
         {
-            .name = "sv39-sv48x4-store-valid",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {},
-            .g_permissions = {.user = true},
-        },
-        {
-            .name = "sv48-sv39x4-store-valid",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv39,
-            .vs_permissions = {},
-            .g_permissions = {.user = true},
-        },
-        {
-            .name = "sv48-sv48x4-store-valid",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {},
-            .g_permissions = {.user = true},
-        },
-        {
-            .name = "sv39-store-vs-readonly",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "vs-readonly",
             .vs_permissions = {.writable = false},
             .g_permissions = {.user = true},
             .exception = memblock::kExceptionStorePageFault,
         },
         {
-            .name = "sv39-store-vs-accessed0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "vs-accessed0",
             .vs_permissions = {.accessed = false},
             .g_permissions = {.user = true},
             .exception = memblock::kExceptionStorePageFault,
         },
         {
-            .name = "sv39-store-vs-dirty0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "vs-dirty0",
             .vs_permissions = {.dirty = false},
             .g_permissions = {.user = true},
             .exception = memblock::kExceptionStorePageFault,
         },
         {
-            .name = "sv39-store-vs-user-vsum0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "vs-user-vsum0",
             .vs_permissions = {.user = true},
             .g_permissions = {.user = true},
             .exception = memblock::kExceptionStorePageFault,
         },
         {
-            .name = "sv39-store-vs-user-vsum1",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "vs-user-vsum1",
             .vs_permissions = {.user = true},
             .g_permissions = {.user = true},
             .vsum = true,
         },
         {
-            .name = "sv48-store-vs-readonly",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {.writable = false},
-            .g_permissions = {.user = true},
-            .exception = memblock::kExceptionStorePageFault,
-        },
-        {
-            .name = "sv48-store-vs-accessed0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {.accessed = false},
-            .g_permissions = {.user = true},
-            .exception = memblock::kExceptionStorePageFault,
-        },
-        {
-            .name = "sv48-store-vs-dirty0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {.dirty = false},
-            .g_permissions = {.user = true},
-            .exception = memblock::kExceptionStorePageFault,
-        },
-        {
-            .name = "sv48-store-vs-user-vsum0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {.user = true},
-            .g_permissions = {.user = true},
-            .exception = memblock::kExceptionStorePageFault,
-        },
-        {
-            .name = "sv48-store-vs-user-vsum1",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {.user = true},
-            .g_permissions = {.user = true},
-            .vsum = true,
-        },
-        {
-            .name = "sv39x4-store-g-readonly",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "g-readonly",
             .vs_permissions = {},
             .g_permissions = {.writable = false, .user = true},
             .exception = memblock::kExceptionStoreGuestPageFault,
         },
         {
-            .name = "sv39x4-store-g-accessed0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "g-accessed0",
             .vs_permissions = {},
             .g_permissions = {.user = true, .accessed = false},
             .exception = memblock::kExceptionStoreGuestPageFault,
         },
         {
-            .name = "sv39x4-store-g-dirty0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
+            .name = "g-dirty0",
             .vs_permissions = {},
             .g_permissions = {.user = true, .dirty = false},
             .exception = memblock::kExceptionStoreGuestPageFault,
         },
         {
-            .name = "sv39x4-store-g-user0",
-            .vs_mode = memblock::ReferencePageMode::sv39,
-            .g_mode = memblock::ReferencePageMode::sv39,
-            .vs_permissions = {},
-            .g_permissions = {},
-            .exception = memblock::kExceptionStoreGuestPageFault,
-        },
-        {
-            .name = "sv48x4-store-g-readonly",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {},
-            .g_permissions = {.writable = false, .user = true},
-            .exception = memblock::kExceptionStoreGuestPageFault,
-        },
-        {
-            .name = "sv48x4-store-g-accessed0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {},
-            .g_permissions = {.user = true, .accessed = false},
-            .exception = memblock::kExceptionStoreGuestPageFault,
-        },
-        {
-            .name = "sv48x4-store-g-dirty0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
-            .vs_permissions = {},
-            .g_permissions = {.user = true, .dirty = false},
-            .exception = memblock::kExceptionStoreGuestPageFault,
-        },
-        {
-            .name = "sv48x4-store-g-user0",
-            .vs_mode = memblock::ReferencePageMode::sv48,
-            .g_mode = memblock::ReferencePageMode::sv48,
+            .name = "g-user0",
             .vs_permissions = {},
             .g_permissions = {},
             .exception = memblock::kExceptionStoreGuestPageFault,
         },
     }};
+    std::vector<TwoStageStoreCase> two_stage_store_cases;
+    two_stage_store_cases.reserve(
+        permission_modes.size() * permission_modes.size() *
+        two_stage_store_variants.size());
+    for (const auto vs_mode : permission_modes) {
+        for (const auto g_mode : permission_modes) {
+            for (const auto &variant : two_stage_store_variants) {
+                two_stage_store_cases.push_back({
+                    .name = std::string(permission_mode_name(vs_mode)) + "-" +
+                        permission_mode_name(g_mode) + "x4-store-" + variant.name,
+                    .vs_mode = vs_mode,
+                    .g_mode = g_mode,
+                    .vs_permissions = variant.vs_permissions,
+                    .g_permissions = variant.g_permissions,
+                    .vsum = variant.vsum,
+                    .exception = variant.exception,
+                });
+            }
+        }
+    }
 
     for (std::size_t index = 0; index < two_stage_store_cases.size(); ++index) {
         const auto &test = two_stage_store_cases[index];
@@ -24973,7 +25001,7 @@ int run_translation_permissions(int argc, char **argv)
                 .rob = 1,
                 .lq = 0,
                 .sq = 1,
-                .pdest = static_cast<std::uint8_t>(224 + index),
+                .pdest = static_cast<std::uint8_t>(1 + index),
                 .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
             };
             environment.expect_load_data(readback, transaction.data);
