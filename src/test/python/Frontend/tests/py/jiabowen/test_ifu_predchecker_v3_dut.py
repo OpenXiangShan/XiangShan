@@ -556,6 +556,7 @@ def test_fe_ifu_predchecker_first_block_false_taken_clips_second_fetch(env) -> N
     "BIN-991",
     "BIN-992",
     "BIN-975",
+    "BIN-948",
     *_PREDICTOR_WARMUP_OWNER_BINS,
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -582,6 +583,13 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
         max_cycles=512,
         debug_pc=branch_pc,
     )
+    _run_until_bin(
+        env,
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_050",
+        max_cycles=32,
+        debug_pc=branch_pc,
+    )
     checked_invalid_owner_bins = (
         "BIN-917",
         "BIN-935",
@@ -606,6 +614,7 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
         (
             *_PREDICTOR_WARMUP_OWNER_BINS,
             "BIN-975",
+            "BIN-948",
             *checked_invalid_owner_bins,
         ),
     )

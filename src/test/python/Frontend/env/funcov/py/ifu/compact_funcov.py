@@ -254,6 +254,22 @@ def _read_predchecker(recorder, dut, stem: str) -> Optional[int]:
     return _read_ifu_internal(recorder, dut, f"predChecker.{stem}")
 
 
+def _read_predchecker_with_path(
+    recorder, dut, stem: str
+) -> tuple[Optional[int], Optional[str]]:
+    """Read a PredChecker probe and retain the concrete DUT path used."""
+
+    for prefix in (
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__",
+        "Frontend_top.Frontend.inner_ifu.predChecker.",
+    ):
+        path = prefix + str(stem)
+        value = recorder._try_read_dut_signal(dut, path)
+        if value is not None:
+            return int(value), path
+    return _read_ifu_internal_with_path(recorder, dut, f"predChecker.{stem}")
+
+
 def _read_predchecker_or_ifu(recorder, dut, pred_stem: str, ifu_stem: str) -> Optional[int]:
     value = _read_predchecker(recorder, dut, pred_stem)
     if value is not None:
@@ -2091,6 +2107,255 @@ def _sample_pred_taken_index_mapping(recorder, dut, cycle: int) -> None:
         )
 
 
+def _record_predchecker_wb_half_rvi_observation_once(
+    recorder,
+    cycle: int,
+    event: str,
+    **observations: Any,
+) -> None:
+    """Keep a failed BIN-948 writeback proof visible without promoting it."""
+
+    key = (str(event), repr(observations))
+    seen = getattr(recorder, "_ifu_predchecker_wb_half_rvi_observations", set())
+    if key in seen:
+        return
+    seen.add(key)
+    recorder._ifu_predchecker_wb_half_rvi_observations = seen
+    recorder.risk_observations.append(
+        {
+            "event": str(event),
+            "cycle": int(cycle),
+            "coverage_promotion": "none",
+            **observations,
+        }
+    )
+
+
+def _sample_predchecker_wb_half_rvi_selection(recorder, dut, cycle: int) -> None:
+    """Prove the current V3 registered writeback selection for BIN-948.
+
+    #6220 deliberately keeps two meanings of the checker block selector:
+    raw ``blockSel`` selects the first/total saved half-RVI record, while
+    ``blockSel | isCrossBlockInstr`` selects the FTQ owner.  The proof reads
+    both meanings from the same writeback cycle and fails closed on any
+    unobservable probe or payload disagreement.
+    """
+
+    redirect_valid, redirect_valid_path = _read_predchecker_with_path(
+        recorder, dut, "io_resp_stage2Out_checkerRedirect_valid"
+    )
+    registered_invalid_taken, registered_invalid_taken_path = _read_predchecker_with_path(
+        recorder, dut, "invalidTakenNext"
+    )
+    if redirect_valid != 1 or registered_invalid_taken != 1:
+        return
+
+    pred_fields = (
+        "io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
+        "io_resp_stage2Out_checkerRedirect_bits_blockSel",
+        "io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
+        "io_resp_stage2Out_checkerRedirect_bits_target_addr",
+        "io_resp_stage2Out_checkerRedirect_bits_taken",
+        "io_resp_stage2Out_checkerRedirect_bits_isRVC",
+        "io_resp_stage2Out_checkerRedirect_bits_attribute_branchType",
+        "io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction",
+        "io_resp_stage2Out_checkerRedirect_bits_endOffset",
+    )
+    ifu_fields = (
+        "wbRedirect_valid",
+        "io_toFtq_wbRedirect_valid",
+        "io_toFtq_wbRedirect_bits_target",
+        "io_toFtq_wbRedirect_bits_taken",
+        "io_toFtq_wbRedirect_bits_isRVC",
+        "io_toFtq_wbRedirect_bits_attribute_branchType",
+        "io_toFtq_wbRedirect_bits_attribute_rasAction",
+        "io_toFtq_wbRedirect_bits_ftqOffset",
+        "io_toFtq_wbRedirect_bits_ftqIdx_flag",
+        "io_toFtq_wbRedirect_bits_ftqIdx_value",
+        "io_toFtq_wbRedirect_bits_pc",
+    )
+    values: dict[str, Optional[int]] = {
+        "checker_redirect_valid": redirect_valid,
+        "invalid_taken_next": registered_invalid_taken,
+    }
+    paths: dict[str, Optional[str]] = {
+        "checker_redirect_valid": redirect_valid_path,
+        "invalid_taken_next": registered_invalid_taken_path,
+    }
+    for field in pred_fields:
+        value, path = _read_predchecker_with_path(recorder, dut, field)
+        values[field] = value
+        paths[field] = path
+    for field in ifu_fields:
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        values[field] = value
+        paths[field] = path
+
+    raw_block_sel = values[
+        "io_resp_stage2Out_checkerRedirect_bits_blockSel"
+    ]
+    is_cross_block_instr = values[
+        "io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr"
+    ]
+    if raw_block_sel is not None and is_cross_block_instr is not None:
+        effective_owner = int(raw_block_sel) | int(is_cross_block_instr)
+        selected_half = "wbTotalEndHalfRvi" if int(raw_block_sel) else "wbFirstEndHalfRvi"
+        for field in (
+            f"{selected_half}_valid",
+            f"{selected_half}_bits_pc_addr",
+            f"{selected_half}_bits_data",
+            f"wbAlignFetchBlock_{effective_owner}_ftqIdx_flag",
+            f"wbAlignFetchBlock_{effective_owner}_ftqIdx_value",
+            f"wbAlignFetchBlock_{effective_owner}_startVAddr_addr",
+        ):
+            value, path = _read_ifu_internal_with_path(recorder, dut, field)
+            values[field] = value
+            paths[field] = path
+    else:
+        effective_owner = None
+        selected_half = None
+
+    missing = sorted(name for name, value in values.items() if value is None)
+    if missing:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_probe_missing",
+            missing=missing,
+            signal_paths={name: paths.get(name) for name in sorted(paths)},
+        )
+        return
+
+    assert raw_block_sel is not None
+    assert is_cross_block_instr is not None
+    assert effective_owner is not None
+    assert selected_half is not None
+    checker_invalid_taken = int(
+        values["io_resp_stage2Out_checkerRedirect_bits_invalidTaken"]
+    )
+    transport_valid = (
+        int(values["wbRedirect_valid"]) == 1
+        and int(values["io_toFtq_wbRedirect_valid"]) == 1
+    )
+    if checker_invalid_taken != 1 or not transport_valid:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_transport_mismatch",
+            checker_invalid_taken=checker_invalid_taken,
+            wb_redirect_valid=int(values["wbRedirect_valid"]),
+            to_ftq_wb_redirect_valid=int(values["io_toFtq_wbRedirect_valid"]),
+            raw_block_sel=int(raw_block_sel),
+            is_cross_block_instr=int(is_cross_block_instr),
+            effective_owner=int(effective_owner),
+            signal_paths={name: paths.get(name) for name in sorted(paths)},
+        )
+        return
+
+    selected_valid = int(values[f"{selected_half}_valid"])
+    expected_ftq_idx = (
+        int(values[f"wbAlignFetchBlock_{effective_owner}_ftqIdx_flag"]),
+        int(values[f"wbAlignFetchBlock_{effective_owner}_ftqIdx_value"]),
+    )
+    observed_ftq_idx = (
+        int(values["io_toFtq_wbRedirect_bits_ftqIdx_flag"]),
+        int(values["io_toFtq_wbRedirect_bits_ftqIdx_value"]),
+    )
+    checker_target_addr = int(
+        values["io_resp_stage2Out_checkerRedirect_bits_target_addr"]
+    )
+    checker_target = _decode_pruned_pc(checker_target_addr)
+    assert checker_target is not None
+    expected_ftq_pc_addr = int(
+        values[f"wbAlignFetchBlock_{effective_owner}_startVAddr_addr"]
+    )
+    expected_ftq_pc = _decode_pruned_pc(expected_ftq_pc_addr)
+    assert expected_ftq_pc is not None
+    payload_checks = {
+        "target": int(checker_target)
+        == int(values["io_toFtq_wbRedirect_bits_target"]),
+        "taken": int(values["io_resp_stage2Out_checkerRedirect_bits_taken"])
+        == int(values["io_toFtq_wbRedirect_bits_taken"]),
+        "is_rvc": int(values["io_resp_stage2Out_checkerRedirect_bits_isRVC"])
+        == int(values["io_toFtq_wbRedirect_bits_isRVC"]),
+        "branch_type": int(
+            values["io_resp_stage2Out_checkerRedirect_bits_attribute_branchType"]
+        )
+        == int(values["io_toFtq_wbRedirect_bits_attribute_branchType"]),
+        "ras_action": int(
+            values["io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction"]
+        )
+        == int(values["io_toFtq_wbRedirect_bits_attribute_rasAction"]),
+        "end_offset": int(values["io_resp_stage2Out_checkerRedirect_bits_endOffset"])
+        == int(values["io_toFtq_wbRedirect_bits_ftqOffset"]),
+        "ftq_idx": observed_ftq_idx == expected_ftq_idx,
+        "ftq_pc": int(values["io_toFtq_wbRedirect_bits_pc"])
+        == int(expected_ftq_pc),
+    }
+    payload_matches = all(payload_checks.values())
+    evidence = {
+        "event": "ifu_predchecker_wb_half_rvi_selected",
+        "checker_redirect_valid": 1,
+        "invalid_taken_next": 1,
+        "checker_invalid_taken": 1,
+        "raw_block_sel": int(raw_block_sel),
+        "is_cross_block_instr": int(is_cross_block_instr),
+        "effective_owner": int(effective_owner),
+        "selected_half_record": selected_half,
+        "selected_half_valid": selected_valid,
+        "selected_half_pc": _decode_pruned_pc(
+            values[f"{selected_half}_bits_pc_addr"]
+        ),
+        "selected_half_data": int(values[f"{selected_half}_bits_data"]),
+        "expected_ftq_idx": expected_ftq_idx,
+        "observed_ftq_idx": observed_ftq_idx,
+        "checker_target_addr": checker_target_addr,
+        "checker_target": int(checker_target),
+        "outbound_target": int(values["io_toFtq_wbRedirect_bits_target"]),
+        "checker_payload": {
+            "taken": int(values["io_resp_stage2Out_checkerRedirect_bits_taken"]),
+            "is_rvc": int(values["io_resp_stage2Out_checkerRedirect_bits_isRVC"]),
+            "branch_type": int(
+                values["io_resp_stage2Out_checkerRedirect_bits_attribute_branchType"]
+            ),
+            "ras_action": int(
+                values["io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction"]
+            ),
+            "end_offset": int(values["io_resp_stage2Out_checkerRedirect_bits_endOffset"]),
+        },
+        "outbound_payload": {
+            "taken": int(values["io_toFtq_wbRedirect_bits_taken"]),
+            "is_rvc": int(values["io_toFtq_wbRedirect_bits_isRVC"]),
+            "branch_type": int(values["io_toFtq_wbRedirect_bits_attribute_branchType"]),
+            "ras_action": int(values["io_toFtq_wbRedirect_bits_attribute_rasAction"]),
+            "end_offset": int(values["io_toFtq_wbRedirect_bits_ftqOffset"]),
+            "pc_addr": int(values["io_toFtq_wbRedirect_bits_pc"]),
+        },
+        "expected_ftq_pc_addr": expected_ftq_pc_addr,
+        "expected_ftq_pc": int(expected_ftq_pc),
+        "payload_checks": payload_checks,
+        "payload_matches": payload_matches,
+        "signal_paths": {name: paths.get(name) for name in sorted(paths)},
+    }
+    if selected_valid == 1 and payload_matches:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-948",
+            cycle,
+            evidence,
+            producer="ifu_predchecker_wb_half_rvi_sampler",
+        )
+    else:
+        mismatch_evidence = dict(evidence)
+        mismatch_evidence["source_event"] = mismatch_evidence.pop("event")
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_selection_mismatch",
+            **mismatch_evidence,
+        )
+
+
 def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
     if not hasattr(recorder, "_ifu_predchecker_v3_target_kinds"):
         recorder._ifu_predchecker_v3_target_kinds = set()
@@ -2139,6 +2404,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 "invalid_taken_next": 1,
             },
         )
+    _sample_predchecker_wb_half_rvi_selection(recorder, dut, cycle)
     if (
         pending is not None
         and pending["fault"] is None
@@ -2288,22 +2554,6 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     "BIN-947",
                     cycle,
                     checked_redirect,
-                    producer="ifu_predchecker_v3_sampler",
-                )
-            redirect_half_valid = _read_ifu_internal(
-                recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
-            )
-            if pending["invalid_taken"] == 1 and redirect_half_valid == 1:
-                mark_owner_v3_checked(
-                    recorder,
-                    "BIN-948",
-                    cycle,
-                    {
-                        **checked_redirect,
-                        "redirect_invalid_taken": True,
-                        "half_state_valid": True,
-                        "s2_prev_end_is_half_rvi": int(redirect_half_valid),
-                    },
                     producer="ifu_predchecker_v3_sampler",
                 )
         if (

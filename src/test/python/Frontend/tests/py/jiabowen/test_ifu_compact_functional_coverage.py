@@ -416,6 +416,74 @@ def _set_predchecker_redirect(dut, pending, *, target):
     dut.set(base + "bits_endOffset", pending.get("end_offset", pending["slot"]))
 
 
+def _set_predchecker_wb_half_rvi_redirect(
+    dut,
+    *,
+    raw_block_sel,
+    is_cross_block_instr,
+    selected_half_valid=1,
+):
+    """Drive one observable V3 writeback redirect transaction for BIN-948."""
+
+    raw_block_sel = int(raw_block_sel)
+    is_cross_block_instr = int(is_cross_block_instr)
+    effective_owner = raw_block_sel | is_cross_block_instr
+    selected_half = "wbTotalEndHalfRvi" if raw_block_sel else "wbFirstEndHalfRvi"
+    other_half = "wbFirstEndHalfRvi" if raw_block_sel else "wbTotalEndHalfRvi"
+    base = _PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_"
+    target = 0x80000244
+    expected_ftq = (1, 0x19)
+    expected_pc_addr = 0x40000100
+
+    dut.set(base + "valid", 1)
+    dut.set(_PREFIX + "predChecker.invalidTakenNext", 1)
+    dut.set(base + "bits_invalidTaken", 1)
+    dut.set(base + "bits_blockSel", raw_block_sel)
+    dut.set(base + "bits_isCrossBlockInstr", is_cross_block_instr)
+    # PredChecker carries GuardedPc.addr (without instruction-alignment bit);
+    # toFtq.wbRedirect.target is the restored byte address.
+    dut.set(base + "bits_target_addr", target >> 1)
+    dut.set(base + "bits_taken", 1)
+    dut.set(base + "bits_isRVC", 0)
+    dut.set(base + "bits_attribute_branchType", 0)
+    dut.set(base + "bits_attribute_rasAction", 0)
+    dut.set(base + "bits_endOffset", 15)
+
+    dut.set(_PREFIX + "wbRedirect_valid", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_target", target)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_taken", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_isRVC", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_attribute_branchType", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_attribute_rasAction", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_ftqOffset", 15)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_flag", expected_ftq[0])
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_value", expected_ftq[1])
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_pc", expected_pc_addr << 1)
+
+    for block in range(2):
+        dut.set(
+            _PREFIX + f"wbAlignFetchBlock_{block}_ftqIdx_flag",
+            expected_ftq[0] if block == effective_owner else 0,
+        )
+        dut.set(
+            _PREFIX + f"wbAlignFetchBlock_{block}_ftqIdx_value",
+            expected_ftq[1] if block == effective_owner else 3,
+        )
+        dut.set(
+            _PREFIX + f"wbAlignFetchBlock_{block}_startVAddr_addr",
+            expected_pc_addr if block == effective_owner else 0x40000080,
+        )
+
+    dut.set(_PREFIX + f"{selected_half}_valid", selected_half_valid)
+    dut.set(_PREFIX + f"{selected_half}_bits_pc_addr", 0x4000011F)
+    dut.set(_PREFIX + f"{selected_half}_bits_data", 0xA5A5)
+    dut.set(_PREFIX + f"{other_half}_valid", 0)
+    dut.set(_PREFIX + f"{other_half}_bits_pc_addr", 0x4000007F)
+    dut.set(_PREFIX + f"{other_half}_bits_data", 0x5A5A)
+    return selected_half, effective_owner
+
+
 def test_ifu_predchecker_v3_fault_types_and_no_fault_are_observed(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     fault_entries = (
@@ -449,6 +517,103 @@ def test_ifu_predchecker_v3_registered_invalid_taken_survives_back_to_back_s2(tm
     sample_cfvec_coverage(recorder, env, 1)
 
     assert recorder.key_hit("ifu_predchecker_v3_fault", "invalid_taken")
+
+
+@pytest.mark.parametrize(
+    ("raw_block_sel", "is_cross_block_instr", "expected_half", "expected_owner"),
+    (
+        (0, 1, "wbFirstEndHalfRvi", 1),
+        (1, 0, "wbTotalEndHalfRvi", 1),
+    ),
+)
+def test_bin948_uses_raw_block_select_for_wb_half_and_effective_owner_for_ftq(
+    tmp_path,
+    raw_block_sel,
+    is_cross_block_instr,
+    expected_half,
+    expected_owner,
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    selected_half, effective_owner = _set_predchecker_wb_half_rvi_redirect(
+        dut,
+        raw_block_sel=raw_block_sel,
+        is_cross_block_instr=is_cross_block_instr,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert selected_half == expected_half
+    assert effective_owner == expected_owner
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_050")
+    hit = recorder.hits[
+        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_050")
+    ]
+    evidence = hit.evidence[-1]["observations"]
+    assert evidence["raw_block_sel"] == raw_block_sel
+    assert evidence["effective_owner"] == expected_owner
+    assert evidence["selected_half_record"] == expected_half
+    assert evidence["selected_half_valid"] == 1
+    assert evidence["checker_target"] == evidence["outbound_target"]
+    assert evidence["expected_ftq_pc"] == evidence["outbound_payload"]["pc_addr"]
+    assert evidence["payload_matches"] is True
+
+
+def test_bin948_rejects_invalid_selected_wb_half_rvi(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_wb_half_rvi_redirect(
+        dut,
+        raw_block_sel=0,
+        is_cross_block_instr=0,
+        selected_half_valid=0,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_050")
+    assert any(
+        item.get("event") == "ifu_predchecker_wb_half_rvi_selection_mismatch"
+        for item in recorder.risk_observations
+    )
+
+
+def test_bin948_rejects_checker_to_ftq_payload_mismatch(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_wb_half_rvi_redirect(
+        dut,
+        raw_block_sel=0,
+        is_cross_block_instr=0,
+    )
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_target", 0x80000248)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_050")
+    mismatch = next(
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_predchecker_wb_half_rvi_selection_mismatch"
+    )
+    assert mismatch["payload_checks"]["target"] is False
+    assert mismatch["payload_matches"] is False
+
+
+def test_bin948_missing_selected_wb_half_rvi_probe_is_diagnostic_not_hit(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    selected_half, _effective_owner = _set_predchecker_wb_half_rvi_redirect(
+        dut,
+        raw_block_sel=1,
+        is_cross_block_instr=0,
+    )
+    delattr(dut, _PREFIX + f"{selected_half}_bits_data")
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_050")
+    assert any(
+        item.get("event") == "ifu_predchecker_wb_half_rvi_probe_missing"
+        and f"{selected_half}_bits_data" in item.get("missing", [])
+        for item in recorder.risk_observations
+    )
 
 
 def test_ifu_predchecker_v3_tracks_correct_jalr_forms_and_taken_offsets(tmp_path):
@@ -2321,9 +2486,30 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_prevEndIsHalfRviInfo_bits_data",
         _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
         _PREFIX + "wbRedirect_valid",
+        _PREFIX + "wbFirstEndHalfRvi_valid",
+        _PREFIX + "wbFirstEndHalfRvi_bits_pc_addr",
+        _PREFIX + "wbFirstEndHalfRvi_bits_data",
+        _PREFIX + "wbTotalEndHalfRvi_valid",
+        _PREFIX + "wbTotalEndHalfRvi_bits_pc_addr",
+        _PREFIX + "wbTotalEndHalfRvi_bits_data",
+        _PREFIX + "wbAlignFetchBlock_0_ftqIdx_flag",
+        _PREFIX + "wbAlignFetchBlock_0_ftqIdx_value",
+        _PREFIX + "wbAlignFetchBlock_0_startVAddr_addr",
+        _PREFIX + "wbAlignFetchBlock_1_ftqIdx_flag",
+        _PREFIX + "wbAlignFetchBlock_1_ftqIdx_value",
+        _PREFIX + "wbAlignFetchBlock_1_startVAddr_addr",
         _PREFIX + "uncacheRedirect_valid",
         _PREFIX + "io_fromFtq_redirect_valid",
         _PREFIX + "io_toFtq_wbRedirect_valid",
+        _PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_flag",
+        _PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_value",
+        _PREFIX + "io_toFtq_wbRedirect_bits_ftqOffset",
+        _PREFIX + "io_toFtq_wbRedirect_bits_pc",
+        _PREFIX + "io_toFtq_wbRedirect_bits_target",
+        _PREFIX + "io_toFtq_wbRedirect_bits_taken",
+        _PREFIX + "io_toFtq_wbRedirect_bits_isRVC",
+        _PREFIX + "io_toFtq_wbRedirect_bits_attribute_branchType",
+        _PREFIX + "io_toFtq_wbRedirect_bits_attribute_rasAction",
         _PREFIX + "s0_flush",
         _PREFIX + "s2_flush",
         _PREFIX + "s0_prevEndIsHalfRvi",
@@ -2340,6 +2526,14 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_frontendTrigger_debugMode",
         _PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp",
         "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_valid",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_target_addr",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_taken",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isRVC",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_attribute_branchType",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_endOffset",
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_blockSel",
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
         _FTQ_PREFIX + "ifuResolve_valid",
