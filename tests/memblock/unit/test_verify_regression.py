@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 13
+        result["constraint_schema"] = 14
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -368,6 +368,50 @@ class VerifyRegressionTest(unittest.TestCase):
                 "actual_nested_leaf_topology": "0,0,0,0",
             }
         )
+        result.update(
+            {
+                "constraint_schema": 13,
+                "target_ops": "0,0,3,2,0,0,0,0,0,0,1",
+                "actual_ops": "0,0,3,2,0,0,0,0,0,0,6",
+                "target_cmo_operation": "1,1,1",
+                "actual_cmo_operation": "1,2,3",
+                "target_cmo_dirty": 500,
+                "actual_cmo_line_state": "3,3",
+                "target_cmo_younger_overlap": 10,
+                "actual_cmo_younger_overlap": "5,1",
+                "probes": 6,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["probes"] = 5
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "constrained/CMO accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probes"] = 6
+        result["actual_cmo_younger_overlap"] = "5,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_cmo_younger_overlap",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_younger_overlap"] = "5,1"
+        result["target_cmo_operation"] = "1,0,1"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_cmo_operation",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_cmo_operation"] = "1,1,1"
+        result["target_cmo_dirty"] = 0
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_cmo_line_state",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_ops"] = "0,0,3,2,0,0,0,0,0,0"
+        result["actual_ops"] = "0,0,3,2,0,0,0,0,0,0"
         result["constraint_schema"] = 11
 
         result["actual_vector_vta"] = "3,0"

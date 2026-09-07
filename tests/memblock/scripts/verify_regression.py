@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -328,6 +328,11 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_need_data = _csv_counts(
             result, "actual_probe_need_data", 2
         )
+        cmo_probe_count = (
+            _csv_counts(result, "actual_ops", 11)[10]
+            if schema >= 13
+            else 0
+        )
         _require(
             isinstance(actual_sequences, int)
             and not isinstance(actual_sequences, bool)
@@ -345,6 +350,14 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     and (target == 0 or actual[1] > 0),
                     f"{name} has an enabled but uncovered class: {actual}",
                 )
+        elif schema >= 13:
+            _require(
+                actual_sequences == 0
+                and actual_caps == [0, 0]
+                and actual_need_data == [0, 0],
+                "disabled constrained Probe has coverage observations",
+            )
+        if target_probe != 0 or schema >= 13:
             _require(
                 sum(actual_caps) == actual_sequences
                 and sum(actual_need_data) == actual_sequences,
@@ -353,8 +366,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             probes = result.get("probes")
             _require(
                 isinstance(probes, int) and not isinstance(probes, bool)
-                and probes == actual_sequences + actual_caps[1],
-                "manager Probe count does not match sequence/toB cleanup accounting",
+                and probes == actual_sequences + actual_caps[1] + cmo_probe_count,
+                "manager Probe count does not match constrained/CMO accounting",
             )
 
     if schema >= 4:
@@ -411,7 +424,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             )
 
     if schema >= 7:
-        operation_fields = 10 if schema >= 8 else 9
+        operation_fields = 11 if schema >= 13 else 10 if schema >= 8 else 9
         target_operations = _csv_counts(
             result, "target_ops", operation_fields
         )
@@ -448,6 +461,83 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 sum(actual_hypervisor) == actual_operations[hypervisor_index],
                 "hypervisor operation/family coverage is not conserved",
             )
+
+        if schema >= 13:
+            target_cmo_operations = _csv_counts(
+                result, "target_cmo_operation", 3
+            )
+            actual_cmo_operations = _csv_counts(
+                result, "actual_cmo_operation", 3
+            )
+            target_cmo_dirty = result.get("target_cmo_dirty")
+            target_cmo_overlap = result.get("target_cmo_younger_overlap")
+            actual_cmo_states = _csv_counts(
+                result, "actual_cmo_line_state", 2
+            )
+            actual_cmo_overlaps = _csv_counts(
+                result, "actual_cmo_younger_overlap", 2
+            )
+            for name, value in (
+                ("target_cmo_dirty", target_cmo_dirty),
+                ("target_cmo_younger_overlap", target_cmo_overlap),
+            ):
+                _require(
+                    isinstance(value, int) and not isinstance(value, bool)
+                    and 0 <= value <= 1000,
+                    f"{name} is not a per-mille integer: {value!r}",
+                )
+            cmo_count = actual_operations[10]
+            if target_operations[10] != 0:
+                _require(
+                    all(
+                        (weight == 0 and count == 0)
+                        or (weight != 0 and count > 0)
+                        for weight, count in zip(
+                            target_cmo_operations, actual_cmo_operations
+                        )
+                    ),
+                    "actual_cmo_operation has an enabled but uncovered class: "
+                    f"{actual_cmo_operations}",
+                )
+                for name, target, actual in (
+                    ("actual_cmo_line_state", target_cmo_dirty, actual_cmo_states),
+                    (
+                        "actual_cmo_younger_overlap",
+                        target_cmo_overlap,
+                        actual_cmo_overlaps,
+                    ),
+                ):
+                    _require(
+                        (
+                            target == 0
+                            and actual[0] > 0
+                            and actual[1] == 0
+                        )
+                        or (
+                            target == 1000
+                            and actual[0] == 0
+                            and actual[1] > 0
+                        )
+                        or (
+                            0 < target < 1000
+                            and actual[0] > 0
+                            and actual[1] > 0
+                        ),
+                        f"{name} has an enabled but uncovered class: {actual}",
+                    )
+                _require(
+                    sum(actual_cmo_operations) == cmo_count
+                    and sum(actual_cmo_states) == cmo_count
+                    and sum(actual_cmo_overlaps) == cmo_count,
+                    "CMO operation/state/overlap coverage is not conserved",
+                )
+            else:
+                _require(
+                    actual_cmo_operations == [0, 0, 0]
+                    and actual_cmo_states == [0, 0]
+                    and actual_cmo_overlaps == [0, 0],
+                    "disabled CMO operation has coverage observations",
+                )
 
     if schema >= 8:
         target_segment_store = result.get("target_vector_segment_store")

@@ -9614,7 +9614,10 @@ public:
         // A misaligned store at the ROB head can leave the SQ while another
         // outstanding class is still draining.  Do not turn that completed
         // store into a wait for the following SQ entry.
-        if (sq_dequeued_ < target &&
+        // CMO may leave the externally monitored SQ before architectural
+        // commit, but StoreQueue's shared CMO/MMIO state machine still needs
+        // the backend scommit pulse to leave s_wait and accept another CMO.
+        if ((is_cmo(transaction.op) || sq_dequeued_ < target) &&
             !commit_stores_through(transaction, 1)) {
             return false;
         }

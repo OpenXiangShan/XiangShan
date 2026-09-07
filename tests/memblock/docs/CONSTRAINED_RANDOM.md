@@ -49,10 +49,13 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor` | Relative special-operation weights |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `hypervisor-hlv`, `hypervisor-hlvx`, `hypervisor-hsv` | Relative family weights inside the `hypervisor` class |
+| `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative operation weights inside the `cmo` class |
+| `cmo-dirty` | Per-mille share of CMO target lines made dirty by a committed store that CMO must drain from SBuffer |
+| `cmo-younger-overlap` | Per-mille share of CMO actions that issue a younger cold load into another MSHR and require `flushPipe` cancellation with no writeback |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -133,6 +136,7 @@ scenario implementations:
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
 | Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
+| Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, and `cmo-younger-overlap` select CMO actions in the active Bare/stage-1/nested context, derive exact clean/dirty Probe reports and data, hold randomized CBOAck latency, and optionally cancel a younger delayed miss | Add simultaneous multi-class windows, multiple CMO sources, and low-rate denied/corrupt injection after their common error oracle is modeled |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
@@ -152,15 +156,19 @@ choice into the common interface and its coverage contract, not adding
 Operation columns are relative weights. Locality is `hot/warm/cold`; the
 remaining numeric direction columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
-| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
+| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
+| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
 hypervisor family weights (HLV/HLVX/HSV) are `1/1/1`, `90/5/5`, and `1/1/1`.
+Their CMO operation weights (CLEAN/FLUSH/INVAL) are `1/1/1` in every preset.
+Dirty-line rates are `500`, `50`, and `500` per mille, and younger-load overlap
+rates are `500`, `10`, and `750`. Thus `spec` retains a verification floor
+without making cache maintenance or its pipeline flush artificially common.
 Their vector-segment store shares are `500`, `300`, and `500` per mille.
 `coverage` and `corner` weight every ordinary and segment
 addressing/EEW/SEW/LMUL/EMUL class equally, plus every segment NF. `spec`
@@ -259,8 +267,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=12`, the resolved target weights,
-and actual operation, atomic family/width, hypervisor family, ordinary-vector
+Every terminal line prints `constraint_schema=13`, the resolved target weights,
+and actual operation, atomic family/width, hypervisor family, CMO operation/
+line-state/younger-overlap, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
 addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
 locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
@@ -279,6 +288,9 @@ load must contain an actual mask-off body element; when both `vta` and partial
 VL are enabled, at least one load must contain an actual tail element. These
 semantic observations are reported as `actual_vector_agnostic=mask,tail`, so a
 control bit without a relevant inactive element cannot close coverage.
+CMO operation, clean/dirty line-state, and no-overlap/younger-overlap counts each
+conserve exactly against the CMO operation count. A zero operation weight or a
+fixed binary target must also leave its disabled observed bin at zero.
 Probe counts must also conserve sequences and their toB cleanup requests. Every
 load lane must observe both canceled and uncanceled wakeups without constraining
 the legal replay count, and every seed must emit at least one `prefetch.i`

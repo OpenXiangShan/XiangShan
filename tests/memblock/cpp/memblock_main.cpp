@@ -80,6 +80,7 @@ struct RandomConstraints {
         noncacheable,
         mmio,
         hypervisor,
+        cmo,
         operation_count,
     };
 
@@ -95,6 +96,13 @@ struct RandomConstraints {
         hypervisor_hlvx,
         hypervisor_hsv,
         hypervisor_family_count,
+    };
+
+    enum CmoOperation : unsigned {
+        cmo_clean,
+        cmo_flush,
+        cmo_inval,
+        cmo_operation_count,
     };
 
     enum TranslationRegime : unsigned {
@@ -117,6 +125,9 @@ struct RandomConstraints {
     std::array<unsigned, atomic_family_count> atomic_family_weights{};
     std::array<unsigned, 2> atomic_width_weights{};
     std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
+    std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
+    unsigned cmo_dirty_per_mille = 0;
+    unsigned cmo_younger_overlap_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -163,11 +174,14 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "coverage",
                 .operation_weights = {
-                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75},
+                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
                 .hypervisor_family_weights = {1, 1, 1},
+                .cmo_operation_weights = {1, 1, 1},
+                .cmo_dirty_per_mille = 500,
+                .cmo_younger_overlap_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -215,11 +229,15 @@ struct RandomConstraints {
             // not claims about their exact SPEC frequency.
             return RandomConstraints{
                 .name = "spec",
-                .operation_weights = {648, 270, 20, 10, 1, 35, 5, 5, 5, 1},
+                .operation_weights = {
+                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
                 .hypervisor_family_weights = {90, 5, 5},
+                .cmo_operation_weights = {1, 1, 1},
+                .cmo_dirty_per_mille = 50,
+                .cmo_younger_overlap_per_mille = 10,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -268,11 +286,14 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "corner",
                 .operation_weights = {
-                    125, 125, 125, 125, 125, 125, 125, 125, 125, 125},
+                    125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
                 .hypervisor_family_weights = {1, 1, 1},
+                .cmo_operation_weights = {1, 1, 1},
+                .cmo_dirty_per_mille = 500,
+                .cmo_younger_overlap_per_mille = 750,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -378,6 +399,7 @@ struct RandomConstraints {
                 {"nc", noncacheable},
                 {"mmio", mmio},
                 {"hypervisor", hypervisor},
+                {"cmo", cmo},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -428,6 +450,11 @@ struct RandomConstraints {
             }
             return false;
         };
+        constexpr std::array<std::string_view, cmo_operation_count>
+            cmo_operation_keys{{"cmo-clean", "cmo-flush", "cmo-inval"}};
+        if (assign_weight(cmo_operation_keys, cmo_operation_weights)) {
+            return;
+        }
         constexpr std::array<std::string_view, 4> vector_addressing_keys{{
             "vector-unit-stride", "vector-strided",
             "vector-indexed-unordered", "vector-indexed-ordered",
@@ -595,6 +622,10 @@ struct RandomConstraints {
             vector_nonzero_vstart_per_mille = parsed;
         } else if (key == "vector-segment-store") {
             vector_segment_stores_per_mille = parsed;
+        } else if (key == "cmo-dirty") {
+            cmo_dirty_per_mille = parsed;
+        } else if (key == "cmo-younger-overlap") {
+            cmo_younger_overlap_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -645,6 +676,13 @@ struct RandomConstraints {
                 hypervisor_family_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "hypervisor family constraint weights cannot all be zero");
+        }
+        if (operation_weights[cmo] != 0 &&
+            std::accumulate(
+                cmo_operation_weights.begin(), cmo_operation_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "CMO operation constraint weights cannot all be zero");
         }
         if (operation_weights[vector_load] != 0 ||
             operation_weights[vector_store] != 0) {
@@ -861,6 +899,8 @@ struct RandomConstraints {
             vector_partial_vl_per_mille > 1000 ||
             vector_nonzero_vstart_per_mille > 1000 ||
             vector_segment_stores_per_mille > 1000 ||
+            cmo_dirty_per_mille > 1000 ||
+            cmo_younger_overlap_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
@@ -1023,6 +1063,11 @@ struct RandomConstraints {
         return choose_weighted(hypervisor_family_weights, random);
     }
 
+    unsigned choose_cmo_operation(std::uint64_t random) const
+    {
+        return choose_weighted(cmo_operation_weights, random);
+    }
+
     unsigned choose_translation_regime(std::uint64_t random) const
     {
         return choose_weighted(translation_weights, random);
@@ -1127,6 +1172,14 @@ struct RandomConstraints {
                 actions += direction_classes(nc_stores_per_mille);
             } else if (operation == mmio) {
                 actions += direction_classes(mmio_stores_per_mille);
+            } else if (operation == cmo) {
+                const unsigned operations = static_cast<unsigned>(std::count_if(
+                    cmo_operation_weights.begin(), cmo_operation_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                actions += std::max({
+                    operations,
+                    direction_classes(cmo_dirty_per_mille),
+                    direction_classes(cmo_younger_overlap_per_mille)});
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -1211,7 +1264,8 @@ struct RandomConstraints {
         return std::any_of(
             operation_weights.begin(), operation_weights.begin() + noncacheable,
             [](unsigned weight) { return weight != 0; }) ||
-            operation_weights[hypervisor] != 0;
+            operation_weights[hypervisor] != 0 ||
+            operation_weights[cmo] != 0;
     }
 
     bool uses_uncache() const
@@ -1244,7 +1298,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=12 constraints=" << name
+        stream << "constraint_schema=13 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1259,6 +1313,11 @@ struct RandomConstraints {
                << hypervisor_family_weights[0] << ','
                << hypervisor_family_weights[1] << ','
                << hypervisor_family_weights[2]
+               << " target_cmo_operation=" << cmo_operation_weights[0] << ','
+               << cmo_operation_weights[1] << ',' << cmo_operation_weights[2]
+               << " target_cmo_dirty=" << cmo_dirty_per_mille
+               << " target_cmo_younger_overlap="
+               << cmo_younger_overlap_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -1549,6 +1608,10 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> atomic_widths{};
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
+    std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
+        cmo_operations{};
+    std::array<std::uint64_t, 2> cmo_line_states{};
+    std::array<std::uint64_t, 2> cmo_younger_overlaps{};
     std::array<std::uint64_t, 2> vector_directions{};
     std::array<std::uint64_t, 4> vector_addressing{};
     std::array<std::uint64_t, 4> vector_eews{};
@@ -1747,6 +1810,20 @@ struct ConstraintCoverage {
                 });
             return operations[operation] != 0 && families_complete;
         }
+        if (operation == RandomConstraints::cmo) {
+            const bool operations_complete = std::equal(
+                constraints.cmo_operation_weights.begin(),
+                constraints.cmo_operation_weights.end(),
+                cmo_operations.begin(), [](unsigned weight, std::uint64_t count) {
+                    return (weight == 0) == (count == 0);
+                });
+            return operations[operation] != 0 && operations_complete &&
+                binary_complete(
+                    constraints.cmo_dirty_per_mille, cmo_line_states) &&
+                binary_complete(
+                    constraints.cmo_younger_overlap_per_mille,
+                    cmo_younger_overlaps);
+        }
         if (operation == RandomConstraints::vector_load ||
             operation == RandomConstraints::vector_store) {
             const auto target_complete = [](const auto &weights,
@@ -1916,6 +1993,12 @@ struct ConstraintCoverage {
                << " actual_hypervisor_family=" << hypervisor_families[0]
                << ',' << hypervisor_families[1] << ','
                << hypervisor_families[2]
+               << " actual_cmo_operation=" << cmo_operations[0] << ','
+               << cmo_operations[1] << ',' << cmo_operations[2]
+               << " actual_cmo_line_state=" << cmo_line_states[0] << ','
+               << cmo_line_states[1]
+               << " actual_cmo_younger_overlap="
+               << cmo_younger_overlaps[0] << ',' << cmo_younger_overlaps[1]
                << " actual_vector_direction=" << vector_directions[0] << ','
                << vector_directions[1]
                << " actual_vector_addressing=" << vector_addressing[0] << ','
@@ -28708,6 +28791,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t lq_offset = 0;
     std::uint64_t sq_offset = 0;
     std::uint64_t constrained_cold_line = 0;
+    std::array<std::uint64_t, 3> cmo_locality_lines{};
+    std::uint64_t cmo_overlap_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -28722,6 +28807,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t nested_vs_napot_base = cache0_base + 0xc0000;
     constexpr std::uint64_t nested_g_napot_base = cache0_base + 0xd0000;
     constexpr std::uint64_t nested_both_napot_base = cache0_base + 0xe0000;
+    constexpr std::uint64_t cmo_base = cache0_base + 0x200000;
+    constexpr std::uint64_t cmo_span = 0x1000000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -29265,6 +29352,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   guest_physical_address, host_physical_address, root,
                   true, true, executable);
     };
+    const auto map_stage_2m = [&](unsigned mode, std::uint64_t root,
+                                  std::uint64_t address) {
+        return mode == 0
+            ? environment.map_sv39_2m(
+                  address, address, root, true, true, true)
+            : environment.map_sv48_2m(
+                  address, address, root, true, true, true);
+    };
+    const auto map_g_2m = [&](unsigned mode, std::uint64_t root,
+                              std::uint64_t address) {
+        return mode == 0
+            ? environment.map_sv39x4_2m(
+                  address, address, root, true, true, true)
+            : environment.map_sv48x4_2m(
+                  address, address, root, true, true, true);
+    };
     const auto map_stage_napot = [&](unsigned mode, std::uint64_t root,
                                      std::uint64_t virtual_base) {
         return mode == 0
@@ -29331,6 +29434,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 !map_g_napot(
                     mode, random_g_roots[mode], nested_both_napot_base)) {
                 return false;
+            }
+        }
+        for (std::uint64_t block = cmo_base;
+             block < cmo_base + cmo_span; block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
             }
         }
         if (!map_all_contexts(
@@ -31578,6 +31691,202 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 (constraint_coverage.probe_sequences == 0 ||
                  missing_cap || missing_data);
         };
+        const auto issue_random_cmo = [&] (
+            unsigned operation, bool dirty, bool younger_overlap) {
+            const unsigned cmo_completion_timeout =
+                std::max(constrained_completion_timeout, 16384U);
+            phase = "random-cmo-drain";
+            if (!environment.run_until_all_complete(8192) ||
+                !environment.run_until_queues_retired(8192) ||
+                !environment.run_until_sbuffer_empty(
+                    cmo_completion_timeout)) {
+                return false;
+            }
+
+            unsigned locality = constraints.choose_locality(random());
+            for (unsigned candidate = 0;
+                 candidate < constraint_coverage.locality.size(); ++candidate) {
+                if (constraints.locality_weights[candidate] != 0 &&
+                    constraint_coverage.locality[candidate] == 0) {
+                    locality = candidate;
+                    break;
+                }
+            }
+            ++constraint_coverage.locality[locality];
+
+            constexpr std::uint64_t lines_per_half_block = 0x100000 / 64;
+            const std::uint64_t sequence = cmo_locality_lines[locality]++;
+            const std::uint64_t block = locality == 0
+                ? 0 : locality == 1 ? 1 : 2 + (sequence / lines_per_half_block) % 6;
+            const std::uint64_t line_in_block = locality == 0
+                ? sequence % 32
+                : locality == 1
+                ? sequence % 512
+                : sequence % lines_per_half_block;
+            const std::uint64_t line = cmo_base + block * 0x200000 +
+                line_in_block * 64;
+            const std::uint64_t address = line + 8 * (1 + random() % 6);
+
+            const auto warm = make_load(
+                address, memblock::LoadOp::ld,
+                random() % memblock::kScalarLoadLanes);
+            environment.expect_load(warm);
+            phase = "random-cmo-warm";
+            if (!environment.set_rob_head(warm.rob, warm.rob_flag) ||
+                !environment.enqueue_load(warm) ||
+                !environment.issue_load(warm, 4096) ||
+                !environment.run_until_complete(
+                    cmo_completion_timeout) ||
+                !environment.run_until_lq_retired(8192)) {
+                return false;
+            }
+
+            if (dirty) {
+                phase = "random-cmo-dirty";
+                const auto dirty_store = make_store(
+                    address, random(), memblock::StoreOp::sd,
+                    random() % memblock::kScalarStoreLanes,
+                    random() % memblock::kScalarStoreLanes);
+                environment.expect_store(dirty_store);
+                if (!environment.set_rob_head(
+                        dirty_store.rob, dirty_store.rob_flag) ||
+                    !environment.enqueue_store(
+                        dirty_store, memblock::lq_pointer_value(lq_offset)) ||
+                    !environment.issue_store_data(dirty_store, 4096) ||
+                    !environment.issue_store_address_until_tlb_hit(
+                        dirty_store, cmo_completion_timeout) ||
+                    !environment.run_until_store_complete(
+                        cmo_completion_timeout) ||
+                    !environment.commit_store(dirty_store, 8192) ||
+                    environment.sbuffer_empty()) {
+                    return false;
+                }
+            }
+
+            constexpr std::array<memblock::StoreOp,
+                                 RandomConstraints::cmo_operation_count>
+                cmo_ops{{
+                    memblock::StoreOp::cbo_clean,
+                    memblock::StoreOp::cbo_flush,
+                    memblock::StoreOp::cbo_inval,
+                }};
+            auto cmo_transaction = make_store(
+                line + random() % 64, random(), cmo_ops[operation],
+                random() % memblock::kScalarStoreLanes,
+                random() % memblock::kScalarStoreLanes);
+            cmo_transaction.oracle_address = line;
+            cmo_transaction.expected_output_flush_pipe = true;
+            cmo_transaction.expected_debug_is_mmio = false;
+            cmo_transaction.expected_debug_is_ncio = false;
+            const std::vector<unsigned char> expected_line =
+                environment.memory().read_beat(line, 64);
+            const bool retain = operation == RandomConstraints::cmo_clean;
+            const std::uint8_t probe_cap = retain ? 1U : 2U;
+            const std::uint8_t expected_report = dirty
+                ? (retain ? 0U : 1U)
+                : (retain ? 4U : 2U);
+            const std::uint64_t cmo_before =
+                environment.dcache_cmo_requests(cmo_transaction.op);
+            const std::uint64_t probe_responses_before =
+                environment.dcache_probe_responses();
+            const std::uint64_t probe_data_before =
+                environment.dcache_probe_data();
+            const std::uint64_t store_writebacks_before =
+                environment.store_writebacks();
+            environment.expect_store(cmo_transaction);
+            phase = "random-cmo-issue";
+            if (!environment.enqueue_store(
+                    cmo_transaction, memblock::lq_pointer_value(lq_offset)) ||
+                !environment.issue_store_address_until_tlb_hit(
+                    cmo_transaction, cmo_completion_timeout) ||
+                !environment.issue_store_data(cmo_transaction, 4096)) {
+                return false;
+            }
+            const unsigned cmo_response_delay = younger_overlap
+                ? 512U + static_cast<unsigned>(random() % 513U)
+                : 128U + static_cast<unsigned>(random() % 897U);
+            environment.force_next_cmo_response_delay(cmo_response_delay);
+            phase = "random-cmo-probe";
+            if (!environment.wait_for_cmo_store_request(
+                    cmo_transaction, cmo_before + 1, 8192) ||
+                environment.dcache_last_cmo_address() != line ||
+                environment.dcache_last_cmo_source() !=
+                    memblock::kDcacheCmoSource ||
+                !environment.request_dcache_probe(
+                    line, probe_cap, false, expected_report,
+                    dirty ? expected_line : std::vector<unsigned char>{}) ||
+                !environment.run_until_probe_responses(
+                    probe_responses_before + 1,
+                    cmo_completion_timeout) ||
+                environment.dcache_probe_data() !=
+                    probe_data_before + (dirty ? 1U : 0U) ||
+                environment.store_writebacks() != store_writebacks_before ||
+                environment.pending_scalar_stores() != 1) {
+                return false;
+            }
+
+            std::optional<memblock::LoadTransaction> younger;
+            std::uint64_t younger_writebacks_before = 0;
+            std::uint64_t younger_cancels_before = 0;
+            unsigned younger_response_delay = 0;
+            if (younger_overlap) {
+                phase = "random-cmo-younger-overlap";
+                const std::uint64_t younger_line =
+                    cmo_base + block * 0x200000 + 0x100000 +
+                    (cmo_overlap_line++ % lines_per_half_block) * 64;
+                younger = make_load(
+                    younger_line + 8 * (random() % 8),
+                    memblock::LoadOp::ld,
+                    random() % memblock::kScalarLoadLanes);
+                const std::uint64_t requests_before =
+                    environment.tilelink_requests();
+                younger_writebacks_before = environment.writebacks();
+                younger_cancels_before =
+                    environment.lq_redirect_canceled_observed();
+                younger_response_delay = cmo_response_delay + 512U +
+                    static_cast<unsigned>(random() % 1025U);
+                environment.force_next_dcache_response_delay(
+                    younger_response_delay);
+                if (!environment.enqueue_load(*younger) ||
+                    !environment.issue_load(*younger, 4096) ||
+                    !environment.run_until_dcache_requests(
+                        requests_before + 1, 8192) ||
+                    environment.store_writebacks() != store_writebacks_before ||
+                    environment.writebacks() != younger_writebacks_before ||
+                    environment.pending_scalar_stores() != 1) {
+                    return false;
+                }
+            }
+
+            phase = "random-cmo-complete";
+            if (!environment.run_until_store_complete(
+                    cmo_completion_timeout) ||
+                (younger_overlap &&
+                 (!environment.redirect_after(
+                      cmo_transaction.rob, cmo_transaction.rob_flag, false) ||
+                  environment.writebacks() != younger_writebacks_before)) ||
+                !environment.commit_store(cmo_transaction, 8192) ||
+                !environment.run_cycles(
+                    younger_overlap ? younger_response_delay + 256U : 16U) ||
+                (younger_overlap &&
+                 (environment.writebacks() != younger_writebacks_before ||
+                  environment.lq_redirect_canceled_observed() !=
+                      younger_cancels_before + 1)) ||
+                !environment.run_until_queues_retired(8192) ||
+                !environment.dcache_responses_idle() ||
+                !environment.dcache_grants_drained() ||
+                environment.dcache_cmo_requests(cmo_transaction.op) !=
+                    cmo_before + 1 ||
+                !environment.sbuffer_empty()) {
+                return false;
+            }
+            if (younger_overlap) {
+                --rob_offset;
+                --lq_offset;
+            }
+            phase = "seeded-mixed-tail";
+            return true;
+        };
 
         while (actions < target_before_redirect) {
             const bool closing_stride_stream =
@@ -31633,6 +31942,27 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.vector_segment_directions[1] == 0) {
                     vector_segment_store = true;
                 }
+            }
+            unsigned cmo_operation = 0;
+            bool cmo_dirty = false;
+            bool cmo_younger_overlap = false;
+            if (kind == RandomConstraints::cmo) {
+                cmo_operation = constraints.choose_cmo_operation(random());
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::cmo_operation_count;
+                     ++candidate) {
+                    if (constraints.cmo_operation_weights[candidate] != 0 &&
+                        constraint_coverage.cmo_operations[candidate] == 0) {
+                        cmo_operation = candidate;
+                        break;
+                    }
+                }
+                cmo_dirty = choose_binary_class(
+                    constraints.cmo_dirty_per_mille,
+                    constraint_coverage.cmo_line_states);
+                cmo_younger_overlap = choose_binary_class(
+                    constraints.cmo_younger_overlap_per_mille,
+                    constraint_coverage.cmo_younger_overlaps);
             }
             std::optional<unsigned> hypervisor_family;
             if (kind == RandomConstraints::hypervisor) {
@@ -32100,6 +32430,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return false;
                 }
                 ++constraint_coverage.hypervisor_families[*hypervisor_family];
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::cmo) {
+                ordinary_leaf_addressed = true;
+                if (!issue_random_cmo(
+                        cmo_operation, cmo_dirty, cmo_younger_overlap)) {
+                    return false;
+                }
+                ++constraint_coverage.cmo_operations[cmo_operation];
+                ++constraint_coverage.cmo_line_states[cmo_dirty ? 1 : 0];
+                ++constraint_coverage.cmo_younger_overlaps[
+                    cmo_younger_overlap ? 1 : 0];
+                ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::noncacheable) {
                 ordinary_leaf_addressed = true;

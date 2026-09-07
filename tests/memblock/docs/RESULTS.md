@@ -1894,6 +1894,49 @@ and rejects any resulting load writeback. `mmio-contracts`, `uncache-errors`,
 `cbo-zero-contracts`, and `dcache-coherence` passed on the same regenerated
 model. The RTL fix is isolated in commit `42152f6ba`.
 
+## Schema 13 Random CMO Closure
+
+On 2026-09-07 CMO became an operation class in the common `random-mixed`
+constraint interface. CLEAN, FLUSH, and INVAL have independent weights, while
+`cmo-dirty` and `cmo-younger-overlap` steer line state and whether a delayed
+younger cold load occupies another MSHR. Every action checks the exact CMO A
+request and operation/state-derived Probe response, holds CBOAck for a random
+128..1024 cycles, and, when overlap is selected, delays the younger refill
+beyond CBOAck and requires exactly one LQ cancellation with no terminal
+writeback. CMO follows the active Bare/stage-1/nested context; translated cases
+use identity-mapped 2-MiB leaves. The schema-13 terminal record and independent
+verifier conserve all three CMO subclass counters against the CMO operation
+count.
+
+Five 256-action dynamic runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Cycle | CMO CLEAN/FLUSH/INVAL | Clean/dirty | No-overlap/overlap | Maximum DCache latency |
+| --- | ---: | --- | --- | --- | ---: |
+| `coverage`, seed 1 | 31,618 | 2/2/3 | 3/4 | 3/4 | 1,815 |
+| `spec`, seed 2 | 40,833 | 1/1/1 | 2/1 | 2/1 | 1,651 |
+| `corner`, seed 3 | 101,737 | 5/3/2 | 5/5 | 3/7 | 2,236 |
+| CMO-only, seed 9 | 272,223 | 41/57/57 | 71/84 | 81/74 | 2,478 |
+| Fixed CLEAN/clean/overlap, seed 14 | 453,186 | 155/0/0 | 155/0 | 0/155 | 2,455 |
+
+An additional frozen-runtime coverage seed 15 completed at cycle 33,205 with
+CMO counts `4/1/3`, line states `4/4`, and overlaps `5/3`. The regression
+controller recorded the runtime manifest and all controller-file hashes; the
+independent verifier accepted artifact SHA-256
+`e3eb1fe2c489a71f649d58e4eb709abfa3502d6e2a250e660a0b070d061c5881`.
+The frozen executable SHA-256 was
+`cc5fcc37649d1792c96b6c34f58015f17a4cfbbec5c8f2547f6a3f08f2088be8`.
+
+The CMO-only run issued 155 CMO requests and 155 derived Probes in its
+constrained tail; 75 overlapping younger loads were canceled and LQ/SQ
+accounting ended at `269+75/344` and `296+0/296`. Repeated CMO initially exposed
+a UT driver defect: `commit_store()` skipped the backend `scommit` pulse when
+the externally monitored SQ dequeue had already occurred, leaving the shared
+CMO/MMIO StoreQueue state machine unable to accept the next request. The helper
+now always supplies that architectural commit for CMO. This was a verification
+environment correction, not a CPU RTL bug, and no standalone bug report was
+created. No new CPU RTL defect was observed in these runs.
+
 ## DCache Per-Beat Error And MSHR Isolation Closure
 
 On 2026-09-07 the DCache manager stopped treating independent `corrupt` as a

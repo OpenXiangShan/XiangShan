@@ -21,7 +21,9 @@ with concurrent legal TileLink traffic, randomized request/response backpressure
 source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
 denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
-side effects and CMO CLEAN/FLUSH/INVAL functional/error paths are covered.
+side effects and CMO CLEAN/FLUSH/INVAL functional/error paths are covered; the
+same CMO operations, line states, and younger-load cancellation are also
+weighted dimensions in the common constrained-random generator.
 `hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, PMP
 execute behavior, and each operation family across all four Sv39/Sv48 and
 Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
@@ -947,10 +949,11 @@ can add legal NC/MMIO load overlap, then randomizes issue order, store
 address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
-   AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
-   Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus independent
-   nested VS/G NAPOT placement, translation switch and legal fence kind/scope,
-   manager Probe rate/toB/need-data crosses, and DCache, PTW, and
+AMO/LRSC/AMOCAS family and W/D width, CMO CLEAN/FLUSH/INVAL operation,
+clean/dirty line state and younger-load overlap, NC/MMIO load/store direction,
+Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
+independent nested VS/G NAPOT placement, translation switch and legal fence
+kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
 Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
 training pressure on the L1 stride prefetcher. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
@@ -977,7 +980,7 @@ make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=65536 \
   CONSTRAINTS=spec
 make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
   CONSTRAINTS=corner \
-  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 stride-stream=750 ptw-latency=spec'
+  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 cmo=125 cmo-younger-overlap=750 stride-stream=750 ptw-latency=spec'
 ```
 
 `extended-regression`, `final-regression`, and `long-final-regression` default
