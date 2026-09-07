@@ -606,7 +606,7 @@ bin-trace pipeline:
 这些 case 位于：
 
 ```text
-src/test/python/Frontend/tests/test_instr_uncache_port_boundaries.py
+src/test/python/Frontend/tests/py/zhaoxinran/uncache/test_instr_uncache_port_boundaries.py
 ```
 
 | 类别 | Case | 构造要点 | 覆盖重点 |

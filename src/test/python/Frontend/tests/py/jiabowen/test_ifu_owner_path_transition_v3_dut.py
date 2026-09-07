@@ -10,7 +10,7 @@ from env.core.transactions import ProgramImage
 from env.sequences import LoadProgramSequence
 from env.support import PmpPmaConfig
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

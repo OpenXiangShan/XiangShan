@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.set_a_ready(0)
@@ -55,7 +59,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
     uncache._prepare_mmio_cnop_stream(env)
     snapshots: list[dict[str, int | None]] = []

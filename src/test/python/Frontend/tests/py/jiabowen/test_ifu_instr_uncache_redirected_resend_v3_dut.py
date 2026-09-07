@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _OWNER_GROUP = "ifu_instruncache_owner_v3"
@@ -38,7 +42,7 @@ def _wait_for_redirected_resend(env, *, max_cycles: int = 128) -> dict | None:
 
 @pytest.mark.funcov_bins("BIN-1104")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT,
+    not _RUN_DUT,
     reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration",
 )
 def test_cross_8b_resend_redirect_completes_without_old_delivery(env):

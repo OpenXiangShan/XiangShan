@@ -622,6 +622,20 @@ def test_backend_fault_redirect_recovery(
     fault_bit: int,
     redirect_faults: dict[str, int],
 ) -> None:
+    return _run_backend_fault_redirect_recovery(
+        env,
+        fault_kind=fault_kind,
+        fault_bit=fault_bit,
+        redirect_faults=redirect_faults,
+    )
+
+
+def _run_backend_fault_redirect_recovery(
+    env,
+    fault_kind: str,
+    fault_bit: int,
+    redirect_faults: dict[str, int],
+) -> None:
     fault, normal = _backend_fault_recovery_scenarios(fault_kind)
     fault_pc = (fault.va & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
     builder = TranslationScenarioBuilder(env)

@@ -3,11 +3,12 @@ from __future__ import annotations
 import os
 
 import pytest
+from env.sequences import TranslationPmpPmaEntry, TranslationScenario, TranslationScenarioBuilder
 
 from env.support import PmpPmaConfig
 from env.funcov.py.ifu.cacheable_pipeline_funcov import _UPSTREAM_SIGNALS
 from tests.py.jiabowen import test_two_fetch_directed_flow_dut as two_fetch
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -22,7 +23,7 @@ def _entry(kind: str, index: int, addr: int, *, cacheable: bool | None = None):
         execute=True,
         **({} if cacheable is None else {"cacheable": bool(cacheable)}),
     )
-    return uncache.TranslationPmpPmaEntry(
+    return TranslationPmpPmaEntry(
         kind=kind,
         index=index,
         config=config,
@@ -59,7 +60,7 @@ def test_two_fetch_mmio_window_suppresses_second_icache_response(env) -> None:
     payload = two_fetch._second_block_taken_loop()
 
     uncache._initialize_sv39_fetch(env, reset_vector=start_va)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-904-train-cacheable-then-pma-uncache-two-fetch",
         va=mapping_va,
         pa=mapping_pa,
@@ -73,7 +74,7 @@ def test_two_fetch_mmio_window_suppresses_second_icache_response(env) -> None:
             _entry("pma", 0, page, cacheable=True),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     assert state.expected_page_outcomes[0]["expected_path"] == "cacheable"
 
     env.arm_translation_scenario(state)

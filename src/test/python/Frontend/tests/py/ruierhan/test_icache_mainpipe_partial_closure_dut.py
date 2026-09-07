@@ -19,14 +19,14 @@ from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _load_two_fetch_loop,
     _register_mainpipe_observer,
 )
-from tests.py.zhaoxinran.test_instr_uncache_port_boundaries import (
-    test_uncache_sv39_cross_page_rvi_uses_second_page_pma_path
+from tests.py.zhaoxinran.uncache.test_instr_uncache_port_boundaries import (
+    _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path
     as _run_cross_page_pma_path,
-    test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault
+    _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault
     as _run_pmp_execute_denied,
-    test_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page
+    _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page
     as _run_sector_lane_refill,
-    test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests
+    _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests
     as _run_pbmt_nc_redirect,
 )
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

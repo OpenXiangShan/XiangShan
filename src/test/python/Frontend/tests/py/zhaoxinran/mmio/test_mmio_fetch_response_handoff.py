@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
-from tests.py.zhaoxinran import test_nc_fetch_paths as nc_paths
+from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.uncache import test_nc_fetch_paths as nc_paths
 from env.support import PmpPmaConfig
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 def _register_snapshot_observer(env) -> list[dict[str, int | None]]:
@@ -20,7 +24,7 @@ def _register_snapshot_observer(env) -> list[dict[str, int | None]]:
     return snapshots
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=16)
@@ -55,7 +59,7 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_over_uncache_response(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=32)
@@ -108,7 +112,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(env, tmp_path):
     """Cancel a stale prediction's MMIO request before it becomes pending."""
     source_va = uncache._NORMAL_BASE

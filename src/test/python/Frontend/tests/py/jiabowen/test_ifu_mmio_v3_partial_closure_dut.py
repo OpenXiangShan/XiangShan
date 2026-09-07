@@ -1,10 +1,24 @@
 from __future__ import annotations
 
+import os
+
 import pytest
+from env.core.transactions import ProgramImage
+from env.sequences import (
+    LoadProgramSequence,
+    TranslationPmpPmaEntry,
+    TranslationPte,
+    TranslationPtwResponseOverride,
+    TranslationScenario,
+    TranslationScenarioBuilder,
+)
+from env.support import PmpPmaConfig
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.funcov.py.ifu.mmio_v3_funcov import MMIO_V3_CHECKED_EVENT_TYPE
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 def _two_rvi_cross_beat_payload() -> bytes:
@@ -81,7 +95,7 @@ def _register_cross_8b_trace(env) -> list[dict[str, int | None]]:
 
 
 @pytest.mark.funcov_bins("BIN-1012")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_tl_a_stall_holds_request_context(env):
     uncache._prepare_mmio_cnop_stream(env)
     uncache._initialize_mmio_fetch(env)
@@ -112,7 +126,7 @@ def test_mmio_tl_a_stall_holds_request_context(env):
 
 
 @pytest.mark.funcov_bins("BIN-1013")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_rvc_delivers_next_pc_plus_2b(env):
     uncache._prepare_cross_page_rvc_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=16)
@@ -134,7 +148,7 @@ def test_mmio_page_tail_rvc_delivers_next_pc_plus_2b(env):
 
 
 @pytest.mark.funcov_bins("BIN-1014")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
     cross_page_va = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
     cross_page_pa = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE - 2
@@ -143,7 +157,7 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
     payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
 
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-1007-mmio-cross-page-first-iaf",
         va=cross_page_va,
         pa=cross_page_pa,
@@ -152,19 +166,19 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
         expected_path="fault",
         expected_result="access_fault",
         pmp_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=False
                 ),
                 addr=first_page_pa,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True
                 ),
                 addr=second_page_pa,
@@ -172,19 +186,19 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
             ),
         ),
         pma_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True, cacheable=False
                 ),
                 addr=first_page_pa,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True, cacheable=False
                 ),
                 addr=second_page_pa,
@@ -192,7 +206,7 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
             ),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     first_permission = state.expected_page_outcomes[0]["permission"]
     second_permission = state.expected_page_outcomes[1]["permission"]
     assert first_permission["execute_allowed"] is False
@@ -284,7 +298,7 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
 
 
 @pytest.mark.funcov_bins("BIN-1045")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_page_second_page_pf_attributes_to_rvi_start(env):
     """Exercise the owner leaf's first-half/second-page fault contract."""
     cross_page_va = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
@@ -293,55 +307,55 @@ def test_mmio_cross_page_second_page_pf_attributes_to_rvi_start(env):
     payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little") + int(uncache._CNOP).to_bytes(2, "little") * 64
 
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-1045-mmio-cross-page-second-pf",
         va=cross_page_va,
         pa=cross_page_pa,
         payload=payload,
         page_count=2,
-        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_IO),
+        s1_pte=TranslationPte(pbmt=uncache._PBMT_IO),
         expected_path="fault",
         pmp_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=0,
-                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
                 addr=uncache._MMIO_BASE,
                 size=0x1000,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
-                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
                 addr=next_page_pa,
                 size=0x1000,
             ),
         ),
         pma_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=0,
-                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
                 addr=uncache._MMIO_BASE,
                 size=0x1000,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
-                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
                 addr=next_page_pa,
                 size=0x1000,
             ),
         ),
         ptw_response_overrides=(
-            uncache.TranslationPtwResponseOverride(
+            TranslationPtwResponseOverride(
                 vpn=(cross_page_va >> 12) + 1,
                 s2xlate=0,
                 patch=(("s1_pf", 1),),
             ),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(cross_page_va)
     env.arm_translation_scenario(state)
@@ -376,7 +390,7 @@ def test_mmio_cross_page_second_page_pf_attributes_to_rvi_start(env):
 
 
 @pytest.mark.funcov_bins("BIN-1015")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=16)
@@ -399,7 +413,7 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
 
 @pytest.mark.funcov_bins("BIN-1032")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
 def test_instr_uncache_send_request_stall_uses_legal_nc_witness(env):
     """Exercise the canonical SendReq backpressure contract on a legal NC path."""
@@ -464,25 +478,25 @@ def test_instr_uncache_send_request_stall_uses_legal_nc_witness(env):
 
 @pytest.mark.funcov_bins("BIN-1056")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
 def test_nc_execute_denied_preserves_fetch_exception(env):
     payload = int(uncache._CNOP).to_bytes(2, "little") * 64
     start_pc = uncache._NORMAL_BASE
 
     uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-1056-nc-execute-denied",
         va=start_pc,
         pa=uncache._NORMAL_PHYS_BASE,
         payload=payload,
-        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
+        s1_pte=TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
         pmp_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=False
                 ),
                 addr=uncache._NORMAL_PHYS_BASE,
@@ -490,10 +504,10 @@ def test_nc_execute_denied_preserves_fetch_exception(env):
             ),
         ),
         pma_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot",
                     read=True,
                     write=True,
@@ -506,7 +520,7 @@ def test_nc_execute_denied_preserves_fetch_exception(env):
             ),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(start_pc)
     exception_samples = []
@@ -545,7 +559,7 @@ def test_nc_execute_denied_preserves_fetch_exception(env):
 
 @pytest.mark.funcov_bins("BIN-1084", "BIN-1086")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
 def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
     start_pc = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
@@ -555,29 +569,29 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
     payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
 
     uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-1086-nc-page-tail-first-page-iaf",
         va=start_pc,
         pa=start_paddr,
         payload=payload,
         page_count=2,
-        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
+        s1_pte=TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
         expected_result="access_fault",
         pmp_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=False
                 ),
                 addr=first_page,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True
                 ),
                 addr=second_page,
@@ -585,10 +599,10 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
             ),
         ),
         pma_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot",
                     read=True,
                     write=True,
@@ -599,10 +613,10 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
                 addr=first_page,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot",
                     read=True,
                     write=True,
@@ -615,7 +629,7 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
             ),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     assert state.expected_page_outcomes[0]["permission"]["execute_allowed"] is False
     assert state.expected_page_outcomes[1]["permission"]["execute_allowed"] is True
 
@@ -682,7 +696,7 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
 
 @pytest.mark.funcov_bins("BIN-1085")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
 def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
     cross_page_va = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
@@ -692,29 +706,29 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
     payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
 
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
-    scenario = uncache.TranslationScenario(
+    scenario = TranslationScenario(
         scenario_id="bin-1085-nc-cross-page-second-pf",
         va=cross_page_va,
         pa=cross_page_pa,
         payload=payload,
         page_count=2,
-        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
+        s1_pte=TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
         expected_result="page_fault",
         pmp_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True
                 ),
                 addr=first_page,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pmp",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot", read=True, write=True, execute=True
                 ),
                 addr=second_page,
@@ -722,10 +736,10 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
             ),
         ),
         pma_entries=(
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=0,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot",
                     read=True,
                     write=True,
@@ -736,10 +750,10 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
                 addr=first_page,
                 size=uncache._SV39_PAGE_SIZE,
             ),
-            uncache.TranslationPmpPmaEntry(
+            TranslationPmpPmaEntry(
                 kind="pma",
                 index=1,
-                config=uncache.PmpPmaConfig(
+                config=PmpPmaConfig(
                     match="napot",
                     read=True,
                     write=True,
@@ -752,14 +766,14 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
             ),
         ),
         ptw_response_overrides=(
-            uncache.TranslationPtwResponseOverride(
+            TranslationPtwResponseOverride(
                 vpn=(cross_page_va >> 12) + 1,
                 s2xlate=0,
                 patch=(("s1_pf", 1),),
             ),
         ),
     )
-    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
     exception_samples = []
 
     def capture_cross_page_fault(cycle, active_env):
@@ -814,7 +828,7 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
 
 @pytest.mark.funcov_bins("BIN-1067")
 @pytest.mark.skipif(
-    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
 def test_cacheable_checker_redirect_flushes_younger_nc_internal_request(env):
     virtual_page = uncache._NORMAL_BASE
@@ -865,14 +879,14 @@ def test_cacheable_checker_redirect_flushes_younger_nc_internal_request(env):
         response_source="model",
         compare_drive_source="model",
     )
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(
+    LoadProgramSequence(
+        image=ProgramImage(
             payload=bytes(cacheable_payload), base_addr=physical_page
         ),
         step_cycles=0,
     ).run(env)
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(
+    LoadProgramSequence(
+        image=ProgramImage(
             payload=bytes(nc_payload), base_addr=nc_physical_page
         ),
         step_cycles=0,
@@ -1131,7 +1145,7 @@ def test_cacheable_checker_redirect_flushes_younger_nc_internal_request(env):
 
 
 @pytest.mark.funcov_bins("BIN-1052")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_response_writeback(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=32)
@@ -1194,15 +1208,15 @@ def test_mmio_backend_redirect_wins_response_writeback(env):
     "BIN-1111",
     "BIN-1114",
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
     cross_8b_trace = _register_cross_8b_trace(env)
     payload = _two_rvi_cross_beat_payload()
     env.memory.mmio_ranges.append(
         (uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload))
     )
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
+    LoadProgramSequence(
+        image=ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
         step_cycles=0,
     ).run(env)
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
@@ -1245,7 +1259,7 @@ def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
     "BIN-1111",
     "BIN-1114",
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_8b_clean_resend_delivers_two_ordered_rvi(env, tmp_path):
     cross_8b_trace = _register_cross_8b_trace(env)
     payload = _two_rvi_cross_beat_payload()
@@ -1291,7 +1305,7 @@ def test_nc_cross_8b_clean_resend_delivers_two_ordered_rvi(env, tmp_path):
 
 
 @pytest.mark.funcov_bins("BIN-1080", "BIN-1081", "BIN-1083")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_page_clean_rvi_resumes_and_delivers_once(env, tmp_path):
     payload = _cross_page_payload(rvi_tail=True)
     bin_path = tmp_path / "pbmt_nc_cross_page_rvi.bin"
@@ -1325,7 +1339,7 @@ def test_nc_cross_page_clean_rvi_resumes_and_delivers_once(env, tmp_path):
 
 
 @pytest.mark.funcov_bins("BIN-1082")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_rvc_delivers_without_half_instruction_resend(env, tmp_path):
     payload = _cross_page_payload(rvi_tail=False)[: uncache._SV39_PAGE_SIZE]
     bin_path = tmp_path / "pbmt_nc_page_tail_rvc.bin"
@@ -1352,14 +1366,14 @@ def test_nc_page_tail_rvc_delivers_without_half_instruction_resend(env, tmp_path
 
 
 @pytest.mark.funcov_bins("BIN-1049")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_branch_reuses_common_predecode(env):
     payload = _branch_payload()
     env.memory.mmio_ranges.append(
         (uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload))
     )
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
+    LoadProgramSequence(
+        image=ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
         step_cycles=0,
     ).run(env)
     uncache._initialize_mmio_fetch(env)
@@ -1372,7 +1386,7 @@ def test_mmio_branch_reuses_common_predecode(env):
 
 
 @pytest.mark.funcov_bins("BIN-1075")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_branch_reuses_common_predecode(env, tmp_path):
     bin_path = tmp_path / "pbmt_nc_branch.bin"
     bin_path.write_bytes(_branch_payload())
@@ -1392,7 +1406,7 @@ def test_nc_branch_reuses_common_predecode(env, tmp_path):
 
 
 @pytest.mark.funcov_bins("BIN-1023", "BIN-1089", "BIN-1092")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_naturally_advances_to_pbmt_io(env):
     nc_vaddr = uncache._NORMAL_BASE
     io_vaddr = nc_vaddr + uncache._SV39_PAGE_SIZE
@@ -1422,8 +1436,8 @@ def test_nc_page_tail_naturally_advances_to_pbmt_io(env):
         mode="sv39", response_source="model", compare_drive_source="model"
     )
     for paddr in (nc_paddr, io_paddr):
-        uncache.LoadProgramSequence(
-            image=uncache.ProgramImage(payload=payload, base_addr=paddr),
+        LoadProgramSequence(
+            image=ProgramImage(payload=payload, base_addr=paddr),
             step_cycles=0,
         ).run(env)
 
@@ -1450,7 +1464,7 @@ def test_nc_page_tail_naturally_advances_to_pbmt_io(env):
 
 
 @pytest.mark.funcov_bins("BIN-1063")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_tl_a_stall_holds_and_releases_same_request(env, tmp_path):
     bin_path = tmp_path / "pbmt_nc_tl_a_stall.bin"
     bin_path.write_bytes(int(uncache._CNOP).to_bytes(2, "little") * 256)
@@ -1485,7 +1499,7 @@ def test_nc_tl_a_stall_holds_and_releases_same_request(env, tmp_path):
 
 
 @pytest.mark.funcov_bins("BIN-1062")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_send_request_is_suppressed_when_ibuffer_not_ready(env):
     expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
@@ -1531,7 +1545,7 @@ def test_nc_send_request_is_suppressed_when_ibuffer_not_ready(env):
 
 
 @pytest.mark.funcov_bins("BIN-1090")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_delivery_then_pbmt_nc_starts_with_clean_first_instruction(env):
     nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
     env.icache_agent.configure(

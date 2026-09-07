@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import os
+
 import pytest
-from env.core.transactions import BackendRedirectClass
+from env.core.transactions import BackendRedirectClass, ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from env.sequences import LoadProgramSequence
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _INSTRUCTION_ACCESS_FAULT_BIT = 1
@@ -49,8 +54,8 @@ def _load_mmio_payload(env, payload: bytes) -> None:
     env.memory.mmio_ranges.append(
         (uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload))
     )
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(payload=bytes(payload), base_addr=uncache._MMIO_BASE),
+    LoadProgramSequence(
+        image=ProgramImage(payload=bytes(payload), base_addr=uncache._MMIO_BASE),
         step_cycles=0,
     ).run(env)
 
@@ -63,7 +68,7 @@ def _rvi_rvc_payload(*, first: str) -> bytes:
 
 
 @pytest.mark.parametrize("offset", [0, 2, 4])
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env, offset: int):
     payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 64)
     payload[offset : offset + 4] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
@@ -85,7 +90,7 @@ def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env, offset: int):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_rvc_at_8b_tail_advances_by_2b_without_second_beat(env):
     payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 64)
     payload[6:8] = int(uncache._CNOP).to_bytes(2, "little")
@@ -111,7 +116,7 @@ def test_mmio_rvc_at_8b_tail_advances_by_2b_without_second_beat(env):
 
 
 @pytest.mark.parametrize("first", ["rvc", "rvi"])
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_adjacent_rvc_rvi_stream_preserves_pc_progress(env, first: str):
     payload = _rvi_rvc_payload(first=first)
     _load_mmio_payload(env, payload)
@@ -134,7 +139,7 @@ def test_mmio_adjacent_rvc_rvi_stream_preserves_pc_progress(env, first: str):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
     uncache._prepare_cross_beat_rvi_stream(env)
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
@@ -160,7 +165,7 @@ def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
         pytest.param({"corrupt": 1, "denied": 1}, id="corrupt_and_denied"),
     ],
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[str, int]):
     uncache._prepare_cross_beat_rvi_stream(env)
     cfvec_records = _capture_cfvec_exceptions(env)
@@ -190,7 +195,7 @@ def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[
 
 
 @pytest.mark.parametrize("fault", [None, "corrupt", "corrupt_and_denied"])
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
     uncache._prepare_cross_beat_rvi_stream(env)
     cfvec_records = _capture_cfvec_exceptions(env)
@@ -239,7 +244,7 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
         pytest.param({"corrupt": 1, "denied": 1}, id="corrupt-and-denied"),
     ],
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int]):
     uncache._prepare_mmio_cnop_stream(env)
     cfvec_records = _capture_cfvec_exceptions(env)
@@ -264,7 +269,7 @@ def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int
     assert not env.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_branch_instruction_is_delivered_as_control_flow(env):
     branch = int(0x00000263).to_bytes(4, "little")
     payload = branch + int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
@@ -305,7 +310,7 @@ def test_mmio_branch_instruction_is_delivered_as_control_flow(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_jal_instruction_is_delivered_as_control_flow(env):
     payload = int(uncache._JAL_X0_PLUS_4).to_bytes(4, "little")
     payload += int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
@@ -323,7 +328,7 @@ def test_mmio_jal_instruction_is_delivered_as_control_flow(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.set_a_ready(0)
@@ -346,7 +351,7 @@ def test_mmio_tl_a_backpressure_holds_request_until_accepted(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_redirect_drops_a_ready_stalled_request(env):
     uncache._prepare_mmio_cnop_stream(env)
     target_pc = uncache._MMIO_BASE + 0x40
@@ -386,8 +391,12 @@ def test_mmio_redirect_drops_a_ready_stalled_request(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
+    return _run_mmio_redirect_cancels_wait_last_commit_before_request(env)
+
+
+def _run_mmio_redirect_cancels_wait_last_commit_before_request(env):
     """Redirect a non-first MMIO while it is still commit ordered."""
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
@@ -461,7 +470,7 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_rvi_rechecks_next_page_before_delivery(env):
     uncache._prepare_cross_page_rvi_stream(env)
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
@@ -482,7 +491,7 @@ def test_mmio_page_tail_rvi_rechecks_next_page_before_delivery(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_rvc_delivers_before_next_page_fetch(env):
     uncache._prepare_cross_page_rvc_stream(env)
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
@@ -511,7 +520,7 @@ def test_mmio_page_tail_rvc_delivers_before_next_page_fetch(env):
         pytest.param({"denied": 1}, True, id="denied"),
     ],
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_first_beat_fault_preserves_resend_contract(
     env, fault: dict[str, int], expect_page_recheck: bool
 ):

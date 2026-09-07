@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 def _read_dut_signal(env, name: str) -> int:
@@ -74,7 +78,7 @@ def _redirect_before_unaccepted_request(env, *, pending_addr: int, target_pc: in
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_flush_cancels_unaccepted_8b_resend(env):
     uncache._prepare_cross_beat_rvi_stream(env)
     snapshots = _register_flush_snapshot_observer(env)
@@ -106,7 +110,7 @@ def test_mmio_flush_cancels_unaccepted_8b_resend(env):
     ), {"snapshots": snapshots[-64:]}
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_flush_cancels_unaccepted_page_half_recheck(env):
     uncache._prepare_cross_page_rvi_stream(env)
     snapshots = _register_flush_snapshot_observer(env)
@@ -136,7 +140,7 @@ def test_mmio_flush_cancels_unaccepted_page_half_recheck(env):
     ), {"snapshots": snapshots[-64:]}
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_d_response_coincides_with_ifu_flush(env):
     """Deliver TL-D on the cycle a redirect flushes the pending MMIO."""
     uncache._prepare_mmio_cnop_stream(env)

@@ -5,7 +5,7 @@ import os
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

@@ -478,6 +478,24 @@ def test_sfence_scope_after_refill(
     ident,
     retranslation_page_indexes,
 ) -> None:
+    return _run_sfence_scope_after_refill(
+        env,
+        scenario_id=scenario_id,
+        rs1=rs1,
+        rs2=rs2,
+        ident=ident,
+        retranslation_page_indexes=retranslation_page_indexes,
+    )
+
+
+def _run_sfence_scope_after_refill(
+    env,
+    scenario_id,
+    rs1,
+    rs2,
+    ident,
+    retranslation_page_indexes,
+) -> None:
     scenario = _sfence_stage_scenario(scenario_id, s2xlate=0)
     record = _run_sfence_retranslation(
         env,

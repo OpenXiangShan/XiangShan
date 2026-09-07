@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.funcov.py.ifu.mmio_nc_owner_funcov import (
@@ -14,8 +16,10 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig
-from tests.py.zhaoxinran import test_address_translation_fault as translation_faults
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import translation_faults
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _CFVEC_EXCEPTION_BITS = (1, 2, 12, 19, 20)
@@ -304,7 +308,7 @@ def _nc_cross_page_fault_scenario(
     return scenario, cross_page_va, cross_page_pa
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_tl_a_backpressure_holds_payload_until_fire(env):
     """Exercise NC TL-A stall/stability/release with a non-MMIO PBMT.NC page."""
     _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -357,7 +361,7 @@ def test_nc_tl_a_backpressure_holds_payload_until_fire(env):
         pytest.param({"corrupt": 1, "denied": 1}, 1, id="denied-iaf"),
     ],
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_d_response_fault_reports_exception(env, fault, expected_exception_bit):
     """Exercise NC D corrupt/denied responses and require an exception-marked cfVec."""
     _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -402,7 +406,7 @@ def test_nc_d_response_fault_reports_exception(env, fault, expected_exception_bi
 
 
 @pytest.mark.parametrize("is_rvc", [pytest.param(False, id="rvi"), pytest.param(True, id="rvc")])
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_8b_tail_delivery_uses_correct_second_beat_policy(env, tmp_path, is_rvc):
     """Exercise NC 8B-tail RVI resend and RVC no-resend at physical offset ...e."""
     payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 7)
@@ -466,7 +470,7 @@ def test_nc_8b_tail_delivery_uses_correct_second_beat_policy(env, tmp_path, is_r
         pytest.param(uncache._JAL_X0_PLUS_4, "jump", id="jump"),
     ],
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cfi_instruction_is_delivered_with_control_flow_type(env, tmp_path, instruction, branch_kind):
     """Exercise NC branch/jump delivery without relying on a Python coverage key."""
     payload = bytearray(int(instruction).to_bytes(4, "little"))
@@ -506,7 +510,7 @@ def test_nc_cfi_instruction_is_delivered_with_control_flow_type(env, tmp_path, i
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_mixed_beat_types_preserve_delivery_order_and_pc_progress(env, tmp_path):
     """Exercise all missing RVI/RVC transitions across bounded backend backpressure."""
     payload = bytearray()
@@ -573,7 +577,7 @@ def test_nc_mixed_beat_types_preserve_delivery_order_and_pc_progress(env, tmp_pa
 
 
 @pytest.mark.parametrize("is_rvc", [pytest.param(False, id="rvi"), pytest.param(True, id="rvc")])
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_rvc):
     """Exercise a real NC page tail at the sampler-compatible physical ...ffe offset."""
     payload = bytearray(
@@ -682,7 +686,7 @@ def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_r
 
 
 @pytest.mark.funcov_bins("BIN-1128")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env, tmp_path):
     """Reject a denied first-page tail response without an illegal resend."""
     payload = bytearray(
@@ -748,7 +752,7 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     "s2xlate,response_field,expected_result,expected_fault",
     translation_faults._CROSS_PAGE_FAULT_CASES,
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
     env,
     s2xlate: int,
@@ -862,7 +866,7 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
 
 
 @pytest.mark.funcov_bins("BIN-1127")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
     fault_matrix = (
         (0, "s1_pf", "page_fault", "instruction_page_fault"),
@@ -985,7 +989,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
     )
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
     """Reject a PBMT.NC fetch before issuing TL-A when PMP denies execute."""
     scenario = TranslationScenario(
@@ -1058,7 +1062,7 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     """Exercise an NC pending response across a backend canAccept fall/rise."""
     _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -1111,7 +1115,7 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     """Flush an outstanding NC response and recover through a cacheable page."""
     nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
@@ -1213,7 +1217,7 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_request_selection_overlaps_natural_predchecker_redirect(env, tmp_path):
     """Cancel a stale prediction's PBMT.NC request before it becomes pending."""
     source_va = uncache._NORMAL_BASE

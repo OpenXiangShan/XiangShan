@@ -530,6 +530,10 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
+    return _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup)
+
+
+def _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
     _initialize_cacheable_stream(env, base, latency=96)

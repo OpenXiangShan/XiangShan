@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _WAIT_LAST_COMMIT = 1
@@ -68,7 +72,7 @@ def _register_flow_snapshot_observer(env):
     return snapshots
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
@@ -124,7 +128,7 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_empty(env):
     """Construct WAIT_LAST_COMMIT with backend work visible but an empty IBuffer."""
     uncache._prepare_mmio_cnop_stream(env)
@@ -154,7 +158,7 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_empty_release_enters_send_req_before_tl_a(env):
     """Release WAIT_LAST_COMMIT with both queues empty before TL-A starts."""
     uncache._prepare_mmio_cnop_stream(env)
@@ -198,7 +202,7 @@ def test_mmio_empty_release_enters_send_req_before_tl_a(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
     """Raise backend acceptance only after a pending MMIO has produced cfVec."""
     uncache._prepare_mmio_cnop_stream(env)
@@ -236,7 +240,7 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     """Drop backend acceptance while a pending MMIO has no visible cfVec."""
     uncache._prepare_mmio_cnop_stream(env)
@@ -280,7 +284,7 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_ibuffer_stall_suppresses_tl_a(env):
     """Use a legal PBMT.NC request to hold SEND_REQ under IBuffer stall."""
     expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(

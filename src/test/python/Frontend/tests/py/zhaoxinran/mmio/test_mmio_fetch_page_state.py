@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
     uncache._prepare_cross_page_rvi_stream(env)
     env.uncache_agent.configure(latency=2, mmio_latency=16)

@@ -8,7 +8,7 @@ import pytest
 
 from env.core.transactions import ProgramImage
 from env.sequences import LoadProgramSequence
-from tests.py.zhaoxinran.test_instr_uncache_port_boundaries import _force_redirect_to
+from tests.py.support.uncache_scenarios import _force_redirect_to
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

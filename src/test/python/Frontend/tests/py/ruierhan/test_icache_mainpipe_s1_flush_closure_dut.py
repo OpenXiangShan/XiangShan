@@ -448,6 +448,10 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
 @pytest.mark.funcov_bins("BIN-618")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
+    return _run_tc_icache_mainpipe_s1_bpu_miss(env)
+
+
+def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples = _register_s1_observer(env)
     _initialize_bpu_s3_stream(env)

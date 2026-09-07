@@ -18,10 +18,11 @@ from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from tests.py.jiabowen import test_ifu_predchecker_v3_dut as predchecker
 from tests.py.ruierhan import test_icache_lowrisk_gap_closure_dut as lowrisk
 from tests.py.ruierhan import test_icache_mainpipe_s1_flush_closure_dut as s1_flush
-from tests.py.zhaoxinran import test_instruction_fetch_permission_boundary as faults
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
-from tests.py.zhaoxinran import test_mmio_fetch_boundary as mmio
-from tests.py.zhaoxinran import test_address_translation_context_switch as context_switch
+from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
+from tests.py.support import uncache_scenarios as uncache
+from tests.py.zhaoxinran.uncache import test_instr_uncache_port_boundaries as uncache_tests
+from tests.py.zhaoxinran.mmio import test_mmio_fetch_boundary as mmio
+from tests.py.zhaoxinran.translation import test_address_translation_context_switch as context_switch
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -360,7 +361,7 @@ def test_rfr_s01_fault_redirect_recovery_three_fetches(
 ) -> None:
     """Deliver a backend fetch fault and observe three recovery fetches."""
     main_fetch_samples = _register_main_fetch_observer(env)
-    faults.test_backend_fault_redirect_recovery(
+    faults._run_backend_fault_redirect_recovery(
         env,
         fault_kind=fault_kind,
         fault_bit=fault_bit,
@@ -374,7 +375,7 @@ def test_rfr_s01_fault_redirect_recovery_three_fetches(
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_rfr_s02_memory_violation_redirect_cancels_mmio(env) -> None:
     """Use the structured memory-violation class on a live MMIO source."""
-    mmio.test_mmio_redirect_cancels_wait_last_commit_before_request(env)
+    mmio._run_mmio_redirect_cancels_wait_last_commit_before_request(env)
     assert not env.monitor.get_errors()
 
 
@@ -445,7 +446,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
     else:
         samples = _register_uncache_redirect_observer(env)
         if path == "cross-page-resend":
-            uncache.test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env)
+            uncache_tests._run_uncache_page_tail_rvi_need_resend_rechecks_next_page(env)
             matches = [
                 sample
                 for sample in samples
@@ -456,7 +457,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
                 and sample["backend_redirect"] == 0
             ]
         else:
-            uncache.test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
+            uncache_tests._run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
             matches = [
                 sample
                 for sample in samples
@@ -474,7 +475,7 @@ def test_rfr_s04_uncache_response_redirect_recovery(env, path: str) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_rfr_s05_bpu_s3_override_flushes_old_window(env) -> None:
     """Keep the existing BPU s3 miss stimulus under the RFR entry point."""
-    s1_flush.test_tc_icache_mainpipe_s1_bpu_miss(env)
+    s1_flush._run_tc_icache_mainpipe_s1_bpu_miss(env)
     assert not env.monitor.get_errors()
 
 
@@ -483,9 +484,9 @@ def test_rfr_s05_bpu_s3_override_flushes_old_window(env) -> None:
 def test_rfr_s06_fencei_with_cache_state_restarts_fetch(env, flush: str) -> None:
     """Exercise both architectural frontend flush inputs on live DUT state."""
     if flush == "fencei":
-        lowrisk.test_icache_lowrisk_missunit_merge_and_fencei(env)
+        lowrisk._run_icache_lowrisk_missunit_merge_and_fencei(env)
     else:
-        context_switch.test_sfence_scope_after_refill(
+        context_switch._run_sfence_scope_after_refill(
             env,
             scenario_id="rfr-sfence-all-address-all-id",
             rs1=1,

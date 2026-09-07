@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-import pytest
+import os
 
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+import pytest
+from env.core.transactions import ProgramImage
+from env.sequences import LoadProgramSequence
+
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 _JALR_X0_X1_0 = 0x00008067
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_jalr_return_is_delivered_as_indirect_control_flow(env):
     payload = int(_JALR_X0_X1_0).to_bytes(4, "little")
     payload += int(uncache._CNOP).to_bytes(2, "little") * 128
     env.memory.mmio_ranges.append((uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload)))
-    uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
+    LoadProgramSequence(
+        image=ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
         step_cycles=0,
     ).run(env)
     uncache._initialize_mmio_fetch(env)

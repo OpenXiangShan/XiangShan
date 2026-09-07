@@ -177,7 +177,7 @@ TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 
 地址翻译随机回归保留两个独立入口：
 
-- `tests/py/zhaoxinran/test_translation_random_regression_dut.py` 保留原始的
+- `tests/py/zhaoxinran/translation/test_translation_random_regression_dut.py` 保留原始的
   fault-inclusive 随机流。
 - `tests/py/ruierhan/test_translation_random_regression_filtered_dut.py` 默认过滤
   已知会产生 translation fault 的场景；设置

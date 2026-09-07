@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_pbmt_nc_non_mmio_enters_uncache_send_path(env):
     expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
@@ -27,7 +31,7 @@ def test_pbmt_nc_non_mmio_enters_uncache_send_path(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_pmp_mmio_with_pbmt_nc_waits_for_mmio_commit_order(env):
     _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,

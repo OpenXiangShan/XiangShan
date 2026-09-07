@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from env.core.transactions import ProgramImage
@@ -13,8 +15,10 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig, fold_pc
-from tests.py.zhaoxinran import test_address_translation_fault as translation_faults
-from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+from tests.py.support import translation_faults
+from tests.py.support import uncache_scenarios as uncache
+
+_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
 def _prepare_cross_page_mmio_rvi(env) -> tuple[int, int, bytes]:
@@ -103,7 +107,7 @@ def _cross_page_fault_scenario(
     "s2xlate,response_field,expected_result,expected_fault",
     translation_faults._CROSS_PAGE_FAULT_CASES,
 )
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_page_second_page_translation_fault(
     env,
     s2xlate: int,
@@ -194,7 +198,7 @@ def test_mmio_cross_page_second_page_translation_fault(
 
 
 @pytest.mark.funcov_bins("BIN-1123", "BIN-1124", "BIN-1125")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
     """A first-page MMIO PMP execute denial must be IAF, never illegal."""
     cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
@@ -307,7 +311,7 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
 
 
 @pytest.mark.funcov_bins("BIN-1126")
-@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
     cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
     first_page_pa = cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)
