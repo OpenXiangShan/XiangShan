@@ -69,15 +69,16 @@ and PMA matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks read-request acceptance, ordinary and prefetch miss
-responses, kill and `no_translate`, and the exact cacheable no-fault
-PA/PBMT/PMP/PMA result after the requestor's own PTW refill. The miss is
-returned immediately while
-the shared prefetch TLB fills internally; a same-VA retry must hit without a
-new external PTW TileLink A request. PMP allow and a locked 4-KiB deny are
-checked on that real cacheable translation. The separately registered PMP
-result is sampled one cycle after the TLB response, matching
-`PMPChecker(leaveHitMux=true)`. Positive PBMT NC/IO and PF/GPF/AF response
-payloads remain explicit coverage gaps.
+responses, kill and `no_translate`, and exact cacheable, PBMT=NC, and PBMT=IO
+no-fault PA/PBMT/PMP/PMA results after the requestor's own PTW refill. The miss
+is returned immediately while the shared prefetch TLB fills internally; a
+same-VA retry must hit without a new external PTW TileLink A request. The same
+refill/hit contract is checked for stage-1 page fault, nested G-stage guest-page
+fault, and PTW access-fault entries. Their fault bits must be exact, but address
+and PMP fields are deliberately not constrained because the L2 consumer drops
+the result on fault. PMP allow and a locked 4-KiB deny are checked on a real
+cacheable translation. The separately registered PMP result is sampled one
+cycle after the TLB response, matching `PMPChecker(leaveHitMux=true)`.
 
 ## Architecture
 

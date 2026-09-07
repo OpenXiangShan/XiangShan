@@ -471,7 +471,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "l1_hit_response=1",
             "phase=l1-hit-response",
             "phase=pmp-denied",
+            "RefilledResponseExpectation",
+            "pbmt_nc=1 pbmt_io=1 pf_ld=1 gpf_ld=1 af_ld=1",
             "pmp_allow=1 pmp_deny=1 pmp_mmio=1",
+            "ptw_a_requests=",
             "leaveHitMux",
         ):
             self.assertIn(contract, environment + main + makefile)

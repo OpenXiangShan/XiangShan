@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `7a81e76170a5d06fbe7807633c4bcbabf307146feafd18fc30d0288d15214d7c`
+- Current rebuilt and frozen UT executable SHA-256: `7c4c7f57b86e0563e8f7b7bf94cbe34fa9952357a5eb497198778b41e8f32c41`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `ac660cb8804945b620710e16df71a1020e15cfafc97d5643609bffd329ca131f`
+- Frozen runtime manifest SHA-256: `011b22025bc20d01c8685e7f3ea4dfd05cdf98a1e2daba41d6c70c04f3c6baae`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1435,6 +1435,14 @@ classification one cycle after the TLB response, so the helper now samples the
 two payloads at their actual cycles. These were UT oracle defects, not CPU/RTL
 defects.
 
+The completed L2 boundary matrix additionally refills and retries PBMT=NC,
+PBMT=IO, stage-1 page-fault, nested G-stage guest-page-fault, and PTW
+access-fault results. Every retry hits without a new external PTW TileLink A
+request. Exact PA/PBMT/PMP/PMA remain required for non-fault hits; fault hits
+check only the fault result because the real L2 consumer drops their address
+and protection payloads. The combined scenario passed in 1,967 cycles with 15
+external PTW TileLink A requests. No CPU RTL defect was observed.
+
 The first `store-rdata-order` run also exposed an oracle defect rather than an
 RTL failure. Its exceptional StoreUnit address writeback carried the expected
 `storeAddrMisaligned=0x40` and `TriggerAction.None=15`, but the test had
@@ -1494,7 +1502,7 @@ the historical complete RTL SHA-256 is
 | Hypervisor memory operations | Pass | 76 cases in 17,599 aggregate cycles: all encodings, four nested mode pairs, five PBMT combinations, misaligned split paths, 18 M-mode/SPVP physical-PMP crosses including six locked R/RWX cases, and three fixed-PMA device cases. HLV required R, HLVX required R+X, and HSV required W; PMA-device HLV/HSV used Uncache while HLVX faulted; 11 total access faults, 656 PTW requests, and 48 DCache requests matched the oracle |
 | Concurrent exception priority | Pass | Cycle 1,351; wrapped/reversed queue age, same-ROB vector-uop order, cross-cause and scalar/vector replacement all passed. Two additional vector-load/store pairs populated the exception buffers in opposite arrival orders; toggling `isStoreException` selected and restored each exact source VA. Totals were 11 scalar-load, six vector-load, and six scalar-store writebacks |
 | Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
-| L2-to-L1 DTLB boundary | Pass | Cycle 552; an ordinary request returned a legal miss, completed its internal PTW refill, then hit at exact PA `0xa0056018` with PBMT 0, no fault, PMP allow, and cacheable PMA classification without another external PTW TileLink A request. A locked 4-KiB NAPOT entry changed the same resident hit to PMP deny without changing its translation. A prefetch request returned a legal cold miss, `no_translate=1` exercised the pruned-zero-address MMIO contract, `kill=1` produced no response for 128 cycles, and all 16 source IDs x both L2-hint polarities produced no ghost traffic; the external PTW TileLink A count remained 3 |
+| L2-to-L1 DTLB boundary | Pass | 1,967 aggregate cycles; cold requests refilled then retried as exact cacheable, PBMT=NC, PBMT=IO, stage-1 PF, nested GPF, and PTW AF pftlb hits without an additional external PTW TileLink A request. The cacheable hit returned PA `0xa0056018`, PMP allow, and cacheable PMA classification; a locked 4-KiB NAPOT entry changed the resident hit to PMP deny without changing translation. A prefetch request returned a legal cold miss, `no_translate=1` exercised the pruned-zero-address MMIO contract, `kill=1` produced no response for 128 cycles, and all 16 source IDs x both L2-hint polarities produced no ghost traffic; total external PTW TileLink A requests were 15 |
 | PTW D-channel errors | Pass | 16 fault cases plus 16 same-address clean recoveries in 3,466 aggregate cycles: eight stage-1, four isolated G-stage, two fully nested, and two bitmap reads; load/store and denied/independent-corrupt each split 8/8, with corrupt split 4/4 over first/last beat. Denied was fixed across both beats and also asserted corrupt as required for data responses. The 111 PTW requests proved exact fault cutoff and post-fence reread of every failed block; faulting accesses reached neither DCache nor Uncache, while every recovery returned exact data through one DCache request |
 | IFU-to-Mem PTW bridge | Pass | 42 cases in 29,920 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, six stage-1/G-stage leaf/non-leaf `G` cases, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Stage-1 global input was reported in three leaf cases and conservatively demoted in three non-leaf cases; G-stage raw `G` was reported in two leaf cases and demoted in two non-leaf cases without changing functional results. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 278 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 215 response-stall cycles passed; RTL SHA-256 `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39` |
 | Reset recovery | Pass | 576 aggregate cycles; three repeated-reset phases accepted and canceled DCache-refill, PTW-walk, and Uncache/MMIO traffic under 256-cycle delayed responses, then completed three distinct post-reset survivors with no stale response/writeback |

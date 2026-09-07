@@ -18266,6 +18266,71 @@ int run_pmp_contracts(int argc, char **argv)
 
 int run_l2_tlb_contracts(int argc, char **argv)
 {
+    struct RefilledResponseExpectation {
+        const char *phase = nullptr;
+        std::uint64_t vaddr = 0;
+        std::optional<std::uint64_t> paddr;
+        std::optional<std::uint8_t> pbmt;
+        bool page_fault = false;
+        bool guest_page_fault = false;
+        bool access_fault = false;
+        bool check_protection = false;
+        bool pmp_load_denied = false;
+        bool pmp_mmio = false;
+        bool is_prefetch = false;
+    };
+    const auto expect_refilled_response = [](
+        memblock::Environment &candidate,
+        const RefilledResponseExpectation &expected) {
+        memblock::Environment::L2TlbResponse cold{};
+        if (!candidate.issue_l2_tlb_request(
+                expected.vaddr, 0, false, expected.is_prefetch, false, cold) ||
+            !cold.miss) {
+            std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                      << candidate.cycle() << " phase=" << expected.phase
+                      << "-miss reason=" << candidate.error()
+                      << " miss=" << cold.miss << '\n';
+            return false;
+        }
+        if (!candidate.run_cycles(256)) {
+            std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                      << candidate.cycle() << " phase=" << expected.phase
+                      << "-refill-drain reason=" << candidate.error() << '\n';
+            return false;
+        }
+        const std::uint64_t ptw_a_before_retry = candidate.ptw_requests();
+        memblock::Environment::L2TlbResponse response{};
+        const bool received = candidate.issue_l2_tlb_request(
+            expected.vaddr, 0, false, expected.is_prefetch, false, response);
+        const bool payload_mismatch =
+            response.miss || response.page_fault != expected.page_fault ||
+            response.guest_page_fault != expected.guest_page_fault ||
+            response.access_fault != expected.access_fault ||
+            (expected.paddr && response.paddr != *expected.paddr) ||
+            (expected.pbmt && response.pbmt != *expected.pbmt) ||
+            (expected.check_protection &&
+             (response.pmp_load_denied != expected.pmp_load_denied ||
+              response.pmp_mmio != expected.pmp_mmio)) ||
+            candidate.ptw_requests() != ptw_a_before_retry;
+        if (!received || payload_mismatch) {
+            std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                      << candidate.cycle() << " phase=" << expected.phase
+                      << "-hit reason=" << candidate.error()
+                      << " miss=" << response.miss
+                      << " paddr=0x" << std::hex << response.paddr << std::dec
+                      << " pbmt=" << static_cast<unsigned>(response.pbmt)
+                      << " pf=" << response.page_fault
+                      << " gpf=" << response.guest_page_fault
+                      << " af=" << response.access_fault
+                      << " pmp_ld=" << response.pmp_load_denied
+                      << " pmp_mmio=" << response.pmp_mmio
+                      << " ptw_a_before=" << ptw_a_before_retry
+                      << " ptw_a_after=" << candidate.ptw_requests() << '\n';
+            return false;
+        }
+        return true;
+    };
+
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_base = 0x50056000ULL;
     constexpr std::uint64_t physical_base = 0xa0056000ULL;
@@ -18452,13 +18517,125 @@ int run_l2_tlb_contracts(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment pbmt_and_pf(argc, argv);
+    constexpr std::uint64_t payload_virtual = 0x51000000ULL;
+    constexpr std::uint64_t payload_physical = 0xa1000000ULL;
+    constexpr std::uint64_t payload_root = 0x97200000ULL;
+    if (!pbmt_and_pf.reset() ||
+        !pbmt_and_pf.map_sv39_4k(
+            payload_virtual, payload_physical, payload_root,
+            true, true, false, false, true, false) ||
+        !pbmt_and_pf.map_sv39_4k(
+            payload_virtual + 0x1000, payload_physical + 0x1000,
+            payload_root, true, true, false, false, false, true) ||
+        !pbmt_and_pf.map_sv39_4k(
+            payload_virtual + 0x2000, payload_physical + 0x2000,
+            payload_root, false, false, true) ||
+        !pbmt_and_pf.set_page_based_memory_types(true, false) ||
+        !pbmt_and_pf.activate_sv39(payload_root, 81)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << pbmt_and_pf.cycle()
+                  << " phase=payload-configuration reason="
+                  << pbmt_and_pf.error() << '\n';
+        return 1;
+    }
+    if (!expect_refilled_response(
+            pbmt_and_pf,
+            {.phase = "pbmt-nc",
+             .vaddr = payload_virtual + 0x18,
+             .paddr = payload_physical + 0x18,
+             .pbmt = 1,
+             .check_protection = true,
+             .is_prefetch = true}) ||
+        !expect_refilled_response(
+            pbmt_and_pf,
+            {.phase = "pbmt-io",
+             .vaddr = payload_virtual + 0x1018,
+             .paddr = payload_physical + 0x1018,
+             .pbmt = 2,
+             .check_protection = true,
+             .is_prefetch = true}) ||
+        !expect_refilled_response(
+            pbmt_and_pf,
+            {.phase = "stage1-pf",
+             .vaddr = payload_virtual + 0x2018,
+             .page_fault = true,
+             .is_prefetch = true})) {
+        return 1;
+    }
+
+    memblock::Environment nested_gpf(argc, argv);
+    constexpr std::uint64_t nested_virtual = 0x52000000ULL;
+    constexpr std::uint64_t nested_guest = 0x9f000000ULL;
+    constexpr std::uint64_t nested_physical = 0xa2000000ULL;
+    constexpr std::uint64_t nested_vs_root = 0x97400000ULL;
+    constexpr std::uint64_t nested_g_root = 0x97600000ULL;
+    bool nested_ready = nested_gpf.reset() &&
+        nested_gpf.map_sv39_4k(
+            nested_virtual, nested_guest, nested_vs_root);
+    for (unsigned page = 0; nested_ready && page < 3; ++page) {
+        const std::uint64_t address = nested_vs_root + page * 0x1000ULL;
+        nested_ready = nested_gpf.map_sv39x4_4k(
+            address, address, nested_g_root);
+    }
+    nested_ready = nested_ready && nested_gpf.map_sv39x4_4k(
+        nested_guest, nested_physical, nested_g_root,
+        false, false, true) &&
+        nested_gpf.activate_two_stage(nested_vs_root, nested_g_root, 82, 83);
+    if (!nested_ready) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << nested_gpf.cycle()
+                  << " phase=nested-gpf-configuration reason="
+                  << nested_gpf.error() << '\n';
+        return 1;
+    }
+    if (!expect_refilled_response(
+            nested_gpf,
+            {.phase = "nested-gpf",
+             .vaddr = nested_virtual + 0x18,
+             .guest_page_fault = true,
+             .is_prefetch = true})) {
+        return 1;
+    }
+
+    memblock::Environment ptw_af(argc, argv);
+    constexpr std::uint64_t af_virtual = 0x53000000ULL;
+    constexpr std::uint64_t af_physical = 0xa3000000ULL;
+    constexpr std::uint64_t af_root = 0x97800000ULL;
+    if (!ptw_af.reset() ||
+        !ptw_af.map_sv39_4k(af_virtual, af_physical, af_root) ||
+        !ptw_af.activate_sv39(af_root, 84)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << ptw_af.cycle() << " phase=ptw-af-configuration reason="
+                  << ptw_af.error() << '\n';
+        return 1;
+    }
+    ptw_af.inject_ptw_response_error_after(0, true, false);
+    if (!expect_refilled_response(
+            ptw_af,
+            {.phase = "ptw-af",
+             .vaddr = af_virtual + 0x18,
+             .access_fault = true,
+             .is_prefetch = true}) ||
+        ptw_af.ptw_error_response_requests() != 1) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << ptw_af.cycle() << " phase=ptw-af-count reason="
+                  << ptw_af.error() << " errors="
+                  << ptw_af.ptw_error_response_requests() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_L2_TLB_CONTRACTS_PASS"
-              << " cycle=" << environment.cycle()
+              << " cycles=" << environment.cycle() + pbmt_and_pf.cycle() +
+                    nested_gpf.cycle() + ptw_af.cycle()
               << " l1_miss_response=1 l1_hit_response=1"
               << " no_translate=1 killed=1 prefetch_miss=1"
+              << " pbmt_nc=1 pbmt_io=1 pf_ld=1 gpf_ld=1 af_ld=1"
               << " pmp_allow=1 pmp_deny=1 pmp_mmio=1 hints=32"
               << " hit_paddr=0x" << std::hex << warm_hit.paddr << std::dec
-              << " ptw_requests=" << environment.ptw_requests()
+              << " ptw_a_requests=" << environment.ptw_requests() +
+                    pbmt_and_pf.ptw_requests() + nested_gpf.ptw_requests() +
+                    ptw_af.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
