@@ -4385,6 +4385,10 @@ public:
                     dut_.io_l2_tlb_req_resp_bits_excp_0_pf_ld.B();
                 response.access_fault =
                     dut_.io_l2_tlb_req_resp_bits_excp_0_af_ld.B();
+                // The retained L2 PMP response comes from a leaveHitMux
+                // checker, whose match and config are registered one cycle
+                // after the TLB response payload becomes valid.
+                tick(false);
                 response.pmp_load_denied = dut_.io_l2_pmp_resp_ld.B();
                 response.pmp_mmio = dut_.io_l2_pmp_resp_mmio.B();
                 return check_components();

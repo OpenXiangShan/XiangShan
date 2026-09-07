@@ -18282,9 +18282,9 @@ int run_l2_tlb_contracts(int argc, char **argv)
     }
 
     // Warm the ordinary DTLB through a real load first.  The L2-to-L1 port is
-    // a separate non-blocking requestor: its response tells the external L2
-    // whether the L1 lookup hit.  A miss is intentionally returned to that
-    // external L2; MemBlock does not refill this port from its own PTW.
+    // a separate requestor, so its first lookup must still miss.  That miss
+    // also starts a PTW walk which refills the shared prefetch TLB; retrying
+    // this port then exercises the real hit payload and PMP/PMA classifier.
     const memblock::LoadTransaction warm{
         .address = virtual_base + 0x18,
         .oracle_address = physical_base + 0x18,
@@ -18317,18 +18317,50 @@ int run_l2_tlb_contracts(int argc, char **argv)
         }
     }
 
-    memblock::Environment::L2TlbResponse hit;
+    memblock::Environment::L2TlbResponse ordinary_miss;
     if (!environment.issue_l2_tlb_request(
-            warm.address, 0, false, false, false, hit) || !hit.miss ||
-        hit.page_fault || hit.guest_page_fault || hit.access_fault ||
-        hit.pbmt != 0) {
+            warm.address, 0, false, false, false, ordinary_miss) ||
+        !ordinary_miss.miss) {
         std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=l1-miss-response reason="
-                  << environment.error() << " miss=" << hit.miss
-                  << " paddr=0x" << std::hex << hit.paddr
-                  << std::dec << " pf=" << hit.page_fault
-                  << " gpf=" << hit.guest_page_fault
-                  << " af=" << hit.access_fault << '\n';
+                  << environment.error() << " miss=" << ordinary_miss.miss
+                  << " paddr=0x" << std::hex << ordinary_miss.paddr
+                  << std::dec << " pf=" << ordinary_miss.page_fault
+                  << " gpf=" << ordinary_miss.guest_page_fault
+                  << " af=" << ordinary_miss.access_fault
+                  << " pmp_ld=" << ordinary_miss.pmp_load_denied
+                  << " pmp_mmio=" << ordinary_miss.pmp_mmio << '\n';
+        return 1;
+    }
+
+    if (!environment.run_cycles(128)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=l1-refill-drain reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t ptw_requests_before_hit = environment.ptw_requests();
+    memblock::Environment::L2TlbResponse warm_hit;
+    if (!environment.issue_l2_tlb_request(
+            warm.address, 0, false, false, false, warm_hit) ||
+        warm_hit.miss || warm_hit.page_fault || warm_hit.guest_page_fault ||
+        warm_hit.access_fault ||
+        warm_hit.paddr != warm.oracle_address.value() || warm_hit.pbmt != 0 ||
+        warm_hit.pmp_load_denied || warm_hit.pmp_mmio ||
+        environment.ptw_requests() != ptw_requests_before_hit) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=l1-hit-response reason="
+                  << environment.error() << " miss=" << warm_hit.miss
+                  << " paddr=0x" << std::hex << warm_hit.paddr
+                  << " expected=0x" << warm.oracle_address.value() << std::dec
+                  << " pbmt=" << static_cast<unsigned>(warm_hit.pbmt)
+                  << " pf=" << warm_hit.page_fault
+                  << " gpf=" << warm_hit.guest_page_fault
+                  << " af=" << warm_hit.access_fault
+                  << " pmp_ld=" << warm_hit.pmp_load_denied
+                  << " pmp_mmio=" << warm_hit.pmp_mmio
+                  << " ptw_before=" << ptw_requests_before_hit
+                  << " ptw_after=" << environment.ptw_requests() << '\n';
         return 1;
     }
 
@@ -18341,7 +18373,8 @@ int run_l2_tlb_contracts(int argc, char **argv)
             0xa0056018ULL, 0, false, false, true, no_translate) ||
         no_translate.miss || no_translate.page_fault ||
         no_translate.guest_page_fault || no_translate.access_fault ||
-        no_translate.paddr != 0 || no_translate.pbmt != 0) {
+        no_translate.paddr != 0 || no_translate.pbmt != 0 ||
+        no_translate.pmp_load_denied || !no_translate.pmp_mmio) {
         std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=no-translate reason="
                   << environment.error() << " miss=" << no_translate.miss
@@ -18349,7 +18382,9 @@ int run_l2_tlb_contracts(int argc, char **argv)
                   << std::dec << " pbmt=" << static_cast<unsigned>(no_translate.pbmt)
                   << " pf=" << no_translate.page_fault
                   << " gpf=" << no_translate.guest_page_fault
-                  << " af=" << no_translate.access_fault << '\n';
+                  << " af=" << no_translate.access_fault
+                  << " pmp_ld=" << no_translate.pmp_load_denied
+                  << " pmp_mmio=" << no_translate.pmp_mmio << '\n';
         return 1;
     }
 
@@ -18364,26 +18399,65 @@ int run_l2_tlb_contracts(int argc, char **argv)
     memblock::Environment::L2TlbResponse miss;
     const std::uint64_t unmapped = virtual_base + 0x2000;
     if (!environment.issue_l2_tlb_request(
-            unmapped, 0, false, true, false, miss) || !miss.miss ||
-        miss.pbmt != 0 || miss.page_fault ||
-        miss.guest_page_fault || miss.access_fault) {
+            unmapped, 0, false, true, false, miss) || !miss.miss) {
         std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=cold-miss reason="
                   << environment.error() << " miss=" << miss.miss
                   << " paddr=0x" << std::hex << miss.paddr << std::dec
                   << " pf=" << miss.page_fault
                   << " gpf=" << miss.guest_page_fault
-                  << " af=" << miss.access_fault << '\n';
+                  << " af=" << miss.access_fault
+                  << " pmp_ld=" << miss.pmp_load_denied
+                  << " pmp_mmio=" << miss.pmp_mmio << '\n';
+        return 1;
+    }
+
+    // PMP reconfiguration does not invalidate the PFTLB entry.  Deny exactly
+    // the translated 4-KiB page and re-query the resident translation so the
+    // retained PMP output is checked against a real, non-MMIO physical address.
+    const auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+        return (base | (size / 2 - 1)) >> 2;
+    };
+    constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
+    memblock::Environment::L2TlbResponse pmp_denied;
+    if (!environment.configure_pmp(
+            {napot_address(physical_base, 0x1000)},
+            {pmp_locked_napot_deny})) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=pmp-configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t ptw_requests_before_pmp_hit =
+        environment.ptw_requests();
+    if (!environment.issue_l2_tlb_request(
+            warm.address, 0, false, false, false, pmp_denied) ||
+        pmp_denied.miss || pmp_denied.page_fault ||
+        pmp_denied.guest_page_fault || pmp_denied.access_fault ||
+        pmp_denied.paddr != warm.oracle_address.value() ||
+        pmp_denied.pbmt != 0 || !pmp_denied.pmp_load_denied ||
+        pmp_denied.pmp_mmio ||
+        environment.ptw_requests() != ptw_requests_before_pmp_hit) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=pmp-denied reason="
+                  << environment.error() << " miss=" << pmp_denied.miss
+                  << " paddr=0x" << std::hex << pmp_denied.paddr << std::dec
+                  << " pf=" << pmp_denied.page_fault
+                  << " gpf=" << pmp_denied.guest_page_fault
+                  << " af=" << pmp_denied.access_fault
+                  << " pmp_ld=" << pmp_denied.pmp_load_denied
+                  << " pmp_mmio=" << pmp_denied.pmp_mmio
+                  << " ptw_before=" << ptw_requests_before_pmp_hit
+                  << " ptw_after=" << environment.ptw_requests() << '\n';
         return 1;
     }
 
     std::cout << "MEMBLOCK_L2_TLB_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
-              << " l1_miss_response=1 no_translate=1 killed=1 prefetch_miss=1"
-              << " hints=32"
-              << " hit_paddr=0x" << std::hex << hit.paddr << std::dec
-              << " l2_pmp_ld=" << hit.pmp_load_denied
-              << " l2_pmp_mmio=" << hit.pmp_mmio
+              << " l1_miss_response=1 l1_hit_response=1"
+              << " no_translate=1 killed=1 prefetch_miss=1"
+              << " pmp_allow=1 pmp_deny=1 pmp_mmio=1 hints=32"
+              << " hit_paddr=0x" << std::hex << warm_hit.paddr << std::dec
               << " ptw_requests=" << environment.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

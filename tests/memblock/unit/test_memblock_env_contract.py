@@ -468,6 +468,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "io_l2_hint_valid",
             "l2-tlb-contracts",
             "l1_miss_response=1",
+            "l1_hit_response=1",
+            "phase=l1-hit-response",
+            "phase=pmp-denied",
+            "pmp_allow=1 pmp_deny=1 pmp_mmio=1",
+            "leaveHitMux",
         ):
             self.assertIn(contract, environment + main + makefile)
 

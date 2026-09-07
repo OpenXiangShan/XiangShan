@@ -15,7 +15,8 @@ D-width AMOs (ADD/XOR/AND/OR/SWAP/MIN/MAX, signed and
 unsigned) plus LR/SC are covered through the atomic unit, including old-value
 writeback, AMOCAS compare success/failure, reservation success/failure, and
 cache visibility. The L2-to-L1 DTLB and L2 hint input boundaries are checked for
-legal miss/cancel/metadata behavior. All three frontend bridge paths are driven
+legal miss/refill-hit/cancel behavior and exact translation/PMP/PMA metadata.
+All three frontend bridge paths are driven
 with concurrent legal TileLink traffic, randomized request/response backpressure,
 source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
 denied and corrupt D-channel responses are checked through scalar exception
@@ -67,10 +68,16 @@ device mapping and locked R/RWX PMP entries; broader hypervisor PMP region-edge
 and PMA matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
-`l2-tlb-contracts` checks request-field acceptance, L1 miss responses for both
-ordinary and prefetch requests, PBMT/fault-field legality, and the exported PMP
-classification. A miss is intentionally handed back to the external L2 TLB;
-the MemBlock top level has no refill response input for this port.
+`l2-tlb-contracts` checks read-request acceptance, ordinary and prefetch miss
+responses, kill and `no_translate`, and the exact cacheable no-fault
+PA/PBMT/PMP/PMA result after the requestor's own PTW refill. The miss is
+returned immediately while
+the shared prefetch TLB fills internally; a same-VA retry must hit without a
+new external PTW TileLink A request. PMP allow and a locked 4-KiB deny are
+checked on that real cacheable translation. The separately registered PMP
+result is sampled one cycle after the TLB response, matching
+`PMPChecker(leaveHitMux=true)`. Positive PBMT NC/IO and PF/GPF/AF response
+payloads remain explicit coverage gaps.
 
 ## Architecture
 
