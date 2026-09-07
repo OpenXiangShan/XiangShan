@@ -305,7 +305,7 @@ $(SIM_TOP_OUT): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating $(CHISEL_TARGET) files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
-	$(TIME_CMD) NOOP_HOME=$(abspath .) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
+	NOOP_HOME=$(abspath .) $(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
 		--num-cores $(NUM_CORES) $(SIM_ARGS) --full-stacktrace
 ifeq ($(CHISEL_TARGET),systemverilog)
