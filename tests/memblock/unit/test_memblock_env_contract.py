@@ -2001,6 +2001,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         for contract in (
             "kReferencePhysicalAddressBits = 48",
             "reference_pte_physical_address_fault",
+            "reference_pte_guest_address_fault",
+            "guest_address_bits",
             "bool access_fault = false",
             "!pte_translation.access_fault",
             "!final_translation.access_fault",
@@ -2022,6 +2024,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "intermediate_ppn_access_fault_cases=",
             "root_ppn_access_fault_cases=",
             "ppn_access_fault_ptw_requests=",
+            "vs_gpa_width_cases=",
+            "sv39x4_gpa_width_cases=",
+            "sv48x4_gpa_width_cases=",
+            "vs_gpa_intermediate_cases=",
+            "expected_fault_pte_reads = 2",
+            "expected_fault_gpa",
         ):
             self.assertIn(contract, main)
 

@@ -22377,8 +22377,15 @@ int run_translation_faults(int argc, char **argv)
     unsigned root_ppn_access_fault_cases = 0;
     unsigned lowest_high_ppn_cases = 0;
     unsigned highest_high_ppn_cases = 0;
+    unsigned vs_gpa_width_cases = 0;
+    unsigned sv39x4_gpa_width_cases = 0;
+    unsigned sv48x4_gpa_width_cases = 0;
+    unsigned vs_gpa_leaf_cases = 0;
+    unsigned vs_gpa_intermediate_cases = 0;
+    unsigned vs_gpa_root_cases = 0;
     std::uint64_t noncanonical_ptw_requests = 0;
     std::uint64_t ppn_access_fault_ptw_requests = 0;
+    std::uint64_t vs_gpa_width_ptw_requests = 0;
     struct CanonicalAddressCase {
         const char *name;
         memblock::ReferencePageMode mode;
@@ -23019,6 +23026,228 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
+    constexpr std::array<memblock::ReferencePageMode, 2> paged_modes{{
+        memblock::ReferencePageMode::sv39,
+        memblock::ReferencePageMode::sv48,
+    }};
+    unsigned vs_gpa_case_index = 0;
+    for (const auto vs_mode : paged_modes) {
+        for (const auto g_mode : paged_modes) {
+            const unsigned levels = memblock::reference_page_levels(vs_mode);
+            const unsigned lowest_invalid_ppn_bit =
+                g_mode == memblock::ReferencePageMode::sv48 ? 38U : 29U;
+            const std::array<unsigned, 2> ppn_bits{{
+                lowest_invalid_ppn_bit,
+                43U,
+            }};
+            for (unsigned target_level = 0; target_level < levels;
+                 ++target_level) {
+                for (const unsigned ppn_bit : ppn_bits) {
+                    memblock::Environment environment(argc, argv);
+                    const std::uint64_t input_address =
+                        vs_mode == memblock::ReferencePageMode::sv48
+                            ? 0xffff900040000188ULL
+                            : 0x7c000188ULL;
+                    constexpr std::uint64_t valid_guest_physical =
+                        0x7d000000ULL;
+                    constexpr std::uint64_t vs_root = 0xd0000000ULL;
+                    constexpr std::uint64_t g_root = 0xd4000000ULL;
+                    bool configured = environment.reset();
+                    if (configured) {
+                        configured = vs_mode == memblock::ReferencePageMode::sv48
+                            ? environment.map_sv48_4k(
+                                  input_address & ~std::uint64_t{0xfff},
+                                  valid_guest_physical, vs_root)
+                            : environment.map_sv39_4k(
+                                  input_address & ~std::uint64_t{0xfff},
+                                  valid_guest_physical, vs_root);
+                    }
+                    const auto fault_pte =
+                        memblock::reference_pte_address_at_level(
+                            environment.memory(), vs_root, input_address,
+                            vs_mode, target_level);
+                    std::uint64_t expected_fault_gpa = 0;
+                    if (configured && fault_pte.has_value()) {
+                        const std::uint64_t overflow_pte =
+                            environment.memory().read_u64(*fault_pte) |
+                            (std::uint64_t{1} << (ppn_bit + 10));
+                        environment.memory().write_u64(*fault_pte, overflow_pte);
+                        expected_fault_gpa = memblock::reference_leaf_address(
+                            overflow_pte, input_address, target_level);
+                    }
+                    const auto map_gstage = [&](std::uint64_t address) {
+                        return g_mode == memblock::ReferencePageMode::sv48
+                            ? environment.map_sv48x4_4k(
+                                  address, address, g_root)
+                            : environment.map_sv39x4_4k(
+                                  address, address, g_root);
+                    };
+                    for (unsigned page = 0; configured && page < levels;
+                         ++page) {
+                        configured = map_gstage(
+                            vs_root + page * 0x1000ULL);
+                    }
+                    const auto reference = memblock::reference_two_stage_walk(
+                        environment.memory(), vs_root, g_root, input_address,
+                        vs_mode, g_mode);
+                    if (!configured || !fault_pte.has_value() ||
+                        reference.translated || !reference.guest_page_fault ||
+                        reference.stage1_page_fault || reference.access_fault ||
+                        reference.is_for_vs_nonleaf_pte !=
+                            (target_level != 0) ||
+                        reference.faulting_guest_physical_address !=
+                            expected_fault_gpa) {
+                        std::cerr
+                            << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=vs-gpa-width-reference"
+                            << " case=" << vs_gpa_case_index
+                            << " vs_mode=" << static_cast<unsigned>(vs_mode)
+                            << " g_mode=" << static_cast<unsigned>(g_mode)
+                            << " level=" << target_level
+                            << " ppn_bit=" << ppn_bit << '\n';
+                        return 1;
+                    }
+                    configured = environment.activate_two_stage_modes(
+                        vs_mode, g_mode, vs_root, g_root,
+                        91 + vs_gpa_case_index, 121 + vs_gpa_case_index);
+                    if (!configured) {
+                        std::cerr
+                            << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=vs-gpa-width-configuration"
+                            << " case=" << vs_gpa_case_index
+                            << " reason=" << environment.error() << '\n';
+                        return 1;
+                    }
+
+                    const std::uint64_t ptw_before = environment.ptw_requests();
+                    // A fully nested walk first obtains the current VS PTE
+                    // through G-stage and then re-accesses that block on the
+                    // stage-1 result path that performs the GPA-width check.
+                    constexpr std::uint64_t expected_fault_pte_reads = 2;
+                    const std::uint64_t dcache_before =
+                        environment.tilelink_requests();
+                    const std::uint64_t uncache_before =
+                        environment.uncache_requests();
+                    const memblock::LoadTransaction load{
+                        .address = input_address,
+                        .op = memblock::LoadOp::ld,
+                        .rob = 0,
+                        .lq = 0,
+                        .pdest = static_cast<std::uint8_t>(
+                            32 + vs_gpa_case_index),
+                        .lane = static_cast<unsigned>(
+                            vs_gpa_case_index % memblock::kScalarLoadLanes),
+                        .expected_exception_mask =
+                            memblock::kExceptionLoadGuestPageFault,
+                    };
+                    environment.expect_load(load);
+                    if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+                        !environment.enqueue_load(load) ||
+                        !environment.issue_load(load, 4096) ||
+                        !environment.run_until_complete(32768) ||
+                        !environment.run_until_lq_retired(8192) ||
+                        environment.ptw_requests() <= ptw_before ||
+                        environment.ptw_requests_covering_since(
+                            *fault_pte, ptw_before) !=
+                            expected_fault_pte_reads ||
+                        environment.tilelink_requests() != dcache_before ||
+                        environment.uncache_requests() != uncache_before ||
+                        environment.exception_vaddr() != input_address ||
+                        environment.exception_is_for_vs_nonleaf_pte() !=
+                            (target_level != 0)) {
+                        std::cerr
+                            << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=vs-gpa-width-load"
+                            << " case=" << vs_gpa_case_index
+                            << " reason="
+                            << (environment.error().empty()
+                                    ? "wrong fault, PTE traffic, metadata, or data-manager side effect"
+                                    : environment.error())
+                            << " pte_reads="
+                            << environment.ptw_requests_covering_since(
+                                   *fault_pte, ptw_before)
+                            << " ptw=" << ptw_before << '/'
+                            << environment.ptw_requests()
+                            << " dcache=" << dcache_before << '/'
+                            << environment.tilelink_requests()
+                            << " uncache=" << uncache_before << '/'
+                            << environment.uncache_requests()
+                            << " vaddr=0x" << std::hex
+                            << environment.exception_vaddr()
+                            << "/0x" << input_address
+                            << " vs_nonleaf=" << std::dec
+                            << environment.exception_is_for_vs_nonleaf_pte()
+                            << '\n';
+                        return 1;
+                    }
+                    ++vs_gpa_width_cases;
+
+                    const std::uint64_t store_ptw_before =
+                        environment.ptw_requests();
+                    const memblock::StoreTransaction store{
+                        .address = input_address,
+                        .data = 0x778899aabbccddeeULL ^ vs_gpa_case_index,
+                        .op = memblock::StoreOp::sd,
+                        .rob = 1,
+                        .sq = 0,
+                        .address_lane = static_cast<unsigned>(
+                            vs_gpa_case_index % memblock::kScalarStoreLanes),
+                        .data_lane = static_cast<unsigned>(
+                            (vs_gpa_case_index + 1) %
+                            memblock::kScalarStoreLanes),
+                        .expected_exception_mask =
+                            memblock::kExceptionStoreGuestPageFault,
+                    };
+                    environment.expect_store(store);
+                    if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+                        !environment.enqueue_store(store, 0) ||
+                        !environment.issue_store_address(store, 4096) ||
+                        !environment.issue_store_data(store, 4096) ||
+                        !environment.run_until_store_complete_with_replay(
+                            store, 32768) ||
+                        environment.ptw_requests() <= store_ptw_before ||
+                        environment.ptw_requests_covering_since(
+                            *fault_pte, store_ptw_before) !=
+                            expected_fault_pte_reads ||
+                        environment.tilelink_requests() != dcache_before ||
+                        environment.uncache_requests() != uncache_before ||
+                        (environment.sq_dequeued() + environment.sq_canceled() <
+                             environment.sq_allocated() &&
+                         !environment.account_sq_cancellation(1)) ||
+                        environment.sq_dequeued() + environment.sq_canceled() !=
+                            environment.sq_allocated()) {
+                        std::cerr
+                            << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=vs-gpa-width-store"
+                            << " case=" << vs_gpa_case_index
+                            << " reason="
+                            << (environment.error().empty()
+                                    ? "wrong fault, PTE traffic, data-manager side effect, or SQ accounting"
+                                    : environment.error())
+                            << " pte_reads="
+                            << environment.ptw_requests_covering_since(
+                                   *fault_pte, store_ptw_before)
+                            << " ptw=" << store_ptw_before << '/'
+                            << environment.ptw_requests() << '\n';
+                        return 1;
+                    }
+                    ++vs_gpa_width_cases;
+                    if (g_mode == memblock::ReferencePageMode::sv48) {
+                        sv48x4_gpa_width_cases += 2;
+                    } else {
+                        sv39x4_gpa_width_cases += 2;
+                    }
+                    if (target_level == 0) {
+                        vs_gpa_leaf_cases += 2;
+                    } else if (target_level == levels - 1) {
+                        vs_gpa_root_cases += 2;
+                    } else {
+                        vs_gpa_intermediate_cases += 2;
+                    }
+                    vs_gpa_width_ptw_requests +=
+                        environment.ptw_requests() - ptw_before;
+                    ++vs_gpa_case_index;
+                }
+            }
+        }
+    }
+
     struct PteEncodingCase {
         const char *name;
         memblock::ReferencePageMode mode;
@@ -23365,6 +23594,7 @@ int run_translation_faults(int argc, char **argv)
 
     std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
               << canonical_boundary_cases + 4 + ppn_access_fault_cases +
+                    vs_gpa_width_cases +
                     pte_encoding_cases.size() * 4
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
@@ -23385,6 +23615,15 @@ int run_translation_faults(int argc, char **argv)
               << " highest_high_ppn_cases=" << highest_high_ppn_cases
               << " ppn_access_fault_ptw_requests="
               << ppn_access_fault_ptw_requests
+              << " vs_gpa_width_cases=" << vs_gpa_width_cases
+              << " sv39x4_gpa_width_cases=" << sv39x4_gpa_width_cases
+              << " sv48x4_gpa_width_cases=" << sv48x4_gpa_width_cases
+              << " vs_gpa_leaf_cases=" << vs_gpa_leaf_cases
+              << " vs_gpa_intermediate_cases="
+              << vs_gpa_intermediate_cases
+              << " vs_gpa_root_cases=" << vs_gpa_root_cases
+              << " vs_gpa_width_ptw_requests="
+              << vs_gpa_width_ptw_requests
               << " stage1_pte_encoding_cases=" << pte_encoding_cases.size()
               << " gstage_pte_encoding_cases=" << pte_encoding_cases.size()
               << " stage1_store_pte_encoding_cases="

@@ -355,13 +355,16 @@ and Sv39x4/Sv48x4 G-stage. Every encoding is exercised by both a scalar load
 and a scalar store. Fifty-six additional transactions cross stage-1/G-stage,
 Sv39/Sv48, every PTE level, load/store, and the lowest/highest PPN bits above
 the 48-bit physical-address width, for 174 architectural transactions in
-total. The shared
+total before nested-GPA checks. Another 56 transactions cross all four
+Sv39/Sv48 VS/G mode pairs, every VS PTE level, load/store, and the lowest PPN
+bit outside the selected 41/50-bit GPA plus PPN[43], bringing the total to 230.
+The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an
 invalid NAPOT encoding. It checks the independent walk's failing PTE/level,
 exact access- and stage-specific exception, load fault VA/GPA, zero faulting
-DCache/Uncache data requests, exact PPN-fault PTW traffic, and store SQ
-conservation. A noncanonical store
+DCache/Uncache data requests, exact PPN-fault PTW traffic, VS non-leaf marker,
+and store SQ conservation. A noncanonical store
 may still issue an implementation-dependent PTW request before the DTLB reports
 the page fault; PTW request count is recorded as coverage, not correctness.
 

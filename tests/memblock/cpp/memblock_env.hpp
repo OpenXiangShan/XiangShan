@@ -1075,6 +1075,19 @@ inline bool reference_pte_physical_address_fault(std::uint64_t pte)
             (kReferencePhysicalAddressBits - page_offset_bits)) != 0;
 }
 
+inline bool reference_pte_guest_address_fault(
+    std::uint64_t pte, ReferencePageMode gstage_mode)
+{
+    if (gstage_mode == ReferencePageMode::bare || (pte & 1U) == 0) {
+        return false;
+    }
+    constexpr unsigned page_offset_bits = 12;
+    const unsigned guest_address_bits =
+        gstage_mode == ReferencePageMode::sv48 ? 50U : 41U;
+    return (reference_pte_ppn(pte) >>
+            (guest_address_bits - page_offset_bits)) != 0;
+}
+
 inline bool reference_pte_is_invalid(std::uint64_t pte)
 {
     const bool valid = (pte & 1U) != 0;
@@ -1294,7 +1307,7 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
                     !pte_translation.access_fault,
                     false,
                     pte_gpa,
-                    true,
+                    level != 0,
                     pte_translation.access_fault,
                 };
             }
@@ -1305,9 +1318,33 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
                     pte, static_cast<unsigned>(level), vs_pbmte)) {
                 return {false, 0, false, true, pte_gpa, false};
             }
+            const std::uint64_t generated_address = reference_leaf_address(
+                pte, guest_virtual_address, static_cast<unsigned>(level));
+            if (g_mode == ReferencePageMode::bare &&
+                reference_pte_physical_address_fault(pte)) {
+                return {
+                    false,
+                    0,
+                    false,
+                    false,
+                    generated_address,
+                    false,
+                    true,
+                };
+            }
+            if (reference_pte_guest_address_fault(pte, g_mode)) {
+                return {
+                    false,
+                    0,
+                    true,
+                    false,
+                    generated_address,
+                    level != 0,
+                    false,
+                };
+            }
             if (reference_pte_is_leaf(pte)) {
-                guest_physical_address = reference_leaf_address(
-                    pte, guest_virtual_address, static_cast<unsigned>(level));
+                guest_physical_address = generated_address;
                 break;
             }
             if (level == 0) {
