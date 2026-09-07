@@ -4627,11 +4627,29 @@ public:
     std::uint64_t store_tlb_feedbacks() const { return store_tlb_feedbacks_; }
     std::uint64_t store_tlb_misses() const { return store_tlb_misses_; }
     std::uint64_t lq_allocated() const { return lq_allocated_; }
+    std::uint64_t lq_enqueued_observed() const
+    {
+        return lq_enqueued_observed_;
+    }
     std::uint64_t lq_dequeued() const { return lq_dequeued_; }
     std::uint64_t lq_canceled() const { return lq_canceled_; }
     std::uint64_t sq_allocated() const { return sq_allocated_; }
+    std::uint64_t sq_enqueued_observed() const
+    {
+        return sq_enqueued_observed_;
+    }
     std::uint64_t sq_dequeued() const { return sq_dequeued_; }
     std::uint64_t sq_canceled() const { return sq_canceled_; }
+    const std::array<std::uint64_t, generated::kLsqEnqueueLanes> &
+    lsq_enqueue_widths_observed() const
+    {
+        return lsq_enqueue_widths_observed_;
+    }
+    const std::array<std::uint64_t, generated::kLsqEnqueueLanes> &
+    lsq_enqueue_lanes_observed() const
+    {
+        return lsq_enqueue_lanes_observed_;
+    }
     std::uint64_t writebacks() const { return scoreboard_.observed(); }
     std::uint64_t prefetch_writebacks() const
     {
@@ -9101,6 +9119,36 @@ private:
         // they may already describe the following transaction.  LSQ dequeue
         // pulses are registered separately and are counted below instead.
         if (monitor) {
+            unsigned lsq_enqueue_width = 0;
+            for (unsigned lane = 0; lane < generated::kLsqEnqueueLanes;
+                 ++lane) {
+                const auto enqueue =
+                    generated::sample_lsq_enqueue(dut_, lane);
+                if (!enqueue.valid) {
+                    continue;
+                }
+                ++lsq_enqueue_width;
+                ++lsq_enqueue_lanes_observed_[lane];
+                if ((enqueue.need_alloc != 1 && enqueue.need_alloc != 2) ||
+                    enqueue.num_ls_elem == 0) {
+                    std::ostringstream message;
+                    message << "invalid accepted LSQ enqueue on lane " << lane
+                            << " need_alloc="
+                            << static_cast<unsigned>(enqueue.need_alloc)
+                            << " num_ls_elem="
+                            << static_cast<unsigned>(enqueue.num_ls_elem);
+                    error_ = message.str();
+                    continue;
+                }
+                if (enqueue.need_alloc == 1) {
+                    lq_enqueued_observed_ += enqueue.num_ls_elem;
+                } else {
+                    sq_enqueued_observed_ += enqueue.num_ls_elem;
+                }
+            }
+            if (lsq_enqueue_width != 0) {
+                ++lsq_enqueue_widths_observed_.at(lsq_enqueue_width - 1);
+            }
             ++l2_flush_checks_;
             if (dut_.io_outer_l2_flush_en.B() != l2_flush_enable_input) {
                 error_ = "L2 flush enable did not pass through combinationally";
@@ -9544,6 +9592,15 @@ private:
             error_ = store_scoreboard_.error();
         } else if (!vector_scoreboard_.ok()) {
             error_ = vector_scoreboard_.error();
+        } else if (lq_enqueued_observed_ != lq_allocated_ ||
+                   sq_enqueued_observed_ != sq_allocated_) {
+            std::ostringstream message;
+            message << "LSQ enqueue monitor disagrees with driver accounting"
+                    << " lq_observed=" << lq_enqueued_observed_
+                    << " lq_expected=" << lq_allocated_
+                    << " sq_observed=" << sq_enqueued_observed_
+                    << " sq_expected=" << sq_allocated_;
+            error_ = message.str();
         }
         return error_.empty();
     }
@@ -9627,11 +9684,17 @@ private:
     std::uint64_t reset_async_assertions_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
+    std::uint64_t lq_enqueued_observed_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;
     std::uint64_t sq_allocated_ = 0;
+    std::uint64_t sq_enqueued_observed_ = 0;
     std::uint64_t sq_dequeued_ = 0;
     std::uint64_t sq_canceled_ = 0;
+    std::array<std::uint64_t, generated::kLsqEnqueueLanes>
+        lsq_enqueue_widths_observed_{};
+    std::array<std::uint64_t, generated::kLsqEnqueueLanes>
+        lsq_enqueue_lanes_observed_{};
     std::unordered_map<std::uint64_t, std::uint64_t>
         scalar_store_sq_targets_;
     std::unordered_map<std::uint64_t, std::uint64_t>

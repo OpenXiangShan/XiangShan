@@ -96,6 +96,8 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 
 - reset and cycle control with registered Picker clock;
 - typed LSQ, scalar load/store, vector load/store, and software-prefetch drivers;
+- passive six-lane LSQ enqueue monitoring with independent LQ/SQ vector-flow
+  accounting and dispatch width/lane coverage;
 - distributed PMP CSR programming for packed config and address registers;
 - coherent TileLink A/B/C/D/E memory agent with randomized ready/response delay;
 - PTW TileLink agent with independent request and response backpressure;

@@ -10491,6 +10491,57 @@ inline void drive_lsq_enqueue(
     }
 }
 
+struct LsqEnqueueObservation {
+    bool valid = false;
+    std::uint8_t need_alloc = 0;
+    std::uint8_t num_ls_elem = 0;
+};
+
+inline LsqEnqueueObservation sample_lsq_enqueue(
+    UTMemBlock &dut, unsigned lane)
+{
+    switch (lane) {
+    case 0:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_0_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_0.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_0_bits_numLsElem.U()),
+        };
+    case 1:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_1_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_1.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_1_bits_numLsElem.U()),
+        };
+    case 2:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_2_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_2.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_2_bits_numLsElem.U()),
+        };
+    case 3:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_3_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_3.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_3_bits_numLsElem.U()),
+        };
+    case 4:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_4_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_4.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_4_bits_numLsElem.U()),
+        };
+    case 5:
+        return LsqEnqueueObservation{
+            .valid = dut.io_ooo_to_mem_enqLsq_req_5_valid.B(),
+            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_5.U()),
+            .num_ls_elem = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem.U()),
+        };
+    default:
+        throw std::out_of_range("invalid LSQ enqueue observation lane");
+    }
+}
+
 struct ScalarLoadIssue {
     std::uint64_t pc = 0;
     bool predecode_rvc = false;

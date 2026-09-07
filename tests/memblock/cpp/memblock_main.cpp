@@ -25542,10 +25542,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (!environment.run_until_all_complete(2048)) {
                 return false;
             }
-            ++coverage.dispatch_widths[width - 1];
-            for (const unsigned lane : dispatch_lanes) {
-                ++coverage.dispatch_lanes[lane];
-            }
             for (const auto &transaction : batch) {
                 coverage.sample(transaction);
             }
@@ -28179,6 +28175,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         coverage.ptw_response_delays = environment.ptw_response_delays();
         coverage.uncache_request_stalls = environment.uncache_request_stalls();
         coverage.uncache_response_delays = environment.uncache_response_delays();
+        coverage.dispatch_widths =
+            environment.lsq_enqueue_widths_observed();
+        coverage.dispatch_lanes =
+            environment.lsq_enqueue_lanes_observed();
         if (actions != options.transactions || environment.ptw_requests() < 3 ||
             environment.uncache_requests() < 2 ||
             !environment.dcache_grants_drained() ||
@@ -28217,6 +28217,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " sq=" << environment.sq_dequeued() << '+'
                   << environment.sq_canceled() << '/'
                   << environment.sq_allocated()
+                  << " lsq_monitor_schema=1"
+                  << " lsq_enqueued_observed="
+                  << environment.lq_enqueued_observed() << ','
+                  << environment.sq_enqueued_observed()
                   << " ptw=" << environment.ptw_requests()
                   << " uncache=" << environment.uncache_requests()
                   << " release_data=" << environment.tilelink_release_data()
@@ -28271,6 +28275,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/'
               << environment.sq_allocated()
+              << " lsq_monitor_schema=1"
+              << " lsq_enqueued_observed="
+              << environment.lq_enqueued_observed() << ','
+              << environment.sq_enqueued_observed()
               << ' ' << coverage.summary() << ' '
               << constraint_coverage.summary(
                      constraints, environment.dcache_response_latency_stats(),

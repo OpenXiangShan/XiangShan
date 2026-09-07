@@ -252,6 +252,37 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    }",
             "}",
             "",
+            "struct LsqEnqueueObservation {",
+            "    bool valid = false;",
+            "    std::uint8_t need_alloc = 0;",
+            "    std::uint8_t num_ls_elem = 0;",
+            "};",
+            "",
+            "inline LsqEnqueueObservation sample_lsq_enqueue(",
+            "    UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in lsq_lanes:
+        prefix = f"io_ooo_to_mem_enqLsq_req_{lane}"
+        lines.extend(
+            [
+                f"    case {lane}:",
+                "        return LsqEnqueueObservation{",
+                f"            .valid = dut.{prefix}_valid.B(),",
+                f"            .need_alloc = static_cast<std::uint8_t>(dut.io_ooo_to_mem_enqLsq_needAlloc_{lane}.U()),",
+                f"            .num_ls_elem = static_cast<std::uint8_t>(dut.{prefix}_bits_numLsElem.U()),",
+                "        };",
+            ]
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid LSQ enqueue observation lane");',
+            "    }",
+            "}",
+            "",
             "struct ScalarLoadIssue {",
             "    std::uint64_t pc = 0;",
             "    bool predecode_rvc = false;",

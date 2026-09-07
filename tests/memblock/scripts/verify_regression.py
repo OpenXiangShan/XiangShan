@@ -672,16 +672,18 @@ def _positive_csv_prefix(
     )
 
 
-def _balanced_queue(result: dict[str, Any], name: str) -> None:
+def _balanced_queue(result: dict[str, Any], name: str) -> int:
     value = result.get(name)
     _require(isinstance(value, str), f"{name} accounting is not a string")
     try:
         retired, allocated = value.split("/", 1)
         dequeued, canceled = retired.split("+", 1)
-        balanced = int(dequeued, 10) + int(canceled, 10) == int(allocated, 10)
+        allocated_count = int(allocated, 10)
+        balanced = int(dequeued, 10) + int(canceled, 10) == allocated_count
     except (ValueError, AttributeError) as error:
         raise VerificationError(f"invalid {name} accounting: {value!r}") from error
     _require(balanced, f"unbalanced {name} accounting: {value}")
+    return allocated_count
 
 
 def _check_mixed_coverage(
@@ -766,8 +768,19 @@ def _check_mixed_coverage(
         and result["max_outstanding"] > 1,
         "mixed traffic never had heterogeneous outstanding work",
     )
-    _balanced_queue(result, "lq")
-    _balanced_queue(result, "sq")
+    lq_allocated = _balanced_queue(result, "lq")
+    sq_allocated = _balanced_queue(result, "sq")
+    lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
+    _require(
+        lsq_monitor_schema in (0, 1),
+        f"unknown LSQ enqueue monitor schema: {lsq_monitor_schema!r}",
+    )
+    if lsq_monitor_schema == 1:
+        observed = _csv_counts(result, "lsq_enqueued_observed", 2)
+        _require(
+            observed == [lq_allocated, sq_allocated],
+            "observed LSQ enqueue counts disagree with allocated queue totals",
+        )
 
 
 def _check_stress_coverage(

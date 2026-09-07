@@ -36,6 +36,8 @@ def mixed_result(seed: int) -> dict[str, object]:
         "uncache_requests": 2,
         "lq": "31+1/32",
         "sq": "16+0/16",
+        "lsq_monitor_schema": 1,
+        "lsq_enqueued_observed": "32,16",
         "load_ops": "1,1,1,1,1,1,1",
         "store_ops": "1,1,1,1",
         "scalar": "12,8",
@@ -151,6 +153,17 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_lsq_enqueue_monitor_must_match_queue_allocation(self) -> None:
+        result = mixed_result(7)
+        verify_regression._check_mixed_coverage(result)
+
+        result["lsq_enqueued_observed"] = "31,16"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "observed LSQ enqueue counts disagree",
+        ):
+            verify_regression._check_mixed_coverage(result)
+
     def test_dcache_grants_require_one_grant_ack_each(self) -> None:
         result = mixed_result(7)
         result.update(

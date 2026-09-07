@@ -1737,3 +1737,26 @@ artifact verifier accepted `/tmp/memblock-schema11-seed21.json` with SHA-256
 `afe2f9b81dd95b7931a22326a651d6296c71d7bd3992ac29b27035ef6cc26b34`;
 the frozen executable, model, xspcomm, RTL metadata, controller sources, and
 resolved libraries remained hash-stable.
+
+## Independent LSQ Enqueue Accounting
+
+On 2026-09-07 the environment began sampling all six top-level LSQ dispatch
+lanes before each functional clock edge. It independently classifies LQ/SQ
+allocation from `needAlloc`, adds the observed `numLsElem` flow count, rejects
+invalid valid/allocation/zero-flow combinations, and uses the observed width
+and lane histograms for `random-mixed` coverage. The existing driver counters
+remain as an independent expectation and must equal the monitor totals before
+any public operation can pass.
+
+`make unit` passed 178 tests and `make smoke` passed in 38 cycles. Frozen
+coverage seed 22 then completed 256 actions in 17,880 cycles and 7.254363
+seconds. It observed LQ/SQ enqueue totals `442,271`, matching queue accounting
+`441+1/442` and `271+0/271`; all six dispatch widths and lanes were nonzero.
+The independent verifier accepted
+`/tmp/memblock-lsq-monitor-seed22.json` with SHA-256
+`5cc86c0770dbb0f4e0e16dc74d004b65e3e9be6381de0a52897ee99993a70719`
+against complete RTL SHA-256
+`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+The frozen executable SHA-256 was
+`1c6fdb44860ed97d32e049bf3a89ab0b8d985added55296e789ce1d8c94e14fb`.
+No CPU RTL defect was observed; this was verification-environment closure.

@@ -1514,6 +1514,33 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("dispatch_widths=", main)
         self.assertIn("dispatch_lanes=", main)
 
+    def test_lsq_enqueue_accounting_is_observed_from_top_level_pins(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        generated = (MEMBLOCK_ROOT / "cpp/generated_port_defaults.hpp").read_text()
+
+        for contract in (
+            "struct LsqEnqueueObservation",
+            "sample_lsq_enqueue",
+            "bits_numLsElem.U()",
+            "needAlloc_0.U()",
+        ):
+            self.assertIn(contract, generated)
+        for contract in (
+            "lq_enqueued_observed_ += enqueue.num_ls_elem",
+            "sq_enqueued_observed_ += enqueue.num_ls_elem",
+            "lsq_enqueue_widths_observed_.at(lsq_enqueue_width - 1)",
+            "LSQ enqueue monitor disagrees with driver accounting",
+            "invalid accepted LSQ enqueue on lane",
+        ):
+            self.assertIn(contract, environment)
+        self.assertIn(
+            "environment.lsq_enqueue_widths_observed()", main
+        )
+        self.assertIn(
+            "environment.lsq_enqueue_lanes_observed()", main
+        )
+
     def test_mixed_vector_aliasing_uses_address_oracle_and_nonoverlap_stores(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         for contract in (

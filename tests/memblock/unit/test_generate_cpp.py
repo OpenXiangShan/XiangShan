@@ -31,6 +31,8 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("sample_all_outputs", rendered)
         self.assertIn("std::uint32_t exception_mask = 0;", rendered)
         self.assertIn("std::uint8_t trigger = 15;", rendered)
+        self.assertIn("struct LsqEnqueueObservation", rendered)
+        self.assertIn("sample_lsq_enqueue", rendered)
         self.assertIn("bool predecode_rvc = false;", rendered)
         self.assertIn("kScalarLoadFeedbackLanes = 3", rendered)
         self.assertIn("sample_scalar_load_wakeup", rendered)
@@ -65,6 +67,17 @@ class GenerateCppTest(unittest.TestCase):
         for lane in range(6):
             self.assertIn(
                 f"dut.io_ooo_to_mem_enqLsq_req_{lane}_valid.ImmSet", rendered
+            )
+            self.assertIn(
+                f".valid = dut.io_ooo_to_mem_enqLsq_req_{lane}_valid.B()",
+                rendered,
+            )
+            self.assertIn(
+                f"dut.io_ooo_to_mem_enqLsq_needAlloc_{lane}.U()", rendered
+            )
+            self.assertIn(
+                f"dut.io_ooo_to_mem_enqLsq_req_{lane}_bits_numLsElem.U()",
+                rendered,
             )
         for lane in range(3):
             self.assertIn(
