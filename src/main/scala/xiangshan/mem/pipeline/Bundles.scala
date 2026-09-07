@@ -138,6 +138,7 @@ class LoadPipeBundle(
   // S1 -> S2
   val shouldFastReplay = Option.when(param.hasS2PreProcess)(Bool())
   // S2 -> S3
+  val causeOrR = Option.when(param.hasS3PreProcess)(Bool())
   val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
   val rrBankConflictFastReplay = Option.when(param.hasS3PreProcess)(Bool())
   val rrBankConflictFastReplayGrant = Option.when(param.hasS3PreProcess)(Bool())
