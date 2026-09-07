@@ -25378,7 +25378,93 @@ int run_translation_superpages(int argc, char **argv)
     unsigned napot_readbacks = 0;
     std::uint64_t napot_ptw_requests = 0;
     std::uint64_t napot_cycles = 0;
-    const auto run_napot_case = [&] (
+    const auto execute_napot_subpage = [&](
+        memblock::Environment &environment,
+        std::string_view label,
+        unsigned case_index,
+        unsigned page,
+        std::uint64_t address,
+        std::uint64_t physical) {
+        const std::uint64_t initial =
+            0x1020304050607080ULL ^
+            (static_cast<std::uint64_t>(case_index) << 48) ^
+            (static_cast<std::uint64_t>(page) * 0x0101010101010101ULL);
+        const std::uint64_t stored = initial ^ 0xff00ff0000ff00ffULL;
+        environment.memory().write_u64(physical, initial);
+
+        const memblock::LoadTransaction load{
+            .address = address,
+            .oracle_address = physical,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(page * 3),
+            .lq = static_cast<std::uint8_t>(page * 2),
+            .pdest = static_cast<std::uint8_t>(80 + page),
+            .lane = (page + case_index) % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load_data(load, initial);
+        if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+            !environment.enqueue_load(load) ||
+            !environment.issue_load(load, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=" << label
+                      << " phase=load page=" << page
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        ++napot_loads;
+
+        const memblock::StoreTransaction store{
+            .address = address,
+            .oracle_address = physical,
+            .data = stored,
+            .op = memblock::StoreOp::sd,
+            .rob = static_cast<std::uint8_t>(page * 3 + 1),
+            .sq = static_cast<std::uint8_t>(page),
+            .address_lane = (page + case_index) % memblock::kScalarStoreLanes,
+            .data_lane = (page + case_index + 1) %
+                memblock::kScalarStoreLanes,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete_with_replay(store, 16384) ||
+            !environment.commit_store(store, 16384) ||
+            !environment.run_until_sbuffer_empty(16384)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=" << label
+                      << " phase=store page=" << page
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        ++napot_stores;
+
+        const memblock::LoadTransaction readback{
+            .address = address,
+            .oracle_address = physical,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(page * 3 + 2),
+            .lq = static_cast<std::uint8_t>(page * 2 + 1),
+            .pdest = static_cast<std::uint8_t>(120 + page),
+            .lane = (page + case_index + 1) % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load_data(readback, stored);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=" << label
+                      << " phase=readback page=" << page
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        ++napot_readbacks;
+        return true;
+    };
+
+    const auto run_napot_case = [&](
         memblock::ReferencePageMode mode,
         bool gstage,
         unsigned case_index) {
@@ -25431,19 +25517,15 @@ int run_translation_superpages(int argc, char **argv)
                       << '\n';
             return false;
         }
+        const std::string label = std::string("Svnapot-") +
+            (gstage ? "G-" : "S-") +
+            (mode == memblock::ReferencePageMode::sv48 ? "Sv48" : "Sv39");
 
         for (unsigned page = 0; page < 16; ++page) {
             const std::uint64_t byte_offset =
                 page * 0x1000ULL + 0x180ULL + page * 8ULL;
             const std::uint64_t address = input_base + byte_offset;
             const std::uint64_t physical = physical_base + byte_offset;
-            const std::uint64_t initial =
-                0x1020304050607080ULL ^
-                (static_cast<std::uint64_t>(case_index) << 48) ^
-                (static_cast<std::uint64_t>(page) * 0x0101010101010101ULL);
-            const std::uint64_t stored = initial ^ 0xff00ff0000ff00ffULL;
-            environment.memory().write_u64(physical, initial);
-
             memblock::ReferenceTwoStageWalkResult reference;
             if (gstage) {
                 reference = memblock::reference_two_stage_walk(
@@ -25457,99 +25539,18 @@ int run_translation_superpages(int argc, char **argv)
             }
             if (!reference.translated ||
                 reference.physical_address != physical) {
-                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
-                          << (gstage ? "G-" : "S-")
-                          << (mode == memblock::ReferencePageMode::sv48
-                                  ? "Sv48" : "Sv39")
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case="
+                          << label
                           << " phase=reference page=" << page
                           << " expected=0x" << std::hex << physical
                           << " actual=0x" << reference.physical_address
                           << std::dec << '\n';
                 return false;
             }
-
-            const memblock::LoadTransaction load{
-                .address = address,
-                .oracle_address = physical,
-                .op = memblock::LoadOp::ld,
-                .rob = static_cast<std::uint8_t>(page * 3),
-                .lq = static_cast<std::uint8_t>(page * 2),
-                .pdest = static_cast<std::uint8_t>(80 + case_index * 32 + page),
-                .lane = (page + case_index) % memblock::kScalarLoadLanes,
-            };
-            environment.expect_load_data(load, initial);
-            if (!environment.set_rob_head(load.rob, load.rob_flag) ||
-                !environment.enqueue_load(load) ||
-                !environment.issue_load(load, 2048) ||
-                !environment.run_until_complete(16384) ||
-                !environment.run_until_lq_retired(4096)) {
-                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
-                          << (gstage ? "G-" : "S-")
-                          << (mode == memblock::ReferencePageMode::sv48
-                                  ? "Sv48" : "Sv39")
-                          << " phase=load page=" << page
-                          << " reason=" << environment.error() << '\n';
+            if (!execute_napot_subpage(
+                    environment, label, case_index, page, address, physical)) {
                 return false;
             }
-            ++napot_loads;
-
-            const memblock::StoreTransaction store{
-                .address = address,
-                .oracle_address = physical,
-                .data = stored,
-                .op = memblock::StoreOp::sd,
-                .rob = static_cast<std::uint8_t>(page * 3 + 1),
-                .sq = static_cast<std::uint8_t>(page),
-                .address_lane = (page + case_index) %
-                    memblock::kScalarStoreLanes,
-                .data_lane = (page + case_index + 1) %
-                    memblock::kScalarStoreLanes,
-            };
-            environment.expect_store(store);
-            if (!environment.set_rob_head(store.rob, store.rob_flag) ||
-                !environment.enqueue_store(store, 0) ||
-                !environment.issue_store_address(store, 2048) ||
-                !environment.issue_store_data(store, 2048) ||
-                !environment.run_until_store_complete_with_replay(
-                    store, 16384) ||
-                !environment.commit_store(store, 16384) ||
-                !environment.run_until_sbuffer_empty(16384)) {
-                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
-                          << (gstage ? "G-" : "S-")
-                          << (mode == memblock::ReferencePageMode::sv48
-                                  ? "Sv48" : "Sv39")
-                          << " phase=store page=" << page
-                          << " reason=" << environment.error() << '\n';
-                return false;
-            }
-            ++napot_stores;
-
-            const memblock::LoadTransaction readback{
-                .address = address,
-                .oracle_address = physical,
-                .op = memblock::LoadOp::ld,
-                .rob = static_cast<std::uint8_t>(page * 3 + 2),
-                .lq = static_cast<std::uint8_t>(page * 2 + 1),
-                .pdest = static_cast<std::uint8_t>(
-                    160 + case_index * 16 + page),
-                .lane = (page + case_index + 1) %
-                    memblock::kScalarLoadLanes,
-            };
-            environment.expect_load_data(readback, stored);
-            if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
-                !environment.enqueue_load(readback) ||
-                !environment.issue_load(readback, 2048) ||
-                !environment.run_until_complete(16384) ||
-                !environment.run_until_lq_retired(4096)) {
-                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
-                          << (gstage ? "G-" : "S-")
-                          << (mode == memblock::ReferencePageMode::sv48
-                                  ? "Sv48" : "Sv39")
-                          << " phase=readback page=" << page
-                          << " reason=" << environment.error() << '\n';
-                return false;
-            }
-            ++napot_readbacks;
             ++completed;
         }
         if (gstage) {
@@ -25569,10 +25570,173 @@ int run_translation_superpages(int argc, char **argv)
         return 1;
     }
 
+    struct NestedNapotPair {
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        const char *name;
+    };
+    constexpr std::array<NestedNapotPair, 4> nested_napot_pairs{{
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39, "Sv39-Sv39x4"},
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv48, "Sv39-Sv48x4"},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv39, "Sv48-Sv39x4"},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48, "Sv48-Sv48x4"},
+    }};
+    struct NestedNapotTopology {
+        bool vs_napot;
+        bool g_napot;
+        const char *name;
+    };
+    constexpr std::array<NestedNapotTopology, 3> nested_napot_topologies{{
+        {true, false, "VS-NAPOT"},
+        {false, true, "G-NAPOT"},
+        {true, true, "VS-G-NAPOT"},
+    }};
+    unsigned napot_nested_mode_cases = 0;
+    unsigned napot_nested_subpages = 0;
+    unsigned napot_nested_vs_subpages = 0;
+    unsigned napot_nested_g_subpages = 0;
+    unsigned napot_nested_both_subpages = 0;
+
+    for (unsigned pair_index = 0;
+         pair_index < nested_napot_pairs.size(); ++pair_index) {
+        const auto &pair = nested_napot_pairs[pair_index];
+        for (unsigned topology_index = 0;
+             topology_index < nested_napot_topologies.size();
+             ++topology_index) {
+            const auto &topology = nested_napot_topologies[topology_index];
+            const unsigned case_index =
+                4 + pair_index * nested_napot_topologies.size() + topology_index;
+            memblock::Environment environment(argc, argv);
+            const std::uint64_t guest_virtual_base =
+                pair.vs_mode == memblock::ReferencePageMode::sv48
+                    ? 0xffff800020000000ULL + topology_index * 0x20000ULL
+                    : 0x64000000ULL + topology_index * 0x20000ULL;
+            const std::uint64_t guest_physical_base =
+                0x130000000ULL + case_index * 0x20000ULL;
+            const std::uint64_t host_physical_base =
+                0xd4000000ULL + case_index * 0x20000ULL;
+            const std::uint64_t vs_root =
+                0x9a000000ULL + case_index * 0x100000ULL;
+            const std::uint64_t g_root =
+                0xaa000000ULL + case_index * 0x100000ULL;
+            const std::string label = std::string(pair.name) + '-' + topology.name;
+            environment.configure_backpressure(
+                0xc0ac29b7c97c50ddULL ^
+                    (case_index * 0x9e3779b97f4a7c15ULL),
+                true);
+            bool configured = environment.reset();
+
+            if (configured && topology.vs_napot) {
+                configured = pair.vs_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48_napot64k(
+                        guest_virtual_base, guest_physical_base, vs_root)
+                    : environment.map_sv39_napot64k(
+                        guest_virtual_base, guest_physical_base, vs_root);
+            }
+            for (unsigned page = 0;
+                 configured && !topology.vs_napot && page < 16; ++page) {
+                const std::uint64_t offset = page * 0x1000ULL;
+                configured = pair.vs_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48_4k(
+                        guest_virtual_base + offset,
+                        guest_physical_base + offset, vs_root)
+                    : environment.map_sv39_4k(
+                        guest_virtual_base + offset,
+                        guest_physical_base + offset, vs_root);
+            }
+
+            const unsigned vs_table_pages =
+                pair.vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
+            for (unsigned page = 0;
+                 configured && page < vs_table_pages; ++page) {
+                const std::uint64_t address = vs_root + page * 0x1000ULL;
+                configured = pair.g_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_4k(address, address, g_root)
+                    : environment.map_sv39x4_4k(address, address, g_root);
+            }
+
+            if (configured && topology.g_napot) {
+                configured = pair.g_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_napot64k(
+                        guest_physical_base, host_physical_base, g_root)
+                    : environment.map_sv39x4_napot64k(
+                        guest_physical_base, host_physical_base, g_root);
+            }
+            for (unsigned page = 0;
+                 configured && !topology.g_napot && page < 16; ++page) {
+                const std::uint64_t offset = page * 0x1000ULL;
+                configured = pair.g_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_4k(
+                        guest_physical_base + offset,
+                        host_physical_base + offset, g_root)
+                    : environment.map_sv39x4_4k(
+                        guest_physical_base + offset,
+                        host_physical_base + offset, g_root);
+            }
+            if (configured) {
+                configured = environment.activate_two_stage_modes(
+                    pair.vs_mode, pair.g_mode, vs_root, g_root,
+                    static_cast<std::uint16_t>(70 + case_index),
+                    static_cast<std::uint16_t>(90 + case_index));
+            }
+            if (!configured) {
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case="
+                          << label << " phase=configuration reason="
+                          << environment.error() << '\n';
+                return 1;
+            }
+
+            for (unsigned page = 0; page < 16; ++page) {
+                const std::uint64_t byte_offset =
+                    page * 0x1000ULL + 0x180ULL + page * 8ULL;
+                const std::uint64_t address =
+                    guest_virtual_base + byte_offset;
+                const std::uint64_t physical =
+                    host_physical_base + byte_offset;
+                const auto reference = memblock::reference_two_stage_walk(
+                    environment.memory(), vs_root, g_root, address,
+                    pair.vs_mode, pair.g_mode);
+                if (!reference.translated ||
+                    reference.physical_address != physical) {
+                    std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case="
+                              << label << " phase=reference page=" << page
+                              << " expected=0x" << std::hex << physical
+                              << " actual=0x" << reference.physical_address
+                              << std::dec << '\n';
+                    return 1;
+                }
+                if (!execute_napot_subpage(
+                        environment, label, case_index, page, address,
+                        physical)) {
+                    return 1;
+                }
+                ++completed;
+            }
+
+            ++napot_nested_mode_cases;
+            napot_nested_subpages += 16;
+            napot_nested_vs_subpages += topology.vs_napot ? 16 : 0;
+            napot_nested_g_subpages += topology.g_napot ? 16 : 0;
+            napot_nested_both_subpages +=
+                topology.vs_napot && topology.g_napot ? 16 : 0;
+            napot_ptw_requests += environment.ptw_requests();
+            napot_cycles += environment.cycle();
+        }
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_SUPERPAGES_PASS"
               << " cases=" << completed
               << " napot_stage1_subpages=" << napot_stage1_subpages
               << " napot_gstage_subpages=" << napot_gstage_subpages
+              << " napot_nested_mode_cases=" << napot_nested_mode_cases
+              << " napot_nested_subpages=" << napot_nested_subpages
+              << " napot_nested_vs_subpages=" << napot_nested_vs_subpages
+              << " napot_nested_g_subpages=" << napot_nested_g_subpages
+              << " napot_nested_both_subpages=" << napot_nested_both_subpages
               << " napot_loads=" << napot_loads
               << " napot_stores=" << napot_stores
               << " napot_readbacks=" << napot_readbacks

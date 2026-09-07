@@ -1313,6 +1313,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "napot_readbacks=",
             "run_napot_case(memblock::ReferencePageMode::sv39, false",
             "run_napot_case(memblock::ReferencePageMode::sv48, true",
+            "std::array<NestedNapotPair, 4>",
+            "std::array<NestedNapotTopology, 3>",
+            '{true, false, "VS-NAPOT"}',
+            '{false, true, "G-NAPOT"}',
+            '{true, true, "VS-G-NAPOT"}',
+            "napot_nested_mode_cases=",
+            "napot_nested_both_subpages=",
         ):
             self.assertIn(contract, main)
 

@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `8570daa4584280d6b47983f78ddd72361545b57a28f6bb87a6992f4923d3762c`
+- Current rebuilt and frozen UT executable SHA-256: `003514ed0193de4695ba65cf39ed9d3f43c419fa5dca8b91513d51da37592c3e`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `975c869130c926c1eb3548fe3e80fc91052ccb09838508a3ae9872ee3e67ed13`
+- Frozen runtime manifest SHA-256: `8bbdd5fa55994e8421be341944b09e31ed3f1a4fd4ad38c598a4a9bb0e0a90c1`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -890,15 +890,20 @@ G-stage VMID/root, and host/nested/host `virt` transitions. Every switch and
 switch-back returned the independently selected physical-page data; 55 PTW
 requests completed without a stale-context result.
 
-`make translation-superpages` passed 74 deterministic leaf/subpage cases on
-both the mutable build and frozen runtime. Ten cover the original Sv39/Sv48
-stage-1 and Sv39x4/Sv48x4 G-stage 2 MiB/1 GiB leaves plus the Sv48 512 GiB
-leaves. The other 64 cover every 4-KiB subpage of legal 64-KiB Svnapot mappings
-in Sv39, Sv48, Sv39x4, and Sv48x4. Those cases completed 64 initial loads, 64
-committed scalar stores, and 64 exact readbacks against an independent
-VPN-low-four-bit address oracle. The four NAPOT environments generated 14 PTW
-requests over 7,971 aggregate cycles, exercising translation reuse across the
-16-subpage region. The executable reported complete RTL SHA-256
+`make translation-superpages` passed 266 deterministic leaf/subpage cases on
+both the mutable build and frozen runtime.
+Ten cover the original Sv39/Sv48 stage-1 and Sv39x4/Sv48x4 G-stage 2 MiB/1 GiB
+leaves plus the Sv48 512 GiB leaves. Sixty-four cover every 4-KiB subpage of
+legal 64-KiB Svnapot mappings in Sv39, Sv48, Sv39x4, and Sv48x4 stage-only
+paths. Another 192 cover all four VS/G mode pairs crossed with VS-only NAPOT,
+final-G-only NAPOT, and simultaneous VS/G NAPOT leaves. VS-NAPOT and G-NAPOT
+each cover 128 nested subpages, including 64 where both stages are NAPOT; the
+G-stage mappings used for implicit VS page-table accesses remain ordinary 4
+KiB. The full NAPOT matrix completed 256 initial loads, 256 committed scalar
+stores, and 256 exact readbacks against an independent VPN-low-four-bit address
+oracle. It generated 142 PTW requests over 38,353 aggregate cycles, exercising
+translation reuse across each 16-subpage region. The executable reported
+complete RTL SHA-256
 `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`.
 
 `make translation-faults` passed 258 deterministic architectural transactions.

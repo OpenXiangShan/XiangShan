@@ -343,7 +343,10 @@ Sv39x4/Sv48x4 G-stage equivalents, plus the Sv48 512 GiB leaf. It also builds
 legal 64-KiB Svnapot mappings in Sv39, Sv48, Sv39x4, and Sv48x4 by installing
 the identical `N=1, PPN[3:0]=8` PTE in all 16 leaf slots. Every Svnapot subpage
 is checked with an independent VPN-low-bit address oracle, an initial load, a
-committed scalar store, and an exact load readback.
+committed scalar store, and an exact load readback. All four VS/G mode pairs
+also cross VS-only NAPOT, final-G-only NAPOT, and simultaneous VS/G NAPOT
+leaves while G-stage translations of the VS page-table pages remain ordinary
+4-KiB mappings.
 
 `translation-bare` covers stage-1 Bare, G-only, VS-only, and fully Bare
 degenerations. It checks that the selected stage is bypassed exactly once and
