@@ -53,9 +53,9 @@ class MainBtbAlignBank(
 
       val mbtbResp: Resp = Output(new Resp)
       class VbtbResp extends Bundle {
-        val positions:   Vec[UInt]              = Vec(1, UInt(CfiPositionWidth.W))
-        val predictions: Vec[Valid[Prediction]] = Vec(1, Valid(new Prediction))
-        val metas:       Vec[MainBtbMetaEntry]  = Vec(1, new MainBtbMetaEntry)
+        val position:   UInt              = UInt(CfiPositionWidth.W)
+        val prediction: Valid[Prediction] = Valid(new Prediction)
+        val meta:       MainBtbMetaEntry  = new MainBtbMetaEntry
       }
       val vbtbResp: VbtbResp = Output(new VbtbResp)
     }
@@ -85,7 +85,7 @@ class MainBtbAlignBank(
     val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
-    val s3_vbtbTakenMask: Vec[Bool] = Input(Vec(1, Bool()))
+    val s3_vbtbTaken: Bool = Input(Bool())
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
@@ -175,8 +175,8 @@ class MainBtbAlignBank(
   private val s1_vbtbSelectOH    = PriorityEncoderOH(s1_vbtbMinHitMask.asUInt)
   private val s1_vbtbSelectEntry = Mux1H(s1_vbtbSelectOH, s1_vbtbEntries)
 
-  io.read.mbtbResp.positions    := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
-  io.read.vbtbResp.positions(0) := Cat(s1_posHigherBits, s1_vbtbSelectEntry.entry.position)
+  io.read.mbtbResp.positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
+  io.read.vbtbResp.position  := Cat(s1_posHigherBits, s1_vbtbSelectEntry.entry.position)
 
   /* *** s2 ***
    * check entries hit
@@ -223,26 +223,24 @@ class MainBtbAlignBank(
       meta.position  := Cat(s2_posHigherBits, e.position)
       meta.counter   := c
   }
-  (r.vbtbResp.predictions zip r.vbtbResp.metas).foreach {
-    case (pred, meta) =>
-      val selected = s2_vbtbSelectOH.orR
-      val e        = s2_vbtbSelectEntry
-      pred.valid            := selected
-      pred.bits.cfiPosition := Cat(s2_posHigherBits, e.entry.position)
-      pred.bits.target      := getFullTarget(s2_startPc, e.entry.targetLowerBits, e.entry.targetCarry)
-      pred.bits.attribute   := e.entry.attribute
-      pred.bits.taken       := e.counter.isPositive
-
-      meta.rawHit    := selected
-      meta.attribute := e.entry.attribute
-      meta.position  := Cat(s2_posHigherBits, e.entry.position)
-      meta.counter   := e.counter
-  }
-
-  assert(
-    !s2_fire || PopCount(r.vbtbResp.predictions.map(_.valid)) <= 1.U,
-    "VBTB should output at most one hit per align bank"
+  private val s2_vbtbSelected = s2_vbtbSelectOH.orR
+  private val s2_vbtbPred     = r.vbtbResp.prediction
+  private val s2_vbtbMeta     = r.vbtbResp.meta
+  private val s2_vbtbEntry    = s2_vbtbSelectEntry
+  s2_vbtbPred.valid            := s2_vbtbSelected
+  s2_vbtbPred.bits.cfiPosition := Cat(s2_posHigherBits, s2_vbtbEntry.entry.position)
+  s2_vbtbPred.bits.target := getFullTarget(
+    s2_startPc,
+    s2_vbtbEntry.entry.targetLowerBits,
+    s2_vbtbEntry.entry.targetCarry
   )
+  s2_vbtbPred.bits.attribute := s2_vbtbEntry.entry.attribute
+  s2_vbtbPred.bits.taken     := s2_vbtbEntry.counter.isPositive
+
+  s2_vbtbMeta.rawHit    := s2_vbtbSelected
+  s2_vbtbMeta.attribute := s2_vbtbEntry.entry.attribute
+  s2_vbtbMeta.position  := Cat(s2_posHigherBits, s2_vbtbEntry.entry.position)
+  s2_vbtbMeta.counter   := s2_vbtbEntry.counter
 
   // add an alias for hitMask for later use & debug purpose
   private val s2_hitMask = VecInit(r.mbtbResp.predictions.map(_.valid))
@@ -252,11 +250,11 @@ class MainBtbAlignBank(
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  private val s3_fire          = io.stageCtrl.s3_fire
-  private val s3_vbtbTakenMask = io.s3_vbtbTakenMask
-  private val s3_vbtbSelectOH  = RegEnable(s2_vbtbSelectOH, s2_fire)
+  private val s3_fire         = io.stageCtrl.s3_fire
+  private val s3_vbtbTaken    = io.s3_vbtbTaken
+  private val s3_vbtbSelectOH = RegEnable(s2_vbtbSelectOH, s2_fire)
 
-  victimBtbReplacer.io.predTouch.valid := s3_fire && s3_vbtbTakenMask(0) && s3_vbtbSelectOH.orR
+  victimBtbReplacer.io.predTouch.valid := s3_fire && s3_vbtbTaken && s3_vbtbSelectOH.orR
   victimBtbReplacer.io.predTouch.bits  := OHToUInt(s3_vbtbSelectOH)
 
   /* *** t0 ***

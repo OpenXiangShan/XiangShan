@@ -99,7 +99,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   s1_fire := io.stageCtrl.s1_fire && io.enable
 
   io.s1_positions := VecInit(alignBanks.flatMap(bank =>
-    VecInit(bank.io.read.mbtbResp.positions ++ bank.io.read.vbtbResp.positions)
+    VecInit(bank.io.read.mbtbResp.positions ++ Seq(bank.io.read.vbtbResp.position))
   ))
 
   /* *** s2 ***
@@ -113,20 +113,20 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
   io.result := VecInit(alignBanks.flatMap(bank =>
-    VecInit(bank.io.read.mbtbResp.predictions ++ bank.io.read.vbtbResp.predictions)
+    VecInit(bank.io.read.mbtbResp.predictions ++ Seq(bank.io.read.vbtbResp.prediction))
   ))
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(bank =>
-    VecInit(bank.io.read.mbtbResp.metas ++ bank.io.read.vbtbResp.metas)
+    VecInit(bank.io.read.mbtbResp.metas ++ Seq(bank.io.read.vbtbResp.meta))
   ))
 
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
   s3_fire := io.enable && io.stageCtrl.s3_fire
-  // io.result is flattened, so is s3_takenMask from Bpu top, here we need to slice it back to alignBank structure
+  // io.result is flattened, so use each align bank's last result as its VBTB taken feedback.
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.s3_vbtbTakenMask := io.s3_takenMask.slice(i * (NumWay + 1) + NumWay, i * (NumWay + 1) + NumWay + 1)
+    b.io.s3_vbtbTaken := io.s3_takenMask(i * (NumWay + 1) + NumWay)
   }
 
   /* *** t0 ***
