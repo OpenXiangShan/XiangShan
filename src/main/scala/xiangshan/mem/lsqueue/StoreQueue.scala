@@ -870,13 +870,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
           mmioState := Mux(cboZeroOffset.andR, s_wb, s_req)
         }
 
-        when (io.uncache.resp.bits.denied || io.cmoOpResp.bits.denied) {
+        when (io.uncache.resp.bits.denied) {
           uncacheUop.exceptionVec(storeAccessFault) := true.B
           mmioState := s_wb
         }
 
-        when (io.uncache.resp.bits.corrupt && !io.uncache.resp.bits.denied ||
-              io.cmoOpResp.bits.corrupt && !io.cmoOpResp.bits.denied) {
+        when (io.uncache.resp.bits.corrupt && !io.uncache.resp.bits.denied) {
           uncacheUop.exceptionVec(hardwareError) := true.B
           mmioState := s_wb
         }
@@ -1022,6 +1021,12 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       when (io.cmoOpResp.fire) {
         noPending := true.B
         mmioState := s_wb
+        when (io.cmoOpResp.bits.denied) {
+          uncacheUop.exceptionVec(storeAccessFault) := true.B
+        }
+        when (io.cmoOpResp.bits.corrupt && !io.cmoOpResp.bits.denied) {
+          uncacheUop.exceptionVec(hardwareError) := true.B
+        }
       }
     }
   }
