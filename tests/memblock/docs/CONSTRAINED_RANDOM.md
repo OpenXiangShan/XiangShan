@@ -52,6 +52,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
+| `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
+| `atomic-error-denied` | Per-mille denied share among atomic D-channel errors; the other class is independent corrupt |
 | `hypervisor-hlv`, `hypervisor-hlvx`, `hypervisor-hsv` | Relative family weights inside the `hypervisor` class |
 | `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative operation weights inside the `cmo` class |
 | `cmo-dirty` | Per-mille share of CMO target lines made dirty by a committed store that CMO must drain from SBuffer |
@@ -114,7 +116,8 @@ An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
-An all-error Uncache mix requires `special-concurrent=0`, because the current
+An enabled `atomic-error` requires a nonzero atomic operation weight. An
+all-error Uncache mix requires `special-concurrent=0`, because the current
 special overlap slot is a nonfaulting load and cannot legally satisfy a
 100-percent precise-error constraint.
 
@@ -144,7 +147,7 @@ scenario implementations:
 | Dimension | Implemented common-interface behavior | Remaining work |
 | --- | --- | --- |
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
-| Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
+| Atomic subtype and errors | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences. Schema 18 adds `atomic-error`/`atomic-error-denied`, closes all 18 enabled family x width x clean/corrupt/denied outcomes, and checks the exact exception plus two-beat refill, errored GrantAck/refill, unchanged manager memory at response time, and deterministic poisoned-line cache image if it is later released. LRSC error actions stop at LR because a cold SC cannot request a refill | Cross-hart reservation interference remains integration-level |
 | Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths | Add simultaneous multi-class windows and multiple CMO sources |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
@@ -154,7 +157,7 @@ scenario implementations:
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, and `probe-overlap` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. The overlap class holds an unrelated cold refill for 2048..4096 cycles, queues a clean auxiliary Probe and the dirty primary Probe without an intervening cycle, checks their distinct B sources/address-matched C responses, and requires at least two accepted-but-unanswered Probes before the delayed load can write back | Extend beyond two simultaneous Probe sources and compose Probe overlap with more operation classes and malformed manager traffic |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
-| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. All enabled outcomes close per seed | Lift PTW and atomic error controls into the same interface while keeping realistic presets rare or zero; add per-beat corrupt selection after the response-wide random class is stable |
+| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. All enabled outcomes close per seed | Lift PTW error controls into the same interface; add per-beat corrupt selection after the response-wide random class is stable |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
 `corner` are settings of the same generator. Closing them means lifting each
@@ -183,6 +186,9 @@ CMO error rates are `100`, `0`, and `500` per mille for `coverage`, `spec`, and
 `corner`; the denied share is `500` in all three presets. Ordinary SPEC-like
 traffic therefore injects no manager error, balanced coverage keeps errors
 rare after its mandatory cross closes, and corner traffic emphasizes them.
+Atomic error rates use the same `100`, `0`, and `500` values, with a 500
+per-mille denied share. Error actions use unique cold identity-mapped lines;
+ordinary SPEC-like atomic traffic therefore remains free of synthetic errors.
 Uncache error rates use the same `100`, `0`, and `500` values, with a 500
 per-mille denied share among error loads. The `spec` preset therefore models
 ordinary traffic without frequent external errors, while `coverage` and

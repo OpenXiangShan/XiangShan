@@ -124,6 +124,8 @@ struct RandomConstraints {
     std::array<unsigned, 3> locality_weights{};
     std::array<unsigned, atomic_family_count> atomic_family_weights{};
     std::array<unsigned, 2> atomic_width_weights{};
+    unsigned atomic_error_per_mille = 0;
+    unsigned atomic_error_denied_per_mille = 0;
     std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
     std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
     unsigned cmo_dirty_per_mille = 0;
@@ -185,6 +187,8 @@ struct RandomConstraints {
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
+                .atomic_error_per_mille = 100,
+                .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
@@ -248,6 +252,8 @@ struct RandomConstraints {
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
+                .atomic_error_per_mille = 0,
+                .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {90, 5, 5},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 50,
@@ -311,6 +317,8 @@ struct RandomConstraints {
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
+                .atomic_error_per_mille = 500,
+                .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
@@ -453,6 +461,14 @@ struct RandomConstraints {
         }
         if (key == "atomic-d") {
             atomic_width_weights[1] = parsed;
+            return;
+        }
+        if (key == "atomic-error") {
+            atomic_error_per_mille = parsed;
+            return;
+        }
+        if (key == "atomic-error-denied") {
+            atomic_error_denied_per_mille = parsed;
             return;
         }
         const std::array<std::pair<std::string_view, HypervisorFamily>,
@@ -941,6 +957,8 @@ struct RandomConstraints {
             vector_partial_vl_per_mille > 1000 ||
             vector_nonzero_vstart_per_mille > 1000 ||
             vector_segment_stores_per_mille > 1000 ||
+            atomic_error_per_mille > 1000 ||
+            atomic_error_denied_per_mille > 1000 ||
             cmo_dirty_per_mille > 1000 ||
             cmo_younger_overlap_per_mille > 1000 ||
             cmo_error_per_mille > 1000 ||
@@ -991,6 +1009,10 @@ struct RandomConstraints {
         if (cmo_error_per_mille != 0 && operation_weights[cmo] == 0) {
             throw std::invalid_argument(
                 "cmo-error requires a nonzero CMO operation weight");
+        }
+        if (atomic_error_per_mille != 0 && operation_weights[atomic] == 0) {
+            throw std::invalid_argument(
+                "atomic-error requires a nonzero atomic operation weight");
         }
         if (dcache_load_error_per_mille != 0 &&
             operation_weights[scalar_load] == 0) {
@@ -1263,7 +1285,15 @@ struct RandomConstraints {
                 const unsigned widths = static_cast<unsigned>(std::count_if(
                     atomic_width_weights.begin(), atomic_width_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
-                actions += std::max(families, widths);
+                const unsigned outcomes =
+                    (atomic_error_per_mille == 1000 ? 0U : 1U) +
+                    (atomic_error_per_mille != 0 &&
+                         atomic_error_denied_per_mille != 1000
+                     ? 1U : 0U) +
+                    (atomic_error_per_mille != 0 &&
+                         atomic_error_denied_per_mille != 0
+                     ? 1U : 0U);
+                actions += families * widths * outcomes;
             } else if (operation == scalar_load) {
                 const unsigned error_kinds =
                     dcache_load_error_per_mille == 0 ? 0U :
@@ -1423,7 +1453,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=17 constraints=" << name
+        stream << "constraint_schema=18 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1434,6 +1464,9 @@ struct RandomConstraints {
                << atomic_family_weights[1] << ',' << atomic_family_weights[2]
                << " target_atomic_width=" << atomic_width_weights[0] << ','
                << atomic_width_weights[1]
+               << " target_atomic_error=" << atomic_error_per_mille
+               << " target_atomic_error_denied="
+               << atomic_error_denied_per_mille
                << " target_hypervisor_family="
                << hypervisor_family_weights[0] << ','
                << hypervisor_family_weights[1] << ','
@@ -1742,6 +1775,14 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, RandomConstraints::atomic_family_count>
         atomic_families{};
     std::array<std::uint64_t, 2> atomic_widths{};
+    std::array<std::uint64_t, 2> atomic_errors{};
+    std::array<std::uint64_t, 2> atomic_error_kinds{};
+    // [AMO/LRSC/CAS][W/D][clean/corrupt/denied].
+    std::array<std::array<std::array<std::uint64_t, 3>, 2>,
+               RandomConstraints::atomic_family_count>
+        atomic_outcomes{};
+    // error responses/denied beats/corrupt beats/GrantAcks/refills.
+    std::array<std::uint64_t, 5> atomic_error_manager{};
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
     std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
@@ -1829,6 +1870,24 @@ struct ConstraintCoverage {
         ++uncache_errors[error_denied ? 1U : 0U];
         if (error_denied) {
             ++uncache_error_kinds[*error_denied ? 1U : 0U];
+        }
+    }
+
+    void sample_atomic(
+        unsigned family, unsigned width, std::optional<bool> error_denied,
+        const std::array<std::uint64_t, 5> &manager_delta = {})
+    {
+        const unsigned outcome = !error_denied
+            ? 0U : *error_denied ? 2U : 1U;
+        ++atomic_families.at(family);
+        ++atomic_widths.at(width);
+        ++atomic_outcomes.at(family).at(width).at(outcome);
+        ++atomic_errors[error_denied ? 1U : 0U];
+        if (error_denied) {
+            ++atomic_error_kinds[*error_denied ? 1U : 0U];
+        }
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            atomic_error_manager[index] += manager_delta[index];
         }
     }
 
@@ -1966,20 +2025,33 @@ struct ConstraintCoverage {
             return true;
         }
         if (operation == RandomConstraints::atomic) {
-            const bool families_complete = std::equal(
-                constraints.atomic_family_weights.begin(),
-                constraints.atomic_family_weights.end(),
-                atomic_families.begin(), [](unsigned weight, std::uint64_t count) {
-                    return weight == 0 || count != 0;
-                });
-            const bool widths_complete = std::equal(
-                constraints.atomic_width_weights.begin(),
-                constraints.atomic_width_weights.end(), atomic_widths.begin(),
-                [](unsigned weight, std::uint64_t count) {
-                    return weight == 0 || count != 0;
-                });
-            return operations[operation] != 0 && families_complete &&
-                widths_complete;
+            for (unsigned family = 0; family < atomic_outcomes.size();
+                 ++family) {
+                for (unsigned width = 0;
+                     width < atomic_outcomes[family].size(); ++width) {
+                    for (unsigned outcome = 0;
+                         outcome < atomic_outcomes[family][width].size();
+                         ++outcome) {
+                        const bool enabled =
+                            constraints.atomic_family_weights[family] != 0 &&
+                            constraints.atomic_width_weights[width] != 0 &&
+                            (outcome == 0
+                                ? constraints.atomic_error_per_mille != 1000
+                                : outcome == 1
+                                ? constraints.atomic_error_per_mille != 0 &&
+                                    constraints.atomic_error_denied_per_mille !=
+                                        1000
+                                : constraints.atomic_error_per_mille != 0 &&
+                                    constraints.atomic_error_denied_per_mille !=
+                                        0);
+                        if ((atomic_outcomes[family][width][outcome] != 0) !=
+                            enabled) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            return operations[operation] != 0;
         }
         if (operation == RandomConstraints::scalar_load) {
             const std::array<bool, 3> enabled{{
@@ -2149,6 +2221,30 @@ struct ConstraintCoverage {
             !fences_complete(constraints)) {
             return false;
         }
+        std::array<std::uint64_t, 3> atomic_outcome_totals{};
+        for (const auto &family : atomic_outcomes) {
+            for (const auto &width : family) {
+                for (unsigned outcome = 0; outcome < width.size(); ++outcome) {
+                    atomic_outcome_totals[outcome] += width[outcome];
+                }
+            }
+        }
+        const std::uint64_t atomic_actions =
+            atomic_outcome_totals[0] + atomic_outcome_totals[1] +
+            atomic_outcome_totals[2];
+        const std::uint64_t atomic_error_actions =
+            atomic_outcome_totals[1] + atomic_outcome_totals[2];
+        if (atomic_actions != operations[RandomConstraints::atomic] ||
+            atomic_errors != std::array<std::uint64_t, 2>{
+                atomic_outcome_totals[0], atomic_error_actions} ||
+            atomic_error_kinds != std::array<std::uint64_t, 2>{
+                atomic_outcome_totals[1], atomic_outcome_totals[2]} ||
+            atomic_error_manager != std::array<std::uint64_t, 5>{
+                atomic_error_actions, atomic_outcome_totals[2] * 2,
+                atomic_error_actions * 2, atomic_error_actions,
+                atomic_error_actions}) {
+            return false;
+        }
         const std::uint64_t uncache_actions =
             operations[RandomConstraints::noncacheable] +
             operations[RandomConstraints::mmio];
@@ -2293,6 +2389,26 @@ public:
                << atomic_families[1] << ',' << atomic_families[2]
                << " actual_atomic_width=" << atomic_widths[0] << ','
                << atomic_widths[1]
+               << " actual_atomic_error=" << atomic_errors[0] << ','
+               << atomic_errors[1]
+               << " actual_atomic_error_kind=" << atomic_error_kinds[0] << ','
+               << atomic_error_kinds[1]
+               << " actual_atomic_outcome=";
+        for (unsigned family = 0; family < atomic_outcomes.size(); ++family) {
+            for (unsigned width = 0; width < atomic_outcomes[family].size();
+                 ++width) {
+                for (unsigned outcome = 0;
+                     outcome < atomic_outcomes[family][width].size(); ++outcome) {
+                    stream << (family == 0 && width == 0 && outcome == 0
+                                   ? "" : ",")
+                           << atomic_outcomes[family][width][outcome];
+                }
+            }
+        }
+        stream << " actual_atomic_error_manager="
+               << atomic_error_manager[0] << ',' << atomic_error_manager[1]
+               << ',' << atomic_error_manager[2] << ','
+               << atomic_error_manager[3] << ',' << atomic_error_manager[4]
                << " actual_hypervisor_family=" << hypervisor_families[0]
                << ',' << hypervisor_families[1] << ','
                << hypervisor_families[2]
@@ -29143,6 +29259,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t cmo_overlap_line = 0;
     std::uint64_t probe_overlap_line = 0;
     std::uint64_t dcache_error_line = 0;
+    std::uint64_t atomic_error_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -29164,6 +29281,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t dcache_error_base =
         probe_overlap_base + probe_overlap_span;
     constexpr std::uint64_t dcache_error_span = 0x4000000;
+    constexpr std::uint64_t atomic_error_base =
+        dcache_error_base + dcache_error_span;
+    constexpr std::uint64_t atomic_error_span = 0x4000000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -29823,6 +29943,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (std::uint64_t block = atomic_error_base;
+             block < atomic_error_base + atomic_error_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
         if (!map_all_contexts(
                 cache1_base + 0xf000, cache1_base + 0xf000,
                 false, false, true) ||
@@ -29946,7 +30077,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return false;
         }
         if (constraints.uncache_error_per_mille != 0 ||
-            constraints.dcache_load_error_per_mille != 0) {
+            constraints.dcache_load_error_per_mille != 0 ||
+            constraints.atomic_error_per_mille != 0) {
             environment.configure_cache_error_enable(true);
             if (!environment.run_cycles(4)) {
                 return false;
@@ -32543,6 +32675,57 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
             }
+            unsigned atomic_family = 0;
+            unsigned atomic_width = 0;
+            std::optional<bool> atomic_error_denied;
+            bool atomic_outcome_forced = false;
+            if (kind == RandomConstraints::atomic) {
+                atomic_family = constraints.choose_atomic_family(random());
+                atomic_width = constraints.choose_atomic_width(random());
+                for (unsigned family = 0;
+                     family < RandomConstraints::atomic_family_count &&
+                         !atomic_outcome_forced;
+                     ++family) {
+                    if (constraints.atomic_family_weights[family] == 0) {
+                        continue;
+                    }
+                    for (unsigned width = 0;
+                         width < 2 && !atomic_outcome_forced; ++width) {
+                        if (constraints.atomic_width_weights[width] == 0) {
+                            continue;
+                        }
+                        for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                            const bool enabled = outcome == 0
+                                ? constraints.atomic_error_per_mille != 1000
+                                : outcome == 1
+                                ? constraints.atomic_error_per_mille != 0 &&
+                                    constraints.
+                                        atomic_error_denied_per_mille != 1000
+                                : constraints.atomic_error_per_mille != 0 &&
+                                    constraints.
+                                        atomic_error_denied_per_mille != 0;
+                            if (enabled &&
+                                constraint_coverage.atomic_outcomes[
+                                    family][width][outcome] == 0) {
+                                atomic_family = family;
+                                atomic_width = width;
+                                atomic_outcome_forced = true;
+                                if (outcome != 0) {
+                                    atomic_error_denied = outcome == 2;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!atomic_outcome_forced && choose_binary_class(
+                        constraints.atomic_error_per_mille,
+                        constraint_coverage.atomic_errors)) {
+                    atomic_error_denied = choose_binary_class(
+                        constraints.atomic_error_denied_per_mille,
+                        constraint_coverage.atomic_error_kinds);
+                }
+            }
             std::optional<bool> uncache_error_denied;
             bool uncache_outcome_forced = false;
             if (kind == RandomConstraints::noncacheable ||
@@ -33107,64 +33290,182 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::atomic) {
                 ordinary_leaf_addressed = true;
                 const std::size_t slot = random() % atomic_values.size();
-                unsigned family = constraints.choose_atomic_family(random());
-                for (unsigned candidate = 0;
-                     candidate < RandomConstraints::atomic_family_count;
-                     ++candidate) {
-                    if (constraints.atomic_family_weights[candidate] != 0 &&
-                        constraint_coverage.atomic_families[candidate] == 0) {
-                        family = candidate;
-                        break;
-                    }
-                }
-                unsigned width = constraints.choose_atomic_width(random());
-                for (unsigned candidate = 0; candidate < 2; ++candidate) {
-                    if (constraints.atomic_width_weights[candidate] != 0 &&
-                        constraint_coverage.atomic_widths[candidate] == 0) {
-                        width = candidate;
-                        break;
-                    }
-                }
-                const bool word = width == 0;
+                const bool word = atomic_width == 0;
                 const std::uint64_t operand = random();
-                const std::uint64_t address = atomic_base + slot * 64;
-                const auto expect_atomic_writeback = [&](const auto &transaction,
-                                                         std::uint64_t value) {
+                const bool error_response = atomic_error_denied.has_value();
+                std::uint64_t address = atomic_base + slot * 64;
+                if (error_response) {
+                    constexpr std::uint64_t error_lines =
+                        atomic_error_span / 64;
+                    if (atomic_error_line >= error_lines) {
+                        phase = "random-atomic-error-address-space-exhausted";
+                        return false;
+                    }
+                    const std::uint64_t sequence = atomic_error_line++;
+                    const std::uint64_t line = sequence ^ (sequence >> 1);
+                    address = atomic_error_base + line * 64 + (word ? 4 : 0);
+                }
+                const memblock::LoadOp read_op = word
+                    ? memblock::LoadOp::lwu : memblock::LoadOp::ld;
+                const std::uint64_t original_value = error_response
+                    ? environment.memory().expected_load(address, read_op)
+                    : word
+                    ? static_cast<std::uint32_t>(atomic_values[slot])
+                    : atomic_values[slot];
+                const auto expect_atomic_writeback = [&] (
+                    const auto &transaction, std::uint64_t value,
+                    std::uint32_t exception = 0) {
                     const memblock::LoadTransaction writeback{
                         .address = transaction.address,
-                        .op = memblock::LoadOp::ld,
+                        .op = read_op,
                         .rob = transaction.rob,
                         .rob_flag = transaction.rob_flag,
                         .pdest = transaction.pdest,
                         .lane = 0,
-                        .rf_wen = true,
+                        .expected_exception_mask = exception,
+                        .rf_wen = exception == 0,
                     };
                     environment.expect_load_data(writeback, value);
                 };
-                if (family == RandomConstraints::atomic_amo) {
+                memblock::AtomicTransaction transaction;
+                if (atomic_family == RandomConstraints::atomic_amo) {
                     const auto &operations =
                         word ? atomic_operations_w : atomic_operations_d;
                     const auto op = operations[random() % operations.size()];
-                    const auto transaction = make_atomic(address, op, operand);
+                    transaction = make_atomic(address, op, operand);
+                } else if (atomic_family == RandomConstraints::atomic_cas) {
+                    transaction = make_atomic(
+                        address,
+                        word ? memblock::AtomicOp::amocas_w
+                             : memblock::AtomicOp::amocas_d,
+                        operand);
+                    const bool compare_match = (random() & 1U) != 0;
+                    transaction.compare = compare_match
+                        ? original_value : original_value ^ 1U;
+                } else {
+                    transaction = make_atomic(
+                        address,
+                        word ? memblock::AtomicOp::lr_w
+                             : memblock::AtomicOp::lr_d,
+                        0);
+                }
+
+                std::array<std::uint64_t, 5> manager_delta{};
+                if (error_response) {
+                    phase = *atomic_error_denied
+                        ? "random-atomic-denied"
+                        : "random-atomic-corrupt";
+                    if (!environment.run_until_all_complete(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_queues_retired(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    const std::uint32_t expected_exception =
+                        !*atomic_error_denied
+                        ? memblock::kExceptionHardwareError
+                        : atomic_family == RandomConstraints::atomic_lrsc
+                        ? memblock::kExceptionLoadAccessFault
+                        : memblock::kExceptionStoreAccessFault;
                     expect_atomic_writeback(
-                        transaction, atomic_writeback(atomic_values[slot], word));
+                        transaction, 0, expected_exception);
+                    const std::uint64_t requests_before_error =
+                        environment.tilelink_requests();
+                    const std::uint64_t refills_before =
+                        environment.dcache_error_response_refills();
+                    const std::uint64_t error_responses_before =
+                        environment.dcache_error_response_requests();
+                    const std::uint64_t denied_beats_before =
+                        environment.dcache_denied_d_beats();
+                    const std::uint64_t corrupt_beats_before =
+                        environment.dcache_corrupt_d_beats();
+                    const std::uint64_t grant_acks_before =
+                        environment.dcache_error_response_grant_acks();
+                    const std::uint64_t bus_data_before =
+                        environment.bus_expected_load(address, read_op);
+                    environment.inject_dcache_response_error_at(
+                        address & ~std::uint64_t{63},
+                        *atomic_error_denied, !*atomic_error_denied);
+                    if (!environment.set_rob_head(
+                            transaction.rob, transaction.rob_flag) ||
+                        !environment.issue_atomic(transaction, 4096) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    manager_delta = {{
+                        environment.dcache_error_response_requests() -
+                            error_responses_before,
+                        environment.dcache_denied_d_beats() -
+                            denied_beats_before,
+                        environment.dcache_corrupt_d_beats() -
+                            corrupt_beats_before,
+                        environment.dcache_error_response_grant_acks() -
+                            grant_acks_before,
+                        environment.dcache_error_response_refills() -
+                            refills_before,
+                    }};
+                    if (environment.tilelink_requests() <
+                            requests_before_error + 1 ||
+                        manager_delta != std::array<std::uint64_t, 5>{
+                            1, *atomic_error_denied ? 2U : 0U,
+                            2, 1, 1} ||
+                        (environment.dcache_last_error_response_address() &
+                         ~std::uint64_t{63}) !=
+                            (address & ~std::uint64_t{63}) ||
+                        environment.dcache_last_error_response_keyword() ||
+                        environment.bus_expected_load(address, read_op) !=
+                            bus_data_before) {
+                        phase += ":oracle";
+                        return false;
+                    }
+                    // The design intentionally installs an errored refill as a
+                    // poisoned line. AMO/CAS still update that private cache
+                    // image, while the manager backing store stays unchanged
+                    // until a possible dirty eviction. Track the expected
+                    // ReleaseData without treating exceptional data as an ISA
+                    // result.
+                    bool cache_image_updated = false;
+                    std::uint64_t cache_image_value = original_value;
+                    if (atomic_family == RandomConstraints::atomic_amo) {
+                        cache_image_value = atomic_result(
+                            transaction.op, original_value, operand);
+                        cache_image_updated = true;
+                    } else if (
+                        atomic_family == RandomConstraints::atomic_cas &&
+                        transaction.compare == original_value) {
+                        cache_image_value = operand;
+                        cache_image_updated = true;
+                    }
+                    if (cache_image_updated) {
+                        const unsigned bytes = word ? 4U : 8U;
+                        for (unsigned byte = 0; byte < bytes; ++byte) {
+                            environment.memory().write_reference_byte(
+                                address + byte,
+                                static_cast<std::uint8_t>(
+                                    cache_image_value >> (8 * byte)));
+                        }
+                    }
+                    ++coverage.exceptions;
+                } else if (atomic_family == RandomConstraints::atomic_amo) {
+                    expect_atomic_writeback(
+                        transaction,
+                        atomic_writeback(atomic_values[slot], word));
                     if (!environment.issue_atomic(transaction, 4096) ||
                         !environment.run_until_complete(
                             constrained_completion_timeout)) {
                         return false;
                     }
                     atomic_values[slot] = atomic_result(
-                        op, atomic_values[slot], operand);
-                } else if (family == RandomConstraints::atomic_cas) {
-                    auto transaction = make_atomic(
-                        address,
-                        word ? memblock::AtomicOp::amocas_w
-                             : memblock::AtomicOp::amocas_d,
-                        operand);
-                    const bool compare_match = (random() & 1U) != 0;
+                        transaction.op, atomic_values[slot], operand);
+                } else if (atomic_family == RandomConstraints::atomic_cas) {
                     const std::uint64_t old_value = atomic_values[slot];
-                    transaction.compare = compare_match
-                        ? old_value : old_value ^ 1U;
+                    const std::uint64_t compare_value = word
+                        ? static_cast<std::uint32_t>(old_value) : old_value;
                     expect_atomic_writeback(
                         transaction, atomic_writeback(old_value, word));
                     if (!environment.issue_atomic(transaction, 4096) ||
@@ -33172,21 +33473,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             constrained_completion_timeout)) {
                         return false;
                     }
-                    if (compare_match) {
+                    if (transaction.compare == compare_value) {
                         atomic_values[slot] = word
                             ? ((old_value & ~std::uint64_t{0xffffffff}) |
                                static_cast<std::uint32_t>(operand))
                             : operand;
                     }
                 } else {
-                    const auto lr = make_atomic(
-                        address,
-                        word ? memblock::AtomicOp::lr_w
-                             : memblock::AtomicOp::lr_d,
-                        0);
                     expect_atomic_writeback(
-                        lr, atomic_writeback(atomic_values[slot], word));
-                    if (!environment.issue_atomic(lr, 4096) ||
+                        transaction,
+                        atomic_writeback(atomic_values[slot], word));
+                    if (!environment.issue_atomic(transaction, 4096) ||
                         !environment.run_until_complete(
                             constrained_completion_timeout)) {
                         return false;
@@ -33207,10 +33504,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                            static_cast<std::uint32_t>(operand))
                         : operand;
                 }
-                environment.record_atomic_result(
-                    address, atomic_values[slot]);
-                ++constraint_coverage.atomic_families[family];
-                ++constraint_coverage.atomic_widths[width];
+                if (!error_response) {
+                    environment.record_atomic_result(
+                        address, atomic_values[slot]);
+                }
+                constraint_coverage.sample_atomic(
+                    atomic_family, atomic_width, atomic_error_denied,
+                    manager_delta);
                 ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::hypervisor) {

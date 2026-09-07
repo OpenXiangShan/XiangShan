@@ -951,9 +951,10 @@ can add legal NC/MMIO load overlap, then randomizes issue order, store
 address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
-AMO/LRSC/AMOCAS family and W/D width, CMO CLEAN/FLUSH/INVAL operation,
-clean/dirty line state, younger-load overlap, and legal CBOAck error presence
-and kind, NC/MMIO load/store direction plus legal Uncache response-error
+AMO/LRSC/AMOCAS family, W/D width, and D-channel error presence/kind, CMO
+CLEAN/FLUSH/INVAL operation, clean/dirty line state, younger-load overlap, and
+legal CBOAck error presence and kind, NC/MMIO load/store direction plus legal
+Uncache response-error
 presence and kind,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
@@ -1084,6 +1085,21 @@ the error transaction oracle. Preset error rates are `100/0/500` for
 An extreme 1000-per-mille run must set both `stride-stream=0` and
 `concurrent=0`; every scalar action then redirects, so neither clean prefetch
 training nor the fixed clean scalar members of a mixed issue window are legal.
+
+Schema 18 adds `atomic-error` and `atomic-error-denied`. Atomic error actions
+use a separate nonrepeating cold-line region mapped in Bare, Sv39, Sv48, and
+all nested VS/G mode pairs. Every enabled AMO/LRSC/AMOCAS x W/D x
+clean/corrupt/denied cross must be nonzero. Denied LR reports LoadAccessFault;
+denied AMO/AMOCAS reports StoreAccessFault; corrupt reports HardwareError.
+For `N` errors including `D` denied errors, the manager tuple must be exactly
+`N/2D/2N/N/N` for error responses, denied beats, corrupt beats, errored
+GrantAcks, and errored refills. Backing memory must be unchanged when the
+exception is returned. MainPipe intentionally retains an errored refill as a
+poisoned line and may apply the AMO/CAS transform to its private cache image;
+the reference model separately predicts any later dirty ReleaseData without
+treating exceptional data as an ISA-visible value. LRSC error actions issue LR
+only because a cold SC without a usable reservation returns failure before a
+D-channel request.
 
 For a reproducible local pressure run:
 

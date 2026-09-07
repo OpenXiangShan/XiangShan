@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 18
+        result["constraint_schema"] = 19
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -526,6 +526,49 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["actual_ops"] = "10,0,3,2,0,0,0,5,5,0,6"
+        result.update(
+            {
+                "constraint_schema": 18,
+                "target_ops": "1,0,3,2,0,0,1,1,1,0,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,0,6",
+                "target_atomic_family": "1,1,1",
+                "target_atomic_width": "1,1",
+                "target_atomic_error": 500,
+                "target_atomic_error_denied": 500,
+                "actual_atomic_family": "6,6,6",
+                "actual_atomic_width": "9,9",
+                "actual_atomic_error": "6,12",
+                "actual_atomic_error_kind": "6,6",
+                "actual_atomic_outcome":
+                    "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1",
+                "actual_atomic_error_manager": "12,12,24,12,12",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_error_manager"] = "12,11,24,12,12"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "atomic error manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_error_manager"] = "12,12,24,12,12"
+        result["actual_atomic_outcome"] = (
+            "2,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_atomic_outcome"
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_outcome"] = (
+            "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"
+        )
+        result["actual_ops"] = "10,0,3,2,0,0,19,5,5,0,6"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "atomic error coverage is not conserved",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_ops"] = "10,0,3,2,0,0,18,5,5,0,6"
         result.update(
             {
                 "constraint_schema": 14,

@@ -2245,3 +2245,50 @@ The frozen executable and runtime-manifest SHA-256 values are
 `70ca94a91c132895c1b414d5c6c90e64640b33f72ca3b045f47daef463775131`
 and `f585ab7277cb6599910e843e7836b15e4454eb795827cb251ba14975b95c1fc4`.
 No CPU RTL defect was observed.
+
+## Schema 18 Random Atomic D-Channel Error Closure
+
+On 2026-09-07 the common `random-mixed` interface added `atomic-error` and
+`atomic-error-denied`. The generator crosses AMO/LRSC/AMOCAS, W/D width, and
+clean/corrupt/denied outcome, using unique cold lines mapped under Bare, Sv39,
+Sv48, and every nested VS/G mode pair. Denied LR requires LoadAccessFault;
+denied AMO/AMOCAS requires StoreAccessFault; corrupt requires HardwareError.
+LRSC error actions issue LR only because a cold SC cannot produce a refill
+response in this implementation.
+
+For `N` errors including `D` denied errors, both the online gate and offline
+artifact verifier require the exact manager tuple `N/2D/2N/N/N`: errored
+responses, denied beats, corrupt beats, errored GrantAcks, and errored refills.
+The backing store remains unchanged when the exception returns. The clarified
+RTL policy intentionally retains a poisoned line and can apply the AMO/CAS
+transform to its private cache data, so the reference model separately predicts
+any later dirty ReleaseData. Exceptional data remains outside the ISA oracle.
+The initial assumption that errored atomic cache data would never be released
+was therefore corrected as a UT model issue; no CPU bug document was created.
+
+The following 256-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/corrupt/denied | Error manager tuple |
+| --- | ---: | ---: | --- | --- |
+| `spec`, default zero error | 18001 | 27,246 | 6/0/0 | 0/0/0/0/0 |
+| `corner` | 18002 | 70,237 | 7/6/7 | 13/14/26/13/13 |
+| all corrupt | 18003 | 35,826 | 0/9/0 | 9/0/18/9/9 |
+| all denied | 18004 | 42,193 | 0/0/12 | 12/24/24/12/12 |
+| frozen `coverage` | 18007 | 39,709 | 8/7/6 | 13/12/26/13/13 |
+
+`atomic-dchannel-errors` also passed all 44 refill-capable W/D opcode/error
+cases, 44 persistent poisoned-line load hits, four SC poisoned-hit checks, and
+two clean recovery sequences in 7,182 cycles. Invalid `atomic=0` plus enabled
+error injection and out-of-range per-mille constraints were rejected before
+simulation. All 185 Python unit tests and `check-ports`/`check-rtl` passed. The
+independent verifier accepted frozen-runtime seed 18007:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=18007..18007 results=1 transactions=256 elapsed_seconds=15.724905 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=c4c15ef212701ae250271025db3a04fbe3447cda84900946f9895dfc05744c42
+```
+
+The frozen executable and runtime-manifest SHA-256 values are
+`eb14b54fdac43f0e515f482e1fa200445f786b2035be1d3aa0b41263e4b14bcb`
+and `c52b4030cf1229105232103d1b3ac707e4614f047131725b99658e10f50878cf`.
+No CPU RTL defect was observed.

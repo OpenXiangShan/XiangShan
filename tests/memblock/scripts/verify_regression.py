@@ -151,7 +151,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
+        schema in (
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+        ),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -895,6 +897,94 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 actual_dcache_load_manager
                 == [errors, denied * 2, errors * 2, errors, errors],
                 "DCache load error manager accounting is not conserved",
+            )
+
+        if schema >= 18:
+            target_atomic_families = _csv_counts(
+                result, "target_atomic_family", 3
+            )
+            target_atomic_widths = _csv_counts(
+                result, "target_atomic_width", 2
+            )
+            target_atomic_error = result.get("target_atomic_error")
+            target_atomic_denied = result.get("target_atomic_error_denied")
+            for name, value in (
+                ("target_atomic_error", target_atomic_error),
+                ("target_atomic_error_denied", target_atomic_denied),
+            ):
+                _require(
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 1000,
+                    f"{name} is not a per-mille integer: {value!r}",
+                )
+            actual_atomic_families = _csv_counts(
+                result, "actual_atomic_family", 3
+            )
+            actual_atomic_widths = _csv_counts(
+                result, "actual_atomic_width", 2
+            )
+            actual_atomic_error = _csv_counts(
+                result, "actual_atomic_error", 2
+            )
+            actual_atomic_error_kind = _csv_counts(
+                result, "actual_atomic_error_kind", 2
+            )
+            actual_atomic_outcomes = _csv_counts(
+                result, "actual_atomic_outcome", 18
+            )
+            actual_atomic_manager = _csv_counts(
+                result, "actual_atomic_error_manager", 5
+            )
+            atomic_enabled = target_operations[6] != 0
+            atomic_outcome_enabled = (
+                target_atomic_error != 1000,
+                target_atomic_error != 0 and target_atomic_denied != 1000,
+                target_atomic_error != 0 and target_atomic_denied != 0,
+            )
+            derived_families = [0, 0, 0]
+            derived_widths = [0, 0]
+            outcome_totals = [0, 0, 0]
+            for family in range(3):
+                for width in range(2):
+                    for outcome in range(3):
+                        enabled = (
+                            atomic_enabled
+                            and target_atomic_families[family] != 0
+                            and target_atomic_widths[width] != 0
+                            and atomic_outcome_enabled[outcome]
+                        )
+                        index = family * 6 + width * 3 + outcome
+                        count = actual_atomic_outcomes[index]
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_atomic_outcome does not match enabled "
+                            f"classes: {actual_atomic_outcomes}",
+                        )
+                        derived_families[family] += count
+                        derived_widths[width] += count
+                        outcome_totals[outcome] += count
+            clean, corrupt, denied = outcome_totals
+            errors = corrupt + denied
+            _require(
+                actual_atomic_families == derived_families
+                and actual_atomic_widths == derived_widths,
+                "atomic family/width coverage does not match outcomes",
+            )
+            _require(
+                actual_atomic_error == [clean, errors]
+                and actual_atomic_error_kind == [corrupt, denied],
+                "atomic aggregate error coverage does not match outcomes",
+            )
+            _require(
+                clean + errors == actual_operations[6]
+                and sum(actual_atomic_error_kind) == errors,
+                "atomic error coverage is not conserved",
+            )
+            _require(
+                actual_atomic_manager
+                == [errors, denied * 2, errors * 2, errors, errors],
+                "atomic error manager accounting is not conserved",
             )
 
     if schema >= 8:
