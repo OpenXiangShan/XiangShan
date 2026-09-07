@@ -1532,6 +1532,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "lsq_enqueue_widths_observed_.at(lsq_enqueue_width - 1)",
             "LSQ enqueue monitor disagrees with driver accounting",
             "invalid accepted LSQ enqueue on lane",
+            "io_mem_to_ooo_lqCancelCnt.U()",
+            "io_mem_to_ooo_sqCancelCnt.U()",
+            "lq_redirect_canceled_observed_ += lq_canceled",
+            "sq_redirect_canceled_observed_ += sq_canceled",
+            "lq_canceled_unobserved_ += count",
+            "sq_canceled_unobserved_ += count",
         ):
             self.assertIn(contract, environment)
         self.assertIn(
@@ -1540,6 +1546,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(
             "environment.lsq_enqueue_lanes_observed()", main
         )
+        self.assertIn("lsq_monitor_schema=2", main)
+        self.assertIn("redirect_cancels_observed=", main)
+        self.assertIn("unobserved_cancels=", main)
 
     def test_mixed_vector_aliasing_uses_address_oracle_and_nonoverlap_stores(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

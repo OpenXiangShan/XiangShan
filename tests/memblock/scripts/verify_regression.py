@@ -672,18 +672,19 @@ def _positive_csv_prefix(
     )
 
 
-def _balanced_queue(result: dict[str, Any], name: str) -> int:
+def _balanced_queue(result: dict[str, Any], name: str) -> tuple[int, int]:
     value = result.get(name)
     _require(isinstance(value, str), f"{name} accounting is not a string")
     try:
         retired, allocated = value.split("/", 1)
         dequeued, canceled = retired.split("+", 1)
         allocated_count = int(allocated, 10)
-        balanced = int(dequeued, 10) + int(canceled, 10) == allocated_count
+        canceled_count = int(canceled, 10)
+        balanced = int(dequeued, 10) + canceled_count == allocated_count
     except (ValueError, AttributeError) as error:
         raise VerificationError(f"invalid {name} accounting: {value!r}") from error
     _require(balanced, f"unbalanced {name} accounting: {value}")
-    return allocated_count
+    return allocated_count, canceled_count
 
 
 def _check_mixed_coverage(
@@ -768,18 +769,36 @@ def _check_mixed_coverage(
         and result["max_outstanding"] > 1,
         "mixed traffic never had heterogeneous outstanding work",
     )
-    lq_allocated = _balanced_queue(result, "lq")
-    sq_allocated = _balanced_queue(result, "sq")
+    lq_allocated, lq_canceled = _balanced_queue(result, "lq")
+    sq_allocated, sq_canceled = _balanced_queue(result, "sq")
     lsq_monitor_schema = result.get("lsq_monitor_schema", 0)
     _require(
-        lsq_monitor_schema in (0, 1),
+        lsq_monitor_schema in (0, 1, 2),
         f"unknown LSQ enqueue monitor schema: {lsq_monitor_schema!r}",
     )
-    if lsq_monitor_schema == 1:
+    if lsq_monitor_schema in (1, 2):
         observed = _csv_counts(result, "lsq_enqueued_observed", 2)
         _require(
             observed == [lq_allocated, sq_allocated],
             "observed LSQ enqueue counts disagree with allocated queue totals",
+        )
+    if lsq_monitor_schema == 2:
+        redirect_cancels = _csv_counts(
+            result, "redirect_cancels_observed", 3
+        )
+        unobserved_cancels = _csv_counts(result, "unobserved_cancels", 2)
+        _require(
+            redirect_cancels[0] > 0,
+            "no redirect cancellation event was independently observed",
+        )
+        _require(
+            redirect_cancels[1] + unobserved_cancels[0] == lq_canceled
+            and redirect_cancels[2] + unobserved_cancels[1] == sq_canceled,
+            "observed and unobserved cancellation classes do not conserve queue totals",
+        )
+        _require(
+            unobserved_cancels == [0, 0],
+            "random-mixed used an unobserved queue cancellation",
         )
 
 

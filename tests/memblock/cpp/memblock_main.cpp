@@ -6771,8 +6771,7 @@ int run_dcache_errors(int argc, char **argv)
         !environment.run_until_complete(1024) ||
         !environment.run_cycles(8) ||
         !environment.redirect_after(denied.rob, denied.rob_flag, true) ||
-        !environment.run_cycles(96) ||
-        !environment.account_lq_cancellation(1)) {
+        !environment.run_cycles(96)) {
         std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle=" << environment.cycle()
                   << " phase=denied reason=" << environment.error() << '\n';
         return 1;
@@ -6796,8 +6795,7 @@ int run_dcache_errors(int argc, char **argv)
         !environment.run_until_complete(1024) ||
         !environment.run_cycles(8) ||
         !environment.redirect_after(corrupt.rob, corrupt.rob_flag, true) ||
-        !environment.run_cycles(96) ||
-        !environment.account_lq_cancellation(1)) {
+        !environment.run_cycles(96)) {
         std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle=" << environment.cycle()
                   << " phase=corrupt reason=" << environment.error() << '\n';
         return 1;
@@ -13585,6 +13583,22 @@ int run_redirect(int argc, char **argv)
                   << " phase=cancel reason=" << environment.error() << '\n';
         return 1;
     }
+    if (environment.redirect_cancellation_events_observed() != 1 ||
+        environment.lq_redirect_canceled_observed() != 1 ||
+        environment.sq_redirect_canceled_observed() != 0 ||
+        environment.lq_canceled_unobserved() != 0 ||
+        environment.sq_canceled_unobserved() != 0) {
+        std::cerr << "MEMBLOCK_REDIRECT_FAIL cycle=" << environment.cycle()
+                  << " phase=cancel-observation"
+                  << " observed="
+                  << environment.redirect_cancellation_events_observed() << ','
+                  << environment.lq_redirect_canceled_observed() << ','
+                  << environment.sq_redirect_canceled_observed()
+                  << " unobserved="
+                  << environment.lq_canceled_unobserved() << ','
+                  << environment.sq_canceled_unobserved() << '\n';
+        return 1;
+    }
 
     const memblock::LoadTransaction survivor{
         .address = address,
@@ -13606,6 +13620,10 @@ int run_redirect(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " surviving_writebacks=" << environment.writebacks()
+              << " redirect_cancels_observed="
+              << environment.redirect_cancellation_events_observed() << ','
+              << environment.lq_redirect_canceled_observed() << ','
+              << environment.sq_redirect_canceled_observed()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -28137,8 +28155,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             !environment.redirect_after(
                 memblock::rob_pointer_value(canceled_rob_offset - 1),
                 memblock::rob_pointer_flag(canceled_rob_offset - 1), false) ||
-            !environment.run_cycles(96) ||
-            !environment.account_lq_cancellation(1)) {
+            !environment.run_cycles(96)) {
             return false;
         }
         coverage.sample(canceled);
@@ -28187,6 +28204,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.lq_allocated() ||
             environment.sq_dequeued() + environment.sq_canceled() !=
                 environment.sq_allocated() ||
+            environment.redirect_cancellation_events_observed() == 0 ||
+            environment.lq_redirect_canceled_observed() !=
+                environment.lq_canceled() ||
+            environment.sq_redirect_canceled_observed() !=
+                environment.sq_canceled() ||
+            environment.lq_canceled_unobserved() != 0 ||
+            environment.sq_canceled_unobserved() != 0 ||
             !coverage.complete(
                 constraints.concurrent_actions_per_mille != 0) ||
             !constraint_coverage.complete(
@@ -28217,10 +28241,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " sq=" << environment.sq_dequeued() << '+'
                   << environment.sq_canceled() << '/'
                   << environment.sq_allocated()
-                  << " lsq_monitor_schema=1"
+                  << " lsq_monitor_schema=2"
                   << " lsq_enqueued_observed="
                   << environment.lq_enqueued_observed() << ','
                   << environment.sq_enqueued_observed()
+                  << " redirect_cancels_observed="
+                  << environment.redirect_cancellation_events_observed() << ','
+                  << environment.lq_redirect_canceled_observed() << ','
+                  << environment.sq_redirect_canceled_observed()
+                  << " unobserved_cancels="
+                  << environment.lq_canceled_unobserved() << ','
+                  << environment.sq_canceled_unobserved()
                   << " ptw=" << environment.ptw_requests()
                   << " uncache=" << environment.uncache_requests()
                   << " release_data=" << environment.tilelink_release_data()
@@ -28275,10 +28306,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/'
               << environment.sq_allocated()
-              << " lsq_monitor_schema=1"
+              << " lsq_monitor_schema=2"
               << " lsq_enqueued_observed="
               << environment.lq_enqueued_observed() << ','
               << environment.sq_enqueued_observed()
+              << " redirect_cancels_observed="
+              << environment.redirect_cancellation_events_observed() << ','
+              << environment.lq_redirect_canceled_observed() << ','
+              << environment.sq_redirect_canceled_observed()
+              << " unobserved_cancels="
+              << environment.lq_canceled_unobserved() << ','
+              << environment.sq_canceled_unobserved()
               << ' ' << coverage.summary() << ' '
               << constraint_coverage.summary(
                      constraints, environment.dcache_response_latency_stats(),

@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `93d34f32a3ff3035cec7535929bfb1f67094b9d6f0422b31a9a71e46986ebf09`
+- Current rebuilt and frozen UT executable SHA-256: `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `1d57c0054817a07fef68951a25a707ec2abd0ad8551615c5c5703acfbcca2bae`
+- Frozen runtime manifest SHA-256: `8d11d3f850e4d521ff5a00fb89e6310c35ef6f97ce8a75c953cff716e2082002`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1760,3 +1760,27 @@ against complete RTL SHA-256
 The frozen executable SHA-256 was
 `1c6fdb44860ed97d32e049bf3a89ab0b8d985added55296e789ce1d8c94e14fb`.
 No CPU RTL defect was observed; this was verification-environment closure.
+
+## Independent Redirect Cancellation Accounting
+
+On 2026-09-07 the environment stopped inferring cancellation from the driver
+after a redirect. MemBlock registers the redirect once, and the virtual load
+and store queues publish retained cancellation counts two further clock edges
+later. The environment now samples `lqCancelCnt/sqCancelCnt` exactly once at
+that boundary, adds the observed values to queue conservation, and separately
+labels any non-redirect exception/reset teardown that cannot use this oracle.
+The Schema-2 mixed gate requires every cancellation to be observed.
+
+`make unit` passed 178 tests and `make smoke` passed in 38 cycles. The directed
+redirect case passed in 166 cycles with one redirect event and exactly one LQ
+cancellation. DCache-error, trigger, and Uncache-error scenarios passed in
+their short directed runs. Coverage seed 22 completed 256 actions in 17,885
+cycles, reporting `redirect_cancels_observed=1,1,0`,
+`unobserved_cancels=0,0`, LQ `441+1/442`, SQ `271+0/271`, and independently
+observed enqueues `442,271`. The frozen-runtime run took 7.153940 seconds;
+the independent verifier accepted
+`/tmp/memblock-redirect-monitor-seed22.json` with SHA-256
+`f9c0d083ead4d7f517485c08759fc718ba5efd2bb8b64f86da199ad95314a130`.
+The frozen executable SHA-256 was
+`b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`.
+No CPU RTL defect was observed.

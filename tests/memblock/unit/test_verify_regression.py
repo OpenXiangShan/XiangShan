@@ -36,8 +36,10 @@ def mixed_result(seed: int) -> dict[str, object]:
         "uncache_requests": 2,
         "lq": "31+1/32",
         "sq": "16+0/16",
-        "lsq_monitor_schema": 1,
+        "lsq_monitor_schema": 2,
         "lsq_enqueued_observed": "32,16",
+        "redirect_cancels_observed": "1,1,0",
+        "unobserved_cancels": "0,0",
         "load_ops": "1,1,1,1,1,1,1",
         "store_ops": "1,1,1,1",
         "scalar": "12,8",
@@ -161,6 +163,23 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "observed LSQ enqueue counts disagree",
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result = mixed_result(7)
+        result["redirect_cancels_observed"] = "1,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "cancellation classes do not conserve",
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result = mixed_result(7)
+        result["redirect_cancels_observed"] = "1,0,0"
+        result["unobserved_cancels"] = "1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "unobserved queue cancellation",
         ):
             verify_regression._check_mixed_coverage(result)
 

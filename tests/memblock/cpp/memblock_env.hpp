@@ -4633,6 +4633,14 @@ public:
     }
     std::uint64_t lq_dequeued() const { return lq_dequeued_; }
     std::uint64_t lq_canceled() const { return lq_canceled_; }
+    std::uint64_t lq_redirect_canceled_observed() const
+    {
+        return lq_redirect_canceled_observed_;
+    }
+    std::uint64_t lq_canceled_unobserved() const
+    {
+        return lq_canceled_unobserved_;
+    }
     std::uint64_t sq_allocated() const { return sq_allocated_; }
     std::uint64_t sq_enqueued_observed() const
     {
@@ -4640,6 +4648,18 @@ public:
     }
     std::uint64_t sq_dequeued() const { return sq_dequeued_; }
     std::uint64_t sq_canceled() const { return sq_canceled_; }
+    std::uint64_t sq_redirect_canceled_observed() const
+    {
+        return sq_redirect_canceled_observed_;
+    }
+    std::uint64_t sq_canceled_unobserved() const
+    {
+        return sq_canceled_unobserved_;
+    }
+    std::uint64_t redirect_cancellation_events_observed() const
+    {
+        return redirect_cancellation_events_observed_;
+    }
     const std::array<std::uint64_t, generated::kLsqEnqueueLanes> &
     lsq_enqueue_widths_observed() const
     {
@@ -8622,6 +8642,7 @@ public:
             return false;
         }
         lq_canceled_ += count;
+        lq_canceled_unobserved_ += count;
         return true;
     }
 
@@ -8632,6 +8653,7 @@ public:
             return false;
         }
         sq_canceled_ += count;
+        sq_canceled_unobserved_ += count;
         return true;
     }
 
@@ -8922,6 +8944,32 @@ public:
         dut_.io_redirect_valid.ImmSet(std::uint64_t{1});
         tick();
         dut_.io_redirect_valid.ImmSet(std::uint64_t{0});
+        // MemBlock registers redirect once; the queues publish their retained
+        // redirectCancelCount values after two more clock edges. Sample once
+        // per known redirect instead of treating the retained value as a pulse.
+        tick();
+        tick();
+        dut_.RefreshComb();
+        const std::uint64_t lq_canceled =
+            dut_.io_mem_to_ooo_lqCancelCnt.U();
+        const std::uint64_t sq_canceled =
+            dut_.io_mem_to_ooo_sqCancelCnt.U();
+        if (lq_dequeued_ + lq_canceled_ + lq_canceled > lq_allocated_ ||
+            sq_dequeued_ + sq_canceled_ + sq_canceled > sq_allocated_) {
+            std::ostringstream message;
+            message << "observed redirect cancellation exceeds queue allocation"
+                    << " lq=" << lq_dequeued_ << '+' << lq_canceled_ << '+'
+                    << lq_canceled << '/' << lq_allocated_
+                    << " sq=" << sq_dequeued_ << '+' << sq_canceled_ << '+'
+                    << sq_canceled << '/' << sq_allocated_;
+            error_ = message.str();
+            return false;
+        }
+        ++redirect_cancellation_events_observed_;
+        lq_redirect_canceled_observed_ += lq_canceled;
+        sq_redirect_canceled_observed_ += sq_canceled;
+        lq_canceled_ += lq_canceled;
+        sq_canceled_ += sq_canceled;
         return check_components();
     }
 
@@ -9687,10 +9735,15 @@ private:
     std::uint64_t lq_enqueued_observed_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;
+    std::uint64_t lq_redirect_canceled_observed_ = 0;
+    std::uint64_t lq_canceled_unobserved_ = 0;
     std::uint64_t sq_allocated_ = 0;
     std::uint64_t sq_enqueued_observed_ = 0;
     std::uint64_t sq_dequeued_ = 0;
     std::uint64_t sq_canceled_ = 0;
+    std::uint64_t sq_redirect_canceled_observed_ = 0;
+    std::uint64_t sq_canceled_unobserved_ = 0;
+    std::uint64_t redirect_cancellation_events_observed_ = 0;
     std::array<std::uint64_t, generated::kLsqEnqueueLanes>
         lsq_enqueue_widths_observed_{};
     std::array<std::uint64_t, generated::kLsqEnqueueLanes>
