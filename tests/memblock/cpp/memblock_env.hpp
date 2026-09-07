@@ -723,6 +723,54 @@ inline std::uint16_t active_vector_elements(
     return result;
 }
 
+inline std::optional<unsigned> vector_writeback_global_element(
+    const VectorMemoryTransaction &transaction, unsigned element)
+{
+    const unsigned element_count = 16U >> vector_data_eew(transaction);
+    if (transaction.segment) {
+        return vector_segment_vd_index(transaction) * element_count + element;
+    }
+    if (vector_is_indexed(transaction)) {
+        return vector_indexed_vd_index(transaction) * element_count + element;
+    }
+    return transaction.vuop_idx * element_count + element;
+}
+
+inline std::uint16_t vector_tail_elements(
+    const VectorMemoryTransaction &transaction)
+{
+    const unsigned element_count = 16U >> vector_data_eew(transaction);
+    const unsigned effective_vl = vector_effective_vl(transaction);
+    std::uint16_t result = 0;
+    for (unsigned element = 0; element < element_count; ++element) {
+        const auto global = vector_writeback_global_element(transaction, element);
+        if (global && *global >= effective_vl) {
+            result |= static_cast<std::uint16_t>(1U << element);
+        }
+    }
+    return result;
+}
+
+inline std::uint16_t vector_mask_inactive_elements(
+    const VectorMemoryTransaction &transaction)
+{
+    if (transaction.vm) {
+        return 0;
+    }
+    const unsigned element_count = 16U >> vector_data_eew(transaction);
+    const unsigned effective_vl = vector_effective_vl(transaction);
+    std::uint16_t result = 0;
+    for (unsigned element = 0; element < element_count; ++element) {
+        const auto global = vector_writeback_global_element(transaction, element);
+        if (global && *global >= transaction.vstart && *global < effective_vl &&
+            (*global >= 16 ||
+             ((transaction.mask_bits >> *global) & 1U) == 0)) {
+            result |= static_cast<std::uint16_t>(1U << element);
+        }
+    }
+    return result;
+}
+
 inline std::uint16_t vector_writeback_elements(
     const VectorMemoryTransaction &transaction)
 {
@@ -3277,6 +3325,8 @@ public:
         std::int64_t stride;
         std::uint16_t mask_bits;
         std::array<unsigned char, 16> index;
+        std::uint16_t tail_elements;
+        std::uint16_t mask_inactive_elements;
     };
 
     void expect(
@@ -3343,6 +3393,8 @@ public:
                 transaction.stride,
                 transaction.mask_bits,
                 transaction.index,
+                vector_tail_elements(output_transaction),
+                vector_mask_inactive_elements(output_transaction),
             });
     }
 
@@ -3483,10 +3535,11 @@ private:
             }
             const bool active =
                 ((expected.active_elements >> element) & 1U) != 0;
-            const bool tail_agnostic = element >= expected.vl && expected.vta;
+            const bool tail_agnostic =
+                ((expected.tail_elements >> element) & 1U) != 0 && expected.vta;
             const bool mask_agnostic =
-                element >= expected.vstart && element < expected.vl &&
-                !active && expected.vma;
+                ((expected.mask_inactive_elements >> element) & 1U) != 0 &&
+                expected.vma;
             if (active || (!tail_agnostic && !mask_agnostic)) {
                 if (!preserved) {
                     return false;

@@ -182,13 +182,15 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 11
+        result["constraint_schema"] = 12
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
             verify_regression._check_mixed_coverage(result)
 
-    def test_constraint_schema_ten_checks_weighted_vector_shapes(self) -> None:
+    def test_constraint_schemas_ten_and_eleven_check_vector_shapes_and_policy(
+        self,
+    ) -> None:
         result = mixed_result(10)
         result.update(
             {
@@ -258,6 +260,36 @@ class VerifyRegressionTest(unittest.TestCase):
         )
         verify_regression._check_mixed_coverage(result)
 
+        result.update(
+            {
+                "constraint_schema": 11,
+                "target_vector_masked": 500,
+                "target_vector_vma": 500,
+                "target_vector_vta": 500,
+                "target_vector_partial_vl": 500,
+                "target_vector_nonzero_vstart": 500,
+                "actual_vector_masked": "2,1",
+                "actual_vector_vma": "1,2",
+                "actual_vector_vta": "2,1",
+                "actual_vector_partial_vl": "1,2",
+                "actual_vector_nonzero_vstart": "2,1",
+                "actual_vector_agnostic": "1,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_vector_vta"] = "3,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_vector_vta"
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_vector_vta"] = "2,1"
+        result["actual_vector_agnostic"] = "0,1"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "mask-agnostic"
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_vector_agnostic"] = "1,1"
+
         result["actual_vector_lmul"] = "0,1,1,1,0,0,0"
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "actual_vector_lmul"
@@ -284,6 +316,12 @@ class VerifyRegressionTest(unittest.TestCase):
                 "actual_vector_shape_ops": 0,
                 "actual_vector_uops": 0,
                 "actual_vector_multi_uop": 0,
+                "actual_vector_masked": "0,0",
+                "actual_vector_vma": "0,0",
+                "actual_vector_vta": "0,0",
+                "actual_vector_partial_vl": "0,0",
+                "actual_vector_nonzero_vstart": "0,0",
+                "actual_vector_agnostic": "0,0",
             }
         )
         verify_regression._check_mixed_coverage(result)

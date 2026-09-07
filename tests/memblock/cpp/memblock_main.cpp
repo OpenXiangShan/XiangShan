@@ -129,6 +129,11 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
+    unsigned vector_masked_per_mille = 0;
+    unsigned vector_vma_per_mille = 0;
+    unsigned vector_vta_per_mille = 0;
+    unsigned vector_partial_vl_per_mille = 0;
+    unsigned vector_nonzero_vstart_per_mille = 0;
     std::array<unsigned, 4> vector_addressing_weights{};
     std::array<unsigned, 4> vector_eew_weights{};
     std::array<unsigned, 4> vector_sew_weights{};
@@ -172,6 +177,11 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_masked_per_mille = 500,
+                .vector_vma_per_mille = 500,
+                .vector_vta_per_mille = 500,
+                .vector_partial_vl_per_mille = 500,
+                .vector_nonzero_vstart_per_mille = 500,
                 .vector_addressing_weights = {1, 1, 1, 1},
                 .vector_eew_weights = {1, 1, 1, 1},
                 .vector_sew_weights = {1, 1, 1, 1},
@@ -216,6 +226,11 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
+                .vector_masked_per_mille = 100,
+                .vector_vma_per_mille = 500,
+                .vector_vta_per_mille = 500,
+                .vector_partial_vl_per_mille = 100,
+                .vector_nonzero_vstart_per_mille = 20,
                 .vector_addressing_weights = {980, 10, 5, 5},
                 .vector_eew_weights = {5, 3, 2, 1},
                 .vector_sew_weights = {1, 2, 5, 2},
@@ -261,6 +276,11 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_masked_per_mille = 500,
+                .vector_vma_per_mille = 500,
+                .vector_vta_per_mille = 500,
+                .vector_partial_vl_per_mille = 500,
+                .vector_nonzero_vstart_per_mille = 500,
                 .vector_addressing_weights = {1, 1, 1, 1},
                 .vector_eew_weights = {1, 1, 1, 1},
                 .vector_sew_weights = {1, 1, 1, 1},
@@ -539,6 +559,16 @@ struct RandomConstraints {
             misaligned_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
+        } else if (key == "vector-masked") {
+            vector_masked_per_mille = parsed;
+        } else if (key == "vector-vma") {
+            vector_vma_per_mille = parsed;
+        } else if (key == "vector-vta") {
+            vector_vta_per_mille = parsed;
+        } else if (key == "vector-partial-vl") {
+            vector_partial_vl_per_mille = parsed;
+        } else if (key == "vector-nonzero-vstart") {
+            vector_nonzero_vstart_per_mille = parsed;
         } else if (key == "vector-segment-store") {
             vector_segment_stores_per_mille = parsed;
         } else if (key == "probe") {
@@ -609,11 +639,13 @@ struct RandomConstraints {
             require_vector_weights(vector_lmul_weights, "LMUL");
             require_vector_weights(vector_emul_weights, "EMUL");
 
+            const unsigned minimum_vlmax = vector_policy_minimum_vlmax();
             std::array<bool, 4> reachable_addressing{};
             std::array<bool, 4> reachable_eew{};
             std::array<bool, 4> reachable_sew{};
             std::array<bool, 7> reachable_lmul{};
             std::array<bool, 7> reachable_emul{};
+            bool reachable_shape = false;
             for (unsigned addressing = 0; addressing < 4; ++addressing) {
                 if (vector_addressing_weights[addressing] == 0) {
                     continue;
@@ -638,6 +670,13 @@ struct RandomConstraints {
                                 vector_emul_weights[emul_log2 + 3] == 0) {
                                 continue;
                             }
+                            const unsigned vector_bytes = lmul_log2 < 0
+                                ? 16U >> static_cast<unsigned>(-lmul_log2)
+                                : 16U << static_cast<unsigned>(lmul_log2);
+                            if ((vector_bytes >> vsew) < minimum_vlmax) {
+                                continue;
+                            }
+                            reachable_shape = true;
                             reachable_addressing[addressing] = true;
                             reachable_eew[eew] = true;
                             reachable_sew[vsew] = true;
@@ -658,6 +697,11 @@ struct RandomConstraints {
                     }
                 }
             };
+            if (!reachable_shape) {
+                throw std::invalid_argument(
+                    "vector policy constraints are incompatible with enabled "
+                    "shape classes");
+            }
             require_reachable(
                 vector_addressing_weights, reachable_addressing, "addressing");
             require_reachable(vector_eew_weights, reachable_eew, "EEW");
@@ -785,6 +829,10 @@ struct RandomConstraints {
             translation_switches_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
             vector_corner_per_mille > 1000 || probes_per_mille > 1000 ||
+            vector_masked_per_mille > 1000 || vector_vma_per_mille > 1000 ||
+            vector_vta_per_mille > 1000 ||
+            vector_partial_vl_per_mille > 1000 ||
+            vector_nonzero_vstart_per_mille > 1000 ||
             vector_segment_stores_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
@@ -1032,6 +1080,11 @@ struct RandomConstraints {
                     actions += enabled(vector_sew_weights);
                     actions += enabled(vector_lmul_weights);
                     actions += enabled(vector_emul_weights);
+                    actions += direction_classes(vector_masked_per_mille);
+                    actions += direction_classes(vector_vma_per_mille);
+                    actions += direction_classes(vector_vta_per_mille);
+                    actions += direction_classes(vector_partial_vl_per_mille);
+                    actions += direction_classes(vector_nonzero_vstart_per_mille);
                 }
             } else if (operation == vector_segment) {
                 const auto enabled = [](const auto &weights) {
@@ -1106,10 +1159,25 @@ struct RandomConstraints {
             translation_weights[translation_nested] != 0;
     }
 
+    unsigned vector_policy_minimum_vlmax() const
+    {
+        const bool masked = vector_masked_per_mille == 1000;
+        const bool partial = vector_partial_vl_per_mille == 1000;
+        const bool nonzero_vstart = vector_nonzero_vstart_per_mille == 1000;
+        if (masked && partial && nonzero_vstart) {
+            return 3;
+        }
+        if ((masked && partial) || (partial && nonzero_vstart) ||
+            (masked && nonzero_vstart)) {
+            return 2;
+        }
+        return 1;
+    }
+
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=10 constraints=" << name
+        stream << "constraint_schema=11 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1144,6 +1212,12 @@ struct RandomConstraints {
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
+               << " target_vector_masked=" << vector_masked_per_mille
+               << " target_vector_vma=" << vector_vma_per_mille
+               << " target_vector_vta=" << vector_vta_per_mille
+               << " target_vector_partial_vl=" << vector_partial_vl_per_mille
+               << " target_vector_nonzero_vstart="
+               << vector_nonzero_vstart_per_mille
                << " target_vector_addressing=";
         append_weights(stream, vector_addressing_weights);
         stream << " target_vector_eew=";
@@ -1399,6 +1473,13 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 4> vector_sews{};
     std::array<std::uint64_t, 7> vector_lmuls{};
     std::array<std::uint64_t, 7> vector_emuls{};
+    std::array<std::uint64_t, 2> vector_masked{};
+    std::array<std::uint64_t, 2> vector_vma{};
+    std::array<std::uint64_t, 2> vector_vta{};
+    std::array<std::uint64_t, 2> vector_partial_vl{};
+    std::array<std::uint64_t, 2> vector_nonzero_vstart{};
+    std::uint64_t vector_mask_agnostic = 0;
+    std::uint64_t vector_tail_agnostic = 0;
     std::uint64_t vector_shape_operations = 0;
     std::uint64_t vector_uops = 0;
     std::uint64_t vector_multi_uop = 0;
@@ -1575,7 +1656,25 @@ struct ConstraintCoverage {
                 target_complete(constraints.vector_eew_weights, vector_eews) &&
                 target_complete(constraints.vector_sew_weights, vector_sews) &&
                 target_complete(constraints.vector_lmul_weights, vector_lmuls) &&
-                target_complete(constraints.vector_emul_weights, vector_emuls);
+                target_complete(constraints.vector_emul_weights, vector_emuls) &&
+                binary_complete(
+                    constraints.vector_masked_per_mille, vector_masked) &&
+                binary_complete(constraints.vector_vma_per_mille, vector_vma) &&
+                binary_complete(constraints.vector_vta_per_mille, vector_vta) &&
+                binary_complete(
+                    constraints.vector_partial_vl_per_mille,
+                    vector_partial_vl) &&
+                binary_complete(
+                    constraints.vector_nonzero_vstart_per_mille,
+                    vector_nonzero_vstart) &&
+                (constraints.operation_weights[RandomConstraints::vector_load] == 0 ||
+                 constraints.vector_vma_per_mille == 0 ||
+                 constraints.vector_masked_per_mille == 0 ||
+                 vector_mask_agnostic != 0) &&
+                (constraints.operation_weights[RandomConstraints::vector_load] == 0 ||
+                 constraints.vector_vta_per_mille == 0 ||
+                 constraints.vector_partial_vl_per_mille == 0 ||
+                 vector_tail_agnostic != 0);
         }
         if (operation == RandomConstraints::vector_segment) {
             const auto enabled_complete = [](const auto &weights,
@@ -1727,6 +1826,18 @@ struct ConstraintCoverage {
                << vector_emuls[1] << ',' << vector_emuls[2] << ','
                << vector_emuls[3] << ',' << vector_emuls[4] << ','
                << vector_emuls[5] << ',' << vector_emuls[6]
+               << " actual_vector_masked=" << vector_masked[0] << ','
+               << vector_masked[1]
+               << " actual_vector_vma=" << vector_vma[0] << ','
+               << vector_vma[1]
+               << " actual_vector_vta=" << vector_vta[0] << ','
+               << vector_vta[1]
+               << " actual_vector_partial_vl=" << vector_partial_vl[0] << ','
+               << vector_partial_vl[1]
+               << " actual_vector_nonzero_vstart="
+               << vector_nonzero_vstart[0] << ',' << vector_nonzero_vstart[1]
+               << " actual_vector_agnostic=" << vector_mask_agnostic << ','
+               << vector_tail_agnostic
                << " actual_vector_shape_ops=" << vector_shape_operations
                << " actual_vector_uops=" << vector_uops
                << " actual_vector_multi_uop=" << vector_multi_uop
@@ -1796,6 +1907,19 @@ struct ConstraintCoverage {
     }
 
 private:
+    static bool binary_complete(
+        unsigned true_per_mille,
+        const std::array<std::uint64_t, 2> &counts)
+    {
+        if (true_per_mille == 0) {
+            return counts[0] != 0 && counts[1] == 0;
+        }
+        if (true_per_mille == 1000) {
+            return counts[0] == 0 && counts[1] != 0;
+        }
+        return counts[0] != 0 && counts[1] != 0;
+    }
+
     static bool direction_complete(
         unsigned stores_per_mille,
         const std::array<std::uint64_t, 2> &directions)
@@ -26860,6 +26984,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                 emul_log2 + 3] == 0) {
                             continue;
                         }
+                        const unsigned vector_bytes = lmul_log2 < 0
+                            ? 16U >> static_cast<unsigned>(-lmul_log2)
+                            : 16U << static_cast<unsigned>(lmul_log2);
+                        if ((vector_bytes >> vsew) <
+                            constraints.vector_policy_minimum_vlmax()) {
+                            continue;
+                        }
                         long double weight =
                             constraints.vector_addressing_weights[addressing];
                         weight *= constraints.vector_eew_weights[eew];
@@ -27017,6 +27148,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             return *fallback;
         };
+        const auto choose_binary_class = [&] (
+            unsigned true_per_mille,
+            const std::array<std::uint64_t, 2> &counts) {
+            if (true_per_mille != 1000 && counts[0] == 0) {
+                return false;
+            }
+            if (true_per_mille != 0 && counts[1] == 0) {
+                return true;
+            }
+            return random() % 1000 < true_per_mille;
+        };
         auto make_random_vector_uops = [&] (
             bool store, std::uint64_t address, const RandomVectorShape &shape,
             bool vector_corner) {
@@ -27062,13 +27204,69 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         (vlmax - 1U);
                 }
             }
-            const std::uint8_t vl = static_cast<std::uint8_t>(vector_corner
-                ? random() % (vlmax + 1U) : vlmax);
-            const std::uint8_t vstart = vector_corner && vl != 0
-                ? static_cast<std::uint8_t>(random() % (vl + 1U)) : 0;
-            const bool vm = !vector_corner || (random() & 1U) != 0;
-            const std::uint16_t mask_bits =
-                static_cast<std::uint16_t>(random());
+            bool masked = choose_binary_class(
+                constraints.vector_masked_per_mille,
+                constraint_coverage.vector_masked);
+            bool vma = choose_binary_class(
+                constraints.vector_vma_per_mille,
+                constraint_coverage.vector_vma);
+            bool vta = choose_binary_class(
+                constraints.vector_vta_per_mille,
+                constraint_coverage.vector_vta);
+            bool partial_vl = choose_binary_class(
+                constraints.vector_partial_vl_per_mille,
+                constraint_coverage.vector_partial_vl);
+            bool nonzero_vstart = choose_binary_class(
+                constraints.vector_nonzero_vstart_per_mille,
+                constraint_coverage.vector_nonzero_vstart);
+            const bool force_mask_agnostic = !store &&
+                constraints.vector_vma_per_mille != 0 &&
+                constraints.vector_masked_per_mille != 0 &&
+                constraint_coverage.vector_mask_agnostic == 0;
+            const bool force_tail_agnostic = !force_mask_agnostic && !store &&
+                constraints.vector_vta_per_mille != 0 &&
+                constraints.vector_partial_vl_per_mille != 0 &&
+                constraint_coverage.vector_tail_agnostic == 0;
+            if (force_mask_agnostic) {
+                masked = true;
+                vma = true;
+            }
+            if (force_tail_agnostic) {
+                vta = true;
+                partial_vl = true;
+            }
+            if (partial_vl && masked && nonzero_vstart && vlmax < 3U) {
+                if (constraints.vector_partial_vl_per_mille != 1000) {
+                    partial_vl = false;
+                } else if (constraints.vector_masked_per_mille != 1000) {
+                    masked = false;
+                } else {
+                    nonzero_vstart = false;
+                }
+            }
+            unsigned vl = vlmax;
+            if (partial_vl) {
+                const unsigned minimum_vl = masked && nonzero_vstart
+                    ? 2U : (masked || nonzero_vstart ? 1U : 0U);
+                vl = minimum_vl + random() % (vlmax - minimum_vl);
+            }
+            if (masked && nonzero_vstart && vl < 2U) {
+                nonzero_vstart = false;
+            }
+            unsigned vstart = 0;
+            if (nonzero_vstart) {
+                const unsigned maximum = masked
+                    ? std::min(vl - 1U, 15U) : vl;
+                if (maximum == 0) {
+                    nonzero_vstart = false;
+                } else {
+                    vstart = 1U + random() % maximum;
+                }
+            }
+            std::uint16_t mask_bits = static_cast<std::uint16_t>(random());
+            if (masked) {
+                mask_bits &= static_cast<std::uint16_t>(~(1U << vstart));
+            }
             const std::uint64_t rob = rob_offset++;
             std::uint64_t &queue_cursor = store ? sq_offset : lq_offset;
             const std::uint8_t vlmul = static_cast<std::uint8_t>(
@@ -27100,10 +27298,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         shape.addressing),
                     .eew = static_cast<std::uint8_t>(shape.eew),
                     .vsew = static_cast<std::uint8_t>(shape.vsew),
-                    .vl = vl,
-                    .vstart = vstart,
-                    .vm = vm,
+                    .vl = static_cast<std::uint8_t>(vl),
+                    .vstart = static_cast<std::uint8_t>(vstart),
+                    .vm = !masked,
                     .mask_bits = mask_bits,
+                    .vma = vma,
+                    .vta = vta,
                     .rob = memblock::rob_pointer_value(rob),
                     .rob_flag = memblock::rob_pointer_flag(rob),
                     .lq = memblock::lq_pointer_value(
@@ -27402,6 +27602,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.vector_sews[shape.vsew];
                 ++constraint_coverage.vector_lmuls[shape.lmul_log2 + 3];
                 ++constraint_coverage.vector_emuls[shape.emul_log2 + 3];
+                const auto &policy = uops.front();
+                const unsigned vector_bytes = shape.lmul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
+                    : 16U << static_cast<unsigned>(shape.lmul_log2);
+                const unsigned vlmax = vector_bytes >> shape.vsew;
+                ++constraint_coverage.vector_masked[policy.vm ? 0U : 1U];
+                ++constraint_coverage.vector_vma[policy.vma ? 1U : 0U];
+                ++constraint_coverage.vector_vta[policy.vta ? 1U : 0U];
+                ++constraint_coverage.vector_partial_vl[
+                    policy.vl < vlmax ? 1U : 0U];
+                ++constraint_coverage.vector_nonzero_vstart[
+                    policy.vstart != 0 ? 1U : 0U];
+                constraint_coverage.vector_mask_agnostic += !store && policy.vma &&
+                    std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
+                        return memblock::vector_mask_inactive_elements(uop) != 0;
+                    });
+                constraint_coverage.vector_tail_agnostic += !store && policy.vta &&
+                    std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
+                        return memblock::vector_tail_elements(uop) != 0;
+                    });
                 ++constraint_coverage.vector_shape_operations;
                 constraint_coverage.vector_uops += uops.size();
                 constraint_coverage.vector_multi_uop += uops.size() > 1U;

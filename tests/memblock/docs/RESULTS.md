@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `ef48b0166f67aa7dee545571e4498a8c706cbbfe8b32ea508eb1c2bad4b88225`
+- Current rebuilt and frozen UT executable SHA-256: `93d34f32a3ff3035cec7535929bfb1f67094b9d6f0422b31a9a71e46986ebf09`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `2009cc5fb1a393f932cdbca659e08221d42b1778eb73a4eafeb5eb4ba97ad689`
+- Frozen runtime manifest SHA-256: `1d57c0054817a07fef68951a25a707ec2abd0ad8551615c5c5703acfbcca2bae`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1708,3 +1708,32 @@ current-worktree Uncache finding is documented separately in
 the four independently reproduced LSU defects listed above. Any future failure
 should be triaged from its recorded seed and runtime provenance rather than
 treated as a known-good result.
+
+## Schema 11 Vector Policy Closure
+
+On 2026-09-07 the common `random-mixed` interface added independent ordinary
+vector constraints for masking, `vma`, `vta`, partial VL, and nonzero `vstart`.
+The scoreboard now classifies mask/tail inactive elements by global element
+number across ordinary, indexed-special, and segment uops before applying the
+retained-or-all-ones agnostic oracle.
+
+Five intentionally short 256-action checks passed against complete RTL SHA-256
+`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`:
+coverage seed 13 hit both sides of every policy and observed mask/tail agnostic
+loads `4,5`; load-only seed 16 fixed all five policies to zero and reported only
+false classes; load-only seed 17 fixed all five to 1000 and reported only true
+classes with agnostic observations `15,15`; seed 19 expanded every constrained
+M8 instruction to eight uops (120 uops total) with both agnostic classes; seed
+20 checked VTA on the MF8/VLMAX=2 fractional tail and observed `0,15`. An enabled
+MF8/SEW8 shape combined
+with fixed masked+partial-VL+nonzero-vstart was rejected before cycle 0 because
+its VLMAX cannot satisfy the combination. No CPU RTL defect was observed.
+
+The final frozen-runtime seed 21 completed 256 actions in 17,397 cycles and
+7.071575 seconds. It covered 24 constrained ordinary vector instructions, 60
+uops, 14 multi-uop instructions, all shape classes, both sides of all five
+policy dimensions, and agnostic observations `4,8`. The independent schema-11
+artifact verifier accepted `/tmp/memblock-schema11-seed21.json` with SHA-256
+`afe2f9b81dd95b7931a22326a651d6296c71d7bd3992ac29b27035ef6cc26b34`;
+the frozen executable, model, xspcomm, RTL metadata, controller sources, and
+resolved libraries remained hash-stable.

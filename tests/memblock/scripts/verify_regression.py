@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -578,6 +578,82 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "ordinary vector counts are nonzero while vector operations "
                 "are disabled",
             )
+
+    if schema >= 11:
+        vector_enabled = target_operations[2] != 0 or target_operations[3] != 0
+        vector_shape_operations = result.get("actual_vector_shape_ops")
+        policy_targets: dict[str, int] = {}
+        for policy in (
+            "masked",
+            "vma",
+            "vta",
+            "partial_vl",
+            "nonzero_vstart",
+        ):
+            target = result.get(f"target_vector_{policy}")
+            _require(
+                isinstance(target, int)
+                and not isinstance(target, bool)
+                and 0 <= target <= 1000,
+                f"target_vector_{policy} is not a per-mille integer: {target!r}",
+            )
+            actual = _csv_counts(result, f"actual_vector_{policy}", 2)
+            policy_targets[policy] = target
+            if vector_enabled:
+                _require(
+                    (
+                        target == 0
+                        and actual[0] > 0
+                        and actual[1] == 0
+                    )
+                    or (
+                        target == 1000
+                        and actual[0] == 0
+                        and actual[1] > 0
+                    )
+                    or (
+                        0 < target < 1000
+                        and actual[0] > 0
+                        and actual[1] > 0
+                    ),
+                    f"actual_vector_{policy} has an enabled but uncovered "
+                    f"class: target={target} actual={actual}",
+                )
+                _require(
+                    sum(actual) == vector_shape_operations,
+                    f"ordinary vector policy coverage is not conserved for {policy}",
+                )
+            else:
+                _require(
+                    all(count == 0 for count in actual),
+                    f"actual_vector_{policy} is nonzero while ordinary vector "
+                    "operations are disabled",
+                )
+
+        agnostic = _csv_counts(result, "actual_vector_agnostic", 2)
+        load_enabled = target_operations[2] != 0
+        mask_agnostic_enabled = (
+            load_enabled
+            and policy_targets["vma"] != 0
+            and policy_targets["masked"] != 0
+        )
+        tail_agnostic_enabled = (
+            load_enabled
+            and policy_targets["vta"] != 0
+            and policy_targets["partial_vl"] != 0
+        )
+        _require(
+            (agnostic[0] > 0) == mask_agnostic_enabled,
+            "mask-agnostic semantic coverage does not match enabled vector policy",
+        )
+        _require(
+            (agnostic[1] > 0) == tail_agnostic_enabled,
+            "tail-agnostic semantic coverage does not match enabled vector policy",
+        )
+        _require(
+            all(count <= vector_directions[0] for count in agnostic),
+            "vector agnostic semantic counts exceed constrained vector loads",
+        )
 
 
 def _positive_csv_prefix(

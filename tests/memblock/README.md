@@ -902,6 +902,16 @@ summary reports both instruction and uop counts and the offline verifier checks
 both enabled load/store directions, every enabled shape class,
 disabled-class zeros, and per-dimension conservation.
 
+Schema 11 adds independent per-mille controls for `vector-masked`,
+`vector-vma`, `vector-vta`, `vector-partial-vl`, and
+`vector-nonzero-vstart`. Zero and 1000 are strict fixed values; intermediate
+values require both classes in every accepted seed. The generator makes masked
+body and tail elements observable when their corresponding agnostic policy is
+enabled, while the scoreboard classifies each inactive byte from the uop's
+global element number and accepts only the architectural retained/all-ones
+outcomes. A fixed policy combination that cannot coexist with an enabled shape
+is rejected before cycle 0.
+
 For a reproducible local pressure run:
 
 ```sh

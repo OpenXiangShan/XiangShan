@@ -68,6 +68,10 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
+| `vector-masked` | Per-mille share of ordinary vector instructions with `vm=0`; generated masked instructions contain an observable mask-off body element |
+| `vector-vma`, `vector-vta` | Per-mille share of ordinary vector instructions with mask/tail agnostic policy enabled |
+| `vector-partial-vl` | Per-mille share of ordinary vector instructions with `vl < VLMAX` |
+| `vector-nonzero-vstart` | Per-mille share of ordinary vector instructions with `vstart != 0` |
 | `vector-unit-stride`, `vector-strided`, `vector-indexed-unordered`, `vector-indexed-ordered` | Relative ordinary vector addressing-mode weights shared by loads and stores |
 | `vector-eew8` .. `vector-eew64`, `vector-sew8` .. `vector-sew64` | Relative ordinary vector index/memory EEW and data SEW weights |
 | `vector-lmul-mf8` .. `vector-lmul-m8`, `vector-emul-mf8` .. `vector-emul-m8` | Relative ordinary vector LMUL and derived EMUL weights. Only legal `EMUL = EEW - SEW + LMUL` shapes are generated |
@@ -86,7 +90,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 
 Invalid names, all-zero operation/locality, enabled atomic/hypervisor-family,
 atomic-width, or enabled vector-shape dimensions, unreachable vector shape
-classes, out-of-range per-mille values, inconsistent special-concurrency or
+classes, incompatible fixed vector shape/policy combinations, out-of-range
+per-mille values, inconsistent special-concurrency or
 manager-latency settings, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
@@ -251,7 +256,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=10`, the resolved target weights,
+Every terminal line prints `constraint_schema=11`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
 addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
@@ -262,6 +267,14 @@ stride-prefetch observations, and per-manager latency counts. Each enabled
 class must be observed at least once. Every ordinary shape dimension conserves
 against `actual_vector_shape_ops`; uops must remain in the architectural 1..8
 range and any enabled multi-uop shape must produce a multi-uop instruction.
+The five ordinary-vector binary policies report false/true instruction counts.
+A target of zero permits only false, 1000 permits only true, and an intermediate
+target requires both; each pair also conserves against
+`actual_vector_shape_ops`. When both `vma` and masking are enabled, at least one
+load must contain an actual mask-off body element; when both `vta` and partial
+VL are enabled, at least one load must contain an actual tail element. These
+semantic observations are reported as `actual_vector_agnostic=mask,tail`, so a
+control bit without a relevant inactive element cannot close coverage.
 Probe counts must also conserve sequences and their toB cleanup requests. Every
 load lane must observe both canceled and uncanceled wakeups without constraining
 the legal replay count, and every seed must emit at least one `prefetch.i`
@@ -279,7 +292,7 @@ backend wakeup by design. When `stride-stream` is enabled, the architectural
 load replay gate therefore uses a counter snapshot taken immediately before
 the prefetcher is enabled. The terminal summary reports that gate window as
 `load_wakeups/load_cancels` and the full simulation as
-`raw_load_wakeups/raw_load_cancels`; schema 10 requires each raw count to be at
+`raw_load_wakeups/raw_load_cancels`; schema 11 requires each raw count to be at
 least its corresponding snapshot count. L2 source-12 observation is checked
 separately, so this separation neither hides prefetch activity nor mistakes it
 for a failed backend load.
