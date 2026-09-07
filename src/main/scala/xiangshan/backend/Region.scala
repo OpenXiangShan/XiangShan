@@ -228,6 +228,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }
       iq.io.wakeupFromF2I.foreach(_ := io.wakeupFromF2I.get)
+      iq.io.busyTableF2I.foreach(_ := io.cross.busyTableF2I.get)
+      iq.io.busyTableI2F.foreach(x => io.cross.busyTableI2F.get := x)
       println(s"[Region_int] wakeupFromWB.size = ${wakeupFromWB.size}")
       println(s"[Region_int] iq.io.wakeupFromWB.size = ${iq.io.wakeupFromWB.size}")
       println(s"[Region_int] ${iq.param.getIQName}: iq.param.needWakeupFromIntWBPort = ${iq.param.needWakeupFromIntWBPort.map(x => (x._1, x._2.map(_.name)))}")
@@ -355,6 +357,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     println(s"[Region] iqReplaceRCIdxVec: ${iqReplaceRCIdxVec.size}")
   }
   dataPath.io.hartId := io.hartId
+  dataPath.io.og0CancelForStdFromFltRegion := io.og0CancelForStdFromFltRegion.get
   dataPath.io.flush := flushCopyRegVec.last
   dataPath.io.fromIntIQ.flatten.map(x => {
     x.valid := false.B
@@ -445,6 +448,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     io.cross.I2FWakeupOut.get := exuBlock.io.cross.I2FWakeupOut.get
     io.cross.I2FDataOut.get   := exuBlock.io.cross.I2FDataOut.get
     exuBlock.io.cross.F2IDataIn.get := io.cross.F2IDataIn.get
+    exuBlock.io.cross.busyTableF2I.get := io.cross.busyTableF2I.get
     exuBlock.io.csrio.get <> io.csrio.get
     exuBlock.io.csrin.get := io.csrin.get
     println(s"[Region_int] wbDataPath.io.fromIntExu.size = ${wbDataPath.io.fromIntExu.size}")
@@ -568,7 +572,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       iq.io.wbBusyTableRead := wbFuBusyTable.io.out.fpRespRead(i)
     }
     io.cross.F2IWakeupOut.get := exuBlock.io.cross.F2IWakeupOut.get
-    io.cross.F2IDataOut.get   := exuBlock.io.cross.F2IDataOut.get
     exuBlock.io.cross.I2FDataIn.get := io.cross.I2FDataIn.get
     wbDataPath.io.fromFpExu.flatten.zip(exuBlock.io.out.flatten).map{ case (sink, source) =>
       sink.valid := source.valid
@@ -1029,8 +1032,6 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val fromVfWb = Input(backendParams.genVfWriteBackBundle)
   val fromV0Wb = Input(backendParams.genV0WriteBackBundle)
   val fromVlWb = Input(backendParams.genVlWriteBackBundle)
-  val I2FWakeupIn = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
-  val F2IWakeupIn = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val og0Cancel = Output(ExuVec())
   val fenceio = Option.when(params.isIntSchd)(new FenceIO)
   val frm = Input(UInt(3.W))
@@ -1040,6 +1041,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val exuOut = params.genNewExuOutputValidBundle
   val fromIntExu = Option.when(!params.isIntSchd)(Flipped(intSchdParam.genNewExuOutputValidBundle))
   val fromFpExu = Option.when(!params.isFpSchd)(Flipped(fpSchdParam.genNewExuOutputValidBundle))
+  val og0CancelForStdFromFltRegion = Option.when(params.isIntSchd)(Input(Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())))
   val fromVecExu = Option.when(!params.isVecSchd)(Flipped(vecSchdParam.genNewExuOutputValidBundle))
   val intSchdBusyTable = MixedVec(intSchdParam.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))
   val fpSchdBusyTable = MixedVec(fpSchdParam.issueBlockParams.map(x => Input(x.genWbFuBusyTableWriteBundle)))

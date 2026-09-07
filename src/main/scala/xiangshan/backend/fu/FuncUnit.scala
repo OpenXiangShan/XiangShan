@@ -15,6 +15,7 @@ import xiangshan.ExceptionNO
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 import xiangshan.backend.fu.fpu.Bundles._
+import yunsuan.fpu.fmul.utils.FMULToFADDCtrlBundle
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -127,6 +128,23 @@ class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
 class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val ctrl = new FuncUnitCtrlOutput(cfg)
   val res = new FuncUnitDataOutput(cfg)
+  val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+  val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
+}
+
+class FuncUnitFaluInputFromFmul(implicit p: Parameters) extends XSBundle {
+  val FMULToFALUCtrl = new FMULToFADDCtrlBundle(64)
+  val fpAAppend = UInt(53.W)
+  val fpA = UInt(64.W)
+  val src2 = UInt(64.W)
+  val isSub = Bool()
+}
+
+class FuncUnitFmulOutputToFalu(implicit p: Parameters) extends XSBundle {
+  val falucfg = FuConfig.FaluCfg
+  val fuType = FuType()
+  val ctrl = new FuncUnitCtrlInput(falucfg)
+  val data = new FuncUnitDataInput(falucfg)
   val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
   val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
 }
