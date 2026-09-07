@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 14
+        result["constraint_schema"] = 15
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -386,7 +386,7 @@ class VerifyRegressionTest(unittest.TestCase):
         result["probes"] = 5
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
-            "constrained/CMO accounting",
+            "constrained/overlap/CMO accounting",
         ):
             verify_regression._check_mixed_coverage(result)
         result["probes"] = 6
@@ -410,9 +410,51 @@ class VerifyRegressionTest(unittest.TestCase):
             "actual_cmo_line_state",
         ):
             verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 14,
+                "target_cmo_dirty": 500,
+                "target_probe": 1,
+                "target_probe_to_b": 500,
+                "target_probe_need_data": 500,
+                "target_probe_overlap": 500,
+                "actual_probe_sequences": 2,
+                "actual_probe_caps": "1,1",
+                "actual_probe_need_data": "1,1",
+                "actual_probe_overlap": "1,1",
+                "probe_max_outstanding": 2,
+                "probes": 10,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 1
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "two outstanding sources",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 2
+        result["actual_probe_overlap"] = "2,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_probe_overlap",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_probe": 0,
+                "actual_probe_sequences": 0,
+                "actual_probe_caps": "0,0",
+                "actual_probe_need_data": "0,0",
+                "actual_probe_overlap": "0,0",
+                "probes": 6,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
         result["target_ops"] = "0,0,3,2,0,0,0,0,0,0"
         result["actual_ops"] = "0,0,3,2,0,0,0,0,0,0"
         result["constraint_schema"] = 11
+        result["probes"] = 0
 
         result["actual_vector_vta"] = "3,0"
         with self.assertRaisesRegex(

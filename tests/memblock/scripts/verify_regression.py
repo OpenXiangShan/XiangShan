@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -328,6 +328,32 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_need_data = _csv_counts(
             result, "actual_probe_need_data", 2
         )
+        target_probe_overlap = (
+            result.get("target_probe_overlap") if schema >= 14 else 0
+        )
+        actual_probe_overlap = (
+            _csv_counts(result, "actual_probe_overlap", 2)
+            if schema >= 14
+            else [0, 0]
+        )
+        probe_max_outstanding = (
+            result.get("probe_max_outstanding") if schema >= 14 else 0
+        )
+        if schema >= 14:
+            _require(
+                isinstance(target_probe_overlap, int)
+                and not isinstance(target_probe_overlap, bool)
+                and 0 <= target_probe_overlap <= 1000,
+                "target_probe_overlap is not a per-mille integer: "
+                f"{target_probe_overlap!r}",
+            )
+            _require(
+                isinstance(probe_max_outstanding, int)
+                and not isinstance(probe_max_outstanding, bool)
+                and probe_max_outstanding >= 0,
+                "probe_max_outstanding is invalid: "
+                f"{probe_max_outstanding!r}",
+            )
         cmo_probe_count = (
             _csv_counts(result, "actual_ops", 11)[10]
             if schema >= 13
@@ -354,7 +380,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             _require(
                 actual_sequences == 0
                 and actual_caps == [0, 0]
-                and actual_need_data == [0, 0],
+                and actual_need_data == [0, 0]
+                and (schema < 14 or actual_probe_overlap == [0, 0]),
                 "disabled constrained Probe has coverage observations",
             )
         if target_probe != 0 or schema >= 13:
@@ -363,11 +390,41 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and sum(actual_need_data) == actual_sequences,
                 "constrained Probe coverage is not conserved",
             )
+            if schema >= 14 and target_probe != 0:
+                _require(
+                    (
+                        target_probe_overlap == 0
+                        and actual_probe_overlap[0] > 0
+                        and actual_probe_overlap[1] == 0
+                    )
+                    or (
+                        target_probe_overlap == 1000
+                        and actual_probe_overlap[0] == 0
+                        and actual_probe_overlap[1] > 0
+                    )
+                    or (
+                        0 < target_probe_overlap < 1000
+                        and actual_probe_overlap[0] > 0
+                        and actual_probe_overlap[1] > 0
+                    ),
+                    "actual_probe_overlap has an enabled but uncovered class: "
+                    f"{actual_probe_overlap}",
+                )
+                _require(
+                    sum(actual_probe_overlap) == actual_sequences,
+                    "Probe overlap coverage is not conserved",
+                )
+                if actual_probe_overlap[1] > 0:
+                    _require(
+                        probe_max_outstanding >= 2,
+                        "Probe overlap never reached two outstanding sources",
+                    )
             probes = result.get("probes")
             _require(
                 isinstance(probes, int) and not isinstance(probes, bool)
-                and probes == actual_sequences + actual_caps[1] + cmo_probe_count,
-                "manager Probe count does not match constrained/CMO accounting",
+                and probes == actual_sequences + actual_caps[1]
+                + cmo_probe_count + actual_probe_overlap[1],
+                "manager Probe count does not match constrained/overlap/CMO accounting",
             )
 
     if schema >= 4:

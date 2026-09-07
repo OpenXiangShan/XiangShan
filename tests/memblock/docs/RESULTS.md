@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `73696ea118b4ba4c86bcbffa8dcb8caa1322d4b896e001d2dc842d74991d5ab2`
+- Current rebuilt and frozen UT executable SHA-256: `648db97b007d0855d733cd899e7019da8f88698dab3b11cbdaa832a1df9cc862`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `2aca745bf4603a22c24e02e2c0c7337f5416d1739b8798d081ddb7b9a855f8a6`
+- Frozen runtime manifest SHA-256: `d8580e9747c905675ef2e5ffddbf19ff6f91d9fdb27576fe9e717191fa1ba526`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1854,6 +1854,42 @@ the independent verifier accepted
 The frozen executable SHA-256 was
 `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`.
 No CPU RTL defect was observed.
+
+## Schema 14 Random Probe/Refill Overlap Closure
+
+On 2026-09-07 the common `random-mixed` interface added `probe-overlap`. An
+overlap sequence warms a dedicated clean line, starts an unrelated cold scalar
+load whose DCache response is held for 2048..4096 cycles, then queues the clean
+auxiliary Probe and the existing dirty primary Probe without an intervening
+cycle. The manager assigns distinct B-source IDs; the oracle requires both
+address-matched C responses, byte-exact primary dirty data, no delayed-load
+writeback before those responses, and an accepted-but-unanswered Probe depth
+of at least two. The delayed refill and GrantAck are then fully drained.
+
+Seven 256-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Overlap false/true | Probes | Maximum Probe depth | Maximum DCache latency |
+| --- | ---: | ---: | --- | ---: | ---: | ---: |
+| `coverage` | 14001 | 28,107 | 1/1 | 10 | 2 | 2,864 |
+| `spec` | 14002 | 25,589 | 1/1 | 7 | 2 | 2,626 |
+| `corner` | 14003 | 46,265 | 1/2 | 13 | 2 | 3,413 |
+| `coverage`, overlap fixed to 0 | 14004 | 23,631 | 4/0 | 10 | 1 | 2,319 |
+| `coverage`, overlap fixed to 1000 | 14005 | 32,573 | 0/2 | 11 | 2 | 3,325 |
+| `coverage`, controller artifact | 14006 | 41,655 | 1/1 | 16 | 2 | 3,116 |
+| `coverage`, frozen runtime | 14007 | 38,478 | 1/1 | 13 | 2 | 2,930 |
+
+Schema 14 reports and conserves primary Probe sequences, toB cleanup Probes,
+CMO-derived Probes, and one auxiliary Probe per overlap. Zero and 1000 enforce
+strict disabled/enabled bins; intermediate rates require both. All 185 Python
+unit tests passed. The independent verifier accepted the frozen artifact with
+SHA-256
+`f3b3e3f2a31baf102d70736efab583d60252f105da93e16582cb4d6bdd46e675`;
+the frozen executable and runtime-manifest SHA-256 values are
+`648db97b007d0855d733cd899e7019da8f88698dab3b11cbdaa832a1df9cc862`
+and `d8580e9747c905675ef2e5ffddbf19ff6f91d9fdb27576fe9e717191fa1ba526`.
+No CPU RTL defect was observed; this closes a verification-environment
+concurrency gap.
 
 ## CMO Functional And Error Closure
 

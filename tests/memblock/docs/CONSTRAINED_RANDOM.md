@@ -88,6 +88,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
 | `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
 | `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
+| `probe-overlap` | Per-mille share of generated Probe sequences that hold an unrelated cold load refill open and queue a clean auxiliary Probe plus the primary dirty Probe on distinct B-source IDs |
 | `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
 | `stride-stream` | Per-mille chance that a scalar load joins a fixed-PC, 128-byte-stride cold stream; nonzero settings reserve eight closing loads so every seed can train the L1 stride prefetcher |
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
@@ -142,7 +143,7 @@ scenario implementations:
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
-| Cache Probe | `probe`, `probe-to-b`, and `probe-need-data` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe | Overlap Probes with unrelated misses/refills and support multiple outstanding Probe sources |
+| Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, and `probe-overlap` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. The overlap class holds an unrelated cold refill for 2048..4096 cycles, queues a clean auxiliary Probe and the dirty primary Probe without an intervening cycle, checks their distinct B sources/address-matched C responses, and requires at least two accepted-but-unanswered Probes before the delayed load can write back | Extend beyond two simultaneous Probe sources and compose Probe overlap with more operation classes and malformed manager traffic |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
 | Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
 
@@ -156,11 +157,11 @@ choice into the common interface and its coverage contract, not adding
 Operation columns are relative weights. Locality is `hot/warm/cold`; the
 remaining numeric direction columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
-| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
+| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe/overlap | Stride stream | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20/500 | 500 | compact |
+| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1/10 | 100 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100/750 | 750 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
@@ -183,11 +184,12 @@ Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
 need-data/no-need-data requests. Since the candidate line is dirty, both
 need-data values require exact ProbeAckData; the bit tests the protocol rule,
-not whether the oracle checks returned bytes. SQ retirement only transfers a
-committed store into SBuffer, so the Probe sequence first allows half of the
-bounded manager-completion window for older SBuffer traffic to drain. This
-prevents a legal early NtoN response from being misclassified as a dirty-line
-failure under the long-tail latency profile.
+not whether the oracle checks returned bytes. Their overlap rates are `500`,
+`10`, and `750` per mille. Thus normal `spec` traffic retains a low-rate
+two-source concurrency floor while `corner` emphasizes it. SQ retirement only
+transfers a committed store into SBuffer, so the Probe sequence first drains
+older SBuffer traffic. This prevents a legal early NtoN response from being
+misclassified as a dirty-line failure under the long-tail latency profile.
 Their stride-stream rates are `500`, `100`, and `750` per mille. The lower
 `spec` value keeps prefetch training present without turning ordinary load
 traffic into an artificial continuous stream; mandatory closing loads retain
@@ -267,14 +269,15 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=13`, the resolved target weights,
+Every terminal line prints `constraint_schema=14`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
 line-state/younger-overlap, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
 addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
 locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
 kind/scope, cold-walk/reuse,
-TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
+TLB-flush, hit/miss, Probe sequence/cap/need-data/overlap and maximum outstanding
+depth, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, L2
 stride-prefetch observations, and per-manager latency counts. Each enabled
 class must be observed at least once. Every ordinary shape dimension conserves
@@ -291,7 +294,10 @@ control bit without a relevant inactive element cannot close coverage.
 CMO operation, clean/dirty line-state, and no-overlap/younger-overlap counts each
 conserve exactly against the CMO operation count. A zero operation weight or a
 fixed binary target must also leave its disabled observed bin at zero.
-Probe counts must also conserve sequences and their toB cleanup requests. Every
+Probe subclass counts conserve against the generated sequence count. Manager
+Probe traffic additionally conserves primary sequences, toB cleanup requests,
+CMO-derived Probes, and overlap's auxiliary clean Probes. Any observed overlap
+requires a maximum accepted-but-unanswered Probe depth of at least two. Every
 load lane must observe both canceled and uncanceled wakeups without constraining
 the legal replay count, and every seed must emit at least one `prefetch.i`
 request toward the frontend. More than one

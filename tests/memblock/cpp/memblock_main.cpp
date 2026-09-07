@@ -163,6 +163,7 @@ struct RandomConstraints {
     unsigned probes_per_mille = 0;
     unsigned probe_to_b_per_mille = 0;
     unsigned probe_need_data_per_mille = 0;
+    unsigned probe_overlap_per_mille = 0;
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
     unsigned stride_stream_per_mille = 0;
@@ -217,6 +218,7 @@ struct RandomConstraints {
                 .probes_per_mille = 20,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
+                .probe_overlap_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .stride_stream_per_mille = 500,
@@ -273,6 +275,7 @@ struct RandomConstraints {
                 .probes_per_mille = 1,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
+                .probe_overlap_per_mille = 10,
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
                 .stride_stream_per_mille = 100,
@@ -329,6 +332,7 @@ struct RandomConstraints {
                 .probes_per_mille = 100,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
+                .probe_overlap_per_mille = 750,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .stride_stream_per_mille = 750,
@@ -632,6 +636,8 @@ struct RandomConstraints {
             probe_to_b_per_mille = parsed;
         } else if (key == "probe-need-data") {
             probe_need_data_per_mille = parsed;
+        } else if (key == "probe-overlap") {
+            probe_overlap_per_mille = parsed;
         } else if (key == "nc-store") {
             nc_stores_per_mille = parsed;
         } else if (key == "mmio-store") {
@@ -903,6 +909,7 @@ struct RandomConstraints {
             cmo_younger_overlap_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
+            probe_overlap_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
             mmio_stores_per_mille > 1000 ||
             stride_stream_per_mille > 1000) {
@@ -1298,7 +1305,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=13 constraints=" << name
+        stream << "constraint_schema=14 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1377,6 +1384,7 @@ struct RandomConstraints {
                << " target_probe_to_b=" << probe_to_b_per_mille
                << " target_probe_need_data="
                << probe_need_data_per_mille
+               << " target_probe_overlap=" << probe_overlap_per_mille
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
                << " target_stride_stream=" << stride_stream_per_mille
@@ -1659,6 +1667,7 @@ struct ConstraintCoverage {
     std::uint64_t probe_sequences = 0;
     std::array<std::uint64_t, 2> probe_caps{};
     std::array<std::uint64_t, 2> probe_need_data{};
+    std::array<std::uint64_t, 2> probe_overlaps{};
     std::uint64_t actions = 0;
 
     void sample_operation(unsigned operation)
@@ -1948,7 +1957,9 @@ struct ConstraintCoverage {
              !direction_complete(
                  constraints.probe_to_b_per_mille, probe_caps) ||
              !direction_complete(
-                 constraints.probe_need_data_per_mille, probe_need_data))) {
+                 constraints.probe_need_data_per_mille, probe_need_data) ||
+             !binary_complete(
+                 constraints.probe_overlap_per_mille, probe_overlaps))) {
             return false;
         }
         if (backpressure) {
@@ -2099,6 +2110,8 @@ struct ConstraintCoverage {
                << probe_caps[1]
                << " actual_probe_need_data=" << probe_need_data[0] << ','
                << probe_need_data[1]
+               << " actual_probe_overlap=" << probe_overlaps[0] << ','
+               << probe_overlaps[1]
                << latency_summary("dcache_latency", dcache_latency)
                << latency_summary("ptw_latency", ptw_latency)
                << latency_summary("uncache_latency", uncache_latency);
@@ -28793,6 +28806,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t constrained_cold_line = 0;
     std::array<std::uint64_t, 3> cmo_locality_lines{};
     std::uint64_t cmo_overlap_line = 0;
+    std::uint64_t probe_overlap_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -28809,6 +28823,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t nested_both_napot_base = cache0_base + 0xe0000;
     constexpr std::uint64_t cmo_base = cache0_base + 0x200000;
     constexpr std::uint64_t cmo_span = 0x1000000;
+    constexpr std::uint64_t probe_overlap_base = cmo_base + cmo_span;
+    constexpr std::uint64_t probe_overlap_span = 0x4000000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -29438,6 +29454,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         for (std::uint64_t block = cmo_base;
              block < cmo_base + cmo_span; block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
+        for (std::uint64_t block = probe_overlap_base;
+             block < probe_overlap_base + probe_overlap_span;
+             block += 0x200000) {
             for (unsigned mode = 0; mode < 2; ++mode) {
                 if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
                     !map_stage_2m(mode, random_vs_roots[mode], block) ||
@@ -31687,9 +31714,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                  constraint_coverage.probe_need_data[0] == 0) ||
                 (constraints.probe_need_data_per_mille != 0 &&
                  constraint_coverage.probe_need_data[1] == 0);
+            const bool missing_overlap =
+                (constraints.probe_overlap_per_mille != 1000 &&
+                 constraint_coverage.probe_overlaps[0] == 0) ||
+                (constraints.probe_overlap_per_mille != 0 &&
+                 constraint_coverage.probe_overlaps[1] == 0);
             return constraints.probes_per_mille != 0 &&
                 (constraint_coverage.probe_sequences == 0 ||
-                 missing_cap || missing_data);
+                 missing_cap || missing_data || missing_overlap);
         };
         const auto issue_random_cmo = [&] (
             unsigned operation, bool dirty, bool younger_overlap) {
@@ -32589,40 +32621,122 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     need_data = random() % 1000 <
                         constraints.probe_need_data_per_mille;
                 }
+                const bool probe_overlap = choose_binary_class(
+                    constraints.probe_overlap_per_mille,
+                    constraint_coverage.probe_overlaps);
 
                 std::ostringstream probe_phase;
                 probe_phase << "random-probe:address=0x" << std::hex
                             << *probe_candidate << std::dec
                             << ":cap=" << (to_b ? "toB" : "toN")
-                            << ":need_data=" << need_data;
+                            << ":need_data=" << need_data
+                            << ":overlap=" << probe_overlap;
                 phase = probe_phase.str();
 
                 const auto expected_line = environment.memory().read_beat(
                     *probe_candidate, 64);
                 const std::uint64_t responses_before =
                     environment.dcache_probe_responses();
+                const unsigned probe_completion_timeout =
+                    std::max(constrained_completion_timeout, 8192U);
                 // SQ retirement only moves the committed write into SBuffer.
-                // Allow the bounded manager backlog to drain before requiring
-                // the line to respond as dirty rather than accepting NtoN.
-                if (!environment.run_cycles(constrained_completion_timeout / 2) ||
-                    !environment.request_dcache_probe(
+                // Drain it before requiring a dirty Probe response.
+                if (!environment.run_until_sbuffer_empty(
+                        probe_completion_timeout)) {
+                    return false;
+                }
+
+                std::optional<memblock::LoadTransaction> overlap_load;
+                std::uint64_t overlap_writebacks_before = 0;
+                if (probe_overlap) {
+                    phase = probe_phase.str() + ":prepare-overlap";
+                    constexpr std::uint64_t block_bytes = 0x200000;
+                    constexpr std::uint64_t half_block_bytes = 0x100000;
+                    constexpr std::uint64_t lines_per_half =
+                        half_block_bytes / 64;
+                    constexpr std::uint64_t overlap_blocks =
+                        probe_overlap_span / block_bytes;
+                    const std::uint64_t sequence = probe_overlap_line++;
+                    const std::uint64_t block =
+                        (sequence / lines_per_half) % overlap_blocks;
+                    const std::uint64_t line_index = sequence % lines_per_half;
+                    const std::uint64_t clean_line = probe_overlap_base +
+                        block * block_bytes + line_index * 64;
+                    const std::uint64_t miss_line = clean_line + half_block_bytes;
+                    const auto clean_load = make_load(
+                        clean_line + 8 * (random() % 8),
+                        memblock::LoadOp::ld,
+                        random() % memblock::kScalarLoadLanes);
+                    environment.expect_load(clean_load);
+                    if (!environment.set_rob_head(
+                            clean_load.rob, clean_load.rob_flag) ||
+                        !environment.enqueue_load(clean_load) ||
+                        !environment.issue_load(clean_load, 4096) ||
+                        !environment.run_until_complete(
+                            probe_completion_timeout) ||
+                        !environment.run_until_lq_retired(8192)) {
+                        return false;
+                    }
+
+                    overlap_load = make_load(
+                        miss_line + 8 * (random() % 8),
+                        memblock::LoadOp::ld,
+                        random() % memblock::kScalarLoadLanes);
+                    environment.expect_load(*overlap_load);
+                    const std::uint64_t requests_before_overlap =
+                        environment.tilelink_requests();
+                    overlap_writebacks_before = environment.writebacks();
+                    environment.force_next_dcache_response_delay(
+                        2048U + static_cast<unsigned>(random() % 2049U));
+                    if (!environment.set_rob_head(
+                            overlap_load->rob, overlap_load->rob_flag) ||
+                        !environment.enqueue_load(*overlap_load) ||
+                        !environment.issue_load(*overlap_load, 4096) ||
+                        !environment.run_until_dcache_requests(
+                            requests_before_overlap + 1, 8192) ||
+                        environment.writebacks() != overlap_writebacks_before ||
+                        !environment.request_dcache_probe(
+                            clean_line, 2, false, 2)) {
+                        return false;
+                    }
+                }
+
+                phase = probe_phase.str() + ":probe";
+                const std::uint64_t probe_depth_before =
+                    environment.dcache_max_probe_outstanding();
+                if (!environment.request_dcache_probe(
                         *probe_candidate, to_b ? 1U : 2U, need_data,
                         to_b ? 0U : 1U, expected_line) ||
                     !environment.run_until_probe_responses(
-                        responses_before + 1, constrained_completion_timeout)) {
+                        responses_before + (probe_overlap ? 2U : 1U),
+                        probe_completion_timeout) ||
+                    (probe_overlap &&
+                     (environment.writebacks() != overlap_writebacks_before ||
+                      environment.dcache_max_probe_outstanding() <
+                          std::max<std::uint64_t>(2, probe_depth_before)))) {
                     return false;
                 }
                 if (to_b &&
                     (!environment.request_dcache_probe(
                          *probe_candidate, 2, false, 2) ||
                      !environment.run_until_probe_responses(
-                         responses_before + 2,
-                         constrained_completion_timeout))) {
+                         responses_before + (probe_overlap ? 3U : 2U),
+                         probe_completion_timeout))) {
+                    return false;
+                }
+                if (overlap_load &&
+                    (!environment.run_until_complete(
+                         probe_completion_timeout) ||
+                     !environment.run_until_lq_retired(8192) ||
+                     !environment.run_cycles(256) ||
+                     !environment.dcache_responses_idle() ||
+                     !environment.dcache_grants_drained())) {
                     return false;
                 }
                 ++constraint_coverage.probe_sequences;
                 ++constraint_coverage.probe_caps[to_b ? 1 : 0];
                 ++constraint_coverage.probe_need_data[need_data ? 1 : 0];
+                ++constraint_coverage.probe_overlaps[probe_overlap ? 1 : 0];
                 phase = "seeded-mixed-tail";
             }
         }
@@ -32698,6 +32812,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.dcache_response_latency_stats(),
                 environment.ptw_response_latency_stats(),
                 environment.uncache_response_latency_stats()) ||
+            (constraints.probes_per_mille != 0 &&
+             constraints.probe_overlap_per_mille != 0 &&
+             environment.dcache_max_probe_outstanding() < 2) ||
             (constraints.stride_stream_per_mille != 0 &&
              environment.hardware_prefetch_stats().l2_source_counts[12] == 0) ||
             total_ifetch_prefetches() == 0 ||
@@ -32735,6 +32852,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " ptw=" << environment.ptw_requests()
                   << " uncache=" << environment.uncache_requests()
                   << " release_data=" << environment.tilelink_release_data()
+                  << " probe_max_outstanding="
+                  << environment.dcache_max_probe_outstanding()
                   << " ifetch_prefetches=" << total_ifetch_prefetches()
                   << " l2_stride_prefetches="
                   << environment.hardware_prefetch_stats().l2_source_counts[12]
@@ -32773,6 +32892,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " probes=" << environment.dcache_probes()
               << " grant_acks=" << environment.dcache_grant_acks()
               << " release_data=" << environment.tilelink_release_data()
+              << " probe_max_outstanding="
+              << environment.dcache_max_probe_outstanding()
               << " ifetch_prefetches=" << total_ifetch_prefetches()
               << " l2_stride_prefetches="
               << environment.hardware_prefetch_stats().l2_source_counts[12]

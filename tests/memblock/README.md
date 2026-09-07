@@ -953,8 +953,8 @@ AMO/LRSC/AMOCAS family and W/D width, CMO CLEAN/FLUSH/INVAL operation,
 clean/dirty line state and younger-load overlap, NC/MMIO load/store direction,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
-kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
-Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
+kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
+and Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
 training pressure on the L1 stride prefetcher. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
 load/store address mode independently, all legal ordinary vector
@@ -970,8 +970,11 @@ coverage plus final LSQ-accounting gates. The deterministic coherence scenario
 covers its directed coherence state sequence. The random tail can follow a
 completed dirty scalar store with a byte-exact manager Probe, independently
 crosses toB/toN and requested/mandatory data, and cleans up retained toB lines.
-Concurrent Probe/refill overlap and multiple outstanding Probe sources remain
-follow-on cross-coverage items.
+The `probe-overlap` class holds an unrelated refill open while clean auxiliary
+and dirty primary Probes with distinct B-source IDs are queued together. Both
+address-matched C responses must complete at a measured outstanding depth of
+at least two before the delayed load writes back. More than two simultaneous
+Probe sources and wider operation-class overlap remain follow-on coverage.
 
 For example, these commands run the same generator in two directions:
 
@@ -1037,6 +1040,13 @@ NAPOT topology uses a distinct aligned work region, is checked by the
 independent page-table walker before traffic starts, and has an observed
 per-seed coverage gate. Zero and 1000 fix a stage to ordinary or NAPOT leaves;
 intermediate values require both enabled classes.
+
+Schema 13 adds CMO CLEAN/FLUSH/INVAL, clean/dirty line state, and optional
+younger delayed-refill cancellation to the common operation constraints.
+Schema 14 adds `probe-overlap`: zero and 1000 strictly disable or require the
+class, while intermediate values require both classes. The terminal record and
+offline verifier conserve the auxiliary Probe and require maximum Probe depth
+two whenever overlap is observed.
 
 For a reproducible local pressure run:
 
