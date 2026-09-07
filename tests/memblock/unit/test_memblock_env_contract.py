@@ -1059,6 +1059,30 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_dcache_errors_cross_per_beat_corruption_and_mshr_isolation(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "enum class DcacheCorruptBeat",
+            "inject_response_error_at",
+            "selected_corrupt_beat",
+            "DCache TileLink A source reused before D completion",
+            "dcache_max_outstanding_requests",
+            "dcache_responses_idle",
+            "force_next_dcache_interbeat_delay(256)",
+            "phase=multibeat-overlap-window",
+            "multibeat_cases != 6",
+            "multibeat_denied_cases != 2",
+            "multibeat_corrupt_first_cases != 2",
+            "multibeat_corrupt_last_cases != 2",
+            "multibeat_keyword_cases != 3",
+            "multibeat_nonkeyword_cases != 3",
+            "multibeat_concurrent_mshr_cases != 6",
+            "multibeat_poisoned_hit_cases != 6",
+            "multibeat_healthy_hit_cases != 6",
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_hardware_prefetch_has_positive_sms_pht_causality(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

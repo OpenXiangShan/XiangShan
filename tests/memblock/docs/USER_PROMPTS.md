@@ -200,3 +200,5 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 48. [`2026-09-07 09:51:00 CST`] `请你把前面针对vector segment redirect的讨论，也补充进prompt和CPU_BUG_VECTOR_SEGMENT_REDIRECT_IGNORED.md里面，后者需要更完整解释一下这个BUG为什么会传播出去`
 
 49. [`2026-09-07 10:01:19 CST`] `我问了一下设计，他说segment指令执行的时候需要档前阻后，理论上不会有 redirect 需要刷它，请你看看香山前面的设计，是这样吗？`
+
+50. [`2026-09-07 17:04:36 CST`] `这个UT的工作（上一个周日8月30号，从开始到现在）一共烧了多少token呀`

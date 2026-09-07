@@ -1622,6 +1622,12 @@ enum class PtwCorruptBeat {
     last,
 };
 
+enum class DcacheCorruptBeat {
+    all,
+    first,
+    last,
+};
+
 struct ResponseLatencyProfiles {
     ResponseLatencyProfile dcache = ResponseLatencyProfile::compact;
     ResponseLatencyProfile ptw = ResponseLatencyProfile::compact;
@@ -1700,10 +1706,18 @@ public:
         force_e_stall_ = enabled;
     }
 
-    void inject_next_response_error(bool denied, bool corrupt)
+    void inject_next_response_error(
+        bool denied, bool corrupt,
+        DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all)
     {
-        inject_denied_ = denied;
-        inject_corrupt_ = corrupt;
+        configure_response_error(std::nullopt, denied, corrupt, corrupt_beat);
+    }
+
+    void inject_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all)
+    {
+        configure_response_error(address, denied, corrupt, corrupt_beat);
     }
 
     void force_next_response_delay(unsigned cycles)
@@ -1735,10 +1749,11 @@ public:
         d_presenting_ = false;
         forced_next_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
-        inject_denied_ = false;
-        inject_corrupt_ = false;
+        pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
         force_e_stall_ = random_backpressure_;
+        outstanding_requests_ = 0;
+        active_request_sources_.fill(false);
         probe_canceled_count_ += probe_request_count_ -
             probe_response_count_ - probe_canceled_count_;
         next_probe_source_ = 0;
@@ -1904,14 +1919,39 @@ public:
                     probe_canceled_count_);
         }
         if (d_fire_) {
+            const DBeat &response = d_beats_.front();
             if (d_beats_.front().opcode == 5) {
                 ++grant_data_beat_count_;
+            }
+            denied_d_beat_count_ += response.denied;
+            corrupt_d_beat_count_ += response.corrupt;
+            const bool completes_a = response.opcode == 1 ||
+                response.opcode == 4 ||
+                (response.opcode == 5 && response.last_beat);
+            if (completes_a) {
+                if (response.source >= active_request_sources_.size() ||
+                    !active_request_sources_[response.source] ||
+                    outstanding_requests_ == 0) {
+                    error_ = "DCache TileLink D completed an inactive A source";
+                } else {
+                    active_request_sources_[response.source] = false;
+                    --outstanding_requests_;
+                }
             }
             d_beats_.pop_front();
             d_presenting_ = false;
             d_gap_ = d_beats_.empty() ? 0 : d_beats_.front().delay_before;
         }
         if (a_fire_ && captured_a_) {
+            if (captured_a_->source >= active_request_sources_.size() ||
+                active_request_sources_[captured_a_->source]) {
+                error_ = "DCache TileLink A source reused before D completion";
+            } else {
+                active_request_sources_[captured_a_->source] = true;
+                ++outstanding_requests_;
+                max_outstanding_requests_ = std::max(
+                    max_outstanding_requests_, outstanding_requests_);
+            }
             last_request_address_ = captured_a_->address;
             respond(*captured_a_);
             ++request_count_;
@@ -1977,6 +2017,30 @@ public:
     {
         return grant_data_beat_count_;
     }
+    std::uint64_t denied_d_beat_count() const
+    {
+        return denied_d_beat_count_;
+    }
+    std::uint64_t corrupt_d_beat_count() const
+    {
+        return corrupt_d_beat_count_;
+    }
+    std::uint64_t error_response_request_count() const
+    {
+        return error_response_request_count_;
+    }
+    std::uint64_t last_error_response_address() const
+    {
+        return last_error_response_address_;
+    }
+    bool last_error_response_keyword() const
+    {
+        return last_error_response_keyword_;
+    }
+    std::uint64_t max_outstanding_requests() const
+    {
+        return max_outstanding_requests_;
+    }
     std::uint64_t grant_ack_stall_cycles() const
     {
         return grant_ack_stall_cycles_;
@@ -2022,6 +2086,10 @@ public:
         return b_beats_.empty() && probe_responses_.empty();
     }
     bool grant_acks_idle() const { return expected_grant_acks_.empty(); }
+    bool responses_idle() const
+    {
+        return d_beats_.empty() && outstanding_requests_ == 0;
+    }
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes)
     {
@@ -2084,7 +2152,15 @@ private:
         std::vector<unsigned char> data;
         bool denied = false;
         bool corrupt = false;
+        bool last_beat = true;
         unsigned delay_before = 0;
+    };
+
+    struct PendingResponseError {
+        std::optional<std::uint64_t> address;
+        bool denied;
+        bool corrupt;
+        DcacheCorruptBeat corrupt_beat;
     };
 
     struct BBeat {
@@ -2128,12 +2204,25 @@ private:
 
     void respond(const ARequest &request)
     {
-        const bool denied = inject_denied_;
-        const bool corrupt = inject_corrupt_;
-        inject_denied_ = false;
-        inject_corrupt_ = false;
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
+        bool denied = false;
+        bool corrupt = false;
+        DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all;
+        if (pending_response_error_) {
+            const bool address_matches = !pending_response_error_->address ||
+                ((*pending_response_error_->address & ~(transfer_bytes - 1)) ==
+                 base);
+            if (address_matches) {
+                denied = pending_response_error_->denied;
+                corrupt = pending_response_error_->corrupt;
+                corrupt_beat = pending_response_error_->corrupt_beat;
+                pending_response_error_.reset();
+                ++error_response_request_count_;
+                last_error_response_address_ = request.address;
+                last_error_response_keyword_ = request.keyword;
+            }
+        }
         switch (request.opcode) {
         case 4: { // Get -> AccessAckData
             ++get_count_;
@@ -2159,10 +2248,16 @@ private:
                 transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
             for (std::size_t beat = 0; beat < beats; ++beat) {
                 const std::size_t memory_beat = request.keyword ? beat ^ 1U : beat;
+                const bool selected_corrupt_beat =
+                    corrupt_beat == DcacheCorruptBeat::all ||
+                    (corrupt_beat == DcacheCorruptBeat::first && beat == 0) ||
+                    (corrupt_beat == DcacheCorruptBeat::last &&
+                     beat + 1 == beats);
                 push_response(DBeat{
                     5, cap, request.size, request.source, sink, request.keyword,
                     memory_.read_beat(base + memory_beat * kBeatBytes, kBeatBytes),
-                    denied, corrupt || denied,
+                    denied, denied || (corrupt && selected_corrupt_beat),
+                    beat + 1 == beats,
                 }, beat == 0);
             }
             expected_grant_acks_.push_back(sink);
@@ -2192,6 +2287,23 @@ private:
             break;
         }
         }
+    }
+
+    void configure_response_error(
+        std::optional<std::uint64_t> address, bool denied, bool corrupt,
+        DcacheCorruptBeat corrupt_beat)
+    {
+        if (!denied && !corrupt) {
+            throw std::invalid_argument(
+                "DCache response error injection requires denied or corrupt");
+        }
+        if ((!corrupt || denied) &&
+            corrupt_beat != DcacheCorruptBeat::all) {
+            throw std::invalid_argument(
+                "DCache per-beat selection requires independent corrupt");
+        }
+        pending_response_error_ = PendingResponseError{
+            address, denied, corrupt, corrupt_beat};
     }
 
     void accept_probe_response(const CRequest &response)
@@ -2422,6 +2534,13 @@ private:
     std::uint64_t probe_stall_cycles_ = 0;
     std::uint64_t grant_ack_count_ = 0;
     std::uint64_t grant_data_beat_count_ = 0;
+    std::uint64_t denied_d_beat_count_ = 0;
+    std::uint64_t corrupt_d_beat_count_ = 0;
+    std::uint64_t error_response_request_count_ = 0;
+    std::uint64_t last_error_response_address_ = 0;
+    bool last_error_response_keyword_ = false;
+    std::uint64_t outstanding_requests_ = 0;
+    std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t grant_ack_stall_cycles_ = 0;
     std::uint8_t next_probe_source_ = 0;
     std::array<bool, 64> probe_sources_seen_{};
@@ -2434,8 +2553,8 @@ private:
     bool force_a_stall_ = false;
     bool force_e_stall_ = false;
     bool d_presenting_ = false;
-    bool inject_denied_ = false;
-    bool inject_corrupt_ = false;
+    std::array<bool, 64> active_request_sources_{};
+    std::optional<PendingResponseError> pending_response_error_;
     std::optional<unsigned> forced_next_response_delay_;
     std::optional<unsigned> forced_next_interbeat_delay_;
     std::uint64_t request_stall_cycles_ = 0;
@@ -4421,9 +4540,20 @@ public:
             seed ^ 0x3c6ef372fe94f82aULL, enabled, latency_profiles.uncache);
     }
 
-    void inject_next_dcache_response_error(bool denied, bool corrupt)
+    void inject_next_dcache_response_error(
+        bool denied, bool corrupt,
+        DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all)
     {
-        memory_agent_.inject_next_response_error(denied, corrupt);
+        memory_agent_.inject_next_response_error(
+            denied, corrupt, corrupt_beat);
+    }
+
+    void inject_dcache_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all)
+    {
+        memory_agent_.inject_response_error_at(
+            address, denied, corrupt, corrupt_beat);
     }
 
     void inject_ptw_response_error_after(
@@ -4955,6 +5085,30 @@ public:
     {
         return memory_agent_.grant_data_beat_count();
     }
+    std::uint64_t dcache_denied_d_beats() const
+    {
+        return memory_agent_.denied_d_beat_count();
+    }
+    std::uint64_t dcache_corrupt_d_beats() const
+    {
+        return memory_agent_.corrupt_d_beat_count();
+    }
+    std::uint64_t dcache_error_response_requests() const
+    {
+        return memory_agent_.error_response_request_count();
+    }
+    std::uint64_t dcache_last_error_response_address() const
+    {
+        return memory_agent_.last_error_response_address();
+    }
+    bool dcache_last_error_response_keyword() const
+    {
+        return memory_agent_.last_error_response_keyword();
+    }
+    std::uint64_t dcache_max_outstanding_requests() const
+    {
+        return memory_agent_.max_outstanding_requests();
+    }
     std::uint64_t dcache_grant_ack_stalls() const
     {
         return memory_agent_.grant_ack_stall_cycles();
@@ -4962,6 +5116,10 @@ public:
     bool dcache_grants_drained() const
     {
         return memory_agent_.grant_acks_idle();
+    }
+    bool dcache_responses_idle() const
+    {
+        return memory_agent_.responses_idle();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
     std::uint64_t ptw_error_response_requests() const

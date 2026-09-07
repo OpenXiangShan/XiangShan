@@ -7007,6 +7007,421 @@ int run_dcache_errors(int argc, char **argv)
         return 1;
     }
 
+    struct MultibeatErrorCase {
+        const char *name;
+        bool denied;
+        memblock::DcacheCorruptBeat corrupt_beat;
+    };
+    const std::array<MultibeatErrorCase, 3> multibeat_error_cases{{
+        {"denied", true, memblock::DcacheCorruptBeat::all},
+        {"corrupt-first", false, memblock::DcacheCorruptBeat::first},
+        {"corrupt-last", false, memblock::DcacheCorruptBeat::last},
+    }};
+    unsigned multibeat_cases = 0;
+    unsigned multibeat_denied_cases = 0;
+    unsigned multibeat_corrupt_first_cases = 0;
+    unsigned multibeat_corrupt_last_cases = 0;
+    unsigned multibeat_keyword_cases = 0;
+    unsigned multibeat_nonkeyword_cases = 0;
+    unsigned multibeat_concurrent_mshr_cases = 0;
+    unsigned multibeat_poisoned_hit_cases = 0;
+    unsigned multibeat_healthy_hit_cases = 0;
+    std::uint64_t multibeat_cycles = 0;
+    for (unsigned keyword_index = 0; keyword_index < 2; ++keyword_index) {
+        const bool keyword = keyword_index != 0;
+        for (unsigned error_index = 0;
+             error_index < multibeat_error_cases.size(); ++error_index) {
+            const auto &test_case = multibeat_error_cases[error_index];
+            memblock::Environment multibeat(argc, argv);
+            const std::uint64_t case_index =
+                keyword_index * multibeat_error_cases.size() + error_index;
+            const std::uint64_t poison_line = base + 0x1000 + case_index * 0x100;
+            const std::uint64_t healthy_line = poison_line + 0x40;
+            const std::uint64_t primary_address =
+                poison_line + (keyword ? 0x38 : 0x18);
+            const std::uint64_t merged_address =
+                poison_line + (keyword ? 0x18 : 0x38);
+            const std::uint64_t healthy_address = healthy_line + 0x18;
+            multibeat.memory().fill_incrementing(
+                poison_line, 64,
+                static_cast<std::uint8_t>(0x61 + case_index * 9));
+            multibeat.memory().fill_incrementing(
+                healthy_line, 64,
+                static_cast<std::uint8_t>(0xa3 + case_index * 7));
+            if (!multibeat.reset()) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-reset case=" << test_case.name
+                          << " keyword=" << keyword << " reason="
+                          << multibeat.error() << '\n';
+                return 1;
+            }
+
+            const std::uint32_t poison_exception = test_case.denied
+                ? memblock::kExceptionLoadAccessFault
+                : memblock::kExceptionHardwareError;
+            const bool primary_faults = test_case.denied ||
+                test_case.corrupt_beat == memblock::DcacheCorruptBeat::first;
+            const memblock::LoadTransaction primary{
+                .address = primary_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = 180,
+                .lane = 0,
+                .expected_exception_mask = primary_faults
+                    ? poison_exception : 0,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            multibeat.expect_load(primary);
+            multibeat.force_next_dcache_response_delay(32);
+            multibeat.force_next_dcache_interbeat_delay(256);
+            multibeat.inject_dcache_response_error_at(
+                poison_line, test_case.denied, !test_case.denied,
+                test_case.corrupt_beat);
+            if (!multibeat.set_rob_head(primary.rob, primary.rob_flag) ||
+                !multibeat.enqueue_load(primary) ||
+                !multibeat.issue_load(primary, 512) ||
+                !multibeat.run_until_complete(1024)) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-primary case=" << test_case.name
+                          << " keyword=" << keyword << " reason="
+                          << multibeat.error() << '\n';
+                return 1;
+            }
+            const std::uint64_t expected_first_denied_beats =
+                test_case.denied ? 1 : 0;
+            const std::uint64_t expected_first_corrupt_beats =
+                test_case.denied ||
+                    test_case.corrupt_beat ==
+                        memblock::DcacheCorruptBeat::first
+                ? 1 : 0;
+            if (multibeat.tilelink_requests() != 1 ||
+                multibeat.dcache_refills() != 1 ||
+                multibeat.dcache_grant_data_beats() != 1 ||
+                multibeat.dcache_denied_d_beats() !=
+                    expected_first_denied_beats ||
+                multibeat.dcache_corrupt_d_beats() !=
+                    expected_first_corrupt_beats ||
+                multibeat.dcache_error_response_requests() != 1 ||
+                (multibeat.dcache_last_error_response_address() &
+                 ~std::uint64_t{63}) != poison_line ||
+                multibeat.dcache_last_error_response_keyword() != keyword ||
+                multibeat.dcache_responses_idle() ||
+                multibeat.writebacks() != 1) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-first-beat case="
+                          << test_case.name << " keyword=" << keyword
+                          << " requests=" << multibeat.tilelink_requests()
+                          << " refills=" << multibeat.dcache_refills()
+                          << " grant_beats="
+                          << multibeat.dcache_grant_data_beats()
+                          << " denied_beats="
+                          << multibeat.dcache_denied_d_beats()
+                          << " corrupt_beats="
+                          << multibeat.dcache_corrupt_d_beats()
+                          << " error_requests="
+                          << multibeat.dcache_error_response_requests()
+                          << " error_address=0x" << std::hex
+                          << multibeat.dcache_last_error_response_address()
+                          << std::dec << " error_keyword="
+                          << multibeat.dcache_last_error_response_keyword()
+                          << " responses_idle="
+                          << multibeat.dcache_responses_idle()
+                          << " writebacks=" << multibeat.writebacks() << '\n';
+                return 1;
+            }
+
+            const std::vector<memblock::LoadTransaction> overlap_loads{
+                {
+                    .address = merged_address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 1,
+                    .lq = 1,
+                    .pdest = 181,
+                    .lane = 1,
+                    .expected_exception_mask = poison_exception,
+                    .expected_debug_is_mmio = false,
+                    .expected_debug_is_ncio = false,
+                    .expected_debug_is_perf_cnt = false,
+                },
+                {
+                    .address = healthy_address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 2,
+                    .lq = 2,
+                    .pdest = 182,
+                    .lane = 2,
+                    .expected_debug_is_mmio = false,
+                    .expected_debug_is_ncio = false,
+                    .expected_debug_is_perf_cnt = false,
+                },
+            };
+            multibeat.expect_load(overlap_loads[0]);
+            multibeat.expect_load(overlap_loads[1]);
+            if (!multibeat.enqueue_load_batch(overlap_loads, {0, 1}) ||
+                !multibeat.issue_load(overlap_loads[1], 512)) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-healthy-issue case="
+                          << test_case.name << " keyword=" << keyword
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+            for (unsigned cycle = 0;
+                 cycle < 128 && multibeat.tilelink_requests() < 2; ++cycle) {
+                if (!multibeat.run_cycles(1) ||
+                    multibeat.dcache_grant_data_beats() != 1) {
+                    break;
+                }
+            }
+            if (!multibeat.ok() || multibeat.tilelink_requests() != 2 ||
+                multibeat.dcache_grant_data_beats() != 1 ||
+                multibeat.dcache_max_outstanding_requests() < 2) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-overlap-window case="
+                          << test_case.name << " keyword=" << keyword
+                          << " requests=" << multibeat.tilelink_requests()
+                          << " grant_beats="
+                          << multibeat.dcache_grant_data_beats()
+                          << " max_outstanding="
+                          << multibeat.dcache_max_outstanding_requests()
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+            if (!multibeat.issue_load(overlap_loads[0], 512) ||
+                multibeat.dcache_grant_data_beats() != 1) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-merge-issue case="
+                          << test_case.name << " keyword=" << keyword
+                          << " grant_beats="
+                          << multibeat.dcache_grant_data_beats()
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+            if (!multibeat.run_until_complete(4096)) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-overlap-complete case="
+                          << test_case.name << " keyword=" << keyword
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+            for (unsigned cycle = 0;
+                 cycle < 1024 &&
+                     (!multibeat.dcache_responses_idle() ||
+                      !multibeat.dcache_grants_drained()); ++cycle) {
+                if (!multibeat.run_cycles(1)) {
+                    break;
+                }
+            }
+            const std::uint64_t expected_denied_beats =
+                test_case.denied ? 2 : 0;
+            const std::uint64_t expected_corrupt_beats =
+                test_case.denied ? 2 : 1;
+            if (!multibeat.ok() || !multibeat.dcache_responses_idle() ||
+                !multibeat.dcache_grants_drained() ||
+                multibeat.tilelink_requests() != 2 ||
+                multibeat.dcache_refills() != 2 ||
+                multibeat.dcache_grant_data_beats() != 4 ||
+                multibeat.dcache_grant_acks() != 2 ||
+                multibeat.dcache_denied_d_beats() != expected_denied_beats ||
+                multibeat.dcache_corrupt_d_beats() !=
+                    expected_corrupt_beats ||
+                multibeat.dcache_response_delays() < 288 ||
+                multibeat.writebacks() != 3) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-overlap-drain case="
+                          << test_case.name << " keyword=" << keyword
+                          << " responses_idle="
+                          << multibeat.dcache_responses_idle()
+                          << " grant_acks="
+                          << multibeat.dcache_grant_acks()
+                          << " grant_beats="
+                          << multibeat.dcache_grant_data_beats()
+                          << " denied_beats="
+                          << multibeat.dcache_denied_d_beats()
+                          << " corrupt_beats="
+                          << multibeat.dcache_corrupt_d_beats()
+                          << " response_delays="
+                          << multibeat.dcache_response_delays()
+                          << " writebacks=" << multibeat.writebacks()
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+
+            if (!multibeat.redirect_after(
+                    primary.rob, primary.rob_flag, true) ||
+                !multibeat.run_cycles(64) ||
+                !multibeat.run_until_lq_retired(1024)) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-overlap-retire case="
+                          << test_case.name << " keyword=" << keyword
+                          << " lq=" << multibeat.lq_allocated() << '/'
+                          << multibeat.lq_dequeued() << '+'
+                          << multibeat.lq_canceled() << " reason="
+                          << multibeat.error() << '\n';
+                return 1;
+            }
+
+            const memblock::LoadTransaction healthy_hit{
+                .address = healthy_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 8,
+                .lq = 3,
+                .pdest = 183,
+                .lane = 0,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            const memblock::LoadTransaction poisoned_hit{
+                .address = primary_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 9,
+                .lq = 4,
+                .pdest = 184,
+                .lane = 1,
+                .expected_exception_mask = poison_exception,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            };
+            const std::uint64_t requests_before_hits =
+                multibeat.tilelink_requests();
+            multibeat.expect_load(healthy_hit);
+            if (!multibeat.set_rob_head(
+                    healthy_hit.rob, healthy_hit.rob_flag) ||
+                !multibeat.enqueue_load(healthy_hit) ||
+                !multibeat.issue_load(healthy_hit, 512) ||
+                !multibeat.run_until_complete(2048) ||
+                !multibeat.run_until_lq_retired(1024) ||
+                multibeat.tilelink_requests() != requests_before_hits) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-healthy-hit case="
+                          << test_case.name << " keyword=" << keyword
+                          << " requests=" << multibeat.tilelink_requests()
+                          << " expected_requests=" << requests_before_hits
+                          << " reason=" << multibeat.error() << '\n';
+                return 1;
+            }
+            multibeat.expect_load(poisoned_hit);
+            if (!multibeat.set_rob_head(
+                    poisoned_hit.rob, poisoned_hit.rob_flag) ||
+                !multibeat.enqueue_load(poisoned_hit) ||
+                !multibeat.issue_load(poisoned_hit, 512) ||
+                !multibeat.run_until_complete(2048) ||
+                multibeat.tilelink_requests() != requests_before_hits ||
+                !multibeat.redirect_after(
+                    poisoned_hit.rob, poisoned_hit.rob_flag, true) ||
+                !multibeat.run_cycles(96) ||
+                !multibeat.run_until_lq_retired(1024)) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-poisoned-hit case="
+                          << test_case.name << " keyword=" << keyword
+                          << " requests=" << multibeat.tilelink_requests()
+                          << " expected_requests=" << requests_before_hits
+                          << " lq=" << multibeat.lq_allocated() << '/'
+                          << multibeat.lq_dequeued() << '+'
+                          << multibeat.lq_canceled() << " reason="
+                          << multibeat.error() << '\n';
+                return 1;
+            }
+
+            std::uint64_t wakeups = 0;
+            std::uint64_t cancels = 0;
+            const auto &feedback =
+                multibeat.scalar_load_feedback_stats();
+            for (unsigned lane = 0;
+                 lane < memblock::kScalarLoadLanes; ++lane) {
+                wakeups += feedback.wakeups[lane];
+                cancels += feedback.ld2_cancels[lane];
+            }
+            const std::uint64_t expected_clean_loads = primary_faults ? 2 : 3;
+            // A current D-beat error is visible in stage 2 and cancels its
+            // speculative wakeup.  Errors learned only from installed line
+            // metadata arrive through LoadPipe's delayed stage-3 path: their
+            // terminal writeback suppresses rfWen, but ld2Cancel cannot cover
+            // that already-issued wakeup in the non-accurate-error build.
+            constexpr std::uint64_t late_error_wakeups = 2;
+            const std::uint64_t expected_uncanceled_wakeups =
+                expected_clean_loads + late_error_wakeups;
+            if (wakeups < cancels ||
+                wakeups - cancels != expected_uncanceled_wakeups ||
+                multibeat.writebacks() != 5 ||
+                multibeat.lq_allocated() != 5 ||
+                multibeat.lq_allocated() !=
+                    multibeat.lq_dequeued() + multibeat.lq_canceled()) {
+                std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                          << multibeat.cycle()
+                          << " phase=multibeat-conservation case="
+                          << test_case.name << " keyword=" << keyword
+                          << " wakeups=" << wakeups
+                          << " cancels=" << cancels
+                          << " lane_wakeups=" << feedback.wakeups[0] << ','
+                          << feedback.wakeups[1] << ','
+                          << feedback.wakeups[2]
+                          << " lane_cancels=" << feedback.ld2_cancels[0]
+                          << ',' << feedback.ld2_cancels[1] << ','
+                          << feedback.ld2_cancels[2]
+                          << " expected_clean_loads="
+                          << expected_clean_loads
+                          << " expected_uncanceled_wakeups="
+                          << expected_uncanceled_wakeups
+                          << " writebacks=" << multibeat.writebacks()
+                          << " lq=" << multibeat.lq_allocated() << '/'
+                          << multibeat.lq_dequeued() << '+'
+                          << multibeat.lq_canceled() << '\n';
+                return 1;
+            }
+
+            ++multibeat_cases;
+            multibeat_denied_cases += test_case.denied;
+            multibeat_corrupt_first_cases +=
+                test_case.corrupt_beat ==
+                memblock::DcacheCorruptBeat::first;
+            multibeat_corrupt_last_cases +=
+                test_case.corrupt_beat ==
+                memblock::DcacheCorruptBeat::last;
+            multibeat_keyword_cases += keyword;
+            multibeat_nonkeyword_cases += !keyword;
+            ++multibeat_concurrent_mshr_cases;
+            ++multibeat_poisoned_hit_cases;
+            ++multibeat_healthy_hit_cases;
+            multibeat_cycles += multibeat.cycle();
+        }
+    }
+    if (multibeat_cases != 6 || multibeat_denied_cases != 2 ||
+        multibeat_corrupt_first_cases != 2 ||
+        multibeat_corrupt_last_cases != 2 ||
+        multibeat_keyword_cases != 3 || multibeat_nonkeyword_cases != 3 ||
+        multibeat_concurrent_mshr_cases != 6 ||
+        multibeat_poisoned_hit_cases != 6 ||
+        multibeat_healthy_hit_cases != 6) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL phase=multibeat-cardinality"
+                  << " cases=" << multibeat_cases
+                  << " denied=" << multibeat_denied_cases
+                  << " corrupt_first=" << multibeat_corrupt_first_cases
+                  << " corrupt_last=" << multibeat_corrupt_last_cases
+                  << " keyword=" << multibeat_keyword_cases
+                  << " nonkeyword=" << multibeat_nonkeyword_cases
+                  << " concurrent_mshr="
+                  << multibeat_concurrent_mshr_cases
+                  << " poisoned_hits=" << multibeat_poisoned_hit_cases
+                  << " healthy_hits=" << multibeat_healthy_hit_cases << '\n';
+        return 1;
+    }
+
     memblock::Environment ecc_environment(argc, argv);
     constexpr std::uint64_t ecc_base =
         memblock::kDefaultMemoryBase + 0x2d000;
@@ -7608,6 +8023,21 @@ int run_dcache_errors(int argc, char **argv)
               << " denied_cancels=" << denied_feedback.second
               << " corrupt_wakeups=" << corrupt_wakeups
               << " corrupt_cancels=" << corrupt_cancels
+              << " multibeat_cases=" << multibeat_cases
+              << " multibeat_denied=" << multibeat_denied_cases
+              << " multibeat_corrupt_first="
+              << multibeat_corrupt_first_cases
+              << " multibeat_corrupt_last="
+              << multibeat_corrupt_last_cases
+              << " multibeat_keyword=" << multibeat_keyword_cases
+              << " multibeat_nonkeyword=" << multibeat_nonkeyword_cases
+              << " multibeat_concurrent_mshr="
+              << multibeat_concurrent_mshr_cases
+              << " multibeat_poisoned_hits="
+              << multibeat_poisoned_hit_cases
+              << " multibeat_healthy_hits="
+              << multibeat_healthy_hit_cases
+              << " multibeat_cycles=" << multibeat_cycles
               << " tag_ecc=" << tag_ecc_cases
               << " data_ecc=" << data_ecc_cases
               << " concurrent_ecc=" << concurrent_ecc_cases

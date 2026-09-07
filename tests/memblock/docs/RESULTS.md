@@ -20,12 +20,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39`
-- Current rebuilt and frozen UT executable SHA-256: `ad3cc4a5deb4a62582b94869933d966cc660219ce4e24b1638959ef96971eefe`
+- Current rebuilt and frozen UT executable SHA-256: `302e7c119a39c656d310f13ab4b8306d5b7b2160f1ca312e36db18a61c24fdde`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `975836439a7a64a397a6e0723930b2eae9b643a043394e3ca221bb146660c482`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `fb60b6019b8812ee459bb5d22afdbb8a35f3dc5929106b03e77d97fe6aad50f0`
-- Frozen runtime manifest SHA-256: `82d6e9063fd0d7d6590504efa063544f9f682a1e11805b330dcb3399323496f8`
+- Frozen runtime manifest SHA-256: `e6b8ffe8aa8b835c043438ce63ae7e73fdc121cd059aa027719c41c49dcb4deb`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1852,6 +1852,52 @@ the independent verifier accepted
 `f9c0d083ead4d7f517485c08759fc718ba5efd2bb8b64f86da199ad95314a130`.
 The frozen executable SHA-256 was
 `b0072aab194f2e4af0b31bdd25367bd6fead52b0d24cb638dd270857e47c9555`.
+No CPU RTL defect was observed.
+
+## DCache Per-Beat Error And MSHR Isolation Closure
+
+On 2026-09-07 the DCache manager stopped treating independent `corrupt` as a
+response-wide property. It can now select only the first or last GrantData
+beat, while denied remains fixed over the response and forces corrupt on every
+data beat. The agent tracks A-source lifetime through final D completion,
+rejects premature source reuse, records maximum outstanding depth, and exposes
+a true response-queue drain check distinct from the E-channel GrantAck queue.
+
+`dcache-errors` added six directed cases crossing both `isKeyword` values with
+denied, first-beat corrupt, and last-beat corrupt. Every case completes the
+primary critical-beat access while the second beat is delayed 256 cycles, then
+issues an unrelated cold load before that beat and requires outstanding A
+depth two. An opposite-half load merges into the original MSHR. Exact gates
+require two AcquireBlocks, four GrantData beats, two GrantAcks, one targeted
+error response, correct per-beat denied/corrupt counts, one clean resident hit,
+one poisoned resident hit, five terminal writebacks, and exact LQ conservation.
+Last-beat-only corrupt returns the primary word normally because that word's
+critical beat is clean; the merged opposite half and later resident access
+report HardwareError. The unrelated line remains byte-exact.
+
+The run also characterized the existing early-wakeup boundary. A cause visible
+from the current D beat is known in stage 2 and cancels the early wakeup. The
+two accesses that learn an installed line error through LoadPipe's delayed
+stage-3 metadata retain an uncanceled wakeup, but their terminal exception
+writebacks have `rfWen=0` and are followed by redirect. This is not classified
+as a CPU functional bug under the current `EnableAccurateLoadError=false`
+contract.
+
+The rebuilt and frozen runtime both produced:
+
+```text
+MEMBLOCK_DCACHE_ERRORS_PASS cycle=290 denied=1 corrupt=1 denied_wakeups=2 denied_cancels=2 corrupt_wakeups=2 corrupt_cancels=2 multibeat_cases=6 multibeat_denied=2 multibeat_corrupt_first=2 multibeat_corrupt_last=2 multibeat_keyword=3 multibeat_nonkeyword=3 multibeat_concurrent_mshr=6 multibeat_poisoned_hits=6 multibeat_healthy_hits=6 multibeat_cycles=3300 tag_ecc=2 data_ecc=17 concurrent_ecc=1 ecc_error_reports=19 ecc_wakeups=22 ecc_cancels=2 ecc_lq_allocated=61 ecc_lq_canceled=2 ecc_sq_allocated=56 ecc_cycles=6494 rtl_sha256=97b1339a74d458a48a1c58fad766a22cc9dac000cb297e303501311bf47d3b39
+```
+
+`make unit` passed all 184 tests; `make check-ports check-rtl`, `single-load`,
+`dcache-coherence`, and all 44 `atomic-dchannel-errors` cases also passed. The
+reset-recovery, dirty-release, and smoke controls passed as well. Random-load
+seed 37 completed 1,024 operations in 24,369 cycles with 230 refills, 794
+resident hits, and exact completion of every load. The
+frozen executable SHA-256 is
+`302e7c119a39c656d310f13ab4b8306d5b7b2160f1ca312e36db18a61c24fdde`;
+the runtime manifest SHA-256 is
+`e6b8ffe8aa8b835c043438ce63ae7e73fdc121cd059aa027719c41c49dcb4deb`.
 No CPU RTL defect was observed.
 
 ## Schema 12 Random Svnapot Closure

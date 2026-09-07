@@ -601,12 +601,30 @@ The same fixed-PC stream is available through the common `random-mixed`
 translation, miss/refill, Probe, and response-latency mix and requires an L2
 source-12 observation in every enabled seed.
 
-`dcache-errors` injects one denied and one corrupt DCache response and checks
-the corresponding scalar load access-fault and hardware-error writebacks with
-RF writes suppressed. Its backend feedback oracle independently requires
-nonzero cancellation for each error and no surviving normal wakeup. The same
-TileLink agent encodes every denied data response with `corrupt=1` and rejects
-corrupt injection on data-less `Grant`, matching the legal D-channel contract.
+`dcache-errors` first injects one response-wide denied and one response-wide
+corrupt DCache refill and checks the corresponding scalar load access-fault and
+hardware-error writebacks with RF writes suppressed. Its backend feedback
+oracle independently requires nonzero cancellation for each error and no
+surviving normal wakeup. The same TileLink agent encodes every denied data
+response with `corrupt=1` and rejects corrupt injection on data-less `Grant`,
+matching the legal D-channel contract. The agent also rejects reuse of an A
+source before its final D beat, measures maximum outstanding A requests, and
+distinguishes an empty D-response queue from completed GrantAck obligations.
+
+A separate six-case matrix crosses both critical-beat orders with denied on
+both beats, corrupt on only the first beat, and corrupt on only the last beat.
+The second beat is held for 256 cycles. During that gap, an opposite-half load
+merges into the same MSHR and an unrelated cold load must allocate a second
+outstanding MSHR. Every case requires exactly two AcquireBlocks, four
+GrantData beats, two GrantAcks, exact per-beat error polarity, a faulting
+resident hit on the poisoned line, and an exact zero-request hit on the healthy
+line. Last-beat-only corrupt deliberately permits the primary critical-beat
+load to finish with exact data before the unrelated half arrives corrupted.
+Loads that see the error directly in stage 2 cancel their early wakeup; loads
+that learn it later from installed line metadata instead rely on the terminal
+exception writeback (`rfWen=0`) and redirect in this
+`EnableAccurateLoadError=false` build.
+
 The all-wakeups-canceled rule is also checked by `scalar-guest-fault` for a
 G-stage fault
 whose VA, GPA, and VS-non-leaf classification are independently modeled. The
