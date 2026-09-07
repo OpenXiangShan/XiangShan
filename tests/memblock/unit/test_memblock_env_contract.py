@@ -612,6 +612,18 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("PTWRepeaterNB(passReady = false", memblock)
         self.assertIn("req_in.ready := !sent", repeater)
 
+    def test_ifetch_ptw_bridge_covers_all_sector_indices(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "sector_request_order",
+            "sector_valid_masks",
+            "response.s1_ppn_low[sibling]",
+            "response.s1_valididx == valid_mask",
+            "sector_ptw_before + 3",
+            "sector_indices=8 sector_ppn_low=8 sector_valid_masks=3",
+        ):
+            self.assertIn(contract, main)
+
     def test_scalar_load_feedback_is_observed_on_every_lane(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

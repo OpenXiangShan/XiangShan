@@ -18947,6 +18947,126 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         total_ptw_requests += environment.ptw_requests();
     }
 
+    constexpr std::uint64_t sector_virtual_base = 0x64018000ULL;
+    constexpr std::uint64_t sector_root = 0x95800000ULL;
+    constexpr std::array<std::uint8_t, 8> sector_ppn_low{
+        5, 0, 7, 2, 6, 1, 4, 3};
+    constexpr std::array<std::uint8_t, 8> sector_group{
+        0, 1, 2, 0, 2, 0, 1, 2};
+    constexpr std::array<std::uint8_t, 8> sector_request_order{
+        7, 0, 5, 2, 6, 1, 4, 3};
+    constexpr std::array<std::uint8_t, 3> sector_valid_masks{
+        0x29, 0x42, 0x94};
+    constexpr std::array<std::uint64_t, 3> sector_physical_groups{
+        0xc8000000ULL, 0xc8010000ULL, 0xc8020000ULL};
+    memblock::Environment sector_environment(argc, argv);
+    sector_environment.configure_backpressure(
+        0x243f6a8885a308d3ULL, true,
+        memblock::ResponseLatencyProfile::spec);
+    bool sector_configured = sector_environment.reset();
+    for (unsigned sector = 0;
+         sector_configured && sector < sector_ppn_low.size(); ++sector) {
+        const std::uint64_t virtual_page =
+            sector_virtual_base + sector * 0x1000ULL;
+        const std::uint64_t physical_page =
+            sector_physical_groups[sector_group[sector]] +
+            sector_ppn_low[sector] * 0x1000ULL;
+        sector_configured = sector_environment.map_sv39_4k(
+            virtual_page, physical_page, sector_root,
+            true, false, true, false);
+        const auto reference = memblock::reference_page_walk(
+            sector_environment.memory(), sector_root, virtual_page,
+            memblock::ReferencePageMode::sv39);
+        sector_configured = sector_configured && reference.translated &&
+            reference.physical_address == physical_page;
+    }
+    sector_configured = sector_configured &&
+        sector_environment.activate_sv39(sector_root, asid);
+    if (!sector_configured) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=Sv39-sector"
+                  << " cycle=" << sector_environment.cycle()
+                  << " phase=configuration reason="
+                  << sector_environment.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t sector_ptw_before =
+        sector_environment.ptw_requests();
+    std::uint64_t sector_ptw_after_cold = 0;
+    for (unsigned request_index = 0;
+         request_index < sector_request_order.size(); ++request_index) {
+        const unsigned sector = sector_request_order[request_index];
+        const std::uint64_t virtual_page =
+            sector_virtual_base + sector * 0x1000ULL;
+        const std::uint64_t physical_page =
+            sector_physical_groups[sector_group[sector]] +
+            sector_ppn_low[sector] * 0x1000ULL;
+        const std::uint64_t vpn = virtual_page >> 12;
+        memblock::Environment::IFetchPtwResponse response{};
+        if (!sector_environment.issue_ifetch_ptw_request(
+                vpn, memblock::PtwTranslationMode::no_stage_two, response,
+                response_stall_cycles)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=Sv39-sector"
+                      << " cycle=" << sector_environment.cycle()
+                      << " phase=request sector=" << sector
+                      << " reason=" << sector_environment.error() << '\n';
+            return 1;
+        }
+        if (request_index == 0) {
+            sector_ptw_after_cold = sector_environment.ptw_requests();
+        }
+
+        bool sibling_ppn_low_valid = true;
+        const std::uint8_t valid_mask =
+            sector_valid_masks[sector_group[sector]];
+        for (unsigned sibling = 0;
+             sibling < sector_ppn_low.size(); ++sibling) {
+            if ((valid_mask & (1U << sibling)) != 0 &&
+                response.s1_ppn_low[sibling] != sector_ppn_low[sibling]) {
+                sibling_ppn_low_valid = false;
+            }
+        }
+        const std::uint64_t reconstructed_ppn =
+            (response.s1_ppn << 3) | response.s1_ppn_low[sector];
+        const bool payload_valid =
+            response.s2xlate == static_cast<std::uint8_t>(
+                memblock::PtwTranslationMode::no_stage_two) &&
+            response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
+            !response.s1_n && response.s1_pbmt == 0 && !response.s1_d &&
+            response.s1_a && !response.s1_g && !response.s1_u &&
+            response.s1_x && !response.s1_w && response.s1_r &&
+            response.s1_level == 0 && response.s1_v &&
+            response.s1_addr_low == sector &&
+            response.s1_pteidx == (1U << sector) &&
+            response.s1_valididx == valid_mask &&
+            sibling_ppn_low_valid &&
+            reconstructed_ppn == (physical_page >> 12) &&
+            !response.s1_pf && !response.s1_af;
+        const bool ptw_count_valid = request_index == 0
+            ? sector_ptw_after_cold == sector_ptw_before + 3
+            : sector_environment.ptw_requests() == sector_ptw_after_cold;
+        if (!payload_valid || !ptw_count_valid) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=Sv39-sector"
+                      << " cycle=" << sector_environment.cycle()
+                      << " phase=response sector=" << sector
+                      << " s1_tag=0x" << std::hex << response.s1_tag
+                      << " ppn=0x" << reconstructed_ppn
+                      << " valididx=0x"
+                      << static_cast<unsigned>(response.s1_valididx)
+                      << " pteidx=0x"
+                      << static_cast<unsigned>(response.s1_pteidx)
+                      << std::dec << " addr_low="
+                      << static_cast<unsigned>(response.s1_addr_low)
+                      << " ptw=" << sector_ptw_before << '/'
+                      << sector_ptw_after_cold << '/'
+                      << sector_environment.ptw_requests()
+                      << " reason=" << sector_environment.error() << '\n';
+            return 1;
+        }
+    }
+    total_cycles += sector_environment.cycle();
+    total_ptw_requests += sector_environment.ptw_requests();
+
     struct DegenerateCase {
         const char *name;
         memblock::ReferencePageMode mode;
@@ -19954,9 +20074,10 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
 
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
               << " cases=" << cases.size() + degenerate_cases.size() +
-                    nested_fault_cases.size() + 10
+                    nested_fault_cases.size() + 18
               << " stage1_valid=6 nested_valid=8 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
+              << " sector_indices=8 sector_ppn_low=8 sector_valid_masks=3"
               << " s1_global_leaf=3 s1_global_nonleaf=3"
               << " s1_global_reported=" << s1_global_reported
               << " s1_global_demoted=" << s1_global_demoted
@@ -19975,7 +20096,7 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
               << concurrent.ptw_max_outstanding_requests()
               << " response_stall_cycles="
               << (cases.size() + degenerate_cases.size() +
-                  nested_fault_cases.size() + 11) *
+                  nested_fault_cases.size() + 19) *
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

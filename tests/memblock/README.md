@@ -645,8 +645,14 @@ reported/demoted split is recorded. G-stage `G` is allowed to appear as raw
 internal response metadata, but must not change translation, permissions, or
 fault results because the architecture requires hardware to ignore it. It
 reconstructs translated PPNs from the sector response, checks the active
-stage's ASID/VMID, permissions, PBMT, fault level, and faults, requires a cold PTW walk,
-and holds response ready low to verify stable payload under backpressure. A
+stage's ASID/VMID, permissions, PBMT, fault level, and faults, requires a cold
+PTW walk, and holds response ready low to verify stable payload under
+backpressure. An eight-page Sv39 matrix exercises every sector index in one
+leaf-PTE cacheline. Three deliberately interleaved PPN-high groups require
+exact `valididx` masks `0x29`, `0x42`, and `0x94`, all eight selected
+`ppn_low` fields, exact one-hot `pteidx`, and exact reconstructed PPNs. Its
+first cold request requires three external PTW reads; the other seven sector
+requests must add none. A
 separate overlap case delays the IFU root PTE response for 256 cycles, issues a
 cold scalar DTLB miss before retiring the IFU response, requires both leaf PTE
 addresses and a PTW manager outstanding depth of at least two, and checks the
