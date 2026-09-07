@@ -48,6 +48,14 @@ object TeaBinders {
   def applyControlRedirect(psv: UInt, isControlRedirect: Bool): UInt = {
     Mux(isControlRedirect, TeaPsvOps.setBit(psv, TeaEvent.FL_MB), psv)
   }
+
+  def applyMemVioRedirect(psv: UInt, isMemVioRedirect: Bool): UInt = {
+    Mux(isMemVioRedirect, TeaPsvOps.setBit(psv, TeaEvent.FL_MO), psv)
+  }
+
+  def applyExceptionFlush(psv: UInt, isExceptionFlush: Bool): UInt = {
+    Mux(isExceptionFlush, TeaPsvOps.setBit(psv, TeaEvent.FL_EX), psv)
+  }
 }
 
 object TeaFrontend {
@@ -71,7 +79,7 @@ object TeaFrontend {
   }
 }
 
-class TeaOIR(implicit p: Parameters) extends XSBundle {
+class TeaFlushCause(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
   val pc = UInt(VAddrBits.W)
   val psv = UInt(TeaEvent.width.W)
@@ -90,90 +98,96 @@ class TeaEntry(implicit p: Parameters) extends XSBundle {
 
 class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new Bundle {
-    val sampleFire = Input(Bool())
+    val enable = Input(Bool())
+    val samplePeriod = Input(UInt(64.W))
     val state = Input(UInt(4.W))
+    val hasCommit = Input(Bool())
     val commitMask = Input(UInt(CommitWidth.W))
     val commitPc = Input(Vec(CommitWidth, UInt(VAddrBits.W)))
     val commitPsv = Input(Vec(CommitWidth, UInt(TeaEvent.width.W)))
-    val headPc = Input(UInt(VAddrBits.W))
-    val headPsv = Input(UInt(TeaEvent.width.W))
-    val oir = Input(new TeaOIR()(p))
-    val overflow = Input(Bool())
-    val firstAllocValid = Input(Bool())
-    val firstAllocPc = Input(UInt(VAddrBits.W))
-    val firstAllocPsv = Input(UInt(TeaEvent.width.W))
+    val flushCause = Input(new TeaFlushCause()(p))
     val sampleValid = Output(Bool())
     val sample = Output(new TeaEntry()(p))
-    val pendingDrain = Output(Bool())
   })
 
-  val pendingDrainCount = RegInit(0.U(64.W))
-  val replayActive = RegInit(false.B)
-  val replayPc = RegInit(0.U(VAddrBits.W))
-  val replayPsv = RegInit(0.U(TeaEvent.width.W))
+  val computingState = 0.U
+  val stalledState = 1.U
+  val flushedState = 2.U
+  val drainedState = 3.U
+
   val cycle = RegInit(0.U(64.W))
+  val countdown = RegInit(0.U(64.W))
+  val pendingValid = RegInit(false.B)
+  val pendingState = RegInit(0.U(4.W))
+  val pendingCycle = RegInit(0.U(64.W))
+  val overflowPending = RegInit(false.B)
   cycle := cycle + 1.U
 
   val sample = WireInit(0.U.asTypeOf(new TeaEntry()(p)))
   val sampleValid = WireDefault(false.B)
-  val oirSample = io.sampleFire && io.oir.valid
-  val regularSample = io.sampleFire && !io.oir.valid && io.state =/= 3.U
-  val drainCapture = io.sampleFire && !io.oir.valid && io.state === 3.U
+  val sampleDue = io.enable && countdown === 0.U
+  val hasCurrentPayload =
+    io.state === stalledState ||
+    io.state === drainedState ||
+    io.state === computingState && io.hasCommit ||
+    io.state === flushedState && io.flushCause.valid
+  val accept = sampleDue && !pendingValid && hasCurrentPayload
+  val drop = sampleDue && !accept
+  val resolvePending = pendingValid && io.hasCommit
 
-  val pendingAfterCapture = pendingDrainCount + drainCapture.asUInt
-  val replayFromNewAlloc = !replayActive && io.firstAllocValid && io.firstAllocPsv.orR && pendingAfterCapture =/= 0.U
-  val replaySourcePc = Mux(replayActive, replayPc, io.firstAllocPc)
-  val replaySourcePsv = Mux(replayActive, replayPsv, io.firstAllocPsv)
-  val replayNow = io.sampleFire && replayActive && replaySourcePsv.orR && pendingAfterCapture =/= 0.U && !io.oir.valid
-  val pendingAfterReplay = pendingAfterCapture - replayNow.asUInt
-
-  sample.cycle := cycle
-  sample.overflow := io.overflow
-
-  when(oirSample) {
-    sample.state := 2.U
+  when(resolvePending) {
+    sample.cycle := pendingCycle
+    sample.state := pendingState
     sample.validMask := 1.U(CommitWidth.W)
-    sample.pcVec(0) := io.oir.pc
-    sample.psvVec(0) := io.oir.psv
-    sample.oirValid := true.B
+    sample.pcVec(0) := io.commitPc(0)
+    sample.psvVec(0) := io.commitPsv(0)
     sampleValid := true.B
-  }.elsewhen(replayNow) {
-    sample.state := 3.U
+  }.elsewhen(accept && io.state === computingState) {
+    sample.cycle := cycle
+    sample.state := computingState
+    sample.validMask := io.commitMask
+    sample.pcVec := io.commitPc
+    sample.psvVec := io.commitPsv
+    sampleValid := true.B
+  }.elsewhen(accept && io.state === flushedState) {
+    sample.cycle := cycle
+    sample.state := flushedState
     sample.validMask := 1.U(CommitWidth.W)
-    sample.pcVec(0) := replaySourcePc
-    sample.psvVec(0) := replaySourcePsv
-    sample.pendingDrain := true.B
+    sample.pcVec(0) := io.flushCause.pc
+    sample.psvVec(0) := io.flushCause.psv
     sampleValid := true.B
-  }.elsewhen(regularSample) {
-    switch(io.state) {
-      is(0.U) {
-        sample.state := 0.U
-        sample.validMask := io.commitMask
-        sample.pcVec := io.commitPc
-        sample.psvVec := io.commitPsv
-        sampleValid := io.commitMask.orR
-      }
-      is(1.U) {
-        sample.state := 1.U
-        sample.validMask := 1.U(CommitWidth.W)
-        sample.pcVec(0) := io.headPc
-        sample.psvVec(0) := io.headPsv
-        sampleValid := true.B
-      }
-    }
   }
 
-  pendingDrainCount := pendingAfterReplay
+  sample.oirValid := sample.state === flushedState
+  sample.pendingDrain := sample.state === drainedState
+  sample.overflow := overflowPending || drop
 
-  when(replayFromNewAlloc) {
-    replayPc := io.firstAllocPc
-    replayPsv := io.firstAllocPsv
-    replayActive := true.B
-  }.elsewhen(replayActive && replayNow && pendingAfterReplay === 0.U) {
-    replayActive := false.B
+  when(!io.enable) {
+    countdown := 0.U
+    pendingValid := false.B
+    overflowPending := false.B
+  }.otherwise {
+    when(countdown === 0.U) {
+      countdown := Mux(io.samplePeriod === 0.U, 0.U, io.samplePeriod - 1.U)
+    }.otherwise {
+      countdown := countdown - 1.U
+    }
+
+    when(resolvePending) {
+      pendingValid := false.B
+    }.elsewhen(accept && (io.state === stalledState || io.state === drainedState)) {
+      pendingValid := true.B
+      pendingState := io.state
+      pendingCycle := cycle
+    }
+
+    when(sampleValid) {
+      overflowPending := false.B
+    }.elsewhen(drop) {
+      overflowPending := true.B
+    }
   }
 
   io.sampleValid := sampleValid
   io.sample := sample
-  io.pendingDrain := pendingAfterReplay =/= 0.U
 }
