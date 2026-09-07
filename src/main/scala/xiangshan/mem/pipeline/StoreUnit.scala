@@ -530,7 +530,11 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_misalign_stout.bits.need_rep := RegEnable(s1_tlb_miss, s1_fire)
   io.misalign_stout := s2_misalign_stout
 
-  val s2_misalign_cango = !s2_mis_align || s2_in.isvec && (s2_misalignNeedReplay || s2_exception) || !s2_in.isvec && !s2_misalignNeedReplay && s2_exception
+  val s2_misalign_cango = Mux(
+    s2_in.isvec,
+    !s2_mis_align || s2_misalignNeedReplay || s2_exception,
+    !s2_misalignNeedReplay && (!s2_mis_align || s2_exception)
+  )
 
   // mmio and exception
   io.lsq_replenish := s2_out
@@ -539,8 +543,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
 
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
-  io.lsq_replenish.updateAddrValid := !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) ||
-    !s2_in.isvec && s2_exception && !s2_misalignNeedReplay || s2_in.isvec && s2_exception
+  val s2_updateAddrValid = !s2_mis_align && (!s2_frm_mabuf || s2_out.isFinalSplit) || s2_exception
+  io.lsq_replenish.updateAddrValid := s2_updateAddrValid && (s2_in.isvec || !s2_misalignNeedReplay)
   io.lsq_replenish.isvec := s2_out.isvec || s2_frm_mab_vec
 
   io.lsq_replenish.hasException := (ExceptionNO.selectByFu(s2_out.uop.exceptionVec, StaCfg).asUInt.orR ||
