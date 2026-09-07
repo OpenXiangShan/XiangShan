@@ -11,36 +11,21 @@ import yunsuan.vector.Common._
 trait VecFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
   protected val inData  = io.in.bits.data
-  protected val vecCtrl = inCtrl.vpu.get
+  protected val vtype   = inCtrl.vtype.get
 
-  protected val vill    = vecCtrl.vill
-  protected val vma     = vecCtrl.vma
-  protected val vta     = vecCtrl.vta
-  protected val vsew    = vecCtrl.vsew
-  protected val vlmul   = vecCtrl.vlmul
-  protected val vm      = vecCtrl.vm
-  protected val vstart  = vecCtrl.vstart
+  protected val vma     = vtype.vma
+  protected val vta     = vtype.vta
+  protected val vsew    = vtype.vsew
+  protected val vlmul   = vtype.vlmul
+  protected val vm      = inCtrl.vm.get
 
   protected val frm     = io.frm.getOrElse(0.U.asTypeOf(Frm()))
   protected val vxrm    = io.vxrm.getOrElse(0.U(2.W))
   protected val rm      = frm
-  protected val vuopIdx = vecCtrl.vuopIdx
+  protected val vuopIdx = inCtrl.uopIdx.get
   protected val nf      = 0.U  // No need to handle nf in vector arith unit
 
   protected val fuOpType  = inCtrl.fuOpType
-  protected val isNarrow  = vecCtrl.isNarrow
-  protected val isExt     = vecCtrl.isExt
-  protected val isDstMask = vecCtrl.isDstMask
-  protected val isMove    = vecCtrl.isMove
-  // swap vs1 and vs2, used by vrsub, etc
-  protected val isReverse = vecCtrl.isReverse
-
-  protected val sew8  = vecCtrl.sew8
-  protected val sew16 = vecCtrl.sew16
-  protected val sew32 = vecCtrl.sew32
-  protected val sew64 = vecCtrl.sew64
-  protected val maskVecGen = vecCtrl.maskVecGen
-
   protected val allMaskTrue = VecInit(Seq.fill(VLEN)(true.B)).asUInt
   protected val allMaskFalse = VecInit(Seq.fill(VLEN)(false.B)).asUInt
 
@@ -70,16 +55,16 @@ class VecPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(c
   protected val outCtrl     = ctrlVec(cfg.latency.orginLatencyVal.get)
   protected val outData     = dataVec(cfg.latency.orginLatencyVal.get)
 
-  protected val outVecCtrl  = outCtrl.vpu.get
-  protected val outVm       = outVecCtrl.vm
+  protected val outVType    = outCtrl.vtype.get
+  protected val outVm       = outCtrl.vm.get
+  protected val outUopIdx   = outCtrl.uopIdx.get
 
   // vadc.vv, vsbc.vv need this
   protected val outNeedClearMask: Bool = if(cfg == VialuCfg) VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType) else false.B
   protected val outVl       = outData.vl.get
-  protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
-  protected val outVlmul    = outCtrl.vpu.get.vlmul
-  protected val outLastUop  = outCtrl.vpu.get.lastUop
+  protected val outVlmul    = outVType.vlmul
+  protected val outLastUop  = outCtrl.lastUop.get
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
   protected val outSrcMask: UInt = {

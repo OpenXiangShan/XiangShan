@@ -10,7 +10,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.{V0Data, VlData}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.fu.vector.Bundles.NumLsElem
+import xiangshan.backend.fu.vector.Bundles.{NumLsElem, VType}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 
@@ -359,17 +359,15 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       val ignoreOldVd = Wire(Bool())
       val vlWakeUpByIntWb = common.vlWakeupByIntWb
       val vlWakeUpByVfWb = common.vlWakeupByVfWb
-      val vpu = entryReg.payload.og1Payload.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
-      val isDependOldVd = vpu.isDependOldVd
-      val isWritePartVd = vpu.isWritePartVd
-      val vta = vpu.vta
-      val vma = vpu.vma
-      val vm = vpu.vm
+      val vtype = entryReg.payload.og1Payload.vtype.getOrElse(0.U.asTypeOf(VType()))
+      val vta = vtype.vta
+      val vma = vtype.vma
+      val vm = entryReg.payload.og1Payload.vm.getOrElse(false.B)
       val vlFromIntIsZero = commonIn.vlFromIntIsZero
       val vlFromIntIsVlmax = commonIn.vlFromIntIsVlmax
       val vlIsVlmax = (vlFromIntIsVlmax && vlWakeUpByIntWb)
       val vlIsNonZero = (!vlFromIntIsZero && vlWakeUpByIntWb)
-      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma) && !isWritePartVd
+      val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma)
       val ignoreWhole = (vm =/= 0.U || vma) && vta
       val srcIsVec = SrcType.isVp(srcStatus.srcType)
       if (params.numVfSrc > 0 && srcIdx == 2) {
@@ -379,7 +377,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           * 2. when vl = 0, we cannot set the srctype to imm because the vd keep the old value
           * 3. when vl = vlmax, we can set srctype to imm when vta is not set
           */
-        ignoreOldVd := srcIsVec && vlIsNonZero && !isDependOldVd && (ignoreTail || ignoreWhole)
+        ignoreOldVd := srcIsVec && vlIsNonZero && (ignoreTail || ignoreWhole)
       } else {
         ignoreOldVd := false.B
       }

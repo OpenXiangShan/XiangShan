@@ -348,8 +348,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.payload.og1Payload.imm.foreach(_                 := s0_enqBits(enqIdx).imm.get)
       connectSamePort(enq.bits.payload.og1Payload, s0_enqBits(enqIdx))
       // dirty code, for uopidx and lastUop's assign
-      enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
-      enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)
+      enq.bits.payload.og1Payload.uopIdx.foreach(_              := s0_enqBits(enqIdx).uopIdx.get)
+      enq.bits.payload.og1Payload.lastUop.foreach(_             := s0_enqBits(enqIdx).lastUop.get)
       enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
     }
     entriesIO.og0Resp                                           := io.og0Resp

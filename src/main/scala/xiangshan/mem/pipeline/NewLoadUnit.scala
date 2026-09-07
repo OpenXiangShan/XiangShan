@@ -1150,11 +1150,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   connectSamePort(stageInfo, in)
   stageInfo.uop.flushPipe := false.B
   stageInfo.uop.exceptionVec extendFrom exceptionVec
-  stageInfo.uop.vpu.vstart := Mux(
-    LoadEntrance.isReplay(entrance) || LoadEntrance.isFastReplay(entrance),
-    uop.vpu.vstart,
-    in.vecVaddrOffset.get >> uop.vpu.veew
-  )
+  // Todo[Vector]: support vector exception
   stageInfo.pmp.get := pmp
   stageInfo.nc.get := isNC
   stageInfo.mmio.get := isMMIO

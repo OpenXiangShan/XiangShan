@@ -172,7 +172,6 @@ object Bundles {
     val canRobCompress = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val vpu = new VPUCtrlSignals
     val frm = Frm()
     val vm = Bool()
     val vtype = VType()
@@ -258,7 +257,6 @@ object Bundles {
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val vpu = new VPUCtrlSignals
     val frm = Frm()
     val vm = Bool()
     val vlsInstr = Bool()
@@ -388,7 +386,6 @@ object Bundles {
     val vlWen = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val vpu = new VPUCtrlSignals
     val fflagsWen = Bool()
     val uopIdx = UopIdx()
     val lastUop = Bool()
@@ -455,11 +452,10 @@ object Bundles {
     val vlWen    = Option.when(params.needVlWen )(Bool())
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt(32.W))
-    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
     val frm      = Option.when(params.needSrcFrm)(Frm())
     val vm       = Option.when(params.readV0Rf)(Bool())
     val oldVType = Option.when(params.writeVType)(VType())
-    val vtype    = Option.when(params.readVlRf)(VType())
+    val vtype    = Option.when(params.readVlRf || params.inVfSchd)(VType())
     val fflagsWen  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd || params.isMemAddrIQ)(Bool())
@@ -504,10 +500,10 @@ object Bundles {
     val fuOpType = Opcode()
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val vm       = Option.when(params.inVfSchd)(Bool())
     val frm      = Option.when(params.needSrcFrm)(Frm())
     val oldVType = Option.when(params.writeVType)(VType())
-    val vtype    = Option.when(params.readVlRf)(VType())
+    val vtype    = Option.when(params.readVlRf || params.inVfSchd)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
@@ -535,7 +531,8 @@ object Bundles {
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val frm      = Option.when(params.needSrcFrm)(Frm())
-    val vpu      = Option.when(params.issueBlockParam.inVfSchd)(new VPUCtrlSignals)
+    val vm       = Option.when(params.issueBlockParam.inVfSchd)(Bool())
+    val vtype    = Option.when(params.readVlRf)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
@@ -630,7 +627,6 @@ object Bundles {
     val fusionNum       = UInt(2.W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
-    val vpu             = new VPUCtrlSignals
     val frm             = Frm()
     val oldVType        = VType()
     val vtype           = VType()
@@ -881,78 +877,6 @@ object Bundles {
     val og1Cancel = Bool()
   }
 
-  class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
-    // vtype
-    val vill      = Bool()
-    val vma       = Bool()    // 1: agnostic, 0: undisturbed
-    val vta       = Bool()    // 1: agnostic, 0: undisturbed
-    val vsew      = VSew()
-    val vlmul     = VLmul()   // 1/8~8      --> -3~3
-
-    val vm        = Bool()    // 0: need v0.t
-    val vstart    = Vl()
-
-    // float rounding mode
-    val frm       = Frm()
-    // scalar float instr and vector float reduction
-    val fpu       = Fpu()
-    // vector fix int rounding mode
-    val vxrm      = Vxrm()
-    // vector uop index, exclude other non-vector uop
-    val vuopIdx   = UopIdx()
-    val lastUop   = Bool()
-    // maybe used if data dependancy
-    val vmask     = UInt(V0Data().dataWidth.W)
-    val vl        = Vl()
-
-    // vector load/store
-    val nf        = Nf()
-    val veew      = VEew()
-
-    val isReverse = Bool() // vrsub, vrdiv
-    val isExt     = Bool()
-    val isNarrow  = Bool()
-    val isDstMask = Bool() // vvm, vvvm, mmm
-    val isOpMask  = Bool() // vmand, vmnand
-    val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
-
-    val isDependOldVd = Bool() // some instruction's computation depends on oldvd
-    val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum
-
-    val isVleff = Bool() // vleff
-
-    val maskVecGen = UInt((V0Data().dataWidth / 8).W)
-    val sew8  = Bool()
-    val sew16 = Bool()
-    val sew32 = Bool()
-    val sew64 = Bool()
-
-    def vtype: VType = {
-      val res = Wire(VType())
-      res.illegal := this.vill
-      res.vma     := this.vma
-      res.vta     := this.vta
-      res.vsew    := this.vsew
-      res.vlmul   := this.vlmul
-      res
-    }
-
-    def vconfig: VConfig = {
-      val res = Wire(VConfig())
-      res.vtype := this.vtype
-      res.vl    := this.vl
-      res
-    }
-
-    def connectVType(source: VType): Unit = {
-      this.vill  := source.illegal
-      this.vma   := source.vma
-      this.vta   := source.vta
-      this.vsew  := source.vsew
-      this.vlmul := source.vlmul
-    }
-  }
-
   // [IssueQueue]--> DataPath
   class Og0InUop(
                                   val iqParams: IssueBlockParams,
@@ -1022,7 +946,9 @@ object Bundles {
     val selImm         = Option.when(exuParams.needImm)(SelImm())
     val imm            = Option.when(exuParams.needImm)(UInt(exuParams.deqImmTypesMaxLen.W))
     val frm            = Option.when(exuParams.needSrcFrm)(Frm())
-    val vpu      = Option.when(iqParams.inVfSchd)(new VPUCtrlSignals)
+    val vm       = Option.when(iqParams.inVfSchd)(Bool())
+    val uopIdx   = Option.when(iqParams.inVfSchd)(UopIdx())
+    val lastUop  = Option.when(iqParams.inVfSchd)(Bool())
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
     val fflagsWen = Option.when(exuParams.writeFflags)(Bool())
@@ -1086,7 +1012,8 @@ object Bundles {
       this.fuOpType := 0.U
       this.selImm.foreach(_ := 0.U)
       this.imm.foreach(_ := 0.U)
-      this.vpu.foreach(_ := 0.U.asTypeOf(new VPUCtrlSignals))
+      this.uopIdx.foreach(_ := 0.U)
+      this.lastUop.foreach(_ := false.B)
       this.oldVType.foreach(_ := 0.U.asTypeOf(VType()))
       this.vtype.foreach(_ := 0.U.asTypeOf(VType()))
       this.fflagsWen.foreach(_ := false.B)
@@ -1115,7 +1042,10 @@ object Bundles {
       this.imm.foreach(_ := source.imm.get)
 
       this.frm.foreach(_ := source.frm.get)
-      this.vpu.foreach(_ := source.vpu.get)
+      this.vm.foreach(_ := source.vm.get)
+      this.uopIdx.foreach(_ := source.uopIdx.get)
+      this.lastUop.foreach(_ := source.lastUop.get)
+      this.vtype.foreach(_ := source.vtype.get)
       this.fflagsWen.foreach(_ := source.fflagsWen.get)
 
       this.rasAction.foreach(_ := source.rasAction.get)
@@ -1229,11 +1159,13 @@ object Bundles {
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
     val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
-    val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
+    val vm            = if (params.needVPUCtrl)   Some(Bool())                        else None
+    val uopIdx        = if (params.needVPUCtrl)   Some(UopIdx())                      else None
+    val lastUop       = if (params.needVPUCtrl)   Some(Bool())                        else None
     val frm           = if (params.needSrcFrm)    Some(Frm())                         else None
     val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
     val oldVType      = Option.when(params.writeVType)(VType())
-    val vtype         = Option.when(params.readVlRf)(VType())
+    val vtype         = Option.when(params.readVlRf || params.needVPUCtrl)(VType())
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val rasAction     = if (params.hasRasAction)  Some(BranchAttribute.RasAction())   else None
     val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
@@ -1279,7 +1211,10 @@ object Bundles {
       this.imm                      := source.imm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
       this.selImm                   := source.selImm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
       this.fflagsWen     .foreach(_ := source.fflagsWen.get)
-      this.vpu           .foreach(_ := source.vpu.get)
+      this.vm            .foreach(_ := source.vm.get)
+      this.uopIdx        .foreach(_ := source.uopIdx.get)
+      this.lastUop       .foreach(_ := source.lastUop.get)
+      this.vtype         .foreach(_ := source.vtype.get)
       this.frm           .foreach(_ := source.frm.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
       this.storeSetHit   .foreach(_ := source.storeSetHit.get)
@@ -1320,7 +1255,7 @@ object Bundles {
       uop.ftqOffset      := this.ftqOffset.getOrElse(0.U)
       uop.perfDebugInfo  := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
       uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
-      uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      uop.vtype          := this.vtype.getOrElse(0.U.asTypeOf(VType()))
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
@@ -1344,10 +1279,12 @@ object Bundles {
     val v0Wen          = Option.when(params.needV0Wen)(Bool())
     val vlWen          = Option.when(params.needVlWen)(Bool())
     val fflagsWen      = Option.when(params.writeFflags)(Bool())
-    val vpu            = Option.when(params.needVPUCtrl)(new VPUCtrlSignals)
+    val vm             = Option.when(params.needVPUCtrl)(Bool())
+    val uopIdx         = Option.when(params.needVPUCtrl)(UopIdx())
+    val lastUop        = Option.when(params.needVPUCtrl)(Bool())
     val frm            = Option.when(params.needSrcFrm)(Frm())
     val oldVType       = Option.when(params.writeVType)(VType())
-    val vtype          = Option.when(params.readVlRf)(VType())
+    val vtype          = Option.when(params.readVlRf || params.needVPUCtrl)(VType())
     val flushPipe      = Option.when(params.flushPipe)(Bool())
     val rasAction      = Option.when(params.hasRasAction)(BranchAttribute.RasAction())
     val isRVC          = Option.when(params.needIsRVC)(Bool())
@@ -1454,18 +1391,6 @@ object Bundles {
     val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
   }
 
-class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) extends Bundle with HasXSParameter {
-    val vpu          = new VPUCtrlSignals
-    val oldVdPsrc    = UInt(PhyRegIdxWidth.W)
-    val vdIdx        = UInt(3.W)
-    val vdIdxInField = UInt(3.W)
-    val isIndexed    = Bool()
-    val isMasked     = Bool()
-    val isStrided    = Bool()
-    val isWhole      = Bool()
-    val isVecLoad    = Bool()
-    val isVlm        = Bool()
-  }
   class ExuOutputToRob(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
     val robIdx       = new RobPtr
     val fflags       = Option.when(params.writeFflags)(UInt(5.W))

@@ -756,7 +756,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, in.uop.exceptionVec)
   wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
   wbData.tlbException.get := Mux(headHasException, head.tlbException.get, in.tlbException.get)
-  wbData.uop.vpu.vstart := Mux(headHasException, head.uop.vpu.vstart, in.uop.vpu.vstart)
+  // Todo[Vector]: support vector exception
   wbData.isForVSnonLeafPTE.get := Mux(
     headHasException,
     head.isForVSnonLeafPTE.get,

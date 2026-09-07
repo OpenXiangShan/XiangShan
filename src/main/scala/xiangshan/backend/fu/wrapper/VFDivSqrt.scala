@@ -69,39 +69,33 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
       mod.io.is_vec_i       := true.B // Todo
       resultData(i) := mod.io.fpdiv_res_o
       fflagsData(i) := mod.io.fflags_o
-      fp_aIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
-        ((vsew === VSew.e32) & (!vs2Split.io.outVec64b(i).head(32).andR)) |
-          ((vsew === VSew.e16) & (!vs2Split.io.outVec64b(i).head(48).andR))
-        )
-      fp_bIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
-        ((vsew === VSew.e32) & (!vs1Split.io.outVec64b(i).head(32).andR)) |
-          ((vsew === VSew.e16) & (!vs1Split.io.outVec64b(i).head(48).andR))
-        )
+      fp_aIsFpCanonicalNAN(i) := false.B
+      fp_bIsFpCanonicalNAN(i) := false.B
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
 
   io.in.ready  := vfdivs.map(_.io.start_ready_o).reduce(_&_)
   io.out.valid := vfdivs.map(_.io.finish_valid_o).reduce(_&_)
-  val outEew = outVecCtrl.vsew
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val outEew = outVType.vsew
+  val outVuopidx = outUopIdx(2, 0)
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
-  val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1, 0)).asUInt + 1.U, outVecCtrl.vlmul(1, 0))
-  val outVlFix = Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
+  val lmulAbs = Mux(outVType.vlmul(2), (~outVType.vlmul(1, 0)).asUInt + 1.U, outVType.vlmul(1, 0))
+  val outVlFix = outVl
   val vlMaxAllUop = Wire(outVl.cloneType)
-  vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
-  val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
+  vlMaxAllUop := Mux(outVType.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
+  val vlMaxThisUop = Mux(outVType.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
   val vlSetThisUop = Mux(outVlFix > outVuopidx * vlMaxThisUop, outVlFix - outVuopidx * vlMaxThisUop, 0.U)
   val vlThisUop = Wire(UInt(4.W))
   vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
 
-  private val needNoMask = outVecCtrl.fpu.isFpToVecInst
+  private val needNoMask = false.B
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
   val allFFlagsEn = Wire(Vec(4 * numVecModule, Bool()))
   val outSrcMaskRShift = Wire(UInt((4 * numVecModule).W))
-  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)
+  outSrcMaskRShift := (maskToMgu >> (outUopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
@@ -140,17 +134,17 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   mgu.io.in.vd := resultDataUInt
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := maskToMgu
-  mgu.io.in.info.ta := outVecCtrl.vta
-  mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
-  mgu.io.in.info.vlmul := outVecCtrl.vlmul
+  mgu.io.in.info.ta := outVType.vta
+  mgu.io.in.info.ma := outVType.vma
+  mgu.io.in.info.vl := outVl
+  mgu.io.in.info.vlmul := outVType.vlmul
   mgu.io.in.info.valid := io.out.valid
-  mgu.io.in.info.vstart := Mux(outVecCtrl.fpu.isFpToVecInst, 0.U, outVecCtrl.vstart)
-  mgu.io.in.info.eew := outVecCtrl.vsew
-  mgu.io.in.info.vsew := outVecCtrl.vsew
-  mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
-  mgu.io.in.info.narrow := outVecCtrl.isNarrow
-  mgu.io.in.info.dstMask := outVecCtrl.isDstMask
+  mgu.io.in.info.vstart := 0.U // vstart is always 0 for vector non-memory instructions
+  mgu.io.in.info.eew := outVType.vsew
+  mgu.io.in.info.vsew := outVType.vsew
+  mgu.io.in.info.vdIdx := outUopIdx
+  mgu.io.in.info.narrow := false.B
+  mgu.io.in.info.dstMask := false.B
   mgu.io.in.isIndexedVls := false.B
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := mgu.io.out.illegal
