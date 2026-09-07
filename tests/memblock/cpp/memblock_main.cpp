@@ -18328,6 +18328,11 @@ int run_l2_tlb_contracts(int argc, char **argv)
 
 int run_ifetch_ptw_bridge(int argc, char **argv)
 {
+    enum class GlobalPtePlacement : std::uint8_t {
+        none,
+        leaf,
+        nonleaf,
+    };
     struct Case {
         const char *name;
         memblock::ReferencePageMode vs_mode;
@@ -18335,8 +18340,10 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         bool nested;
         memblock::ReferencePbmt pbmt;
         bool page_fault;
+        GlobalPtePlacement vs_global = GlobalPtePlacement::none;
+        GlobalPtePlacement g_global = GlobalPtePlacement::none;
     };
-    constexpr std::array<Case, 10> cases{{
+    constexpr std::array<Case, 16> cases{{
         {"Sv39", memblock::ReferencePageMode::sv39,
          memblock::ReferencePageMode::bare, false,
          memblock::ReferencePbmt::pma, false},
@@ -18367,6 +18374,30 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         {"Sv48-invalid-L0", memblock::ReferencePageMode::sv48,
          memblock::ReferencePageMode::bare, false,
          memblock::ReferencePbmt::pma, true},
+        {"Sv39-global-leaf", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::leaf},
+        {"Sv48-global-nonleaf", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::nonleaf},
+        {"Sv39-Sv39x4-global-leaves", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39, true,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::leaf, GlobalPtePlacement::leaf},
+        {"Sv39-Sv48x4-global-nonleaves", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv48, true,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::nonleaf, GlobalPtePlacement::nonleaf},
+        {"Sv48-Sv39x4-global-mixed", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv39, true,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::leaf, GlobalPtePlacement::nonleaf},
+        {"Sv48-Sv48x4-global-mixed", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48, true,
+         memblock::ReferencePbmt::pma, false,
+         GlobalPtePlacement::nonleaf, GlobalPtePlacement::leaf},
     }};
     constexpr std::uint64_t vs_root = 0x94000000ULL;
     constexpr std::uint64_t g_root = 0x95000000ULL;
@@ -18375,6 +18406,10 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
     constexpr unsigned response_stall_cycles = 5;
     std::uint64_t total_cycles = 0;
     std::uint64_t total_ptw_requests = 0;
+    unsigned s1_global_reported = 0;
+    unsigned s1_global_demoted = 0;
+    unsigned gstage_global_reported = 0;
+    unsigned gstage_global_demoted = 0;
 
     for (unsigned case_index = 0; case_index < cases.size(); ++case_index) {
         const auto &item = cases[case_index];
@@ -18399,12 +18434,30 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                       virtual_page, stage1_output, vs_root, true, false,
                       true, false,
                       item.pbmt == memblock::ReferencePbmt::nc,
-                      item.pbmt == memblock::ReferencePbmt::io)
+                      item.pbmt == memblock::ReferencePbmt::io,
+                      item.vs_global == GlobalPtePlacement::leaf)
                 : environment.map_sv39_4k(
                       virtual_page, stage1_output, vs_root, true, false,
                       true, false,
                       item.pbmt == memblock::ReferencePbmt::nc,
-                      item.pbmt == memblock::ReferencePbmt::io);
+                      item.pbmt == memblock::ReferencePbmt::io,
+                      item.vs_global == GlobalPtePlacement::leaf);
+        }
+        if (configured &&
+            item.vs_global == GlobalPtePlacement::nonleaf) {
+            const auto nonleaf_pte = memblock::reference_pte_address_at_level(
+                environment.memory(), vs_root, virtual_page, item.vs_mode,
+                memblock::reference_page_levels(item.vs_mode) - 1U);
+            if (!nonleaf_pte) {
+                std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case="
+                          << item.name
+                          << " phase=locate-vs-global-nonleaf\n";
+                return 1;
+            }
+            environment.memory().write_u64(
+                *nonleaf_pte,
+                environment.memory().read_u64(*nonleaf_pte) |
+                    (std::uint64_t{1} << 5));
         }
         if (configured && item.nested) {
             const unsigned vs_table_pages = item.vs_mode ==
@@ -18423,9 +18476,30 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
             if (configured) {
                 configured = item.g_mode == memblock::ReferencePageMode::sv48
                     ? environment.map_sv48x4_4k(
-                          guest_page, host_page, g_root, true, false, true)
+                          guest_page, host_page, g_root, true, false, true,
+                          item.g_global == GlobalPtePlacement::leaf)
                     : environment.map_sv39x4_4k(
-                          guest_page, host_page, g_root, true, false, true);
+                          guest_page, host_page, g_root, true, false, true,
+                          item.g_global == GlobalPtePlacement::leaf);
+            }
+            if (configured &&
+                item.g_global == GlobalPtePlacement::nonleaf) {
+                const auto nonleaf_pte =
+                    memblock::reference_pte_address_at_level(
+                        environment.memory(), g_root, guest_page,
+                        item.g_mode,
+                        memblock::reference_page_levels(item.g_mode) - 1U,
+                        true);
+                if (!nonleaf_pte) {
+                    std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case="
+                              << item.name
+                              << " phase=locate-g-global-nonleaf\n";
+                    return 1;
+                }
+                environment.memory().write_u64(
+                    *nonleaf_pte,
+                    environment.memory().read_u64(*nonleaf_pte) |
+                        (std::uint64_t{1} << 5));
             }
         }
         if (configured && item.page_fault) {
@@ -18495,7 +18569,11 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                 !response.s1_r && !response.s1_v &&
                 reconstructed_s1_ppn == 0 && response.s1_pf &&
                 !response.s1_af
-            : !response.s1_d && response.s1_a && !response.s1_g &&
+            // Caching a global mapping as ASID-specific is a legal,
+            // conservative implementation choice. Never permit the inverse.
+            : !response.s1_d && response.s1_a &&
+                (item.vs_global != GlobalPtePlacement::none ||
+                 !response.s1_g) &&
                 !response.s1_u && response.s1_x && !response.s1_w &&
                 response.s1_r && response.s1_v &&
                 reconstructed_s1_ppn == stage1_ppn &&
@@ -18506,7 +18584,12 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
              response.s2_tag == (guest_page >> 12) &&
              response.s2_vmid == vmid && !response.s2_n &&
              response.s2_pbmt == 0 && response.s2_ppn == (host_page >> 12) &&
-             !response.s2_d && response.s2_a && !response.s2_g &&
+             // G-stage G is architecturally ignored. The internal response
+             // may expose or demote the raw bit, but it must not alter the
+             // translation, permissions, or fault result checked here.
+             !response.s2_d && response.s2_a &&
+             (item.g_global != GlobalPtePlacement::none ||
+              !response.s2_g) &&
              response.s2_u && response.s2_x && !response.s2_w &&
              response.s2_r && response.s2_level == 0 &&
              !response.s2_gpf && !response.s2_gaf);
@@ -18537,6 +18620,14 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                       << " ptw_requests=" << environment.ptw_requests()
                       << '\n';
             return 1;
+        }
+        if (item.vs_global != GlobalPtePlacement::none) {
+            response.s1_g ? ++s1_global_reported : ++s1_global_demoted;
+        }
+        if (item.g_global != GlobalPtePlacement::none) {
+            response.s2_g
+                ? ++gstage_global_reported
+                : ++gstage_global_demoted;
         }
         total_cycles += environment.cycle();
         total_ptw_requests += environment.ptw_requests();
@@ -19550,8 +19641,14 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
               << " cases=" << cases.size() + degenerate_cases.size() +
                     nested_fault_cases.size() + 10
-              << " stage1_valid=4 nested_valid=4 stage1_fault=2"
+              << " stage1_valid=6 nested_valid=8 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
+              << " s1_global_leaf=3 s1_global_nonleaf=3"
+              << " s1_global_reported=" << s1_global_reported
+              << " s1_global_demoted=" << s1_global_demoted
+              << " gstage_g_leaf=2 gstage_g_nonleaf=2"
+              << " gstage_g_reported=" << gstage_global_reported
+              << " gstage_g_demoted=" << gstage_global_demoted
               << " nested_vs_fault=4 nested_g_leaf_fault=4"
               << " nested_implicit_g_fault=4"
               << " ifu_stage1_context_race=1"

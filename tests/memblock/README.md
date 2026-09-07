@@ -622,7 +622,12 @@ MemBlock top-level boundary. It checks valid and invalid Sv39/Sv48 stage-1
 walks, PBMT=NC/IO leaves, all four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks,
 both Sv39/Sv48 forms of the VS-only and G-only degenerations, and all four
 nested mode pairs crossed with VS-leaf, final-G-leaf, and implicit VS-page-table
-G-stage faults. It
+G-stage faults. Six additional cases place `G` in stage-1 and G-stage leaf and
+non-leaf PTEs. Stage-1 `G=0` is never allowed to become global, while a true
+global mapping may be conservatively cached as ASID-specific; the observed
+reported/demoted split is recorded. G-stage `G` is allowed to appear as raw
+internal response metadata, but must not change translation, permissions, or
+fault results because the architecture requires hardware to ignore it. It
 reconstructs translated PPNs from the sector response, checks the active
 stage's ASID/VMID, permissions, PBMT, fault level, and faults, requires a cold PTW walk,
 and holds response ready low to verify stable payload under backpressure. A

@@ -6061,7 +6061,8 @@ public:
         bool executable = false,
         bool user = false,
         bool noncacheable = false,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -6069,6 +6070,7 @@ public:
         constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
         constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
         constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
@@ -6117,7 +6119,8 @@ public:
             (readable ? pte_read : 0) |
             (writable ? pte_write : 0) |
             (executable ? pte_execute : 0) |
-            (user ? pte_user : 0) | pte_accessed |
+            (user ? pte_user : 0) | (global ? pte_global : 0) |
+            pte_accessed |
             (writable ? pte_dirty : 0) |
             (noncacheable ? pte_pbmt_nc : 0) |
             (io ? pte_pbmt_io : 0);
@@ -6136,7 +6139,8 @@ public:
         bool executable = false,
         bool user = false,
         bool noncacheable = false,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -6144,6 +6148,7 @@ public:
         constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
         constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
         constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
@@ -6206,7 +6211,8 @@ public:
             (readable ? pte_read : 0) |
             (writable ? pte_write : 0) |
             (executable ? pte_execute : 0) |
-            (user ? pte_user : 0) | pte_accessed |
+            (user ? pte_user : 0) | (global ? pte_global : 0) |
+            pte_accessed |
             (writable ? pte_dirty : 0) |
             (noncacheable ? pte_pbmt_nc : 0) |
             (io ? pte_pbmt_io : 0);
@@ -6249,12 +6255,13 @@ public:
         bool noncacheable = false,
         bool accessed = true,
         std::optional<bool> dirty = std::nullopt,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv39, false, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty, io);
+            executable, user, noncacheable, accessed, dirty, io, global);
     }
 
     bool map_sv39_2m(
@@ -6299,12 +6306,13 @@ public:
         bool noncacheable = false,
         bool accessed = true,
         std::optional<bool> dirty = std::nullopt,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv48, false, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty, io);
+            executable, user, noncacheable, accessed, dirty, io, global);
     }
 
     bool map_sv48_2m(
@@ -6358,7 +6366,8 @@ public:
         std::uint64_t root_page_table = 0x95000000ULL,
         bool readable = true,
         bool writable = true,
-        bool executable = false)
+        bool executable = false,
+        bool global = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t root_mask = 0x3fff;
@@ -6367,6 +6376,7 @@ public:
         constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
         constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
         constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         if ((guest_physical_address & page_mask) !=
@@ -6424,6 +6434,7 @@ public:
             (readable ? pte_read : 0) |
             (writable ? pte_write : 0) |
             (executable ? pte_execute : 0) | pte_user |
+            (global ? pte_global : 0) |
             pte_accessed | (writable ? pte_dirty : 0);
         memory_.write_u64(
             l0_it->second + vpn0 * 8,
@@ -6443,12 +6454,13 @@ public:
         std::optional<bool> dirty = std::nullopt,
         bool user = true,
         bool noncacheable = false,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv48, true, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty, io);
+            executable, user, noncacheable, accessed, dirty, io, global);
     }
 
     bool map_sv48x4_2m(
@@ -6581,7 +6593,8 @@ private:
         bool noncacheable,
         bool accessed = true,
         std::optional<bool> dirty = std::nullopt,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -6589,6 +6602,7 @@ private:
         constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
         constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
         constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
@@ -6663,6 +6677,7 @@ private:
             (writable ? pte_write : 0) |
             (executable ? pte_execute : 0) |
             (user ? pte_user : 0) |
+            (global ? pte_global : 0) |
             (accessed ? pte_accessed : 0) |
             (dirty.value_or(writable) ? pte_dirty : 0) |
             (noncacheable ? pte_pbmt_nc : 0) |
@@ -6760,7 +6775,8 @@ public:
         std::uint64_t root_page_table = 0x95000000ULL,
         bool readable = true,
         bool writable = true,
-        bool executable = false)
+        bool executable = false,
+        bool global = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t root_mask = 0x3fff;
@@ -6769,6 +6785,7 @@ public:
         constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
         constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
         constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         if ((guest_physical_address & page_mask) !=
@@ -6811,7 +6828,8 @@ public:
         const std::uint64_t flags = pte_valid |
             (readable ? pte_read : 0) |
             (writable ? pte_write : 0) |
-            (executable ? pte_execute : 0) | pte_user | pte_accessed |
+            (executable ? pte_execute : 0) | pte_user |
+            (global ? pte_global : 0) | pte_accessed |
             (writable ? pte_dirty : 0);
         memory_.write_u64(
             l0_it->second + vpn0 * 8,
@@ -6831,12 +6849,13 @@ public:
         std::optional<bool> dirty = std::nullopt,
         bool user = true,
         bool noncacheable = false,
-        bool io = false)
+        bool io = false,
+        bool global = false)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv39, true, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty, io);
+            executable, user, noncacheable, accessed, dirty, io, global);
     }
 
     bool map_sv39x4_2m(
