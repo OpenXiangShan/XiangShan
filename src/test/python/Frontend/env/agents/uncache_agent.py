@@ -22,6 +22,7 @@ class UncacheAgent:
     def __init__(self, memory: MemoryModel) -> None:
         self.logger = logging.getLogger("env.agents.uncache")
         self.memory = memory
+        self.response_bytes = 8
         self.interface = None
         self.latency = 2
         self.mmio_latency = 4
@@ -35,6 +36,7 @@ class UncacheAgent:
         self.denied_resp_count = 0
         self.corrupt_resp_count = 0
         self.request_addrs = []
+        self.request_records = []
         self.response_addrs = []
 
     @staticmethod
@@ -119,8 +121,14 @@ class UncacheAgent:
         self._write(self.interface.a_ready, a_ready)
         if self._read(self.interface.a_valid, 0) == 1 and a_ready == 1:
             addr = self._read(self.interface.a_bits_address, 0)
-            blk = self.memory.read_block(addr, 32)
+            blk = self.memory.read_block(addr, self.response_bytes)
             data = int.from_bytes(blk, "little")
+            mem_back_type_mm = self._read(
+                getattr(self.interface, "a_bits_user_mem_back_type_mm", None), 0
+            )
+            mem_page_type_nc = self._read(
+                getattr(self.interface, "a_bits_user_mem_page_type_nc", None), 0
+            )
             latency = self.mmio_latency if self.memory.is_mmio(addr) else self.latency
             fault = self._next_fault_for_addr(addr)
             self.pending.append(
@@ -134,11 +142,21 @@ class UncacheAgent:
             )
             self.req_count += 1
             self.request_addrs.append(int(addr))
+            self.request_records.append(
+                {
+                    "cycle": int(cycle),
+                    "address": int(addr),
+                    "mem_back_type_mm": int(mem_back_type_mm),
+                    "mem_page_type_nc": int(mem_page_type_nc),
+                }
+            )
             self._emit(
                 cycle,
                 "handshake.uncache_a",
                 {
                     "address": int(addr),
+                    "mem_back_type_mm": int(mem_back_type_mm),
+                    "mem_page_type_nc": int(mem_page_type_nc),
                     "latency": int(latency),
                     "denied": int(fault.get("denied", 0)),
                     "corrupt": int(fault.get("corrupt", 0)),
@@ -181,7 +199,9 @@ class UncacheAgent:
             "queued_response_faults": len(self.next_response_faults),
             "queued_addr_faults": sum(len(faults) for faults in self.response_faults_by_addr.values()),
             "request_addrs": list(self.request_addrs),
+            "request_records": list(self.request_records),
             "response_addrs": list(self.response_addrs),
+            "response_bytes": self.response_bytes,
         }
 
 

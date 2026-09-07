@@ -4,20 +4,6 @@ from toffee import Bundle, Signal
 
 
 class CSRControlBundle(Bundle):
-    # Newer Frontend DUT exports only mode/asid/vmid for these CSR groups.
-    # Keep the legacy ppn fields optional so the Python env can still bind.
-    OPTIONAL_ATTRS = {
-        "io_tlbCsr_satp_ppn",
-        "io_tlbCsr_vsatp_ppn",
-        "io_tlbCsr_hgatp_ppn",
-        "io_tlbCsr_priv_virt_changed",
-        "io_tlbCsr_satp_changed",
-        "io_tlbCsr_vsatp_changed",
-        "io_tlbCsr_hgatp_changed",
-        "io_tlbCsr_mPBMTE",
-        "io_tlbCsr_hPBMTE",
-    }
-
     io_tlbCsr_priv_imode = Signal()
     io_tlbCsr_priv_virt = Signal()
     io_tlbCsr_priv_virt_changed = Signal()
@@ -35,6 +21,19 @@ class CSRControlBundle(Bundle):
     io_tlbCsr_hgatp_changed = Signal()
     io_tlbCsr_mPBMTE = Signal()
     io_tlbCsr_hPBMTE = Signal()
+    io_tlbCsr_mbmc_BCLEAR = Signal()
+    io_tlbCsr_mbmc_BMA = Signal()
+    io_tlbCsr_priv_mxr = Signal()
+    io_tlbCsr_priv_sum = Signal()
+    io_tlbCsr_priv_vmxr = Signal()
+    io_tlbCsr_priv_vsum = Signal()
+    io_tlbCsr_priv_spvp = Signal()
+    io_tlbCsr_priv_dmode = Signal()
+    io_tlbCsr_pmm_mseccfg = Signal()
+    io_tlbCsr_pmm_menvcfg = Signal()
+    io_tlbCsr_pmm_henvcfg = Signal()
+    io_tlbCsr_pmm_hstatus = Signal()
+    io_tlbCsr_pmm_senvcfg = Signal()
     io_csrCtrl_bp_ctrl_ubtbEnable = Signal()
     io_csrCtrl_bp_ctrl_abtbEnable = Signal()
     io_csrCtrl_bp_ctrl_mbtbEnable = Signal()
@@ -46,6 +45,24 @@ class CSRControlBundle(Bundle):
     io_csrCtrl_distribute_csr_w_valid = Signal()
     io_csrCtrl_distribute_csr_w_bits_addr = Signal()
     io_csrCtrl_distribute_csr_w_bits_data = Signal()
+    io_csrCtrl_sbuffer_timeout = Signal()
+    io_csrCtrl_ldld_vio_check_enable = Signal()
+    io_csrCtrl_cache_error_enable = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_valid = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_addr = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_select = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_action = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_store = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_load = Signal()
+    io_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2 = Signal()
+    io_csrCtrl_mem_trigger_tEnableVec_0 = Signal()
+    io_csrCtrl_mem_trigger_tEnableVec_1 = Signal()
+    io_csrCtrl_mem_trigger_tEnableVec_2 = Signal()
+    io_csrCtrl_mem_trigger_tEnableVec_3 = Signal()
+    io_csrCtrl_mem_trigger_debugMode = Signal()
+    io_csrCtrl_mem_trigger_triggerCanRaiseBpExp = Signal()
 
     def drive_idle(
         self,
@@ -73,6 +90,19 @@ class CSRControlBundle(Bundle):
         self.io_tlbCsr_hgatp_changed.value = 0
         self.io_tlbCsr_mPBMTE.value = 0
         self.io_tlbCsr_hPBMTE.value = 0
+        self.io_tlbCsr_mbmc_BCLEAR.value = 0
+        self.io_tlbCsr_mbmc_BMA.value = 0
+        self.io_tlbCsr_priv_mxr.value = 0
+        self.io_tlbCsr_priv_sum.value = 0
+        self.io_tlbCsr_priv_vmxr.value = 0
+        self.io_tlbCsr_priv_vsum.value = 0
+        self.io_tlbCsr_priv_spvp.value = 0
+        self.io_tlbCsr_priv_dmode.value = 0
+        self.io_tlbCsr_pmm_mseccfg.value = 0
+        self.io_tlbCsr_pmm_menvcfg.value = 0
+        self.io_tlbCsr_pmm_henvcfg.value = 0
+        self.io_tlbCsr_pmm_hstatus.value = 0
+        self.io_tlbCsr_pmm_senvcfg.value = 0
         self.io_csrCtrl_bp_ctrl_ubtbEnable.value = int(ubtb_enable)
         self.io_csrCtrl_bp_ctrl_abtbEnable.value = int(abtb_enable)
         self.io_csrCtrl_bp_ctrl_mbtbEnable.value = int(mbtb_enable)
@@ -84,3 +114,21 @@ class CSRControlBundle(Bundle):
         self.io_csrCtrl_distribute_csr_w_valid.value = 0
         self.io_csrCtrl_distribute_csr_w_bits_addr.value = 0
         self.io_csrCtrl_distribute_csr_w_bits_data.value = 0
+        self.io_csrCtrl_sbuffer_timeout.value = 0
+        self.io_csrCtrl_ldld_vio_check_enable.value = 0
+        self.io_csrCtrl_cache_error_enable.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_valid.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_addr.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_select.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_action.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_store.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_load.value = 0
+        self.io_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2.value = 0
+        self.io_csrCtrl_mem_trigger_tEnableVec_0.value = 0
+        self.io_csrCtrl_mem_trigger_tEnableVec_1.value = 0
+        self.io_csrCtrl_mem_trigger_tEnableVec_2.value = 0
+        self.io_csrCtrl_mem_trigger_tEnableVec_3.value = 0
+        self.io_csrCtrl_mem_trigger_debugMode.value = 0
+        self.io_csrCtrl_mem_trigger_triggerCanRaiseBpExp.value = 0

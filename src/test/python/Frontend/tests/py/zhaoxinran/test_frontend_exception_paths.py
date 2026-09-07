@@ -102,7 +102,6 @@ def _configure_frontend_execute_trigger(env, pc: int) -> None:
         f"{prefix}tUpdate_bits_addr": 0,
         f"{prefix}tUpdate_bits_tdata_matchType": 0,
         f"{prefix}tUpdate_bits_tdata_select": 0,
-        f"{prefix}tUpdate_bits_tdata_timing": 0,
         f"{prefix}tUpdate_bits_tdata_action": _TRIGGER_DEBUG_MODE,
         f"{prefix}tUpdate_bits_tdata_chain": 0,
         f"{prefix}tUpdate_bits_tdata_tdata2": int(pc),

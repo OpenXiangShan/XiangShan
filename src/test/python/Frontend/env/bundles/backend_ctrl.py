@@ -77,6 +77,8 @@ class BackendCtrlBundle(Bundle):
         self.can_accept.value = 1
         self.backend_empty.value = 1
         self.commit_valid.value = 0
+        self.commit_bits_flag.value = 0
+        self.commit_bits_value.value = 0
         self.redirect_valid.value = 0
         self.redirect_bits_pc.value = 0
         self.redirect_bits_target.value = 0
@@ -96,6 +98,19 @@ class BackendCtrlBundle(Bundle):
         self.redirect_bits_debug_is_mem_vio.value = 0
         for signal in self.resolve_valid:
             signal.value = 0
+        for signals in (
+            self.resolve_bits_ftq_idx_flag,
+            self.resolve_bits_ftq_idx_value,
+            self.resolve_bits_ftq_offset,
+            self.resolve_bits_pc_addr,
+            self.resolve_bits_target_addr,
+            self.resolve_bits_taken,
+            self.resolve_bits_mispredict,
+            self.resolve_bits_attribute_branch_type,
+            self.resolve_bits_attribute_ras_action,
+        ):
+            for signal in signals:
+                signal.value = 0
         for signal in self.call_ret_commit_valid:
             signal.value = 0
         for signal in self.call_ret_commit_bits_ras_action:

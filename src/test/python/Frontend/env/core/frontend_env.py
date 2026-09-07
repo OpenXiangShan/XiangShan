@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
 
 from ..agents.backend_agent import BackendAgent
 from ..agents.icache_agent import ICacheAgent
+from ..agents.icache_control_agent import ICacheControlAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from .backend_model import BackendModel
@@ -19,11 +20,11 @@ from ..bundles import (
     CSRControlBundle,
     ClockResetBundle,
     DFTControlBundle,
-    FrontendInfoBundle,
+    FrontendPerformanceBundle,
     ICacheBundle,
+    ICacheControlBundle,
     PTWBundle,
     UncacheBundle,
-    bind_bundle_optional,
     bind_bundle_required,
 )
 from toffee.bundle import DummySignal
@@ -37,14 +38,12 @@ from ..support.pmp_pma import (
     encode_pmp_pma_cfg,
 )
 from ..support.signal_utils import read_internal_signal
+from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
 from ..monitors.translation_permission_oracle import TranslationPermissionOracle
-
-
-_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
 class FrontendEnv:
@@ -72,6 +71,7 @@ class FrontendEnv:
         self.functional_coverage = None
         self.event_sink = event_sink
         self.config = config or DEFAULT_ENV_CONFIG
+        self.itlb_ptw_req_get_gpa_path = frontend_itlb_ptw_req_get_gpa_path()
         self._nemu_sync_module: Optional[Any] = None
         self._nemu_sync_adapter_spec: Optional[str] = None
         self._nemu_satp_override: Optional[int] = None
@@ -125,6 +125,7 @@ class FrontendEnv:
             "monitor": FrontendMonitor(memory=self.memory, page_table=self.page_table, branch_checker=branch_checker),
             "backend_observe_monitor": BackendObserveMonitor(),
             "icache_agent": ICacheAgent(self.memory),
+            "icache_control_agent": ICacheControlAgent(),
             "uncache_agent": UncacheAgent(self.memory),
             "ptw_agent": PTWAgent(self.page_table),
             "ptw_full_ppn_checker": PTWFullPpnChecker(),
@@ -152,6 +153,7 @@ class FrontendEnv:
         self.monitor = collaborators["monitor"]
         self.backend_observe_monitor = collaborators["backend_observe_monitor"]
         self.icache_agent = collaborators["icache_agent"]
+        self.icache_control_agent = collaborators["icache_control_agent"]
         self.uncache_agent = collaborators["uncache_agent"]
         self.ptw_agent = collaborators["ptw_agent"]
         self.ptw_full_ppn_checker = collaborators["ptw_full_ppn_checker"]
@@ -207,27 +209,30 @@ class FrontendEnv:
             io_backend_fromFtq_wen=self.backend_from_ftq_if.io_backend_fromFtq_wen,
             io_backend_fromFtq_ftqIdx=self.backend_from_ftq_if.io_backend_fromFtq_ftqIdx,
             io_backend_fromFtq_startPc_addr=self.backend_from_ftq_if.io_backend_fromFtq_startPc_addr,
-            io_frontendInfo_ibufFull=self.frontend_info_if.io_frontendInfo_ibufFull,
         )
 
     def _create_interfaces(self) -> None:
         self.clock_reset = bind_bundle_required(ClockResetBundle, self.dut)
         self.csr_ctrl_if = bind_bundle_required(CSRControlBundle, self.dut)
         self.dft_ctrl_if = bind_bundle_required(DFTControlBundle, self.dut)
-        self.icache_if = bind_bundle_optional(ICacheBundle, self.dut)
-        self.uncache_if = bind_bundle_optional(UncacheBundle, self.dut)
-        self.ptw_if = bind_bundle_optional(PTWBundle, self.dut)
+        self.icache_if = bind_bundle_required(ICacheBundle, self.dut)
+        self.icache_control_if = bind_bundle_required(ICacheControlBundle, self.dut)
+        self.uncache_if = bind_bundle_required(UncacheBundle, self.dut)
+        self.ptw_if = bind_bundle_required(PTWBundle, self.dut)
         self.backend_ctrl_if = bind_bundle_required(BackendCtrlBundle, self.dut)
-        self.backend_observe_if = bind_bundle_optional(BackendObserveBundle, self.dut)
-        self.backend_from_ftq_if = bind_bundle_optional(BackendFromFtqBundle, self.dut)
-        self.frontend_info_if = bind_bundle_optional(FrontendInfoBundle, self.dut)
+        self.backend_observe_if = bind_bundle_required(BackendObserveBundle, self.dut)
+        self.backend_from_ftq_if = bind_bundle_required(BackendFromFtqBundle, self.dut)
+        self.performance_if = bind_bundle_required(FrontendPerformanceBundle, self.dut)
 
     def _bind_collaborators(self) -> None:
         self.icache_agent.bind(self.icache_if)
+        self.icache_control_agent.bind(self.icache_control_if)
         self.uncache_agent.bind(self.uncache_if)
         self.ptw_agent.bind(self.ptw_if)
         self.ptw_agent.set_request_context_provider(self._build_ptw_request_context)
-        self.ptw_agent.set_request_get_gpa_provider(lambda: read_internal_signal(self.dut, _ITLB_PTW_REQ_GET_GPA))
+        self.ptw_agent.set_request_get_gpa_provider(
+            lambda: read_internal_signal(self.dut, self.itlb_ptw_req_get_gpa_path)
+        )
         self.ptw_agent.set_nemu_sync_hook(self._sync_nemu_ptw_state)
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)
@@ -240,7 +245,6 @@ class FrontendEnv:
                 drive_if=self.backend_ctrl_if,
                 observe_if=self.backend_observe_if,
                 from_ftq_if=self.backend_from_ftq_if,
-                frontend_info_if=self.frontend_info_if,
             )
         else:
             self.backend_model.bind(self.dut)
@@ -260,6 +264,7 @@ class FrontendEnv:
     def _bindable_collaborators(self) -> tuple:
         return (
             self.icache_agent,
+            self.icache_control_agent,
             self.uncache_agent,
             self.ptw_agent,
             self.ptw_full_ppn_checker,
@@ -498,6 +503,7 @@ class FrontendEnv:
         )
         self.dft_ctrl_if.drive_idle()
         self.icache_if.drive_idle()
+        self.icache_control_if.drive_idle()
         self.uncache_if.drive_idle()
         self.ptw_if.drive_idle()
         self.backend_ctrl_if.drive_idle()
@@ -515,6 +521,28 @@ class FrontendEnv:
             "io_softPrefetch_1_bits_vaddr": 0,
             "io_softPrefetch_2_valid": 0,
             "io_softPrefetch_2_bits_vaddr": 0,
+            "io_backend_toFtq_ftqIdxAhead_bits_flag": 0,
+            "io_backend_toFtq_ftqIdxAhead_bits_value": 0,
+            "io_backend_toIBuf_commitVType_hasVsetvl": 0,
+            "io_backend_toIBuf_commitVType_vtype_bits_illegal": 0,
+            "io_backend_toIBuf_commitVType_vtype_bits_vlmul": 0,
+            "io_backend_toIBuf_commitVType_vtype_bits_vma": 0,
+            "io_backend_toIBuf_commitVType_vtype_bits_vsew": 0,
+            "io_backend_toIBuf_commitVType_vtype_bits_vta": 0,
+            "io_backend_toIBuf_commitVType_vtype_valid": 0,
+            "io_backend_toIBuf_resumingVType": 0,
+            "io_backend_toIBuf_vsetvlVType_illegal": 0,
+            "io_backend_toIBuf_vsetvlVType_vlmul": 0,
+            "io_backend_toIBuf_vsetvlVType_vma": 0,
+            "io_backend_toIBuf_vsetvlVType_vsew": 0,
+            "io_backend_toIBuf_vsetvlVType_vta": 0,
+            "io_backend_toIBuf_walkToArchVType": 0,
+            "io_backend_toIBuf_walkVType_bits_illegal": 0,
+            "io_backend_toIBuf_walkVType_bits_vlmul": 0,
+            "io_backend_toIBuf_walkVType_bits_vma": 0,
+            "io_backend_toIBuf_walkVType_bits_vsew": 0,
+            "io_backend_toIBuf_walkVType_bits_vta": 0,
+            "io_backend_toIBuf_walkVType_valid": 0,
             "io_testOnlyPtwReqCtrlEnable": 0,
             "io_testOnlyPtwReqCtrlFire": 0,
             "io_testOnlyPtwReqCtrlBitsVpn": 0,
@@ -527,21 +555,7 @@ class FrontendEnv:
             "io_tlbCsr_mbmc_KEYIDEN": 0,
             "io_tlbCsr_mbmc_BME": 0,
             "io_tlbCsr_mbmc_CMODE": 0,
-            "io_tlbCsr_mbmc_BCLEAR": 0,
-            "io_tlbCsr_mbmc_BMA": 0,
-            "io_tlbCsr_priv_mxr": 0,
-            "io_tlbCsr_priv_sum": 0,
-            "io_tlbCsr_priv_vmxr": 0,
-            "io_tlbCsr_priv_vsum": 0,
-            "io_tlbCsr_priv_spvp": 0,
-            "io_tlbCsr_priv_dmode": 0,
-            "io_tlbCsr_mPBMTE": 0,
-            "io_tlbCsr_hPBMTE": 0,
-            "io_tlbCsr_pmm_mseccfg": 0,
-            "io_tlbCsr_pmm_menvcfg": 0,
-            "io_tlbCsr_pmm_henvcfg": 0,
-            "io_tlbCsr_pmm_hstatus": 0,
-            "io_tlbCsr_pmm_senvcfg": 0,
+            "io_tlbCsr_priv_debug": 0,
             "io_csrCtrl_pf_ctrl_l2_pf_enable": 0,
             "io_csrCtrl_pf_ctrl_l1D_pf_enable": 0,
             "io_csrCtrl_pf_ctrl_l1D_pf_train_on_hit": 0,
@@ -563,11 +577,8 @@ class FrontendEnv:
             "io_csrCtrl_storeset_no_fast_wakeup": 0,
             "io_csrCtrl_lvpred_timeout": 0,
             "io_csrCtrl_bp_ctrl_rasEnable": 1,
-            "io_csrCtrl_sbuffer_timeout": 0,
             "io_csrCtrl_sbuffer_threshold": 0,
-            "io_csrCtrl_ldld_vio_check_enable": 0,
             "io_csrCtrl_soft_prefetch_enable": 0,
-            "io_csrCtrl_cache_error_enable": 0,
             "io_csrCtrl_uncache_write_outstanding_enable": 0,
             "io_csrCtrl_hd_misalign_st_enable": 0,
             "io_csrCtrl_hd_misalign_ld_enable": 0,
@@ -582,7 +593,6 @@ class FrontendEnv:
             "io_csrCtrl_frontend_trigger_tUpdate_bits_addr": 0,
             "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType": 0,
             "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing": 0,
             "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action": 0,
             "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain": 0,
             "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute": 0,
@@ -595,23 +605,8 @@ class FrontendEnv:
             "io_csrCtrl_frontend_trigger_tEnableVec_3": 0,
             "io_csrCtrl_frontend_trigger_debugMode": 0,
             "io_csrCtrl_frontend_trigger_triggerCanRaiseBpExp": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_valid": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_addr": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_select": 0,
             "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_action": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain": 0,
             "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_execute": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_store": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_load": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2": 0,
-            "io_csrCtrl_mem_trigger_tEnableVec_0": 0,
-            "io_csrCtrl_mem_trigger_tEnableVec_1": 0,
-            "io_csrCtrl_mem_trigger_tEnableVec_2": 0,
-            "io_csrCtrl_mem_trigger_tEnableVec_3": 0,
-            "io_csrCtrl_mem_trigger_debugMode": 0,
-            "io_csrCtrl_mem_trigger_triggerCanRaiseBpExp": 0,
             "io_csrCtrl_virtMode": 0,
             "io_debugTopDown_robHeadVaddr_valid": 0,
             "io_debugTopDown_robHeadVaddr_bits_addr": 0,
@@ -629,8 +624,10 @@ class FrontendEnv:
             observer(int(cycle), self)
         if self._read(self.clock_reset.reset, 0):
             self.icache_agent.reset()
+            self.icache_control_agent.reset()
         else:
             self.icache_agent.on_clock_edge(cycle)
+            self.icache_control_agent.on_clock_edge(cycle)
         self.uncache_agent.on_clock_edge(cycle)
         self.ptw_agent.on_clock_edge(cycle)
         self.ptw_full_ppn_checker.on_clock_edge(cycle)
@@ -645,6 +642,9 @@ class FrontendEnv:
 
     def step(self, cycles: int = 1) -> int:
         return self.dut.Step(int(cycles))
+
+    def observed_cfvec_pc(self, slot: int) -> int:
+        return int(self.backend_model.observed_cfvec_pc(int(slot)))
 
     def Step(self, cycles: int = 1) -> int:
         return self.step(cycles)
@@ -701,31 +701,51 @@ class FrontendEnv:
         self._emit_event("control.load_program", {"base_addr": int(base_addr), "size": len(data)})
 
     def load_program_file(self, path: str, base_addr: int) -> int:
-        size = Path(path).stat().st_size
-        self.memory.load_file(path, int(base_addr))
+        data = Path(path).read_bytes()
+        size = len(data)
+        self.memory.load_bin(data, int(base_addr))
+        materialized_payload_bytes = self.memory.materialize_nexus_am_loader_payload(data, int(base_addr))
         self.backend_model.set_explicit_injection_enabled(
             False,
             reason=f"bin/program-file mode active ({str(path)})",
         )
-        self.logger.info("program file loaded: path=%s base=0x%x size=%d", path, int(base_addr), size)
+        self.logger.info(
+            "program file loaded: path=%s base=0x%x size=%d materialized_payload_bytes=%d",
+            path,
+            int(base_addr),
+            size,
+            materialized_payload_bytes,
+        )
         self._emit_event(
             "control.load_program",
-            {"path": str(path), "base_addr": int(base_addr), "size": int(size)},
+            {
+                "path": str(path),
+                "base_addr": int(base_addr),
+                "size": int(size),
+                "materialized_payload_bytes": int(materialized_payload_bytes),
+            },
         )
         return int(size)
 
     def load_golden_trace_file(self, path: str, start_index: int = 0) -> int:
         trace = GoldenTrace.from_file(str(path))
+        materialized_bytes = self.memory.materialize_trace_instructions(trace.entries)
         self.backend_model.set_golden_trace(trace, start_cursor=int(start_index))
         self.logger.info(
-            "golden trace loaded: path=%s start_index=%d entries=%d",
+            "golden trace loaded: path=%s start_index=%d entries=%d materialized_bytes=%d",
             str(path),
             int(start_index),
             len(trace.entries),
+            int(materialized_bytes),
         )
         self._emit_event(
             "control.load_golden_trace",
-            {"path": str(path), "entries": int(len(trace.entries)), "start_index": int(start_index)},
+            {
+                "path": str(path),
+                "entries": int(len(trace.entries)),
+                "start_index": int(start_index),
+                "materialized_bytes": int(materialized_bytes),
+            },
         )
         return int(len(trace.entries))
 

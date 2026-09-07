@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..bundles import BackendFromFtqBundle, FrontendInfoBundle, bind_bundle_optional
+from ..bundles import BackendFromFtqBundle, bind_bundle_optional
 from ..model.backend_runtime import BackendObservationSnapshot
 
 
@@ -17,7 +17,6 @@ class BackendStartupObservation:
 class BackendObserveMonitor:
     def __init__(self) -> None:
         self.from_ftq_if = None
-        self.frontend_info_if = None
 
     @staticmethod
     def _read(signal, default: int = 0) -> int:
@@ -29,7 +28,6 @@ class BackendObserveMonitor:
 
     def bind(self, target) -> None:
         self.from_ftq_if = bind_bundle_optional(BackendFromFtqBundle, target)
-        self.frontend_info_if = bind_bundle_optional(FrontendInfoBundle, target)
 
     def observe_startup(self) -> BackendStartupObservation:
         from_ftq_wen = self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_wen", None))
@@ -37,7 +35,7 @@ class BackendObserveMonitor:
             startup_progress=bool(from_ftq_wen),
             from_ftq_ftq_idx=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_ftqIdx", None)),
             from_ftq_start_pc_addr=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_startPc_addr", None)),
-            ibuf_full=self._read(getattr(self.frontend_info_if, "io_frontendInfo_ibufFull", None)),
+            ibuf_full=0,
         )
 
     def startup_progressed(self) -> bool:

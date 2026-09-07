@@ -433,22 +433,13 @@ class PTWAgent:
         valididx_payload = payload.get("s1_valididx", [0] * len(valididx_signals.signals))
         pteidx_payload = payload.get("s1_pteidx", [0] * len(pteidx_signals.signals))
         self._write(self.interface.resp_bits_s2xlate, payload.get("s2xlate", 0))
-        self._write(self.interface.resp_bits_get_gpa, payload.get("get_gpa", 0))
-        self._write(self.interface.resp_bits_memidx_is_ld, payload.get("memidx_is_ld", 0))
-        self._write(self.interface.resp_bits_memidx_is_st, payload.get("memidx_is_st", 0))
-        self._write(self.interface.resp_bits_memidx_idx, payload.get("memidx_idx", 0))
         self._write(self.interface.resp_bits_s2_entry_tag, payload.get("s2_entry_tag", 0))
         self._write(self.interface.resp_bits_s2_entry_vmid, payload.get("s2_entry_vmid", 0))
         self._write(self.interface.resp_bits_s2_entry_n, payload.get("s2_entry_n", 0))
         self._write(self.interface.resp_bits_s2_entry_pbmt, payload.get("s2_entry_pbmt", 0))
         self._write(self.interface.resp_bits_s2_entry_perm_a, payload.get("s2_entry_perm_a", 0))
-        self._write(self.interface.resp_bits_s2_entry_perm_g, payload.get("s2_entry_perm_g", 0))
-        self._write(self.interface.resp_bits_s2_entry_perm_u, payload.get("s2_entry_perm_u", 0))
         self._write(self.interface.resp_bits_s2_entry_perm_x, payload.get("s2_entry_perm_x", 0))
-        self._write(self.interface.resp_bits_s2_entry_perm_w, payload.get("s2_entry_perm_w", 0))
-        self._write(self.interface.resp_bits_s2_entry_perm_r, payload.get("s2_entry_perm_r", 0))
         self._write(self.interface.resp_bits_s2_entry_level, payload.get("s2_entry_level", 0))
-        self._write(self.interface.resp_bits_s2_entry_v, payload.get("s2_entry_v", 0))
         self._write(self.interface.resp_bits_s2_entry_ppn, payload.get("s2_entry_ppn", 0))
         self._write(self.interface.resp_bits_s2_gpf, payload.get("s2_gpf", 0))
         self._write(self.interface.resp_bits_s2_gaf, payload.get("s2_gaf", 0))
@@ -507,14 +498,14 @@ class PTWAgent:
         if req_valid == 1 and req_ready == 1:
             vpn = self._read(self.interface.req_0_bits_vpn, 0)
             s2xlate = self._read(self.interface.req_0_bits_s2xlate, 0)
-            get_gpa = self._read(self.interface.req_0_bits_get_gpa, 0)
+            get_gpa = 0
             if self.request_get_gpa_provider is not None:
                 internal_get_gpa = self.request_get_gpa_provider()
                 if internal_get_gpa is not None:
                     get_gpa = int(internal_get_gpa)
-            memidx_is_ld = self._read(self.interface.req_0_bits_memidx_is_ld, 0)
-            memidx_is_st = self._read(self.interface.req_0_bits_memidx_is_st, 0)
-            memidx_idx = self._read(self.interface.req_0_bits_memidx_idx, 0)
+            memidx_is_ld = 0
+            memidx_is_st = 0
+            memidx_idx = 0
             if self.page_table.mode == "bare":
                 self.bare_req_count += 1
             latency = self._current_latency()

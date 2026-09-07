@@ -73,7 +73,6 @@ class ICacheAgent:
         self._write(self.interface.a_ready, 0)
         self._write(self.interface.d_valid, 0)
         self._write(self.interface.d_bits_opcode, 0)
-        self._write(self.interface.d_bits_size, 0)
         self._write(self.interface.d_bits_source, 0)
         self._write(self.interface.d_bits_denied, 0)
         self._write(self.interface.d_bits_data, 0)
@@ -214,7 +213,6 @@ class ICacheAgent:
         data = top.beat0 if top.beat_idx == 0 else top.beat1
         self._write(self.interface.d_valid, 1)
         self._write(self.interface.d_bits_opcode, 1)
-        self._write(self.interface.d_bits_size, 6)
         self._write(self.interface.d_bits_source, top.source)
         self._write(self.interface.d_bits_data, data)
         self._write(self.interface.d_bits_denied, top.denied)

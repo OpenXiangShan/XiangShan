@@ -9,8 +9,9 @@ from .backend_observe import BackendObserveBundle
 from .clock_reset import ClockResetBundle
 from .csr_control import CSRControlBundle
 from .dft_control import DFTControlBundle
-from .frontend_info import FrontendInfoBundle
+from .frontend_performance import FrontendPerformanceBundle
 from .icache import ICacheBundle
+from .icache_control import ICacheControlBundle
 from .ptw import PTWBundle
 from .uncache import UncacheBundle
 
@@ -91,8 +92,9 @@ __all__ = [
     "CSRControlBundle",
     "ClockResetBundle",
     "DFTControlBundle",
-    "FrontendInfoBundle",
+    "FrontendPerformanceBundle",
     "ICacheBundle",
+    "ICacheControlBundle",
     "PTWBundle",
     "UncacheBundle",
     "bind_bundle_optional",
