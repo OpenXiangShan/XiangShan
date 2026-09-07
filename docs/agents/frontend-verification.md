@@ -240,8 +240,15 @@ equivalent explicit alias and writes
 `build-frontend/pylib-verilator/Frontend/`; `make frontend-vcs` writes
 `build-frontend/pylib-vcs/Frontend/`. The two DUT packages can coexist. Select
 the package for a test process with `TB_FRONTEND_SIM=verilator` or
-`TB_FRONTEND_SIM=vcs`; use `TB_FRONTEND_PYLIB=/path/to/pylib-root` only for an
-explicit override.
+`TB_FRONTEND_SIM=vcs`.
+
+Both build targets first run the `verilog` dependency when the Chisel/Scala
+inputs have changed, with `BUILD_DIR=build-frontend`, so the full RTL is emitted
+directly under `build-frontend/rtl/`. Picker selects
+`build-frontend/rtl/Frontend.sv` with
+`--sname Frontend --tname Frontend`; neither target runs `FrontendTopMain`.
+The VCS target appends the funcov SV sources after the complete RTL list in
+`build-frontend/full-rtl-picker.funcov.f`.
 
 In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
 by default. It opens a local socket during `pytest_configure` and otherwise
@@ -441,8 +448,8 @@ Any DUT bin-trace case must meet the following operational requirements:
 - every run must generate a waveform artifact
 - every run must generate a readable log artifact
 - every run must use a unique `run_id` and artifact root, normally
-  `src/test/python/Frontend/data/runs/<run_id>/`; a suite must use a unique
-  dated suite root under `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`
+  `build-frontend/artifacts/<run_id>/`; a suite must use a unique dated suite
+  root under `build-frontend/artifacts/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`
 - code coverage, waveform, funcov, and logs from one run must not be mixed with
   another run's output directories
 - waveform and log filenames should be logically tied to the binary and test
@@ -519,15 +526,15 @@ Open a VCS-generated frontend FSDB with RTL in Verdi:
 ```bash
 verdi -sv \
   "$NOOP_HOME/build-frontend/pylib-vcs/Frontend/Frontend_top.sv" \
-  -F "$NOOP_HOME/build-frontend/rtl/filelist.funcov.f" \
+  -F "$NOOP_HOME/build-frontend/full-rtl-picker.funcov.f" \
   -top Frontend_top \
-  -ssf "$NOOP_HOME/src/test/python/Frontend/data/runs/<run_id>/waveforms/<case>.fsdb"
+  -ssf "$NOOP_HOME/build-frontend/artifacts/<run_id>/waveforms/<case>.fsdb"
 ```
 
 Use `-F`, not `-f`, so relative RTL paths inside the generated filelist are
 resolved from the filelist directory. Include the picker/VCS wrapper
 `build-frontend/pylib-vcs/Frontend/Frontend_top.sv` explicitly and use
-`-top Frontend_top`; the generated RTL module `FrontendTop` is the DUT under
+`-top Frontend_top`; the generated RTL module `Frontend` is the DUT under
 that wrapper, not the FSDB top.
 
 ## Artifact Naming
@@ -535,7 +542,7 @@ that wrapper, not the FSDB top.
 - Use one unique `run_id` for every invocation and keep its outputs under one
   run root.
 - A bin-trace run keeps coverage, waveforms, funcov, and logs in separate
-  subdirectories of `src/test/python/Frontend/data/runs/<run_id>/`.
+  subdirectories of `build-frontend/artifacts/<run_id>/`.
 - Waveform and log filenames use the testcase/binary artifact tag; by default
   they are `<tag>.<wave-ext>` and `<tag>.log`.
 - Case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
@@ -613,7 +620,7 @@ than host-side test scaffolding.
 Current default implementation details in `env/runtime/fixtures.py`:
 
 - waveform, case log, coverage `.dat`, and funcov default under
-  `src/test/python/Frontend/data/runs/<run_id>/`
+  `build-frontend/artifacts/<run_id>/`
 - non-bin DUT tests use the same run-scoped layout as bin-trace tests
 - default waveform file name is `<bin-stem>_<test-name>.<wave-ext>`
 - default `wave-ext` is `fst`

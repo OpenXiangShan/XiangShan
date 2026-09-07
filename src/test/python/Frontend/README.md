@@ -86,7 +86,7 @@
   - 若不传 `output.fsdb`，默认在输入文件同目录下生成同名 `.fsdb`
   - 用于 FST 波形；frontend 默认构建产物是 `.fst`
   - 若显式执行 `make verilog FRONTEND_WAVEFORM_FORMAT=vcd` 或 `make frontend FRONTEND_WAVEFORM_FORMAT=vcd`，则 frontend pylib 会改为生成 `.vcd`
-  - 一旦 `build-frontend/.waveform_format` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
+  - 一旦 `build-frontend/.waveform_format.verilator` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 - `scripts/gen_coverage_html.sh`
   - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] [input.dat ... | input_dir] [output_dir]`
@@ -96,7 +96,7 @@
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
   - HTML 行号左侧的 `[ + ]` / `[ - ]` 来自 `merged.info` 里的 `BRDA` 记录，但不一定都是 RTL `if/else` branch。`verilator_coverage -write-info` 会把部分 raw coverage point 转成 lcov `BRDA`；例如端口声明行 `output io_phr_444` 左侧两个 `+`，原始 `.dat` 中对应的是 `t=toggle` 的 `io_phr_444:0->1` 和 `io_phr_444:1->0`。遇到端口、wire、reg 声明行出现 `[ + + ]` 时，应回查 raw `.dat` 的 `t=` 和 `o=` 字段，不要直接解释成代码分支。
   - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
-    `source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate && src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/runs/<run_id>/coverage`
+    `source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate && src/test/python/Frontend/scripts/gen_coverage_html.sh build-frontend/artifacts/<run_id>/coverage`
 - `Frontend.ignore`
   - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
   - `scripts/gen_coverage_html.sh` 也会默认读取该文件，并把文件级 pattern 转成 `genhtml --exclude`。
@@ -110,12 +110,12 @@
   - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
 - `scripts/report_raw_code_coverage.py`
-  - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir src/test/python/Frontend/data/runs/<run_id>/coverage`
+  - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir build-frontend/artifacts/<run_id>/coverage`
   - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
-  - 使用 `--json-output <path> --run-id <run_id>` 固化机器可读 summary；suite 默认写入 `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/report/code_coverage_summary.json`
+  - 使用 `--json-output <path> --run-id <run_id>` 固化机器可读 summary；suite 默认写入 `build-frontend/artifacts/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/report/code_coverage_summary.json`
   - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
 - `scripts/run_baremode_asm_suite.sh`
-  - 每次启动固定写入 `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`；其中 `cases/<case_stem>/` 是单个用例的独立 run 目录，`report/` 是 suite 汇总。`TB_SUITE_DATE`、`TB_SUITE_TIME` 可用于受控复现，已存在的 suite 目录会直接拒绝，避免覆盖或混写证据。
+  - 每次启动固定写入 `build-frontend/artifacts/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`；其中 `cases/<case_stem>/` 是单个用例的独立目录，`report/` 是 suite 汇总。`TB_SUITE_DATE`、`TB_SUITE_TIME` 可用于受控复现，已存在的 suite 目录会直接拒绝，避免覆盖或混写证据。
   - 随后自动生成逐 artifact gate audit、只读反标结果和同签名 `observed` funcov aggregate。
   - `observed` aggregate 只用于批量 summary/unhit；自动 `HIT` 仍只认逐 case、真实 DUT 且通过全部门禁的原始 artifact。
 - `scripts/asm_to_jsonl.sh`
@@ -123,9 +123,9 @@
   - 默认把 `.S` 链接到 `0x10001000`，按 NEMU memory base `0x10000000`
     在最终 `.bin` 前补 `0x1000` 字节 0
   - 默认输出 `.bin` 到 `tests/asm_cases/generated/<case>.bin`，输出 golden trace 到
-    `data/runs/<run_id>/inputs/<case>.trace.jsonl`
+    `build-frontend/artifacts/<run_id>/inputs/<case>.trace.jsonl`
   - 通过现有 `tools/nemu_bin_to_golden_trace.py` 调用 NEMU 并转换 trace；
-    raw NEMU log 默认写到 `data/runs/<run_id>/inputs/<case>.nemu.log`
+    raw NEMU log 默认写到 `build-frontend/artifacts/<run_id>/inputs/<case>.nemu.log`
   - 调用前需要先激活 frontend Python/runtime 环境；脚本本身不写死 venv 路径
   - 可用 `NEMU_EXEC=/path/to/riscv64-nemu-interpreter` 手动指定 NEMU；
     默认使用 `ready-to-run/riscv64-nemu-interpreter`
@@ -160,8 +160,13 @@ make frontend-vcs \
 和 FSDB 波形。两套产物分别保留在
 `build-frontend/pylib-verilator/Frontend/` 和
 `build-frontend/pylib-vcs/Frontend/`。跑测试时用 `TB_FRONTEND_SIM=verilator`
-或 `TB_FRONTEND_SIM=vcs` 选择；只有需要显式指定非默认目录时才使用
-`TB_FRONTEND_PYLIB=/path/to/pylib-root`。
+或 `TB_FRONTEND_SIM=vcs` 选择。
+
+两个目标都会先使用 `BUILD_DIR=build-frontend` 调用 `verilog`，按需将 RTL
+直接生成到 `build-frontend/rtl/`，且不修改其中的 `Frontend.sv`。Picker 均以
+`Frontend` 为 source top；VCS 额外使用
+`build-frontend/full-rtl-picker.funcov.f`，在完整 RTL filelist 后追加
+funcov SystemVerilog 文件。
 
 - non-DUT 默认回归入口：
 
