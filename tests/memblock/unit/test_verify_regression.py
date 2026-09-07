@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 15
+        result["constraint_schema"] = 16
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -442,6 +442,36 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression._check_mixed_coverage(result)
         result.update(
             {
+                "constraint_schema": 15,
+                "actual_cmo_operation": "2,2,2",
+                "target_cmo_error": 1000,
+                "target_cmo_error_denied": 500,
+                "actual_cmo_error": "0,6",
+                "actual_cmo_error_kind": "3,3",
+                "actual_cmo_operation_error": "1,1,1,1,1,1",
+                "actual_probe_overlap": "1,1",
+                "probes": 4,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_error_kind"] = "4,2"
+        result["actual_cmo_operation_error"] = "1,1,1,1,2,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "operation/error cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_error_kind"] = "3,3"
+        result["actual_cmo_operation_error"] = "1,1,1,1,1,1"
+        result["target_cmo_error"] = 500
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_cmo_error",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 14,
                 "target_probe": 0,
                 "actual_probe_sequences": 0,
                 "actual_probe_caps": "0,0",

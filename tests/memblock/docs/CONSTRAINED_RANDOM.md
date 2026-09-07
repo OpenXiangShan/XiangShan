@@ -56,6 +56,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative operation weights inside the `cmo` class |
 | `cmo-dirty` | Per-mille share of CMO target lines made dirty by a committed store that CMO must drain from SBuffer |
 | `cmo-younger-overlap` | Per-mille share of CMO actions that issue a younger cold load into another MSHR and require `flushPipe` cancellation with no writeback |
+| `cmo-error` | Per-mille share of CMO actions whose opcode-qualified `CBOAck` carries a legal error; zero strictly disables error injection |
+| `cmo-error-denied` | Per-mille denied share among error CMO actions; false selects independent corrupt and true selects denied |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -137,7 +139,7 @@ scenario implementations:
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
 | Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
-| Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, and `cmo-younger-overlap` select CMO actions in the active Bare/stage-1/nested context, derive exact clean/dirty Probe reports and data, hold randomized CBOAck latency, and optionally cancel a younger delayed miss | Add simultaneous multi-class windows, multiple CMO sources, and low-rate denied/corrupt injection after their common error oracle is modeled |
+| Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths | Add simultaneous multi-class windows and multiple CMO sources |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
@@ -145,7 +147,7 @@ scenario implementations:
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, and `probe-overlap` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. The overlap class holds an unrelated cold refill for 2048..4096 cycles, queues a clean auxiliary Probe and the dirty primary Probe without an intervening cycle, checks their distinct B sources/address-matched C responses, and requires at least two accepted-but-unanswered Probes before the delayed load can write back | Extend beyond two simultaneous Probe sources and compose Probe overlap with more operation classes and malformed manager traffic |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
-| Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
+| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection to the common generator. It cannot be consumed by a same-address refill or permission upgrade, and all enabled CLEAN/FLUSH/INVAL x error-kind classes close per seed | Lift DCache load/refill, PTW, Uncache, and atomic error controls into the same interface while keeping realistic presets rare or zero |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
 `corner` are settings of the same generator. Closing them means lifting each
@@ -170,6 +172,10 @@ Their CMO operation weights (CLEAN/FLUSH/INVAL) are `1/1/1` in every preset.
 Dirty-line rates are `500`, `50`, and `500` per mille, and younger-load overlap
 rates are `500`, `10`, and `750`. Thus `spec` retains a verification floor
 without making cache maintenance or its pipeline flush artificially common.
+CMO error rates are `100`, `0`, and `500` per mille for `coverage`, `spec`, and
+`corner`; the denied share is `500` in all three presets. Ordinary SPEC-like
+traffic therefore injects no manager error, balanced coverage keeps errors
+rare after its mandatory cross closes, and corner traffic emphasizes them.
 Their vector-segment store shares are `500`, `300`, and `500` per mille.
 `coverage` and `corner` weight every ordinary and segment
 addressing/EEW/SEW/LMUL/EMUL class equally, plus every segment NF. `spec`
@@ -257,8 +263,9 @@ The combined ordinary memory mix is about 70.6% loads and 29.4% stores. Atomic
 miss allocations were only 19,008 and 225,708 in the two datasets; reported
 MMIO loads/stores were also only thousands, and the sampled NC counters were
 zero. Those events therefore receive small verification floors rather than
-being made artificially common in `spec`. Error injection remains in focused
-error contracts and corner campaigns, not ordinary SPEC-like traffic.
+being made artificially common in `spec`. CMO error injection is disabled in
+the `spec` preset and remains concentrated in focused contracts plus balanced
+or corner campaigns.
 
 The calibrated first-beat DCache/PTW/Uncache response latency distribution is
 approximately 74.1% below 20 cycles, 14.4% at 20-39, 5.1% at 40-99, and 6.4%
@@ -269,9 +276,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=14`, the resolved target weights,
+Every terminal line prints `constraint_schema=15`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
-line-state/younger-overlap, ordinary-vector
+line-state/younger-overlap/error presence/error kind, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
 addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
 locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
@@ -294,6 +301,11 @@ control bit without a relevant inactive element cannot close coverage.
 CMO operation, clean/dirty line-state, and no-overlap/younger-overlap counts each
 conserve exactly against the CMO operation count. A zero operation weight or a
 fixed binary target must also leave its disabled observed bin at zero.
+CMO error presence also conserves against that count. When errors are enabled,
+corrupt/denied counts and every enabled CLEAN/FLUSH/INVAL x error-kind cross are
+required and conserved; an error CMO contributes no manager Probe because the
+operation failed. The offline verifier subtracts exactly those actions from
+CMO-derived Probe conservation.
 Probe subclass counts conserve against the generated sequence count. Manager
 Probe traffic additionally conserves primary sequences, toB cleanup requests,
 CMO-derived Probes, and overlap's auxiliary clean Probes. Any observed overlap

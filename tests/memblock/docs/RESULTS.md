@@ -2077,3 +2077,63 @@ frozen executable SHA-256 was
 the runtime manifest SHA-256 was
 `82d6e9063fd0d7d6590504efa063544f9f682a1e11805b330dcb3399323496f8`.
 No CPU RTL defect was observed.
+
+## Schema 15 Random CMO Error Closure
+
+On 2026-09-07 the common `random-mixed` interface added independent
+`cmo-error` and `cmo-error-denied` per-mille constraints. Success and error
+actions use the same CMO scheduler, Bare/stage-1/nested mappings, clean/dirty
+line preparation, randomized CBOAck delay, and optional younger delayed miss.
+Every enabled seed records error presence, corrupt/denied kind, and all six
+CLEAN/FLUSH/INVAL x error-kind crosses. Error CMO completion requires the exact
+HardwareError or StoreAccessFault, `flushPipe=1`, no manager Probe, unchanged
+bus memory, self redirect cleanup, and cancellation of an overlapping younger
+load without writeback. Probe conservation subtracts exactly the failed CMO
+count.
+
+The presets use CMO error rates `100/0/500` for
+`coverage/spec/corner`; the denied share is 500 in all three. Thus the
+SPEC-like direction keeps rare manager errors disabled, while balanced and
+corner runs close the same common-interface crosses at different pressure.
+
+The following 256-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | CMO operations | Clean/dirty | No-error/error | Corrupt/denied |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| `coverage` | 15041 | 47,759 | 5/4/4 | 9/4 | 6/7 | 4/3 |
+| `spec`, error rate 500 | 15042 | 32,928 | 3/2/2 | 6/1 | 1/6 | 3/3 |
+| `corner` | 15043 | 55,436 | 4/3/5 | 6/6 | 4/8 | 3/5 |
+| all denied | 15044 | 32,075 | 3/1/2 | 4/2 | 0/6 | 0/6 |
+| `spec`, default zero error | 15045 | 26,781 | 1/1/1 | 2/1 | 3/0 | 0/0 |
+| `coverage`, error disabled | 15046 | 27,922 | 2/2/1 | 2/3 | 5/0 | 0/0 |
+| all corrupt | 15047 | 33,827 | 1/3/4 | 3/5 | 0/8 | 8/0 |
+| CMO disabled | 15048 | 17,805 | 0/0/0 | 0/0 | 0/0 | 0/0 |
+
+Two CMO-only dirty-line runs, seeds 15031 and 15032, each completed 155
+independent corrupt CBOAck actions with and without manager backpressure. The
+focused `cmo-contracts` scenario also passed all three operations and both
+error kinds.
+
+Two verification-environment assumptions were corrected while minimizing the
+new crosses. Address-only error injection could be consumed by the same-line
+permission/refill response used to make a CMO target dirty; the dedicated
+injector now also requires A opcode 12, 13, or 14. Separately, Probe overlap
+used a fixed 256-cycle final settle even though corner traffic can retain a
+longer unrelated D response; it now polls D-response and GrantAck state to a
+bounded timeout. Both were testbench issues, not CPU RTL defects, so no
+standalone bug document was created.
+
+Frozen-runtime seed 15051 passed at cycle 33,533 with CMO operation counts
+`5/3/2`, clean/dirty `4/6`, no-error/error `4/6`, corrupt/denied `3/3`, and all
+six operation/error crosses nonzero. The independent verifier accepted the
+controller-hashed frozen artifact:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=15051..15051 results=1 transactions=256 elapsed_seconds=13.259939 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=38c0453f6da813177e893e91e4de84e8c820ba3440c73fcb78bc22407acae2ef
+```
+
+The frozen executable and runtime-manifest SHA-256 values are
+`c1d6796f1f79734f291ff99c84ab5c81e338e23230b369bdbd0063012837b00d`
+and `cd8309dc3d298e972e1394b73007649b102bfeee2ba9426627cad33182b2ec91`.
+All 185 Python unit tests passed. No new CPU RTL defect was observed.

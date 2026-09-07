@@ -1751,6 +1751,13 @@ public:
         configure_response_error(address, denied, corrupt, corrupt_beat);
     }
 
+    void inject_cmo_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt)
+    {
+        configure_response_error(
+            address, denied, corrupt, DcacheCorruptBeat::all, true);
+    }
+
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
@@ -2213,6 +2220,7 @@ private:
         bool denied;
         bool corrupt;
         DcacheCorruptBeat corrupt_beat;
+        bool cmo_only;
     };
 
     struct BBeat {
@@ -2265,7 +2273,9 @@ private:
             const bool address_matches = !pending_response_error_->address ||
                 ((*pending_response_error_->address & ~(transfer_bytes - 1)) ==
                  base);
-            if (address_matches) {
+            const bool request_matches = !pending_response_error_->cmo_only ||
+                (request.opcode >= 12 && request.opcode <= 14);
+            if (address_matches && request_matches) {
                 denied = pending_response_error_->denied;
                 corrupt = pending_response_error_->corrupt;
                 corrupt_beat = pending_response_error_->corrupt_beat;
@@ -2357,7 +2367,7 @@ private:
 
     void configure_response_error(
         std::optional<std::uint64_t> address, bool denied, bool corrupt,
-        DcacheCorruptBeat corrupt_beat)
+        DcacheCorruptBeat corrupt_beat, bool cmo_only = false)
     {
         if (!denied && !corrupt) {
             throw std::invalid_argument(
@@ -2369,7 +2379,7 @@ private:
                 "DCache per-beat selection requires independent corrupt");
         }
         pending_response_error_ = PendingResponseError{
-            address, denied, corrupt, corrupt_beat};
+            address, denied, corrupt, corrupt_beat, cmo_only};
     }
 
     void accept_probe_response(const CRequest &response)
@@ -4632,6 +4642,13 @@ public:
     {
         memory_agent_.inject_response_error_at(
             address, denied, corrupt, corrupt_beat);
+    }
+
+    void inject_dcache_cmo_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt)
+    {
+        memory_agent_.inject_cmo_response_error_at(
+            address, denied, corrupt);
     }
 
     void inject_ptw_response_error_after(
@@ -9134,6 +9151,26 @@ public:
         }
         if (memory_agent_.request_count() < target) {
             error_ = "timed out waiting for target DCache request count";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_dcache_idle(unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout &&
+                 (!memory_agent_.responses_idle() ||
+                  !memory_agent_.grant_acks_idle());
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (!memory_agent_.responses_idle() ||
+            !memory_agent_.grant_acks_idle()) {
+            error_ = "timed out draining DCache responses and GrantAcks";
             return false;
         }
         return check_components();

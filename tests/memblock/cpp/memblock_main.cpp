@@ -128,6 +128,8 @@ struct RandomConstraints {
     std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
     unsigned cmo_dirty_per_mille = 0;
     unsigned cmo_younger_overlap_per_mille = 0;
+    unsigned cmo_error_per_mille = 0;
+    unsigned cmo_error_denied_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -183,6 +185,8 @@ struct RandomConstraints {
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 500,
+                .cmo_error_per_mille = 100,
+                .cmo_error_denied_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -240,6 +244,8 @@ struct RandomConstraints {
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 50,
                 .cmo_younger_overlap_per_mille = 10,
+                .cmo_error_per_mille = 0,
+                .cmo_error_denied_per_mille = 500,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -297,6 +303,8 @@ struct RandomConstraints {
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 750,
+                .cmo_error_per_mille = 500,
+                .cmo_error_denied_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -630,6 +638,10 @@ struct RandomConstraints {
             cmo_dirty_per_mille = parsed;
         } else if (key == "cmo-younger-overlap") {
             cmo_younger_overlap_per_mille = parsed;
+        } else if (key == "cmo-error") {
+            cmo_error_per_mille = parsed;
+        } else if (key == "cmo-error-denied") {
+            cmo_error_denied_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -907,6 +919,8 @@ struct RandomConstraints {
             vector_segment_stores_per_mille > 1000 ||
             cmo_dirty_per_mille > 1000 ||
             cmo_younger_overlap_per_mille > 1000 ||
+            cmo_error_per_mille > 1000 ||
+            cmo_error_denied_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -945,6 +959,10 @@ struct RandomConstraints {
         if (probes_per_mille != 0 && operation_weights[scalar_store] == 0) {
             throw std::invalid_argument(
                 "probe requires a nonzero scalar-store weight");
+        }
+        if (cmo_error_per_mille != 0 && operation_weights[cmo] == 0) {
+            throw std::invalid_argument(
+                "cmo-error requires a nonzero CMO operation weight");
         }
         if (stride_stream_per_mille != 0 &&
             (operation_weights[scalar_load] == 0 ||
@@ -1305,7 +1323,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=14 constraints=" << name
+        stream << "constraint_schema=15 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1325,6 +1343,9 @@ struct RandomConstraints {
                << " target_cmo_dirty=" << cmo_dirty_per_mille
                << " target_cmo_younger_overlap="
                << cmo_younger_overlap_per_mille
+               << " target_cmo_error=" << cmo_error_per_mille
+               << " target_cmo_error_denied="
+               << cmo_error_denied_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -1620,6 +1641,11 @@ struct ConstraintCoverage {
         cmo_operations{};
     std::array<std::uint64_t, 2> cmo_line_states{};
     std::array<std::uint64_t, 2> cmo_younger_overlaps{};
+    std::array<std::uint64_t, 2> cmo_errors{};
+    std::array<std::uint64_t, 2> cmo_error_kinds{};
+    std::array<std::array<std::uint64_t, 2>,
+               RandomConstraints::cmo_operation_count>
+        cmo_operation_errors{};
     std::array<std::uint64_t, 2> vector_directions{};
     std::array<std::uint64_t, 4> vector_addressing{};
     std::array<std::uint64_t, 4> vector_eews{};
@@ -1826,12 +1852,37 @@ struct ConstraintCoverage {
                 cmo_operations.begin(), [](unsigned weight, std::uint64_t count) {
                     return (weight == 0) == (count == 0);
                 });
+            bool error_crosses_complete = true;
+            for (unsigned cmo_operation = 0;
+                 cmo_operation < RandomConstraints::cmo_operation_count;
+                 ++cmo_operation) {
+                if (constraints.cmo_operation_weights[cmo_operation] == 0) {
+                    error_crosses_complete &=
+                        cmo_operation_errors[cmo_operation] ==
+                            std::array<std::uint64_t, 2>{};
+                    continue;
+                }
+                if (constraints.cmo_error_per_mille != 0) {
+                    error_crosses_complete &=
+                        (constraints.cmo_error_denied_per_mille == 1000 ||
+                         cmo_operation_errors[cmo_operation][0] != 0) &&
+                        (constraints.cmo_error_denied_per_mille == 0 ||
+                         cmo_operation_errors[cmo_operation][1] != 0);
+                }
+            }
             return operations[operation] != 0 && operations_complete &&
                 binary_complete(
                     constraints.cmo_dirty_per_mille, cmo_line_states) &&
                 binary_complete(
                     constraints.cmo_younger_overlap_per_mille,
-                    cmo_younger_overlaps);
+                    cmo_younger_overlaps) &&
+                binary_complete(
+                    constraints.cmo_error_per_mille, cmo_errors) &&
+                (constraints.cmo_error_per_mille == 0 ||
+                 direction_complete(
+                     constraints.cmo_error_denied_per_mille,
+                     cmo_error_kinds)) &&
+                error_crosses_complete;
         }
         if (operation == RandomConstraints::vector_load ||
             operation == RandomConstraints::vector_store) {
@@ -2010,6 +2061,17 @@ struct ConstraintCoverage {
                << cmo_line_states[1]
                << " actual_cmo_younger_overlap="
                << cmo_younger_overlaps[0] << ',' << cmo_younger_overlaps[1]
+               << " actual_cmo_error=" << cmo_errors[0] << ','
+               << cmo_errors[1]
+               << " actual_cmo_error_kind=" << cmo_error_kinds[0] << ','
+               << cmo_error_kinds[1]
+               << " actual_cmo_operation_error="
+               << cmo_operation_errors[0][0] << ','
+               << cmo_operation_errors[0][1] << ','
+               << cmo_operation_errors[1][0] << ','
+               << cmo_operation_errors[1][1] << ','
+               << cmo_operation_errors[2][0] << ','
+               << cmo_operation_errors[2][1]
                << " actual_vector_direction=" << vector_directions[0] << ','
                << vector_directions[1]
                << " actual_vector_addressing=" << vector_addressing[0] << ','
@@ -12114,7 +12176,7 @@ int run_cmo_contracts(int argc, char **argv)
             const std::uint64_t errors_before =
                 environment.dcache_error_response_requests();
             environment.expect_store(cmo);
-            environment.inject_dcache_response_error_at(
+            environment.inject_dcache_cmo_response_error_at(
                 line, denied, corrupt);
             environment.force_next_cmo_response_delay(256);
             if (!environment.enqueue_store(cmo, 0) ||
@@ -31724,7 +31786,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                  missing_cap || missing_data || missing_overlap);
         };
         const auto issue_random_cmo = [&] (
-            unsigned operation, bool dirty, bool younger_overlap) {
+            unsigned operation, bool dirty, bool younger_overlap,
+            std::optional<bool> error_denied) {
             const unsigned cmo_completion_timeout =
                 std::max(constrained_completion_timeout, 16384U);
             phase = "random-cmo-drain";
@@ -31810,6 +31873,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             cmo_transaction.expected_output_flush_pipe = true;
             cmo_transaction.expected_debug_is_mmio = false;
             cmo_transaction.expected_debug_is_ncio = false;
+            if (error_denied) {
+                cmo_transaction.expected_exception_mask = *error_denied
+                    ? memblock::kExceptionStoreAccessFault
+                    : memblock::kExceptionHardwareError;
+            }
             const std::vector<unsigned char> expected_line =
                 environment.memory().read_beat(line, 64);
             const bool retain = operation == RandomConstraints::cmo_clean;
@@ -31825,7 +31893,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.dcache_probe_data();
             const std::uint64_t store_writebacks_before =
                 environment.store_writebacks();
+            const std::uint64_t error_responses_before =
+                environment.dcache_error_response_requests();
+            const std::uint64_t denied_beats_before =
+                environment.dcache_denied_d_beats();
+            const std::uint64_t corrupt_beats_before =
+                environment.dcache_corrupt_d_beats();
+            const std::uint64_t bus_line_before =
+                environment.bus_expected_load(line + 24, memblock::LoadOp::ld);
+            const std::uint64_t sq_cancels_before =
+                environment.sq_redirect_canceled_observed();
             environment.expect_store(cmo_transaction);
+            if (error_denied) {
+                environment.inject_dcache_cmo_response_error_at(
+                    line, *error_denied, !*error_denied);
+            }
             phase = "random-cmo-issue";
             if (!environment.enqueue_store(
                     cmo_transaction, memblock::lq_pointer_value(lq_offset)) ||
@@ -31843,22 +31925,27 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     cmo_transaction, cmo_before + 1, 8192) ||
                 environment.dcache_last_cmo_address() != line ||
                 environment.dcache_last_cmo_source() !=
-                    memblock::kDcacheCmoSource ||
-                !environment.request_dcache_probe(
-                    line, probe_cap, false, expected_report,
-                    dirty ? expected_line : std::vector<unsigned char>{}) ||
-                !environment.run_until_probe_responses(
-                    probe_responses_before + 1,
-                    cmo_completion_timeout) ||
-                environment.dcache_probe_data() !=
-                    probe_data_before + (dirty ? 1U : 0U) ||
-                environment.store_writebacks() != store_writebacks_before ||
+                    memblock::kDcacheCmoSource) {
+                return false;
+            }
+            if (!error_denied &&
+                (!environment.request_dcache_probe(
+                     line, probe_cap, false, expected_report,
+                     dirty ? expected_line : std::vector<unsigned char>{}) ||
+                 !environment.run_until_probe_responses(
+                     probe_responses_before + 1,
+                     cmo_completion_timeout) ||
+                 environment.dcache_probe_data() !=
+                     probe_data_before + (dirty ? 1U : 0U))) {
+                return false;
+            }
+            if (environment.store_writebacks() != store_writebacks_before ||
                 environment.pending_scalar_stores() != 1) {
                 return false;
             }
 
             std::optional<memblock::LoadTransaction> younger;
-            std::uint64_t younger_writebacks_before = 0;
+            std::uint64_t younger_writebacks_before = environment.writebacks();
             std::uint64_t younger_cancels_before = 0;
             unsigned younger_response_delay = 0;
             if (younger_overlap) {
@@ -31893,13 +31980,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             phase = "random-cmo-complete";
             if (!environment.run_until_store_complete(
                     cmo_completion_timeout) ||
-                (younger_overlap &&
+                ((younger_overlap || error_denied.has_value()) &&
                  (!environment.redirect_after(
-                      cmo_transaction.rob, cmo_transaction.rob_flag, false) ||
+                      cmo_transaction.rob, cmo_transaction.rob_flag,
+                      error_denied.has_value()) ||
                   environment.writebacks() != younger_writebacks_before)) ||
-                !environment.commit_store(cmo_transaction, 8192) ||
+                (!error_denied &&
+                 !environment.commit_store(cmo_transaction, 8192)) ||
                 !environment.run_cycles(
-                    younger_overlap ? younger_response_delay + 256U : 16U) ||
+                    younger_overlap ? younger_response_delay + 256U
+                                    : error_denied ? 96U : 16U) ||
                 (younger_overlap &&
                  (environment.writebacks() != younger_writebacks_before ||
                   environment.lq_redirect_canceled_observed() !=
@@ -31911,6 +32001,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     cmo_before + 1 ||
                 !environment.sbuffer_empty()) {
                 return false;
+            }
+            if (error_denied &&
+                (environment.dcache_error_response_requests() !=
+                     error_responses_before + 1 ||
+                 environment.dcache_denied_d_beats() !=
+                     denied_beats_before + (*error_denied ? 1U : 0U) ||
+                 environment.dcache_corrupt_d_beats() !=
+                     corrupt_beats_before + (*error_denied ? 0U : 1U) ||
+                 environment.dcache_probe_responses() !=
+                     probe_responses_before ||
+                 environment.bus_expected_load(line + 24, memblock::LoadOp::ld) !=
+                     bus_line_before)) {
+                return false;
+            }
+            if (error_denied) {
+                --rob_offset;
+                const std::uint64_t canceled_sq =
+                    environment.sq_redirect_canceled_observed() -
+                    sq_cancels_before;
+                if (canceled_sq > 1 || canceled_sq > sq_offset) {
+                    return false;
+                }
+                sq_offset -= canceled_sq;
             }
             if (younger_overlap) {
                 --rob_offset;
@@ -31978,6 +32091,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             unsigned cmo_operation = 0;
             bool cmo_dirty = false;
             bool cmo_younger_overlap = false;
+            std::optional<bool> cmo_error_denied;
             if (kind == RandomConstraints::cmo) {
                 cmo_operation = constraints.choose_cmo_operation(random());
                 for (unsigned candidate = 0;
@@ -31987,6 +32101,39 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constraint_coverage.cmo_operations[candidate] == 0) {
                         cmo_operation = candidate;
                         break;
+                    }
+                }
+                if (constraints.cmo_error_per_mille != 0) {
+                    for (unsigned candidate = 0;
+                         candidate < RandomConstraints::cmo_operation_count;
+                         ++candidate) {
+                        if (constraints.cmo_operation_weights[candidate] == 0) {
+                            continue;
+                        }
+                        if (constraints.cmo_error_denied_per_mille != 1000 &&
+                            constraint_coverage.cmo_operation_errors[
+                                candidate][0] == 0) {
+                            cmo_operation = candidate;
+                            cmo_error_denied = false;
+                            break;
+                        }
+                        if (constraints.cmo_error_denied_per_mille != 0 &&
+                            constraint_coverage.cmo_operation_errors[
+                                candidate][1] == 0) {
+                            cmo_operation = candidate;
+                            cmo_error_denied = true;
+                            break;
+                        }
+                    }
+                }
+                if (!cmo_error_denied) {
+                    const bool cmo_error = choose_binary_class(
+                        constraints.cmo_error_per_mille,
+                        constraint_coverage.cmo_errors);
+                    if (cmo_error) {
+                        cmo_error_denied = choose_binary_class(
+                            constraints.cmo_error_denied_per_mille,
+                            constraint_coverage.cmo_error_kinds);
                     }
                 }
                 cmo_dirty = choose_binary_class(
@@ -32466,13 +32613,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::cmo) {
                 ordinary_leaf_addressed = true;
                 if (!issue_random_cmo(
-                        cmo_operation, cmo_dirty, cmo_younger_overlap)) {
+                        cmo_operation, cmo_dirty, cmo_younger_overlap,
+                        cmo_error_denied)) {
                     return false;
                 }
                 ++constraint_coverage.cmo_operations[cmo_operation];
                 ++constraint_coverage.cmo_line_states[cmo_dirty ? 1 : 0];
                 ++constraint_coverage.cmo_younger_overlaps[
                     cmo_younger_overlap ? 1 : 0];
+                ++constraint_coverage.cmo_errors[
+                    cmo_error_denied ? 1 : 0];
+                if (cmo_error_denied) {
+                    const unsigned error_kind = *cmo_error_denied ? 1U : 0U;
+                    ++constraint_coverage.cmo_error_kinds[error_kind];
+                    ++constraint_coverage.cmo_operation_errors[
+                        cmo_operation][error_kind];
+                }
                 ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::noncacheable) {
@@ -32706,32 +32862,55 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     environment.dcache_max_probe_outstanding();
                 if (!environment.request_dcache_probe(
                         *probe_candidate, to_b ? 1U : 2U, need_data,
-                        to_b ? 0U : 1U, expected_line) ||
-                    !environment.run_until_probe_responses(
+                        to_b ? 0U : 1U, expected_line)) {
+                    phase = probe_phase.str() + ":primary-request";
+                    return false;
+                }
+                if (!environment.run_until_probe_responses(
                         responses_before + (probe_overlap ? 2U : 1U),
-                        probe_completion_timeout) ||
-                    (probe_overlap &&
-                     (environment.writebacks() != overlap_writebacks_before ||
-                      environment.dcache_max_probe_outstanding() <
-                          std::max<std::uint64_t>(2, probe_depth_before)))) {
+                        probe_completion_timeout)) {
+                    phase = probe_phase.str() + ":response-drain";
                     return false;
                 }
-                if (to_b &&
-                    (!environment.request_dcache_probe(
-                         *probe_candidate, 2, false, 2) ||
-                     !environment.run_until_probe_responses(
-                         responses_before + (probe_overlap ? 3U : 2U),
-                         probe_completion_timeout))) {
+                if (probe_overlap &&
+                    environment.writebacks() != overlap_writebacks_before) {
+                    phase = probe_phase.str() + ":early-delayed-writeback";
                     return false;
                 }
-                if (overlap_load &&
-                    (!environment.run_until_complete(
-                         probe_completion_timeout) ||
-                     !environment.run_until_lq_retired(8192) ||
-                     !environment.run_cycles(256) ||
-                     !environment.dcache_responses_idle() ||
-                     !environment.dcache_grants_drained())) {
+                if (probe_overlap &&
+                    environment.dcache_max_probe_outstanding() <
+                        std::max<std::uint64_t>(2, probe_depth_before)) {
+                    phase = probe_phase.str() + ":outstanding-depth";
                     return false;
+                }
+                if (to_b) {
+                    if (!environment.request_dcache_probe(
+                            *probe_candidate, 2, false, 2)) {
+                        phase = probe_phase.str() + ":cleanup-request";
+                        return false;
+                    }
+                    if (!environment.run_until_probe_responses(
+                            responses_before + (probe_overlap ? 3U : 2U),
+                            probe_completion_timeout)) {
+                        phase = probe_phase.str() + ":cleanup-response";
+                        return false;
+                    }
+                }
+                if (overlap_load) {
+                    phase = probe_phase.str() + ":delayed-load-complete";
+                    if (!environment.run_until_complete(
+                            probe_completion_timeout)) {
+                        return false;
+                    }
+                    phase = probe_phase.str() + ":delayed-load-retire";
+                    if (!environment.run_until_lq_retired(8192)) {
+                        return false;
+                    }
+                    phase = probe_phase.str() + ":delayed-manager-drain";
+                    if (!environment.run_until_dcache_idle(
+                            probe_completion_timeout)) {
+                        return false;
+                    }
                 }
                 ++constraint_coverage.probe_sequences;
                 ++constraint_coverage.probe_caps[to_b ? 1 : 0];

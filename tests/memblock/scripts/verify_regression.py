@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -354,11 +354,17 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "probe_max_outstanding is invalid: "
                 f"{probe_max_outstanding!r}",
             )
-        cmo_probe_count = (
-            _csv_counts(result, "actual_ops", 11)[10]
-            if schema >= 13
-            else 0
-        )
+        cmo_probe_count = 0
+        if schema >= 13:
+            cmo_probe_count = _csv_counts(result, "actual_ops", 11)[10]
+            if schema >= 15:
+                cmo_probe_count -= sum(
+                    _csv_counts(result, "actual_cmo_error_kind", 2)
+                )
+                _require(
+                    cmo_probe_count >= 0,
+                    "CMO error count exceeds CMO operation count",
+                )
         _require(
             isinstance(actual_sequences, int)
             and not isinstance(actual_sequences, bool)
@@ -588,6 +594,106 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     and sum(actual_cmo_overlaps) == cmo_count,
                     "CMO operation/state/overlap coverage is not conserved",
                 )
+                if schema >= 15:
+                    target_cmo_error = result.get("target_cmo_error")
+                    target_cmo_error_denied = result.get(
+                        "target_cmo_error_denied"
+                    )
+                    for name, value in (
+                        ("target_cmo_error", target_cmo_error),
+                        ("target_cmo_error_denied", target_cmo_error_denied),
+                    ):
+                        _require(
+                            isinstance(value, int)
+                            and not isinstance(value, bool)
+                            and 0 <= value <= 1000,
+                            f"{name} is not a per-mille integer: {value!r}",
+                        )
+                    actual_cmo_error = _csv_counts(
+                        result, "actual_cmo_error", 2
+                    )
+                    actual_cmo_error_kind = _csv_counts(
+                        result, "actual_cmo_error_kind", 2
+                    )
+                    actual_cmo_operation_error = _csv_counts(
+                        result, "actual_cmo_operation_error", 6
+                    )
+                    _require(
+                        (
+                            target_cmo_error == 0
+                            and actual_cmo_error[0] > 0
+                            and actual_cmo_error[1] == 0
+                        )
+                        or (
+                            target_cmo_error == 1000
+                            and actual_cmo_error[0] == 0
+                            and actual_cmo_error[1] > 0
+                        )
+                        or (
+                            0 < target_cmo_error < 1000
+                            and actual_cmo_error[0] > 0
+                            and actual_cmo_error[1] > 0
+                        ),
+                        "actual_cmo_error has an enabled but uncovered class: "
+                        f"{actual_cmo_error}",
+                    )
+                    _require(
+                        sum(actual_cmo_error) == cmo_count,
+                        "CMO error presence is not conserved",
+                    )
+                    if target_cmo_error == 0:
+                        _require(
+                            actual_cmo_error_kind == [0, 0]
+                            and actual_cmo_operation_error == [0] * 6,
+                            "disabled CMO errors have coverage observations",
+                        )
+                    else:
+                        _require(
+                            (
+                                target_cmo_error_denied == 0
+                                and actual_cmo_error_kind[0] > 0
+                                and actual_cmo_error_kind[1] == 0
+                            )
+                            or (
+                                target_cmo_error_denied == 1000
+                                and actual_cmo_error_kind[0] == 0
+                                and actual_cmo_error_kind[1] > 0
+                            )
+                            or (
+                                0 < target_cmo_error_denied < 1000
+                                and actual_cmo_error_kind[0] > 0
+                                and actual_cmo_error_kind[1] > 0
+                            ),
+                            "actual_cmo_error_kind has an enabled but uncovered "
+                            f"class: {actual_cmo_error_kind}",
+                        )
+                        _require(
+                            sum(actual_cmo_error_kind) == actual_cmo_error[1]
+                            and sum(actual_cmo_operation_error) ==
+                                actual_cmo_error[1],
+                            "CMO error kind/cross coverage is not conserved",
+                        )
+                        for operation in range(3):
+                            corrupt, denied = actual_cmo_operation_error[
+                                operation * 2 : operation * 2 + 2
+                            ]
+                            _require(
+                                (target_cmo_operations[operation] != 0)
+                                == (corrupt + denied > 0),
+                                "CMO error cross does not match enabled "
+                                f"operation: {actual_cmo_operation_error}",
+                            )
+                            _require(
+                                corrupt + denied <=
+                                actual_cmo_operations[operation],
+                                "CMO error cross exceeds operation count",
+                            )
+                            _require(
+                                (target_cmo_error_denied == 1000 or corrupt > 0)
+                                and (target_cmo_error_denied == 0 or denied > 0),
+                                "CMO operation/error cross has an uncovered "
+                                f"class: {actual_cmo_operation_error}",
+                            )
             else:
                 _require(
                     actual_cmo_operations == [0, 0, 0]
@@ -595,6 +701,17 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     and actual_cmo_overlaps == [0, 0],
                     "disabled CMO operation has coverage observations",
                 )
+                if schema >= 15:
+                    _require(
+                        _csv_counts(result, "actual_cmo_error", 2) == [0, 0]
+                        and _csv_counts(
+                            result, "actual_cmo_error_kind", 2
+                        ) == [0, 0]
+                        and _csv_counts(
+                            result, "actual_cmo_operation_error", 6
+                        ) == [0] * 6,
+                        "disabled CMO operation has error observations",
+                    )
 
     if schema >= 8:
         target_segment_store = result.get("target_vector_segment_store")

@@ -23,7 +23,9 @@ denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
 side effects and CMO CLEAN/FLUSH/INVAL functional/error paths are covered; the
 same CMO operations, line states, and younger-load cancellation are also
-weighted dimensions in the common constrained-random generator.
+weighted dimensions in the common constrained-random generator. Legal CMO
+denied/corrupt responses are independently constrained there as well, with a
+zero rate in the SPEC-like preset.
 `hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, PMP
 execute behavior, and each operation family across all four Sv39/Sv48 and
 Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
@@ -120,7 +122,7 @@ The correctness contracts are cataloged separately in
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference, wider multi-class CMO and full-core fence ordering,
 ordered side-effecting indexed accesses, remaining PMP/PMA matrices,
-coherence protocol negatives, error injection, cross-cause/vector exception
+coherence protocol negatives, remaining random error families, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
 planned rows.
@@ -950,7 +952,8 @@ address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family and W/D width, CMO CLEAN/FLUSH/INVAL operation,
-clean/dirty line state and younger-load overlap, NC/MMIO load/store direction,
+clean/dirty line state, younger-load overlap, and legal CBOAck error presence
+and kind, NC/MMIO load/store direction,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1047,6 +1050,13 @@ Schema 14 adds `probe-overlap`: zero and 1000 strictly disable or require the
 class, while intermediate values require both classes. The terminal record and
 offline verifier conserve the auxiliary Probe and require maximum Probe depth
 two whenever overlap is observed.
+Schema 15 adds `cmo-error` and `cmo-error-denied`. Error presence and kind are
+independent per-mille constraints; every enabled CLEAN/FLUSH/INVAL x
+corrupt/denied cross is required per seed. The CMO-specific injector matches
+both line address and CBO opcode so a preceding same-line refill or permission
+upgrade cannot consume the error. Error completion requires exact
+HardwareError or StoreAccessFault, no manager Probe, unchanged backing memory,
+and redirect cleanup, including an optional younger delayed load.
 
 For a reproducible local pressure run:
 
