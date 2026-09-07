@@ -67,7 +67,8 @@ object FuTypeField {
       case _: Opcode.BkuOpcodes.type => FuType.bku
       case _: Opcode.CsrOpcodes.type => FuType.csr
       case _: Opcode.FenceOpcodes.type => FuType.fence
-      case _: Opcode.FMacOpcodes.type => FuType.fmac
+      case _: Opcode.FAluOpcodes.type => FuType.falu
+      case _: Opcode.FMacOpcodes.type => FuType.fmul
       case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt
       case _: Opcode.FCvtOpcodes.type => FuType.fcvt
       case _: Opcode.FMiscOpcodes.type => FuType.fcmp
