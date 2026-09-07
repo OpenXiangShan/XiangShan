@@ -52,6 +52,8 @@ jobs:
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build EMU
+        env:
+          MAKEFLAGS: VM_VPI=0
         run: |
           # TODO: Use verilator for wave dump, switch to GSIM when ready
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
