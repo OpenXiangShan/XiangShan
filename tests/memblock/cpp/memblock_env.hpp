@@ -4075,6 +4075,12 @@ public:
         std::array<std::uint64_t, kScalarLoadLanes> last_cancel_cycle{};
     };
 
+    struct LoadMmioStats {
+        std::array<std::uint64_t, kScalarLoadLanes> pulses{};
+        std::array<std::uint8_t, kScalarLoadLanes> last_rob{};
+        std::array<std::uint64_t, kScalarLoadLanes> last_cycle{};
+    };
+
     struct StoreSlowFeedbackSample {
         unsigned lane = 0;
         bool hit = false;
@@ -4935,6 +4941,10 @@ public:
     const ScalarLoadFeedbackStats &scalar_load_feedback_stats() const
     {
         return scalar_load_feedback_stats_;
+    }
+    const LoadMmioStats &load_mmio_stats() const
+    {
+        return load_mmio_stats_;
     }
     const BusErrorStats &bus_error_stats() const { return bus_error_stats_; }
     const TopDownStats &top_down_stats() const { return top_down_stats_; }
@@ -5864,6 +5874,7 @@ public:
         ptw_agent_.reset_link_state();
         uncache_agent_.reset_link_state();
         scalar_load_feedback_stats_ = {};
+        load_mmio_stats_ = {};
         iq_slow_feedback_stats_ = {};
         memory_violation_stats_ = {};
         ifetch_prefetch_stats_ = {};
@@ -9814,6 +9825,32 @@ private:
                 memory_violation_stats_.last_cycle = cycle();
             }
             for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+                bool load_mmio = false;
+                std::uint8_t load_mmio_rob = 0;
+                switch (lane) {
+                case 0:
+                    load_mmio = dut_.io_mem_to_ooo_lsqio_loadMmio_0.B();
+                    load_mmio_rob = static_cast<std::uint8_t>(
+                        dut_.io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value.U());
+                    break;
+                case 1:
+                    load_mmio = dut_.io_mem_to_ooo_lsqio_loadMmio_1.B();
+                    load_mmio_rob = static_cast<std::uint8_t>(
+                        dut_.io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value.U());
+                    break;
+                case 2:
+                    load_mmio = dut_.io_mem_to_ooo_lsqio_loadMmio_2.B();
+                    load_mmio_rob = static_cast<std::uint8_t>(
+                        dut_.io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value.U());
+                    break;
+                default:
+                    break;
+                }
+                if (load_mmio) {
+                    ++load_mmio_stats_.pulses[lane];
+                    load_mmio_stats_.last_rob[lane] = load_mmio_rob;
+                    load_mmio_stats_.last_cycle[lane] = cycle();
+                }
                 const auto ifetch_prefetch =
                     generated::sample_ifetch_prefetch(dut_, lane);
                 if (ifetch_prefetch.valid) {
@@ -10102,6 +10139,7 @@ private:
     std::uint64_t frontend_reset_survivor_requests_ = 0;
     std::uint64_t frontend_reset_stall_checks_ = 0;
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
+    LoadMmioStats load_mmio_stats_;
     IqSlowFeedbackStats iq_slow_feedback_stats_;
     MemoryViolationStats memory_violation_stats_;
     IfetchPrefetchStats ifetch_prefetch_stats_;

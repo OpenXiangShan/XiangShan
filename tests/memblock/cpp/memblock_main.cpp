@@ -9723,6 +9723,7 @@ int run_mmio_contracts(int argc, char **argv)
 
     unsigned normal_count = 0;
     unsigned fault_count = 0;
+    unsigned load_mmio_before_response = 0;
     auto run_case = [&](std::uint8_t rob, std::uint8_t lq,
                         std::uint8_t pdest, std::uint64_t offset,
                         std::uint32_t exception, bool denied, bool corrupt) {
@@ -9739,7 +9740,9 @@ int run_mmio_contracts(int argc, char **argv)
             .expected_debug_is_ncio = false,
             .expected_debug_is_perf_cnt = false,
         };
+        const auto load_mmio_before = environment.load_mmio_stats();
         environment.expect_load(transaction);
+        environment.force_next_uncache_response_delay(64U << rob);
         if (denied || corrupt) {
             environment.inject_next_uncache_response_error(denied, corrupt);
         }
@@ -9748,8 +9751,42 @@ int run_mmio_contracts(int argc, char **argv)
             !environment.enqueue_load(transaction) ||
             !environment.issue_load(transaction, 2048) ||
             !environment.wait_for_mmio_request(
-                transaction.rob, transaction.rob_flag, 4096) ||
-            !environment.run_until_complete(8192)) {
+                transaction.rob, transaction.rob_flag, 4096)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=request rob="
+                      << static_cast<unsigned>(rob) << " reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+        const auto load_mmio_at_request = environment.load_mmio_stats();
+        // LoadQueueUncache compacts valid requests in ROB order before
+        // publishing this Vec, so a single valid request always occupies
+        // output slot zero regardless of its originating load-unit lane.
+        constexpr unsigned metadata_slot = 0;
+        bool metadata_matches =
+            load_mmio_at_request.last_rob[metadata_slot] == transaction.rob;
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            metadata_matches = metadata_matches &&
+                load_mmio_at_request.pulses[lane] ==
+                    load_mmio_before.pulses[lane] +
+                        (lane == metadata_slot ? 1U : 0U);
+        }
+        if (!metadata_matches) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=load-mmio-metadata rob="
+                      << static_cast<unsigned>(rob) << " lane="
+                      << transaction.lane << " slot=" << metadata_slot
+                      << " pulses="
+                      << load_mmio_at_request.pulses[0] << ','
+                      << load_mmio_at_request.pulses[1] << ','
+                      << load_mmio_at_request.pulses[2] << " last_rob="
+                      << static_cast<unsigned>(
+                             load_mmio_at_request.last_rob[metadata_slot])
+                      << '\n';
+            return false;
+        }
+        ++load_mmio_before_response;
+        if (!environment.run_until_complete(8192)) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=writeback rob="
                       << static_cast<unsigned>(rob) << " reason="
@@ -9762,19 +9799,36 @@ int run_mmio_contracts(int argc, char **argv)
                       << static_cast<unsigned>(rob) << " reason=MMIO issued a DCache request\n";
             return false;
         }
+        bool completed = false;
         if (exception == 0) {
             ++normal_count;
-            return environment.run_until_lq_retired(2048);
+            completed = environment.run_until_lq_retired(2048);
+        } else {
+            ++fault_count;
+            completed = environment.run_cycles(8) &&
+                environment.redirect_after(
+                    transaction.rob, transaction.rob_flag, true) &&
+                environment.run_cycles(96);
+            if (completed &&
+                environment.lq_dequeued() + environment.lq_canceled() <
+                    environment.lq_allocated()) {
+                completed = environment.account_lq_cancellation(1);
+            }
         }
-        ++fault_count;
-        if (!environment.run_cycles(8) ||
-            !environment.redirect_after(transaction.rob, transaction.rob_flag, true) ||
-            !environment.run_cycles(96)) {
+        const auto &load_mmio_after = environment.load_mmio_stats();
+        if (!completed ||
+            load_mmio_after.pulses != load_mmio_at_request.pulses ||
+            load_mmio_after.last_rob != load_mmio_at_request.last_rob ||
+            load_mmio_after.last_cycle != load_mmio_at_request.last_cycle) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=load-mmio-duplicate-check rob="
+                      << static_cast<unsigned>(rob) << " pulses="
+                      << load_mmio_after.pulses[0] << ','
+                      << load_mmio_after.pulses[1] << ','
+                      << load_mmio_after.pulses[2] << " reason="
+                      << environment.error() << '\n';
             return false;
-        }
-        if (environment.lq_dequeued() + environment.lq_canceled() <
-            environment.lq_allocated()) {
-            return environment.account_lq_cancellation(1);
         }
         return true;
     };
@@ -9788,6 +9842,186 @@ int run_mmio_contracts(int argc, char **argv)
                   << environment.cycle() << " phase=final reason="
                   << environment.error() << '\n';
         return 1;
+    }
+
+    unsigned load_mmio_output_slots = 0;
+    {
+        // In bare mode, three same-cycle MMIO classifications avoid TLB
+        // replay skew and exercise every ROB-facing compacted output slot.
+        // pendingMMIOld stays low, so no external request can race the check.
+        memblock::Environment parallel(argc, argv);
+        constexpr std::uint64_t parallel_base = 0x35000200ULL;
+        if (!parallel.reset() || !parallel.set_rob_head(40)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << parallel.cycle()
+                      << " phase=load-mmio-parallel-configuration reason="
+                      << parallel.error() << '\n';
+            return 1;
+        }
+        const std::vector<memblock::LoadTransaction> transactions{
+            memblock::LoadTransaction{
+                .address = parallel_base + 0x08,
+                .oracle_address = parallel_base + 0x08,
+                .op = memblock::LoadOp::ld,
+                .rob = 24,
+                .lq = 0,
+                .pdest = 155,
+                .lane = 2,
+            },
+            memblock::LoadTransaction{
+                .address = parallel_base + 0x10,
+                .oracle_address = parallel_base + 0x10,
+                .op = memblock::LoadOp::ld,
+                .rob = 25,
+                .lq = 1,
+                .pdest = 156,
+                .lane = 0,
+            },
+            memblock::LoadTransaction{
+                .address = parallel_base + 0x18,
+                .oracle_address = parallel_base + 0x18,
+                .op = memblock::LoadOp::ld,
+                .rob = 26,
+                .lq = 2,
+                .pdest = 157,
+                .lane = 1,
+            },
+        };
+        const auto metadata_before = parallel.load_mmio_stats();
+        const std::uint64_t uncache_before = parallel.uncache_requests();
+        if (!parallel.enqueue_load_batch(transactions, {0, 1, 2}) ||
+            !parallel.issue_load_batch(transactions, 2048, true)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << parallel.cycle()
+                      << " phase=load-mmio-parallel-issue reason="
+                      << parallel.error() << '\n';
+            return 1;
+        }
+        bool all_slots_observed = false;
+        for (unsigned cycle = 0; cycle < 128 && !all_slots_observed; ++cycle) {
+            if (!parallel.run_cycles(1)) {
+                break;
+            }
+            const auto &metadata = parallel.load_mmio_stats();
+            all_slots_observed = true;
+            const std::uint64_t classification_cycle = metadata.last_cycle[0];
+            for (unsigned slot = 0; slot < memblock::kScalarLoadLanes; ++slot) {
+                all_slots_observed = all_slots_observed &&
+                    metadata.pulses[slot] == metadata_before.pulses[slot] + 1 &&
+                    metadata.last_rob[slot] == transactions[slot].rob &&
+                    metadata.last_cycle[slot] == classification_cycle;
+            }
+        }
+        const auto metadata_after = parallel.load_mmio_stats();
+        if (!all_slots_observed ||
+            parallel.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << parallel.cycle()
+                      << " phase=load-mmio-parallel-check pulses="
+                      << metadata_after.pulses[0] << ','
+                      << metadata_after.pulses[1] << ','
+                      << metadata_after.pulses[2] << " robs="
+                      << static_cast<unsigned>(metadata_after.last_rob[0]) << ','
+                      << static_cast<unsigned>(metadata_after.last_rob[1]) << ','
+                      << static_cast<unsigned>(metadata_after.last_rob[2])
+                      << " uncache_delta="
+                      << parallel.uncache_requests() - uncache_before
+                      << " reason=" << parallel.error() << '\n';
+            return 1;
+        }
+        if (!parallel.redirect_after(23, false, false) ||
+            !parallel.run_cycles(32) ||
+            parallel.uncache_requests() != uncache_before ||
+            parallel.load_mmio_stats().pulses != metadata_after.pulses ||
+            parallel.lq_dequeued() + parallel.lq_canceled() !=
+                parallel.lq_allocated()) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << parallel.cycle()
+                      << " phase=load-mmio-parallel-cleanup retired="
+                      << parallel.lq_dequeued() << '+'
+                      << parallel.lq_canceled() << '/'
+                      << parallel.lq_allocated() << " reason="
+                      << parallel.error() << '\n';
+            return 1;
+        }
+        load_mmio_output_slots = memblock::kScalarLoadLanes;
+    }
+
+    std::uint64_t non_mmio_control_cycles = 0;
+    {
+        memblock::Environment non_mmio(argc, argv);
+        constexpr std::uint64_t control_virtual = 0x54000000ULL;
+        constexpr std::uint64_t control_physical = 0xa4000000ULL;
+        constexpr std::uint64_t control_root = 0x97200000ULL;
+        non_mmio.memory().fill_incrementing(control_physical, 0x2000, 0x4b);
+        if (!non_mmio.reset() ||
+            !non_mmio.map_sv39_4k(
+                control_virtual, control_physical, control_root) ||
+            !non_mmio.map_sv39_4k(
+                control_virtual + 0x1000, control_physical + 0x1000,
+                control_root, true, true, false, false, true, false) ||
+            !non_mmio.set_page_based_memory_types(true, false) ||
+            !non_mmio.activate_sv39(control_root, 45)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << non_mmio.cycle()
+                      << " phase=load-mmio-negative-configuration reason="
+                      << non_mmio.error() << '\n';
+            return 1;
+        }
+        const std::vector<memblock::LoadTransaction> controls{
+            memblock::LoadTransaction{
+                .address = control_virtual + 0x18,
+                .oracle_address = control_physical + 0x18,
+                .op = memblock::LoadOp::ld,
+                .rob = 16,
+                .lq = 0,
+                .pdest = 153,
+                .lane = 0,
+            },
+            memblock::LoadTransaction{
+                .address = control_virtual + 0x1018,
+                .oracle_address = control_physical + 0x1018,
+                .op = memblock::LoadOp::ld,
+                .rob = 17,
+                .lq = 1,
+                .pdest = 154,
+                .lane = 1,
+            },
+        };
+        for (const auto &control : controls) {
+            non_mmio.expect_load(control);
+        }
+        const auto metadata_before = non_mmio.load_mmio_stats();
+        const std::uint64_t dcache_before = non_mmio.tilelink_requests();
+        const std::uint64_t uncache_before = non_mmio.uncache_requests();
+        if (!non_mmio.set_rob_head(
+                controls.front().rob, controls.front().rob_flag) ||
+            !non_mmio.enqueue_load_batch(controls, {0, 1}) ||
+            !non_mmio.issue_load_batch(controls, 2048, true) ||
+            !non_mmio.run_until_complete(16384) ||
+            !non_mmio.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << non_mmio.cycle()
+                      << " phase=load-mmio-negative-complete reason="
+                      << non_mmio.error() << '\n';
+            return 1;
+        }
+        const auto &metadata_after = non_mmio.load_mmio_stats();
+        if (metadata_after.pulses != metadata_before.pulses ||
+            non_mmio.tilelink_requests() != dcache_before + 1 ||
+            non_mmio.uncache_requests() != uncache_before + 1) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << non_mmio.cycle()
+                      << " phase=load-mmio-negative-check pulses="
+                      << metadata_after.pulses[0] << ','
+                      << metadata_after.pulses[1] << ','
+                      << metadata_after.pulses[2] << " dcache_delta="
+                      << non_mmio.tilelink_requests() - dcache_before
+                      << " uncache_delta="
+                      << non_mmio.uncache_requests() - uncache_before << '\n';
+            return 1;
+        }
+        non_mmio_control_cycles = non_mmio.cycle();
     }
 
     // MMIO stores are committed through StoreQueue's uncache state machine;
@@ -10780,6 +11014,11 @@ int run_mmio_contracts(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " normal=" << normal_count
               << " denied=1 corrupt=1"
+              << " load_mmio_pulses=3 load_mmio_input_lanes=3"
+              << " load_mmio_output_slots=" << load_mmio_output_slots
+              << " load_mmio_before_response=" << load_mmio_before_response
+              << " non_mmio_controls=2 non_mmio_cycles="
+              << non_mmio_control_cycles
               << " stores=1"
               << " pma_loads=" << pma_load_count
               << " pma_stores=" << pma_store_count

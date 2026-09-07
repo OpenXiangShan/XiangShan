@@ -1515,6 +1515,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "configure_uncache_device",
             "uncache_device_accesses",
             "run_until_load_writebacks",
+            "struct LoadMmioStats",
+            "io_mem_to_ooo_lsqio_loadMmio_0",
+            "io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value",
         ):
             self.assertIn(contract, environment)
         for contract in (
@@ -1562,6 +1565,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=device-mixed-order",
             "mixed_device_ops=",
             "mixed_device_max_outstanding=",
+            "load_mmio_before_response",
+            "load_mmio_pulses=3 load_mmio_input_lanes=3",
+            "load_mmio_output_slots=",
+            "non_mmio_controls=2",
+            "phase=load-mmio-parallel-check",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)

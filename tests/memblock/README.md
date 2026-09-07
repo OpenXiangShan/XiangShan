@@ -701,9 +701,19 @@ complete 8-byte beat, checks the generated size/address/mask contract, and
 applies deterministic request and response backpressure before the scalar
 scoreboard checks sign/zero extension.
 
-`mmio-contracts` maps a page as PBMT=IO and checks the MMIO load's direct
-three-cycle metadata path: the load must bypass DCache, report `isMMIO=1` and
-`isNCIO=0`, and preserve denied/corrupt response exceptions through writeback.
+`mmio-contracts` maps a page as PBMT=IO and checks the MMIO load's
+response-independent ROB classification path: the load must bypass DCache,
+report `isMMIO=1` and `isNCIO=0`, and preserve denied/corrupt response
+exceptions through final writeback.
+The harness independently samples all three ROB-facing `loadMmio` pulses and
+their ROB indices. Single requests from each load-unit input prove that the
+sorted interface compacts one valid request into output slot zero; a bare-mode
+same-cycle PMA-MMIO triple permutes input lanes against ROB order, then proves
+all three compacted output slots pulse together in exact ROB order. Normal,
+denied, and corrupt PBMT=IO loads delay their external response
+by 64, 128, and 256 cycles and require the classification pulse before the
+Uncache request completes. A cacheable load plus PBMT=NC control must produce no
+`loadMmio` pulse while still selecting DCache and Uncache respectively.
 It also cold-misses and reissues a scalar PBMT=IO store, requiring one Uncache
 Put, no DCache request, exact store writeback metadata, and SQ retirement. The
 PBMT=IO page is backed by the DDR PMA region, so the store writeback's
