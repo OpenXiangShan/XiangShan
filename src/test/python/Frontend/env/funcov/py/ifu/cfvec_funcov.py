@@ -283,13 +283,17 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
 
     valid_slots: list[int] = []
     cf_entries: list[dict] = []
+    pc_resolver = getattr(env, "observed_cfvec_pc", None)
     for slot in range(8):
         base = f"io_backend_cfVec_{slot}_"
         if recorder._read_dut_signal(dut, base + "valid", 0) != 1:
             continue
 
         valid_slots.append(slot)
-        pc = int(recorder._read_dut_signal(dut, base + "bits_pc", 0))
+        if not callable(pc_resolver):
+            raise AssertionError("cfVec coverage requires an FTQ-backed PC resolver")
+        pc = int(pc_resolver(slot))
+        folded_pc = int(recorder._read_dut_signal(dut, base + "bits_foldpc", 0))
         instr = int(recorder._read_dut_signal(dut, base + "bits_instr", 0)) & 0xFFFFFFFF
         is_rvc = bool(recorder._read_dut_signal(dut, base + "bits_isRvc", 0))
         ftq_flag = recorder._read_dut_signal(dut, base + "bits_ftqPtr_flag", 0)
@@ -306,6 +310,7 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             {
                 "slot": int(slot),
                 "pc": int(pc),
+                "foldpc": int(folded_pc),
                 "instr": int(instr) & 0xFFFFFFFF,
                 "is_rvc": int(bool(is_rvc)),
                 "ftq_ptr": (int(ftq_flag), int(ftq_value)),

@@ -31,7 +31,7 @@ def _capture_cfvec_exceptions(env) -> list[dict]:
             records.append(
                 {
                     "cycle": int(cycle),
-                    "pc": int(observe.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "exception_bits": tuple(
                         bit
                         for bit in range(24)

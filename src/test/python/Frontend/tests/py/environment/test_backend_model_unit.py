@@ -19,6 +19,7 @@ from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model import GoldenTrace
 from env.model import TraceEntry
+from env.support import fold_pc
 
 
 class _Signal:
@@ -29,7 +30,7 @@ class _Signal:
 class _ObserveIf:
     def __init__(self) -> None:
         self.cfvec_valid = [_Signal() for _ in range(8)]
-        self.cfvec_pc = [_Signal() for _ in range(8)]
+        self.cfvec_foldpc = [_Signal() for _ in range(8)]
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
         self.cfvec_fixed_taken = [_Signal() for _ in range(8)]
@@ -45,10 +46,19 @@ class _EmptyTrace:
         return None
 
 
-def _set_first_cfvec(interface: _ObserveIf, pc: int, *, ftq_value: int = 0) -> None:
+def _set_first_cfvec(
+    model: BackendModel,
+    interface: _ObserveIf,
+    pc: int,
+    *,
+    ftq_value: int = 0,
+    is_rvc: bool = False,
+) -> None:
     interface.cfvec_valid[0].value = 1
-    interface.cfvec_pc[0].value = int(pc)
+    interface.cfvec_foldpc[0].value = fold_pc(int(pc))
     interface.cfvec_ftq_ptr_value[0].value = int(ftq_value)
+    interface.cfvec_is_rvc[0].value = int(bool(is_rvc))
+    model._ftq_start_pc_by_value[int(ftq_value)] = int(pc) + (0 if is_rvc else 2)
 
 
 def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
@@ -72,6 +82,40 @@ def _source_bound_cfi_model() -> tuple[BackendModel, QueueInstr]:
     source.is_cfi = True
     model._cfvec_queue = deque([source])
     return model, source
+
+
+@pytest.mark.parametrize(("is_rvc", "expected_pc"), ((False, 0x80001008), (True, 0x8000100A)))
+def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expected_pc) -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    interface.cfvec_ftq_ptr_flag[0].value = 1
+    interface.cfvec_ftq_ptr_value[0].value = 3
+    interface.cfvec_ftq_offset[0].value = 5
+    interface.cfvec_is_rvc[0].value = int(is_rvc)
+    interface.cfvec_foldpc[0].value = fold_pc(expected_pc)
+    model._ftq_start_pc_by_value[3] = 0x80001000
+
+    assert model.observed_cfvec_pc(0) == expected_pc
+
+
+def test_observed_cfvec_pc_rejects_missing_ftq_context() -> None:
+    model = BackendModel()
+    model.observe_if = _ObserveIf()
+
+    with pytest.raises(AssertionError, match="without an observed start PC"):
+        model.observed_cfvec_pc(0)
+
+
+def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    interface.cfvec_foldpc[0].value = fold_pc(0x80001000) ^ 1
+    model._ftq_start_pc_by_value[0] = 0x80001002
+
+    with pytest.raises(AssertionError, match="foldpc does not match FTQ-derived PC"):
+        model.observed_cfvec_pc(0)
 
 
 def _redirect_drive_if():
@@ -582,7 +626,7 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
         )
     )
 
-    _set_first_cfvec(interface, 0x1004)
+    _set_first_cfvec(model, interface, 0x1004)
     actions = model.plan_cycle_actions()
 
     assert actions.redirect_payload is not None
@@ -591,19 +635,19 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
 
     model.current_cycle = 11
     model.note_dut_redirect_observed(11)
-    _set_first_cfvec(interface, 0x1008)
+    _set_first_cfvec(model, interface, 0x1008)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
 
     model.current_cycle = 12
-    _set_first_cfvec(interface, 0x1010)
+    _set_first_cfvec(model, interface, 0x1010)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
 
     model.current_cycle = 13
-    _set_first_cfvec(interface, 0x2000, ftq_value=1)
+    _set_first_cfvec(model, interface, 0x2000, ftq_value=1)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004, 0x2000]
@@ -631,7 +675,7 @@ def test_redirect_flush_samples_current_cfvec_before_arming_recovery() -> None:
             },
         )
     )
-    _set_first_cfvec(interface, 0x1004)
+    _set_first_cfvec(model, interface, 0x1004)
 
     actions = model.plan_cycle_actions()
 
@@ -662,7 +706,7 @@ def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None
         expected_recovery_ftq=(0, 1),
         redirect_driven_cycle=10,
     )
-    _set_first_cfvec(interface, 0x2004, ftq_value=1)
+    _set_first_cfvec(model, interface, 0x2004, ftq_value=1)
 
     with pytest.raises(AssertionError, match="redirect recovery first cfvec is not target"):
         model._sample_cfvec()
@@ -677,9 +721,8 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
     model.current_cycle = 20
     model.golden_trace = _EmptyTrace()
 
-    _set_first_cfvec(interface, 0x80003248, ftq_value=3)
+    _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_is_rvc[0].value = 1
     interface.cfvec_fixed_taken[0].value = 1
     interface.cfvec_exception_vec[0][2].value = 1
 
@@ -713,9 +756,8 @@ def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
     prev.golden_target_pc = 0x80003240
     model._cfvec_queue = deque([prev])
 
-    _set_first_cfvec(interface, 0x80003248, ftq_value=3)
+    _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_is_rvc[0].value = 1
     interface.cfvec_exception_vec[0][2].value = 1
 
     model._sample_cfvec()

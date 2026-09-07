@@ -13,13 +13,30 @@ module frontend_ibuffer_funcov (
   input logic             flush,
   input logic             backend_can_accept,
   input logic [7:0]       cfvec_valid,
-  input logic [7:0][49:0] cfvec_pc
+  input logic [7:0][9:0]  cfvec_foldpc,
+  input logic [7:0][5:0]  cfvec_ftq_value,
+  input logic [7:0][4:0]  cfvec_ftq_offset,
+  input logic [7:0]       cfvec_is_rvc,
+  input logic             from_ftq_wen,
+  input logic [5:0]       from_ftq_idx,
+  input logic [49:0]      from_ftq_start_pc_addr
 );
 
   logic        empty_last;
   logic        in_fire_last;
   logic [2:0]  backpressure_cycles;
   logic [6:0]  enqueued_since_flush;
+  logic [49:0] ftq_start_pc [0:63];
+  logic [63:0] ftq_start_pc_valid;
+
+  function automatic logic [9:0] fold_pc(input logic [49:0] pc);
+    logic [48:0] half_pc;
+    begin
+      half_pc = pc[49:1];
+      fold_pc = half_pc[9:0] ^ half_pc[19:10] ^ half_pc[29:20] ^
+        half_pc[39:30] ^ {1'b0, half_pc[48:40]};
+    end
+  endfunction
 
   wire in_fire = in_valid && in_ready;
   wire [35:0] active_input_lanes = in_valid_lanes & in_enq_enable;
@@ -27,13 +44,17 @@ module frontend_ibuffer_funcov (
   wire [35:0] active_rvc = in_is_rvc & active_input_lanes;
   wire [3:0] tail_delivery_count = backend_can_accept && cfvec_valid != '0 ?
     $countones(cfvec_valid) : '0;
+  wire [49:0] cfvec_0_pc = ftq_start_pc[cfvec_ftq_value[0]] +
+    {44'd0, cfvec_ftq_offset[0], 1'b0} - (cfvec_is_rvc[0] ? 50'd0 : 50'd2);
+  wire cfvec_0_pc_valid = ftq_start_pc_valid[cfvec_ftq_value[0]] &&
+    fold_pc(cfvec_0_pc) == cfvec_foldpc[0];
   wire [2:0] queued_input_pc_offset = {
-    !empty_last && backend_can_accept && cfvec_valid[0],
-    cfvec_pc[0][2:1]
+    !empty_last && backend_can_accept && cfvec_valid[0] && cfvec_0_pc_valid,
+    cfvec_0_pc[2:1]
   };
   wire [2:0] bypass_pc_offset = {
-    empty_last && in_fire && backend_can_accept && cfvec_valid[0],
-    cfvec_pc[0][2:1]
+    empty_last && in_fire && backend_can_accept && cfvec_valid[0] && cfvec_0_pc_valid,
+    cfvec_0_pc[2:1]
   };
 
   always_ff @(posedge clock) begin
@@ -42,9 +63,14 @@ module frontend_ibuffer_funcov (
       in_fire_last <= 1'b0;
       backpressure_cycles <= '0;
       enqueued_since_flush <= '0;
+      ftq_start_pc_valid <= '0;
     end else begin
       empty_last <= ibuffer_empty;
       in_fire_last <= in_fire;
+      if (from_ftq_wen) begin
+        ftq_start_pc[from_ftq_idx] <= {from_ftq_start_pc_addr[48:0], 1'b0};
+        ftq_start_pc_valid[from_ftq_idx] <= 1'b1;
+      end
 
       if (backend_can_accept) begin
         backpressure_cycles <= '0;

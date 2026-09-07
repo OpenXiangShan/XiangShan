@@ -47,7 +47,7 @@ def _capture_backend_exception_state(env) -> list[dict]:
                 {
                     "cycle": int(cycle),
                     "slot": slot,
-                    "pc": int(observe.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "ftq_flag": int(observe.cfvec_ftq_ptr_flag[slot].value),
                     "ftq_value": int(observe.cfvec_ftq_ptr_value[slot].value),
                     "exception_bits": exception_bits,
@@ -79,7 +79,7 @@ def _capture_backend_cfvec_cycles(
             slots.append(
                 {
                     "slot": slot,
-                    "pc": int(observe.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "instr": int(observe.cfvec_instr[slot].value),
                     "is_rvc": bool(observe.cfvec_is_rvc[slot].value),
                     "trigger": trigger,

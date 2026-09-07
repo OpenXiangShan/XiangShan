@@ -62,7 +62,7 @@ def _capture_cfvec_deliveries(env) -> list[dict]:
             records.append(
                 {
                     "cycle": int(cycle),
-                    "pc": int(observe.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "ftq_flag": int(observe.cfvec_ftq_ptr_flag[slot].value),
                     "ftq_value": int(observe.cfvec_ftq_ptr_value[slot].value),
                     "cross_page": bool(observe.cfvec_cross_page_ipf_fix[slot].value),

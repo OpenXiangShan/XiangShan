@@ -38,7 +38,6 @@ module frontend_mmio_fetch_funcov (
   input logic        to_ibuffer_ready,
   input logic [35:0] to_ibuffer_enq,
   input logic [35:0] to_ibuffer_is_rvc,
-  input logic [48:0] to_ibuffer_pc_0,
   input logic [2:0]  to_ibuffer_exception,
   input logic        to_ibuffer_exception_cross_page,
   input logic        backend_redirect,

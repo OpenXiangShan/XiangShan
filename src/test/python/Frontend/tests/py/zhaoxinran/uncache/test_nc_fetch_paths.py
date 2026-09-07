@@ -147,7 +147,7 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
                     {
                         "cycle": int(cycle),
                         "slot": int(slot),
-                        "pc": int(observe.cfvec_pc[slot].value),
+                        "pc": current_env.observed_cfvec_pc(slot),
                         "foldpc": int(observe.cfvec_foldpc[slot].value),
                         "cross_page": int(
                             observe.cfvec_cross_page_ipf_fix[slot].value

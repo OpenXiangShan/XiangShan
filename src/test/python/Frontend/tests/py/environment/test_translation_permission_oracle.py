@@ -4,6 +4,7 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend, FakeSignal
+from env.runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from env.sequences import (
     TranslationPermissionProbe,
     TranslationPmpPmaEntry,
@@ -15,9 +16,6 @@ from env.sequences import (
     TranslationSectorLane,
 )
 from env.support import PmpPmaConfig, fold_pc
-
-
-_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
 class _PmpProbeDut(FakeDUTFrontend):
@@ -299,7 +297,7 @@ def test_oracle_maps_generated_cfvec_page_fault_bit() -> None:
     assert env.assert_translation_scenario()["error_count"] == 0
 
 
-def test_oracle_accepts_zero_exception_pc_with_matching_foldpc() -> None:
+def test_oracle_accepts_exception_pc_with_matching_foldpc() -> None:
     env, state = _state(
         scenario_id="oracle-foldpc-fallback",
         va=0x8020_1FFC,
@@ -310,17 +308,17 @@ def test_oracle_accepts_zero_exception_pc_with_matching_foldpc() -> None:
     _observe_matching_ptw(env, state)
     env.translation_oracle.observe_cfvec(
         12,
-        pc=0,
+        pc=state.scenario.va,
         folded_pc=fold_pc(state.scenario.va),
         exception_bits={12: 1},
     )
 
     stats = env.assert_translation_scenario()
     assert stats["error_count"] == 0
-    assert stats["records"][-1]["kind"] == "cfvec_exception_foldpc_match"
+    assert stats["records"][-1]["kind"] == "cfvec_exception"
 
 
-def test_oracle_rejects_zero_exception_pc_with_wrong_foldpc() -> None:
+def test_oracle_rejects_exception_pc_with_wrong_foldpc() -> None:
     env, state = _state(
         scenario_id="oracle-foldpc-mismatch",
         va=0x8020_1FFC,
@@ -331,12 +329,12 @@ def test_oracle_rejects_zero_exception_pc_with_wrong_foldpc() -> None:
     _observe_matching_ptw(env, state)
     env.translation_oracle.observe_cfvec(
         12,
-        pc=0,
+        pc=state.scenario.va,
         folded_pc=fold_pc(state.scenario.va) ^ 1,
         exception_bits={12: 1},
     )
 
-    with pytest.raises(AssertionError, match="cfvec_exception_pc_mismatch"):
+    with pytest.raises(AssertionError, match="cfvec_foldpc_mismatch"):
         env.assert_translation_scenario()
 
 
@@ -691,7 +689,7 @@ def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_abse
     dut.io_ptw_req_0_bits_vpn.value = state.expected_ptw_request["vpn"]
     dut.io_ptw_req_0_bits_s2xlate.value = state.expected_ptw_request["s2xlate"]
     dut.io_ptw_req_0_bits_getGpa.value = 0
-    dut._internal_signals[_ITLB_PTW_REQ_GET_GPA] = FakeSignal(1)
+    dut._internal_signals[frontend_itlb_ptw_req_get_gpa_path()] = FakeSignal(1)
 
     env.translation_oracle.on_clock_edge(12)
 

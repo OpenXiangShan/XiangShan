@@ -1,5 +1,6 @@
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
 from env.funcov.recorder import _decode_signal_inventory_name
+from env.support import fold_pc
 
 
 class _Recorder:
@@ -71,7 +72,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
             "Frontend_top.Frontend.inner_ifu.s2_alignShiftNum": 0,
             "Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr": 0x400,
             "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable": 1,
-            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_pc_0_addr": 0x400,
+            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_foldpc_0": fold_pc(0x800),
             "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_flush": 1,
             "Frontend_top.Frontend.inner_ifu.__Vtogcov__wbRedirect_valid": 1,
             "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_ready": 1,
@@ -103,7 +104,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["empty_after"] == 1
     assert snapshot["s2_uncache_data"] == 0xAABBCCDD
     assert snapshot["s2_instr_pc"] == 0x400
-    assert snapshot["to_pc"] == 0x400
+    assert snapshot["to_foldpc"] == fold_pc(0x800)
     assert snapshot["ifu_flush"] == 1
     assert snapshot["checker_redirect"] == 1
     assert snapshot["to_valid"] == 1
@@ -728,7 +729,7 @@ def _complete_recovery(
             "to_ready": 1,
             "to_ftq_flag": 0,
             "to_ftq_value": recovery_ftq,
-            "to_pc": recovery_pc,
+            "to_foldpc": fold_pc(recovery_pc << 1),
         }
     )
     owner._sample_nc(recorder, first_cycle + 3, delivery, state)

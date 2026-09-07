@@ -162,7 +162,8 @@ def _collect_cfvec_cycles(env, *, max_cycles: int) -> list[dict]:
             slots.append(
                 {
                     "slot": int(slot),
-                    "pc": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_pc", 0),
+                    "pc": env.observed_cfvec_pc(slot),
+                    "foldpc": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_foldpc", 0),
                     "instr": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_instr", 0),
                     "is_rvc": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_isRvc", 0),
                 }

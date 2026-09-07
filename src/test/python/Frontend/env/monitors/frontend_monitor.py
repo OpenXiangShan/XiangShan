@@ -8,7 +8,6 @@ from ..bundles import BackendObserveBundle
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
-from ..support.pc_utils import fold_pc
 from ..support.rvc_decoder import expand_rvc
 
 
@@ -17,6 +16,7 @@ class Observation:
     cycle: int
     slot: int
     pc: int
+    foldpc: int
     instr: int
     is_rvc: bool
     pred_taken: bool
@@ -53,9 +53,6 @@ class FrontendMonitor:
         self.redirect_sync_max: int = int(redirect_sync_max)
         self.redirect_sync_deadline: int = 0
         self.backend_model = None
-        self._ftq_start_pc_cache: Dict[tuple[int, int], int] = {}
-        self._ftq_group_closed: Dict[tuple[int, int], bool] = {}
-        self._ftq_group_max_offset: Dict[tuple[int, int], int] = {}
         self.last_dut_redirect: Optional[dict] = None
         self._skip_cfvec_until_cycle: Optional[int] = None
         self._recovery_target_pc: Optional[int] = None
@@ -142,18 +139,6 @@ class FrontendMonitor:
     def _sequential_next_pc(pc: int, is_rvc: bool) -> int:
         step = 2 if is_rvc else 4
         return (int(pc) + step) & 0xFFFFFFFFFFFFFFFF
-
-    @staticmethod
-    def _slot_has_ftq_identity(ftq_flag: int, ftq_value: int, ftq_offset: int, is_last: bool) -> bool:
-        return bool(int(ftq_flag) != 0 or int(ftq_value) != 0 or int(ftq_offset) != 0 or bool(is_last))
-
-    @staticmethod
-    def _derive_ftq_start_pc(pc: int, ftq_offset: int, is_rvc: bool) -> int:
-        return (int(pc) - int(ftq_offset) * 2 + (0 if bool(is_rvc) else 2)) & 0xFFFFFFFFFFFFFFFF
-
-    @staticmethod
-    def _pc_from_ftq_start(start_pc: int, ftq_offset: int, is_rvc: bool) -> int:
-        return (int(start_pc) + int(ftq_offset) * 2 - (0 if bool(is_rvc) else 2)) & 0xFFFFFFFFFFFFFFFF
 
     def _suppress_pc_mismatch(self, is_sync: bool) -> bool:
         if is_sync:
@@ -254,6 +239,12 @@ class FrontendMonitor:
     def attach_backend_model(self, backend_model) -> None:
         self.backend_model = backend_model
 
+    def _observed_cfvec_pc(self, slot: int) -> int:
+        resolver = getattr(self.backend_model, "observed_cfvec_pc", None)
+        if not callable(resolver):
+            raise AssertionError("FrontendMonitor requires an FTQ-backed cfVec PC resolver")
+        return int(resolver(int(slot)))
+
     def _ftq_identity_tracking_active(self) -> bool:
         if self.backend_model is None:
             return True
@@ -303,9 +294,6 @@ class FrontendMonitor:
         self.wait_sync_after_redirect = False
         self.redirect_sync_deadline = 0
         self.redirect_count += 1
-        self._ftq_start_pc_cache.clear()
-        self._ftq_group_closed.clear()
-        self._ftq_group_max_offset.clear()
         self.logger.info(
             "redirect notified: target=0x%x reason=%s grace=%d",
             int(target_pc),
@@ -346,9 +334,6 @@ class FrontendMonitor:
         self.expected_pc = int(pc)
         self.wait_sync_after_redirect = False
         self.redirect_grace = 2
-        self._ftq_start_pc_cache.clear()
-        self._ftq_group_closed.clear()
-        self._ftq_group_max_offset.clear()
         self.logger.info("monitor resynced after redirect: pc=0x%x", int(pc))
         return True
 
@@ -375,9 +360,6 @@ class FrontendMonitor:
         self.wait_sync_after_redirect = False
         self.redirect_grace = 0
         self.redirect_sync_deadline = 0
-        self._ftq_start_pc_cache.clear()
-        self._ftq_group_closed.clear()
-        self._ftq_group_max_offset.clear()
         self._emit(
             cycle,
             "monitor.dut_redirect",
@@ -411,10 +393,6 @@ class FrontendMonitor:
         cycle_frontend_pred_taken = False
         cycle_frontend_slots: List[dict] = []
         ftq_identity_tracking_active = self._ftq_identity_tracking_active()
-        if not ftq_identity_tracking_active:
-            self._ftq_start_pc_cache.clear()
-            self._ftq_group_closed.clear()
-            self._ftq_group_max_offset.clear()
 
         skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
         recovery_first_cfvec_seen = False
@@ -422,7 +400,7 @@ class FrontendMonitor:
             if skip_cfvec or self._read(self.interface.cfvec_valid[i], 0) != 1:
                 continue
 
-            pc = self._read(self.interface.cfvec_pc[i], 0)
+            pc = self._observed_cfvec_pc(i)
             folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
             instr = self._read(self.interface.cfvec_instr[i], 0)
             is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
@@ -438,45 +416,6 @@ class FrontendMonitor:
                 + self._read(self.interface.cfvec_exception_vec[i][19], 0)
                 + self._read(self.interface.cfvec_exception_vec[i][20], 0)
             )
-            if int(pc) == 0 and int(ex_sum) > 0 and self._recovery_target_pc is not None:
-                recovery_first_cfvec_seen = True
-                target_pc = int(self._recovery_target_pc)
-                expected_foldpc = fold_pc(target_pc)
-                if int(folded_pc) != int(expected_foldpc):
-                    self._record_error(
-                        cycle=cycle,
-                        slot=i,
-                        kind="REDIRECT_RECOVERY_FOLDPC_MISMATCH",
-                        expected=target_pc,
-                        expected_foldpc=expected_foldpc,
-                        actual=0,
-                        actual_foldpc=int(folded_pc),
-                    )
-                    return
-                self._recovery_target_pc = None
-                self.expected_pc = None
-                self.wait_sync_after_redirect = False
-                self.redirect_grace = 0
-                self.redirect_sync_deadline = 0
-                self._ftq_start_pc_cache.clear()
-                self._ftq_group_closed.clear()
-                self._ftq_group_max_offset.clear()
-                self.slots_valid += 1
-                self.exception_mark_count += 1
-                self.foldpc_recovery_count += 1
-                self._emit(
-                    cycle,
-                    "monitor.exception_foldpc_recovery",
-                    {
-                        "slot": int(i),
-                        "expected_pc": target_pc,
-                        "foldpc": int(folded_pc),
-                    },
-                    level="DEBUG",
-                )
-                continue
-            if int(pc) == 0:
-                continue
             if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
                 recovery_first_cfvec_seen = True
                 target_pc = int(self._recovery_target_pc)
@@ -494,15 +433,25 @@ class FrontendMonitor:
                 self.wait_sync_after_redirect = False
                 self.redirect_grace = 0
                 self.redirect_sync_deadline = 0
-                self._ftq_start_pc_cache.clear()
-                self._ftq_group_closed.clear()
-                self._ftq_group_max_offset.clear()
+                if int(ex_sum) > 0:
+                    self.foldpc_recovery_count += 1
+                    self._emit(
+                        cycle,
+                        "monitor.exception_foldpc_recovery",
+                        {
+                            "slot": int(i),
+                            "expected_pc": target_pc,
+                            "foldpc": int(folded_pc),
+                        },
+                        level="DEBUG",
+                    )
 
             self.slots_valid += 1
             obs = Observation(
                 cycle=cycle,
                 slot=i,
                 pc=pc,
+                foldpc=int(folded_pc),
                 instr=instr,
                 is_rvc=is_rvc,
                 pred_taken=pred_taken,
@@ -514,6 +463,7 @@ class FrontendMonitor:
                 {
                     "slot": int(i),
                     "pc": int(pc),
+                    "foldpc": int(folded_pc),
                     "instr": int(instr),
                     "is_rvc": bool(is_rvc),
                     "pred_taken": bool(pred_taken),
@@ -527,37 +477,8 @@ class FrontendMonitor:
                 cycle_frontend_pred_taken = bool(pred_taken)
 
             golden_pc = self.expected_pc if self.expected_pc is not None else pc
-            has_ftq_identity = self._slot_has_ftq_identity(ftq_flag, ftq_value, ftq_offset, is_last)
-            ftq_expected_pc: Optional[int] = None
-            if has_ftq_identity and ftq_identity_tracking_active:
-                ftq_group = (int(ftq_flag), int(ftq_value))
-                ftq_start_pc = self._derive_ftq_start_pc(int(pc), int(ftq_offset), bool(is_rvc))
-                cached_start_pc = self._ftq_start_pc_cache.get(ftq_group)
-                cached_closed = bool(self._ftq_group_closed.get(ftq_group, False))
-                cached_max_offset = int(self._ftq_group_max_offset.get(ftq_group, -1))
-                if (
-                    not cached_closed
-                    and cached_start_pc is not None
-                    and cached_max_offset < 0
-                    and int(ftq_start_pc) != int(cached_start_pc)
-                ):
-                    cached_start_pc = None
-                if (
-                    not cached_closed
-                    and cached_start_pc is not None
-                    and int(ftq_offset) == 0
-                    and int(ftq_start_pc) != int(cached_start_pc)
-                ):
-                    cached_start_pc = None
-                if not cached_closed and cached_max_offset >= 0 and int(ftq_offset) < cached_max_offset:
-                    cached_start_pc = None
-                    cached_closed = False
-                if cached_start_pc is None or cached_closed:
-                    cached_start_pc = int(ftq_start_pc)
-                    self._ftq_start_pc_cache[ftq_group] = int(ftq_start_pc)
-                    self._ftq_group_closed[ftq_group] = False
-                    self._ftq_group_max_offset[ftq_group] = -1
-                ftq_expected_pc = self._pc_from_ftq_start(int(cached_start_pc), int(ftq_offset), bool(is_rvc))
+            has_ftq_identity = True
+            ftq_expected_pc: Optional[int] = int(pc)
 
             if ex_sum > 0:
                 self.exception_mark_count += 1
@@ -679,14 +600,6 @@ class FrontendMonitor:
                         self.wait_sync_after_redirect = True
                         self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
                     self.expected_pc = next_pc
-            if has_ftq_identity and ftq_identity_tracking_active and bool(is_last):
-                self._ftq_group_closed[(int(ftq_flag), int(ftq_value))] = True
-            if has_ftq_identity and ftq_identity_tracking_active:
-                group = (int(ftq_flag), int(ftq_value))
-                self._ftq_group_max_offset[group] = max(
-                    int(self._ftq_group_max_offset.get(group, -1)),
-                    int(ftq_offset),
-                )
 
         if self.wait_sync_after_redirect and self.current_cycle >= self.redirect_sync_deadline:
             if (
@@ -797,9 +710,6 @@ class FrontendMonitor:
         self.redirect_grace = 0
         self.wait_sync_after_redirect = False
         self.redirect_sync_deadline = 0
-        self._ftq_start_pc_cache.clear()
-        self._ftq_group_closed.clear()
-        self._ftq_group_max_offset.clear()
         self.last_dut_redirect = None
         self._skip_cfvec_until_cycle = None
         self._recovery_target_pc = None

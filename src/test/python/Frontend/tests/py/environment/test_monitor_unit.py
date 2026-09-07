@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from env.model.memory_model import MemoryModel
 from env.monitors.frontend_monitor import FrontendMonitor
-from env.support import fold_pc
+from env.support import fold_pc, require_matching_foldpc
 
 
 class _Signal:
@@ -17,7 +17,7 @@ class _ObserveIf:
         self.redirect_bits_target = _Signal()
         self.redirect_bits_taken = _Signal()
         self.cfvec_valid = [_Signal() for _ in range(8)]
-        self.cfvec_pc = [_Signal() for _ in range(8)]
+        self.cfvec_full_pc = [0 for _ in range(8)]
         self.cfvec_foldpc = [_Signal() for _ in range(8)]
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
@@ -36,8 +36,17 @@ class _Trace:
 
 
 class _BackendModel:
-    def __init__(self) -> None:
-        self.golden_trace = _Trace()
+    def __init__(self, interface: _ObserveIf | None = None, *, trace_complete: bool = False) -> None:
+        self.golden_trace = _Trace() if trace_complete else None
+        self.interface = interface
+
+    def current_cycle_start_golden_pc(self):
+        return None
+
+    def observed_cfvec_pc(self, slot: int) -> int:
+        assert self.interface is not None
+        pc = int(self.interface.cfvec_full_pc[int(slot)])
+        return require_matching_foldpc(pc, int(self.interface.cfvec_foldpc[int(slot)].value))
 
 
 def _set_redirect(interface: _ObserveIf, *, valid: int, pc: int = 0, target: int = 0) -> None:
@@ -55,20 +64,23 @@ def _set_first_cfvec(
     ftq_offset: int = 0,
 ) -> None:
     interface.cfvec_valid[0].value = 1
-    interface.cfvec_pc[0].value = int(pc)
+    interface.cfvec_full_pc[0] = int(pc)
+    interface.cfvec_foldpc[0].value = fold_pc(int(pc))
     interface.cfvec_ftq_ptr_value[0].value = int(ftq_value)
     interface.cfvec_ftq_offset[0].value = int(ftq_offset)
 
 
 def _set_second_cfvec(interface: _ObserveIf, pc: int) -> None:
     interface.cfvec_valid[1].value = 1
-    interface.cfvec_pc[1].value = int(pc)
+    interface.cfvec_full_pc[1] = int(pc)
+    interface.cfvec_foldpc[1].value = fold_pc(int(pc))
 
 
 def _new_monitor() -> tuple[FrontendMonitor, _ObserveIf]:
     monitor = FrontendMonitor()
     interface = _ObserveIf()
     monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
     return monitor, interface
 
 
@@ -102,6 +114,7 @@ def test_monitor_does_not_replace_zero_cfvec_instr_from_memory() -> None:
     monitor = FrontendMonitor(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
 
     _set_first_cfvec(interface, 0x8000_1000)
     interface.cfvec_instr[0].value = 0
@@ -119,6 +132,7 @@ def test_monitor_reports_cfvec_pc_size_memory_mismatch_for_invalid_raw16() -> No
     monitor = FrontendMonitor(memory=memory)
     interface = _ObserveIf()
     monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
 
     _set_first_cfvec(interface, 0x8000_3248)
     interface.cfvec_instr[0].value = 0x13
@@ -136,6 +150,7 @@ def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
     monitor = FrontendMonitor(memory=memory)
     interface = _ObserveIf()
     monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
 
     _set_first_cfvec(interface, 0x8000_3248)
     interface.cfvec_instr[0].value = 0x05130000
@@ -200,7 +215,7 @@ def test_dut_redirect_first_sampled_cfvec_after_skip_must_be_target() -> None:
     assert monitor.observations == []
 
 
-def test_redirect_recovery_accepts_zero_exception_pc_with_matching_foldpc() -> None:
+def test_redirect_recovery_accepts_ftq_derived_exception_pc_with_matching_foldpc() -> None:
     monitor, interface = _new_monitor()
     target = 0x8000_0FFE
 
@@ -209,17 +224,16 @@ def test_redirect_recovery_accepts_zero_exception_pc_with_matching_foldpc() -> N
     _set_redirect(interface, valid=0)
     monitor.on_clock_edge(11)
 
-    _set_first_cfvec(interface, 0)
-    interface.cfvec_foldpc[0].value = fold_pc(target)
+    _set_first_cfvec(interface, target)
     interface.cfvec_exception_vec[0][1].value = 1
     monitor.on_clock_edge(12)
 
     assert monitor.get_errors() == []
     assert monitor.get_stats()["exception_mark_count"] == 1
-    assert monitor.get_stats()["foldpc_recovery_count"] == 1
+    assert monitor.observations[0].foldpc == fold_pc(target)
 
 
-def test_redirect_recovery_rejects_zero_exception_pc_with_wrong_foldpc() -> None:
+def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
     monitor, interface = _new_monitor()
     target = 0x8000_0FFE
 
@@ -228,20 +242,20 @@ def test_redirect_recovery_rejects_zero_exception_pc_with_wrong_foldpc() -> None
     _set_redirect(interface, valid=0)
     monitor.on_clock_edge(11)
 
-    _set_first_cfvec(interface, 0)
+    _set_first_cfvec(interface, target)
     interface.cfvec_foldpc[0].value = fold_pc(target) ^ 1
     interface.cfvec_exception_vec[0][1].value = 1
-    monitor.on_clock_edge(12)
+    import pytest
 
-    error = monitor.get_errors()[0]
-    assert error["kind"] == "REDIRECT_RECOVERY_FOLDPC_MISMATCH"
-    assert error["expected_foldpc"] == fold_pc(target)
+    with pytest.raises(AssertionError, match="cfVec foldpc does not match FTQ-derived PC"):
+        monitor.on_clock_edge(12)
 
 
 def test_dut_redirect_to_mmio_target_does_not_require_recovery_cfvec() -> None:
     monitor = FrontendMonitor(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x8000_1000, target=0x1000)
     _set_first_cfvec(interface, 0x8000_1004)
@@ -251,7 +265,7 @@ def test_dut_redirect_to_mmio_target_does_not_require_recovery_cfvec() -> None:
     _set_first_cfvec(interface, 0x8000_1008)
     monitor.on_clock_edge(11)
 
-    _set_first_cfvec(interface, 0)
+    interface.cfvec_valid[0].value = 0
     monitor.on_clock_edge(12)
 
     assert monitor.get_errors() == []
@@ -281,7 +295,7 @@ def test_dut_redirect_clears_stale_ftq_tracking_before_recovery_target() -> None
 
 def test_monitor_ignores_cfvec_after_golden_trace_complete() -> None:
     monitor, interface = _new_monitor()
-    monitor.attach_backend_model(_BackendModel())
+    monitor.attach_backend_model(_BackendModel(interface, trace_complete=True))
 
     _set_first_cfvec(interface, 0)
     interface.cfvec_is_rvc[0].value = 1

@@ -258,13 +258,15 @@ def test_redirected_wait_d_requires_old_response_completion_and_new_identity():
                 "to_enq": 1,
                 "to_ftq_flag": 0,
                 "to_ftq_value": 7 if leak_old_identity else 8,
-                "to_pc": 0x4000 if leak_old_identity else 0x4040,
+                "to_foldpc": fold_pc(
+                    (0x4000 if leak_old_identity else 0x4040) << 1
+                ),
                 "to_exception": 0,
             }
         )
         _sample(recorder, 7, snapshot)
         if leak_old_identity:
-            snapshot.update({"to_ftq_value": 8, "to_pc": 0x4040})
+            snapshot.update({"to_ftq_value": 8, "to_foldpc": fold_pc(0x4040 << 1)})
             _sample(recorder, 8, snapshot)
         return recorder
 
@@ -418,13 +420,15 @@ def _drive_redirected_cross_8b_resend(
             "to_enq": 1,
             "to_ftq_flag": old_identity[0],
             "to_ftq_value": old_identity[1] if leak_old_identity else 8,
-            "to_pc": old_identity[2] if leak_old_identity else 0x4040,
+            "to_foldpc": fold_pc(
+                (old_identity[2] if leak_old_identity else 0x4040) << 1
+            ),
             "to_exception": 0,
         }
     )
     _sample(recorder, redirect_cycle + 3, snapshot)
     if leak_old_identity:
-        snapshot.update({"to_ftq_value": 8, "to_pc": 0x4040})
+        snapshot.update({"to_ftq_value": 8, "to_foldpc": fold_pc(0x4040 << 1)})
         _sample(recorder, redirect_cycle + 4, snapshot)
     return recorder, snapshot, redirect_cycle
 
@@ -735,13 +739,13 @@ def test_page_tail_need_resend_does_not_count_an_internal_second_beat():
             "to_enq": 1,
             "to_is_rvc": 0,
             "to_exception": 0,
-            "to_pc": 0x800,
+            "to_foldpc": fold_pc(0x800 << 1),
             "s2_uncache_data": 0x00000013,
         }
     )
     _sample(recorder, 7, snapshot)
     assert not _hit(recorder, 28)
-    snapshot["to_pc"] = 0x7FF
+    snapshot["to_foldpc"] = fold_pc(0x7FF << 1)
     _sample(recorder, 8, snapshot)
     assert _hit(recorder, 28)
 
@@ -1056,7 +1060,6 @@ def test_first_page_tl_fault_suppresses_cross_page_refetch_and_illegal_decode():
                 "to_valid": 1,
                 "to_ready": 1,
                 "to_enq": 1,
-                "to_pc": 0x7FF,
                 "to_ftq_flag": 0,
                 "to_ftq_value": 9,
                 "to_ftq_offset": end_offset,
@@ -1128,7 +1131,7 @@ def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
                 "to_exception": 0,
                 "to_ftq_flag": 0,
                 "to_ftq_value": ftq_value,
-                "to_pc": pc,
+                "to_foldpc": fold_pc(pc << 1),
             }
         )
         _sample(recorder, cycle + 3, snapshot)
@@ -1172,7 +1175,7 @@ def test_mixed_attribute_modes_require_completed_distinct_ifu_identities():
             "to_exception": 0,
             "to_ftq_flag": 0,
             "to_ftq_value": 7,
-            "to_pc": 0x4000,
+            "to_foldpc": fold_pc(0x4000 << 1),
         }
     )
     _sample(recorder, 4, snapshot)

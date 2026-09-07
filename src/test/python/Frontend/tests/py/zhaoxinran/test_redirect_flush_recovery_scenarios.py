@@ -180,8 +180,7 @@ def _register_uncache_redirect_observer(
             target_seen = int(
                 any(
                     int(current_env.backend_observe_if.cfvec_valid[slot].value or 0) == 1
-                    and int(current_env.backend_observe_if.cfvec_pc[slot].value or 0)
-                    == int(target_pc)
+                    and current_env.observed_cfvec_pc(slot) == int(target_pc)
                     for slot in range(8)
                 )
             )

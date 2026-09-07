@@ -10,9 +10,6 @@ _EXCEPTION_BITS = {
     20: "instruction_guest_page_fault",
 }
 
-_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
-
-
 class TranslationPermissionOracle:
     """Check one armed translation scenario against DUT-facing observations."""
 
@@ -391,7 +388,12 @@ class TranslationPermissionOracle:
         if not self._observation_ready(cycle):
             self._record(cycle, "pre_redirect_fetch_request", path=actual_path, pa=actual_pa)
             return
-        if self.active["expected_ptw_requests"] and not self.active["response_seen"]:
+        known_out_of_scope_fetch = any(
+            int(item["pa"]) == actual_pa
+            and int(item["pa"]) not in self.active["observed_out_of_scope_fetch_pas"]
+            for item in self.active["allowed_out_of_scope_fetches"]
+        )
+        if self.active["expected_ptw_requests"] and not self.active["response_seen"] and not known_out_of_scope_fetch:
             # A phase transition can leave prior ICache requests in flight. They
             # cannot be attributed to the newly armed translation epoch yet.
             self._record(cycle, "pre_response_fetch_request", path=actual_path, pa=actual_pa)
@@ -427,7 +429,6 @@ class TranslationPermissionOracle:
             item
             for item in self.active["allowed_out_of_scope_fetches"]
             if int(item["pa"]) == actual_pa
-            and int(item["pa"]) not in self.active["observed_out_of_scope_fetch_pas"]
         ]
         if matching_out_of_scope_fetches:
             expected = matching_out_of_scope_fetches[0]
@@ -489,10 +490,11 @@ class TranslationPermissionOracle:
             return None
 
     def _read_ptw_request_get_gpa(self, ptw_if) -> int:
-        internal_get_gpa = self._read_internal_signal(_ITLB_PTW_REQ_GET_GPA)
+        path = self.env.itlb_ptw_req_get_gpa_path
+        internal_get_gpa = self._read_internal_signal(path)
         if internal_get_gpa is not None:
             return internal_get_gpa
-        return self._read(ptw_if.req_0_bits_get_gpa)
+        return 0
 
     def observe_cfvec(
         self,
@@ -504,6 +506,15 @@ class TranslationPermissionOracle:
         folded_pc: Optional[int] = None,
     ) -> None:
         if self.active is None:
+            return
+        if folded_pc is not None and int(folded_pc) != fold_pc(int(pc)):
+            self._error(
+                cycle,
+                "cfvec_foldpc_mismatch",
+                pc=int(pc),
+                expected_foldpc=fold_pc(int(pc)),
+                actual_foldpc=int(folded_pc),
+            )
             return
         actual_faults = [name for bit, name in _EXCEPTION_BITS.items() if int(exception_bits.get(bit, 0))]
         if not actual_faults:
@@ -564,22 +575,9 @@ class TranslationPermissionOracle:
             return
         va = int(self.active["va"])
         pc_matches = va <= int(pc) < va + int(self.active["payload_size"])
-        foldpc_matches = (
-            int(pc) == 0
-            and folded_pc is not None
-            and int(folded_pc) == fold_pc(va)
-        )
-        if not pc_matches and not foldpc_matches:
+        if not pc_matches:
             self._error(cycle, "cfvec_exception_pc_mismatch", expected_va=va, actual_pc=int(pc), actual_fault=actual_fault)
             return
-        if foldpc_matches:
-            self._record(
-                cycle,
-                "cfvec_exception_foldpc_match",
-                expected_va=va,
-                folded_pc=int(folded_pc),
-                fault=actual_fault,
-            )
         if actual_fault != expected_fault:
             self._error(cycle, "cfvec_exception_type_mismatch", expected_fault=expected_fault, actual_fault=actual_fault, pc=int(pc))
             return
@@ -637,9 +635,12 @@ class TranslationPermissionOracle:
         for slot in range(8):
             if not self._read(observe_if.cfvec_valid[slot]):
                 continue
+            resolver = getattr(self.env.backend_model, "observed_cfvec_pc", None)
+            if not callable(resolver):
+                raise AssertionError("translation oracle requires an FTQ-backed cfVec PC resolver")
             self.observe_cfvec(
                 cycle,
-                pc=self._read(observe_if.cfvec_pc[slot]),
+                pc=int(resolver(slot)),
                 folded_pc=self._read(observe_if.cfvec_foldpc[slot]),
                 exception_bits={bit: self._read(observe_if.cfvec_exception_vec[slot][bit]) for bit in _EXCEPTION_BITS},
                 cross_page=bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot])),

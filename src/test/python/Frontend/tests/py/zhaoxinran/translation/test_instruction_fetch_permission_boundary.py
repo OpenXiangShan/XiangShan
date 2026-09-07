@@ -136,7 +136,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
                 {
                     "cycle": int(cycle),
                     "slot": int(slot),
-                    "pc": int(observe.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "foldpc": int(observe.cfvec_foldpc[slot].value),
                     "ftq_flag": int(observe.cfvec_ftq_ptr_flag[slot].value),
                     "ftq_value": int(observe.cfvec_ftq_ptr_value[slot].value),

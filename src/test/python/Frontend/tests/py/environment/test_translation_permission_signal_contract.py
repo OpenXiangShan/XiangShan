@@ -1,13 +1,5 @@
 from pathlib import Path
-import os
-
-import pytest
-
-
-_REPO_ROOT = Path(__file__).resolve().parents[7]
-_COMMON_SIGNALS = {
-    "itlb_ptw_request_get_gpa": "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa",
-}
+from env.runtime.pylib import frontend_itlb_ptw_req_get_gpa_path, frontend_offset_path
 
 def _registered_names(offset: Path) -> set[str]:
     return {
@@ -17,17 +9,12 @@ def _registered_names(offset: Path) -> set[str]:
     }
 
 
-@pytest.mark.parametrize("simulator", ["verilator", "vcs"])
-def test_translation_permission_signal_contract_matches_generated_inventory(simulator: str) -> None:
-    # The regression environment is intentionally Verilator-only.  Keep the
-    # VCS contract available for VCS jobs, but do not make a Verilator run fail
-    # merely because that optional build tree is absent.
-    if simulator != os.getenv("TB_FRONTEND_SIM", "verilator").strip().lower():
-        pytest.skip(f"{simulator} inventory is outside the active {os.getenv('TB_FRONTEND_SIM', 'verilator')} environment")
-    offset = _REPO_ROOT / "build-frontend" / f"pylib-{simulator}" / "Frontend" / "Frontend_offset.yaml"
-    assert offset.is_file(), f"{simulator} DUT signal inventory is required"
+def test_translation_permission_signal_contract_matches_generated_inventory() -> None:
+    offset = frontend_offset_path()
+    assert offset.is_file(), f"selected DUT signal inventory is required: {offset}"
 
     registered = _registered_names(offset)
-    missing = {name: signal for name, signal in _COMMON_SIGNALS.items() if signal not in registered}
+    signal = frontend_itlb_ptw_req_get_gpa_path()
+    missing = {"itlb_ptw_request_get_gpa": signal} if signal not in registered else {}
 
-    assert not missing, {"simulator": simulator, "missing_translation_permission_signals": missing}
+    assert not missing, {"missing_translation_permission_signals": missing}

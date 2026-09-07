@@ -4,7 +4,6 @@ from typing import Any, Optional
 
 from ....support import fold_pc
 
-
 INSTR_UNCACHE_OWNER_GROUP = "ifu_instruncache_owner_v3"
 INSTR_UNCACHE_OWNER_COVERPOINT = "protocol_leaf"
 INSTR_UNCACHE_OWNER_LEAF_COUNT = 38
@@ -89,6 +88,10 @@ def _selected_word(data: Optional[int], pruned_addr: Optional[int]) -> Optional[
     return (int(data) >> shift) & 0xFFFFFFFF
 
 
+def _folded_instr_pc(pruned_pc: Optional[int]) -> Optional[int]:
+    return None if pruned_pc is None else fold_pc(int(pruned_pc) << 1)
+
+
 def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
     return {
         "req_is_mmio": s["req_is_mmio"],
@@ -107,7 +110,6 @@ def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
         "to_valid": s["to_valid"],
         "to_ready": s["to_ready"],
         "to_enq": s["to_enq"],
-        "to_pc": s["to_pc"],
         "to_foldpc": s["to_foldpc"],
         "to_ftq_flag": s["to_ftq_flag"],
         "to_ftq_value": s["to_ftq_value"],
@@ -457,9 +459,13 @@ def sample_instr_uncache_owner_coverage(
         old_identity = (
             redirected_wait_d["s2_ftq_flag"],
             redirected_wait_d["s2_ftq_value"],
-            redirected_wait_d["s2_instr_pc"],
+            _folded_instr_pc(redirected_wait_d["s2_instr_pc"]),
         )
-        delivered_identity = (s["to_ftq_flag"], s["to_ftq_value"], s["to_pc"])
+        delivered_identity = (
+            s["to_ftq_flag"],
+            s["to_ftq_value"],
+            s["to_foldpc"],
+        )
         identity_observable = None not in (*old_identity, *delivered_identity)
         if identity_observable and delivered_identity == old_identity:
             redirected_wait_d["old_identity_delivered"] = True
@@ -512,13 +518,11 @@ def sample_instr_uncache_owner_coverage(
                     first_page_fault["s2_instr_pc"],
                     first_page_fault["s2_ftq_flag"],
                     first_page_fault["s2_ftq_value"],
-                    s["to_pc"],
                     s["to_ftq_flag"],
                     s["to_ftq_value"],
                     s["to_ftq_offset"],
                     s["to_foldpc"],
                 )
-                and int(s["to_pc"]) == int(first_page_fault["s2_instr_pc"])
                 and s["to_ftq_flag"] == first_page_fault["s2_ftq_flag"]
                 and s["to_ftq_value"] == first_page_fault["s2_ftq_value"]
                 and int(s["to_ftq_offset"]) == expected_end_offset
@@ -565,7 +569,7 @@ def sample_instr_uncache_owner_coverage(
             candidate_identity = (
                 identity_source.get("s2_ftq_flag"),
                 identity_source.get("s2_ftq_value"),
-                identity_source.get("s2_instr_pc"),
+                _folded_instr_pc(identity_source.get("s2_instr_pc")),
             )
             if None not in candidate_identity:
                 old_identity = candidate_identity
@@ -645,12 +649,13 @@ def sample_instr_uncache_owner_coverage(
             s["to_valid"] == 1
             and s["to_ready"] == 1
             and single_delivery
-            and None not in (s["to_ftq_flag"], s["to_ftq_value"], s["to_pc"])
+            and None
+            not in (s["to_ftq_flag"], s["to_ftq_value"], s["to_foldpc"])
         ):
             delivered_identity = (
                 s["to_ftq_flag"],
                 s["to_ftq_value"],
-                s["to_pc"],
+                s["to_foldpc"],
             )
         if delivered_identity == redirected_resend["old_identity"]:
             _record_risk(
@@ -823,8 +828,9 @@ def sample_instr_uncache_owner_coverage(
             if (
                 s["to_valid"] == 1
                 and s["to_ready"] == 1
-                and s["to_pc"] is not None
-                and int(s["to_pc"]) == flush_pending["old_pc"]
+                and s["to_foldpc"] is not None
+                and int(s["to_foldpc"])
+                == fold_pc(int(flush_pending["old_pc"]) << 1)
             ):
                 flush_pending["old_delivery"] = True
             if s["prev_end_half"] == 0 and s["s2_valid"] != 1:
@@ -862,8 +868,9 @@ def sample_instr_uncache_owner_coverage(
             and s["to_ready"] == 1
             and single_delivery
             and s["to_exception"] in {0, None}
-            and s["to_pc"] is not None
-            and int(s["to_pc"]) == cross_page["redirect_half_pc"]
+            and s["to_foldpc"] is not None
+            and int(s["to_foldpc"])
+            == fold_pc(int(cross_page["redirect_half_pc"]) << 1)
             and s["s2_uncache_data"] is not None
             and (int(s["s2_uncache_data"]) & 0x3) == 0x3
             and (int(s["s2_uncache_data"]) & 0xFFFF)
@@ -1082,11 +1089,12 @@ def sample_instr_uncache_owner_coverage(
                     transaction["s2_instr_pc"],
                     s["to_ftq_flag"],
                     s["to_ftq_value"],
-                    s["to_pc"],
+                    s["to_foldpc"],
                 )
                 and transaction["s2_ftq_flag"] == s["to_ftq_flag"]
                 and transaction["s2_ftq_value"] == s["to_ftq_value"]
-                and transaction["s2_instr_pc"] == s["to_pc"]
+                and _folded_instr_pc(transaction["s2_instr_pc"])
+                == s["to_foldpc"]
                 and s["to_exception"] in {0, None}
             ),
             None,
@@ -1095,7 +1103,7 @@ def sample_instr_uncache_owner_coverage(
             completed_record = dict(completed)
             completed_record["to_ftq_flag"] = s["to_ftq_flag"]
             completed_record["to_ftq_value"] = s["to_ftq_value"]
-            completed_record["to_pc"] = s["to_pc"]
+            completed_record["to_foldpc"] = s["to_foldpc"]
             state["completed_attribute_transactions"].append(completed_record)
             attribute_transactions.remove(completed)
             recent = state["completed_attribute_transactions"][-2:]

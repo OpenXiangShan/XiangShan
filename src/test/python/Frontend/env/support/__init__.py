@@ -12,7 +12,7 @@ from .pmp_pma import (
     encode_pmp_pma_cfg,
     reconstruct_pmp_request_addr,
 )
-from .pc_utils import fold_pc
+from .pc_utils import fold_pc, pc_from_ftq_start, require_matching_foldpc
 from .signal_utils import read_internal_signal
 
 __all__ = [
@@ -26,6 +26,8 @@ __all__ = [
     "encode_pmp_pma_addr",
     "encode_pmp_pma_cfg",
     "fold_pc",
+    "pc_from_ftq_start",
     "reconstruct_pmp_request_addr",
+    "require_matching_foldpc",
     "read_internal_signal",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from toffee import Bundle, Signal, SignalList
+from toffee.bundle import DummySignal
 
 
 class BackendObserveBundle(Bundle):
@@ -16,7 +17,6 @@ class BackendObserveBundle(Bundle):
     }
 
     cfvec_valid = SignalList("io_backend_cfVec_#_valid", 8)
-    cfvec_pc = SignalList("io_backend_cfVec_#_bits_pc", 8)
     cfvec_foldpc = SignalList("io_backend_cfVec_#_bits_foldpc", 8)
     cfvec_instr = SignalList("io_backend_cfVec_#_bits_instr", 8)
     cfvec_is_rvc = SignalList("io_backend_cfVec_#_bits_isRvc", 8)
@@ -27,7 +27,11 @@ class BackendObserveBundle(Bundle):
     cfvec_ftq_offset = SignalList("io_backend_cfVec_#_bits_ftqOffset", 8)
     cfvec_is_last_in_ftq_entry = SignalList("io_backend_cfVec_#_bits_isLastInFtqEntry", 8)
     cfvec_cross_page_ipf_fix = SignalList("io_backend_cfVec_#_bits_crossPageIPFFix", 8)
-    cfvec_exception_vec = [SignalList(f"io_backend_cfVec_{slot}_bits_exceptionVec_#", 24) for slot in range(8)]
+    cfvec_exception_vec_1 = SignalList("io_backend_cfVec_#_bits_exceptionVec_1", 8)
+    cfvec_exception_vec_2 = SignalList("io_backend_cfVec_#_bits_exceptionVec_2", 8)
+    cfvec_exception_vec_12 = SignalList("io_backend_cfVec_#_bits_exceptionVec_12", 8)
+    cfvec_exception_vec_19 = SignalList("io_backend_cfVec_#_bits_exceptionVec_19", 8)
+    cfvec_exception_vec_20 = SignalList("io_backend_cfVec_#_bits_exceptionVec_20", 8)
     redirect_valid = Signal()
     redirect_bits_pc = Signal()
     redirect_bits_target = Signal()
@@ -36,3 +40,12 @@ class BackendObserveBundle(Bundle):
     gpaddr_mem_waddr = Signal()
     gpaddr_mem_gpaddr = Signal()
     gpaddr_mem_is_for_vs_nonleaf_pte = Signal()
+
+    @property
+    def cfvec_exception_vec(self):
+        result = [[DummySignal() for _ in range(24)] for _ in range(8)]
+        for bit in (1, 2, 12, 19, 20):
+            signals = getattr(self, f"cfvec_exception_vec_{bit}")
+            for slot in range(8):
+                result[slot][bit] = signals[slot]
+        return result

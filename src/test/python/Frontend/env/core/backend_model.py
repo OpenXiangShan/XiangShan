@@ -6,7 +6,8 @@ from dataclasses import replace
 from typing import Callable, Deque, Dict, Optional
 
 from ..agents.backend_agent import BackendAgent
-from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
+from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
+from ..support.pc_utils import pc_from_ftq_start, require_matching_foldpc
 from ..model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
 from ..model.backend_state import (
     ActiveWrongPathEpisode,
@@ -63,7 +64,6 @@ class BackendModel:
         self.drive_if = None
         self.observe_if = None
         self.from_ftq_if = None
-        self.frontend_info_if = None
         self.env = None
         self.monitor = None
         self.branch_checker = None
@@ -2772,7 +2772,6 @@ class BackendModel:
             drive_if=bind_bundle_optional(BackendCtrlBundle, dut),
             observe_if=bind_bundle_optional(BackendObserveBundle, dut),
             from_ftq_if=bind_bundle_optional(BackendFromFtqBundle, dut),
-            frontend_info_if=bind_bundle_optional(FrontendInfoBundle, dut),
         )
 
     @staticmethod
@@ -2783,11 +2782,10 @@ class BackendModel:
         except Exception:
             return default
 
-    def bind_interfaces(self, *, drive_if, observe_if, from_ftq_if, frontend_info_if) -> None:
+    def bind_interfaces(self, *, drive_if, observe_if, from_ftq_if) -> None:
         self.drive_if = drive_if
         self.observe_if = observe_if
         self.from_ftq_if = from_ftq_if
-        self.frontend_info_if = frontend_info_if
 
     def attach_env(self, env) -> None:
         self.env = env
@@ -2877,6 +2875,7 @@ class BackendModel:
 
     def consume_backend_observation(self, observation: BackendObservationSnapshot) -> None:
         self._last_observation = observation
+        self._update_ftq_start_pc_cache(observation)
 
     def current_frontend_observation(self) -> BackendObservationSnapshot:
         return self._last_observation
@@ -2886,7 +2885,7 @@ class BackendModel:
             from_ftq_wen=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_wen", None)),
             from_ftq_ftq_idx=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_ftqIdx", None)),
             from_ftq_start_pc_addr=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_startPc_addr", None)),
-            ibuf_full=self._read(getattr(self.frontend_info_if, "io_frontendInfo_ibufFull", None)),
+            ibuf_full=0,
         )
 
     def _bound_backend_agent(self) -> BackendAgent:
@@ -3404,12 +3403,41 @@ class BackendModel:
             self._ftq_start_pc_cache[ftq_idx] = start_pc
             self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
 
+    def observed_cfvec_pc(self, slot: int) -> int:
+        """Return the full PC derived from native cfVec and FTQ observations."""
+        assert self.observe_if is not None
+        slot = int(slot)
+        ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0)
+        ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0)
+        ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[slot], 0)
+        is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0))
+        observed_foldpc = self._read(self.observe_if.cfvec_foldpc[slot], 0)
+        ftq_key = (int(ftq_flag) << 6) | (int(ftq_value) & 0x3F)
+        start_pc = self._ftq_start_pc_cache.get(
+            ftq_key,
+            self._ftq_start_pc_by_value.get(int(ftq_value)),
+        )
+        if start_pc is None:
+            raise AssertionError(
+                "cfVec references an FTQ entry without an observed start PC: "
+                f"slot={slot} ftq=({int(ftq_flag)},{int(ftq_value)}) "
+                f"offset={int(ftq_offset)} foldpc=0x{int(observed_foldpc):x}"
+            )
+        pc = pc_from_ftq_start(int(start_pc), int(ftq_offset), bool(is_rvc))
+        try:
+            return require_matching_foldpc(pc, int(observed_foldpc))
+        except AssertionError as exc:
+            raise AssertionError(
+                f"{exc}; slot={slot} ftq=({int(ftq_flag)},{int(ftq_value)}) "
+                f"offset={int(ftq_offset)} is_rvc={int(is_rvc)}"
+            ) from exc
+
     def _has_later_cfvec_slot_matching_pc(self, current_slot: int, target_pc: int) -> bool:
         assert self.observe_if is not None
         for slot in range(int(current_slot) + 1, 8):
             if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
                 continue
-            if int(self._read(self.observe_if.cfvec_pc[slot], 0)) == int(target_pc):
+            if self.observed_cfvec_pc(slot) == int(target_pc):
                 return True
         return False
 
@@ -3418,7 +3446,7 @@ class BackendModel:
         for slot in range(int(current_slot) + 1, 8):
             if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
                 continue
-            return int(self._read(self.observe_if.cfvec_pc[slot], 0))
+            return self.observed_cfvec_pc(slot)
         return None
 
     def _record_ftq_group_pc(self, ftq_flag: int, ftq_value: int, pc: int, is_rvc: bool) -> None:
@@ -3618,7 +3646,7 @@ class BackendModel:
         for i in range(8):
             if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
                 continue
-            pc = self._read(self.observe_if.cfvec_pc[i], 0)
+            pc = self.observed_cfvec_pc(i)
             instr = self._read(self.observe_if.cfvec_instr[i], 0)
             is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[i], 0))
             pred_taken = bool(self._read(self.observe_if.cfvec_fixed_taken[i], 0))
@@ -4610,7 +4638,6 @@ class BackendModel:
         observation = self._last_observation
         self._activate_visible_queue_call_ret_commit_group()
         self._clear_stale_auxiliary_states()
-        self._update_ftq_start_pc_cache(observation)
         self._watchdog(observation)
         if self.observe_if is not None:
             self._sample_cfvec()
@@ -4640,7 +4667,7 @@ class BackendModel:
         )
 
     def on_clock_edge(self, cycle: int) -> None:
-        if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None or self.frontend_info_if is None:
+        if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None:
             return
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()

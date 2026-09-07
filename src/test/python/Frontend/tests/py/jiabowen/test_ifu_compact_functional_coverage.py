@@ -14,6 +14,7 @@ from env.funcov.py.ifu.compact_funcov import (
     _sample_reset_release_state,
 )
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.support.pc_utils import fold_pc
 from env.support.rvc_decoder import expand_rvc
 
 
@@ -277,8 +278,8 @@ def _set_ifu_output(
         slot = int(slot)
         enq_enable |= 1 << slot
         valid_mask |= 1 << slot
-        # IFU's PrunedAddr omits bit 0, matching the generated DUT signal.
-        dut.set(_PREFIX + f"io_toIBuffer_bits_pc_{slot}_addr", int(pc) >> 1)
+        dut.set(_PREFIX + f"io_toIBuffer_bits_foldpc_{slot}", fold_pc(int(pc)))
+        dut.set(_PREFIX + f"s2_alignedInstrPcVec_{slot}_addr", int(pc) >> 1)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrs_{slot}", instr)
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)
@@ -2439,7 +2440,7 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_toIBuffer_valid",
         _PREFIX + "io_toIBuffer_bits_enqEnable",
         _PREFIX + "io_toIBuffer_bits_valid",
-        _PREFIX + "io_toIBuffer_bits_pc_0_addr",
+        _PREFIX + "io_toIBuffer_bits_foldpc_0",
         _PREFIX + "io_toIBuffer_bits_instrs_0",
         _PREFIX + "io_toIBuffer_bits_isRvc_0",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_offset",

@@ -64,7 +64,13 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 hgatp_changed,
   input logic                 priv_virt_changed,
   input logic [7:0]           cfvec_valid,
-  input logic [7:0][49:0]     cfvec_pc,
+  input logic [7:0][9:0]      cfvec_foldpc,
+  input logic [7:0][5:0]      cfvec_ftq_value,
+  input logic [7:0][4:0]      cfvec_ftq_offset,
+  input logic [7:0]           cfvec_is_rvc,
+  input logic                 from_ftq_wen,
+  input logic [5:0]           from_ftq_idx,
+  input logic [49:0]          from_ftq_start_pc_addr,
   input logic [7:0]           cfvec_iaf,
   input logic [7:0]           cfvec_ipf,
   input logic [7:0]           cfvec_igpf
@@ -98,6 +104,9 @@ module frontend_redirect_flush_recovery_funcov (
   logic        old_prefetch_response_sample;
   logic        old_icache_response_sample;
   logic        old_uncache_response_sample;
+  logic [49:0] ftq_start_pc [0:63];
+  logic [63:0] ftq_start_pc_valid;
+  logic [7:0][49:0] cfvec_pc;
 
   wire ahead_idx_match = ahead_idx_prev_valid &&
     {ahead_idx_prev_flag, ahead_idx_prev_value} ==
@@ -113,13 +122,26 @@ module frontend_redirect_flush_recovery_funcov (
   wire icache_a_fire = icache_a_valid && icache_a_ready;
   wire uncache_a_fire = uncache_a_valid && uncache_a_ready;
 
+  function automatic logic [9:0] fold_pc(input logic [49:0] pc);
+    logic [48:0] half_pc;
+    begin
+      half_pc = pc[49:1];
+      fold_pc = half_pc[9:0] ^ half_pc[19:10] ^ half_pc[29:20] ^
+        half_pc[39:30] ^ {1'b0, half_pc[48:40]};
+    end
+  endfunction
+
   always_comb begin
     cfvec_target_seen = 1'b0;
     cfvec_iaf_seen = 1'b0;
     cfvec_ipf_seen = 1'b0;
     cfvec_igpf_seen = 1'b0;
     for (int slot = 0; slot < 8; slot++) begin
-      cfvec_target_seen |= cfvec_valid[slot] && cfvec_pc[slot] == recovery_target;
+      cfvec_pc[slot] = ftq_start_pc[cfvec_ftq_value[slot]] +
+        {44'd0, cfvec_ftq_offset[slot], 1'b0} - (cfvec_is_rvc[slot] ? 50'd0 : 50'd2);
+      cfvec_target_seen |= cfvec_valid[slot] &&
+        ftq_start_pc_valid[cfvec_ftq_value[slot]] &&
+        cfvec_pc[slot] == recovery_target && cfvec_foldpc[slot] == fold_pc(cfvec_pc[slot]);
       cfvec_iaf_seen |= cfvec_valid[slot] && cfvec_iaf[slot];
       cfvec_ipf_seen |= cfvec_valid[slot] && cfvec_ipf[slot];
       cfvec_igpf_seen |= cfvec_valid[slot] && cfvec_igpf[slot];
@@ -153,6 +175,7 @@ module frontend_redirect_flush_recovery_funcov (
       old_prefetch_response_sample <= 1'b0;
       old_icache_response_sample <= 1'b0;
       old_uncache_response_sample <= 1'b0;
+      ftq_start_pc_valid <= '0;
     end else begin
       ahead_idx_prev_valid <= ftq_idx_ahead_valid;
       ahead_idx_prev_flag <= ftq_idx_ahead_flag;
@@ -167,6 +190,10 @@ module frontend_redirect_flush_recovery_funcov (
       old_prefetch_response_sample <= 1'b0;
       old_icache_response_sample <= 1'b0;
       old_uncache_response_sample <= 1'b0;
+      if (from_ftq_wen) begin
+        ftq_start_pc[from_ftq_idx] <= {from_ftq_start_pc_addr[48:0], 1'b0};
+        ftq_start_pc_valid[from_ftq_idx] <= 1'b1;
+      end
 
       if (icache_a_fire)
         icache_outstanding_sources[icache_a_source] <= 1'b1;

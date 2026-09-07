@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ....support.pc_utils import fold_pc
 from .instr_uncache_owner_funcov import (
     initialize_instr_uncache_owner_coverage_state,
     sample_instr_uncache_owner_coverage,
@@ -123,16 +124,12 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         is_rvc_mask |= (int(value) & 1) << slot
 
     active_slot = None
-    active_to_pc = None
     active_to_ftq_flag = None
     active_to_ftq_value = None
     active_to_ftq_offset = None
     active_to_foldpc = None
     if enq is not None and int(enq) != 0:
         active_slot = (int(enq) & -int(enq)).bit_length() - 1
-        active_to_pc = _read_ifu(
-            recorder, dut, f"io_toIBuffer_bits_pc_{active_slot}_addr"
-        )
         active_to_ftq_flag = _read_ifu(
             recorder, dut, f"io_toIBuffer_bits_ftqPtr_{active_slot}_flag"
         )
@@ -232,6 +229,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             "inner_instrUncache.entries_0.io_req_valid",
             "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_valid",
             "Frontend_top.Frontend.inner_ifu.io_toUncache_req_valid",
+            "Frontend_top.Frontend._inner_ifu_io_toUncache_req_valid",
             *(
                 prefix + "io_toUncache_req_valid"
                 for prefix in _UNCACHE_PREFIXES
@@ -343,7 +341,6 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "to_valid": _read_ifu(recorder, dut, "io_toIBuffer_valid"),
         "to_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
         "to_enq": enq,
-        "to_pc": active_to_pc,
         "to_ftq_flag": active_to_ftq_flag,
         "to_ftq_value": active_to_ftq_value,
         "to_ftq_offset": active_to_ftq_offset,
@@ -859,7 +856,7 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         "uncache_pc": s["uncache_pc"],
         "resp_data": s["resp_data"],
         "s2_uncache_data": s["s2_uncache_data"],
-        "to_pc": s["to_pc"],
+        "to_foldpc": s["to_foldpc"],
         "ifu_stall": ifu_stall,
         "to_uncache_valid": to_uncache_valid,
         "checker_redirect": s["checker_redirect"],
@@ -1109,17 +1106,18 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         failures = checker_pending["failure_reasons"]
         old_ftq = tuple(checker_pending["old_ftq"])
         delivered_ftq = (s["to_ftq_flag"], s["to_ftq_value"])
-        delivered_pc_matches_old = (
-            checker_pending["old_pc"] is None
-            or s["to_pc"] is None
-            or int(s["to_pc"]) == int(checker_pending["old_pc"])
+        delivered_foldpc_matches_old = (
+            checker_pending["old_pc"] is not None
+            and s["to_foldpc"] is not None
+            and int(s["to_foldpc"])
+            == fold_pc(int(checker_pending["old_pc"]) << 1)
         )
         old_ibuffer_delivery = (
             s["to_valid"] == 1
             and s["to_ready"] == 1
             and None not in delivered_ftq
             and delivered_ftq == old_ftq
-            and delivered_pc_matches_old
+            and delivered_foldpc_matches_old
         )
         recovery = checker_pending["recovery"]
         if recovery is None:
@@ -1208,9 +1206,9 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
                 and s["to_ready"] == 1
                 and None not in delivered_ftq
                 and delivered_ftq == tuple(recovery["ftq"])
-                and s["to_pc"] is not None
+                and s["to_foldpc"] is not None
                 and recovery["pc"] is not None
-                and int(s["to_pc"]) == int(recovery["pc"])
+                and int(s["to_foldpc"]) == fold_pc(int(recovery["pc"]) << 1)
             )
             recovery["ibuffer_delivery"] |= bool(recovery_delivery)
             recovery_complete = all(
@@ -1475,8 +1473,13 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
                     "functional_exception_identity_checked": True,
                     "ftq_ptr": [s["to_ftq_flag"], s["to_ftq_value"]],
                     "ftq_offset": s["to_ftq_offset"],
-                    "debug_pc": s["to_pc"],
-                    "debug_pc_matches_nc_va": s["to_pc"] == s["s2_instr_pc"],
+                    "debug_foldpc": s["to_foldpc"],
+                    "debug_foldpc_matches_nc_va": (
+                        s["to_foldpc"] is not None
+                        and s["s2_instr_pc"] is not None
+                        and int(s["to_foldpc"])
+                        == fold_pc(int(s["s2_instr_pc"]) << 1)
+                    ),
                     "cfvec_pc_functional_requirement": False,
                     "old_uncache_request_suppressed": True,
                 },

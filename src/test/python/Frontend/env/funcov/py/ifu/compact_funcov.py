@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from ..common.dut import _read
 from ..common.fetch_memory import _read_expected_fetch_raw, _recover_unavailable_instr
+from ....support.pc_utils import fold_pc
 from ....support.rvc_decoder import expand_rvc
 from .owner_v3_funcov import mark_owner_v3_checked
 
@@ -1068,7 +1069,7 @@ def _read_ibuffer_payload_signature(recorder, dut, enq_enable: int, valid_mask: 
             (
                 int(slot),
                 _read_ifu_output_slot(recorder, dut, "instrs", slot),
-                _read_ifu_output_slot(recorder, dut, "pc", slot, "_addr"),
+                _read_ifu_output_slot(recorder, dut, "foldpc", slot),
                 _read_ifu_output_slot(recorder, dut, "isRvc", slot),
                 _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_flag"),
                 _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_value"),
@@ -3087,7 +3088,15 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     output_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
     records: list[dict[str, Any]] = []
     for slot in slots:
-        pc = _decode_pruned_pc(_read_ifu_output_slot(recorder, dut, "pc", slot, "_addr"))
+        folded_pc = _read_ifu_output_slot(recorder, dut, "foldpc", slot)
+        expected_pc = _decode_pruned_pc(
+            _read_ifu_internal(recorder, dut, f"s2_alignedInstrPcVec_{slot}_addr")
+        )
+        foldpc_matches = (
+            folded_pc is not None
+            and expected_pc is not None
+            and int(folded_pc) == fold_pc(int(expected_pc))
+        )
         instr = _read_ifu_output_slot(recorder, dut, "instrs", slot)
         is_rvc = _read_ifu_output_slot(recorder, dut, "isRvc", slot)
         end_offset = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_offset")
@@ -3100,7 +3109,10 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         records.append(
             {
                 "slot": int(slot),
-                "pc": pc,
+                "pc": expected_pc if foldpc_matches else None,
+                "expected_pc": expected_pc,
+                "foldpc": folded_pc,
+                "foldpc_matches_pc": bool(foldpc_matches),
                 "instr": instr,
                 "is_rvc": is_rvc,
                 "end_offset": end_offset,
@@ -3469,6 +3481,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         for item in internal_records
         if item["aligned_valid"] == 1
         and item["aligned_pc"] == item["pc"]
+        and item["foldpc_matches_pc"]
         and item["aligned_is_rvc"] == item["is_rvc"]
         and item["aligned_end_offset"] == item["end_offset"]
         and item["expanded"] == item["instr"]
