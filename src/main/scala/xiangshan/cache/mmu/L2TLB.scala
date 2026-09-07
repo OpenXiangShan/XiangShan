@@ -452,6 +452,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_data = RegInit(VecInit.fill(blockBits / l1BusDataWidth)(0.U(l1BusDataWidth.W)))
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
   val mem_resp_done = refill_helper._3
+  val refill_error = RegInit(false.B)
+  val mem_resp_error = refill_error || mem.d.bits.denied || mem.d.bits.corrupt
   val mem_resp_from_llptw = from_llptw(mem.d.bits.source)
   val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
@@ -459,6 +461,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   when (mem.d.valid) {
     assert(mem.d.bits.source < MemReqWidth.U)
     refill_data(refill_helper._4) := mem.d.bits.data
+  }
+  when (mem.d.fire) {
+    refill_error := Mux(mem_resp_done, false.B, mem_resp_error)
   }
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
   val refill_data_tmp = WireInit(refill_data)
@@ -514,6 +519,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap
       Bitmap.io.mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
       Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
+      Bitmap.io.mem.resp_af := mem_resp_error
     }
 
     // ptwcache -> hptw llptw
@@ -525,18 +531,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
   llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
   llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
+  llptw_mem.resp_af := mem_resp_error
   // mem -> ptw
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
   ptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize)
+  ptw.io.mem.resp_af := mem_resp_error
   // mem -> hptw
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
   hptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 1)
+  hptw.io.mem.resp_af := mem_resp_error
   // mem -> cache
   val refill_from_llptw = mem_resp_from_llptw
   val refill_from_ptw = mem_resp_from_ptw
   val refill_from_hptw = mem_resp_from_hptw
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
-  val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !(from_hptw(mem.d.bits.source) && hptw_bypassed)
+  val refill_valid = mem_resp_done && !mem_resp_error && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !(from_hptw(mem.d.bits.source) && hptw_bypassed)
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt

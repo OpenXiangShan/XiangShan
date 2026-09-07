@@ -78,6 +78,7 @@ class bitmapIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
       val id = Output(UInt(bMemID.W))
       val value = Output(UInt(blockBits.W))
     }))
+    val resp_af = Input(Bool())
     val req_mask = Input(Vec(l2tlbParams.llptwsize+2, Bool()))
   }
   val req = Flipped(DecoupledIO(new bitmapReqBundle()))
@@ -205,11 +206,11 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
     when (to_mem_out) {
       val index = getBitmapAddr(req_real_ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-      entries(enq_ptr).cf := bitmapdata(index)(req_real_ppn(log2Up(XLEN)-1, 0))
+      entries(enq_ptr).cf := io.mem.resp_af || bitmapdata(index)(req_real_ppn(log2Up(XLEN)-1, 0))
       val ppnPart = req_real_ppn(log2Up(XLEN)-1, log2Up(8))
       val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
       for (j <- 0 until tlbcontiguous) {
-        entries(enq_ptr).cfs(j) := selectedBits(j)
+        entries(enq_ptr).cfs(j) := io.mem.resp_af || selectedBits(j)(0)
       }
     }
     entries(enq_ptr).hit := to_wait || to_mem_out
@@ -278,11 +279,11 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
             entries(i).hit := cm_to_wait || cm_to_mem_out
             when (cm_to_mem_out) {
               val index = getBitmapAddr(entries(i).ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-              entries(i).cf := bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1,0))
+              entries(i).cf := io.mem.resp_af || bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1,0))
               val ppnPart = entries(i).ppn(log2Up(XLEN)-1, log2Up(8))
               val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
               for (j <- 0 until tlbcontiguous) {
-                entries(i).cfs(j) := selectedBits(j)
+                entries(i).cfs(j) := io.mem.resp_af || selectedBits(j)(0)
               }
             }
           }
@@ -305,11 +306,11 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
         state(i) := state_mem_out
         val index = getBitmapAddr(entries(i).ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
         entries(i).data := bitmapdata(index)
-        entries(i).cf := bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1, 0))
+        entries(i).cf := io.mem.resp_af || bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1, 0))
         val ppnPart = entries(i).ppn(log2Up(XLEN)-1, log2Up(8))
         val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
         for (j <- 0 until tlbcontiguous) {
-          entries(i).cfs(j) := selectedBits(j)
+          entries(i).cfs(j) := io.mem.resp_af || selectedBits(j)(0)
         }
       }
     }
@@ -359,7 +360,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.wakeup.bits.s2xlate := DataHoldBypass(entries(mem_ptr).s2xlate, wakeup_valid_1cycle)
 
   // when don't hit, refill the data to bitmap cache
-  io.refill.valid := io.resp.valid && !entries(mem_ptr).hit
+  io.refill.valid := io.resp.valid && !entries(mem_ptr).hit && !entries(mem_ptr).cf
   io.refill.bits.tag := entries(mem_ptr).ppn
   io.refill.bits.data := entries(mem_ptr).data
 
