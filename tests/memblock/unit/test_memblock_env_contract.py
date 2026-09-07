@@ -1295,8 +1295,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
+            "PtwCorruptBeat",
             "inject_response_error_after",
             "pending_response_error_->clean_requests",
+            "selected_corrupt_beat",
+            "denied || (corrupt && selected_corrupt_beat)",
             "response.denied",
             "response.corrupt",
             "ptw_error_response_requests",
@@ -1307,6 +1310,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "sv39-load-leaf-corrupt",
             "sv48-store-middle-corrupt",
             "sv48-store-leaf-denied",
+            "first_beat_corrupt=",
+            "last_beat_corrupt=",
+            "clean_recoveries=",
+            "expected_failed_block_rereads",
             "MEMBLOCK_PTW_ERRORS_PASS",
         ):
             self.assertIn(contract, main)

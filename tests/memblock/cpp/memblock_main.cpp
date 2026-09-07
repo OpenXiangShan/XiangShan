@@ -21645,24 +21645,25 @@ int run_ptw_errors(int argc, char **argv)
         bool denied;
         bool corrupt;
         unsigned clean_requests_before_error;
+        memblock::PtwCorruptBeat corrupt_beat;
     };
     constexpr std::array<Case, 8> cases{{
         {"sv39-load-root-denied", memblock::ReferencePageMode::sv39,
-         false, true, false, 0},
+         false, true, false, 0, memblock::PtwCorruptBeat::all},
         {"sv39-load-leaf-corrupt", memblock::ReferencePageMode::sv39,
-         false, false, true, 2},
+         false, false, true, 2, memblock::PtwCorruptBeat::first},
         {"sv48-load-middle-denied", memblock::ReferencePageMode::sv48,
-         false, true, false, 1},
+         false, true, false, 1, memblock::PtwCorruptBeat::all},
         {"sv48-load-leaf-corrupt", memblock::ReferencePageMode::sv48,
-         false, false, true, 3},
+         false, false, true, 3, memblock::PtwCorruptBeat::last},
         {"sv39-store-root-corrupt", memblock::ReferencePageMode::sv39,
-         true, false, true, 0},
+         true, false, true, 0, memblock::PtwCorruptBeat::first},
         {"sv39-store-leaf-denied", memblock::ReferencePageMode::sv39,
-         true, true, false, 2},
+         true, true, false, 2, memblock::PtwCorruptBeat::all},
         {"sv48-store-middle-corrupt", memblock::ReferencePageMode::sv48,
-         true, false, true, 2},
+         true, false, true, 2, memblock::PtwCorruptBeat::last},
         {"sv48-store-leaf-denied", memblock::ReferencePageMode::sv48,
-         true, true, false, 3},
+         true, true, false, 3, memblock::PtwCorruptBeat::all},
     }};
 
     unsigned loads = 0;
@@ -21677,6 +21678,71 @@ int run_ptw_errors(int argc, char **argv)
     unsigned stage2_cases = 0;
     unsigned nested_cases = 0;
     unsigned bitmap_cases = 0;
+    unsigned first_beat_corrupt = 0;
+    unsigned last_beat_corrupt = 0;
+    unsigned clean_recoveries = 0;
+
+    const auto run_clean_recovery = [&](
+        memblock::Environment &environment, const char *phase,
+        std::uint64_t address, std::uint64_t physical_address,
+        bool fault_was_store, unsigned identity,
+        std::uint64_t dcache_before, std::uint64_t uncache_before,
+        bool hfence_vvma = false, bool hfence_gvma = false,
+        std::uint64_t expected_failed_block_rereads = 1) {
+        const std::uint64_t failed_block =
+            environment.ptw_last_error_response_address();
+        // The L1 DTLB may cache an access-fault translation.  Invalidate that
+        // architecturally visible result before checking that the lower-level
+        // page-table caches did not retain data from the bad block response.
+        if (!environment.issue_sfence(
+                0, 0, true, true, hfence_vvma, hfence_gvma)) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << phase
+                      << "-recovery-fence reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        const std::uint64_t lq_offset = fault_was_store ? 0 : 1;
+        const memblock::LoadTransaction recovery{
+            .address = address,
+            .oracle_address = physical_address,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(1),
+            .rob_flag = memblock::rob_pointer_flag(1),
+            .lq = memblock::lq_pointer_value(lq_offset),
+            .lq_flag = memblock::lq_pointer_flag(lq_offset),
+            .pdest = static_cast<std::uint8_t>(224 + identity),
+            .lane = identity % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(recovery);
+        if (!environment.set_rob_head(recovery.rob, recovery.rob_flag) ||
+            !environment.enqueue_load(recovery) ||
+            !environment.issue_load(recovery, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192) ||
+            environment.ptw_error_response_requests() != 1 ||
+            environment.ptw_requests_covering_since(
+                failed_block, ptw_before) != expected_failed_block_rereads ||
+            environment.tilelink_requests() != dcache_before + 1 ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_PTW_ERRORS_FAIL phase=" << phase
+                      << "-clean-recovery reason=" << environment.error()
+                      << " failed_block=0x" << std::hex << failed_block
+                      << std::dec << " rereads="
+                      << environment.ptw_requests_covering_since(
+                             failed_block, ptw_before) << '/'
+                      << expected_failed_block_rereads
+                      << " errors="
+                      << environment.ptw_error_response_requests()
+                      << " dcache=" << environment.tilelink_requests() << '/'
+                      << dcache_before + 1
+                      << " uncache=" << environment.uncache_requests() << '/'
+                      << uncache_before << '\n';
+            return false;
+        }
+        ++clean_recoveries;
+        return true;
+    };
 
     for (std::size_t index = 0; index < cases.size(); ++index) {
         const Case &test = cases[index];
@@ -21705,7 +21771,8 @@ int run_ptw_errors(int argc, char **argv)
             return 1;
         }
         environment.inject_ptw_response_error_after(
-            test.clean_requests_before_error, test.denied, test.corrupt);
+            test.clean_requests_before_error, test.denied, test.corrupt,
+            test.corrupt_beat);
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
         const std::uint64_t ptw_before = environment.ptw_requests();
@@ -21801,8 +21868,19 @@ int run_ptw_errors(int argc, char **argv)
                       << uncache_before << '\n';
             return 1;
         }
+        if (!run_clean_recovery(
+                environment, test.name, virtual_page + 0x188,
+                physical_page + 0x188, test.store,
+                static_cast<unsigned>(index), dcache_before,
+                uncache_before, false, false)) {
+            return 1;
+        }
         denied += test.denied;
         corrupt += test.corrupt;
+        first_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::first;
+        last_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::last;
         const unsigned levels = memblock::reference_page_levels(test.mode);
         root += test.clean_requests_before_error == 0;
         leaf += test.clean_requests_before_error + 1 == levels;
@@ -21819,16 +21897,17 @@ int run_ptw_errors(int argc, char **argv)
         bool denied;
         bool corrupt;
         unsigned clean_requests_before_error;
+        memblock::PtwCorruptBeat corrupt_beat;
     };
     constexpr std::array<Stage2Case, 4> stage2_tests{{
         {"sv39x4-load-root-denied", memblock::ReferencePageMode::sv39,
-         false, true, false, 0},
+         false, true, false, 0, memblock::PtwCorruptBeat::all},
         {"sv39x4-store-leaf-corrupt", memblock::ReferencePageMode::sv39,
-         true, false, true, 2},
+         true, false, true, 2, memblock::PtwCorruptBeat::first},
         {"sv48x4-load-middle-corrupt", memblock::ReferencePageMode::sv48,
-         false, false, true, 1},
+         false, false, true, 1, memblock::PtwCorruptBeat::last},
         {"sv48x4-store-leaf-denied", memblock::ReferencePageMode::sv48,
-         true, true, false, 3},
+         true, true, false, 3, memblock::PtwCorruptBeat::all},
     }};
     for (std::size_t index = 0; index < stage2_tests.size(); ++index) {
         const auto &test = stage2_tests[index];
@@ -21857,7 +21936,8 @@ int run_ptw_errors(int argc, char **argv)
             return 1;
         }
         environment.inject_ptw_response_error_after(
-            test.clean_requests_before_error, test.denied, test.corrupt);
+            test.clean_requests_before_error, test.denied, test.corrupt,
+            test.corrupt_beat);
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
         const std::uint64_t address = guest_page + 0x188;
@@ -21945,8 +22025,18 @@ int run_ptw_errors(int argc, char **argv)
                       << expected_requests << '\n';
             return 1;
         }
+        if (!run_clean_recovery(
+                environment, test.name, address, physical_page + 0x188,
+                test.store, static_cast<unsigned>(cases.size() + index),
+                dcache_before, uncache_before, false, true)) {
+            return 1;
+        }
         denied += test.denied;
         corrupt += test.corrupt;
+        first_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::first;
+        last_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::last;
         root += test.clean_requests_before_error == 0;
         leaf += test.clean_requests_before_error + 1 ==
             memblock::reference_page_levels(test.mode);
@@ -21966,12 +22056,15 @@ int run_ptw_errors(int argc, char **argv)
         bool denied;
         bool corrupt;
         unsigned clean_requests_before_error;
+        memblock::PtwCorruptBeat corrupt_beat;
     };
     constexpr std::array<NestedCase, 2> nested_tests{{
         {"sv39-sv39x4-g-root-denied", memblock::ReferencePageMode::sv39,
-         memblock::ReferencePageMode::sv39, false, true, false, 0},
+         memblock::ReferencePageMode::sv39, false, true, false, 0,
+         memblock::PtwCorruptBeat::all},
         {"sv48-sv48x4-vs-root-corrupt", memblock::ReferencePageMode::sv48,
-         memblock::ReferencePageMode::sv48, true, false, true, 4},
+         memblock::ReferencePageMode::sv48, true, false, true, 4,
+         memblock::PtwCorruptBeat::first},
     }};
     for (std::size_t index = 0; index < nested_tests.size(); ++index) {
         const auto &test = nested_tests[index];
@@ -22022,7 +22115,8 @@ int run_ptw_errors(int argc, char **argv)
             return 1;
         }
         environment.inject_ptw_response_error_after(
-            test.clean_requests_before_error, test.denied, test.corrupt);
+            test.clean_requests_before_error, test.denied, test.corrupt,
+            test.corrupt_beat);
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
         const std::uint64_t address = virtual_page + 0x188;
@@ -22107,8 +22201,21 @@ int run_ptw_errors(int argc, char **argv)
                       << expected_requests << '\n';
             return 1;
         }
+        if (!run_clean_recovery(
+                environment, test.name, address, host_physical + 0x188,
+                test.store,
+                static_cast<unsigned>(
+                    cases.size() + stage2_tests.size() + index),
+                dcache_before, uncache_before, index != 0, index == 0,
+                index == 0 ? 2 : 1)) {
+            return 1;
+        }
         denied += test.denied;
         corrupt += test.corrupt;
+        first_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::first;
+        last_beat_corrupt += test.corrupt &&
+            test.corrupt_beat == memblock::PtwCorruptBeat::last;
         ++nested_cases;
         total_cycles += environment.cycle();
         total_ptw_requests += environment.ptw_requests();
@@ -22138,11 +22245,14 @@ int run_ptw_errors(int argc, char **argv)
         const bool store = index != 0;
         const bool denied_response = index == 0;
         const bool corrupt_response = index != 0;
+        const memblock::PtwCorruptBeat corrupt_beat = index == 0
+            ? memblock::PtwCorruptBeat::all
+            : memblock::PtwCorruptBeat::last;
         const std::uint64_t ptw_before = environment.ptw_requests();
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
         environment.inject_ptw_response_error_after(
-            3, denied_response, corrupt_response);
+            3, denied_response, corrupt_response, corrupt_beat);
         if (!store) {
             const memblock::LoadTransaction transaction{
                 .address = virtual_page + 0x188,
@@ -22214,8 +22324,21 @@ int run_ptw_errors(int argc, char **argv)
                              policy_word, ptw_before) << '\n';
             return 1;
         }
+        if (!run_clean_recovery(
+                environment, index == 0 ? "bitmap-load" : "bitmap-store",
+                virtual_page + 0x188, physical_page + 0x188, store,
+                static_cast<unsigned>(
+                    cases.size() + stage2_tests.size() +
+                    nested_tests.size() + index),
+                dcache_before, uncache_before, false, false)) {
+            return 1;
+        }
         denied += denied_response;
         corrupt += corrupt_response;
+        first_beat_corrupt += corrupt_response &&
+            corrupt_beat == memblock::PtwCorruptBeat::first;
+        last_beat_corrupt += corrupt_response &&
+            corrupt_beat == memblock::PtwCorruptBeat::last;
         ++bitmap_cases;
         total_cycles += environment.cycle();
         total_ptw_requests += environment.ptw_requests() - ptw_before;
@@ -22232,6 +22355,9 @@ int run_ptw_errors(int argc, char **argv)
               << " stores=" << stores
               << " denied=" << denied
               << " corrupt=" << corrupt
+              << " first_beat_corrupt=" << first_beat_corrupt
+              << " last_beat_corrupt=" << last_beat_corrupt
+              << " clean_recoveries=" << clean_recoveries
               << " levels=" << root << ',' << intermediate << ',' << leaf
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

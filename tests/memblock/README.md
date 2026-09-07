@@ -627,8 +627,14 @@ This is separate from the data-side TLB translation tests.
 `ptw-errors` injects TileLink `denied` and `corrupt` on selected PTW block
 responses. Sixteen cases cross Sv39/Sv48 stage-1, isolated Sv39x4/Sv48x4,
 fully nested walks, bitmap reads, load/store, and root/intermediate/leaf
-locations. Each case requires the original access fault, exact walk cutoff, no
-DCache/Uncache access, and no refill from bad PTE data.
+locations. The eight independent corrupt cases split evenly between first- and
+last-beat corruption; denied remains fixed across the multibeat response and
+also asserts corrupt as required for a TileLink data response. Each case
+requires the original access fault, exact walk cutoff, and no DCache/Uncache
+access. It then applies the matching stage-1 or hypervisor fence and requires a
+clean same-address retry, an exact reread of the failed block, correct data, and
+one DCache request. This distinguishes a permitted L1 fault-result entry from
+forbidden refill of bad response data into the lower page-table caches.
 
 `uncache-errors` injects denied and corrupt Uncache load and store responses.
 Loads check the exception contract through the PBMT=NC adapter. Stores also

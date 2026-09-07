@@ -12,8 +12,9 @@ the repaired RTL has complete SHA-256
 
 1. Install a valid Sv39 page-table mapping for a scalar load.
 2. Let the PTW issue its root-page `Get` request.
-3. Return a legal two-beat `GrantData` response with matching opcode, size,
-   source, and data, but assert the TileLink `denied` bit.
+3. Return a legal two-beat `AccessAckData` response with matching opcode, size,
+   source, and data, asserting TileLink `denied` and the consequently required
+   `corrupt` bit on both data beats.
 4. Observe the PTW and scalar load completion.
 
 The new `ptw-errors` scenario can select the failing response by walk depth and
@@ -79,10 +80,16 @@ response, forwards one access-fault indication to PTW, LLPTW, HPTW, and Bitmap,
 terminates the corresponding walk, and suppresses both page-table-cache and
 bitmap-cache refill from bad data.
 
-The rebuilt model passed all 16 directed cases: eight stage-1, four isolated
-G-stage, two fully nested, and two bitmap reads; loads/stores and
-denied/corrupt each split 8/8. It consumed exactly 45 PTW requests in 1,894
-cycles and issued no DCache or Uncache request for the faulting architectural
-access. The existing translation matrix, 118-case translation-fault suite,
-58-case permission suite, 36-case PBMT suite, Bare degenerations, and ten
-superpage cases also passed on the same RTL hash.
+The rebuilt model passed all 16 directed fault cases: eight stage-1, four
+isolated G-stage, two fully nested, and two bitmap reads; loads/stores and
+denied/independent-corrupt each split 8/8. The eight independent corrupt cases
+split 4/4 between the first and last response beat, directly proving that the
+repair accumulates errors across the complete block. Every case then applied
+the matching `SFENCE.VMA`, `HFENCE.VVMA`, or `HFENCE.GVMA` and completed a clean
+same-address load. The 111 PTW requests in 3,466 cycles prove an exact reread of
+each failed page-table block after invalidating the permitted L1 access-fault
+entry; every recovery returned exact data through one DCache request. No
+faulting architectural access issued a DCache or Uncache request. The existing
+translation matrix, 118-case translation-fault suite, 58-case permission suite,
+36-case PBMT suite, Bare degenerations, and ten superpage cases also passed on
+the same RTL hash.

@@ -1301,6 +1301,12 @@ enum class ResponseLatencyProfile {
     spec,
 };
 
+enum class PtwCorruptBeat {
+    all,
+    first,
+    last,
+};
+
 struct ResponseLatencyProfiles {
     ResponseLatencyProfile dcache = ResponseLatencyProfile::compact;
     ResponseLatencyProfile ptw = ResponseLatencyProfile::compact;
@@ -2118,14 +2124,19 @@ public:
     explicit PtwMemoryAgent(SparseMemory &memory) : memory_(memory) {}
 
     void inject_response_error_after(
-        unsigned clean_requests, bool denied, bool corrupt)
+        unsigned clean_requests, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
     {
         if (!denied && !corrupt) {
             throw std::invalid_argument(
                 "PTW response error injection requires denied or corrupt");
         }
+        if (!corrupt && corrupt_beat != PtwCorruptBeat::all) {
+            throw std::invalid_argument(
+                "PTW corrupt beat selection requires a corrupt injection");
+        }
         pending_response_error_ = PendingResponseError{
-            clean_requests, denied, corrupt};
+            clean_requests, denied, corrupt, corrupt_beat};
     }
 
     void configure_backpressure(
@@ -2371,6 +2382,7 @@ private:
         unsigned clean_requests;
         bool denied;
         bool corrupt;
+        PtwCorruptBeat corrupt_beat;
     };
 
     unsigned respond(const Request &request)
@@ -2388,10 +2400,12 @@ private:
             transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
         bool denied = false;
         bool corrupt = false;
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all;
         if (pending_response_error_) {
             if (pending_response_error_->clean_requests == 0) {
                 denied = pending_response_error_->denied;
                 corrupt = pending_response_error_->corrupt;
+                corrupt_beat = pending_response_error_->corrupt_beat;
                 pending_response_error_.reset();
                 ++error_response_requests_;
                 last_error_response_address_ = request.address;
@@ -2402,6 +2416,10 @@ private:
         }
         unsigned first_response_delay = 0;
         for (std::size_t beat = 0; beat < beats; ++beat) {
+            const bool selected_corrupt_beat =
+                corrupt_beat == PtwCorruptBeat::all ||
+                (corrupt_beat == PtwCorruptBeat::first && beat == 0) ||
+                (corrupt_beat == PtwCorruptBeat::last && beat + 1 == beats);
             const unsigned delay = push_response(Response{
                 static_cast<std::uint8_t>(request.opcode == 4 ? 1 : 5),
                 static_cast<std::uint8_t>(request.opcode == 4 ? 0 : 1),
@@ -2409,7 +2427,10 @@ private:
                 request.source,
                 memory_.read_beat(base + beat * kBeatBytes, kBeatBytes),
                 denied,
-                corrupt,
+                // denied is fixed across a multibeat D response and implies
+                // corrupt on every beat carrying data.  Independent corrupt
+                // errors may legally identify only the affected data beat.
+                denied || (corrupt && selected_corrupt_beat),
                 beat + 1 == beats,
             }, beat == 0);
             if (beat == 0) {
@@ -4069,10 +4090,11 @@ public:
     }
 
     void inject_ptw_response_error_after(
-        unsigned clean_requests, bool denied, bool corrupt)
+        unsigned clean_requests, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
     {
         ptw_agent_.inject_response_error_after(
-            clean_requests, denied, corrupt);
+            clean_requests, denied, corrupt, corrupt_beat);
     }
 
     void force_next_dcache_response_delay(unsigned cycles)
