@@ -2202,3 +2202,46 @@ The frozen executable and runtime-manifest SHA-256 values are
 `770c46eb6281250647f4387933c35844dafa205a748991abe52ea79451f7d1b5`
 and `667f4fee56e371bde93bee49e9d95a9cb6fdef9b87b2b543e4fb2eb96b11285c`.
 No new CPU RTL defect was observed.
+
+## Schema 17 Random DCache Load Error Closure
+
+On 2026-09-07 the common `random-mixed` interface added
+`dcache-load-error` and `dcache-load-error-denied` per-mille constraints for
+ordinary scalar loads. Each error action uses a unique cold line mapped in
+Bare, Sv39, Sv48, and all four nested VS/G mode pairs. Corrupt responses must
+produce HardwareError; denied responses must produce LoadAccessFault. Both
+paths suppress the architectural destination, preserve manager memory, perform
+precise redirect and LQ cleanup, and drain the full refill plus GrantAck.
+
+The manager agent attributes errored refills and GrantAcks independently from
+global traffic. For `N` error refills including `D` denied refills, schema 17
+requires exactly `N` error responses, `2D` denied beats, `2N` corrupt beats,
+`N` errored GrantAcks, and `N` errored refills. This remains exact when a clean
+hardware prefetch request is concurrent. The presets use error rates
+`100/0/500` for `coverage/spec/corner`, with a 500-per-mille denied share;
+SPEC-like traffic therefore retains no synthetic manager errors.
+
+The following 256-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/corrupt/denied | Error manager tuple |
+| --- | ---: | ---: | --- | --- |
+| `coverage` | 17003 | 40,061 | 30/2/4 | 6/8/12/6/6 |
+| all corrupt, serial scalar | 17004 | 58,037 | 0/16/0 | 16/0/32/16/16 |
+| all denied, serial scalar | 17005 | 56,952 | 0/0/17 | 17/34/34/17/17 |
+| `spec`, default zero error | 17006 | 26,444 | 67/0/0 | 0/0/0/0/0 |
+| frozen `coverage` | 17007 | 32,806 | 29/1/1 | 2/2/4/2/2 |
+
+The focused `dcache-errors` scenario also passed its six-case per-beat refill
+matrix, 19 physical tag/data ECC error reports, and concurrent-MSHR checks.
+All 185 Python unit tests and `check-ports`/`check-rtl` passed. The independent
+verifier accepted frozen-runtime seed 17007:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=17007..17007 results=1 transactions=256 elapsed_seconds=13.272454 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=fb898c49998fd726c5d2252c375e14647e244bd515168d67634fe775bad7ea6e
+```
+
+The frozen executable and runtime-manifest SHA-256 values are
+`70ca94a91c132895c1b414d5c6c90e64640b33f72ca3b045f47daef463775131`
+and `f585ab7277cb6599910e843e7836b15e4454eb795827cb251ba14975b95c1fc4`.
+No CPU RTL defect was observed.

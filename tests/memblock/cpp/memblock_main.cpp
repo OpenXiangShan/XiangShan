@@ -130,6 +130,8 @@ struct RandomConstraints {
     unsigned cmo_younger_overlap_per_mille = 0;
     unsigned cmo_error_per_mille = 0;
     unsigned cmo_error_denied_per_mille = 0;
+    unsigned dcache_load_error_per_mille = 0;
+    unsigned dcache_load_error_denied_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -189,6 +191,8 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 500,
                 .cmo_error_per_mille = 100,
                 .cmo_error_denied_per_mille = 500,
+                .dcache_load_error_per_mille = 100,
+                .dcache_load_error_denied_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -250,6 +254,8 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 10,
                 .cmo_error_per_mille = 0,
                 .cmo_error_denied_per_mille = 500,
+                .dcache_load_error_per_mille = 0,
+                .dcache_load_error_denied_per_mille = 500,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -311,6 +317,8 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 750,
                 .cmo_error_per_mille = 500,
                 .cmo_error_denied_per_mille = 500,
+                .dcache_load_error_per_mille = 500,
+                .dcache_load_error_denied_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -650,6 +658,10 @@ struct RandomConstraints {
             cmo_error_per_mille = parsed;
         } else if (key == "cmo-error-denied") {
             cmo_error_denied_per_mille = parsed;
+        } else if (key == "dcache-load-error") {
+            dcache_load_error_per_mille = parsed;
+        } else if (key == "dcache-load-error-denied") {
+            dcache_load_error_denied_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -933,6 +945,8 @@ struct RandomConstraints {
             cmo_younger_overlap_per_mille > 1000 ||
             cmo_error_per_mille > 1000 ||
             cmo_error_denied_per_mille > 1000 ||
+            dcache_load_error_per_mille > 1000 ||
+            dcache_load_error_denied_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -977,6 +991,23 @@ struct RandomConstraints {
         if (cmo_error_per_mille != 0 && operation_weights[cmo] == 0) {
             throw std::invalid_argument(
                 "cmo-error requires a nonzero CMO operation weight");
+        }
+        if (dcache_load_error_per_mille != 0 &&
+            operation_weights[scalar_load] == 0) {
+            throw std::invalid_argument(
+                "dcache-load-error requires a nonzero scalar-load weight");
+        }
+        if (dcache_load_error_per_mille == 1000 &&
+            stride_stream_per_mille != 0) {
+            throw std::invalid_argument(
+                "dcache-load-error=1000 requires stride-stream=0 because "
+                "stride-prefetch training needs clean scalar loads");
+        }
+        if (dcache_load_error_per_mille == 1000 &&
+            concurrent_actions_per_mille != 0) {
+            throw std::invalid_argument(
+                "dcache-load-error=1000 requires concurrent=0 because "
+                "faulting scalar loads redirect the mixed issue window");
         }
         if (uncache_error_per_mille != 0 && !uses_uncache()) {
             throw std::invalid_argument(
@@ -1233,6 +1264,13 @@ struct RandomConstraints {
                     atomic_width_weights.begin(), atomic_width_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
                 actions += std::max(families, widths);
+            } else if (operation == scalar_load) {
+                const unsigned error_kinds =
+                    dcache_load_error_per_mille == 0 ? 0U :
+                    (dcache_load_error_denied_per_mille == 0 ||
+                     dcache_load_error_denied_per_mille == 1000 ? 1U : 2U);
+                actions += error_kinds +
+                    (dcache_load_error_per_mille == 1000 ? 0U : 1U);
             } else if (operation == hypervisor) {
                 actions += static_cast<unsigned>(std::count_if(
                     hypervisor_family_weights.begin(),
@@ -1385,7 +1423,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=16 constraints=" << name
+        stream << "constraint_schema=17 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1408,6 +1446,10 @@ struct RandomConstraints {
                << " target_cmo_error=" << cmo_error_per_mille
                << " target_cmo_error_denied="
                << cmo_error_denied_per_mille
+               << " target_dcache_load_error="
+               << dcache_load_error_per_mille
+               << " target_dcache_load_error_denied="
+               << dcache_load_error_denied_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -1711,6 +1753,12 @@ struct ConstraintCoverage {
     std::array<std::array<std::uint64_t, 2>,
                RandomConstraints::cmo_operation_count>
         cmo_operation_errors{};
+    std::array<std::uint64_t, 2> dcache_load_errors{};
+    std::array<std::uint64_t, 2> dcache_load_error_kinds{};
+    // clean/corrupt/denied for weighted scalar-load actions.
+    std::array<std::uint64_t, 3> dcache_load_outcomes{};
+    // error responses/denied beats/corrupt beats/GrantAcks/refills.
+    std::array<std::uint64_t, 5> dcache_load_error_manager{};
     std::array<std::uint64_t, 2> vector_directions{};
     std::array<std::uint64_t, 4> vector_addressing{};
     std::array<std::uint64_t, 4> vector_eews{};
@@ -1781,6 +1829,22 @@ struct ConstraintCoverage {
         ++uncache_errors[error_denied ? 1U : 0U];
         if (error_denied) {
             ++uncache_error_kinds[*error_denied ? 1U : 0U];
+        }
+    }
+
+    void sample_dcache_load(
+        std::optional<bool> error_denied,
+        const std::array<std::uint64_t, 5> &manager_delta = {})
+    {
+        const unsigned outcome = !error_denied
+            ? 0U : *error_denied ? 2U : 1U;
+        ++dcache_load_outcomes.at(outcome);
+        ++dcache_load_errors[error_denied ? 1U : 0U];
+        if (error_denied) {
+            ++dcache_load_error_kinds[*error_denied ? 1U : 0U];
+        }
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            dcache_load_error_manager[index] += manager_delta[index];
         }
     }
 
@@ -1916,6 +1980,21 @@ struct ConstraintCoverage {
                 });
             return operations[operation] != 0 && families_complete &&
                 widths_complete;
+        }
+        if (operation == RandomConstraints::scalar_load) {
+            const std::array<bool, 3> enabled{{
+                constraints.dcache_load_error_per_mille != 1000,
+                constraints.dcache_load_error_per_mille != 0 &&
+                    constraints.dcache_load_error_denied_per_mille != 1000,
+                constraints.dcache_load_error_per_mille != 0 &&
+                    constraints.dcache_load_error_denied_per_mille != 0,
+            }};
+            for (unsigned outcome = 0; outcome < enabled.size(); ++outcome) {
+                if ((dcache_load_outcomes[outcome] != 0) != enabled[outcome]) {
+                    return false;
+                }
+            }
+            return operations[operation] != 0;
         }
         if (operation == RandomConstraints::hypervisor) {
             const bool families_complete = std::equal(
@@ -2080,6 +2159,34 @@ struct ConstraintCoverage {
                 constraints.uncache_error_per_mille, uncache_errors))) {
             return false;
         }
+        const std::uint64_t dcache_load_actions =
+            dcache_load_outcomes[0] + dcache_load_outcomes[1] +
+            dcache_load_outcomes[2];
+        const std::uint64_t dcache_load_error_actions =
+            dcache_load_outcomes[1] + dcache_load_outcomes[2];
+        const bool dcache_load_enabled =
+            constraints.operation_weights[RandomConstraints::scalar_load] != 0;
+        if ((!dcache_load_enabled &&
+             (dcache_load_actions != 0 ||
+              dcache_load_error_manager !=
+                  std::array<std::uint64_t, 5>{})) ||
+            (dcache_load_enabled &&
+             (dcache_load_errors !=
+                  std::array<std::uint64_t, 2>{
+                      dcache_load_outcomes[0], dcache_load_error_actions} ||
+              dcache_load_error_kinds !=
+                  std::array<std::uint64_t, 2>{
+                      dcache_load_outcomes[1], dcache_load_outcomes[2]} ||
+              dcache_load_actions != operations[RandomConstraints::scalar_load] ||
+              dcache_load_error_manager !=
+                  std::array<std::uint64_t, 5>{
+                      dcache_load_error_actions,
+                      dcache_load_outcomes[2] * 2,
+                      dcache_load_error_actions * 2,
+                      dcache_load_error_actions,
+                      dcache_load_error_actions}))) {
+            return false;
+        }
         if (constraints.uses_translation() &&
             (translation_walk_windows == 0 ||
              translation_reuse_windows == 0)) {
@@ -2206,6 +2313,21 @@ public:
                << cmo_operation_errors[1][1] << ','
                << cmo_operation_errors[2][0] << ','
                << cmo_operation_errors[2][1]
+               << " actual_dcache_load_error="
+               << dcache_load_errors[0] << ',' << dcache_load_errors[1]
+               << " actual_dcache_load_error_kind="
+               << dcache_load_error_kinds[0] << ','
+               << dcache_load_error_kinds[1]
+               << " actual_dcache_load_outcome="
+               << dcache_load_outcomes[0] << ','
+               << dcache_load_outcomes[1] << ','
+               << dcache_load_outcomes[2]
+               << " actual_dcache_load_error_manager="
+               << dcache_load_error_manager[0] << ','
+               << dcache_load_error_manager[1] << ','
+               << dcache_load_error_manager[2] << ','
+               << dcache_load_error_manager[3] << ','
+               << dcache_load_error_manager[4]
                << " actual_vector_direction=" << vector_directions[0] << ','
                << vector_directions[1]
                << " actual_vector_addressing=" << vector_addressing[0] << ','
@@ -29020,6 +29142,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::array<std::uint64_t, 3> cmo_locality_lines{};
     std::uint64_t cmo_overlap_line = 0;
     std::uint64_t probe_overlap_line = 0;
+    std::uint64_t dcache_error_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -29038,6 +29161,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t cmo_span = 0x1000000;
     constexpr std::uint64_t probe_overlap_base = cmo_base + cmo_span;
     constexpr std::uint64_t probe_overlap_span = 0x4000000;
+    constexpr std::uint64_t dcache_error_base =
+        probe_overlap_base + probe_overlap_span;
+    constexpr std::uint64_t dcache_error_span = 0x4000000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -29686,6 +29812,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (std::uint64_t block = dcache_error_base;
+             block < dcache_error_base + dcache_error_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
         if (!map_all_contexts(
                 cache1_base + 0xf000, cache1_base + 0xf000,
                 false, false, true) ||
@@ -29808,7 +29945,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         if (!environment.reset() || !environment.enable_misaligned_accesses()) {
             return false;
         }
-        if (constraints.uncache_error_per_mille != 0) {
+        if (constraints.uncache_error_per_mille != 0 ||
+            constraints.dcache_load_error_per_mille != 0) {
             environment.configure_cache_error_enable(true);
             if (!environment.run_cycles(4)) {
                 return false;
@@ -31358,6 +31496,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++count;
             }
             constraint_coverage.operations[RandomConstraints::scalar_load] += 2;
+            constraint_coverage.sample_dcache_load(std::nullopt);
+            constraint_coverage.sample_dcache_load(std::nullopt);
             ++constraint_coverage.operations[RandomConstraints::scalar_store];
             constraint_coverage.operations[RandomConstraints::vector_load] += 2;
             ++constraint_coverage.operations[RandomConstraints::vector_store];
@@ -32226,18 +32366,30 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return true;
         };
 
-        const auto recover_random_uncache_error = [&] (
+        const auto recover_random_precise_error = [&] (
             std::uint8_t rob, bool rob_flag, bool store,
             std::uint64_t lq_dequeued_before,
             std::uint64_t sq_dequeued_before,
             std::uint64_t lq_cancels_before,
             std::uint64_t sq_cancels_before) {
-            phase = store ? "random-uncache-store-redirect"
-                          : "random-uncache-load-redirect";
-            if (!environment.run_cycles(8) ||
-                !environment.redirect_after(rob, rob_flag, true) ||
-                !environment.run_cycles(96) ||
-                !environment.run_until_queues_retired(8192)) {
+            const char *const redirect_phase = store
+                ? "random-precise-store-redirect"
+                : "random-precise-load-redirect";
+            phase = redirect_phase;
+            if (!environment.run_cycles(8)) {
+                phase += ":pre-redirect-delay";
+                return false;
+            }
+            if (!environment.redirect_after(rob, rob_flag, true)) {
+                phase += ":redirect";
+                return false;
+            }
+            if (!environment.run_cycles(96)) {
+                phase += ":post-redirect-delay";
+                return false;
+            }
+            if (!environment.run_until_queues_retired(8192)) {
+                phase += ":queue-retire";
                 return false;
             }
             const std::uint64_t lq_dequeued =
@@ -32252,6 +32404,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 sq_cancels_before;
             if (lq_dequeued + lq_canceled != (store ? 0U : 1U) ||
                 sq_dequeued + sq_canceled != (store ? 1U : 0U)) {
+                std::ostringstream detail;
+                detail << redirect_phase << ":queue-accounting:lq="
+                       << lq_dequeued << '+' << lq_canceled << ":sq="
+                       << sq_dequeued << '+' << sq_canceled;
+                phase = detail.str();
                 return false;
             }
             --rob_offset;
@@ -32348,6 +32505,42 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 } else if (constraints.mmio_stores_per_mille != 0 &&
                            constraint_coverage.mmio_directions[1] == 0) {
                     mmio_store = true;
+                }
+            }
+            std::optional<bool> dcache_load_error_denied;
+            if (kind == RandomConstraints::scalar_load &&
+                !closing_stride_stream) {
+                for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                    const bool outcome_enabled = outcome == 0
+                        ? constraints.dcache_load_error_per_mille != 1000
+                        : outcome == 1
+                        ? constraints.dcache_load_error_per_mille != 0 &&
+                            constraints.dcache_load_error_denied_per_mille !=
+                                1000
+                        : constraints.dcache_load_error_per_mille != 0 &&
+                            constraints.dcache_load_error_denied_per_mille != 0;
+                    if (outcome_enabled &&
+                        constraint_coverage.dcache_load_outcomes[outcome] == 0) {
+                        if (outcome != 0) {
+                            dcache_load_error_denied = outcome == 2;
+                        }
+                        break;
+                    }
+                }
+                const bool missing_forced_outcome =
+                    (!dcache_load_error_denied &&
+                     constraint_coverage.dcache_load_outcomes[0] == 0 &&
+                     constraints.dcache_load_error_per_mille != 1000) ||
+                    dcache_load_error_denied.has_value();
+                if (!missing_forced_outcome) {
+                    const bool error = choose_binary_class(
+                        constraints.dcache_load_error_per_mille,
+                        constraint_coverage.dcache_load_errors);
+                    if (error) {
+                        dcache_load_error_denied = choose_binary_class(
+                            constraints.dcache_load_error_denied_per_mille,
+                            constraint_coverage.dcache_load_error_kinds);
+                    }
                 }
             }
             std::optional<bool> uncache_error_denied;
@@ -32525,17 +32718,35 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const auto op = static_cast<memblock::LoadOp>(random() % 7);
                 const unsigned size =
                     1U << (static_cast<unsigned>(op) & 3U);
-                const bool stride_shaped = closing_stride_stream ||
-                    (constraints.stride_stream_per_mille != 0 &&
-                     random() % 1000 < constraints.stride_stream_per_mille);
-                ordinary_leaf_addressed = stride_shaped;
+                const bool error_response =
+                    dcache_load_error_denied.has_value();
+                const bool stride_shaped = !error_response &&
+                    (closing_stride_stream ||
+                     (constraints.stride_stream_per_mille != 0 &&
+                      random() % 1000 < constraints.stride_stream_per_mille));
+                std::uint64_t address = 0;
+                if (error_response) {
+                    constexpr std::uint64_t error_lines =
+                        dcache_error_span / 64;
+                    if (dcache_error_line >= error_lines) {
+                        phase = "random-dcache-load-error-address-space-exhausted";
+                        return false;
+                    }
+                    const std::uint64_t sequence = dcache_error_line++;
+                    const std::uint64_t line = sequence ^ (sequence >> 1);
+                    address = dcache_error_base + line * 64 +
+                        ((sequence & 1U) != 0 ? 0x38 : 0x18);
+                    ordinary_leaf_addressed = true;
+                } else if (stride_shaped) {
+                    address = random_stride_base +
+                        (stride_stream_loads % random_stride_slots) *
+                            random_stride_bytes;
+                    ordinary_leaf_addressed = true;
+                } else {
+                    address = action_cacheable_address(size);
+                }
                 auto transaction = make_load(
-                    stride_shaped
-                        ? random_stride_base +
-                              (stride_stream_loads % random_stride_slots) *
-                                  random_stride_bytes
-                        : action_cacheable_address(size),
-                    op, random() % 3);
+                    address, op, random() % 3);
                 if (stride_shaped) {
                     const std::uint64_t epoch =
                         stride_stream_loads / random_stride_slots;
@@ -32543,8 +32754,108 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     ++stride_stream_loads;
                     ++constraint_coverage.locality[2];
                 }
-                if (!issue_load(transaction)) {
-                    return false;
+                if (error_response) {
+                    phase = *dcache_load_error_denied
+                        ? "random-dcache-load-denied"
+                        : "random-dcache-load-corrupt";
+                    if (!environment.run_until_dcache_idle(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_queues_retired(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    transaction.expected_exception_mask =
+                        *dcache_load_error_denied
+                        ? memblock::kExceptionLoadAccessFault
+                        : memblock::kExceptionHardwareError;
+                    const std::uint64_t requests_before_error =
+                        environment.tilelink_requests();
+                    const std::uint64_t refills_before =
+                        environment.dcache_error_response_refills();
+                    const std::uint64_t error_responses_before =
+                        environment.dcache_error_response_requests();
+                    const std::uint64_t denied_beats_before =
+                        environment.dcache_denied_d_beats();
+                    const std::uint64_t corrupt_beats_before =
+                        environment.dcache_corrupt_d_beats();
+                    const std::uint64_t grant_acks_before =
+                        environment.dcache_error_response_grant_acks();
+                    const std::uint64_t bus_data_before =
+                        environment.bus_expected_load(transaction.address, op);
+                    const std::uint64_t lq_dequeued_before =
+                        environment.lq_dequeued();
+                    const std::uint64_t sq_dequeued_before =
+                        environment.sq_dequeued();
+                    const std::uint64_t lq_cancels_before =
+                        environment.lq_redirect_canceled_observed();
+                    const std::uint64_t sq_cancels_before =
+                        environment.sq_redirect_canceled_observed();
+                    environment.inject_dcache_response_error_at(
+                        transaction.address & ~std::uint64_t{63},
+                        *dcache_load_error_denied,
+                        !*dcache_load_error_denied);
+                    if (!environment.set_rob_head(
+                            transaction.rob, transaction.rob_flag) ||
+                        !issue_load(transaction) ||
+                        !recover_random_precise_error(
+                            transaction.rob, transaction.rob_flag, false,
+                            lq_dequeued_before, sq_dequeued_before,
+                            lq_cancels_before, sq_cancels_before) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    const std::array<std::uint64_t, 5> manager_delta{{
+                        environment.dcache_error_response_requests() -
+                            error_responses_before,
+                        environment.dcache_denied_d_beats() -
+                            denied_beats_before,
+                        environment.dcache_corrupt_d_beats() -
+                            corrupt_beats_before,
+                        environment.dcache_error_response_grant_acks() -
+                            grant_acks_before,
+                        environment.dcache_error_response_refills() -
+                            refills_before,
+                    }};
+                    if (environment.tilelink_requests() <
+                            requests_before_error + 1 ||
+                        manager_delta != std::array<std::uint64_t, 5>{
+                            1, *dcache_load_error_denied ? 2U : 0U,
+                            2, 1, 1} ||
+                        (environment.dcache_last_error_response_address() &
+                         ~std::uint64_t{63}) !=
+                            (transaction.address & ~std::uint64_t{63}) ||
+                        environment.dcache_last_error_response_keyword() !=
+                            ((transaction.address & 32U) != 0) ||
+                        environment.bus_expected_load(transaction.address, op) !=
+                            bus_data_before) {
+                        std::ostringstream detail;
+                        detail << phase << ":manager-accounting"
+                               << ":requests="
+                               << environment.tilelink_requests() -
+                                      requests_before_error
+                               << ":manager=" << manager_delta[0] << ','
+                               << manager_delta[1] << ',' << manager_delta[2]
+                               << ',' << manager_delta[3] << ','
+                               << manager_delta[4]
+                               << ":last_address=0x" << std::hex
+                               << environment.dcache_last_error_response_address()
+                               << ":expected_address=0x"
+                               << transaction.address << std::dec
+                               << ":last_keyword="
+                               << environment.dcache_last_error_response_keyword()
+                               << ":expected_keyword="
+                               << ((transaction.address & 32U) != 0);
+                        phase = detail.str();
+                        return false;
+                    }
+                    constraint_coverage.sample_dcache_load(
+                        dcache_load_error_denied, manager_delta);
+                } else {
+                    if (!issue_load(transaction)) {
+                        return false;
+                    }
+                    constraint_coverage.sample_dcache_load(std::nullopt);
                 }
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::scalar_store) {
@@ -33005,7 +33316,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!issue_load(transaction) ||
                         environment.uncache_requests() != uncache_before + 1 ||
                         (uncache_error_denied &&
-                         (!recover_random_uncache_error(
+                         (!recover_random_precise_error(
                               transaction.rob, transaction.rob_flag, false,
                               lq_dequeued_before, sq_dequeued_before,
                               lq_cancels_before, sq_cancels_before) ||
@@ -33175,7 +33486,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         !environment.run_until_complete(
                             constrained_completion_timeout) ||
                         (uncache_error_denied
-                            ? (!recover_random_uncache_error(
+                            ? (!recover_random_precise_error(
                                    transaction.rob, transaction.rob_flag, false,
                                    lq_dequeued_before, sq_dequeued_before,
                                    lq_cancels_before, sq_cancels_before) ||
@@ -33246,7 +33557,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         !environment.run_until_store_complete(
                             constrained_completion_timeout) ||
                         (uncache_error_denied
-                            ? (!recover_random_uncache_error(
+                            ? (!recover_random_precise_error(
                                    transaction.rob, transaction.rob_flag, true,
                                    lq_dequeued_before, sq_dequeued_before,
                                    lq_cancels_before, sq_cancels_before) ||

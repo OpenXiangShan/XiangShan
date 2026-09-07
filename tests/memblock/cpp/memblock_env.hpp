@@ -1780,6 +1780,7 @@ public:
         d_beats_.clear();
         probe_responses_.clear();
         expected_grant_acks_.clear();
+        expected_grant_ack_errors_.clear();
         captured_a_.reset();
         captured_c_.reset();
         release_data_.reset();
@@ -1928,7 +1929,8 @@ public:
         }
         e_fire_ = e_valid && e_ready;
         if (e_fire_) {
-            if (expected_grant_acks_.empty()) {
+            if (expected_grant_acks_.empty() ||
+                expected_grant_ack_errors_.empty()) {
                 error_ = "unexpected DCache TileLink E GrantAck";
             } else if (dut.auto_inner_dcache_client_out_e_bits_sink.U() !=
                        expected_grant_acks_.front()) {
@@ -2017,7 +2019,11 @@ public:
                 accept_release(*captured_c_);
             }
         }
-        if (e_fire_ && !expected_grant_acks_.empty()) {
+        if (e_fire_ && !expected_grant_acks_.empty() &&
+            !expected_grant_ack_errors_.empty()) {
+            error_response_grant_ack_count_ +=
+                expected_grant_ack_errors_.front();
+            expected_grant_ack_errors_.pop_front();
             expected_grant_acks_.pop_front();
             ++grant_ack_count_;
         }
@@ -2089,6 +2095,14 @@ public:
     {
         return error_response_request_count_;
     }
+    std::uint64_t error_response_refill_count() const
+    {
+        return error_response_refill_count_;
+    }
+    std::uint64_t error_response_grant_ack_count() const
+    {
+        return error_response_grant_ack_count_;
+    }
     std::uint64_t last_error_response_address() const
     {
         return last_error_response_address_;
@@ -2145,7 +2159,11 @@ public:
     {
         return b_beats_.empty() && probe_responses_.empty();
     }
-    bool grant_acks_idle() const { return expected_grant_acks_.empty(); }
+    bool grant_acks_idle() const
+    {
+        return expected_grant_acks_.empty() &&
+            expected_grant_ack_errors_.empty();
+    }
     bool responses_idle() const
     {
         return d_beats_.empty() && outstanding_requests_ == 0;
@@ -2299,6 +2317,7 @@ private:
         }
         case 6: { // AcquireBlock -> GrantData
             ++refill_count_;
+            error_response_refill_count_ += denied || corrupt;
             if (request.keyword) {
                 ++keyword_refill_count_;
             } else {
@@ -2324,6 +2343,7 @@ private:
                 }, beat == 0);
             }
             expected_grant_acks_.push_back(sink);
+            expected_grant_ack_errors_.push_back(denied || corrupt);
             break;
         }
         case 7: { // AcquirePerm -> Grant
@@ -2340,6 +2360,7 @@ private:
                 denied, false,
             }, true);
             expected_grant_acks_.push_back(sink);
+            expected_grant_ack_errors_.push_back(denied);
             break;
         }
         case 12: // CBOClean -> CBOAck
@@ -2589,6 +2610,7 @@ private:
     std::deque<DBeat> d_beats_;
     std::deque<ProbeResponseState> probe_responses_;
     std::deque<std::uint16_t> expected_grant_acks_;
+    std::deque<bool> expected_grant_ack_errors_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
     std::optional<ReleaseDataState> release_data_;
@@ -2624,6 +2646,8 @@ private:
     std::uint64_t denied_d_beat_count_ = 0;
     std::uint64_t corrupt_d_beat_count_ = 0;
     std::uint64_t error_response_request_count_ = 0;
+    std::uint64_t error_response_refill_count_ = 0;
+    std::uint64_t error_response_grant_ack_count_ = 0;
     std::uint64_t last_error_response_address_ = 0;
     bool last_error_response_keyword_ = false;
     std::uint64_t outstanding_requests_ = 0;
@@ -5246,6 +5270,14 @@ public:
     std::uint64_t dcache_error_response_requests() const
     {
         return memory_agent_.error_response_request_count();
+    }
+    std::uint64_t dcache_error_response_refills() const
+    {
+        return memory_agent_.error_response_refill_count();
+    }
+    std::uint64_t dcache_error_response_grant_acks() const
+    {
+        return memory_agent_.error_response_grant_ack_count();
     }
     std::uint64_t dcache_last_error_response_address() const
     {

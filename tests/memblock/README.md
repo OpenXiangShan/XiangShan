@@ -1072,6 +1072,19 @@ When Uncache uses the `spec` latency profile, the serial budget forces at least
 four requests so every latency bucket is reachable even under extreme
 load-only or store-only constraints.
 
+Schema 17 adds `dcache-load-error` and `dcache-load-error-denied` for weighted
+scalar-load actions. Error actions use a nonrepeating cold-line region mapped
+in Bare, Sv39, Sv48, and all four nested mode pairs, then require exact
+HardwareError or LoadAccessFault, self-redirect cleanup, unchanged backing
+memory, two corrupt D beats, denied on both beats only for the denied class,
+and one errored refill/GrantAck. Errored GrantAcks are attributed by sink, so a
+simultaneous clean hardware-prefetch refill remains legal without weakening
+the error transaction oracle. Preset error rates are `100/0/500` for
+`coverage/spec/corner`; normal SPEC-like traffic therefore remains error-free.
+An extreme 1000-per-mille run must set both `stride-stream=0` and
+`concurrent=0`; every scalar action then redirects, so neither clean prefetch
+training nor the fixed clean scalar members of a mixed issue window are legal.
+
 For a reproducible local pressure run:
 
 ```sh

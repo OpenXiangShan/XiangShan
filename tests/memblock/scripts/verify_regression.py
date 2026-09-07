@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -827,6 +827,74 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     actual_operations[7] + actual_operations[8]
                 and sum(actual_uncache_error_kind) == actual_uncache_error[1],
                 "Uncache error coverage is not conserved",
+            )
+
+        if schema >= 17:
+            target_dcache_load_error = result.get("target_dcache_load_error")
+            target_dcache_load_denied = result.get(
+                "target_dcache_load_error_denied"
+            )
+            for name, value in (
+                ("target_dcache_load_error", target_dcache_load_error),
+                (
+                    "target_dcache_load_error_denied",
+                    target_dcache_load_denied,
+                ),
+            ):
+                _require(
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 1000,
+                    f"{name} is not a per-mille integer: {value!r}",
+                )
+            actual_dcache_load_error = _csv_counts(
+                result, "actual_dcache_load_error", 2
+            )
+            actual_dcache_load_error_kind = _csv_counts(
+                result, "actual_dcache_load_error_kind", 2
+            )
+            actual_dcache_load_outcome = _csv_counts(
+                result, "actual_dcache_load_outcome", 3
+            )
+            actual_dcache_load_manager = _csv_counts(
+                result, "actual_dcache_load_error_manager", 5
+            )
+            scalar_load_enabled = target_operations[0] != 0
+            expected_outcomes = (
+                scalar_load_enabled and target_dcache_load_error != 1000,
+                scalar_load_enabled
+                and target_dcache_load_error != 0
+                and target_dcache_load_denied != 1000,
+                scalar_load_enabled
+                and target_dcache_load_error != 0
+                and target_dcache_load_denied != 0,
+            )
+            _require(
+                all(
+                    (count > 0) == enabled
+                    for count, enabled in zip(
+                        actual_dcache_load_outcome, expected_outcomes
+                    )
+                ),
+                "actual_dcache_load_outcome does not match enabled classes: "
+                f"{actual_dcache_load_outcome}",
+            )
+            clean, corrupt, denied = actual_dcache_load_outcome
+            errors = corrupt + denied
+            _require(
+                actual_dcache_load_error == [clean, errors]
+                and actual_dcache_load_error_kind == [corrupt, denied],
+                "DCache load aggregate error coverage does not match outcomes",
+            )
+            _require(
+                clean + errors == actual_operations[0]
+                and sum(actual_dcache_load_error_kind) == errors,
+                "DCache load error coverage is not conserved",
+            )
+            _require(
+                actual_dcache_load_manager
+                == [errors, denied * 2, errors * 2, errors, errors],
+                "DCache load error manager accounting is not conserved",
             )
 
     if schema >= 8:

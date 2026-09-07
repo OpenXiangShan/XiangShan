@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 17
+        result["constraint_schema"] = 18
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -496,6 +496,36 @@ class VerifyRegressionTest(unittest.TestCase):
             "actual_uncache_outcome",
         ):
             verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 17,
+                "target_ops": "1,0,3,2,0,0,0,1,1,0,1",
+                "actual_ops": "10,0,3,2,0,0,0,5,5,0,6",
+                "actual_uncache_outcome":
+                    "1,1,1,1,0,1,1,1,1,1,0,1",
+                "target_dcache_load_error": 500,
+                "target_dcache_load_error_denied": 500,
+                "actual_dcache_load_error": "4,6",
+                "actual_dcache_load_error_kind": "2,4",
+                "actual_dcache_load_outcome": "4,2,4",
+                "actual_dcache_load_error_manager": "6,8,12,6,6",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_dcache_load_error_manager"] = "6,7,12,6,6"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "DCache load error manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_dcache_load_error_manager"] = "6,8,12,6,6"
+        result["actual_ops"] = "11,0,3,2,0,0,0,5,5,0,6"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "DCache load error coverage is not conserved",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_ops"] = "10,0,3,2,0,0,0,5,5,0,6"
         result.update(
             {
                 "constraint_schema": 14,
