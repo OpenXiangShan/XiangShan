@@ -30,8 +30,6 @@ logger = logging.getLogger("env.api")
 _STALL_SNAPSHOT_IFU_LANES = 36
 _STALL_SNAPSHOT_IFU_DYNAMIC_LANES = _STALL_SNAPSHOT_IFU_LANES - 1
 _STALL_SNAPSHOT_IFU_CROSS_BLOCK_LANES = _STALL_SNAPSHOT_IFU_LANES - 2
-
-
 def _env_config(env):
     return getattr(env, "config", DEFAULT_ENV_CONFIG)
 
@@ -113,6 +111,14 @@ def _read_sig_present(dut, name: str):
         return None
 
 
+def _read_first_sig(dut, names, default=0):
+    for name in names:
+        value = get_sig(dut, str(name), None)
+        if value is not None:
+            return int(value)
+    return default
+
+
 def _read_addr_sig(dut, name: str) -> int:
     return int(_read_sig(dut, name, 0)) << 1
 
@@ -180,13 +186,17 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         }
 
     cfvec = []
+    cfvec_pc_resolver = getattr(backend_model, "observed_cfvec_pc", None)
     for slot in range(8):
         if _read_sig(dut, f"io_backend_cfVec_{slot}_valid", 0) != 1:
             continue
+        if not callable(cfvec_pc_resolver):
+            raise AssertionError("frontend snapshot requires an FTQ-backed cfVec PC resolver")
         cfvec.append(
             {
                 "slot": int(slot),
-                "pc": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_pc", 0),
+                "pc": int(cfvec_pc_resolver(slot)),
+                "foldpc": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_foldpc", 0),
                 "instr": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_instr", 0),
                 "ftq_flag": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_flag", 0),
                 "ftq_value": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_value", 0),
@@ -291,8 +301,16 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
     ifu_ptr_value = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.ifuPtr_ptrs_0_value", 0)
     bpu_ptr_flag = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag", 0)
     bpu_ptr_value = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_value", 0)
-    ibuffer_lane_pcs = [
-        _read_addr_sig(dut, f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_pc_{idx}_addr")
+    ibuffer_lane_foldpcs = [
+        _read_first_sig(
+            dut,
+            (
+                f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_foldpc_{idx}",
+                f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_foldpc_{idx}",
+                f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_foldpc_{idx}",
+            ),
+            None,
+        )
         for idx in range(4)
     ]
     return {
@@ -421,7 +439,14 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 "Frontend_top.Frontend.inner_ifu.io_fromFtq_req_bits_fetch_0_takenCfiOffset_valid",
                 0,
             ),
-            "to_ibuffer_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid", 0),
+            "to_ibuffer_valid": _read_first_sig(
+                dut,
+                (
+                    "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+                    "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
+                ),
+                0,
+            ),
             "s0_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s0_fire", 0),
             "s1_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_fire", 0),
             "s2_fire": s2_stage_fire,
@@ -435,8 +460,13 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             "s2_block_valid_bits": s2_block_valid_bits,
             "s2_block_valid_mask": s2_block_valid_mask,
             "s2_block_ftq": s2_block_ftq,
-            "to_ibuffer_enq_enable_mask": _snapshot_sig(
-                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0", 0
+            "to_ibuffer_enq_enable_mask": _read_first_sig(
+                dut,
+                (
+                    "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+                    "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
+                ),
+                0,
             ),
             "s2_instr_valid_bits": s2_instr_valid_bits,
             "s2_instr_valid_mask": s2_instr_valid_mask,
@@ -458,7 +488,7 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 "complete": not missing_probes,
                 "missing": sorted(missing_probes),
             },
-            "ibuffer_lane_pcs": ibuffer_lane_pcs,
+            "ibuffer_lane_foldpcs": ibuffer_lane_foldpcs,
         },
         "cfvec_valid_count": len(cfvec),
         "cfvec": cfvec,
@@ -717,7 +747,7 @@ def _format_stall_snapshot(snapshot: dict) -> str:
                 ",".join(str(name) for name in ifu_runtime["probe_contract"]["missing"])
             )
         ),
-        ibuf_pcs="[" + ",".join(_format_optional_pc(pc) for pc in ifu_runtime["ibuffer_lane_pcs"]) + "]",
+        ibuf_pcs="[" + ",".join(_format_optional_pc(pc) for pc in ifu_runtime["ibuffer_lane_foldpcs"]) + "]",
         cfvec_valid_count=int(snapshot["cfvec_valid_count"]),
     )
 

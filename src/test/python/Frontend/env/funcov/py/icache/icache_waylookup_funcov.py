@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
-
 _WL = "Frontend_top.Frontend.inner_icache.wayLookup."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
 _PREFETCH = _ICACHE + "prefetcher."
+_TOP = "Frontend_top.Frontend."
 
 _UPDATE_COUNT = 64
 _ENTRY_FIELD_NAMES = (
@@ -116,8 +116,8 @@ _SIGNALS = {
     "real_two": (
         _ICACHE + "__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
     ),
-    "ftq_valid": (_MAIN + "io_fromFtq_valid",),
-    "ftq_req1_valid": (_MAIN + "io_fromFtq_bits_req_1_valid",),
+    "ftq_valid": (_ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_valid",),
+    "ftq_req1_valid": (_ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",),
     "info0_mmio": (
         _MAIN + "io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
         _MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
@@ -179,11 +179,8 @@ _SIGNALS = {
     "flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
-    "fencei": ("Frontend_top.io_fencei", "Frontend_top.__Vtogcov__io_fencei"),
-    "bpu_flush": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
-        _MAIN + "io_flushFromBpu_s3_valid",
-    ),
+    "fencei": (_TOP + "io_fencei", _TOP + "__Vtogcov__io_fencei"),
+    "bpu_flush": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
 }
 
 

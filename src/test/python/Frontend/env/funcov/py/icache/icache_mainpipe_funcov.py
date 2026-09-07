@@ -94,8 +94,11 @@ ICACHE_MAINPIPE_SAMPLER_BIN_KEYS = frozenset(
 
 
 _SIGNALS = {
-    "ftq_valid": (_MAIN + "io_fromFtq_valid",),
-    "ftq_ready": (_MAIN + "io_fromFtq_ready",),
+    "ftq_valid": (_ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_valid",),
+    "ftq_ready": (
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
+        _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_ready",
+    ),
     "from_valid": (_MAIN + "io_fromWayLookup_valid", _MAIN + "__Vtogcov__io_fromWayLookup_valid"),
     "from_ready": (_MAIN + "io_fromWayLookup_ready", _MAIN + "__Vtogcov__io_fromWayLookup_ready"),
     "data_ready": (
@@ -111,25 +114,17 @@ _SIGNALS = {
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
     "s0_flush": (_MAIN + "s0_flush", _MAIN + "__Vtogcov__s0_flush"),
-    "bpu_valid": (_MAIN + "io_flushFromBpu_s3_valid",),
-    "bpu_flag": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
-        _MAIN + "io_flushFromBpu_s3_bits_flag",
-    ),
-    "bpu_value": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
-        _MAIN + "io_flushFromBpu_s3_bits_value",
-    ),
+    "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "bpu_flag": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",),
+    "bpu_value": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",),
     "s1_ready": (_MAIN + "s1_ready", _MAIN + "__Vtogcov__s1_ready"),
     "s0_fire": (_MAIN + "s0_fire", _MAIN + "__Vtogcov__s0_fire"),
     "s1_valid": (_MAIN + "s1_valid", _MAIN + "__Vtogcov__s1_valid"),
     "s1_flush": (_MAIN + "s1_flush", _MAIN + "__Vtogcov__s1_flush"),
     "s0_ftq_flag": (
-        _MAIN + "io_fromFtq_bits_req_0_ftqIdx_flag",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
     ),
     "s0_ftq_value": (
-        _MAIN + "io_fromFtq_bits_req_0_ftqIdx_value",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
     ),
     "s1_ftq_flag": (
@@ -141,13 +136,20 @@ _SIGNALS = {
         _MAIN + "__Vtogcov__s1_req_0_ftqIdx_value",
     ),
     "req1_valid": (_MAIN + "s1_req_1_valid",),
+    "req0_end_position": (_MAIN + "s1_req_0_endPosition",),
     "backend_exception": (_MAIN + "s1_req_0_hasBackendException",),
     "cross0": _S1_CROSS[0],
     "cross1": _S1_CROSS[1],
-    "toifu_valid": (_MAIN + "io_toIfu_req_valid",),
-    "toifu_ready": (_MAIN + "io_toIfu_req_ready",),
+    "toifu_valid": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        _ICACHE + "__Vtogcov__io_toIfu_req_valid",
+    ),
+    "toifu_ready": (_ICACHE + "__Vtogcov__io_toIfu_req_ready",),
     "s1_fire": (_MAIN + "s1_fire",),
-    "fetch_finish": (_MAIN + "io_toIfu_req_valid",),
+    "fetch_finish": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        _ICACHE + "__Vtogcov__io_toIfu_req_valid",
+    ),
     "miss_req_valid": (_MAIN + "__Vtogcov__io_missReq_valid",),
     "miss_req_ready": (_MAIN + "__Vtogcov__io_missReq_ready",),
     "miss_req_vset": (
@@ -173,7 +175,10 @@ _SIGNALS = {
         for line in range(2)
     ),
     "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
-    "pmp_mmio": (_MAIN + "io_pmp_resp_mmio",),
+    "pmp_mmio": (
+        _MAIN + "io_pmp_resp_mmio",
+        _ICACHE + "__Vtogcov__io_toIfu_req_bits_0_icacheMeta_pmpMmio",
+    ),
     "itlb_exception": (
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
         _MAIN + "__Vtogcov__s1_exceptionInfo_0_itlbException_value",
@@ -181,7 +186,7 @@ _SIGNALS = {
     "exception": (_MAIN + "s1_exception_value",),
     "is_mmio": (_MAIN + "s1_isMmio",),
     "pbmt": (_MAIN + "s1_wayLookupEntry_0_itlbPbmt",),
-    "s2_valid": (_MAIN + "s2_valid", _MAIN + "__Vtogcov__s2_valid"),
+    "s2_valid": (),
     "error_valid": (_MAIN + "io_error_valid", _MAIN + "__Vtogcov__io_error_valid"),
     "error_meta": (_MAIN + "io_error_bits_source_tag",),
     "error_data": (_MAIN + "io_error_bits_source_data",),
@@ -648,6 +653,14 @@ def _snapshot(recorder) -> dict[str, Any]:
             ),
         }
     )
+    if scalar["cross0"] is None and _known(
+        (scalar["start_vaddr"][0], scalar["req0_end_position"])
+    ):
+        scalar["cross0"] = (
+            (int(scalar["start_vaddr"][0]) >> 4)
+            & (int(scalar["req0_end_position"]) >> 4)
+            & 1
+        )
     return scalar
 
 
@@ -1027,7 +1040,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s1_flush",
         "global_flush_clears_s1_hit",
         cycle,
-        _on(s["io_flush"]) and all_valid_lines_cache_hit,
+        global_s1_flush and all_valid_lines_cache_hit,
         evidence,
     )
     _mark(
@@ -1035,7 +1048,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s1_flush",
         "global_flush_clears_s1_pending_miss",
         cycle,
-        _on(s["io_flush"]) and pending_miss,
+        global_s1_flush and pending_miss,
         evidence,
     )
     _mark(
@@ -1066,7 +1079,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s1_flush",
         "late_refill_ignored_after_flush",
         cycle,
-        _on(s["io_flush"]) and pending_miss and not refill_match,
+        global_s1_flush and pending_miss and not refill_match,
         evidence,
     )
     _mark(
@@ -1074,7 +1087,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s1_flush",
         "flush_wins_matching_refill",
         cycle,
-        _on(s["io_flush"]) and _on(s["s1_valid"]) and refill_match,
+        global_s1_flush and _on(s["s1_valid"]) and refill_match,
         evidence,
     )
     registered_refill = state["registered_refill_pending"]
@@ -1085,12 +1098,12 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         registered_refill is not None
         and cycle == registered_refill["cycle"] + 1
-        and _on(s["io_flush"])
+        and global_s1_flush
         and _on(s["s1_valid"])
         and mshr_reg[registered_refill["line"]] == 1,
         evidence,
     )
-    if last_pending_line is not None and _off(s["io_flush"]):
+    if last_pending_line is not None and not global_s1_flush:
         state["registered_refill_pending"] = {
             "cycle": cycle,
             "line": last_pending_line,

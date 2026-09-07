@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-
 def sample_ibuffer_contract(recorder, dut, cycle: int) -> None:
     """Capture alignment/ownership facts without turning them into hits."""
-    valid = recorder._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid")
-    enq = recorder._try_read_dut_signal(
-        dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0"
+    valid = recorder._read_first_dut_signal(
+        dut,
+        (
+            "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+            "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
+        ),
+    )
+    enq = recorder._read_first_dut_signal(
+        dut,
+        (
+            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+            "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
+        ),
     )
     if valid is None or enq is None:
         return

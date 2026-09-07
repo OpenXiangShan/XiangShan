@@ -21,7 +21,6 @@ def _off(value: Optional[int]) -> bool:
 _PREFETCH = "Frontend_top.Frontend.inner_icache.prefetcher."
 _TOP = "Frontend_top."
 
-
 ICACHE_PREFETCHPIPE_COVERPOINTS = {
     "icache_prefetchpipe_s0_entry": "entry_arbitration_flush",
     "icache_prefetchpipe_s1_meta": "itlb_meta_state",
@@ -149,23 +148,14 @@ _PREFETCH_SIGNALS = {
         _ICACHE + "io_fromFtq_redirectFlush",
         _PREFETCH + "io_flush",
     ),
-    "bpu_valid": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
-        _PREFETCH + "io_flushFromBpu_s3_valid",
-    ),
-    "bpu_flag": (
-        _PREFETCH + "io_flushFromBpu_s3_bits_flag",
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
-    ),
-    "bpu_value": (
-        _PREFETCH + "io_flushFromBpu_s3_bits_value",
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
-    ),
+    "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "bpu_flag": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",),
+    "bpu_value": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",),
     "s0_ftq_flag": (_PREFETCH + "io_fromFtq_bits_req_0_ftqIdx_flag",),
     "s0_ftq_value": (_PREFETCH + "io_fromFtq_bits_req_0_ftqIdx_value",),
     "s1_ftq_flag": (_PREFETCH + "s1_ftqIdx_flag",),
     "s1_ftq_value": (_PREFETCH + "s1_ftqIdx_value",),
-    "ftq_prefetch_valid": (_ICACHE + "io_fromFtq_toPrefetch_valid",),
+    "ftq_prefetch_valid": (_ICACHE + "__Vtogcov__io_fromFtq_toPrefetch_valid",),
     "soft_pending": (
         _ICACHE + "softPrefetchValid",
         _ICACHE + "__Vtogcov__softPrefetchValid",

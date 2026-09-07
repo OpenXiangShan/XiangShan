@@ -44,23 +44,13 @@ _SIGNALS = {
         _IFU + "s0_flush",
         _MAIN + "__Vtogcov__s0_flush",
     ),
-    "bpu_valid": (
-        _MAIN + "io_flushFromBpu_s3_valid",
-    ),
-    "bpu_flag": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
-        _MAIN + "io_flushFromBpu_s3_bits_flag",
-    ),
-    "bpu_value": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
-        _MAIN + "io_flushFromBpu_s3_bits_value",
-    ),
+    "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "bpu_flag": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",),
+    "bpu_value": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",),
     "s0_ftq_flag": (
-        _MAIN + "io_fromFtq_bits_req_0_ftqIdx_flag",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
     ),
     "s0_ftq_value": (
-        _MAIN + "io_fromFtq_bits_req_0_ftqIdx_value",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
     ),
     "s1_ready": (
@@ -76,11 +66,10 @@ _SIGNALS = {
         _MAIN + "__Vtogcov__s0_fire",
     ),
     "ftq_valid": (
-        _MAIN + "io_fromFtq_valid",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_valid",
     ),
     "ftq_ready": (
-        _MAIN + "io_fromFtq_ready",
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_ready",
     ),
 }

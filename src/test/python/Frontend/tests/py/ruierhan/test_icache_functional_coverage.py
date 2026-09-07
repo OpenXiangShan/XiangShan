@@ -3417,11 +3417,11 @@ def test_missunit_backpressure_sequence_resets_when_s1_is_flushed():
     assert _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
 
 
-def test_global_s1_flush_samples_io_flush_without_checkpoint_outputs():
+def test_global_s1_flush_samples_local_flush_without_checkpoint_outputs():
     recorder = _Recorder()
     _set_mainpipe_single_sram_hit(recorder)
     for key, value in {
-        "s1_flush": 0,
+        "s1_flush": 1,
         "io_flush": 1,
         "bpu_valid": 0,
         "req1_valid": 0,
@@ -3445,6 +3445,8 @@ def test_global_s1_flush_pending_miss_samples_separate_bin():
     recorder = _Recorder()
     recorder.set_key("s1_valid", 1)
     recorder.set_key("io_flush", 1)
+    recorder.set_key("s1_flush", 1)
+    recorder.set_key("bpu_valid", 0)
     recorder.env.dut.set(_MAIN + "s1_shouldFetch_0", 1)
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
@@ -3543,7 +3545,8 @@ def test_registered_refill_is_cancelled_by_next_cycle_flush():
 
     recorder.set_key("miss_resp_valid", 0)
     recorder.set_key("io_flush", 1)
-    recorder.set_key("s1_flush", 0)
+    recorder.set_key("s1_flush", 1)
+    recorder.set_key("bpu_valid", 0)
     recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 0)
     recorder.env.dut.set(_MAIN + "s1_mshrValidReg_0_0", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 31)
@@ -3559,7 +3562,7 @@ def test_late_refill_samples_flush_before_refill_without_response_or_send():
     recorder = _Recorder()
     for key, value in {
         "s1_valid": 1,
-        "s1_flush": 0,
+        "s1_flush": 1,
         "io_flush": 1,
         "bpu_valid": 0,
         "miss_resp_valid": 0,
@@ -3576,7 +3579,8 @@ def test_same_cycle_refill_flush_requires_global_flush_and_match():
     for key, value in {
         "s1_valid": 1,
         "io_flush": 1,
-        "s1_flush": 0,
+        "s1_flush": 1,
+        "bpu_valid": 0,
         "miss_resp_valid": 1,
     }.items():
         recorder.set_key(key, value)

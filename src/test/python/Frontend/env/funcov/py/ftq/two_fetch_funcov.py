@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from typing import Optional
 
+from ....support.pc_utils import fold_pc
 from ..common.dut import _dut, _read_first
 from ..common.fetch_memory import _read_expected_fetch_raw
 from ..common.utils import circular_distance
@@ -33,23 +34,25 @@ def _count_truthy(values) -> int:
 _WAYLOOKUP_PREFIX = "Frontend_top.Frontend.inner_icache.wayLookup."
 _MAINPIPE_PREFIX = "Frontend_top.Frontend.inner_icache.mainPipe."
 _IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
+_ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
 
 
 _TWO_FETCH_SIGNALS = {
     "ftq_valid": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_valid",
     ),
     "ftq_ready": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_ready",
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_ready",
     ),
     "ftq_req1_valid": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
     ),
     "ftq_req0_start": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_vAddr_0_addr",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
     ),
     "ftq_req1_start": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_vAddr_0_addr",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_vAddr_0_addr",
     ),
     "ftq_req0_ftq_flag": (
         f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_flag",
@@ -72,13 +75,13 @@ _TWO_FETCH_SIGNALS = {
         "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_ftqIdx_value",
     ),
     "ftq_req0_end": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_endPosition",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_endPosition",
     ),
     "ftq_req1_end": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_endPosition",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_endPosition",
     ),
     "ftq_req0_exception": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_hasBackendException",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_hasBackendException",
     ),
     "ftq_backend_exception": (
         "Frontend_top.Frontend.inner_ftq.backendException_value",
@@ -107,22 +110,24 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
     ),
     "prefetch_valid": (
-        "Frontend_top.Frontend.inner_icache.io_fromFtq_toPrefetch_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_valid",
     ),
     "prefetch_ready": (
-        "Frontend_top.Frontend.inner_icache.io_fromFtq_toPrefetch_ready",
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toPrefetch_ready",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toPrefetch_ready",
     ),
     "prefetch_case": (
         "Frontend_top.Frontend.inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value_0",
     ),
     "way_req1_valid": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
     ),
     "way_out_valid": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_valid",
     ),
     "way_out_ready": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_ready",
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_ready",
     ),
     "way_real_two": (
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
@@ -207,10 +212,11 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_valid",
     ),
     "ifu_valid": (
-        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_valid",
     ),
     "ifu_ready": (
-        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_ready",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_ready",
     ),
     "ifu_req1_valid": (
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_valid",
@@ -237,7 +243,8 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
     ),
     "to_ibuffer_valid": (
-        "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid",
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
     ),
     "to_ibuffer_ready": (
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_ready",
@@ -626,7 +633,7 @@ def _tf_first_block_raw_instr_count(recorder) -> int | None:
 
 
 def _tf_ibuffer_entries(recorder) -> list[dict] | None:
-    """Read every enabled IBuffer lane with its PC, width, and FTQ identity."""
+    """Read enabled IBuffer lanes and check foldpc against the aligned IFU PC."""
     base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     enable = _read_first(recorder, (base + "enqEnable",))
     if enable is None:
@@ -635,8 +642,23 @@ def _tf_ibuffer_entries(recorder) -> list[dict] | None:
     for index in range(36):
         if ((int(enable) >> index) & 1) == 0:
             continue
+        expected_pc = _read_first(
+            recorder,
+            (
+                f"{_IFU_PREFIX}s2_alignedInstrPcVec_{index}_addr",
+                f"{_IFU_PREFIX}__Vtogcov__s2_alignedInstrPcVec_{index}_addr",
+            ),
+        )
         values = {
-            "pc": _read_first(recorder, (f"{base}pc_{index}_addr",)),
+            "foldpc": _read_first(
+                recorder,
+                (
+                    f"{_IFU_PREFIX}io_toIBuffer_bits_foldpc_{index}",
+                    f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_foldpc_{index}",
+                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_foldpc_{index}",
+                ),
+            ),
+            "pc": expected_pc,
             "is_rvc": _read_first(recorder, (f"{base}isRvc_{index}",)),
             "ftq_flag": _read_first(recorder, (f"{base}ftqPtr_{index}_flag",)),
             "ftq_value": _read_first(recorder, (f"{base}ftqPtr_{index}_value",)),
@@ -647,6 +669,9 @@ def _tf_ibuffer_entries(recorder) -> list[dict] | None:
             {
                 "slot": index,
                 "pc": int(values["pc"]),
+                "foldpc": int(values["foldpc"]),
+                "foldpc_matches_pc": int(values["foldpc"])
+                == fold_pc(int(values["pc"]) << 1),
                 "is_rvc": int(values["is_rvc"]),
                 "ftq_ptr": (int(values["ftq_flag"]), int(values["ftq_value"])),
             }
@@ -1391,9 +1416,14 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                 for entry in entries:
                     if not compressed_tags or entry["ftq_ptr"] != compressed_tags[-1]:
                         compressed_tags.append(entry["ftq_ptr"])
-            pc_ordered = bool(entries)
+            pc_ordered = bool(entries) and all(
+                entry["foldpc_matches_pc"] for entry in entries
+            )
             if entries:
                 for before, after in zip(entries, entries[1:]):
+                    if not before["foldpc_matches_pc"] or not after["foldpc_matches_pc"]:
+                        pc_ordered = False
+                        break
                     if before["ftq_ptr"] == after["ftq_ptr"]:
                         expected_step = 1 if before["is_rvc"] else 2
                         if int(after["pc"]) - int(before["pc"]) != expected_step:

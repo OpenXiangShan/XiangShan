@@ -11,6 +11,7 @@ from env.funcov.py.ifu.cacheable_pipeline_funcov import (
 )
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
 from env.runtime.pylib import frontend_offset_path
+from env.support.pc_utils import fold_pc
 from env.sequences import LoadProgramSequence
 from env.core.transactions import ProgramImage
 
@@ -31,6 +32,7 @@ _IBUFFER_PAYLOAD_PREFIX = (
 )
 _MAINPIPE_PREFIX = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
+_IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
 
 _DIRECTED_SIGNAL_KEYS = (
     "ftq_valid",
@@ -213,7 +215,7 @@ def _payload_signal_names(recorder) -> tuple[str, ...]:
     )
     required_suffixes = (
         "enqEnable",
-        "pc_0_addr",
+        "foldpc_0",
         "instrs_0",
         "ftqPtr_0_flag",
         "ftqPtr_0_value",
@@ -263,10 +265,14 @@ def _ibuffer_entries(recorder) -> list[dict]:
     for slot in range(36):
         if ((int(enable) >> slot) & 1) == 0:
             continue
-        pc = _read_required(
+        folded_pc = _read_required(
             recorder,
-            (_IBUFFER_PAYLOAD_PREFIX + f"pc_{slot}_addr",),
-            label=f"toIBuffer.pc[{slot}]",
+            (
+                f"{_IFU_PREFIX}io_toIBuffer_bits_foldpc_{slot}",
+                f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_foldpc_{slot}",
+                f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_foldpc_{slot}",
+            ),
+            label=f"toIBuffer.foldpc[{slot}]",
         )
         ftq_flag = _read_required(
             recorder,
@@ -281,7 +287,7 @@ def _ibuffer_entries(recorder) -> list[dict]:
         entries.append(
             {
                 "slot": int(slot),
-                "pc": int(pc) << 1,
+                "foldpc": int(folded_pc),
                 "ftq_tag": (int(ftq_flag), int(ftq_value)),
             }
         )
@@ -290,6 +296,10 @@ def _ibuffer_entries(recorder) -> list[dict]:
 
 def _cfvec_entries(recorder) -> list[dict]:
     entries: list[dict] = []
+    env = getattr(recorder, "env", None)
+    pc_resolver = getattr(env, "observed_cfvec_pc", None)
+    if not callable(pc_resolver):
+        raise AssertionError("cfVec observation requires an FTQ-backed PC resolver")
     for slot in range(8):
         valid = _read_required(
             recorder,
@@ -301,10 +311,11 @@ def _cfvec_entries(recorder) -> list[dict]:
         entries.append(
             {
                 "slot": int(slot),
-                "pc": _read_required(
+                "pc": int(pc_resolver(slot)),
+                "foldpc": _read_required(
                     recorder,
-                    (f"io_backend_cfVec_{slot}_bits_pc",),
-                    label=f"cfVec[{slot}].pc",
+                    (f"io_backend_cfVec_{slot}_bits_foldpc",),
+                    label=f"cfVec[{slot}].foldpc",
                 ),
                 "ftq_tag": (
                     _read_required(
@@ -337,11 +348,18 @@ def _warm_frontend_execution(env, *, max_cycles: int | None = None) -> dict:
         max_cycles = _cycle_limit("TB_TWO_FETCH_TRAIN_MAX_CYCLES", 4000)
     for _ in range(max(0, int(max_cycles))):
         env.step(1)
+        dual_request_fire = (
+            _read_key(recorder, "ftq_valid") == 1
+            and _read_key(recorder, "ftq_ready") == 1
+            and _read_key(recorder, "ftq_req1_valid") == 1
+        )
         if (
             int(env.backend_model.get_stats().get("commit_count", 0)) >= 1
             and int(env.icache_agent.get_stats().get("req_count", 0)) >= 4
             and recorder.key_hit("ifu_cfi_decode_type", "jal")
             and recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
+            and recorder.key_hit("two_fetch_delivery", "dual_fire")
+            and dual_request_fire
         ):
             return {
                 "cycle": int(env.current_cycle),
@@ -422,7 +440,7 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
         _IBUFFER_PAYLOAD_PREFIX + suffix
         for suffix in (
             "enqEnable",
-            "pc_0_addr",
+            "foldpc_0",
             "instrs_0",
             "ftqPtr_0_flag",
             "ftqPtr_0_value",
@@ -653,14 +671,14 @@ def test_two_fetch_ibuffer_backpressure_holds_full_payload_until_single_fire(env
     }
     if matching_fire_cycles:
         assert first_fire_entries == held_entries, {
-            "reason": "enabled-lane PC/FTQ payload changed before release fire",
+            "reason": "enabled-lane foldpc/FTQ payload changed before release fire",
             "stalled_entries": held_entries,
             "fire_entries": first_fire_entries,
         }
 
     # Continue past the fire and reject a repeated transfer of the same full
-    # payload.  PC plus FTQ metadata make a legitimate distinct transaction
-    # differ even for this repetitive instruction stream.
+    # payload. Folded PC plus FTQ metadata make a legitimate distinct
+    # transaction differ even for this repetitive instruction stream.
     # Keep the duplicate check shorter than an FTQ-generation wrap; after a
     # full flag/value wrap the same loop payload is a distinct transaction.
     for _ in range(_cycle_limit("TB_TWO_FETCH_NO_REPEAT_CYCLES", 16)):
@@ -687,6 +705,9 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
     _load_and_reset(env)
     recorder = _recorder(env)
     _warm_frontend_execution(env)
+    # Move fence.i to the next trained loop phase so MainPipe reaches a dual
+    # miss while a later line from the same post-fence refill burst is pending.
+    env.step(6)
 
     # Preserve trained BPU state while invalidating ICache.  Every subsequent
     # accepted TL request is delayed, making the old dual fetch and its D
@@ -786,7 +807,10 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
         if ibuffer_fire:
             entries = _ibuffer_entries(recorder)
             stale = [entry for entry in entries if entry["ftq_tag"] in old_tags]
-            if stale and (not entries or int(entries[0]["pc"]) != _REDIRECT_TARGET):
+            if stale and (
+                not entries
+                or int(entries[0]["foldpc"]) != fold_pc(_REDIRECT_TARGET)
+            ):
                 old_ibuffer_deliveries.append(
                     {"cycle": int(env.current_cycle), "entries": stale}
                 )
@@ -837,7 +861,7 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
         "reason": "redirect target never reached IBuffer",
         "redirect_cycle": redirect_cycle,
     }
-    assert int(first_fire["entries"][0]["pc"]) == _REDIRECT_TARGET, {
+    assert int(first_fire["entries"][0]["foldpc"]) == fold_pc(_REDIRECT_TARGET), {
         "reason": "first post-redirect IBuffer transfer did not start at target",
         "target": _REDIRECT_TARGET,
         "first_fire": first_fire,

@@ -42,23 +42,16 @@ _SIGNALS = {
     "io_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
-    "bpu_valid": (
-        _MAIN + "io_flushFromBpu_s3_valid",
-    ),
-    "bpu_flag": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
-        _MAIN + "io_flushFromBpu_s3_bits_flag",
-    ),
-    "bpu_value": (
-        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
-        _MAIN + "io_flushFromBpu_s3_bits_value",
-    ),
+    "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "bpu_flag": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",),
+    "bpu_value": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",),
     "s1_valid": _aliases(_MAIN + "s1_valid"),
     "s1_ready": _aliases(_MAIN + "s1_ready"),
     "s1_fire": _aliases(_MAIN + "s1_fire"),
     "s1_flush": (_MAIN + "s1_flush", _IFU + "s1_flush", f"TOP.{_MAIN}s1_flush"),
     "s1_fetch_finish": (
-        _MAIN + "io_toIfu_req_valid",
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        _ICACHE + "__Vtogcov__io_toIfu_req_valid",
     ),
     "s1_ftq0_flag": _aliases(_MAIN + "s1_req_0_ftqIdx_flag"),
     "s1_ftq0_value": _aliases(_MAIN + "s1_req_0_ftqIdx_value"),
@@ -74,8 +67,11 @@ _SIGNALS = {
     ),
     "miss_resp_corrupt": (_MAIN + "__Vtogcov__io_missResp_bits_corrupt",),
     "miss_resp_denied": (_MAIN + "__Vtogcov__io_missResp_bits_denied",),
-    "to_ifu_valid": _aliases(_MAIN + "io_toIfu_req_valid"),
-    "to_ifu_ready": _aliases(_MAIN + "io_toIfu_req_ready"),
+    "to_ifu_valid": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        _ICACHE + "__Vtogcov__io_toIfu_req_valid",
+    ),
+    "to_ifu_ready": (_ICACHE + "__Vtogcov__io_toIfu_req_ready",),
     "s2_valid": (
         _MAIN + "s2_valid",
         _MAIN + "__Vtogcov__s2_valid",

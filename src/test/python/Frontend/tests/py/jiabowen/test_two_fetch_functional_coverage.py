@@ -923,9 +923,10 @@ def test_cfvec_redirect_invalidates_current_and_next_cycle(tmp_path):
     _set_cfvec_entries(dut, [(0, 0x80000000, 0, 0x00000013)])
     sample_cfvec_coverage(recorder, env, 10)
     sample_cfvec_coverage(recorder, env, 11)
+    sample_cfvec_coverage(recorder, env, 12)
     assert not recorder.key_hit("ifu_instr_size_type", "rvi_seen")
 
-    sample_cfvec_coverage(recorder, env, 12)
+    sample_cfvec_coverage(recorder, env, 13)
     assert recorder.key_hit("ifu_instr_size_type", "rvi_seen")
 
 

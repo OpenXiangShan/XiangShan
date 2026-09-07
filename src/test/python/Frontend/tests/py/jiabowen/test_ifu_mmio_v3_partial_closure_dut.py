@@ -16,6 +16,7 @@ from env.support import PmpPmaConfig
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.funcov.py.ifu.mmio_v3_funcov import MMIO_V3_CHECKED_EVENT_TYPE
+from env.support.pc_utils import fold_pc
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -221,10 +222,8 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
         to_valid = recorder._read_first_dut_signal(
             dut,
             (
-                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid",
-                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
                 "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
-                "Frontend.inner_ifu.io_toIBuffer_valid",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
             ),
         )
         if to_valid == 1:
@@ -245,7 +244,7 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
             backend_exceptions.append(
                 {
                     "cycle": int(cycle),
-                    "pc": int(monitor_if.cfvec_pc[slot].value),
+                    "pc": active_env.observed_cfvec_pc(slot),
                     "iaf": int(monitor_if.cfvec_exception_vec[slot][1].value),
                     "illegal": int(monitor_if.cfvec_exception_vec[slot][2].value),
                 }
@@ -648,7 +647,7 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
                     "s2_req_uncache": snapshot["s2_req_uncache"],
                     "s2_use_uncache": snapshot["s2_use_uncache"],
                     "s2_exception": snapshot["s2_exception"],
-                    "to_pc": snapshot["to_pc"],
+                    "to_foldpc": snapshot["to_foldpc"],
                     "s2_ftq_flag": snapshot["s2_ftq_flag"],
                     "s2_ftq_value": snapshot["s2_ftq_value"],
                     "to_ftq_flag": snapshot["to_ftq_flag"],
@@ -790,7 +789,7 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
                     "cycle": int(cycle),
                     "exception": snapshot["to_exception"],
                     "s2_instr_pc": snapshot["s2_instr_pc"],
-                    "to_pc": snapshot["to_pc"],
+                    "to_foldpc": snapshot["to_foldpc"],
                 }
             )
 
@@ -812,7 +811,7 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
     }
     assert exception_samples
     assert exception_samples[-1]["exception"] == 1
-    assert exception_samples[-1]["to_pc"] == cross_page_va >> 1
+    assert exception_samples[-1]["to_foldpc"] == fold_pc(cross_page_va)
     ptw_stats = env.ptw_agent.get_stats()
     assert int(ptw_stats.get("response_override_hit_count", 0)) >= 1, ptw_stats
     assert (
@@ -1011,7 +1010,7 @@ def test_cacheable_checker_redirect_flushes_younger_nc_internal_request(env):
                 "resp_valid": snapshot["resp_valid"],
                 "to_valid": snapshot["to_valid"],
                 "to_ready": snapshot["to_ready"],
-                "to_pc": snapshot["to_pc"],
+                "to_foldpc": snapshot["to_foldpc"],
                 "to_ftq": (snapshot["to_ftq_flag"], snapshot["to_ftq_value"]),
                 "req_count": int(
                     active_env.uncache_agent.get_stats().get("req_count", 0)

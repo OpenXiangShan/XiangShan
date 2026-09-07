@@ -16,8 +16,6 @@ _BASE = 0x8004_0000
 _REDIRECT_BASE = 0x8005_0000
 _DUAL_BASE = 0x8006_0000
 _NOP = 0x0000_0013
-
-
 def _aliases(name: str) -> tuple[str, str]:
     return (name, f"TOP.{name}")
 
@@ -61,8 +59,10 @@ _SIGNALS = {
     ),
     "s1_fire": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_fire"),
     "s1_flush": _aliases("Frontend_top.Frontend.inner_icache.mainPipe.s1_flush"),
-    "to_ifu_valid": _aliases(
-        "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid"
+    "to_ifu_valid": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_valid",
+        "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
     ),
     "to_ifu_exception": _aliases(
         "Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_info_0_icacheMeta_exception_value"
@@ -436,7 +436,6 @@ def _unit_icache_interface() -> SimpleNamespace:
         a_bits_address=_Signal(),
         d_valid=_Signal(),
         d_bits_opcode=_Signal(),
-        d_bits_size=_Signal(),
         d_bits_source=_Signal(),
         d_bits_denied=_Signal(),
         d_bits_data=_Signal(),
@@ -473,7 +472,6 @@ def test_icache_agent_fault_injection_obeys_tilelink_contract(
 
     stats = agent.get_stats()
     assert int(stats["resp_line_count"]) == 1
-    assert int(interface.d_bits_size.value) == 6
     assert int(stats["denied_resp_count"]) == expected_denied
     assert int(stats["corrupt_resp_count"]) == expected_corrupt
     assert [int(item["beat_idx"]) for item in stats["response_records"]] == [0, 1]

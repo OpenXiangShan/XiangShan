@@ -62,7 +62,7 @@ from .py.icache import (
     reset_icache_hitmiss_coverage_state,
     sample_icache_hitmiss_coverage,
 )
-from ..runtime.pylib import frontend_pylib_path
+from ..runtime.pylib import frontend_build_root_path, frontend_pylib_path
 from ..support.rvc_decoder import expand_rvc
 
 
@@ -448,9 +448,7 @@ class FunctionalCoverageRecorder:
         }
 
     def _build_provenance(self) -> dict:
-        frontend_root = _frontend_root()
-        repo_root = frontend_root.parents[3]
-        build_root = repo_root / "build-frontend"
+        build_root = frontend_build_root_path()
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
         simulator = frontend_simulator(os.getenv("TB_FRONTEND_SIM", "verilator"))
         manifest_path = (
@@ -727,7 +725,7 @@ class FunctionalCoverageRecorder:
                 "pbmt_nc": bool(self._last_uncache_was_nc),
             }
             self._ifu_last_cfvec = None
-            self._ifu_redirect_skip_until_cycle = cycle + 1
+            self._ifu_redirect_skip_until_cycle = cycle + 2
             self._uncache_page_tail_requests.clear()
 
     def _clear_transient_sampling_state(self) -> None:
@@ -1136,8 +1134,20 @@ class FunctionalCoverageRecorder:
 
     def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
         """Capture alignment/ownership facts without turning them into hits."""
-        valid = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid")
-        enq = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
+        valid = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
+            ),
+        )
+        enq = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
+            ),
+        )
         if valid is None or enq is None:
             return
 

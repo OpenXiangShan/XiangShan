@@ -127,13 +127,14 @@ _SIGNALS = {
     ),
     "bpu_s3_flush": (
         f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
-        f"{_ICACHE_PREFIX}mainPipe.io_flushFromBpu_s3_valid",
     ),
 }
 
 _UPSTREAM_SIGNALS = {
     "mainpipe_fire": (f"{_MAINPIPE_PREFIX}s0_fire",),
-    "second_requested": (f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",),
+    "second_requested": (
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
+    ),
     "second_waylookup_valid": (
         f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_valid",
     ),
@@ -152,23 +153,28 @@ _UPSTREAM_SIGNALS = {
         f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_exceptionEntry_itlbException_value",
     ),
     "first_ftq_flag": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_flag",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
         "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_flag",
     ),
     "first_ftq_value": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_value",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
         "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_value",
     ),
     "real_two_fetch": (
-        f"{_MAINPIPE_PREFIX}s0_realTwoFetchValid",
-        "inner_icache.mainPipe.s0_realTwoFetchValid",
-        f"{_ICACHE_PREFIX}dataArray.io_read_req_bits_1_valid",
+        "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
     ),
 }
 
 _LATE_FAULT_SIGNALS = {
-    "line0_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_0",),
-    "line1_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_1",),
+    "line0_corrupt": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_0_0",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_corrupt_0_0",
+    ),
+    "line1_corrupt": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_0_1",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_corrupt_0_1",
+    ),
     "line0_tl_corrupt": (
         f"{_MAINPIPE_PREFIX}s1_tlCorrupt_r",
         f"{_MAINPIPE_PREFIX}__Vtogcov__s1_tlCorrupt_r",
@@ -784,8 +790,8 @@ def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
 
 def _req_signal_names(index: int, field: str) -> tuple[str, ...]:
     return (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_{index}_{field}",
-        f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_info_{index}_{field}",
+        f"Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_{index}_{field}",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_{index}_{field}",
     )
 
 
