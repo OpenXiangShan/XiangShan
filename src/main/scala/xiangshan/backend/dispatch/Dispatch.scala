@@ -796,7 +796,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     updatedUop(i).singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
     if (i == 0) {
       when (drSqPending && fromRename(0).valid && FuType.isStore(fromRename(0).bits.fuType)) {
-        updatedUop(0).teaPsv := TeaPsvOps.setBit(updatedUop(0).teaPsv, TeaEvent.DR_SQ)
+        updatedUop(0).teaPsv := TeaPsvOps.setBit(fromRename(0).bits.teaPsv, TeaEvent.DR_SQ)
       }
     }
     XSDebug(
