@@ -151,7 +151,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema is None:
         return
     _require(
-        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),
         f"unsupported constraint_schema: {schema!r}",
     )
 
@@ -712,6 +712,122 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         ) == [0] * 6,
                         "disabled CMO operation has error observations",
                     )
+
+        if schema >= 16:
+            target_uncache_error = result.get("target_uncache_error")
+            target_uncache_load_denied = result.get(
+                "target_uncache_load_error_denied"
+            )
+            target_store_shares = [
+                result.get("target_nc_store"),
+                result.get("target_mmio_store"),
+            ]
+            for name, value in (
+                ("target_uncache_error", target_uncache_error),
+                (
+                    "target_uncache_load_error_denied",
+                    target_uncache_load_denied,
+                ),
+                ("target_nc_store", target_store_shares[0]),
+                ("target_mmio_store", target_store_shares[1]),
+            ):
+                _require(
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 1000,
+                    f"{name} is not a per-mille integer: {value!r}",
+                )
+            actual_directions = [
+                _csv_counts(result, "actual_nc_direction", 2),
+                _csv_counts(result, "actual_mmio_direction", 2),
+            ]
+            actual_uncache_error = _csv_counts(
+                result, "actual_uncache_error", 2
+            )
+            actual_uncache_error_kind = _csv_counts(
+                result, "actual_uncache_error_kind", 2
+            )
+            actual_uncache_outcome = _csv_counts(
+                result, "actual_uncache_outcome", 12
+            )
+            for memory_type, operation_index in enumerate((7, 8)):
+                outcomes = actual_uncache_outcome[
+                    memory_type * 6 : memory_type * 6 + 6
+                ]
+                store_share = target_store_shares[memory_type]
+                for direction in range(2):
+                    direction_enabled = (
+                        target_operations[operation_index] != 0
+                        and (
+                            store_share != 1000 if direction == 0
+                            else store_share != 0
+                        )
+                    )
+                    clean, corrupt, denied = outcomes[
+                        direction * 3 : direction * 3 + 3
+                    ]
+                    expected = (
+                        direction_enabled and target_uncache_error != 1000,
+                        direction_enabled
+                        and direction == 0
+                        and target_uncache_error != 0
+                        and target_uncache_load_denied != 1000,
+                        direction_enabled
+                        and target_uncache_error != 0
+                        and (
+                            direction == 1
+                            or target_uncache_load_denied != 0
+                        ),
+                    )
+                    _require(
+                        all(
+                            (count > 0) == enabled
+                            for count, enabled in zip(
+                                (clean, corrupt, denied), expected
+                            )
+                        ),
+                        "actual_uncache_outcome does not match enabled "
+                        f"classes for memory_type={memory_type} "
+                        f"direction={direction}: {outcomes}",
+                    )
+                _require(
+                    sum(outcomes) == actual_operations[operation_index],
+                    "Uncache outcome/operation coverage is not conserved",
+                )
+                derived_directions = [
+                    sum(outcomes[0:3]), sum(outcomes[3:6])
+                ]
+                _require(
+                    derived_directions == actual_directions[memory_type]
+                    and all(
+                        (count > 0) == (
+                            target_operations[operation_index] != 0
+                            and (
+                                store_share != 1000 if direction == 0
+                                else store_share != 0
+                            )
+                        )
+                        for direction, count in enumerate(
+                            actual_directions[memory_type]
+                        )
+                    ),
+                    "Uncache direction coverage does not match outcomes or "
+                    "enabled classes",
+                )
+            clean = sum(actual_uncache_outcome[index] for index in (0, 3, 6, 9))
+            corrupt = sum(actual_uncache_outcome[index] for index in (1, 7))
+            denied = sum(actual_uncache_outcome[index] for index in (2, 5, 8, 11))
+            _require(
+                actual_uncache_error == [clean, corrupt + denied]
+                and actual_uncache_error_kind == [corrupt, denied],
+                "Uncache aggregate error coverage does not match outcomes",
+            )
+            _require(
+                sum(actual_uncache_error) ==
+                    actual_operations[7] + actual_operations[8]
+                and sum(actual_uncache_error_kind) == actual_uncache_error[1],
+                "Uncache error coverage is not conserved",
+            )
 
     if schema >= 8:
         target_segment_store = result.get("target_vector_segment_store")

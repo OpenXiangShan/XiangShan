@@ -953,7 +953,8 @@ in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family and W/D width, CMO CLEAN/FLUSH/INVAL operation,
 clean/dirty line state, younger-load overlap, and legal CBOAck error presence
-and kind, NC/MMIO load/store direction,
+and kind, NC/MMIO load/store direction plus legal Uncache response-error
+presence and kind,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1057,6 +1058,19 @@ both line address and CBO opcode so a preceding same-line refill or permission
 upgrade cannot consume the error. Error completion requires exact
 HardwareError or StoreAccessFault, no manager Probe, unchanged backing memory,
 and redirect cleanup, including an optional younger delayed load.
+
+Schema 16 adds `uncache-error` and `uncache-load-error-denied`. Every enabled
+NC/MMIO load direction must cover clean, denied, and independent-corrupt
+responses; stores cover clean and denied because TileLink does not permit
+`corrupt` on a data-less `AccessAck`. The oracle preserves the architectural
+split between the two store classes: a PBMT=IO denied response must produce a
+final StoreAccessFault writeback, while a committed PBMT=NC denied response is
+reported only through `uncacheError`, must retire its SQ entry without a
+redirect, and must not update manager-side memory. Error-response and D-beat
+counters are conserved against the 12 NC/MMIO x load/store x outcome bins.
+When Uncache uses the `spec` latency profile, the serial budget forces at least
+four requests so every latency bucket is reachable even under extreme
+load-only or store-only constraints.
 
 For a reproducible local pressure run:
 

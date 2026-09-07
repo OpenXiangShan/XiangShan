@@ -168,6 +168,8 @@ struct RandomConstraints {
     unsigned probe_overlap_per_mille = 0;
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
+    unsigned uncache_error_per_mille = 0;
+    unsigned uncache_load_error_denied_per_mille = 0;
     unsigned stride_stream_per_mille = 0;
     memblock::ResponseLatencyProfiles response_latency{};
 
@@ -225,6 +227,8 @@ struct RandomConstraints {
                 .probe_overlap_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
+                .uncache_error_per_mille = 100,
+                .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 500,
                 .response_latency = {},
             };
@@ -284,6 +288,8 @@ struct RandomConstraints {
                 .probe_overlap_per_mille = 10,
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
+                .uncache_error_per_mille = 0,
+                .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 100,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
@@ -343,6 +349,8 @@ struct RandomConstraints {
                 .probe_overlap_per_mille = 750,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
+                .uncache_error_per_mille = 500,
+                .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 750,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
@@ -654,6 +662,10 @@ struct RandomConstraints {
             nc_stores_per_mille = parsed;
         } else if (key == "mmio-store") {
             mmio_stores_per_mille = parsed;
+        } else if (key == "uncache-error") {
+            uncache_error_per_mille = parsed;
+        } else if (key == "uncache-load-error-denied") {
+            uncache_load_error_denied_per_mille = parsed;
         } else if (key == "stride-stream") {
             stride_stream_per_mille = parsed;
         } else {
@@ -926,6 +938,8 @@ struct RandomConstraints {
             probe_overlap_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
             mmio_stores_per_mille > 1000 ||
+            uncache_error_per_mille > 1000 ||
+            uncache_load_error_denied_per_mille > 1000 ||
             stride_stream_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
@@ -963,6 +977,16 @@ struct RandomConstraints {
         if (cmo_error_per_mille != 0 && operation_weights[cmo] == 0) {
             throw std::invalid_argument(
                 "cmo-error requires a nonzero CMO operation weight");
+        }
+        if (uncache_error_per_mille != 0 && !uses_uncache()) {
+            throw std::invalid_argument(
+                "uncache-error requires a nonzero NC or MMIO operation weight");
+        }
+        if (uncache_error_per_mille == 1000 &&
+            special_concurrent_per_mille != 0) {
+            throw std::invalid_argument(
+                "uncache-error=1000 requires special-concurrent=0 because "
+                "faulting special accesses redirect the mixed issue window");
         }
         if (stride_stream_per_mille != 0 &&
             (operation_weights[scalar_load] == 0 ||
@@ -1175,7 +1199,28 @@ struct RandomConstraints {
 
     unsigned minimum_serial_actions() const
     {
+        const auto uncache_outcome_actions = [&](unsigned store_per_mille) {
+            const bool loads_enabled = store_per_mille != 1000;
+            const bool stores_enabled = store_per_mille != 0;
+            if (uncache_error_per_mille == 0) {
+                return direction_classes(store_per_mille);
+            }
+            unsigned outcomes = 0;
+            if (loads_enabled) {
+                outcomes += uncache_error_per_mille == 1000 ? 0U : 1U;
+                outcomes +=
+                    uncache_load_error_denied_per_mille == 1000 ? 0U : 1U;
+                outcomes +=
+                    uncache_load_error_denied_per_mille == 0 ? 0U : 1U;
+            }
+            if (stores_enabled) {
+                outcomes += uncache_error_per_mille == 1000 ? 0U : 1U;
+                ++outcomes;
+            }
+            return std::max(direction_classes(store_per_mille), outcomes);
+        };
         unsigned actions = 0;
+        unsigned uncache_actions = 0;
         for (unsigned operation = 0; operation < operation_count; ++operation) {
             if (operation_weights[operation] == 0) {
                 continue;
@@ -1194,17 +1239,28 @@ struct RandomConstraints {
                     hypervisor_family_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
             } else if (operation == noncacheable) {
-                actions += direction_classes(nc_stores_per_mille);
+                uncache_actions +=
+                    uncache_outcome_actions(nc_stores_per_mille);
             } else if (operation == mmio) {
-                actions += direction_classes(mmio_stores_per_mille);
+                uncache_actions +=
+                    uncache_outcome_actions(mmio_stores_per_mille);
             } else if (operation == cmo) {
                 const unsigned operations = static_cast<unsigned>(std::count_if(
                     cmo_operation_weights.begin(), cmo_operation_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
+                const unsigned error_kinds =
+                    cmo_error_per_mille == 0 ? 0U :
+                    (cmo_error_denied_per_mille == 0 ||
+                     cmo_error_denied_per_mille == 1000 ? 1U : 2U);
+                const unsigned error_actions = cmo_error_per_mille == 0
+                    ? operations
+                    : operations * error_kinds +
+                        (cmo_error_per_mille == 1000 ? 0U : 1U);
                 actions += std::max({
                     operations,
                     direction_classes(cmo_dirty_per_mille),
-                    direction_classes(cmo_younger_overlap_per_mille)});
+                    direction_classes(cmo_younger_overlap_per_mille),
+                    error_actions});
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -1243,6 +1299,12 @@ struct RandomConstraints {
                 ++actions;
             }
         }
+        const unsigned uncache_latency_actions =
+            response_latency.uncache == memblock::ResponseLatencyProfile::spec &&
+                    uses_uncache()
+                ? 4U
+                : 0U;
+        actions += std::max(uncache_actions, uncache_latency_actions);
         unsigned translation_actions =
             translation_weights[translation_bare] != 0;
         if (translation_weights[translation_stage1] != 0) {
@@ -1323,7 +1385,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=15 constraints=" << name
+        stream << "constraint_schema=16 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1408,6 +1470,9 @@ struct RandomConstraints {
                << " target_probe_overlap=" << probe_overlap_per_mille
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
+               << " target_uncache_error=" << uncache_error_per_mille
+               << " target_uncache_load_error_denied="
+               << uncache_load_error_denied_per_mille
                << " target_stride_stream=" << stride_stream_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
@@ -1671,6 +1736,11 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 7> vector_segment_nfs{};
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
+    std::array<std::uint64_t, 2> uncache_errors{};
+    std::array<std::uint64_t, 2> uncache_error_kinds{};
+    // [NC/MMIO][load/store][clean/corrupt/denied]
+    std::array<std::array<std::array<std::uint64_t, 3>, 2>, 2>
+        uncache_outcomes{};
     // Atomic operations are pipeline-serializing at the MemBlock boundary;
     // only NC and MMIO traffic can be added to a legal mixed issue window.
     std::array<std::uint64_t, 2> special_concurrent{};
@@ -1700,6 +1770,18 @@ struct ConstraintCoverage {
     {
         ++operations.at(operation);
         ++actions;
+    }
+
+    void sample_uncache(
+        unsigned memory_type, bool store, std::optional<bool> error_denied)
+    {
+        const unsigned outcome = !error_denied
+            ? 0U : *error_denied ? 2U : 1U;
+        ++uncache_outcomes.at(memory_type).at(store ? 1U : 0U).at(outcome);
+        ++uncache_errors[error_denied ? 1U : 0U];
+        if (error_denied) {
+            ++uncache_error_kinds[*error_denied ? 1U : 0U];
+        }
     }
 
     void sample_dcache(
@@ -1955,12 +2037,14 @@ struct ConstraintCoverage {
                     vector_segment_nfs);
         }
         if (operation == RandomConstraints::noncacheable) {
-            return operations[operation] != 0 && direction_complete(
-                constraints.nc_stores_per_mille, nc_directions);
+            return uncache_operation_complete(
+                constraints, operation, 0, constraints.nc_stores_per_mille,
+                nc_directions);
         }
         if (operation == RandomConstraints::mmio) {
-            return operations[operation] != 0 && direction_complete(
-                constraints.mmio_stores_per_mille, mmio_directions);
+            return uncache_operation_complete(
+                constraints, operation, 1, constraints.mmio_stores_per_mille,
+                mmio_directions);
         }
         return operations[operation] != 0;
     }
@@ -1984,6 +2068,16 @@ struct ConstraintCoverage {
         }
         if (!translation_complete(constraints) ||
             !fences_complete(constraints)) {
+            return false;
+        }
+        const std::uint64_t uncache_actions =
+            operations[RandomConstraints::noncacheable] +
+            operations[RandomConstraints::mmio];
+        if (uncache_errors[0] + uncache_errors[1] != uncache_actions ||
+            uncache_error_kinds[0] + uncache_error_kinds[1] !=
+                uncache_errors[1] ||
+            (uncache_actions != 0 && !binary_complete(
+                constraints.uncache_error_per_mille, uncache_errors))) {
             return false;
         }
         if (constraints.uses_translation() &&
@@ -2034,6 +2128,46 @@ struct ConstraintCoverage {
         }
         return actions != 0;
     }
+
+private:
+    bool uncache_operation_complete(
+        const RandomConstraints &constraints, unsigned operation,
+        unsigned memory_type, unsigned store_per_mille,
+        const std::array<std::uint64_t, 2> &directions) const
+    {
+        if (operations[operation] == 0 ||
+            !direction_complete(store_per_mille, directions)) {
+            return false;
+        }
+        std::uint64_t observed = 0;
+        for (unsigned direction = 0; direction < 2; ++direction) {
+            const bool direction_enabled = direction == 0
+                ? store_per_mille != 1000 : store_per_mille != 0;
+            for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                const bool outcome_enabled = direction_enabled &&
+                    (outcome == 0
+                        ? constraints.uncache_error_per_mille != 1000
+                        : outcome == 1
+                        ? constraints.uncache_error_per_mille != 0 &&
+                            direction == 0 &&
+                            constraints.uncache_load_error_denied_per_mille !=
+                                1000
+                        : constraints.uncache_error_per_mille != 0 &&
+                            (direction == 1 ||
+                             constraints.uncache_load_error_denied_per_mille !=
+                                 0));
+                const std::uint64_t count =
+                    uncache_outcomes[memory_type][direction][outcome];
+                if ((count != 0) != outcome_enabled) {
+                    return false;
+                }
+                observed += count;
+            }
+        }
+        return observed == operations[operation];
+    }
+
+public:
 
     std::string summary(
         const RandomConstraints &constraints,
@@ -2140,6 +2274,23 @@ struct ConstraintCoverage {
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','
                << mmio_directions[1]
+               << " actual_uncache_error=" << uncache_errors[0] << ','
+               << uncache_errors[1]
+               << " actual_uncache_error_kind="
+               << uncache_error_kinds[0] << ',' << uncache_error_kinds[1]
+               << " actual_uncache_outcome="
+               << uncache_outcomes[0][0][0] << ','
+               << uncache_outcomes[0][0][1] << ','
+               << uncache_outcomes[0][0][2] << ','
+               << uncache_outcomes[0][1][0] << ','
+               << uncache_outcomes[0][1][1] << ','
+               << uncache_outcomes[0][1][2] << ','
+               << uncache_outcomes[1][0][0] << ','
+               << uncache_outcomes[1][0][1] << ','
+               << uncache_outcomes[1][0][2] << ','
+               << uncache_outcomes[1][1][0] << ','
+               << uncache_outcomes[1][1][1] << ','
+               << uncache_outcomes[1][1][2]
                << " actual_special_concurrent=" << special_concurrent[0] << ','
                << special_concurrent[1]
                << " actual_translation=" << translation_regimes[0] << ','
@@ -29657,6 +29808,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         if (!environment.reset() || !environment.enable_misaligned_accesses()) {
             return false;
         }
+        if (constraints.uncache_error_per_mille != 0) {
+            environment.configure_cache_error_enable(true);
+            if (!environment.run_cycles(4)) {
+                return false;
+            }
+        }
 
         phase = "bare-heterogeneous-wave";
         std::vector<memblock::LoadTransaction> scalar_wave;
@@ -31211,6 +31368,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     *special_kind - RandomConstraints::noncacheable;
                 ++constraint_coverage.special_concurrent[special_index];
                 constraint_coverage.sample_operation(*special_kind);
+                constraint_coverage.sample_uncache(
+                    special_index, false, std::nullopt);
                 auto &directions = *special_kind ==
                         RandomConstraints::noncacheable
                     ? constraint_coverage.nc_directions
@@ -31978,29 +32137,63 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
 
             phase = "random-cmo-complete";
-            if (!environment.run_until_store_complete(
-                    cmo_completion_timeout) ||
-                ((younger_overlap || error_denied.has_value()) &&
-                 (!environment.redirect_after(
-                      cmo_transaction.rob, cmo_transaction.rob_flag,
-                      error_denied.has_value()) ||
-                  environment.writebacks() != younger_writebacks_before)) ||
-                (!error_denied &&
-                 !environment.commit_store(cmo_transaction, 8192)) ||
-                !environment.run_cycles(
-                    younger_overlap ? younger_response_delay + 256U
-                                    : error_denied ? 96U : 16U) ||
-                (younger_overlap &&
-                 (environment.writebacks() != younger_writebacks_before ||
-                  environment.lq_redirect_canceled_observed() !=
-                      younger_cancels_before + 1)) ||
-                !environment.run_until_queues_retired(8192) ||
-                !environment.dcache_responses_idle() ||
-                !environment.dcache_grants_drained() ||
-                environment.dcache_cmo_requests(cmo_transaction.op) !=
-                    cmo_before + 1 ||
-                !environment.sbuffer_empty()) {
+            const auto fail_cmo_completion = [&](const char *check) {
+                std::ostringstream detail;
+                detail << "random-cmo-complete-" << check
+                       << ":op=" << operation
+                       << ":dirty=" << dirty
+                       << ":overlap=" << younger_overlap
+                       << ":error="
+                       << (error_denied.has_value()
+                               ? (*error_denied ? "denied" : "corrupt")
+                               : "clean");
+                phase = detail.str();
                 return false;
+            };
+            if (!environment.run_until_store_complete(
+                    cmo_completion_timeout)) {
+                return fail_cmo_completion("store-writeback");
+            }
+            if (younger_overlap || error_denied.has_value()) {
+                if (!environment.redirect_after(
+                        cmo_transaction.rob, cmo_transaction.rob_flag,
+                        error_denied.has_value())) {
+                    return fail_cmo_completion("redirect");
+                }
+                if (environment.writebacks() != younger_writebacks_before) {
+                    return fail_cmo_completion("younger-writeback-at-redirect");
+                }
+            }
+            if (!error_denied &&
+                !environment.commit_store(cmo_transaction, 8192)) {
+                return fail_cmo_completion("commit");
+            }
+            if (!environment.run_cycles(
+                    younger_overlap ? younger_response_delay + 256U
+                                    : error_denied ? 96U : 16U)) {
+                return fail_cmo_completion("settle");
+            }
+            if (!environment.run_until_dcache_idle(cmo_completion_timeout)) {
+                return fail_cmo_completion("manager-drain");
+            }
+            if (younger_overlap &&
+                environment.writebacks() != younger_writebacks_before) {
+                return fail_cmo_completion("younger-writeback-after-redirect");
+            }
+            if (younger_overlap &&
+                environment.lq_redirect_canceled_observed() !=
+                    younger_cancels_before + 1) {
+                return fail_cmo_completion("younger-cancel");
+            }
+            if (!environment.run_until_queues_retired(8192)) {
+                return fail_cmo_completion("queue-retire");
+            }
+            if (environment.dcache_cmo_requests(cmo_transaction.op) !=
+                    cmo_before + 1) {
+                return fail_cmo_completion("request-count");
+            }
+            if (!environment.sbuffer_empty()) {
+                return fail_cmo_completion("sbuffer-empty");
             }
             if (error_denied &&
                 (environment.dcache_error_response_requests() !=
@@ -32033,6 +32226,61 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return true;
         };
 
+        const auto recover_random_uncache_error = [&] (
+            std::uint8_t rob, bool rob_flag, bool store,
+            std::uint64_t lq_dequeued_before,
+            std::uint64_t sq_dequeued_before,
+            std::uint64_t lq_cancels_before,
+            std::uint64_t sq_cancels_before) {
+            phase = store ? "random-uncache-store-redirect"
+                          : "random-uncache-load-redirect";
+            if (!environment.run_cycles(8) ||
+                !environment.redirect_after(rob, rob_flag, true) ||
+                !environment.run_cycles(96) ||
+                !environment.run_until_queues_retired(8192)) {
+                return false;
+            }
+            const std::uint64_t lq_dequeued =
+                environment.lq_dequeued() - lq_dequeued_before;
+            const std::uint64_t sq_dequeued =
+                environment.sq_dequeued() - sq_dequeued_before;
+            const std::uint64_t lq_canceled =
+                environment.lq_redirect_canceled_observed() -
+                lq_cancels_before;
+            const std::uint64_t sq_canceled =
+                environment.sq_redirect_canceled_observed() -
+                sq_cancels_before;
+            if (lq_dequeued + lq_canceled != (store ? 0U : 1U) ||
+                sq_dequeued + sq_canceled != (store ? 1U : 0U)) {
+                return false;
+            }
+            --rob_offset;
+            if (store) {
+                sq_offset -= sq_canceled;
+            } else {
+                lq_offset -= lq_canceled;
+            }
+            ++coverage.exceptions;
+            return true;
+        };
+        const auto retire_random_nc_store_error = [&] (
+            std::uint64_t lq_dequeued_before,
+            std::uint64_t sq_dequeued_before,
+            std::uint64_t lq_cancels_before,
+            std::uint64_t sq_cancels_before) {
+            phase = "random-nc-store-error-retire";
+            if (!environment.run_cycles(8) ||
+                !environment.run_until_queues_retired(8192)) {
+                return false;
+            }
+            return environment.lq_dequeued() == lq_dequeued_before &&
+                environment.sq_dequeued() == sq_dequeued_before + 1 &&
+                environment.lq_redirect_canceled_observed() ==
+                    lq_cancels_before &&
+                environment.sq_redirect_canceled_observed() ==
+                    sq_cancels_before;
+        };
+
         while (actions < target_before_redirect) {
             const bool closing_stride_stream =
                 constraints.stride_stream_per_mille != 0 &&
@@ -32043,13 +32291,40 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (!closing_stride_stream && probe_coverage_incomplete()) {
                 kind = RandomConstraints::scalar_store;
             } else if (!closing_stride_stream) {
+                const auto &uncache_latency =
+                    environment.uncache_response_latency_stats();
+                const bool force_uncache_latency =
+                    options.backpressure &&
+                    constraints.response_latency.uncache ==
+                        memblock::ResponseLatencyProfile::spec &&
+                    uncache_latency.samples < uncache_latency.buckets.size();
+                bool selected = false;
+                if (force_uncache_latency) {
+                    for (unsigned candidate = RandomConstraints::noncacheable;
+                         candidate <= RandomConstraints::mmio; ++candidate) {
+                        if (constraints.operation_weights[candidate] != 0 &&
+                            !constraint_coverage.operation_complete(
+                                constraints, candidate)) {
+                            kind = candidate;
+                            selected = true;
+                            break;
+                        }
+                    }
+                    if (!selected) {
+                        kind = constraints.choose_concurrent_special_operation(
+                            random());
+                        selected = true;
+                    }
+                }
                 for (unsigned candidate = 0;
-                     candidate < RandomConstraints::operation_count; ++candidate) {
+                     candidate < RandomConstraints::operation_count &&
+                         !selected;
+                     ++candidate) {
                     if (constraints.operation_weights[candidate] != 0 &&
                         !constraint_coverage.operation_complete(
                             constraints, candidate)) {
                         kind = candidate;
-                        break;
+                        selected = true;
                     }
                 }
             }
@@ -32073,6 +32348,64 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 } else if (constraints.mmio_stores_per_mille != 0 &&
                            constraint_coverage.mmio_directions[1] == 0) {
                     mmio_store = true;
+                }
+            }
+            std::optional<bool> uncache_error_denied;
+            bool uncache_outcome_forced = false;
+            if (kind == RandomConstraints::noncacheable ||
+                kind == RandomConstraints::mmio) {
+                const unsigned memory_type =
+                    kind == RandomConstraints::mmio ? 1U : 0U;
+                bool &store = kind == RandomConstraints::mmio
+                    ? mmio_store : nc_store;
+                const unsigned store_per_mille =
+                    kind == RandomConstraints::mmio
+                    ? constraints.mmio_stores_per_mille
+                    : constraints.nc_stores_per_mille;
+                for (unsigned direction = 0;
+                     direction < 2 && !uncache_outcome_forced;
+                     ++direction) {
+                    const bool direction_enabled = direction == 0
+                        ? store_per_mille != 1000 : store_per_mille != 0;
+                    if (!direction_enabled) {
+                        continue;
+                    }
+                    for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                        const bool outcome_enabled =
+                            outcome == 0
+                            ? constraints.uncache_error_per_mille != 1000
+                            : outcome == 1
+                            ? constraints.uncache_error_per_mille != 0 &&
+                                direction == 0 &&
+                                constraints.
+                                    uncache_load_error_denied_per_mille != 1000
+                            : constraints.uncache_error_per_mille != 0 &&
+                                (direction == 1 ||
+                                 constraints.
+                                    uncache_load_error_denied_per_mille != 0);
+                        if (outcome_enabled &&
+                            constraint_coverage.uncache_outcomes[
+                                memory_type][direction][outcome] == 0) {
+                            store = direction == 1;
+                            uncache_outcome_forced = true;
+                            if (outcome != 0) {
+                                uncache_error_denied = outcome == 2;
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (!uncache_outcome_forced) {
+                    const bool error = choose_binary_class(
+                        constraints.uncache_error_per_mille,
+                        constraint_coverage.uncache_errors);
+                    if (error) {
+                        uncache_error_denied = store ? true :
+                            choose_binary_class(
+                                constraints.
+                                    uncache_load_error_denied_per_mille,
+                                constraint_coverage.uncache_error_kinds);
+                    }
                 }
             }
             bool vector_segment_store = kind == RandomConstraints::vector_segment &&
@@ -32634,30 +32967,168 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::noncacheable) {
                 ordinary_leaf_addressed = true;
                 const std::uint64_t offset = (random() % 128) * 8;
+                if (uncache_error_denied &&
+                    !environment.run_until_queues_retired(8192)) {
+                    return false;
+                }
                 if (!nc_store) {
-                    const auto transaction = make_load(
+                    phase = "random-nc-load";
+                    auto transaction = make_load(
                         nc_base + offset, memblock::LoadOp::ld, random() % 3);
-                    if (!issue_load(transaction)) {
+                    if (uncache_error_denied) {
+                        transaction.expected_exception_mask =
+                            *uncache_error_denied
+                            ? memblock::kExceptionLoadAccessFault
+                            : memblock::kExceptionHardwareError;
+                    }
+                    const std::uint64_t uncache_before =
+                        environment.uncache_requests();
+                    const std::uint64_t error_before =
+                        environment.uncache_error_response_requests();
+                    const std::uint64_t denied_before =
+                        environment.uncache_denied_d_beats();
+                    const std::uint64_t corrupt_before =
+                        environment.uncache_corrupt_d_beats();
+                    const std::uint64_t lq_dequeued_before =
+                        environment.lq_dequeued();
+                    const std::uint64_t sq_dequeued_before =
+                        environment.sq_dequeued();
+                    const std::uint64_t lq_cancels_before =
+                        environment.lq_redirect_canceled_observed();
+                    const std::uint64_t sq_cancels_before =
+                        environment.sq_redirect_canceled_observed();
+                    if (uncache_error_denied) {
+                        environment.inject_next_uncache_response_error(
+                            *uncache_error_denied,
+                            !*uncache_error_denied);
+                    }
+                    if (!issue_load(transaction) ||
+                        environment.uncache_requests() != uncache_before + 1 ||
+                        (uncache_error_denied &&
+                         (!recover_random_uncache_error(
+                              transaction.rob, transaction.rob_flag, false,
+                              lq_dequeued_before, sq_dequeued_before,
+                              lq_cancels_before, sq_cancels_before) ||
+                          environment.uncache_error_response_requests() !=
+                              error_before + 1 ||
+                          environment.uncache_denied_d_beats() !=
+                              denied_before +
+                                  (*uncache_error_denied ? 1U : 0U) ||
+                          environment.uncache_corrupt_d_beats() !=
+                              corrupt_before + 1))) {
                         return false;
                     }
                 } else {
+                    phase = "random-nc-store";
                     auto transaction = make_store(
                         nc_base + offset, random(), memblock::StoreOp::sd,
                         random() % 2, random() % 2);
                     transaction.expected_debug_is_mmio = false;
                     transaction.expected_debug_is_ncio = false;
-                    if (!issue_store(transaction, (random() & 1U) != 0) ||
-                        !environment.commit_store(transaction, 8192) ||
-                        !environment.run_until_queues_retired(8192)) {
+                    const std::uint64_t uncache_before =
+                        environment.uncache_requests();
+                    const std::uint64_t error_before =
+                        environment.uncache_error_response_requests();
+                    const std::uint64_t denied_before =
+                        environment.uncache_denied_d_beats();
+                    const std::uint64_t corrupt_before =
+                        environment.uncache_corrupt_d_beats();
+                    const std::uint64_t bus_before =
+                        environment.bus_expected_load(
+                            transaction.address, memblock::LoadOp::ld);
+                    const auto bus_errors_before = environment.bus_error_stats();
+                    const std::uint64_t lq_dequeued_before =
+                        environment.lq_dequeued();
+                    const std::uint64_t sq_dequeued_before =
+                        environment.sq_dequeued();
+                    const std::uint64_t lq_cancels_before =
+                        environment.lq_redirect_canceled_observed();
+                    const std::uint64_t sq_cancels_before =
+                        environment.sq_redirect_canceled_observed();
+                    if (uncache_error_denied) {
+                        environment.inject_next_uncache_response_error(true, false);
+                    }
+                    bool store_completed = false;
+                    if (uncache_error_denied) {
+                        environment.expect_store(transaction);
+                        // NC stores are already committed before the Uncache
+                        // request. A denied AccessAck is reported through
+                        // uncacheError and must not create a second ROB
+                        // writeback; the manager-side memory remains intact.
+                        const bool data_first = false;
+                        store_completed =
+                            environment.set_rob_head(
+                                transaction.rob, transaction.rob_flag) &&
+                            environment.enqueue_store(
+                                transaction,
+                                memblock::lq_pointer_value(lq_offset)) &&
+                            (data_first
+                                ? environment.issue_store_data(
+                                      transaction, 4096) &&
+                                    environment.
+                                        issue_store_address_until_tlb_hit(
+                                            transaction,
+                                            constrained_completion_timeout)
+                                : environment.issue_store_address_until_tlb_hit(
+                                      transaction,
+                                      constrained_completion_timeout) &&
+                                    environment.issue_store_data(
+                                        transaction, 4096)) &&
+                            environment.run_cycles(64) &&
+                            (environment.uncache_requests() != uncache_before ||
+                             environment.wait_for_mmio_store_request(
+                                 transaction.rob, transaction.rob_flag, 8192)) &&
+                            environment.run_until_uncache_requests(
+                                uncache_before + 1, 8192) &&
+                            environment.run_until_store_complete(
+                                constrained_completion_timeout);
+                        if (store_completed) {
+                            coverage.sample(transaction, data_first);
+                            ++actions;
+                        }
+                    } else {
+                        store_completed =
+                            issue_store(transaction, (random() & 1U) != 0) &&
+                            environment.commit_store(transaction, 8192) &&
+                            environment.run_until_queues_retired(8192);
+                    }
+                    if (!store_completed ||
+                        (uncache_error_denied &&
+                         (!retire_random_nc_store_error(
+                              lq_dequeued_before, sq_dequeued_before,
+                              lq_cancels_before, sq_cancels_before) ||
+                          environment.uncache_error_response_requests() !=
+                              error_before + 1 ||
+                          environment.uncache_denied_d_beats() !=
+                              denied_before + 1 ||
+                          environment.uncache_corrupt_d_beats() !=
+                              corrupt_before ||
+                          environment.bus_expected_load(
+                              transaction.address,
+                              memblock::LoadOp::ld) != bus_before ||
+                          environment.bus_error_stats().uncache_reports !=
+                              bus_errors_before.uncache_reports + 1 ||
+                          environment.bus_error_stats().dcache_reports !=
+                              bus_errors_before.dcache_reports ||
+                          environment.bus_error_stats().last_uncache_address !=
+                              (transaction.address & ~std::uint64_t{63}))) ||
+                        environment.uncache_requests() != uncache_before + 1) {
                         return false;
                     }
                 }
                 ++constraint_coverage.nc_directions[nc_store ? 1 : 0];
+                constraint_coverage.sample_uncache(
+                    0, nc_store, uncache_error_denied);
                 ++coverage.noncacheable;
             } else {
                 ordinary_leaf_addressed = true;
                 const std::uint64_t offset = (random() % 128) * 8;
+                if (uncache_error_denied &&
+                    !environment.run_until_queues_retired(8192)) {
+                    return false;
+                }
                 if (!mmio_store) {
+                    phase = "random-mmio-load";
                     auto transaction = make_load(
                         mmio_access_address() + offset,
                         memblock::LoadOp::ld, random() % 3);
@@ -32665,8 +33136,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     transaction.expected_debug_is_mmio = true;
                     transaction.expected_debug_is_ncio = false;
                     transaction.expected_debug_is_perf_cnt = false;
+                    if (uncache_error_denied) {
+                        transaction.expected_exception_mask =
+                            *uncache_error_denied
+                            ? memblock::kExceptionLoadAccessFault
+                            : memblock::kExceptionHardwareError;
+                    }
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
+                    const std::uint64_t error_before =
+                        environment.uncache_error_response_requests();
+                    const std::uint64_t denied_before =
+                        environment.uncache_denied_d_beats();
+                    const std::uint64_t corrupt_before =
+                        environment.uncache_corrupt_d_beats();
+                    const std::uint64_t lq_dequeued_before =
+                        environment.lq_dequeued();
+                    const std::uint64_t sq_dequeued_before =
+                        environment.sq_dequeued();
+                    const std::uint64_t lq_cancels_before =
+                        environment.lq_redirect_canceled_observed();
+                    const std::uint64_t sq_cancels_before =
+                        environment.sq_redirect_canceled_observed();
+                    if (uncache_error_denied) {
+                        environment.inject_next_uncache_response_error(
+                            *uncache_error_denied,
+                            !*uncache_error_denied);
+                    }
                     environment.expect_load(transaction);
                     if (!environment.set_rob_head(
                             transaction.rob, transaction.rob_flag) ||
@@ -32678,11 +33174,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             uncache_before + 1, 8192) ||
                         !environment.run_until_complete(
                             constrained_completion_timeout) ||
-                        !environment.run_until_lq_retired(8192)) {
+                        (uncache_error_denied
+                            ? (!recover_random_uncache_error(
+                                   transaction.rob, transaction.rob_flag, false,
+                                   lq_dequeued_before, sq_dequeued_before,
+                                   lq_cancels_before, sq_cancels_before) ||
+                               environment.uncache_error_response_requests() !=
+                                   error_before + 1 ||
+                               environment.uncache_denied_d_beats() !=
+                                   denied_before +
+                                       (*uncache_error_denied ? 1U : 0U) ||
+                               environment.uncache_corrupt_d_beats() !=
+                                   corrupt_before + 1)
+                            : !environment.run_until_lq_retired(8192))) {
                         return false;
                     }
                     coverage.sample(transaction);
                 } else {
+                    phase = "random-mmio-store";
                     auto transaction = make_store(
                         mmio_access_address() + offset, random(),
                         memblock::StoreOp::sd,
@@ -32690,8 +33199,35 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     transaction.oracle_address = mmio_physical + offset;
                     transaction.expected_debug_is_mmio = false;
                     transaction.expected_debug_is_ncio = false;
+                    if (uncache_error_denied) {
+                        transaction.expected_exception_mask =
+                            memblock::kExceptionStoreAccessFault;
+                        transaction.allow_preliminary_success_writeback = true;
+                    }
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
+                    const std::uint64_t error_before =
+                        environment.uncache_error_response_requests();
+                    const std::uint64_t denied_before =
+                        environment.uncache_denied_d_beats();
+                    const std::uint64_t corrupt_before =
+                        environment.uncache_corrupt_d_beats();
+                    const std::uint64_t bus_before =
+                        environment.bus_expected_load(
+                            *transaction.oracle_address,
+                            memblock::LoadOp::ld);
+                    const auto bus_errors_before = environment.bus_error_stats();
+                    const std::uint64_t lq_dequeued_before =
+                        environment.lq_dequeued();
+                    const std::uint64_t sq_dequeued_before =
+                        environment.sq_dequeued();
+                    const std::uint64_t lq_cancels_before =
+                        environment.lq_redirect_canceled_observed();
+                    const std::uint64_t sq_cancels_before =
+                        environment.sq_redirect_canceled_observed();
+                    if (uncache_error_denied) {
+                        environment.inject_next_uncache_response_error(true, false);
+                    }
                     environment.expect_store(transaction);
                     const bool prepared_mmio_store = environment.set_rob_head(
                         transaction.rob, transaction.rob_flag);
@@ -32709,8 +33245,31 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             uncache_before + 1, 8192) ||
                         !environment.run_until_store_complete(
                             constrained_completion_timeout) ||
-                        !environment.commit_stores_through(transaction, 1) ||
-                        !environment.run_cycles(16)) {
+                        (uncache_error_denied
+                            ? (!recover_random_uncache_error(
+                                   transaction.rob, transaction.rob_flag, true,
+                                   lq_dequeued_before, sq_dequeued_before,
+                                   lq_cancels_before, sq_cancels_before) ||
+                               environment.uncache_error_response_requests() !=
+                                   error_before + 1 ||
+                               environment.uncache_denied_d_beats() !=
+                                   denied_before + 1 ||
+                               environment.uncache_corrupt_d_beats() !=
+                                   corrupt_before ||
+                               environment.bus_expected_load(
+                                   *transaction.oracle_address,
+                                   memblock::LoadOp::ld) != bus_before ||
+                               environment.bus_error_stats().uncache_reports !=
+                                   bus_errors_before.uncache_reports + 1 ||
+                               environment.bus_error_stats().dcache_reports !=
+                                   bus_errors_before.dcache_reports ||
+                               environment.bus_error_stats().
+                                       last_uncache_address !=
+                                   (*transaction.oracle_address &
+                                    ~std::uint64_t{63}))
+                            : (!environment.commit_stores_through(
+                                   transaction, 1) ||
+                               !environment.run_cycles(16)))) {
                         std::ostringstream detail;
                         detail << "mmio-store"
                                << ":tlb_feedbacks="
@@ -32722,11 +33281,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         phase = detail.str();
                         return false;
                     }
-                    environment.record_committed_store(transaction);
+                    if (!uncache_error_denied) {
+                        environment.record_committed_store(transaction);
+                    }
                     coverage.sample(transaction, false);
                 }
                 ++actions;
                 ++constraint_coverage.mmio_directions[mmio_store ? 1 : 0];
+                constraint_coverage.sample_uncache(
+                    1, mmio_store, uncache_error_denied);
                 ++coverage.noncacheable;
                 sample_dcache = false;
             }

@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 16
+        result["constraint_schema"] = 17
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -467,6 +467,33 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "actual_cmo_error",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 16,
+                "target_ops": "0,0,3,2,0,0,0,1,1,0,1",
+                "actual_ops": "0,0,3,2,0,0,0,5,5,0,6",
+                "target_cmo_error": 1000,
+                "target_nc_store": 500,
+                "target_mmio_store": 500,
+                "target_uncache_error": 500,
+                "target_uncache_load_error_denied": 500,
+                "actual_nc_direction": "3,2",
+                "actual_mmio_direction": "3,2",
+                "actual_uncache_error": "4,6",
+                "actual_uncache_error_kind": "2,4",
+                "actual_uncache_outcome":
+                    "1,1,1,1,0,1,1,1,1,1,0,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_uncache_outcome"] = (
+            "1,1,1,0,1,1,1,1,1,1,0,1"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_uncache_outcome",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

@@ -92,6 +92,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
 | `probe-overlap` | Per-mille share of generated Probe sequences that hold an unrelated cold load refill open and queue a clean auxiliary Probe plus the primary dirty Probe on distinct B-source IDs |
 | `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
+| `uncache-error` | Per-mille share of NC/MMIO actions receiving a legal error response; zero strictly disables injection |
+| `uncache-load-error-denied` | Per-mille denied share among error loads; the other load class is independent corrupt. Error stores always use denied because `AccessAck` carries no data |
 | `stride-stream` | Per-mille chance that a scalar load joins a fixed-PC, 128-byte-stride cold stream; nonzero settings reserve eight closing loads so every seed can train the L1 stride prefetcher |
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
@@ -110,6 +112,9 @@ An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
+An all-error Uncache mix requires `special-concurrent=0`, because the current
+special overlap slot is a nonfaulting load and cannot legally satisfy a
+100-percent precise-error constraint.
 
 ## Constraint Extension Contract
 
@@ -142,12 +147,12 @@ scenario implementations:
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths | Add simultaneous multi-class windows and multiple CMO sources |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
-| NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
+| NC/MMIO direction and errors | `nc-store` and `mmio-store` steer load/store direction. Schema 16 adds `uncache-error` and `uncache-load-error-denied`; all enabled NC/MMIO x load/store x legal clean/corrupt/denied outcomes close per seed. Loads require exact HardwareError/LoadAccessFault, MMIO denied stores require final StoreAccessFault, and committed NC denied stores require only an external error report, unchanged memory, normal SQ dequeue, and no redirect | Concurrent special stores and malformed/duplicate/early/late responses remain deferred |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, and `probe-overlap` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. The overlap class holds an unrelated cold refill for 2048..4096 cycles, queues a clean auxiliary Probe and the dirty primary Probe without an intervening cycle, checks their distinct B sources/address-matched C responses, and requires at least two accepted-but-unanswered Probes before the delayed load can write back | Extend beyond two simultaneous Probe sources and compose Probe overlap with more operation classes and malformed manager traffic |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
-| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection to the common generator. It cannot be consumed by a same-address refill or permission upgrade, and all enabled CLEAN/FLUSH/INVAL x error-kind classes close per seed | Lift DCache load/refill, PTW, Uncache, and atomic error controls into the same interface while keeping realistic presets rare or zero |
+| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. All enabled operation/outcome crosses close per seed | Lift DCache non-CMO load/refill, PTW, and atomic error controls into the same interface while keeping realistic presets rare or zero |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
 `corner` are settings of the same generator. Closing them means lifting each
@@ -176,6 +181,10 @@ CMO error rates are `100`, `0`, and `500` per mille for `coverage`, `spec`, and
 `corner`; the denied share is `500` in all three presets. Ordinary SPEC-like
 traffic therefore injects no manager error, balanced coverage keeps errors
 rare after its mandatory cross closes, and corner traffic emphasizes them.
+Uncache error rates use the same `100`, `0`, and `500` values, with a 500
+per-mille denied share among error loads. The `spec` preset therefore models
+ordinary traffic without frequent external errors, while `coverage` and
+`corner` retain the complete legal outcome matrix.
 Their vector-segment store shares are `500`, `300`, and `500` per mille.
 `coverage` and `corner` weight every ordinary and segment
 addressing/EEW/SEW/LMUL/EMUL class equally, plus every segment NF. `spec`
@@ -276,7 +285,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=15`, the resolved target weights,
+Every terminal line prints `constraint_schema=16`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
 line-state/younger-overlap/error presence/error kind, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/

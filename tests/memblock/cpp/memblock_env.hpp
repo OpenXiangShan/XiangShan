@@ -346,6 +346,7 @@ struct StoreTransaction {
     // class of an address yet.
     std::optional<bool> expected_debug_is_mmio;
     std::optional<bool> expected_debug_is_ncio;
+    bool allow_preliminary_success_writeback = false;
 };
 
 struct MemoryTriggerConfig {
@@ -3185,6 +3186,8 @@ public:
                   dut.auto_inner_buffers_out_d_ready.B();
         if (d_fire_) {
             const Response &expected = responses_.front();
+            denied_d_beat_count_ += expected.denied;
+            corrupt_d_beat_count_ += expected.corrupt;
             if (dut.auto_inner_buffers_out_d_bits_opcode.U() != expected.opcode ||
                 dut.auto_inner_buffers_out_d_bits_size.U() != expected.size ||
                 dut.auto_inner_buffers_out_d_bits_source.U() != expected.source ||
@@ -3229,6 +3232,18 @@ public:
     std::uint64_t outstanding_requests() const
     {
         return outstanding_requests_;
+    }
+    std::uint64_t error_response_requests() const
+    {
+        return error_response_requests_;
+    }
+    std::uint64_t denied_d_beat_count() const
+    {
+        return denied_d_beat_count_;
+    }
+    std::uint64_t corrupt_d_beat_count() const
+    {
+        return corrupt_d_beat_count_;
     }
     const ResponseLatencyStats &response_latency_stats() const
     {
@@ -3290,6 +3305,7 @@ private:
         const bool corrupt = inject_corrupt_;
         inject_denied_ = false;
         inject_corrupt_ = false;
+        error_response_requests_ += denied || corrupt;
         if (request.opcode == 4) {
             const bool response_corrupt = corrupt || denied;
             const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
@@ -3396,6 +3412,9 @@ private:
     bool d_presenting_ = false;
     std::uint64_t outstanding_requests_ = 0;
     std::uint64_t max_outstanding_requests_ = 0;
+    std::uint64_t error_response_requests_ = 0;
+    std::uint64_t denied_d_beat_count_ = 0;
+    std::uint64_t corrupt_d_beat_count_ = 0;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     bool inject_denied_ = false;
@@ -3664,6 +3683,8 @@ public:
                     transaction.input_flush_pipe),
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
+                transaction.allow_preliminary_success_writeback,
+                false,
             });
         if (!inserted && error_.empty()) {
             error_ = "duplicate outstanding scalar store ROB value";
@@ -3700,6 +3721,21 @@ public:
              writeback.debug_is_mmio != *it->second.debug_is_mmio) ||
             (it->second.debug_is_ncio.has_value() &&
              writeback.debug_is_ncio != *it->second.debug_is_ncio);
+        if (it->second.allow_preliminary_success_writeback &&
+            it->second.exception_mask != 0 &&
+            writeback.exception_mask == 0 &&
+            writeback.rob_flag == it->second.rob_flag &&
+            !trigger_mismatch &&
+            writeback.flush_pipe == it->second.flush_pipe &&
+            !debug_mismatch) {
+            if (it->second.preliminary_success_seen) {
+                fail("duplicate preliminary store-address writeback", lane,
+                     writeback);
+                return;
+            }
+            it->second.preliminary_success_seen = true;
+            return;
+        }
         if (writeback.exception_mask != it->second.exception_mask ||
             writeback.rob_flag != it->second.rob_flag ||
             trigger_mismatch ||
@@ -3848,6 +3884,8 @@ private:
         bool flush_pipe;
         std::optional<bool> debug_is_mmio;
         std::optional<bool> debug_is_ncio;
+        bool allow_preliminary_success_writeback;
+        bool preliminary_success_seen;
     };
 
     using Iterator = std::unordered_map<RobIdentity, Expected, RobIdentityHash>::iterator;
@@ -5318,6 +5356,18 @@ public:
     std::uint64_t uncache_outstanding_requests() const
     {
         return uncache_agent_.outstanding_requests();
+    }
+    std::uint64_t uncache_error_response_requests() const
+    {
+        return uncache_agent_.error_response_requests();
+    }
+    std::uint64_t uncache_denied_d_beats() const
+    {
+        return uncache_agent_.denied_d_beat_count();
+    }
+    std::uint64_t uncache_corrupt_d_beats() const
+    {
+        return uncache_agent_.corrupt_d_beat_count();
     }
     const ResponseLatencyStats &uncache_response_latency_stats() const
     {

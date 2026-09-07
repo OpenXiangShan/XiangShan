@@ -2137,3 +2137,68 @@ The frozen executable and runtime-manifest SHA-256 values are
 `c1d6796f1f79734f291ff99c84ab5c81e338e23230b369bdbd0063012837b00d`
 and `cd8309dc3d298e972e1394b73007649b102bfeee2ba9426627cad33182b2ec91`.
 All 185 Python unit tests passed. No new CPU RTL defect was observed.
+
+## Schema 16 Random Uncache Error Closure
+
+On 2026-09-07 the common `random-mixed` interface added independent
+`uncache-error` and `uncache-load-error-denied` per-mille constraints. Each
+enabled seed now forces and conserves 12 outcome bins across NC/MMIO,
+load/store, and clean/corrupt/denied. Data responses obey the TileLink rule
+that denied also asserts corrupt; data-less store `AccessAck` responses permit
+denied but not corrupt. Exact agent-side error-response and D-beat counters are
+checked in addition to architectural results.
+
+The store oracle distinguishes two RTL contracts. PBMT=IO remains precise: its
+initial address writeback may precede the Uncache transaction, but a denied
+response must produce the final StoreAccessFault writeback. A PBMT=NC store is
+already committed before its request; denied therefore produces one aligned
+external `uncacheError`, leaves manager memory unchanged, and dequeues the SQ
+entry without an architectural redirect or second writeback. Loads in both
+memory classes require exact HardwareError or LoadAccessFault and redirect
+cleanup after their exceptional writeback.
+
+The presets use Uncache error rates `100/0/500` for
+`coverage/spec/corner`, with a 500-per-mille denied share among error loads.
+The SPEC-like preset consequently keeps external errors out of normal traffic,
+while coverage and corner directions close every legal class. Extreme fixed
+constraints and disabled-class gates also passed:
+
+| Constraint direction | Seed | Cycle | NC load/store | MMIO load/store | Clean/error | Corrupt/denied |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| `coverage` | 16001 | 44,394 | 4/4 | 6/3 | 11/6 | 2/4 |
+| `spec` | 16002 | 28,572 | 2/2 | 2/1 | 7/0 | 0/0 |
+| `corner` | 16003 | 52,727 | 6/4 | 9/4 | 11/12 | 3/9 |
+| all denied loads | 16004 | 27,896 | 2/0 | 2/0 | 0/4 | 0/4 |
+| all denied stores | 16005 | 28,738 | 0/2 | 0/3 | 0/5 | 0/5 |
+| all corrupt loads | 16007 | 30,958 | 1/0 | 4/0 | 0/5 | 5/0 |
+| error disabled | 16008 | 46,491 | 4/3 | 5/1 | 13/0 | 0/0 |
+| MMIO only | 16009 | 32,213 | 0/0 | 8/3 | 8/3 | 1/2 |
+| NC only | 16010 | 42,684 | 4/3 | 0/0 | 4/3 | 1/2 |
+
+The four deterministic `spec` latency buckets are now included in the serial
+action budget and forced operation selection. Thus 100-percent error
+load-only/store-only configurations still produce enough Uncache requests to
+cover short, medium, long, and 100-plus-cycle responses.
+
+Two testbench assumptions were corrected during closure. NC store errors were
+initially modeled as precise StoreAccessFaults even though the RTL intentionally
+reports this already committed path asynchronously. Separately, a random CMO
+overlap used a fixed post-redirect delay; a trailing ReleaseAck can carry its
+own long-tail delay after the forced younger refill, so the CMO cleanup now
+drains D responses and GrantAcks by state. Neither issue was a CPU RTL defect,
+and no standalone CPU bug document was created.
+
+The focused `uncache-errors`, `mmio-contracts`, and `cmo-contracts` scenarios,
+all 185 Python unit tests, and `check-ports`/`check-rtl` passed. Frozen-runtime
+coverage seed 16011 completed 256 actions at cycle 30,715 with NC direction
+`4/3`, MMIO direction `7/5`, clean/error `11/8`, corrupt/denied `2/6`, and all
+legal outcome bins nonzero. The independent verifier accepted the artifact:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=16011..16011 results=1 transactions=256 elapsed_seconds=12.173522 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=9d9fb517378cba50e7d8744cc0d536515249fce4411a1566c794383e8fed5363
+```
+
+The frozen executable and runtime-manifest SHA-256 values are
+`770c46eb6281250647f4387933c35844dafa205a748991abe52ea79451f7d1b5`
+and `667f4fee56e371bde93bee49e9d95a9cb6fdef9b87b2b543e4fb2eb96b11285c`.
+No new CPU RTL defect was observed.
