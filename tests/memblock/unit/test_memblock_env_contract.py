@@ -2007,10 +2007,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment)
         for contract in (
-            "stage1-sv39-leaf-ppn-bit36",
-            "stage1-sv48-nonleaf-ppn-bit43",
-            "gstage-sv39-leaf-ppn-bit36",
-            "gstage-sv48-nonleaf-ppn-bit43",
+            "stage1-sv39-l1-ppn-bit36",
+            "stage1-sv48-l2-ppn-bit43",
+            "gstage-sv39-l1-ppn-bit36",
+            "gstage-sv48-l2-ppn-bit43",
             "two_stage_reference.access_fault",
             "kExceptionLoadAccessFault",
             "kExceptionStoreAccessFault",
@@ -2019,6 +2019,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "gstage_ppn_access_fault_cases=",
             "leaf_ppn_access_fault_cases=",
             "nonleaf_ppn_access_fault_cases=",
+            "intermediate_ppn_access_fault_cases=",
+            "root_ppn_access_fault_cases=",
             "ppn_access_fault_ptw_requests=",
         ):
             self.assertIn(contract, main)
