@@ -1290,6 +1290,32 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
+    def test_translation_oracle_models_legal_svnapot(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "reference_pte_is_napot",
+            "input_address & napot_offset_mask",
+            "map_reference_napot64k",
+            "map_sv39_napot64k",
+            "map_sv48_napot64k",
+            "map_sv39x4_napot64k",
+            "map_sv48x4_napot64k",
+            "for (unsigned page = 0; page < 16; ++page)",
+            "(physical_base >> 12) | 8U",
+        ):
+            self.assertIn(contract, environment)
+        for contract in (
+            "napot_stage1_subpages=",
+            "napot_gstage_subpages=",
+            "napot_loads=",
+            "napot_stores=",
+            "napot_readbacks=",
+            "run_napot_case(memblock::ReferencePageMode::sv39, false",
+            "run_napot_case(memblock::ReferencePageMode::sv48, true",
+        ):
+            self.assertIn(contract, main)
+
     def test_ptw_manager_errors_are_injectable_by_walk_level(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

@@ -25371,8 +25371,213 @@ int run_translation_superpages(int argc, char **argv)
         ++completed;
     }
 
+    unsigned napot_stage1_subpages = 0;
+    unsigned napot_gstage_subpages = 0;
+    unsigned napot_loads = 0;
+    unsigned napot_stores = 0;
+    unsigned napot_readbacks = 0;
+    std::uint64_t napot_ptw_requests = 0;
+    std::uint64_t napot_cycles = 0;
+    const auto run_napot_case = [&] (
+        memblock::ReferencePageMode mode,
+        bool gstage,
+        unsigned case_index) {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t root = 0x99000000ULL;
+        const std::uint64_t input_base = gstage
+            ? 0x120040000ULL + case_index * 0x20000ULL
+            : mode == memblock::ReferencePageMode::sv48
+                ? 0xffff800012340000ULL
+                : 0x62000000ULL;
+        const std::uint64_t physical_base =
+            0xd1000000ULL + case_index * 0x20000ULL;
+        environment.configure_backpressure(
+            0x3bd39e10cb0ef593ULL ^
+                (case_index * 0x9e3779b97f4a7c15ULL),
+            true);
+        bool configured = environment.reset();
+        if (configured) {
+            if (gstage) {
+                configured = mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_napot64k(
+                        input_base, physical_base, root)
+                    : environment.map_sv39x4_napot64k(
+                        input_base, physical_base, root);
+            } else {
+                configured = mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48_napot64k(
+                        input_base, physical_base, root)
+                    : environment.map_sv39_napot64k(
+                        input_base, physical_base, root);
+            }
+        }
+        if (configured) {
+            configured = gstage
+                ? environment.activate_two_stage_modes(
+                    memblock::ReferencePageMode::bare, mode, 0, root, 0,
+                    static_cast<std::uint16_t>(40 + case_index))
+                : mode == memblock::ReferencePageMode::sv48
+                    ? environment.activate_sv48(
+                        root, static_cast<std::uint16_t>(40 + case_index))
+                    : environment.activate_sv39(
+                        root, static_cast<std::uint16_t>(40 + case_index));
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
+                      << (gstage ? "G-" : "S-")
+                      << (mode == memblock::ReferencePageMode::sv48
+                              ? "Sv48" : "Sv39")
+                      << " phase=configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+
+        for (unsigned page = 0; page < 16; ++page) {
+            const std::uint64_t byte_offset =
+                page * 0x1000ULL + 0x180ULL + page * 8ULL;
+            const std::uint64_t address = input_base + byte_offset;
+            const std::uint64_t physical = physical_base + byte_offset;
+            const std::uint64_t initial =
+                0x1020304050607080ULL ^
+                (static_cast<std::uint64_t>(case_index) << 48) ^
+                (static_cast<std::uint64_t>(page) * 0x0101010101010101ULL);
+            const std::uint64_t stored = initial ^ 0xff00ff0000ff00ffULL;
+            environment.memory().write_u64(physical, initial);
+
+            memblock::ReferenceTwoStageWalkResult reference;
+            if (gstage) {
+                reference = memblock::reference_two_stage_walk(
+                    environment.memory(), 0, root, address,
+                    memblock::ReferencePageMode::bare, mode);
+            } else {
+                const auto stage_reference = memblock::reference_page_walk(
+                    environment.memory(), root, address, mode);
+                reference.translated = stage_reference.translated;
+                reference.physical_address = stage_reference.physical_address;
+            }
+            if (!reference.translated ||
+                reference.physical_address != physical) {
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
+                          << (gstage ? "G-" : "S-")
+                          << (mode == memblock::ReferencePageMode::sv48
+                                  ? "Sv48" : "Sv39")
+                          << " phase=reference page=" << page
+                          << " expected=0x" << std::hex << physical
+                          << " actual=0x" << reference.physical_address
+                          << std::dec << '\n';
+                return false;
+            }
+
+            const memblock::LoadTransaction load{
+                .address = address,
+                .oracle_address = physical,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(page * 3),
+                .lq = static_cast<std::uint8_t>(page * 2),
+                .pdest = static_cast<std::uint8_t>(80 + case_index * 32 + page),
+                .lane = (page + case_index) % memblock::kScalarLoadLanes,
+            };
+            environment.expect_load_data(load, initial);
+            if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+                !environment.enqueue_load(load) ||
+                !environment.issue_load(load, 2048) ||
+                !environment.run_until_complete(16384) ||
+                !environment.run_until_lq_retired(4096)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
+                          << (gstage ? "G-" : "S-")
+                          << (mode == memblock::ReferencePageMode::sv48
+                                  ? "Sv48" : "Sv39")
+                          << " phase=load page=" << page
+                          << " reason=" << environment.error() << '\n';
+                return false;
+            }
+            ++napot_loads;
+
+            const memblock::StoreTransaction store{
+                .address = address,
+                .oracle_address = physical,
+                .data = stored,
+                .op = memblock::StoreOp::sd,
+                .rob = static_cast<std::uint8_t>(page * 3 + 1),
+                .sq = static_cast<std::uint8_t>(page),
+                .address_lane = (page + case_index) %
+                    memblock::kScalarStoreLanes,
+                .data_lane = (page + case_index + 1) %
+                    memblock::kScalarStoreLanes,
+            };
+            environment.expect_store(store);
+            if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+                !environment.enqueue_store(store, 0) ||
+                !environment.issue_store_address(store, 2048) ||
+                !environment.issue_store_data(store, 2048) ||
+                !environment.run_until_store_complete_with_replay(
+                    store, 16384) ||
+                !environment.commit_store(store, 16384) ||
+                !environment.run_until_sbuffer_empty(16384)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
+                          << (gstage ? "G-" : "S-")
+                          << (mode == memblock::ReferencePageMode::sv48
+                                  ? "Sv48" : "Sv39")
+                          << " phase=store page=" << page
+                          << " reason=" << environment.error() << '\n';
+                return false;
+            }
+            ++napot_stores;
+
+            const memblock::LoadTransaction readback{
+                .address = address,
+                .oracle_address = physical,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(page * 3 + 2),
+                .lq = static_cast<std::uint8_t>(page * 2 + 1),
+                .pdest = static_cast<std::uint8_t>(
+                    160 + case_index * 16 + page),
+                .lane = (page + case_index + 1) %
+                    memblock::kScalarLoadLanes,
+            };
+            environment.expect_load_data(readback, stored);
+            if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 2048) ||
+                !environment.run_until_complete(16384) ||
+                !environment.run_until_lq_retired(4096)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case=Svnapot-"
+                          << (gstage ? "G-" : "S-")
+                          << (mode == memblock::ReferencePageMode::sv48
+                                  ? "Sv48" : "Sv39")
+                          << " phase=readback page=" << page
+                          << " reason=" << environment.error() << '\n';
+                return false;
+            }
+            ++napot_readbacks;
+            ++completed;
+        }
+        if (gstage) {
+            napot_gstage_subpages += 16;
+        } else {
+            napot_stage1_subpages += 16;
+        }
+        napot_ptw_requests += environment.ptw_requests();
+        napot_cycles += environment.cycle();
+        return true;
+    };
+
+    if (!run_napot_case(memblock::ReferencePageMode::sv39, false, 0) ||
+        !run_napot_case(memblock::ReferencePageMode::sv48, false, 1) ||
+        !run_napot_case(memblock::ReferencePageMode::sv39, true, 2) ||
+        !run_napot_case(memblock::ReferencePageMode::sv48, true, 3)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_SUPERPAGES_PASS"
               << " cases=" << completed
+              << " napot_stage1_subpages=" << napot_stage1_subpages
+              << " napot_gstage_subpages=" << napot_gstage_subpages
+              << " napot_loads=" << napot_loads
+              << " napot_stores=" << napot_stores
+              << " napot_readbacks=" << napot_readbacks
+              << " napot_ptw_requests=" << napot_ptw_requests
+              << " napot_cycles=" << napot_cycles
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

@@ -1101,6 +1101,13 @@ inline bool reference_pte_is_leaf(std::uint64_t pte)
     return (pte & (2U | 8U)) != 0;
 }
 
+inline bool reference_pte_is_napot(std::uint64_t pte, unsigned level)
+{
+    constexpr std::uint64_t pte_napot = std::uint64_t{1} << 63;
+    return reference_pte_is_leaf(pte) && (pte & pte_napot) != 0 &&
+           level == 0 && (reference_pte_ppn(pte) & 0xfU) == 8U;
+}
+
 inline bool reference_pte_encoding_fault(
     std::uint64_t pte,
     unsigned level,
@@ -1146,6 +1153,12 @@ inline bool reference_pte_encoding_fault(
 inline std::uint64_t reference_leaf_address(
     std::uint64_t pte, std::uint64_t input_address, unsigned level)
 {
+    if (reference_pte_is_napot(pte, level)) {
+        constexpr std::uint64_t napot_offset_mask = 0xffff;
+        constexpr std::uint64_t napot_ppn_mask = ~std::uint64_t{0xf};
+        return ((reference_pte_ppn(pte) & napot_ppn_mask) << 12) |
+               (input_address & napot_offset_mask);
+    }
     const unsigned low_bits = 12 + 9 * level;
     const std::uint64_t low_mask = (std::uint64_t{1} << low_bits) - 1;
     return ((reference_pte_ppn(pte) << 12) & ~low_mask) |
@@ -6477,6 +6490,82 @@ public:
             root_page_table, readable, writable, executable);
     }
 
+    bool map_sv39_napot64k(
+        std::uint64_t virtual_base,
+        std::uint64_t physical_base,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool io = false)
+    {
+        return map_reference_napot64k(
+            virtual_base, physical_base, root_page_table,
+            ReferencePageMode::sv39, false, readable, writable, executable,
+            user, noncacheable, accessed, dirty, io);
+    }
+
+    bool map_sv48_napot64k(
+        std::uint64_t virtual_base,
+        std::uint64_t physical_base,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool io = false)
+    {
+        return map_reference_napot64k(
+            virtual_base, physical_base, root_page_table,
+            ReferencePageMode::sv48, false, readable, writable, executable,
+            user, noncacheable, accessed, dirty, io);
+    }
+
+    bool map_sv39x4_napot64k(
+        std::uint64_t guest_physical_base,
+        std::uint64_t host_physical_base,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool user = true,
+        bool noncacheable = false,
+        bool io = false)
+    {
+        return map_reference_napot64k(
+            guest_physical_base, host_physical_base, root_page_table,
+            ReferencePageMode::sv39, true, readable, writable, executable,
+            user, noncacheable, accessed, dirty, io);
+    }
+
+    bool map_sv48x4_napot64k(
+        std::uint64_t guest_physical_base,
+        std::uint64_t host_physical_base,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool user = true,
+        bool noncacheable = false,
+        bool io = false)
+    {
+        return map_reference_napot64k(
+            guest_physical_base, host_physical_base, root_page_table,
+            ReferencePageMode::sv48, true, readable, writable, executable,
+            user, noncacheable, accessed, dirty, io);
+    }
+
 private:
     bool map_reference_leaf(
         std::uint64_t input_address,
@@ -6581,6 +6670,61 @@ private:
         memory_.write_u64(
             table + leaf_index * 8,
             (((physical_address & ~page_mask) >> 12) << 10) | flags);
+        return true;
+    }
+
+    bool map_reference_napot64k(
+        std::uint64_t input_base,
+        std::uint64_t physical_base,
+        std::uint64_t root_page_table,
+        ReferencePageMode mode,
+        bool x4,
+        bool readable,
+        bool writable,
+        bool executable,
+        bool user,
+        bool noncacheable,
+        bool accessed,
+        std::optional<bool> dirty,
+        bool io)
+    {
+        constexpr std::uint64_t napot_size = 0x10000;
+        constexpr std::uint64_t napot_mask = napot_size - 1;
+        constexpr std::uint64_t page_size = 0x1000;
+        constexpr std::uint64_t pte_ppn_mask =
+            ((std::uint64_t{1} << 44) - 1) << 10;
+        constexpr std::uint64_t pte_napot = std::uint64_t{1} << 63;
+        if ((input_base & napot_mask) != 0 ||
+            (physical_base & napot_mask) != 0) {
+            error_ = "Svnapot 64-KiB mapping requires aligned virtual and physical bases";
+            return false;
+        }
+
+        for (unsigned page = 0; page < 16; ++page) {
+            const std::uint64_t offset = page * page_size;
+            if (!map_reference_leaf(
+                    input_base + offset, physical_base + offset,
+                    root_page_table, mode, x4, 0, readable, writable,
+                    executable, user, noncacheable, accessed, dirty, io)) {
+                return false;
+            }
+        }
+
+        const std::uint64_t napot_ppn = (physical_base >> 12) | 8U;
+        for (unsigned page = 0; page < 16; ++page) {
+            const std::uint64_t address = input_base + page * page_size;
+            const auto pte_address = reference_pte_address_at_level(
+                memory_, root_page_table, address, mode, 0, x4);
+            if (!pte_address) {
+                error_ = "failed to locate Svnapot leaf PTE";
+                return false;
+            }
+            const std::uint64_t ordinary_pte = memory_.read_u64(*pte_address);
+            memory_.write_u64(
+                *pte_address,
+                (ordinary_pte & ~pte_ppn_mask) | (napot_ppn << 10) |
+                    pte_napot);
+        }
         return true;
     }
 

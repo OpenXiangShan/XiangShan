@@ -339,8 +339,11 @@ input address to distinct data so stale translation reuse is externally
 observable.
 
 `translation-superpages` walks 2 MiB and 1 GiB leaves in Sv39/Sv48 and their
-Sv39x4/Sv48x4 G-stage equivalents, plus the Sv48 512 GiB leaf. Each case is
-checked against the independent leaf-address oracle and an architectural load.
+Sv39x4/Sv48x4 G-stage equivalents, plus the Sv48 512 GiB leaf. It also builds
+legal 64-KiB Svnapot mappings in Sv39, Sv48, Sv39x4, and Sv48x4 by installing
+the identical `N=1, PPN[3:0]=8` PTE in all 16 leaf slots. Every Svnapot subpage
+is checked with an independent VPN-low-bit address oracle, an initial load, a
+committed scalar store, and an exact load readback.
 
 `translation-bare` covers stage-1 Bare, G-only, VS-only, and fully Bare
 degenerations. It checks that the selected stage is bypassed exactly once and
