@@ -767,21 +767,28 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       p"excp $deqHasException flushPipe $isFlushPipe " +
       p"Trap_target 0x${Hexadecimal(io.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
 
+  val teaRedirectIdx = io.redirect.bits.robIdx.value
+  val teaFlushIdx = deqPtr.value
+  val teaRedirectCtrlMispred = enableTea.asBool && io.redirect.valid &&
+    io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred
+  val teaRedirectMemVio = enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsMemVio
+  val teaExceptionFlush = enableTea.asBool && io.flushOut.valid && deqHasException
+  teaPsvSetSources += ((teaRedirectCtrlMispred, teaRedirectIdx, TeaEvent.bit(TeaEvent.FL_MB)))
+  teaPsvSetSources += ((teaRedirectMemVio, teaRedirectIdx, TeaEvent.bit(TeaEvent.FL_MO)))
+  teaPsvSetSources += ((teaExceptionFlush, teaFlushIdx, TeaEvent.bit(TeaEvent.FL_EX)))
+
   when (enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred) {
-    val idx = io.redirect.bits.robIdx.value
-    teaPsvSetSources += ((enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred, idx, TeaEvent.bit(TeaEvent.FL_MB)))
+    val idx = teaRedirectIdx
     teaFlushCause.valid := true.B
     teaFlushCause.pc := teaPc(robEntries(idx))
     teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_MB)
   }.elsewhen(enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsMemVio) {
-    val idx = io.redirect.bits.robIdx.value
-    teaPsvSetSources += ((enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsMemVio, idx, TeaEvent.bit(TeaEvent.FL_MO)))
+    val idx = teaRedirectIdx
     teaFlushCause.valid := true.B
     teaFlushCause.pc := teaPc(robEntries(idx))
     teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_MO)
   }.elsewhen(enableTea.asBool && io.flushOut.valid && deqHasException) {
-    val idx = deqPtr.value
-    teaPsvSetSources += ((enableTea.asBool && io.flushOut.valid && deqHasException, idx, TeaEvent.bit(TeaEvent.FL_EX)))
+    val idx = teaFlushIdx
     teaFlushCause.valid := true.B
     teaFlushCause.pc := teaPc(robEntries(idx))
     teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_EX)
