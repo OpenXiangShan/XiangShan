@@ -11832,6 +11832,141 @@ int run_cmo_contracts(int argc, char **argv)
         positive_cycles += environment.cycle();
     }
 
+    std::uint64_t concurrent_cycles = 0;
+    unsigned flushed_younger_loads = 0;
+    {
+        memblock::Environment overlap(argc, argv);
+        const std::uint64_t cmo_line =
+            memblock::kDefaultMemoryBase + 0x430000;
+        const std::uint64_t younger_line = cmo_line + 0x1000;
+        overlap.memory().fill_incrementing(cmo_line, 64, 0x73);
+        overlap.memory().fill_incrementing(younger_line, 64, 0xb1);
+        overlap.configure_backpressure(
+            0xa4093822299f31d0ULL, true,
+            memblock::ResponseLatencyProfile::spec);
+        if (!overlap.reset()) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-reset reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction warm{
+            .address = cmo_line + 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 199,
+            .lane = 0,
+        };
+        overlap.expect_load(warm);
+        if (!overlap.set_rob_head(warm.rob, warm.rob_flag) ||
+            !overlap.enqueue_load(warm) ||
+            !overlap.issue_load(warm, 2048) ||
+            !overlap.run_until_complete(16384) ||
+            !overlap.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-warm reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+
+        const memblock::StoreTransaction cmo{
+            .address = cmo_line + 39,
+            .oracle_address = cmo_line,
+            .data = 0,
+            .op = memblock::StoreOp::cbo_flush,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = 1,
+            .data_lane = 0,
+            .expected_output_flush_pipe = true,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        overlap.expect_store(cmo);
+        if (!overlap.enqueue_store(cmo, 0) ||
+            !overlap.issue_store_address(cmo, 2048) ||
+            !overlap.issue_store_data(cmo, 2048)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-cmo-issue reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+        overlap.force_next_cmo_response_delay(1024);
+        const std::uint64_t probe_responses_before =
+            overlap.dcache_probe_responses();
+        if (!overlap.wait_for_cmo_store_request(cmo, 1, 8192) ||
+            !overlap.request_dcache_probe(cmo_line, 2, false, 2, {}) ||
+            !overlap.run_until_probe_responses(
+                probe_responses_before + 1, 4096)) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-probe reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction younger{
+            .address = younger_line + 24,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 1,
+            .sq = 0,
+            .pdest = 200,
+            .lane = 2,
+        };
+        const std::uint64_t dcache_before = overlap.tilelink_requests();
+        const std::uint64_t load_writebacks_before = overlap.writebacks();
+        overlap.force_next_dcache_response_delay(2048);
+        if (!overlap.enqueue_load(younger) ||
+            !overlap.issue_load(younger, 2048) ||
+            !overlap.run_until_dcache_requests(dcache_before + 1, 4096) ||
+            overlap.store_writebacks() != 0 ||
+            overlap.writebacks() != load_writebacks_before ||
+            overlap.pending_scalar_stores() != 1) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-window reason="
+                      << overlap.error() << " dcache="
+                      << overlap.tilelink_requests() - dcache_before
+                      << " store_wb=" << overlap.store_writebacks()
+                      << " load_wb="
+                      << overlap.writebacks() - load_writebacks_before << '\n';
+            return 1;
+        }
+
+        if (!overlap.run_until_store_complete(16384) ||
+            overlap.writebacks() != load_writebacks_before ||
+            !overlap.redirect_after(cmo.rob, cmo.rob_flag, false) ||
+            !overlap.commit_store(cmo, 8192) ||
+            !overlap.run_cycles(4096) ||
+            overlap.writebacks() != load_writebacks_before ||
+            overlap.lq_redirect_canceled_observed() != 1 ||
+            overlap.lq_dequeued() + overlap.lq_canceled() !=
+                overlap.lq_allocated() ||
+            overlap.sq_dequeued() != overlap.sq_allocated() ||
+            !overlap.dcache_responses_idle() ||
+            !overlap.dcache_grants_drained()) {
+            std::cerr << "MEMBLOCK_CMO_CONTRACTS_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=flushpipe-overlap-cancel reason="
+                      << overlap.error() << " load_wb="
+                      << overlap.writebacks() - load_writebacks_before
+                      << " lq=" << overlap.lq_dequeued() << '+'
+                      << overlap.lq_canceled() << '/'
+                      << overlap.lq_allocated() << " sq="
+                      << overlap.sq_dequeued() << '/'
+                      << overlap.sq_allocated() << '\n';
+            return 1;
+        }
+        flushed_younger_loads = 1;
+        concurrent_cycles = overlap.cycle();
+    }
+
     unsigned denied_cases = 0;
     unsigned corrupt_cases = 0;
     std::uint64_t error_cycles = 0;
@@ -11948,6 +12083,8 @@ int run_cmo_contracts(int argc, char **argv)
               << " automatic_sbuffer_drains=" << automatic_sbuffer_drains
               << " retained_hits=" << retained_hits
               << " invalidation_refills=" << invalidation_refills
+              << " flushed_younger_loads=" << flushed_younger_loads
+              << " concurrent_cycles=" << concurrent_cycles
               << " denied_cases=" << denied_cases
               << " corrupt_cases=" << corrupt_cases
               << " positive_cycles=" << positive_cycles

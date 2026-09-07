@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `88fc39aca6b64790f448378670c2f08cad2e93bafc55a657e45a2d928fc160ba`
+- Current rebuilt and frozen UT executable SHA-256: `73696ea118b4ba4c86bcbffa8dcb8caa1322d4b896e001d2dc842d74991d5ab2`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `63d06db4ba736822ef68823c1980e91ff03aee7e9cea3cf506d2c1f5dfd30a2a`
+- Frozen runtime manifest SHA-256: `2aca745bf4603a22c24e02e2c0c7337f5416d1739b8798d081ddb7b9a855f8a6`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1882,12 +1882,15 @@ cause, CPU impact, reproducer, and fix are recorded in
 The fixed run produced:
 
 ```text
-MEMBLOCK_CMO_CONTRACTS_PASS operations=3 line_state_cases=6 dirty_probe_data=3 automatic_sbuffer_drains=3 retained_hits=2 invalidation_refills=4 denied_cases=3 corrupt_cases=3 positive_cycles=8167 error_cycles=2455 cmo_ack_delay=1024 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
+MEMBLOCK_CMO_CONTRACTS_PASS operations=3 line_state_cases=6 dirty_probe_data=3 automatic_sbuffer_drains=3 retained_hits=2 invalidation_refills=4 flushed_younger_loads=1 concurrent_cycles=5214 denied_cases=3 corrupt_cases=3 positive_cycles=8167 error_cycles=2455 cmo_ack_delay=1024 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
 ```
 
 All six operation/error crosses preserve bus memory, report the exact
 StoreAccessFault or HardwareError, complete with `flushPipe=1`, bypass Uncache,
-and conserve SQ entries. `mmio-contracts`, `uncache-errors`,
+and conserve SQ entries. A separate legal overlap accepts a younger cold load
+on another MSHR while CBOAck is delayed, then applies CMO's `flushAfter`,
+observes exactly one LQ cancellation, drains the 2,048-cycle delayed response,
+and rejects any resulting load writeback. `mmio-contracts`, `uncache-errors`,
 `cbo-zero-contracts`, and `dcache-coherence` passed on the same regenerated
 model. The RTL fix is isolated in commit `42152f6ba`.
 

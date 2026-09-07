@@ -89,8 +89,9 @@ The fixed RTL produces:
 ```text
 MEMBLOCK_CMO_CONTRACTS_PASS operations=3 line_state_cases=6
 dirty_probe_data=3 automatic_sbuffer_drains=3 retained_hits=2
-invalidation_refills=4 denied_cases=3 corrupt_cases=3 positive_cycles=8167
-error_cycles=2455 cmo_ack_delay=1024
+invalidation_refills=4 flushed_younger_loads=1 concurrent_cycles=5214
+denied_cases=3 corrupt_cases=3 positive_cycles=8167 error_cycles=2455
+cmo_ack_delay=1024
 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057
 ```
 
@@ -110,6 +111,8 @@ The executable oracle also covers the success path before testing errors:
   requires a cold refill;
 - every CMO uses line-aligned TileLink size 64 and fixed source 17, bypasses
   Uncache, waits behind SBuffer drain, and completes with `flushPipe=1`;
+- a younger cold load occupies another MSHR while CBOAck is pending, then the
+  CMO `flushAfter` cancels its LQ entry and suppresses its delayed writeback;
 - all three operations are crossed with denied and independent-corrupt
   `CBOAck`, unchanged backing memory, exact exception class, and SQ
   conservation.

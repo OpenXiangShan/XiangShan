@@ -116,7 +116,7 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
-reservation interference, full CMO/fence concurrency ordering,
+reservation interference, wider multi-class CMO and full-core fence ordering,
 ordered side-effecting indexed accesses, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
@@ -786,7 +786,10 @@ require no data, CLEAN retains a Branch line, and FLUSH/INVAL invalidate and
 force a checked refill. Every operation is also crossed with denied and
 independent-corrupt `CBOAck`, exact store-access-fault or hardware-error
 writeback, `flushPipe=1`, no Uncache traffic, unchanged bus memory on failure,
-and SQ conservation. This scenario found the confirmed RTL defect documented in
+and SQ conservation. A separate overlap holds `CBOAck`, accepts a younger cold
+load into another MSHR, applies the CMO writeback's legal `flushAfter`, and
+requires one exact LQ cancellation with no writeback from the delayed D beats.
+This scenario found the confirmed RTL defect documented in
 [`docs/CPU_BUG_CMO_DCHANNEL_ERROR.md`](docs/CPU_BUG_CMO_DCHANNEL_ERROR.md).
 
 `reset-recovery` separately asserts reset with an accepted DCache refill, PTW

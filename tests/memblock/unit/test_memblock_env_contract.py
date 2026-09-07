@@ -493,6 +493,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "automatic_sbuffer_drains=",
             "retained_hits=",
             "invalidation_refills=",
+            "flushed_younger_loads=",
+            "concurrent_cycles=",
             "denied_cases=",
             "corrupt_cases=",
             "cmo-contracts",
