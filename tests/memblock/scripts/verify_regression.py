@@ -165,7 +165,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35,
+            33, 34, 35, 36,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -420,7 +420,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "overlap is enabled",
             )
         cmo_probe_count = 0
-        if schema >= 13:
+        if schema >= 36:
+            cmo_probe_depths = _csv_counts(
+                result, "actual_cmo_probe_depth", 8
+            )
+            cmo_probe_count = sum(
+                (depth + 1) * count
+                for depth, count in enumerate(cmo_probe_depths)
+            )
+        elif schema >= 13:
             cmo_probe_count = _csv_counts(
                 result, "actual_ops",
                 14 if schema >= 21 else 13 if schema >= 20 else
@@ -969,6 +977,16 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             actual_cmo_overlaps = _csv_counts(
                 result, "actual_cmo_younger_overlap", 2
             )
+            if schema >= 36:
+                target_cmo_probe_depths = _csv_counts(
+                    result, "target_cmo_probe_depth", 8
+                )
+                actual_cmo_probe_depths = _csv_counts(
+                    result, "actual_cmo_probe_depth", 8
+                )
+                actual_cmo_probe_crosses = _csv_counts(
+                    result, "actual_cmo_probe_cross", 48
+                )
             for name, value in (
                 ("target_cmo_dirty", target_cmo_dirty),
                 ("target_cmo_younger_overlap", target_cmo_overlap),
@@ -1123,6 +1141,94 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                 "CMO operation/error cross has an uncovered "
                                 f"class: {actual_cmo_operation_error}",
                             )
+                    if schema >= 36:
+                        _require(
+                            target_cmo_error == 1000
+                            or any(target_cmo_probe_depths),
+                            "target_cmo_probe_depth cannot be all zero when a "
+                            "successful CMO is enabled",
+                        )
+                        crossed_operations = [0, 0, 0]
+                        crossed_states = [0, 0]
+                        crossed_depths = [0] * 8
+                        for operation in range(3):
+                            operation_enabled = (
+                                target_cmo_operations[operation] != 0
+                            )
+                            for state in range(2):
+                                state_enabled = (
+                                    target_cmo_dirty != 1000
+                                    if state == 0
+                                    else target_cmo_dirty != 0
+                                )
+                                for depth in range(8):
+                                    index = operation * 16 + state * 8 + depth
+                                    count = actual_cmo_probe_crosses[index]
+                                    enabled = (
+                                        target_cmo_error != 1000
+                                        and operation_enabled
+                                        and state_enabled
+                                        and target_cmo_probe_depths[depth] != 0
+                                    )
+                                    _require(
+                                        (count > 0) == enabled,
+                                        "actual_cmo_probe_cross has an enabled "
+                                        "but uncovered class: "
+                                        f"operation={operation} state={state} "
+                                        f"depth={depth + 1}",
+                                    )
+                                    crossed_operations[operation] += count
+                                    crossed_states[state] += count
+                                    crossed_depths[depth] += count
+                        operation_errors = [
+                            sum(actual_cmo_operation_error[index:index + 2])
+                            for index in range(0, 6, 2)
+                        ]
+                        _require(
+                            all(
+                                crossed_operations[operation]
+                                + operation_errors[operation]
+                                == actual_cmo_operations[operation]
+                                for operation in range(3)
+                            ),
+                            "CMO Probe cross/error counts do not match operation "
+                            "marginals",
+                        )
+                        _require(
+                            crossed_depths == actual_cmo_probe_depths,
+                            "CMO Probe cross does not match depth marginals",
+                        )
+                        _require(
+                            all(
+                                crossed_states[state] <= actual_cmo_states[state]
+                                for state in range(2)
+                            )
+                            and sum(
+                                actual_cmo_states[state] - crossed_states[state]
+                                for state in range(2)
+                            ) == actual_cmo_error[1],
+                            "CMO Probe cross/error counts do not match line-state "
+                            "marginals",
+                        )
+                        _require(
+                            sum(actual_cmo_probe_depths) == actual_cmo_error[0],
+                            "CMO Probe depth/success coverage is not conserved",
+                        )
+                        highest_cmo_probe_depth = max(
+                            (
+                                depth + 1
+                                for depth, count in enumerate(
+                                    actual_cmo_probe_depths
+                                )
+                                if count > 0
+                            ),
+                            default=0,
+                        )
+                        _require(
+                            probe_max_outstanding >= highest_cmo_probe_depth,
+                            "CMO Probe burst never reached its selected "
+                            "outstanding depth",
+                        )
             else:
                 _require(
                     actual_cmo_operations == [0, 0, 0]
@@ -1140,6 +1246,12 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                             result, "actual_cmo_operation_error", 6
                         ) == [0] * 6,
                         "disabled CMO operation has error observations",
+                    )
+                if schema >= 36:
+                    _require(
+                        actual_cmo_probe_depths == [0] * 8
+                        and actual_cmo_probe_crosses == [0] * 48,
+                        "disabled CMO operation has Probe-depth observations",
                     )
 
         if schema >= 16:

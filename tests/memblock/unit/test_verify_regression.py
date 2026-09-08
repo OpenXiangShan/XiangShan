@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 36
+        result["constraint_schema"] = 37
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1356,6 +1356,73 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["actual_probe_cross"] = ",".join(["1"] * 32)
+        result.update(
+            {
+                "constraint_schema": 36,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,48,90,12,256",
+                "actual_cmo_operation": "16,16,16",
+                "actual_cmo_line_state": "24,24",
+                "actual_cmo_younger_overlap": "24,24",
+                "target_cmo_error": 0,
+                "actual_cmo_error": "48,0",
+                "actual_cmo_error_kind": "0,0",
+                "actual_cmo_operation_error": "0,0,0,0,0,0",
+                "target_cmo_probe_depth": "1,1,1,1,1,1,1,1",
+                "actual_cmo_probe_depth": "6,6,6,6,6,6,6,6",
+                "actual_cmo_probe_cross": ",".join(["1"] * 48),
+                "probes": 376,
+                "probe_source_lifecycle": "64,312,5",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_probe_cross"] = ",".join(["0"] + ["1"] * 47)
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_cmo_probe_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_probe_cross"] = ",".join(["1"] * 48)
+        result["actual_cmo_probe_depth"] = "7,5,6,6,6,6,6,6"
+        result["probes"] = 375
+        result["probe_source_lifecycle"] = "64,311,5"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "does not match depth marginals",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_cmo_probe_depth"] = "6,6,6,6,6,6,6,6"
+        result["probes"] = 376
+        result["probe_source_lifecycle"] = "64,312,5"
+        result["target_cmo_probe_depth"] = "0,0,0,0,0,0,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_cmo_probe_depth cannot be all zero",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_cmo_probe_depth"] = "1,1,1,1,1,1,1,1"
+        result["probe_max_outstanding"] = 7
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "selected outstanding depth",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 35,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
+                "actual_cmo_operation": "2,2,2",
+                "actual_cmo_line_state": "3,3",
+                "actual_cmo_younger_overlap": "5,1",
+                "target_cmo_error": 1000,
+                "actual_cmo_error": "0,6",
+                "actual_cmo_error_kind": "3,3",
+                "actual_cmo_operation_error": "1,1,1,1,1,1",
+                "probes": 160,
+                "probe_max_outstanding": 8,
+                "probe_source_lifecycle": "64,96,2",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
         result["probes"] = 159
         with self.assertRaisesRegex(
             verify_regression.VerificationError,

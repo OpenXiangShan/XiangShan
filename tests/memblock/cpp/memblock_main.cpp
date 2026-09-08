@@ -128,6 +128,9 @@ struct RandomConstraints {
         cmo_operation_count,
     };
 
+    static constexpr unsigned cmo_probe_depth_count =
+        memblock::kDcacheProbeEntries;
+
     enum TranslationRegime : unsigned {
         translation_bare,
         translation_stage1,
@@ -192,6 +195,7 @@ struct RandomConstraints {
     unsigned cmo_younger_overlap_per_mille = 0;
     unsigned cmo_error_per_mille = 0;
     unsigned cmo_error_denied_per_mille = 0;
+    std::array<unsigned, cmo_probe_depth_count> cmo_probe_depth_weights{};
     unsigned dcache_load_error_per_mille = 0;
     unsigned dcache_load_error_denied_per_mille = 0;
     std::array<unsigned, ptw_error_site_count> ptw_error_site_weights{};
@@ -280,6 +284,7 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 500,
                 .cmo_error_per_mille = 100,
                 .cmo_error_denied_per_mille = 500,
+                .cmo_probe_depth_weights = {1, 1, 1, 1, 1, 1, 1, 1},
                 .dcache_load_error_per_mille = 100,
                 .dcache_load_error_denied_per_mille = 500,
                 .ptw_error_site_weights = {1, 1, 1, 1, 1},
@@ -368,6 +373,7 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 10,
                 .cmo_error_per_mille = 0,
                 .cmo_error_denied_per_mille = 500,
+                .cmo_probe_depth_weights = {1000, 10, 5, 2, 1, 1, 1, 1},
                 .dcache_load_error_per_mille = 0,
                 .dcache_load_error_denied_per_mille = 500,
                 .ptw_error_site_weights = {1, 1, 1, 1, 1},
@@ -456,6 +462,7 @@ struct RandomConstraints {
                 .cmo_younger_overlap_per_mille = 750,
                 .cmo_error_per_mille = 500,
                 .cmo_error_denied_per_mille = 500,
+                .cmo_probe_depth_weights = {1, 1, 1, 2, 4, 8, 16, 32},
                 .dcache_load_error_per_mille = 500,
                 .dcache_load_error_denied_per_mille = 500,
                 .ptw_error_site_weights = {1, 1, 1, 1, 1},
@@ -684,6 +691,16 @@ struct RandomConstraints {
         constexpr std::array<std::string_view, cmo_operation_count>
             cmo_operation_keys{{"cmo-clean", "cmo-flush", "cmo-inval"}};
         if (assign_weight(cmo_operation_keys, cmo_operation_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, cmo_probe_depth_count>
+            cmo_probe_depth_keys{{
+                "cmo-probe-depth1", "cmo-probe-depth2",
+                "cmo-probe-depth3", "cmo-probe-depth4",
+                "cmo-probe-depth5", "cmo-probe-depth6",
+                "cmo-probe-depth7", "cmo-probe-depth8",
+            }};
+        if (assign_weight(cmo_probe_depth_keys, cmo_probe_depth_weights)) {
             return;
         }
         constexpr std::array<std::string_view, ptw_error_site_count>
@@ -1471,6 +1488,13 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "cmo-error requires a nonzero CMO operation weight");
         }
+        if (operation_weights[cmo] != 0 && cmo_error_per_mille != 1000 &&
+            std::accumulate(
+                cmo_probe_depth_weights.begin(),
+                cmo_probe_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "CMO Probe depth constraint weights cannot all be zero");
+        }
         if (atomic_error_per_mille != 0 && operation_weights[atomic] == 0) {
             throw std::invalid_argument(
                 "atomic-error requires a nonzero atomic operation weight");
@@ -1639,6 +1663,11 @@ struct RandomConstraints {
     unsigned choose_cmo_operation(std::uint64_t random) const
     {
         return choose_weighted(cmo_operation_weights, random);
+    }
+
+    unsigned choose_cmo_probe_depth(std::uint64_t random) const
+    {
+        return choose_weighted(cmo_probe_depth_weights, random);
     }
 
     unsigned choose_ptw_error_site(std::uint64_t random) const
@@ -1928,19 +1957,23 @@ struct RandomConstraints {
                 const unsigned operations = static_cast<unsigned>(std::count_if(
                     cmo_operation_weights.begin(), cmo_operation_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
+                const unsigned probe_depths = static_cast<unsigned>(std::count_if(
+                    cmo_probe_depth_weights.begin(),
+                    cmo_probe_depth_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
                 const unsigned error_kinds =
                     cmo_error_per_mille == 0 ? 0U :
                     (cmo_error_denied_per_mille == 0 ||
                      cmo_error_denied_per_mille == 1000 ? 1U : 2U);
-                const unsigned error_actions = cmo_error_per_mille == 0
-                    ? operations
-                    : operations * error_kinds +
-                        (cmo_error_per_mille == 1000 ? 0U : 1U);
-                actions += std::max({
-                    operations,
-                    direction_classes(cmo_dirty_per_mille),
-                    direction_classes(cmo_younger_overlap_per_mille),
-                    error_actions});
+                const unsigned success_actions = cmo_error_per_mille == 1000
+                    ? 0U
+                    : operations * direction_classes(cmo_dirty_per_mille) *
+                        probe_depths;
+                const unsigned error_actions =
+                    operations * error_kinds;
+                actions += std::max(
+                    success_actions + error_actions,
+                    direction_classes(cmo_younger_overlap_per_mille));
             } else if (operation == ptw_error) {
                 const unsigned sites = static_cast<unsigned>(std::count_if(
                     ptw_error_site_weights.begin(),
@@ -2133,7 +2166,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=35 constraints=" << name
+        stream << "constraint_schema=36 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2168,7 +2201,9 @@ struct RandomConstraints {
                << " target_cmo_error=" << cmo_error_per_mille
                << " target_cmo_error_denied="
                << cmo_error_denied_per_mille
-               << " target_dcache_load_error="
+               << " target_cmo_probe_depth=";
+        append_weights(stream, cmo_probe_depth_weights);
+        stream << " target_dcache_load_error="
                << dcache_load_error_per_mille
                << " target_dcache_load_error_denied="
                << dcache_load_error_denied_per_mille
@@ -2572,6 +2607,16 @@ struct ConstraintCoverage {
     std::array<std::array<std::uint64_t, 2>,
                RandomConstraints::cmo_operation_count>
         cmo_operation_errors{};
+    std::array<std::uint64_t, RandomConstraints::cmo_probe_depth_count>
+        cmo_probe_depths{};
+    // [CLEAN/FLUSH/INVAL][clean/dirty][one through eight Probes].
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t, RandomConstraints::cmo_probe_depth_count>,
+            2>,
+        RandomConstraints::cmo_operation_count>
+        cmo_probe_crosses{};
     std::array<std::uint64_t, 2> dcache_load_errors{};
     std::array<std::uint64_t, 2> dcache_load_error_kinds{};
     // clean/corrupt/denied for weighted scalar-load actions.
@@ -2705,6 +2750,47 @@ struct ConstraintCoverage {
     {
         return depth_class * 4U + static_cast<unsigned>(to_b) * 2U +
             static_cast<unsigned>(need_data);
+    }
+
+    std::optional<unsigned> first_missing_cmo_probe_cross(
+        const RandomConstraints &constraints) const
+    {
+        if (constraints.cmo_error_per_mille == 1000) {
+            return std::nullopt;
+        }
+        for (unsigned operation = 0;
+             operation < RandomConstraints::cmo_operation_count; ++operation) {
+            if (constraints.cmo_operation_weights[operation] == 0) {
+                continue;
+            }
+            for (unsigned state = 0; state < 2; ++state) {
+                const bool state_enabled = state == 0
+                    ? constraints.cmo_dirty_per_mille != 1000
+                    : constraints.cmo_dirty_per_mille != 0;
+                if (!state_enabled) {
+                    continue;
+                }
+                for (unsigned depth = 0;
+                     depth < RandomConstraints::cmo_probe_depth_count; ++depth) {
+                    if (constraints.cmo_probe_depth_weights[depth] != 0 &&
+                        cmo_probe_crosses[operation][state][depth] == 0) {
+                        return operation * 2U *
+                                RandomConstraints::cmo_probe_depth_count +
+                            state * RandomConstraints::cmo_probe_depth_count +
+                            depth;
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    void sample_cmo_probe(unsigned operation, bool dirty, unsigned depth_class)
+    {
+        ++cmo_probe_depths.at(depth_class);
+        ++cmo_probe_crosses.at(operation)
+              .at(dirty ? 1U : 0U)
+              .at(depth_class);
     }
 
     std::optional<unsigned> first_missing_probe_cross(
@@ -3295,6 +3381,11 @@ struct ConstraintCoverage {
                     return (weight == 0) == (count == 0);
                 });
             bool error_crosses_complete = true;
+            bool probe_crosses_complete = true;
+            std::array<
+                std::uint64_t, RandomConstraints::cmo_probe_depth_count>
+                crossed_depths{};
+            std::uint64_t successful_cmo_count = 0;
             for (unsigned cmo_operation = 0;
                  cmo_operation < RandomConstraints::cmo_operation_count;
                  ++cmo_operation) {
@@ -3302,15 +3393,40 @@ struct ConstraintCoverage {
                     error_crosses_complete &=
                         cmo_operation_errors[cmo_operation] ==
                             std::array<std::uint64_t, 2>{};
-                    continue;
-                }
-                if (constraints.cmo_error_per_mille != 0) {
+                } else if (constraints.cmo_error_per_mille != 0) {
                     error_crosses_complete &=
                         (constraints.cmo_error_denied_per_mille == 1000 ||
                          cmo_operation_errors[cmo_operation][0] != 0) &&
                         (constraints.cmo_error_denied_per_mille == 0 ||
                          cmo_operation_errors[cmo_operation][1] != 0);
                 }
+                std::uint64_t operation_successes = 0;
+                for (unsigned state = 0; state < 2; ++state) {
+                    const bool state_enabled = state == 0
+                        ? constraints.cmo_dirty_per_mille != 1000
+                        : constraints.cmo_dirty_per_mille != 0;
+                    for (unsigned depth = 0;
+                         depth < RandomConstraints::cmo_probe_depth_count;
+                         ++depth) {
+                        const bool enabled =
+                            constraints.cmo_error_per_mille != 1000 &&
+                            constraints.cmo_operation_weights[cmo_operation] != 0 &&
+                            state_enabled &&
+                            constraints.cmo_probe_depth_weights[depth] != 0;
+                        const std::uint64_t count =
+                            cmo_probe_crosses[cmo_operation][state][depth];
+                        probe_crosses_complete &= (count != 0) == enabled;
+                        operation_successes += count;
+                        crossed_depths[depth] += count;
+                    }
+                }
+                const std::uint64_t operation_errors =
+                    cmo_operation_errors[cmo_operation][0] +
+                    cmo_operation_errors[cmo_operation][1];
+                probe_crosses_complete &=
+                    operation_successes + operation_errors ==
+                    cmo_operations[cmo_operation];
+                successful_cmo_count += operation_successes;
             }
             return operations[operation] != 0 && operations_complete &&
                 binary_complete(
@@ -3324,7 +3440,9 @@ struct ConstraintCoverage {
                  direction_complete(
                      constraints.cmo_error_denied_per_mille,
                      cmo_error_kinds)) &&
-                error_crosses_complete;
+                error_crosses_complete && probe_crosses_complete &&
+                crossed_depths == cmo_probe_depths &&
+                successful_cmo_count == cmo_errors[0];
         }
         if (operation == RandomConstraints::ptw_error) {
             std::uint64_t observed = 0;
@@ -4001,7 +4119,21 @@ public:
                << cmo_operation_errors[1][1] << ','
                << cmo_operation_errors[2][0] << ','
                << cmo_operation_errors[2][1]
-               << " actual_dcache_load_error="
+               << " actual_cmo_probe_depth=";
+        for (unsigned depth = 0; depth < cmo_probe_depths.size(); ++depth) {
+            stream << (depth == 0 ? "" : ",") << cmo_probe_depths[depth];
+        }
+        stream << " actual_cmo_probe_cross=";
+        bool first_cmo_probe_cross = true;
+        for (const auto &operation : cmo_probe_crosses) {
+            for (const auto &state : operation) {
+                for (const auto count : state) {
+                    stream << (first_cmo_probe_cross ? "" : ",") << count;
+                    first_cmo_probe_cross = false;
+                }
+            }
+        }
+        stream << " actual_dcache_load_error="
                << dcache_load_errors[0] << ',' << dcache_load_errors[1]
                << " actual_dcache_load_error_kind="
                << dcache_load_error_kinds[0] << ','

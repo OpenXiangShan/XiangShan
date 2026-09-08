@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 1248;
+    constexpr unsigned minimum_actions = 1296;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -27,6 +27,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t constrained_cold_line = 0;
     std::array<std::uint64_t, 3> cmo_locality_lines{};
     std::uint64_t cmo_overlap_line = 0;
+    std::uint64_t cmo_auxiliary_probe_group = 0;
     std::uint64_t probe_overlap_line = 0;
     std::uint64_t dcache_error_line = 0;
     std::uint64_t atomic_error_line = 0;
@@ -112,6 +113,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t cmo_span = 0x1000000;
     constexpr std::uint64_t probe_overlap_base = cmo_base + cmo_span;
     constexpr std::uint64_t probe_overlap_span = 0x4000000;
+    constexpr std::uint64_t cmo_auxiliary_probe_base =
+        probe_overlap_base + probe_overlap_span / 2;
+    constexpr std::uint64_t cmo_auxiliary_probe_span =
+        probe_overlap_span / 2;
     constexpr std::uint64_t dcache_error_base =
         probe_overlap_base + probe_overlap_span;
     constexpr std::uint64_t dcache_error_span = 0x4000000;
@@ -3477,7 +3482,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         };
         const auto issue_random_cmo = [&] (
             unsigned operation, bool dirty, bool younger_overlap,
-            std::optional<bool> error_denied) {
+            std::optional<bool> error_denied, unsigned probe_depth_class) {
             const unsigned cmo_completion_timeout =
                 std::max(constrained_completion_timeout, 16384U);
             phase = "random-cmo-drain";
@@ -3545,6 +3550,48 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     !environment.commit_store(dirty_store, 8192) ||
                     environment.sbuffer_empty()) {
                     return false;
+                }
+            }
+
+            const unsigned probe_depth = probe_depth_class + 1U;
+            std::vector<std::uint64_t> auxiliary_probe_lines;
+            if (!error_denied) {
+                constexpr std::uint64_t group_bytes = 0x400;
+                constexpr std::uint64_t groups =
+                    cmo_auxiliary_probe_span / group_bytes;
+                const std::uint64_t group =
+                    cmo_auxiliary_probe_group++ % groups;
+                const std::uint64_t group_base =
+                    cmo_auxiliary_probe_base + group * group_bytes;
+                const unsigned target_set =
+                    static_cast<unsigned>((line >> 6) & 0x7fU);
+                for (unsigned candidate = 0;
+                     auxiliary_probe_lines.size() + 1U < probe_depth;
+                     ++candidate) {
+                    const std::uint64_t auxiliary_line =
+                        group_base + candidate * 64U;
+                    if (((auxiliary_line >> 6) & 0x7fU) == target_set) {
+                        continue;
+                    }
+                    auxiliary_probe_lines.push_back(auxiliary_line);
+                }
+                for (const std::uint64_t auxiliary_line :
+                     auxiliary_probe_lines) {
+                    const auto auxiliary_load = make_load(
+                        auxiliary_line + 8U * (random() % 8U),
+                        memblock::LoadOp::ld,
+                        random() % memblock::kScalarLoadLanes);
+                    environment.expect_load(auxiliary_load);
+                    phase = "random-cmo-auxiliary-probe-warm";
+                    if (!environment.set_rob_head(
+                            auxiliary_load.rob, auxiliary_load.rob_flag) ||
+                        !environment.enqueue_load(auxiliary_load) ||
+                        !environment.issue_load(auxiliary_load, 4096) ||
+                        !environment.run_until_complete(
+                            cmo_completion_timeout) ||
+                        !environment.run_until_lq_retired(8192)) {
+                        return false;
+                    }
                 }
             }
 
@@ -3618,16 +3665,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     memblock::kDcacheCmoSource) {
                 return false;
             }
-            if (!error_denied &&
-                (!environment.request_dcache_probe(
-                     line, probe_cap, false, expected_report,
-                     dirty ? expected_line : std::vector<unsigned char>{}) ||
-                 !environment.run_until_probe_responses(
-                     probe_responses_before + 1,
-                     cmo_completion_timeout) ||
-                 environment.dcache_probe_data() !=
-                     probe_data_before + (dirty ? 1U : 0U))) {
-                return false;
+            if (!error_denied) {
+                const std::uint64_t probes_before =
+                    environment.dcache_probes();
+                if (!environment.hold_dcache_c_until_probes(
+                        probes_before + probe_depth)) {
+                    return false;
+                }
+                for (const std::uint64_t auxiliary_line :
+                     auxiliary_probe_lines) {
+                    if (!environment.request_dcache_probe(
+                            auxiliary_line, 2, false, 2)) {
+                        return false;
+                    }
+                }
+                if (!environment.request_dcache_probe(
+                        line, probe_cap, false, expected_report,
+                        dirty ? expected_line : std::vector<unsigned char>{}) ||
+                    !environment.run_until_probe_responses(
+                        probe_responses_before + probe_depth,
+                        cmo_completion_timeout) ||
+                    environment.dcache_probes() !=
+                        probes_before + probe_depth ||
+                    environment.dcache_probe_data() !=
+                        probe_data_before + (dirty ? 1U : 0U) ||
+                    environment.dcache_max_probe_outstanding() < probe_depth) {
+                    return false;
+                }
             }
             if (environment.store_writebacks() != store_writebacks_before ||
                 environment.pending_scalar_stores() != 1) {
@@ -4124,9 +4188,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             unsigned cmo_operation = 0;
             bool cmo_dirty = false;
             bool cmo_younger_overlap = false;
+            unsigned cmo_probe_depth_class = 0;
             std::optional<bool> cmo_error_denied;
             if (kind == RandomConstraints::cmo) {
                 cmo_operation = constraints.choose_cmo_operation(random());
+                if (constraints.cmo_error_per_mille != 1000) {
+                    cmo_probe_depth_class =
+                        constraints.choose_cmo_probe_depth(random());
+                }
                 for (unsigned candidate = 0;
                      candidate < RandomConstraints::cmo_operation_count;
                      ++candidate) {
@@ -4175,6 +4244,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 cmo_younger_overlap = choose_binary_class(
                     constraints.cmo_younger_overlap_per_mille,
                     constraint_coverage.cmo_younger_overlaps);
+                const std::optional<unsigned> missing_cmo_probe_cross =
+                    constraint_coverage.first_missing_cmo_probe_cross(
+                        constraints);
+                if (missing_cmo_probe_cross) {
+                    constexpr unsigned state_stride =
+                        RandomConstraints::cmo_probe_depth_count;
+                    constexpr unsigned operation_stride = 2U * state_stride;
+                    cmo_operation = *missing_cmo_probe_cross / operation_stride;
+                    const unsigned remainder =
+                        *missing_cmo_probe_cross % operation_stride;
+                    cmo_dirty = remainder / state_stride != 0;
+                    cmo_probe_depth_class = remainder % state_stride;
+                    cmo_error_denied.reset();
+                }
             }
             std::optional<unsigned> hypervisor_family;
             bool hypervisor_spvp_user = false;
@@ -7407,7 +7490,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ordinary_leaf_addressed = true;
                 if (!issue_random_cmo(
                         cmo_operation, cmo_dirty, cmo_younger_overlap,
-                        cmo_error_denied)) {
+                        cmo_error_denied, cmo_probe_depth_class)) {
                     return false;
                 }
                 ++constraint_coverage.cmo_operations[cmo_operation];
@@ -7421,6 +7504,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     ++constraint_coverage.cmo_error_kinds[error_kind];
                     ++constraint_coverage.cmo_operation_errors[
                         cmo_operation][error_kind];
+                } else {
+                    constraint_coverage.sample_cmo_probe(
+                        cmo_operation, cmo_dirty, cmo_probe_depth_class);
                 }
                 ++actions;
                 ++coverage.cacheable;
@@ -7824,7 +7910,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constexpr std::uint64_t lines_per_half =
                         half_block_bytes / 64;
                     constexpr std::uint64_t overlap_blocks =
-                        probe_overlap_span / block_bytes;
+                        (probe_overlap_span / 2U) / block_bytes;
                     const std::uint64_t sequence = probe_overlap_line++;
                     const std::uint64_t block =
                         (sequence / lines_per_half) % overlap_blocks;

@@ -3239,3 +3239,58 @@ No CPU RTL defect was observed. Five-or-more simultaneous replacement
 windows, replacement composition with Probe/CMO traffic, cross-operation
 Probe bursts, and malformed coherence traffic remain explicit DCache breadth
 gaps.
+
+## Schema 36 CMO Probe-Burst Composition Closure
+
+Date: 2026-09-09
+
+Schema 36 composes successful CLEAN, FLUSH, and INVAL requests with the full
+one-through-eight-entry ProbeQueue depth while CBOAck remains pending. Each
+action warms zero through seven fresh clean auxiliary lines, holds C unready
+until every selected B request is accepted, and then adds the operation-specific
+target Probe. The online oracle matches every response by source and address,
+checks exact dirty target data, and closes all 48 operation x clean/dirty x
+depth bins. Opcode-qualified denied/corrupt CMO errors remain zero-Probe paths.
+
+The independent offline verifier reconstructs each operation marginal from
+successful Probe crosses plus its error crosses, reconstructs successful line
+state and depth marginals, and computes manager Probe traffic from the
+depth-weighted success counts. It also requires the measured outstanding depth
+to reach the deepest observed class and retains exact 64-source lifecycle
+accounting.
+
+| Direction | Seed | Final cycle | Enabled CMO Probe depths | Maximum accepted outstanding |
+| --- | ---: | ---: | --- | ---: |
+| Depth-eight-only coverage endpoint | 36008 | 982,929 | 8 | 8 |
+| Coverage profile | 36005 | 1,049,921 | 1 through 8 | 8 |
+| Spec profile | 36006 | 2,049,385 | 1 through 8 | 8 |
+| Corner profile | 36007 | 2,261,106 | 1 through 8 | 8 |
+| Frozen coverage artifact | 1 | 1,068,392 | 1 through 8 | 8 |
+
+The depth-eight-only endpoint covered all six operation/state classes at the
+selected depth while retaining six CMO errors. The coverage endpoint observed
+49 successful and seven error CMOs with depth marginals
+`6,6,7,6,6,6,6,6`; the spec endpoint closed each of the 48 success bins
+exactly once and observed no CMO errors. The frozen seed observed 52 successful
+and six error CMOs, depth marginals `7,6,6,6,7,7,7,6` and
+operation marginals `20,19,19`. Its 395 accepted manager Probes produced the
+exact source lifecycle `64,331,6`. Existing schema-35 replacement coverage
+also remained closed with window counts `195,193,192,193`, 386 held-refill
+actions, and 387 target-C-backpressure actions.
+
+All 187 Python unit tests, `check-rtl`, rebuilt smoke, `cmo-contracts`,
+`dcache-coherence`, `dcache-errors`, and `atomic-dchannel-errors` passed.
+The frozen runtime executable and manifest SHA-256 values are respectively
+`a86f165e7af67c36277ead1d5bd36224ad33e24d554dccf96d48c2fd173f33b3`
+and `869d2929978d01edbbf5582720587d51ce7d6705b1974ca1611e7c7b00b9057f`.
+The accepted artifact is
+`build/memblock/schema36-coverage-1x1296.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1296 elapsed_seconds=413.115138 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=3057e027a6df31828e988be7cd4af9da5b45a4f61d785af001c2d0c9d12c8a45
+```
+
+No CPU RTL defect was observed. Multiple simultaneous CMO sources,
+replacement/atomic Probe-burst composition, five-or-more simultaneous
+replacement windows, and malformed coherence traffic remain explicit DCache
+breadth gaps.

@@ -1357,9 +1357,23 @@ reach its own Release or ReleaseData minimum while all selected loads remain
 pending. Request, byte-image, writeback, dequeue, C-backpressure, and held-load
 accounting continue to scale from the selected window count. Coverage uses
 quad/triple/dual conditional shares of 250/333/500 per mille, SPEC uses 1/1/10,
-and corner uses 750/500/750. The current minimum `random-mixed` length is
-1248 actions. Five-or-more windows and replacement composition with Probe/CMO
-traffic remain separate.
+and corner uses 750/500/750. At this revision the minimum `random-mixed` length
+became 1248 actions. Five-or-more windows and replacement composition with
+Probe/CMO traffic remain separate.
+
+Schema 36 composes the CMO success path with the complete eight-entry
+ProbeQueue. `cmo-probe-depth1` through `cmo-probe-depth8` are relative weights
+for total B requests while a CLEAN/FLUSH/INVAL CBOAck is delayed. Each action
+warms zero through seven distinct clean auxiliary lines, queues their toN
+Probes plus the operation's address-qualified target Probe, and holds C unready
+until every selected B request is accepted. The simulator and offline verifier
+close all 48 operation x clean/dirty x depth bins, match every C response by
+source/address, require exact target dirty data, and conserve successful CMO
+Probe traffic separately from error CMOs, which still emit no Probe. Coverage
+weights all depths equally, SPEC strongly favors depth one without disabling a
+class, and corner weights deep bursts progressively. The current minimum
+`random-mixed` length is 1296 actions. Replacement/atomic Probe composition,
+multiple simultaneous CMO sources, and malformed coherence traffic remain.
 
 For a reproducible local pressure run:
 
@@ -1529,7 +1543,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 1248
+  --test random-mixed --seed 17 --transactions 1296
 ```
 
 ## Complete Pin Audit
