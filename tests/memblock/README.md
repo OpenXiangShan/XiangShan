@@ -77,8 +77,9 @@ NA4 is not independently selectable: an `A=2` write is WARL-coerced to NAPOT
 and is checked as a 4-KiB minimum region. Instruction X permission, HLVX
 physical R+X permission, M-mode/SPVP hypervisor PMP selection, and DebugModule
 access are covered by focused tests. HLV/HLVX/HSV also cross one fixed PMA
-device mapping and locked R/RWX PMP entries; broader hypervisor PMP region-edge
-and PMA matrices remain gaps.
+device mapping, both sides of the exact `0x80000000` device-to-DDR PMA edge,
+and locked R/RWX PMP entries; other hypervisor PMP region edges and PMA
+interval matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks read-request acceptance, ordinary and prefetch miss
@@ -436,6 +437,14 @@ with every VS-stage and G-stage `PMA/NC/IO` combination. The independent oracle
 applies the architectural VS-stage override priority, then checks exact load
 data, committed store readback, IO commit gating, DCache/Uncache selection, and
 LSQ conservation.
+
+`hypervisor-contracts` also translates HLV.D, HLVX.WU, and HSV.D to both sides
+of the fixed `0x80000000` PMA boundary. The device-side cases use the last
+naturally aligned access of the lower page and require HLV/HSV Uncache routing
+plus HLVX `LoadAccessFault`; the DDR-side cases begin at or immediately above
+the boundary and require cacheable HLV/HLVX/HSV completion with exact data or
+store readback. This checks the physical PMA edge after both translation stages,
+not merely through a bare-mode scalar access.
 
 `fp-loads` exercises the separate FP destination-enable path for cacheable and
 PBMT=IO 16-, 32-, and 64-bit load widths. The scoreboard requires exact FLH/FLW

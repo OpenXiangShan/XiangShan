@@ -93,6 +93,7 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned physical_pmp_cases = 0;
     unsigned locked_physical_pmp_cases = 0;
     unsigned physical_pma_cases = 0;
+    unsigned physical_pma_boundary_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -814,6 +815,75 @@ int run_hypervisor_contracts(int argc, char **argv)
     }
     physical_pma_cases += 3;
 
+    constexpr std::uint64_t pma_device_boundary_page = 0x7ffff000ULL;
+    constexpr std::uint64_t pma_ddr_boundary_page = 0x80000000ULL;
+    if (!run_load_case(
+            "pma-boundary-device-hlv", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0xff8, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_boundary_page, true) ||
+        !run_load_case(
+            "pma-boundary-device-hlvx", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0xffc, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_boundary_page, true) ||
+        !run_store_case(
+            "pma-boundary-device-hsv", memblock::StoreOp::hsvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, 0xfedcba9876543210ULL,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0xff8, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_boundary_page, true) ||
+        !run_load_case(
+            "pma-boundary-ddr-hlv", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_ddr_boundary_page, false) ||
+        !run_load_case(
+            "pma-boundary-ddr-hlvx", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 4, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_ddr_boundary_page, false) ||
+        !run_store_case(
+            "pma-boundary-ddr-hsv", memblock::StoreOp::hsvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, 0x0f1e2d3c4b5a6978ULL,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 8, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_ddr_boundary_page, false)) {
+        return 1;
+    }
+    physical_pma_cases += 6;
+    physical_pma_boundary_cases += 6;
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -830,6 +900,8 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " locked_physical_pmp_cases="
               << locked_physical_pmp_cases
               << " physical_pma_cases=" << physical_pma_cases
+              << " physical_pma_boundary_cases="
+              << physical_pma_boundary_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
               << " machine_spvp_pmp=1 locked_spvp_pmp=1"
               << " cycles=" << total_cycles

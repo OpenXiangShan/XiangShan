@@ -111,6 +111,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "physical_pmp_cases=",
             "locked_physical_pmp_cases=",
             "physical_pma_cases=",
+            "physical_pma_boundary_cases=",
             "ReferencePrivilegeMode::machine",
             "pmp_napot_read_execute",
             "pmp_locked_napot_read",
@@ -118,6 +119,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "required_pmp_permission = hlvx ? 0x5U : 0x1U",
             "pma_device_physical = 0x35000000ULL",
             "pma-device-hlvx",
+            "pma_device_boundary_page = 0x7ffff000ULL",
+            "pma_ddr_boundary_page = 0x80000000ULL",
+            "pma-boundary-device-hlvx",
+            "pma-boundary-ddr-hlvx",
             "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
             "machine_spvp_pmp=1 locked_spvp_pmp=1",
         ):
