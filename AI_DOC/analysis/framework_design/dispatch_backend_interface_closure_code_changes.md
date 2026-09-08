@@ -720,3 +720,20 @@ function void report_hdl_value(input string path);
 - 尚未跑 directed PTW-back replay case 验证等待 L2TLB response done 或 timeout 后重新入队。
 - 不模拟完整前端 refetch、ROB/rename 恢复、MemBlock 内部 LoadQueueReplay、TLB miss queue、DCache MSHR 或 SBuffer 内部状态机。
 - `lqCancelCnt/sqCancelCnt/ldCancel/mdpTrain/updateLFST` 不属于本轮闭环落地任务。
+
+## 11. L2TLB completed-response PPN reuse 补充（2026-09-08）
+
+该功能补的是 responder 内部新建 mapping 的可选地址关联，不改变 PTW-back replay 的 response-done
+判定：`response done` 仍只表示 L2TLB -> DTLB response 已被真实 sample。
+
+| 对象 | 当前职责 | 生命周期/边界 |
+|---|---|---|
+| `l2tlb_ppn_history_q` | 保存最近 `M` 次 completed response 的 final PPN 或 invalid 占位。 | `EN=1` 的 completion 写入；runtime reset 和 testcase table reset 清空；普通 SFENCE/HFENCE 保留。 |
+| `record_l2tlb_completed_ppn_history()` | 从 frozen token 的 request-specific S1/S2 resolved PPN 构造 record。 | 仅在 `complete_driving_response()` 的 sampled completion 调用；token `0` 合法。 |
+| `get_or_create_l2tlb_entry_by_req_with_snapshot()` | 维持 exact/range hit 早退，只在 miss build 插表前尝试 reuse。 | 不改 existing entry、key、CSR context 或 pending token。 |
+| `can_apply_reused_final_ppn()` | 判断 normal 4KB leaf target 是否可承载候选 PPN。 | S1 重建 split payload；S2/allStage 需 R/W/X leaf 和 38-bit 可编码。 |
+
+默认 `EN=0` 时，不写 history、不扫描候选、不消耗 reuse 随机数。打开后，fault/PMA AF/unresolvable
+completion 也会占用 FIFO 位置但不成为 candidate；重复 PPN 保留重复 record 权重。专项 software smoke
+`tc_l2tlb_ppn_reuse_smoke` 使用 `EN=1/M=1/WT=100` 验证同一 sample 的 completion-before-capture
+顺序可以让后续不同 VPN 的 miss 立即复用刚完成的 PPN。

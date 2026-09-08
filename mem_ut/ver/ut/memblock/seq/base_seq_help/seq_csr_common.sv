@@ -263,6 +263,12 @@ class seq_csr_common;
     static int unsigned l2tlb_resp_mid_wt = 3;
     static int unsigned l2tlb_resp_long_wt = 1;
     static int unsigned l2tlb_idle_stop_cycle = 5000;
+    // 中文注释：L2TLB PPN reuse 的运行期冻结配置。
+    // 仅 responder sequence 在启动时读取；EN=0 时不允许读写 completed-response history。
+    // HISTORY_SIZE 是 software FIFO 上限，不映射到 DUT 物理资源，最大值固定为 256。
+    static bit          l2tlb_ppn_reuse_en = 1'b0;
+    static int unsigned l2tlb_ppn_reuse_history_size = 5;
+    static int unsigned l2tlb_ppn_reuse_wt = 40;
 
     static task init();
         init_sem.get();
@@ -639,6 +645,13 @@ class seq_csr_common;
         l2tlb_resp_mid_wt           = get_non_negative_int("MEMBLOCK_L2TLB_RESP_MID_WT", plus::MEMBLOCK_L2TLB_RESP_MID_WT);
         l2tlb_resp_long_wt          = get_non_negative_int("MEMBLOCK_L2TLB_RESP_LONG_WT", plus::MEMBLOCK_L2TLB_RESP_LONG_WT);
         l2tlb_idle_stop_cycle       = get_non_negative_int("MEMBLOCK_L2TLB_IDLE_STOP_CYCLE", plus::MEMBLOCK_L2TLB_IDLE_STOP_CYCLE);
+        l2tlb_ppn_reuse_en          = plus::MEMBLOCK_L2TLB_PPN_REUSE_EN;
+        l2tlb_ppn_reuse_history_size = get_non_negative_int(
+            "MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE",
+            plus::MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE);
+        l2tlb_ppn_reuse_wt = get_non_negative_int(
+            "MEMBLOCK_L2TLB_PPN_REUSE_WT",
+            plus::MEMBLOCK_L2TLB_PPN_REUSE_WT);
     endfunction:load_from_plus
 
     // 中文注释：在 responder 开放 ready 前校验本专项的静态 payload 配置。
@@ -671,6 +684,25 @@ class seq_csr_common;
         if (l2tlb_level_weight_en && main_mem_ranges_en)
             `uvm_fatal("SEQ_CSR_CFG", "LEVEL_WEIGHT_EN requires MAIN_MEM_RANGES_EN=0");
     endfunction:check_l2tlb_payload_weight_cfg
+
+    // 中文注释：只校验 PPN reuse 参数的表达范围，不读取 history、不随机且不修改 TLB entry。
+    // ENABLE 打开时 FIFO 容量必须非零；关闭时允许容量为零以保持旧路径完全旁路。
+    static function void check_l2tlb_ppn_reuse_cfg();
+        if (l2tlb_ppn_reuse_history_size > 256) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=%0d exceeds framework bound=256",
+                                 l2tlb_ppn_reuse_history_size))
+        end
+        if (l2tlb_ppn_reuse_wt > 100) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_L2TLB_PPN_REUSE_WT=%0d must be within [0:100]",
+                                 l2tlb_ppn_reuse_wt))
+        end
+        if (l2tlb_ppn_reuse_en && l2tlb_ppn_reuse_history_size == 0) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       "MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE must be non-zero when reuse is enabled")
+        end
+    endfunction:check_l2tlb_ppn_reuse_cfg
 
     // 抽象职责：只校验控制 worker topology plus 的枚举范围；不冻结、不改写运行期状态。
     static function void check_control_worker_topology_mode();
@@ -904,6 +936,7 @@ class seq_csr_common;
 
         check_csr_sequence_cfg();
         check_l2tlb_payload_weight_cfg();
+        check_l2tlb_ppn_reuse_cfg();
     endfunction:validate_and_clamp
 
     // 中文注释：校验 CSR sequence 的冻结 plus 快照。所有检查只诊断配置，不选择
@@ -2113,6 +2146,21 @@ class seq_csr_common;
         check_initialized("get_l2tlb_idle_stop_cycle");
         return l2tlb_idle_stop_cycle;
     endfunction:get_l2tlb_idle_stop_cycle
+
+    static function bit get_l2tlb_ppn_reuse_en();
+        check_initialized("get_l2tlb_ppn_reuse_en");
+        return l2tlb_ppn_reuse_en;
+    endfunction:get_l2tlb_ppn_reuse_en
+
+    static function int unsigned get_l2tlb_ppn_reuse_history_size();
+        check_initialized("get_l2tlb_ppn_reuse_history_size");
+        return l2tlb_ppn_reuse_history_size;
+    endfunction:get_l2tlb_ppn_reuse_history_size
+
+    static function int unsigned get_l2tlb_ppn_reuse_wt();
+        check_initialized("get_l2tlb_ppn_reuse_wt");
+        return l2tlb_ppn_reuse_wt;
+    endfunction:get_l2tlb_ppn_reuse_wt
 
 endclass:seq_csr_common
 

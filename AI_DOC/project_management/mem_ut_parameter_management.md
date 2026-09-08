@@ -231,7 +231,8 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 V2 L2TLB responder 的结构参数与 runtime 行为参数必须分开管理：
 
 - `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`、`MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 是 compile-time DUT 结构/时序合同，只在 `mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh` 定义，并由 `memblock_dispatch_types.sv` 暴露 typed localparam。
-- `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 是 runtime sequence 行为参数，统一经过 `env/plus.sv -> seq_csr_common -> getter`。
+- `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 是 runtime response 调度参数，统一经过 `env/plus.sv -> seq_csr_common -> getter`。
+- `MEMBLOCK_L2TLB_PPN_REUSE_EN=0`、`MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=5`、`MEMBLOCK_L2TLB_PPN_REUSE_WT=40` 是 runtime PPN reuse 参数。只有 `EN=1` 时 responder 才在真实 response completion 收集最近 `M` 个 record，并只在新的 4KB miss build 前按 `WT` 尝试复用 valid PPN；它们不改变连接、TLB key、CSR 真值或 DUT 物理容量。`M` 必须位于 `1..256`、`WT` 必须位于 `0..100`，校验与读取同样统一经过 `seq_csr_common` getter。
 - `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY` 已删除，不得在 preset cfg、getter、历史迁移入口之外重新出现；历史文档应注明以当前 V2 L2TLB execution plan 为准。
 
 ### 2.6 CSR sequence 参数当前分层

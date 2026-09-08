@@ -918,3 +918,22 @@ agent monitor
 
 - `tc_dispatch_smoke extends soft_test_tc_dispatch_smoke`
 - `tc_dispatch_replay_smoke extends soft_test_tc_dispatch_replay_smoke`
+
+### 9.4 L2TLB completed-response PPN reuse software closure（2026-09-08）
+
+当前 V2 增加了一个默认关闭的 responder 策略：只有
+`MEMBLOCK_L2TLB_PPN_REUSE_EN=1` 时，已被 DUT sample 的 response 才会按 completion 顺序写入最近
+`M` 项 PPN history；新建的 normal 4KB leaf miss entry 才能按 `WT` 尝试复用其中一个 valid PPN。
+
+该闭环的目录和编译关系为：
+
+- `seq/base_seq/soft_test/soft_test_l2tlb_ppn_reuse_sequence.sv`：直接验证公共 TLB/history API、
+  frozen completion、token `0`、FIFO 淘汰、invalid record、S1 split payload 与 S2 leaf eligibility。
+- `tc/src/soft_test/soft_test_tc_l2tlb_ppn_reuse.sv`：提供 `tc_l2tlb_ppn_reuse_smoke`。
+- `seq/plus_cfg/tc_l2tlb_ppn_reuse_smoke.cfg`：以 `EN=1/M=1/WT=100` 验证
+  `plus -> seq_csr_common -> responder` 的真实冻结链。
+- `seq_pkg.sv`、`seq.f`、`tc_pkg.sv`、`tc.f`：分别按现有 package/filelist 顺序接入新 sequence 与 testcase。
+
+history 不是 live TLB validity、CSR 或 physical filter 容量的镜像。SFENCE/HFENCE C4 只删除 live entry；
+runtime reset 与 `reset_all_tables()` 清 FIFO。该策略不创建第二个 responder owner，也不触碰 DTLB/L2TLB
+接口方向。

@@ -12,6 +12,9 @@
 |---|---|---|
 | request fire | 同一 service sample 中 drv_cb 的 valid 与 mon_cb 的 ready 同时为 1 | request_fire() |
 | pending record | 一笔 fire 的 request-time 上下文和冻结 response | memblock_l2tlb_pending_req |
+| response completion | 已驱动的 response 被下一 DUT sample 确认可见的边界；不是 select 或仅置 resp_valid 的时刻 | complete_driving_response() |
+| PPN history | enable 后按真实 completion 顺序保存的有界 FIFO；invalid record 也占一个最近返回位置 | common_data_transaction.l2tlb_ppn_history_q |
+| PPN reuse | 新建 normal 4KB miss entry 插表前，从 history 选用 final PPN 的可选策略 | get_or_create_l2tlb_entry_by_req_with_snapshot() |
 | pending_q | 已接受但尚未进入 response driving slot 的请求队列 | pending_q |
 | driving slot | 已选中并等待下一 DUT sample 确认完成的唯一 response | driving_req/driving_valid |
 | due sample | 最早允许 response 被 DUT 采样的 sample 序号 | due_sample_seq |
@@ -554,3 +557,30 @@ match_count为0时输出 UVM_LOW info，允许 prefetch 或无 UID request；
 - 合法 prefetch或独立 DTLB request可能没有 UID，零匹配只记 info。
 - internal token不写入 DUT payload；DUT按 response内容匹配 request。
 - responder driver每拍只搬运一个 gap为0的 cycle item；driver不维护 queue、latency、owner或 stop。
+
+## 11. 2026-09-08 completed-response PPN reuse 补充
+
+关联专项 plan：
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_ppn_reuse_response_history_coding_plan_20260908.md`。
+
+本补充只扩展 responder 的软件映射策略，不改变 DTLB -> L2TLB request、L2TLB -> DTLB response、
+runtime CSR snapshot、token 调度或单 lifecycle owner 合同。
+
+1. 参数通过 `plus.sv -> seq_csr_common -> configure_from_plus()` 冻结为
+   `MEMBLOCK_L2TLB_PPN_REUSE_EN=0`、`MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=5`、
+   `MEMBLOCK_L2TLB_PPN_REUSE_WT=40`。关闭开关时 capture 不扫描 history，completion 不写 FIFO，保持原有行为。
+2. `capture_fired_request()` 仅将冻结的 enable/weight 传给 responder 专用 lookup wrapper。exact/range hit
+   直接返回既有 live entry；只有 miss build 在 canonical entry 插表前可尝试覆盖 final PPN。
+3. `complete_driving_response()` 仅在 `driving_valid && sampled_resp_valid` 成立后，使用 frozen token 的
+   request-specific derived PPN 记录 history，再进行既有 UID completion 和 driving slot 释放。token 从 `0`
+   开始分配，因此 token `0` 是合法第一笔 response 的 provenance，不能被当作无效值。
+4. fault、PMA AF 或 derived PPN 无效的 completed response 写 `ppn_valid=0` 的 record；它们满足每次返回
+   占一个 FIFO 位置，但不能作为候选。普通 SFENCE/HFENCE 只删 live entry，runtime reset 与
+   `reset_all_tables()` 才清 history。
+5. `tlb_map_builder::can_apply_reused_final_ppn()` 只接受无 fault、无 PMA AF、leaf PTE、非 NAPOT 的
+   level-0 target。S1 重建 split PPN payload；S2/allStage 只改 S2 final PPN，且要求 38-bit 可编码及
+   `R/W/X` 至少一个为 1，避免 non-leaf PTE 被误作正常 translation。
+
+专项 software closure 位于
+`seq/base_seq/soft_test/soft_test_l2tlb_ppn_reuse_sequence.sv`，对应 testcase 为
+`tc_l2tlb_ppn_reuse_smoke`，preset 为 `seq/plus_cfg/tc_l2tlb_ppn_reuse_smoke.cfg`。

@@ -50,6 +50,7 @@ seq_pkg.sv
 // ./base_seq/memblock_sfence_control_base_sequence.sv
 // ./base_seq/memblock_redirect_dispatch_base_sequence.sv
 // ./base_seq/memblock_l2tlb_base_sequence.sv
+// ./base_seq/soft_test/soft_test_l2tlb_ppn_reuse_sequence.sv
 // ./base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_main_table_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_control_main_table_sequence.sv

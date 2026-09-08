@@ -3538,3 +3538,24 @@ Subagent review：
 - 新增或迁移 sequence：修改 `seq/seq_pkg.sv` 和 `seq/seq.f`，必要时确认 `cfg/tb.f` 编译顺序。
 - 新增或迁移 testcase：修改 `tc/tc_pkg.sv` 和 `tc/tc.f`。
 - soft_test sequence 放在 `seq/virtual_sequence/soft_test`；soft_test testcase 放在 `tc/src/soft_test`，二者分别归各自 package/filelist 管理。
+
+## 2026-09-08 L2TLB completed-response PPN reuse 实施记录
+
+本项由 `mem_ut_v2_l2tlb_ppn_reuse_response_history_coding_plan_20260908.md` 单独执行，不能回退为早期
+串行 L2TLB 模型。
+
+- `common_data_transaction` 新增 `l2tlb_ppn_history_q` 和 responder 专用 lookup wrapper。通用 lookup
+  wrapper 固定以 reuse 关闭模式调用，因此无关 software range test 不受 runtime plus 影响。
+- `memblock_l2tlb_base_sequence` 在 request fire 冻结 reuse policy，并仅在真实 completion 边界写 history。
+  第一笔 request 的 token 为 `0`，它是合法 provenance，不作为未初始化 sentinel。
+- builder 只在新建 normal 4KB leaf target 上写 final PPN：S1 使用既有 split sector helper，S2/allStage
+  要求 PPN 高 6 bit 为零并要求 S2 `R/W/X` 至少一个为 1；non-leaf、超页、NAPOT、fault 与 PMA AF
+  路径保持 builder 原值。
+- `dispatch_monitor_event_adapter::reset_l2tlb_sfence_state()` 在已去重的 runtime reset epoch 同时清
+  live entry 和 completed-response history。普通 C4 SFENCE/HFENCE delete 不调用 history clear。
+- 新增 `soft_test_l2tlb_ppn_reuse_sequence` 与 `tc_l2tlb_ppn_reuse_smoke`，验证 cfg 冻结、EN=0、WT=0、
+  FIFO M 裁剪、token `0` completion、non-visible response、不合法 record、exact/range hit 和 S2/allStage
+  non-leaf 保护。
+
+本次 soft-test 源码实际位于 `seq/base_seq/soft_test`，以当前 `seq_pkg.sv` include 和 `seq.f` include
+目录为准；本文早期 `seq/virtual_sequence/soft_test` 的描述仅代表当时的历史组织。
