@@ -351,8 +351,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     }
     histQueue(newS0Ptr.value) := initCommonHR
 
-    enqPtr     := nextEnqPtr
-    predPtr    := Mux(predEnable, predPtr + 1.U, predPtr)
+    enqPtr := nextEnqPtr
+    // Keep predPtr on the corresponding queue entry. The S0 block launched by
+    // an S2 override reuses the flushed S1 block's history below, and the
+    // following cycle must consume the S3 update before predPtr advances.
     writePtr   := nextWritePtr
     recoverPtr := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
   }.otherwise {
@@ -389,9 +391,13 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s0_commonHR := MuxCase(
     0.U.asTypeOf(new CommonHREntry),
     Seq(
-      r0_valid                     -> r0_commonHR,
-      r1_valid                     -> r1_commonHR,
-      s3_override                  -> histQueue(recoverPtr.value),
+      r0_valid    -> r0_commonHR,
+      r1_valid    -> r1_commonHR,
+      s3_override -> histQueue(recoverPtr.value),
+      // S2 override replaces the younger S1 block.  Reuse the history that
+      // this S1 block carried when it was predicted in S0, rather than the
+      // S3 update produced in the same cycle.
+      s2_override                  -> s1_commonHR,
       (s0_fire && s3_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
       s0_fire                      -> histQueue(predPtr.value)
     )
