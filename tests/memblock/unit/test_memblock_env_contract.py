@@ -11,9 +11,20 @@ MEMBLOCK_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
+def read_cpp_source(name: str) -> str:
+    """Read a C++ source with local implementation fragments expanded."""
+    source = (MEMBLOCK_ROOT / "cpp" / name).read_text()
+    include = re.compile(
+        r'^#include "((?:scenarios|environment)/[^"]+\.inc)"$', re.MULTILINE
+    )
+    return include.sub(
+        lambda match: (MEMBLOCK_ROOT / "cpp" / match.group(1)).read_text(), source
+    )
+
+
 class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_page_mapping_reuses_walk_structure_instead_of_xor_keys(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
 
         for contract in (
             "ReferencePageMode::sv39, false, 0",
@@ -37,8 +48,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertNotIn(obsolete_cache, environment)
 
     def test_single_load_covers_refill_order_merge_and_partial_progress(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         miss_queue = (
             REPO_ROOT
             / "src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala"
@@ -73,8 +84,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("refill_count ^ isKeyword", miss_queue)
 
     def test_hypervisor_load_store_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         tlb = (
             REPO_ROOT / "src/main/scala/xiangshan/cache/mmu/TLB.scala"
@@ -116,8 +127,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_pointer_masking_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
 
         for contract in (
@@ -139,8 +150,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + driver + makefile)
 
     def test_uncache_outstanding_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
 
         for contract in (
@@ -158,8 +169,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + driver + makefile)
 
     def test_direct_sbuffer_flush_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
 
         for contract in (
@@ -173,8 +184,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + driver + makefile)
 
     def test_l2_flush_control_has_a_continuous_timing_oracle(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         memblock = (
@@ -203,8 +214,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_top_control_bypasses_have_continuous_timing_oracles(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         memblock = (
@@ -256,8 +267,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, memblock)
 
     def test_trace_bridge_has_valid_gated_timing_oracles(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         memblock = (
@@ -294,8 +305,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, memblock)
 
     def test_dft_bridge_exhausts_combinational_input_space(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         memblock = (
@@ -324,8 +335,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, memblock)
 
     def test_frontend_bridge_reset_recovery_covers_requests_and_response(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         for contract in (
@@ -343,8 +354,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + driver + makefile + benchmark)
 
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
 
         for contract in (
@@ -359,8 +370,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + driver + makefile)
 
     def test_mbmc_bitmap_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
 
         for contract in (
@@ -379,8 +390,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         plan = (MEMBLOCK_ROOT / "docs/VERIFICATION_PLAN.md").read_text()
 
@@ -402,7 +413,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         parameters = (
             REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala"
         ).read_text()
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
 
         for scala_name, cpp_name in (
             ("VirtualLoadQueueSize", "kVirtualLoadQueueEntries"),
@@ -434,7 +445,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             REPO_ROOT / "src/main/scala/xiangshan/backend/fu/FuType.scala"
         ).read_text()
         names = re.findall(r'val\s+(\w+)\s*=\s*addType\(name\s*=\s*"[^"]+"\)', fu_type)
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
 
         for scala_name, cpp_name in (
             ("vldu", "kFuTypeVectorLoad"),
@@ -449,7 +460,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
 
     def test_software_prefetch_encodings_match_lsu_op_type(self) -> None:
         package = (REPO_ROOT / "src/main/scala/xiangshan/package.scala").read_text()
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
 
         for scala_name, cpp_name in (
             ("prefetch_i", "instruction"),
@@ -466,8 +477,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
 
     def test_cbo_zero_encoding_and_contract_are_registered(self) -> None:
         package = (REPO_ROOT / "src/main/scala/xiangshan/package.scala").read_text()
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         self.assertRegex(package, r'def\s+cbo_zero\s*=\s*"b0111"\.U')
         self.assertRegex(environment, r'cbo_zero\s*=\s*7')
@@ -484,8 +495,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         tilelink = (
             REPO_ROOT / "rocket-chip/src/main/scala/tilelink/Bundles.scala"
         ).read_text()
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         for name, bits, opcode in (
@@ -533,8 +544,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("environment.sbuffer_empty()", cmo_scenario)
 
     def test_l2_tlb_boundary_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "L2TlbResponse",
@@ -557,8 +568,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile)
 
     def test_uncache_store_bus_error_outputs_are_checked(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "struct BusErrorStats",
             "io_dcacheError_ecc_error_valid",
@@ -573,7 +584,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_physical_dcache_ecc_contract_is_registered(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         parameters = (
             REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala"
         ).read_text()
@@ -633,8 +644,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             )
 
     def test_topdown_outputs_have_semantic_contracts(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         for contract in (
@@ -652,8 +663,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + benchmark)
 
     def test_ifetch_ptw_bridge_covers_concurrent_dtlb_walk(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         memblock = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
@@ -690,7 +701,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("req_in.ready := !sent", repeater)
 
     def test_ifetch_ptw_bridge_covers_all_sector_indices(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "sector_request_order",
             "sector_valid_masks",
@@ -702,8 +713,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_scalar_load_feedback_is_observed_on_every_lane(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
         for contract in (
@@ -736,8 +747,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + generator)
 
     def test_store_and_vector_slow_feedback_fields_are_checked(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "IqSlowFeedbackStats",
@@ -754,8 +765,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile)
 
     def test_memory_violation_is_sampled_and_checked(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
         for contract in (
@@ -789,8 +800,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + generator)
 
     def test_ifetch_prefetch_is_sampled_and_discriminated(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
         for contract in (
@@ -822,8 +833,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + generator)
 
     def test_scalar_store_immediates_and_error_responses_preserve_memory(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "scalar store immediate exceeds signed 12-bit range",
             "immediate_stores=",
@@ -837,8 +848,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_hardware_prefetch_outputs_have_a_stride_oracle(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
         for contract in (
@@ -864,8 +875,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + generator)
 
     def test_exception_priority_uses_rob_age_not_queue_order(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "select_store_exception_address",
             "load_priority",
@@ -890,8 +901,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_vector_address_oracle_covers_ordinary_multi_uop_modes(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "static_cast<std::uint64_t>(transaction.vuop_idx) * 16U",
             "const std::int64_t elements_per_uop = 16 / element_bytes",
@@ -906,8 +917,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_vector_unit_stride_lmul_emul_matrix_matches_rtl_contract(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         rename = (
             REPO_ROOT / "src/main/scala/xiangshan/backend/rename/Rename.scala"
         ).read_text()
@@ -951,7 +962,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_vector_strided_lmul_emul_matrix_matches_rtl_contract(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         common = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
         ).read_text()
@@ -996,8 +1007,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_vector_indexed_lmul_emul_matrix_matches_rtl_contract(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         common = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
         ).read_text()
@@ -1065,8 +1076,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, split)
 
     def test_vector_whole_register_matrix_matches_rtl_contract(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         package = (REPO_ROOT / "src/main/scala/xiangshan/package.scala").read_text()
         split = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSplit.scala"
@@ -1100,7 +1111,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, package + split + common)
 
     def test_vector_indexed_matrix_covers_modes_eews_and_queue_wraps(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "indexed_modes",
             "VectorAddressingMode::indexed_unordered",
@@ -1120,8 +1131,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_dcache_coherence_tracks_concurrent_probe_sources(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "expected.base == response.address",
@@ -1137,8 +1148,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile)
 
     def test_dcache_errors_cross_per_beat_corruption_and_mshr_isolation(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "enum class DcacheCorruptBeat",
             "inject_response_error_at",
@@ -1161,8 +1172,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_hardware_prefetch_has_positive_sms_pht_causality(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "configure_sms_pht_prefetch(false)",
             "configure_sms_pht_prefetch(true)",
@@ -1175,8 +1186,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_memory_trigger_has_control_match_chain_and_store_matrix(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         segment_rtl = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
         ).read_text()
@@ -1231,8 +1242,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "exercise_frontend_bridges",
@@ -1251,8 +1262,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile)
 
     def test_mixed_environment_has_combined_drain_and_queue_accounting(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
 
         for contract in (
             "run_until_all_complete",
@@ -1285,8 +1296,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment)
 
     def test_atomic_contract_has_old_value_visibility_and_reservation_checks(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "enum class AtomicOp",
@@ -1343,7 +1354,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("it->second.check_data_on_exception", environment)
 
     def test_scoreboards_reject_duplicate_identity_and_store_halves(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
 
         for diagnostic in (
             "duplicate outstanding scalar load ROB value",
@@ -1355,7 +1366,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(diagnostic, environment)
 
     def test_store_writeback_is_gated_by_issue_handshake_epoch(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         for contract in (
             "address_issued",
             "data_issued",
@@ -1369,8 +1380,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment)
 
     def test_store_and_vector_scoreboards_check_metadata_sidebands(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "expected_debug_is_mmio",
             "expected_debug_is_ncio",
@@ -1392,7 +1403,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main + environment)
 
     def test_scalar_load_optional_metadata_is_checked_only_when_constrained(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         load_scoreboard = environment.split("class LoadScoreboard", 1)[1].split(
             "class StoreScoreboard", 1
         )[0]
@@ -1402,8 +1413,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertNotIn("expected_debug_is_mmio.value_or(false)", load_scoreboard)
 
     def test_translation_faults_cover_stage_one_and_gstage_pte_encodings(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "reference_pte_encoding_fault",
             "pte_reserved",
@@ -1436,8 +1447,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_translation_oracle_models_legal_svnapot(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "reference_pte_is_napot",
             "input_address & napot_offset_mask",
@@ -1469,8 +1480,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_ptw_manager_errors_are_injectable_by_walk_level(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "PtwCorruptBeat",
@@ -1503,12 +1514,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("ptw-errors:", makefile)
 
     def test_mixed_commit_boundary_does_not_auto_commit_next_rob(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         self.assertIn("rob_offset - 1", main)
         self.assertIn("Keep the commit boundary at the last uop", main)
 
     def test_vector_store_commit_uses_its_enqueue_time_sq_target(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         self.assertIn(
             "vector_store_sq_targets_[vector_store_key(transaction)]", environment
         )
@@ -1517,7 +1528,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("if (sq_dequeued_ < target", environment)
 
     def test_reference_memory_is_separate_from_bus_backing_memory(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         for contract in (
             "SparseMemory bus_memory_;",
             "SparseMemory memory_;",
@@ -1532,14 +1543,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment)
 
     def test_uncache_store_order_uses_bus_backing_oracle(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         self.assertIn("int run_store_rdata_order", main)
         self.assertIn("environment.bus_expected_load(older.address", main)
         self.assertIn("environment.bus_expected_load(younger.address", main)
 
     def test_reset_recovery_reasserts_reset_and_is_a_registered_target(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         self.assertIn("dut_.reset.ImmSet(std::uint64_t{1});", environment)
         self.assertIn("int run_reset_recovery", main)
@@ -1557,8 +1568,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_reset_tree_contract_covers_functional_dft_and_scan_modes(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         for contract in (
@@ -1576,8 +1587,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + benchmark)
 
     def test_wfi_safety_drains_each_memory_manager_before_safe(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         for contract in (
@@ -1594,8 +1605,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + benchmark)
 
     def test_mmio_contract_has_pbmt_io_mapping_and_three_cycle_boundary_test(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         load_unit = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala"
@@ -1690,7 +1701,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_fp_loads_cover_data_paths_and_exception_suppression(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         fp_loads = main[
             main.index("int run_fp_loads") : main.index("int run_trigger_contracts")
         ]
@@ -1723,8 +1734,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_mixed_stimulus_drives_every_lsq_dispatch_lane_in_one_cycle(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         generated = (MEMBLOCK_ROOT / "cpp/generated_port_defaults.hpp").read_text()
 
         self.assertIn("kLsqEnqueueLanes = 6", generated)
@@ -1735,8 +1746,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("dispatch_lanes=", main)
 
     def test_lsq_enqueue_accounting_is_observed_from_top_level_pins(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         generated = (MEMBLOCK_ROOT / "cpp/generated_port_defaults.hpp").read_text()
 
         for contract in (
@@ -1771,7 +1782,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("unobserved_cancels=", main)
 
     def test_mixed_vector_aliasing_uses_address_oracle_and_nonoverlap_stores(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "vector_element_address(store, element)",
             "forwarded[address + byte]",
@@ -1783,7 +1794,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_vector_oracle_allows_only_spec_permitted_agnostic_data(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         for contract in (
             "matches_load_data",
             "vector_writeback_global_element",
@@ -1797,8 +1808,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment)
 
     def test_vector_fault_only_first_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         vfof = (
@@ -1820,8 +1831,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("io.uopWriteback.bits.data             := entries.vl", vfof)
 
     def test_vector_segment_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         segment = (
@@ -1848,8 +1859,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("io.uopwriteback.valid", segment)
 
     def test_vector_segment_lmul_emul_nf_matrix_matches_rtl_contract(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         common = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
         ).read_text()
@@ -1909,8 +1920,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_vector_indexed_segment_lmul_emul_nf_matrix_matches_rtl_contract(
         self,
     ) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         common = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
         ).read_text()
@@ -1983,8 +1994,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("val segmentIndexFlowNum", common)
 
     def test_vector_segment_fof_contract_is_registered(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
         segment = (
@@ -2032,8 +2043,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, plan)
 
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         for contract in (
             "reference_page_walk",
@@ -2107,8 +2118,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("account_sq_cancellation(1)", main)
 
     def test_translation_fence_covers_same_id_root_reuse(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for helper in (
             "update_stage_one_context",
             "update_vs_context",
@@ -2125,8 +2136,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(phase, main)
 
     def test_translation_fence_covers_outstanding_ptw_response(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "issue_sfence_with_redirect",
             "ResponseLatencyProfile::spec",
@@ -2153,8 +2164,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_translation_fence_covers_inflight_context_switches(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "force_next_ptw_response_delay",
             "update_two_stage_context",
@@ -2174,7 +2185,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main)
 
     def test_translation_faults_cover_both_canonicality_directions(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "sv39-high",
             "sv48-high",
@@ -2187,8 +2198,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_translation_faults_cover_physical_ppn_overflow(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "kReferencePhysicalAddressBits = 48",
             "reference_pte_physical_address_fault",
@@ -2228,8 +2239,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "ReferencePtePermissions",
             "ReferencePbmt",
@@ -2306,7 +2317,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_translation_context_covers_host_guest_and_virtuality_switches(self) -> None:
-        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        main = read_cpp_source("memblock_main.cpp")
         for contract in (
             "phase=satp-asid",
             "phase=vsatp-asid",
@@ -2321,7 +2332,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, main)
 
     def test_stress_driver_requires_real_burst_overlap_and_combo_gates(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         for contract in (
             "int run_random_stress",
             "struct StressRandom",
@@ -2337,13 +2348,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, driver)
 
     def test_stress_vector_forwarding_excludes_repeated_address_stores(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         self.assertIn("const std::array<std::int64_t, 5> store_strides", driver)
         self.assertIn("const std::array<std::int64_t, 6> load_strides", driver)
         self.assertIn("if (transaction.store)", driver)
 
     def test_stress_scalar_forwarding_counter_tracks_dependent_load(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         independent = driver.index("case Kind::scalar_load:")
         dependent = driver.index("case Kind::extra_load:")
         self.assertNotIn(
@@ -2354,7 +2365,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_stress_combinations_are_derived_from_generated_features(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         for feature in (
             "masked_vector",
             "unmasked_vector",
@@ -2369,8 +2380,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("indexed_vector && scalar_forwarding", driver)
 
     def test_random_mixed_has_one_configurable_constraint_interface(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         runner = (MEMBLOCK_ROOT / "scripts/run_regression.py").read_text()
 
@@ -2780,7 +2791,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("constraint_overrides", runner)
 
     def test_random_mixed_preserves_atomic_serialization_contract(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         memblock = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
         ).read_text()
@@ -2795,7 +2806,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertNotIn("issue_atomic", concurrent_tail)
 
     def test_vector_cross_16_misalignment_advances_rob_head(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         self.assertIn("requires_misaligned_head", driver)
         self.assertIn("((address & 0xfU) + element_bytes) > 16U", driver)
         self.assertIn("requires_store_pending", driver)
@@ -2805,7 +2816,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("loads[index].index[8] = index == 4 ? 0xa0 : 0xa8", driver)
 
     def test_random_mixed_window_honors_scalar_misalignment_contract(self) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         for contract in (
             "constrained_window_address",
             "constraints.misaligned_per_mille",
@@ -2816,7 +2827,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, driver)
 
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
         for contract in (
             "bool hold_pending_store = false",
             "const auto clear_pending_store",
@@ -2835,7 +2846,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_scalar_misaligned_keeps_rar_pressure_behind_pending_splits(
         self,
     ) -> None:
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        driver = read_cpp_source("memblock_main.cpp")
         scenario = driver[
             driver.index("int run_scalar_misaligned"):
             driver.index("int run_misaligned_stores")
@@ -2855,8 +2866,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_random_mixed_drops_directed_release_snapshots_before_random_tail(
         self,
     ) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         directed_end = driver.index('phase = "seeded-mixed-tail"')
         dirty_pressure = driver.index('phase = "dcache-dirty-pressure"')
         directed_region = driver[dirty_pressure:directed_end]
@@ -2867,8 +2878,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
 
     def test_random_mmio_store_replays_until_tlb_hit(self) -> None:
-        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
-        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = read_cpp_source("memblock_main.cpp")
         self.assertIn("bool issue_store_address_until_tlb_hit(", environment)
         self.assertIn("store_tlb_feedbacks_ == feedbacks_before", environment)
         self.assertIn("store_tlb_misses_ == misses_before", environment)

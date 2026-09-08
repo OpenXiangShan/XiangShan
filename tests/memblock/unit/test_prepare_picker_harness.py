@@ -35,9 +35,15 @@ class PreparePickerHarnessTest(unittest.TestCase):
             main = sources / "memblock_main.cpp"
             environment = sources / "memblock_env.hpp"
             defaults = sources / "generated_port_defaults.hpp"
+            scenarios = sources / "scenarios"
+            scenarios.mkdir()
+            environment_parts = sources / "environment"
+            environment_parts.mkdir()
             main.write_text("main")
             environment.write_text("environment")
             defaults.write_text("defaults")
+            (scenarios / "random_mixed.inc").write_text("random-mixed")
+            (environment_parts / "model.inc").write_text("model")
 
             target = prepare_picker_harness.prepare(
                 picker, main, environment, defaults
@@ -48,6 +54,12 @@ class PreparePickerHarnessTest(unittest.TestCase):
             )
             self.assertEqual(
                 (target / "generated_port_defaults.hpp").read_text(), "defaults"
+            )
+            self.assertEqual(
+                (target / "scenarios/random_mixed.inc").read_text(), "random-mixed"
+            )
+            self.assertEqual(
+                (target / "environment/model.inc").read_text(), "model"
             )
             self.assertEqual((target / "generated.hpp").read_text(), "header")
 

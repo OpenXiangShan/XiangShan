@@ -97,7 +97,25 @@ load/store sequences -> generated lane adapters -> MemBlock
                               functional coverage
 ```
 
-The reusable C++ components are in `cpp/memblock_env.hpp`:
+The C++ harness is partitioned by verification responsibility while preserving
+Picker's single-translation-unit build:
+
+- `cpp/memblock_main.cpp` owns command-line parsing, constraint resolution,
+  coverage aggregation, scenario dispatch, and includes the scenario modules;
+- `cpp/scenarios/*.inc` groups focused and random sequences by verification
+  domain, so work on one family does not require loading the entire scenario
+  catalog;
+- `cpp/memblock_env.hpp` is the stable environment facade, while
+  `cpp/environment/*.inc` separates the reference model, DCache/PTW/uncache
+  agents, scoreboards, and top-level environment orchestration.
+
+The `.inc` modules are intentional: Picker exports `memblock_main.cpp` as a
+single generated `example.cpp`. `scripts/prepare_picker_harness.py` copies both
+module trees beside that file, and the Makefile includes every module in build
+dependencies and controller provenance hashes. This keeps compilation and ABI
+behavior unchanged while making ownership and review boundaries explicit.
+
+The reusable environment components provide:
 
 - reset and cycle control with registered Picker clock;
 - typed LSQ, scalar load/store, vector load/store, and software-prefetch drivers;
@@ -143,7 +161,7 @@ class runtime:
 
 | UVM responsibility | MemBlock implementation |
 | --- | --- |
-| Sequence/sequencer | Focused scenarios and deterministic seeded generators in `memblock_main.cpp` |
+| Sequence/sequencer | Focused scenarios and deterministic seeded generators in `cpp/scenarios/` |
 | Driver | Generated typed LSQ, scalar, vector, prefetch, redirect, and commit adapters |
 | Active agent | Coherent DCache, PTW, and uncache memory agents with independent backpressure |
 | Monitor | Per-cycle writeback, queue-dequeue, TLB-feedback, and TileLink handshake sampling |

@@ -7,6 +7,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+from typing import Sequence
 
 
 class HarnessError(RuntimeError):
@@ -24,6 +25,7 @@ def prepare(
     main_source: Path,
     environment_source: Path | None = None,
     defaults_source: Path | None = None,
+    support_source_dirs: Sequence[Path] | None = None,
 ) -> Path:
     picker_output = picker_output.resolve()
     compiled = picker_output / "build/UT_MemBlock"
@@ -57,6 +59,24 @@ def prepare(
     copy_required(main_source, target / "example.cpp")
     copy_required(environment_source, target / "memblock_env.hpp")
     copy_required(defaults_source, target / "generated_port_defaults.hpp")
+    if support_source_dirs is None:
+        support_source_dirs = [
+            main_source.parent / "scenarios",
+            main_source.parent / "environment",
+        ]
+    copied_names: set[str] = set()
+    for source_dir in support_source_dirs:
+        source_dir = source_dir.resolve()
+        if not source_dir.is_dir():
+            raise HarnessError(
+                f"required support source directory is missing: {source_dir}"
+            )
+        if source_dir.name in copied_names:
+            raise HarnessError(
+                f"duplicate support source directory name: {source_dir.name}"
+            )
+        copied_names.add(source_dir.name)
+        shutil.copytree(source_dir, target / source_dir.name)
     return target
 
 
@@ -66,6 +86,7 @@ def main() -> int:
     parser.add_argument("--main-source", type=Path, required=True)
     parser.add_argument("--environment-source", type=Path)
     parser.add_argument("--defaults-source", type=Path)
+    parser.add_argument("--support-source-dir", type=Path, action="append")
     args = parser.parse_args()
     try:
         print(
@@ -74,6 +95,7 @@ def main() -> int:
                 args.main_source,
                 args.environment_source,
                 args.defaults_source,
+                args.support_source_dir,
             )
         )
     except (OSError, HarnessError) as error:

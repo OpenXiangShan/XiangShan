@@ -38,7 +38,10 @@ RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
 FROZEN_RTL_METADATA := $(RUNTIME_DIR)/rtl.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
-CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py --controller-file Makefile
+CPP_SCENARIOS := $(sort $(wildcard cpp/scenarios/*.inc))
+CPP_ENV_PARTS := $(sort $(wildcard cpp/environment/*.inc))
+CPP_SUPPORT := $(CPP_SCENARIOS) $(CPP_ENV_PARTS)
+CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) $(foreach source,$(CPP_SUPPORT),--controller-file $(source)) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py --controller-file Makefile
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
@@ -88,7 +91,7 @@ $(PICKER_MODEL_STAMP): $(PICKER_EXPORT_STAMP)
 	@test -f $(PICKER_OUTPUT)/build/UT_MemBlock/libUTMemBlock.so
 	@touch $@
 
-$(PICKER_HARNESS_STAMP): $(PICKER_MODEL_STAMP) scripts/prepare_picker_harness.py $(CPP_MAIN) $(CPP_ENV) $(CPP_DEFAULTS)
+$(PICKER_HARNESS_STAMP): $(PICKER_MODEL_STAMP) scripts/prepare_picker_harness.py $(CPP_MAIN) $(CPP_ENV) $(CPP_SUPPORT) $(CPP_DEFAULTS)
 	$(PYTHON) scripts/prepare_picker_harness.py --picker-output $(PICKER_OUTPUT) --main-source $(CPP_MAIN)
 	@touch $@
 
