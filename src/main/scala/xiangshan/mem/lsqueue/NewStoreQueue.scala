@@ -1277,7 +1277,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       else v && (deqPtrVectorInactiveValid(i - 1) || deqPtrMoveFromSbuffer(i - 1).asBool)
     })
 
-    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.handleFinish && x.committed)).asUInt
+    private val uncacheMove = VecInit(deqCtrlEntries.map(x => x.handleFinish && x.committed && !x.vecInactive)).asUInt
 
     // The credit vector needs one more cycle because storeQueue forwarding observes the entry for one additional cycle.
     val deqCount = Cat(deqPtrMoveFromSbuffer.asUInt, deqPtrVectorInactiveMove, uncacheMove) // timing is ok ?
