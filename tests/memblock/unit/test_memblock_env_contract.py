@@ -445,6 +445,23 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             int(scala_store_entries.group(1)),
         )
 
+        configured_probe_entries = re.search(
+            r'"queue\.dcache_probe_entries"\s*:\s*(\d+)', config
+        )
+        scala_probe_entries = re.search(r"nProbeEntries\s*=\s*(\d+)", parameters)
+        cpp_probe_entries = re.search(r"kDcacheProbeEntries = (\d+)", environment)
+        self.assertIsNotNone(configured_probe_entries)
+        self.assertIsNotNone(scala_probe_entries)
+        self.assertIsNotNone(cpp_probe_entries)
+        self.assertEqual(
+            int(configured_probe_entries.group(1)),
+            int(scala_probe_entries.group(1)),
+        )
+        self.assertEqual(
+            int(cpp_probe_entries.group(1)),
+            int(scala_probe_entries.group(1)),
+        )
+
     def test_vector_fu_type_constants_match_scala_one_hot_order(self) -> None:
         fu_type = (
             REPO_ROOT / "src/main/scala/xiangshan/backend/fu/FuType.scala"
@@ -2600,8 +2617,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_need_data=",
             "actual_probe_overlap=",
             "actual_probe_depth=",
+            "target_probe_deep_depth=",
+            "actual_probe_cross=",
             "probe_max_outstanding=",
-            "constraint_schema=32",
+            "constraint_schema=33",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2713,7 +2732,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "retire_random_nc_store_error",
             "probe_overlap_base",
             "candidate_set",
-            "constraints.probe_depth_enabled(2)",
+            "half_block_bytes + line_index * 64",
+            "hold_dcache_c_until_probes",
+            "first_missing_probe_cross",
+            "return probes_per_mille != 0 && probe_depth_enabled",
+            "sample_probe",
         ):
             self.assertIn(contract, driver)
         for contract in (
@@ -2774,6 +2797,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "uncache-load-error-denied",
             "probe-overlap",
             "probe-triple-overlap",
+            "probe-depth3",
+            "probe-depth4",
+            "probe-depth5",
+            "probe-depth6",
+            "probe-depth7",
+            "probe-depth8",
             "stride-stream",
             "atomic-amo",
             "atomic-lrsc",

@@ -154,6 +154,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
+            33,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -337,15 +338,25 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         target_probe_triple_overlap = (
             result.get("target_probe_triple_overlap") if schema >= 32 else 0
         )
+        target_probe_deep_depth = (
+            _csv_counts(result, "target_probe_deep_depth", 6)
+            if schema >= 33
+            else [1]
+        )
         actual_probe_overlap = (
             _csv_counts(result, "actual_probe_overlap", 2)
             if schema >= 14
             else [0, 0]
         )
         actual_probe_depth = (
-            _csv_counts(result, "actual_probe_depth", 3)
+            _csv_counts(result, "actual_probe_depth", 8 if schema >= 33 else 3)
             if schema >= 32
             else [actual_probe_overlap[0], actual_probe_overlap[1], 0]
+        )
+        actual_probe_cross = (
+            _csv_counts(result, "actual_probe_cross", 32)
+            if schema >= 33
+            else []
         )
         probe_max_outstanding = (
             result.get("probe_max_outstanding") if schema >= 14 else 0
@@ -372,6 +383,17 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and 0 <= target_probe_triple_overlap <= 1000,
                 "target_probe_triple_overlap is not a per-mille integer: "
                 f"{target_probe_triple_overlap!r}",
+            )
+        if (
+            schema >= 33
+            and target_probe != 0
+            and target_probe_overlap != 0
+            and target_probe_triple_overlap != 0
+        ):
+            _require(
+                any(weight != 0 for weight in target_probe_deep_depth),
+                "target_probe_deep_depth cannot be all zero when deep Probe "
+                "overlap is enabled",
             )
         cmo_probe_count = 0
         if schema >= 13:
@@ -411,7 +433,11 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and actual_caps == [0, 0]
                 and actual_need_data == [0, 0]
                 and (schema < 14 or actual_probe_overlap == [0, 0])
-                and (schema < 32 or actual_probe_depth == [0, 0, 0]),
+                and (
+                    schema < 32
+                    or actual_probe_depth == [0] * len(actual_probe_depth)
+                )
+                and (schema < 33 or actual_probe_cross == [0] * 32),
                 "disabled constrained Probe has coverage observations",
             )
         if target_probe != 0 or schema >= 13:
@@ -450,13 +476,27 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         "Probe overlap never reached two outstanding sources",
                     )
                 if schema >= 32:
-                    depth_enabled = [
-                        target_probe_overlap != 1000,
-                        target_probe_overlap != 0
-                        and target_probe_triple_overlap != 1000,
-                        target_probe_overlap != 0
-                        and target_probe_triple_overlap != 0,
-                    ]
+                    depth_enabled = (
+                        [
+                            target_probe_overlap != 1000,
+                            target_probe_overlap != 0
+                            and target_probe_triple_overlap != 1000,
+                            *[
+                                target_probe_overlap != 0
+                                and target_probe_triple_overlap != 0
+                                and weight != 0
+                                for weight in target_probe_deep_depth
+                            ],
+                        ]
+                        if schema >= 33
+                        else [
+                            target_probe_overlap != 1000,
+                            target_probe_overlap != 0
+                            and target_probe_triple_overlap != 1000,
+                            target_probe_overlap != 0
+                            and target_probe_triple_overlap != 0,
+                        ]
+                    )
                     _require(
                         all(
                             (actual_probe_depth[index] > 0) == enabled
@@ -473,18 +513,65 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         actual_probe_overlap
                         == [
                             actual_probe_depth[0],
-                            actual_probe_depth[1] + actual_probe_depth[2],
+                            sum(actual_probe_depth[1:]),
                         ],
                         "Probe overlap compatibility projection is not conserved",
                     )
-                    if actual_probe_depth[2] > 0:
+                    highest_probe_depth = max(
+                        (
+                            index + 1
+                            for index, count in enumerate(actual_probe_depth)
+                            if count > 0
+                        ),
+                        default=0,
+                    )
+                    if highest_probe_depth > 0:
                         _require(
-                            probe_max_outstanding >= 3,
-                            "triple Probe overlap never reached three outstanding sources",
+                            probe_max_outstanding >= highest_probe_depth,
+                            "Probe overlap never reached its selected outstanding depth",
+                        )
+                    if schema >= 33:
+                        crossed_depths = [0] * 8
+                        crossed_caps = [0, 0]
+                        crossed_data = [0, 0]
+                        for depth in range(8):
+                            for cap in range(2):
+                                cap_enabled = (
+                                    target_to_b != 0
+                                    if cap else target_to_b != 1000
+                                )
+                                for data in range(2):
+                                    data_enabled = (
+                                        target_need_data != 0
+                                        if data else target_need_data != 1000
+                                    )
+                                    index = depth * 4 + cap * 2 + data
+                                    count = actual_probe_cross[index]
+                                    enabled = (
+                                        depth_enabled[depth]
+                                        and cap_enabled
+                                        and data_enabled
+                                    )
+                                    _require(
+                                        (count > 0) == enabled,
+                                        "actual_probe_cross has an enabled but "
+                                        f"uncovered class: {actual_probe_cross}",
+                                    )
+                                    crossed_depths[depth] += count
+                                    crossed_caps[cap] += count
+                                    crossed_data[data] += count
+                        _require(
+                            crossed_depths == actual_probe_depth
+                            and crossed_caps == actual_caps
+                            and crossed_data == actual_need_data,
+                            "Probe cross coverage does not match its marginals",
                         )
             probes = result.get("probes")
             auxiliary_probes = (
-                actual_probe_depth[1] + 2 * actual_probe_depth[2]
+                sum(
+                    depth_class * count
+                    for depth_class, count in enumerate(actual_probe_depth)
+                )
                 if schema >= 32
                 else actual_probe_overlap[1]
             )

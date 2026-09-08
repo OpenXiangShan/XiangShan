@@ -194,6 +194,16 @@ public:
         release_ready_window_target_lines_.clear();
     }
 
+    void hold_c_until_probe_requests(std::uint64_t target_requests)
+    {
+        if (hold_c_until_probe_requests_ ||
+            target_requests <= probe_request_count_) {
+            error_ = "invalid DCache Probe C hold target";
+            return;
+        }
+        hold_c_until_probe_requests_ = target_requests;
+    }
+
     void reset_link_state()
     {
         b_beats_.clear();
@@ -228,6 +238,7 @@ public:
         release_ready_window_stall_remaining_ = 0;
         release_ready_window_stall_cycles_ = 0;
         release_ready_window_completed_releases_ = 0;
+        hold_c_until_probe_requests_.reset();
         pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
         force_e_stall_ = random_backpressure_;
@@ -243,11 +254,14 @@ public:
     {
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
-        const bool accept_c = release_ready_window_active_
-            ? release_ready_window_first_complete_ ||
-                  release_ready_window_bypass_non_target_ ||
-                  release_ready_window_stall_remaining_ == 0
-            : !random_backpressure_ || (next_random() & 3U) != 0;
+        const bool hold_c_for_probes = hold_c_until_probe_requests_ &&
+            probe_request_count_ < *hold_c_until_probe_requests_;
+        const bool accept_c = !hold_c_for_probes &&
+            (release_ready_window_active_
+                 ? release_ready_window_first_complete_ ||
+                       release_ready_window_bypass_non_target_ ||
+                       release_ready_window_stall_remaining_ == 0
+                 : !random_backpressure_ || (next_random() & 3U) != 0);
         const bool accept_e = !random_backpressure_ ||
                               (!force_e_stall_ && (next_e_random() & 3U) != 0);
         dut.auto_inner_dcache_client_out_a_ready.ImmSet(accept_a);
@@ -465,6 +479,10 @@ public:
                 max_probe_outstanding_,
                 probe_request_count_ - probe_response_count_ -
                     probe_canceled_count_);
+            if (hold_c_until_probe_requests_ &&
+                probe_request_count_ >= *hold_c_until_probe_requests_) {
+                hold_c_until_probe_requests_.reset();
+            }
         }
         if (d_fire_) {
             const DBeat &response = d_beats_.front();
@@ -1356,6 +1374,7 @@ private:
     std::vector<std::uint64_t> pending_held_response_addresses_;
     std::optional<std::uint64_t> hold_next_response_address_;
     std::optional<std::uint64_t> building_held_response_address_;
+    std::optional<std::uint64_t> hold_c_until_probe_requests_;
     bool release_ready_window_active_ = false;
     bool release_ready_window_first_complete_ = false;
     bool release_ready_window_target_selected_ = false;

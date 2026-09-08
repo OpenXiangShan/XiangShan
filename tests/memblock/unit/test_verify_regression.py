@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 33
+        result["constraint_schema"] = 34
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1216,7 +1216,7 @@ class VerifyRegressionTest(unittest.TestCase):
         result["probe_max_outstanding"] = 2
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
-            "three outstanding sources",
+            "selected outstanding depth",
         ):
             verify_regression._check_mixed_coverage(result)
         result["probe_max_outstanding"] = 3
@@ -1226,6 +1226,64 @@ class VerifyRegressionTest(unittest.TestCase):
             "actual_probe_depth",
         ):
             verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 33,
+                "target_probe_deep_depth": "1,1,1,1,1,1",
+                "actual_probe_sequences": 32,
+                "actual_probe_caps": "16,16",
+                "actual_probe_need_data": "16,16",
+                "actual_probe_overlap": "4,28",
+                "actual_probe_depth": "4,4,4,4,4,4,4,4",
+                "actual_probe_cross": ",".join(["1"] * 32),
+                "probe_max_outstanding": 8,
+                "probes": 160,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 7
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "selected outstanding depth",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 8
+        result["target_probe_deep_depth"] = "0,0,0,0,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_probe_deep_depth cannot be all zero",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_probe_deep_depth"] = "1,1,1,1,1,1"
+        result["actual_probe_cross"] = ",".join(["0"] + ["1"] * 31)
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_probe_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_probe_cross"] = ",".join(["2"] + ["1"] * 31)
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "does not match its marginals",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_probe_cross"] = ",".join(["1"] * 32)
+        result["probes"] = 159
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "manager Probe count",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "actual_probe_sequences": 3,
+                "actual_probe_caps": "1,2",
+                "actual_probe_need_data": "1,2",
+                "actual_probe_overlap": "1,2",
+                "probe_max_outstanding": 3,
+                "probes": 8,
+            }
+        )
         result.update(
             {
                 "constraint_schema": 25,

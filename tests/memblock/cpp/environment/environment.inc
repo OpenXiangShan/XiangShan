@@ -350,6 +350,11 @@ public:
         return memory_agent_.request_probe(
             address, cap, need_data, expected_report, expected_data);
     }
+    bool hold_dcache_c_until_probes(std::uint64_t target_requests)
+    {
+        memory_agent_.hold_c_until_probe_requests(target_requests);
+        return check_components();
+    }
     void configure_backpressure(
         std::uint64_t seed, bool enabled,
         ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)

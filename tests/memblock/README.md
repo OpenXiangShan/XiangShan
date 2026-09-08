@@ -1026,12 +1026,13 @@ coverage plus final LSQ-accounting gates. The deterministic coherence scenario
 covers its directed coherence state sequence. The random tail can follow a
 completed dirty scalar store with a byte-exact manager Probe, independently
 crosses toB/toN and requested/mandatory data, and cleans up retained toB lines.
-The Probe overlap classes hold an unrelated refill open while one or two clean
-auxiliary Probes and a dirty primary Probe with distinct B-source IDs are queued
-together. Every address-matched C response must complete at the selected
-accepted-outstanding depth of two or three before the delayed load writes back.
-Four-or-more Probe sources and wider operation-class overlap remain follow-on
-coverage.
+The Probe overlap classes hold an unrelated refill open while zero to seven
+clean auxiliary Probes and a dirty primary Probe with distinct B-source IDs are
+queued together. The manager holds C unready until every selected B request is
+accepted, then address-matches every response and requires the exact selected
+accepted-outstanding depth from one through the configured eight-entry queue
+before the delayed load writes back. Wider operation-class overlap remains
+follow-on coverage.
 
 For example, these commands run the same generator in two directions:
 
@@ -1324,6 +1325,19 @@ also requires a measured maximum accepted-outstanding depth of three whenever
 the triple class is enabled. Coverage/SPEC/corner use conditional triple shares
 of 500/10/750 per mille. Four-or-more sources and composition with other
 operation classes remain separate.
+
+Schema 33 generalizes the deep class to the standard configuration's complete
+eight-entry ProbeQueue capacity. `probe-depth3` through `probe-depth8` are
+relative weights within the deep group; the coverage and corner profiles weight
+them uniformly, while SPEC biases toward shallower bursts without disabling any
+depth. For each sequence, the manager holds C unready until all selected B
+requests have fired, so the measured accepted-but-unanswered depth is exact
+rather than scheduler-dependent. `actual_probe_depth` now has eight fields and
+`actual_probe_cross` records all 32 depth x toN/toB x requested/mandatory-data
+bins. Simulator and offline gates require every enabled bin, exact projection
+onto the legacy overlap/cap/data counters, and manager Probe conservation.
+Cross-operation bursts, malformed responses, and longer source-wrap/reuse
+stress remain separate.
 
 For a reproducible local pressure run:
 

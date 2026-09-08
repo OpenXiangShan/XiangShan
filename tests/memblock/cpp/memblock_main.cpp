@@ -246,6 +246,8 @@ struct RandomConstraints {
     unsigned probe_need_data_per_mille = 0;
     unsigned probe_overlap_per_mille = 0;
     unsigned probe_triple_overlap_per_mille = 0;
+    std::array<unsigned, memblock::kDcacheProbeEntries - 2>
+        probe_deep_depth_weights{};
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
     unsigned uncache_error_per_mille = 0;
@@ -330,6 +332,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 500,
                 .probe_triple_overlap_per_mille = 500,
+                .probe_deep_depth_weights = {1, 1, 1, 1, 1, 1},
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .uncache_error_per_mille = 100,
@@ -416,6 +419,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 10,
                 .probe_triple_overlap_per_mille = 10,
+                .probe_deep_depth_weights = {32, 16, 8, 4, 2, 1},
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
                 .uncache_error_per_mille = 0,
@@ -502,6 +506,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 750,
                 .probe_triple_overlap_per_mille = 750,
+                .probe_deep_depth_weights = {1, 1, 1, 1, 1, 1},
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .uncache_error_per_mille = 500,
@@ -725,6 +730,15 @@ struct RandomConstraints {
             assign_weight(
                 set_pressure_width_keys, set_pressure_width_weights) ||
             assign_weight(set_pressure_set_keys, set_pressure_set_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view,
+                             memblock::kDcacheProbeEntries - 2>
+            probe_deep_depth_keys{{
+                "probe-depth3", "probe-depth4", "probe-depth5",
+                "probe-depth6", "probe-depth7", "probe-depth8",
+            }};
+        if (assign_weight(probe_deep_depth_keys, probe_deep_depth_weights)) {
             return;
         }
         constexpr std::array<std::string_view, 4> vector_addressing_keys{{
@@ -1437,6 +1451,14 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "probe requires a nonzero scalar-store weight");
         }
+        if (probes_per_mille != 0 && probe_overlap_per_mille != 0 &&
+            probe_triple_overlap_per_mille != 0 &&
+            std::accumulate(
+                probe_deep_depth_weights.begin(),
+                probe_deep_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "deep Probe depth constraint weights cannot all be zero");
+        }
         if (cmo_error_per_mille != 0 && operation_weights[cmo] == 0) {
             throw std::invalid_argument(
                 "cmo-error requires a nonzero CMO operation weight");
@@ -1676,24 +1698,54 @@ struct RandomConstraints {
             [](unsigned weight) { return weight != 0; }));
     }
 
-    std::array<unsigned, 3> probe_depth_weights() const
-    {
-        const unsigned overlap = probe_overlap_per_mille;
-        return {{
-            (1000U - overlap) * 1000U,
-            overlap * (1000U - probe_triple_overlap_per_mille),
-            overlap * probe_triple_overlap_per_mille,
-        }};
-    }
-
     unsigned choose_probe_depth(std::uint64_t random) const
     {
-        return choose_weighted(probe_depth_weights(), random);
+        if (random % 1000U >= probe_overlap_per_mille) {
+            return 0;
+        }
+        random /= 1000U;
+        if (random % 1000U >= probe_triple_overlap_per_mille) {
+            return 1;
+        }
+        return 2U + choose_weighted(probe_deep_depth_weights, random / 1000U);
     }
 
     bool probe_depth_enabled(unsigned depth_class) const
     {
-        return probe_depth_weights().at(depth_class) != 0;
+        if (depth_class == 0) {
+            return probe_overlap_per_mille != 1000;
+        }
+        if (depth_class == 1) {
+            return probe_overlap_per_mille != 0 &&
+                probe_triple_overlap_per_mille != 1000;
+        }
+        return probe_overlap_per_mille != 0 &&
+            probe_triple_overlap_per_mille != 0 &&
+            probe_deep_depth_weights.at(depth_class - 2U) != 0;
+    }
+
+    bool probe_cross_enabled(
+        unsigned depth_class, bool to_b, bool need_data) const
+    {
+        const bool cap_enabled = to_b
+            ? probe_to_b_per_mille != 0
+            : probe_to_b_per_mille != 1000;
+        const bool data_enabled = need_data
+            ? probe_need_data_per_mille != 0
+            : probe_need_data_per_mille != 1000;
+        return probes_per_mille != 0 && probe_depth_enabled(depth_class) &&
+            cap_enabled && data_enabled;
+    }
+
+    unsigned maximum_enabled_probe_depth() const
+    {
+        for (unsigned depth = memblock::kDcacheProbeEntries; depth != 0;
+             --depth) {
+            if (probe_depth_enabled(depth - 1U)) {
+                return depth;
+            }
+        }
+        return 0;
     }
 
     unsigned choose_translation_regime(std::uint64_t random) const
@@ -2069,7 +2121,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=32 constraints=" << name
+        stream << "constraint_schema=33 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2215,6 +2267,9 @@ struct RandomConstraints {
                << " target_probe_overlap=" << probe_overlap_per_mille
                << " target_probe_triple_overlap="
                << probe_triple_overlap_per_mille
+               << " target_probe_deep_depth=";
+        append_weights(stream, probe_deep_depth_weights);
+        stream
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
                << " target_uncache_error=" << uncache_error_per_mille
@@ -2626,8 +2681,44 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> probe_caps{};
     std::array<std::uint64_t, 2> probe_need_data{};
     std::array<std::uint64_t, 2> probe_overlaps{};
-    std::array<std::uint64_t, 3> probe_depths{};
+    std::array<std::uint64_t, memblock::kDcacheProbeEntries> probe_depths{};
+    std::array<std::uint64_t, memblock::kDcacheProbeEntries * 4>
+        probe_crosses{};
     std::uint64_t actions = 0;
+
+    static constexpr unsigned probe_cross_index(
+        unsigned depth_class, bool to_b, bool need_data)
+    {
+        return depth_class * 4U + static_cast<unsigned>(to_b) * 2U +
+            static_cast<unsigned>(need_data);
+    }
+
+    std::optional<unsigned> first_missing_probe_cross(
+        const RandomConstraints &constraints) const
+    {
+        for (unsigned index = 0; index < probe_crosses.size(); ++index) {
+            const unsigned depth_class = index / 4U;
+            const bool to_b = (index / 2U) % 2U != 0;
+            const bool need_data = index % 2U != 0;
+            if (constraints.probe_cross_enabled(
+                    depth_class, to_b, need_data) &&
+                probe_crosses[index] == 0) {
+                return index;
+            }
+        }
+        return std::nullopt;
+    }
+
+    void sample_probe(unsigned depth_class, bool to_b, bool need_data)
+    {
+        ++probe_sequences;
+        ++probe_caps[to_b ? 1U : 0U];
+        ++probe_need_data[need_data ? 1U : 0U];
+        ++probe_overlaps[depth_class != 0 ? 1U : 0U];
+        ++probe_depths.at(depth_class);
+        ++probe_crosses.at(
+            probe_cross_index(depth_class, to_b, need_data));
+    }
 
     void sample_operation(unsigned operation)
     {
@@ -3683,6 +3774,30 @@ struct ConstraintCoverage {
                     std::uint64_t{0}) != probe_sequences) {
                 return false;
             }
+            std::array<std::uint64_t, memblock::kDcacheProbeEntries>
+                crossed_depths{};
+            std::array<std::uint64_t, 2> crossed_caps{};
+            std::array<std::uint64_t, 2> crossed_data{};
+            for (unsigned depth = 0; depth < probe_depths.size(); ++depth) {
+                for (unsigned cap = 0; cap < crossed_caps.size(); ++cap) {
+                    for (unsigned data = 0; data < crossed_data.size(); ++data) {
+                        const std::uint64_t count = probe_crosses[
+                            probe_cross_index(depth, cap != 0, data != 0)];
+                        const bool enabled = constraints.probe_cross_enabled(
+                            depth, cap != 0, data != 0);
+                        if ((count != 0) != enabled) {
+                            return false;
+                        }
+                        crossed_depths[depth] += count;
+                        crossed_caps[cap] += count;
+                        crossed_data[data] += count;
+                    }
+                }
+            }
+            if (crossed_depths != probe_depths ||
+                crossed_caps != probe_caps || crossed_data != probe_need_data) {
+                return false;
+            }
         }
         if (backpressure) {
             const auto complete_latency = [](
@@ -4121,7 +4236,15 @@ public:
                << " actual_probe_overlap=" << probe_overlaps[0] << ','
                << probe_overlaps[1]
                << " actual_probe_depth=" << probe_depths[0] << ','
-               << probe_depths[1] << ',' << probe_depths[2]
+               << probe_depths[1] << ',' << probe_depths[2] << ','
+               << probe_depths[3] << ',' << probe_depths[4] << ','
+               << probe_depths[5] << ',' << probe_depths[6] << ','
+               << probe_depths[7]
+               << " actual_probe_cross=";
+        for (unsigned index = 0; index < probe_crosses.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << probe_crosses[index];
+        }
+        stream
                << latency_summary("dcache_latency", dcache_latency)
                << latency_summary("ptw_latency", ptw_latency)
                << latency_summary("uncache_latency", uncache_latency);

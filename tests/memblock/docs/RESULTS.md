@@ -3055,3 +3055,80 @@ No CPU RTL defect was observed. Four-or-more simultaneous Probe sources,
 cross-operation Probe bursts, malformed coherence traffic, four-or-more
 replacement windows, and replacement composition with Probe/CMO traffic remain
 explicit DCache breadth gaps.
+
+## Schema 33 Full Probe-Queue Depth Closure
+
+On 2026-09-09 the common `random-mixed` generator extended Probe bursts to the
+configured eight-entry DCache ProbeQueue capacity. The capacity is now a
+checked generated-configuration dimension and a shared model constant rather
+than a scenario-local assumption. Selection remains hierarchical:
+`probe-overlap` chooses depth one versus a burst, `probe-triple-overlap`
+chooses depth two versus the depth-three-through-eight group, and the new
+`probe-depth3` through `probe-depth8` weights choose within that group.
+
+Schema 33 replaces the separate depth/cap/data closure checks with 32
+authoritative depth x toN/toB x no-data/need-data cross bins while retaining
+the marginal counters as exact projections. The constraints own reachability,
+the coverage model owns missing-bin selection, sampling, and conservation,
+the scenario owns transaction generation, and the offline verifier independently
+recomputes the same required projections from the serialized result. Before
+each selected burst, the DCache manager holds C ready low until all B requests
+have been accepted. The measured accepted-but-unanswered depth must therefore
+reach the selected depth without depending on an internal DUT signal.
+
+The following final-behavior runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Probe depth 1/2/3/4/5/6/7/8 | Maximum accepted outstanding |
+| --- | ---: | ---: | ---: | ---: |
+| depth-1-only `coverage` | 33001 | 125,788 | 5/0/0/0/0/0/0/0 | 1 |
+| depth-8-only `coverage` | 33008 | 149,698 | 0/0/0/0/0/0/0/5 | 8 |
+| Probe-disabled `coverage` | 33000 | 568,306 | 0/0/0/0/0/0/0/0 | 1 (CMO only) |
+| Probe-only closure `coverage` | 33032 | 202,168 | 4/4/4/4/4/4/4/4 | 8 |
+| full `coverage` | 33040 | 656,923 | 5/5/4/4/4/4/4/4 | 8 |
+| full `spec` | 33041 | 1,277,771 | 4/4/4/4/4/4/4/4 | 8 |
+| full `corner` | 33042 | 1,396,187 | 4/4/4/4/4/4/4/4 | 8 |
+| frozen `coverage` artifact | 1 | 653,484 | 4/4/4/4/4/4/4/4 | 8 |
+
+Every fully enabled run hit all 32 Probe cross bins. The full coverage, SPEC,
+and corner seeds also retained all 576 schema-31 replacement bins. The frozen
+seed generated 32 primary Probe sequences, balanced cap and data marginals at
+16/16, projected depth one versus burst overlap at 4/28, and hit every cross
+exactly once. Its 32 primary, 112 auxiliary, 16 toB cleanup, and one CMO
+request account exactly for the reported 161 manager Probes. Its set-pressure
+window counts were 192/192/193; clean/dirty,
+no-overlap/held-refill, and no-stall/stall counts were respectively 288/289,
+289/288, and 289/288.
+
+The Probe-disabled seed closed the remaining common coverage with all Probe
+sequence, depth, and cross counters at zero. Its two observed manager Probes
+were independently generated successful CMO operations and satisfy the same
+manager conservation rule; no disabled constrained Probe leaked into traffic.
+
+The first frozen seed exposed a deterministic UT address-allocation defect,
+not an RTL defect. The held-refill address was derived from the first auxiliary
+clean line. When allocation skipped a clean line that aliased the primary set,
+adjacent Probe sequences could derive the same supposed cold miss address. A
+resident line then produced no new DCache request and the harness timed out
+waiting for one. The held-refill allocator now derives a unique line from the
+sequence block and line index, independently of the filtered auxiliary list.
+The original seed passes at cycle 653,484 after this correction, so no
+standalone CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-coherence`,
+`dcache-errors`, `atomic-dchannel-errors`, both depth endpoints, the focused
+32-bin run, the Probe-disabled profile, all three complete constraint profiles,
+the original failing-seed replay, and the independent frozen-artifact verifier
+passed. The frozen executable and runtime-manifest SHA-256 values are
+`3fd2f6443a155f97914777ec8aae82ce2fdcc162484bdf7e205362f739aae361`
+and `c504aaf039d2503206a72b6d7f9a80c7d6d3c152b4a833a9ef5e4534a04ff873`.
+The accepted artifact is `build/memblock/schema33-coverage-1x1056.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed_seconds=262.504200 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=91a09e2103b14e0209893816c50f2b0ef6747275d48b963ee5612c7bf8be0e87
+```
+
+No CPU RTL defect was observed. Cross-operation Probe bursts, malformed
+coherence traffic, wider B-source wrap/reuse campaigns, four-or-more
+replacement windows, and replacement composition with Probe/CMO traffic remain
+explicit DCache breadth gaps.
