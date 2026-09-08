@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 30
+        result["constraint_schema"] = 31
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1126,6 +1126,39 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "set-pressure backpressure/operation coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 30,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,128",
+                "actual_set_pressure_line_state": "64,64",
+                "actual_set_pressure_refill_overlap": "64,64",
+                "actual_set_pressure_release_backpressure": "64,64",
+                "target_set_pressure_dual_window": 500,
+                "actual_set_pressure_dual_window": "64,64",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 128
+                ),
+                "actual_set_pressure_set": "32,32,32,32",
+                "actual_set_pressure_issue_order": "456,456",
+                "actual_set_pressure_manager": (
+                    "64,912,912,144,144,144,912,912,144"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "64,912,912,912,144,144,0,144,0,0,1872,1872"
+                ),
+                "actual_set_pressure_overlap_manager": "96,96,144,96,96",
+                "actual_set_pressure_backpressure_manager": (
+                    "64,64,1024,1024,128"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_dual_window"] = "65,63"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure dual-window/operation coverage",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

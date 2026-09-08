@@ -2858,3 +2858,72 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=672 elapsed_
 
 No CPU RTL defect was observed. Multiple simultaneous replacement windows are
 the next explicit DCache breadth gap.
+
+## Schema 30 Dual Replacement-Window Closure
+
+On 2026-09-09 `random-mixed` added `set-pressure-dual-window` and expanded
+set-pressure coverage to 384 required clean/dirty x no-overlap/held-refill x
+no-C-stall/C-stall x single/dual-window x 9/10-line x B/H/W/D x
+Bare/stage-1/nested bins. A dual action allocates two distinct physical sets in
+opposite index quarters. When refill overlap is selected, the DCache agent holds
+two complete D transactions by cache-line address. Both load identities must
+remain pending until each target set independently emits at least `depth - 8`
+attributed Release or ReleaseData transactions; only then are the two responses
+released by address. Requests, writebacks, and queue dequeues are conserved by
+window count. The target C-ready window remains action scoped and stalls exactly
+one attributed transaction when selected.
+
+Dirty actions now commit and drain the first eight lines in both sets before
+issuing the ninth/tenth overflow lines. This establishes two dirty resident
+baselines before replacement and prevents an earlier clean eviction from
+satisfying the ReleaseData minimum. Clean actions retain exact forward-fill and
+reverse-revisit data checks. The minimum mixed length is now 864 actions,
+leaving room after every enabled cross bin has been scheduled.
+
+The following final-binary runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/dirty | No-overlap/held | No-stall/stall | Single/dual | Held windows/releases while held |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dual-only `coverage` | 30001 | 278,456 | 97/99 | 98/98 | 98/98 | 0/196 | 196/295 |
+| single-only `coverage` | 30002 | 203,796 | 96/96 | 96/96 | 96/96 | 192/0 | 96/144 |
+| full `coverage` | 30003 | 354,897 | 194/193 | 193/194 | 194/193 | 193/194 | 292/443 |
+| frozen `coverage` artifact | 1 | 345,125 | 193/195 | 193/195 | 194/194 | 192/196 | 294/448 |
+
+Both endpoints hit all 192 reachable bins and kept the disabled window class
+at zero. Both fully enabled runs hit all 384 bins and every set quarter. In the
+frozen artifact, 388 set-pressure actions generated 2,796 exact dirty target
+requests/store writebacks/SQ dequeues and 444 byte-verified target
+ReleaseData transactions. Clean pressure generated 2,756 initial target
+requests and exact revisits, at least 436 revisit misses, 741 attributed target
+Releases, zero target ReleaseData, and 5,658 load writebacks/LQ dequeues. Its
+195 overlap actions represented 294 held windows, each with one request,
+writeback, and dequeue; 448 target releases completed while all corresponding
+loads were still pending. The 194 selected C-backpressure actions produced
+exactly 194 stalled target transactions, 3,104 stall cycles, and 3,104 payload
+stability checks.
+
+Development exposed three UT defects rather than RTL defects. First, issuing
+all dirty lines before the initial commit allowed clean target evictions, so the
+dirty baseline was split from overflow issue. Second, a fixed auxiliary overlap
+tag could already be resident after a long mixed prefix, so overlap addresses
+are now chosen from target-group lines with no prior observed DCache request.
+Third, the DCache idle predicate omitted an in-progress multibeat
+`ReleaseData`; this could close a target ready window while an unrelated final
+C beat was pending. The predicate now includes that transaction state. The
+original constrained failing seeds pass after these harness corrections, so no
+CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-errors`,
+`dcache-coherence`, `atomic-dchannel-errors`, the dirty dual-overlap reproducer,
+both single/dual endpoints, the fully enabled coverage run, and the independent
+frozen-artifact verifier passed. The frozen executable SHA-256 is
+`66d1d463930de5c9ebb20d185a9d157073e80572f9b1e5c401e66d8d3d8bb42b`.
+The accepted artifact is `build/memblock/schema30-coverage-1x864.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=864 elapsed_seconds=135.656291 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=b5b1e01384f907718c949e908b6af0890bb2dc72550741c45eefe41c21c03f90
+```
+
+No CPU RTL defect was observed. Three-or-more simultaneous replacement windows
+and composition with Probe/CMO traffic remain explicit DCache breadth gaps.

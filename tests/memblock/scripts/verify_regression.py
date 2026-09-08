@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1574,6 +1574,29 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                             "actual_set_pressure_backpressure_manager",
                             5,
                         )
+                        if schema >= 30:
+                            target_pressure_dual = result.get(
+                                "target_set_pressure_dual_window"
+                            )
+                            _require(
+                                isinstance(target_pressure_dual, int)
+                                and not isinstance(target_pressure_dual, bool)
+                                and 0 <= target_pressure_dual <= 1000,
+                                "target_set_pressure_dual_window is not a "
+                                "per-mille integer: "
+                                f"{target_pressure_dual!r}",
+                            )
+                            actual_pressure_dual = _csv_counts(
+                                result,
+                                "actual_set_pressure_dual_window",
+                                2,
+                            )
+                        else:
+                            target_pressure_dual = 0
+                            actual_pressure_dual = [
+                                actual_operations[13],
+                                0,
+                            ]
                     else:
                         target_pressure_backpressure = 0
                         actual_pressure_backpressure = [
@@ -1581,6 +1604,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                             0,
                         ]
                         actual_pressure_backpressure_manager = [0] * 5
+                        target_pressure_dual = 0
+                        actual_pressure_dual = [actual_operations[13], 0]
                 else:
                     target_pressure_overlap = 0
                     actual_pressure_overlap = [actual_operations[13], 0]
@@ -1588,10 +1613,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     target_pressure_backpressure = 0
                     actual_pressure_backpressure = [actual_operations[13], 0]
                     actual_pressure_backpressure_manager = [0] * 5
+                    target_pressure_dual = 0
+                    actual_pressure_dual = [actual_operations[13], 0]
                 actual_pressure_cross = _csv_counts(
                     result,
                     "actual_set_pressure_cross",
-                    192 if schema >= 29 else 96 if schema >= 28 else 48,
+                    384 if schema >= 30
+                    else 192 if schema >= 29
+                    else 96 if schema >= 28
+                    else 48,
                 )
                 actual_pressure_clean_manager = _csv_counts(
                     result, "actual_set_pressure_clean_manager", 12
@@ -1605,6 +1635,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 target_pressure_backpressure = 0
                 actual_pressure_backpressure = [actual_operations[13], 0]
                 actual_pressure_backpressure_manager = [0] * 5
+                target_pressure_dual = 0
+                actual_pressure_dual = [actual_operations[13], 0]
                 actual_pressure_cross = _csv_counts(
                     result, "actual_set_pressure_cross", 24
                 )
@@ -1625,9 +1657,11 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             pressure_clean_loads = 0
             pressure_min_revisits = 0
             pressure_overlap_actions = 0
-            pressure_clean_overlap_actions = 0
+            pressure_overlap_windows = 0
+            pressure_clean_overlap_windows = 0
             pressure_overlap_min_releases = 0
             pressure_backpressure_actions = 0
+            pressure_dual_actions = 0
             for state in range(2):
                 state_enabled = (
                     target_pressure_dirty != 1000
@@ -1646,87 +1680,115 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                             if backpressure == 0
                             else target_pressure_backpressure != 0
                         )
-                        for depth in range(2):
-                            for width in range(4):
-                                for regime in range(3):
-                                    if schema >= 29:
-                                        index = (
-                                            state * 96
-                                            + overlap * 48
-                                            + backpressure * 24
-                                            + depth * 12
-                                            + width * 3
-                                            + regime
-                                        )
-                                        count = actual_pressure_cross[index]
-                                    elif backpressure != 0:
-                                        count = 0
-                                    elif schema >= 28:
-                                        index = (
-                                            state * 48
-                                            + overlap * 24
-                                            + depth * 12
-                                            + width * 3
-                                            + regime
-                                        )
-                                        count = actual_pressure_cross[index]
-                                    elif overlap != 0:
-                                        count = 0
-                                    elif schema >= 27:
-                                        count = actual_pressure_cross[
-                                            state * 24
-                                            + depth * 12
-                                            + width * 3
-                                            + regime
-                                        ]
-                                    elif state == 0:
-                                        count = 0
-                                    else:
-                                        count = actual_pressure_cross[
-                                            depth * 12 + width * 3 + regime
-                                        ]
-                                    enabled = (
-                                        pressure_enabled
-                                        and state_enabled
-                                        and overlap_enabled
-                                        and backpressure_enabled
-                                        and target_pressure_depth[depth] != 0
-                                        and target_pressure_width[width] != 0
-                                        and target_translation[regime] != 0
-                                    )
-                                    _require(
-                                        (count > 0) == enabled,
-                                        "actual_set_pressure_cross does not "
-                                        "match enabled classes: "
-                                        f"state={state} overlap={overlap} "
-                                        f"backpressure={backpressure} "
-                                        f"depth={depth} width={width} "
-                                        f"regime={regime}",
-                                    )
-                                    pressure_actions += count
-                                    if state == 0:
-                                        pressure_clean_loads += count * (
-                                            depth + 9
-                                        )
-                                        pressure_min_revisits += count * (
-                                            depth + 1
-                                        )
-                                    else:
-                                        pressure_stores += count * (depth + 9)
-                                        pressure_min_releases += count * (
-                                            depth + 1
-                                        )
-                                    if overlap != 0:
-                                        pressure_overlap_actions += count
-                                        pressure_overlap_min_releases += (
-                                            count * (depth + 1)
-                                        )
-                                        if state == 0:
-                                            pressure_clean_overlap_actions += (
-                                                count
+                        for dual in range(2):
+                            dual_enabled = (
+                                target_pressure_dual != 1000
+                                if dual == 0
+                                else target_pressure_dual != 0
+                            )
+                            windows = dual + 1
+                            for depth in range(2):
+                                for width in range(4):
+                                    for regime in range(3):
+                                        if schema >= 30:
+                                            index = (
+                                                state * 192
+                                                + overlap * 96
+                                                + backpressure * 48
+                                                + dual * 24
+                                                + depth * 12
+                                                + width * 3
+                                                + regime
                                             )
-                                    if backpressure != 0:
-                                        pressure_backpressure_actions += count
+                                            count = actual_pressure_cross[index]
+                                        elif dual != 0:
+                                            count = 0
+                                        elif schema >= 29:
+                                            index = (
+                                                state * 96
+                                                + overlap * 48
+                                                + backpressure * 24
+                                                + depth * 12
+                                                + width * 3
+                                                + regime
+                                            )
+                                            count = actual_pressure_cross[index]
+                                        elif backpressure != 0:
+                                            count = 0
+                                        elif schema >= 28:
+                                            index = (
+                                                state * 48
+                                                + overlap * 24
+                                                + depth * 12
+                                                + width * 3
+                                                + regime
+                                            )
+                                            count = actual_pressure_cross[index]
+                                        elif overlap != 0:
+                                            count = 0
+                                        elif schema >= 27:
+                                            count = actual_pressure_cross[
+                                                state * 24
+                                                + depth * 12
+                                                + width * 3
+                                                + regime
+                                            ]
+                                        elif state == 0:
+                                            count = 0
+                                        else:
+                                            count = actual_pressure_cross[
+                                                depth * 12 + width * 3 + regime
+                                            ]
+                                        enabled = (
+                                            pressure_enabled
+                                            and state_enabled
+                                            and overlap_enabled
+                                            and backpressure_enabled
+                                            and dual_enabled
+                                            and target_pressure_depth[depth] != 0
+                                            and target_pressure_width[width] != 0
+                                            and target_translation[regime] != 0
+                                        )
+                                        _require(
+                                            (count > 0) == enabled,
+                                            "actual_set_pressure_cross does "
+                                            "not match enabled classes: "
+                                            f"state={state} overlap={overlap} "
+                                            f"backpressure={backpressure} "
+                                            f"dual={dual} depth={depth} "
+                                            f"width={width} regime={regime}",
+                                        )
+                                        pressure_actions += count
+                                        if state == 0:
+                                            pressure_clean_loads += (
+                                                count * windows * (depth + 9)
+                                            )
+                                            pressure_min_revisits += (
+                                                count * windows * (depth + 1)
+                                            )
+                                        else:
+                                            pressure_stores += (
+                                                count * windows * (depth + 9)
+                                            )
+                                            pressure_min_releases += (
+                                                count * windows * (depth + 1)
+                                            )
+                                        if overlap != 0:
+                                            pressure_overlap_actions += count
+                                            pressure_overlap_windows += (
+                                                count * windows
+                                            )
+                                            pressure_overlap_min_releases += (
+                                                count * windows * (depth + 1)
+                                            )
+                                            if state == 0:
+                                                pressure_clean_overlap_windows += (
+                                                    count * windows
+                                                )
+                                        if backpressure != 0:
+                                            pressure_backpressure_actions += count
+                                        if dual != 0:
+                                            pressure_dual_actions += count
             _require(
                 pressure_actions == actual_operations[13]
                 and sum(actual_pressure_state) == pressure_actions,
@@ -1780,6 +1842,24 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and actual_pressure_backpressure[0]
                 == pressure_actions - pressure_backpressure_actions,
                 "set-pressure backpressure/operation coverage is not "
+                "conserved",
+            )
+            for dual, count in enumerate(actual_pressure_dual):
+                dual_enabled = (
+                    target_pressure_dual != 1000
+                    if dual == 0
+                    else target_pressure_dual != 0
+                )
+                _require(
+                    (count > 0) == (pressure_enabled and dual_enabled),
+                    "actual_set_pressure_dual_window does not match enabled "
+                    f"classes: {actual_pressure_dual}",
+                )
+            _require(
+                actual_pressure_dual[1] == pressure_dual_actions
+                and actual_pressure_dual[0]
+                == pressure_actions - pressure_dual_actions,
+                "set-pressure dual-window/operation coverage is not "
                 "conserved",
             )
             for set_quartile, count in enumerate(actual_pressure_set):
@@ -1839,21 +1919,27 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and actual_pressure_clean_manager[9]
                 == actual_pressure_clean_manager[8]
                 and actual_pressure_clean_manager[10]
-                == pressure_clean_loads * 2 + pressure_clean_overlap_actions
+                == pressure_clean_loads * 2 + pressure_clean_overlap_windows
                 and actual_pressure_clean_manager[11]
-                == pressure_clean_loads * 2 + pressure_clean_overlap_actions,
+                == pressure_clean_loads * 2 + pressure_clean_overlap_windows,
                 "clean set-pressure manager accounting is not conserved",
             )
+            expected_overlap_manager_items = (
+                pressure_overlap_windows
+                if schema >= 30
+                else pressure_overlap_actions
+            )
             _require(
-                actual_pressure_overlap_manager[0] == pressure_overlap_actions
+                actual_pressure_overlap_manager[0]
+                == expected_overlap_manager_items
                 and actual_pressure_overlap_manager[1]
-                == pressure_overlap_actions
+                == expected_overlap_manager_items
                 and actual_pressure_overlap_manager[2]
                 >= pressure_overlap_min_releases
                 and actual_pressure_overlap_manager[3]
-                == pressure_overlap_actions
+                == expected_overlap_manager_items
                 and actual_pressure_overlap_manager[4]
-                == pressure_overlap_actions,
+                == expected_overlap_manager_items,
                 "set-pressure refill-overlap accounting is not conserved",
             )
             if schema >= 29:

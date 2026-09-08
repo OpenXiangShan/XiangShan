@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 672;
+    constexpr unsigned minimum_actions = 864;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -4450,6 +4450,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             bool set_pressure_dirty = false;
             bool set_pressure_refill_overlap = false;
             bool set_pressure_release_backpressure = false;
+            bool set_pressure_dual_window = false;
             if (kind == RandomConstraints::set_pressure) {
                 set_pressure_depth_index =
                     constraints.choose_set_pressure_depth(random());
@@ -4466,6 +4467,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 set_pressure_release_backpressure = choose_binary_class(
                     constraints.set_pressure_release_backpressure_per_mille,
                     constraint_coverage.set_pressure_release_backpressures);
+                set_pressure_dual_window = choose_binary_class(
+                    constraints.set_pressure_dual_window_per_mille,
+                    constraint_coverage.set_pressure_dual_windows);
                 for (unsigned set = 0;
                      set < constraint_coverage.set_pressure_sets.size(); ++set) {
                     if (constraints.set_pressure_set_weights[set] != 0 &&
@@ -4765,74 +4769,97 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             if (!backpressure_enabled) {
                                 continue;
                             }
-                            for (unsigned depth = 0;
-                                 depth < constraint_coverage
-                                             .set_pressure_crosses[state]
-                                                                  [overlap]
-                                                                  [backpressure]
-                                             .size() &&
+                            for (unsigned dual = 0;
+                                 dual < constraint_coverage
+                                            .set_pressure_crosses[state]
+                                                                 [overlap]
+                                                                 [backpressure]
+                                            .size() &&
                                      !forced_cross;
-                                 ++depth) {
-                                if (constraints
-                                        .set_pressure_depth_weights[depth] == 0) {
+                                 ++dual) {
+                                const bool dual_enabled = dual == 0
+                                    ? constraints
+                                              .set_pressure_dual_window_per_mille !=
+                                          1000
+                                    : constraints
+                                              .set_pressure_dual_window_per_mille !=
+                                          0;
+                                if (!dual_enabled) {
                                     continue;
                                 }
-                                for (unsigned width = 0;
-                                     width < constraint_coverage
+                                for (unsigned depth = 0;
+                                     depth < constraint_coverage
                                                  .set_pressure_crosses[state]
                                                                       [overlap]
                                                                       [backpressure]
-                                                                      [depth]
+                                                                      [dual]
                                                  .size() &&
                                          !forced_cross;
-                                     ++width) {
-                                    if (constraints.set_pressure_width_weights
-                                            [width] == 0) {
+                                     ++depth) {
+                                    if (constraints.set_pressure_depth_weights
+                                            [depth] == 0) {
                                         continue;
                                     }
-                                    for (unsigned regime = 0;
-                                         regime < RandomConstraints::
-                                             translation_regime_count;
-                                         ++regime) {
-                                        if (constraints.translation_weights
-                                                    [regime] != 0 &&
-                                            constraint_coverage
-                                                    .set_pressure_crosses[state]
-                                                                         [overlap]
-                                                                         [backpressure]
-                                                                         [depth]
-                                                                         [width]
-                                                                         [regime] ==
-                                                0) {
-                                            set_pressure_dirty = state != 0;
-                                            set_pressure_refill_overlap =
-                                                overlap != 0;
-                                            set_pressure_release_backpressure =
-                                                backpressure != 0;
-                                            set_pressure_depth_index = depth;
-                                            set_pressure_width = width;
-                                            translation = TranslationContext{};
-                                            translation.regime = regime;
-                                            if (regime == RandomConstraints::
-                                                    translation_stage1) {
-                                                translation.stage1_mode =
-                                                    first_enabled_mode(
-                                                        constraints.
-                                                            stage1_mode_weights);
-                                            } else if (regime ==
-                                                       RandomConstraints::
-                                                           translation_nested) {
-                                                translation.vs_mode =
-                                                    first_enabled_mode(
-                                                        constraints.
-                                                            vs_mode_weights);
-                                                translation.g_mode =
-                                                    first_enabled_mode(
-                                                        constraints.
-                                                            g_mode_weights);
+                                    for (unsigned width = 0;
+                                         width < constraint_coverage
+                                                     .set_pressure_crosses[state]
+                                                                          [overlap]
+                                                                          [backpressure]
+                                                                          [dual]
+                                                                          [depth]
+                                                     .size() &&
+                                             !forced_cross;
+                                         ++width) {
+                                        if (constraints
+                                                .set_pressure_width_weights
+                                                    [width] == 0) {
+                                            continue;
+                                        }
+                                        for (unsigned regime = 0;
+                                             regime < RandomConstraints::
+                                                 translation_regime_count;
+                                             ++regime) {
+                                            if (constraints.translation_weights
+                                                        [regime] != 0 &&
+                                                constraint_coverage
+                                                        .set_pressure_crosses
+                                                            [state][overlap]
+                                                            [backpressure][dual]
+                                                            [depth][width]
+                                                            [regime] == 0) {
+                                                set_pressure_dirty = state != 0;
+                                                set_pressure_refill_overlap =
+                                                    overlap != 0;
+                                                set_pressure_release_backpressure =
+                                                    backpressure != 0;
+                                                set_pressure_dual_window =
+                                                    dual != 0;
+                                                set_pressure_depth_index = depth;
+                                                set_pressure_width = width;
+                                                translation =
+                                                    TranslationContext{};
+                                                translation.regime = regime;
+                                                if (regime == RandomConstraints::
+                                                        translation_stage1) {
+                                                    translation.stage1_mode =
+                                                        first_enabled_mode(
+                                                            constraints.
+                                                                stage1_mode_weights);
+                                                } else if (regime ==
+                                                           RandomConstraints::
+                                                               translation_nested) {
+                                                    translation.vs_mode =
+                                                        first_enabled_mode(
+                                                            constraints.
+                                                                vs_mode_weights);
+                                                    translation.g_mode =
+                                                        first_enabled_mode(
+                                                            constraints.
+                                                                g_mode_weights);
+                                                }
+                                                forced_cross = true;
+                                                break;
                                             }
-                                            forced_cross = true;
-                                            break;
                                         }
                                     }
                                 }
@@ -5330,25 +5357,53 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     set_pressure_span / group_stride;
                 constexpr std::uint64_t sequences_per_quartile =
                     groups * sets_per_quartile;
-                std::uint64_t &quartile_sequence =
-                    set_pressure_sequences.at(set_pressure_set);
-                if (quartile_sequence >= sequences_per_quartile) {
-                    phase = "random-set-pressure-address-space-exhausted";
-                    return false;
+                struct SetPressureWindow {
+                    std::uint64_t sequence;
+                    std::uint64_t first_line;
+                    unsigned set_index;
+                };
+                const unsigned window_count =
+                    set_pressure_dual_window ? 2U : 1U;
+                const std::array<unsigned, 2> window_quartiles{{
+                    set_pressure_set,
+                    (set_pressure_set + 2U) % 4U,
+                }};
+                for (unsigned window = 0; window < window_count; ++window) {
+                    if (set_pressure_sequences.at(window_quartiles[window]) >=
+                        sequences_per_quartile) {
+                        phase = "random-set-pressure-address-space-exhausted";
+                        return false;
+                    }
                 }
-                const std::uint64_t sequence = quartile_sequence++;
-                const std::uint64_t group = sequence / sets_per_quartile;
-                const unsigned set_index = set_pressure_set *
-                        sets_per_quartile +
-                    static_cast<unsigned>(sequence % sets_per_quartile);
-                const std::uint64_t first_line = set_pressure_base +
-                    group * group_stride + set_index * line_bytes;
+                std::vector<SetPressureWindow> pressure_windows;
+                pressure_windows.reserve(window_count);
+                for (unsigned window = 0; window < window_count; ++window) {
+                    const unsigned quartile = window_quartiles[window];
+                    const std::uint64_t sequence =
+                        set_pressure_sequences.at(quartile)++;
+                    const std::uint64_t group =
+                        sequence / sets_per_quartile;
+                    const unsigned set_index = quartile * sets_per_quartile +
+                        static_cast<unsigned>(sequence % sets_per_quartile);
+                    pressure_windows.push_back(SetPressureWindow{
+                        sequence,
+                        set_pressure_base + group * group_stride +
+                            set_index * line_bytes,
+                        set_index,
+                    });
+                }
+                const std::uint64_t sequence =
+                    pressure_windows.front().sequence;
+                const unsigned set_index =
+                    pressure_windows.front().set_index;
                 const unsigned depth = set_pressure_depth_index + 9U;
                 std::vector<std::uint64_t> target_lines;
-                target_lines.reserve(depth);
-                for (unsigned index = 0; index < depth; ++index) {
-                    target_lines.push_back(
-                        first_line + index * same_set_stride);
+                target_lines.reserve(window_count * depth);
+                for (const auto &window : pressure_windows) {
+                    for (unsigned index = 0; index < depth; ++index) {
+                        target_lines.push_back(
+                            window.first_line + index * same_set_stride);
+                    }
                 }
                 const unsigned width_bytes = 1U << set_pressure_width;
                 const unsigned bank = static_cast<unsigned>(random() % 8U);
@@ -5358,7 +5413,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
                 environment.clear_release_line_expectations();
                 environment.begin_dcache_release_observation();
-                std::optional<memblock::LoadTransaction> overlap_load;
+                std::vector<memblock::LoadTransaction> overlap_loads;
+                std::vector<std::uint64_t> overlap_lines;
                 std::uint64_t overlap_requests_before = 0;
                 std::uint64_t overlap_writebacks_before = 0;
                 std::uint64_t overlap_lq_before = 0;
@@ -5371,11 +5427,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 std::array<std::uint64_t, 5> backpressure_manager_delta{};
                 const unsigned set_pressure_completion_timeout =
                     std::max(constrained_completion_timeout, 8192U);
-                const auto target_releases = [&](bool data_only) {
+                const auto window_target_releases = [&] (
+                    const SetPressureWindow &window, bool data_only) {
                     std::uint64_t count = 0;
                     for (unsigned index = 0; index < depth; ++index) {
                         const std::uint64_t line =
-                            first_line + index * same_set_stride;
+                            window.first_line + index * same_set_stride;
                         count += data_only
                             ? environment
                                   .observed_dcache_release_data_covering(line)
@@ -5383,23 +5440,28 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     return count;
                 };
+                const auto target_releases = [&](bool data_only) {
+                    std::uint64_t count = 0;
+                    for (const auto &window : pressure_windows) {
+                        count += window_target_releases(window, data_only);
+                    }
+                    return count;
+                };
                 const auto target_stalled_releases = [&](bool data_only) {
                     std::uint64_t count = 0;
-                    for (unsigned index = 0; index < depth; ++index) {
+                    for (const std::uint64_t line : target_lines) {
                         count += environment
                             .observed_dcache_stalled_releases_covering(
-                                first_line + index * same_set_stride,
-                                data_only);
+                                line, data_only);
                     }
                     return count;
                 };
                 const auto target_release_stall_cycles = [&](bool data_only) {
                     std::uint64_t count = 0;
-                    for (unsigned index = 0; index < depth; ++index) {
+                    for (const std::uint64_t line : target_lines) {
                         count += environment
                             .observed_dcache_release_stall_cycles_covering(
-                                first_line + index * same_set_stride,
-                                data_only);
+                                line, data_only);
                     }
                     return count;
                 };
@@ -5468,88 +5530,166 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!set_pressure_refill_overlap) {
                         return true;
                     }
-                    constexpr std::uint64_t reserved_tag_offset = 0x18000;
-                    const std::uint64_t group_base =
-                        first_line - set_index * line_bytes;
-                    const unsigned overlap_set = (set_index + 1U) % dcache_sets;
-                    const std::uint64_t overlap_line = group_base +
-                        reserved_tag_offset + overlap_set * line_bytes;
-                    environment.memory().fill_incrementing(
-                        overlap_line, line_bytes,
-                        static_cast<std::uint8_t>(0xa7U + set_index));
-                    overlap_load = make_load(
-                        overlap_line + 8U * (random() % 8U),
-                        memblock::LoadOp::ld,
-                        random() % memblock::kScalarLoadLanes);
-                    overlap_load->oracle_address = overlap_load->address;
-                    environment.expect_load(*overlap_load);
                     overlap_requests_before = environment.tilelink_requests();
                     overlap_writebacks_before = environment.writebacks();
                     overlap_lq_before = environment.lq_dequeued();
-                    environment.hold_dcache_response_at(overlap_line);
-                    if ((load_at_rob_head &&
-                         !environment.set_rob_head(
-                             overlap_load->rob, overlap_load->rob_flag)) ||
-                        !environment.enqueue_load(*overlap_load) ||
-                        !environment.issue_load(*overlap_load, 4096)) {
+                    overlap_loads.clear();
+                    overlap_lines.clear();
+                    overlap_loads.reserve(window_count);
+                    overlap_lines.reserve(window_count);
+                    for (const auto &window : pressure_windows) {
+                        const std::uint64_t group_base = window.first_line -
+                            window.set_index * line_bytes;
+                        const unsigned overlap_set =
+                            (window.set_index + 1U) % dcache_sets;
+                        std::optional<std::uint64_t> fresh_overlap_line;
+                        for (unsigned tag = depth; tag < 16U; ++tag) {
+                            const std::uint64_t candidate = group_base +
+                                tag * same_set_stride +
+                                overlap_set * line_bytes;
+                            if (environment.dcache_requests_covering_since(
+                                    candidate, 0) == 0 &&
+                                std::find(
+                                    overlap_lines.begin(), overlap_lines.end(),
+                                    candidate) == overlap_lines.end()) {
+                                fresh_overlap_line = candidate;
+                                break;
+                            }
+                        }
+                        if (!fresh_overlap_line) {
+                            phase =
+                                "random-set-pressure-overlap-address-exhausted";
+                            return false;
+                        }
+                        const std::uint64_t overlap_line = *fresh_overlap_line;
+                        environment.memory().fill_incrementing(
+                            overlap_line, line_bytes,
+                            static_cast<std::uint8_t>(
+                                0xa7U + window.set_index));
+                        overlap_lines.push_back(overlap_line);
+                        overlap_loads.push_back(make_load(
+                            overlap_line + 8U * (random() % 8U),
+                            memblock::LoadOp::ld,
+                            random() % memblock::kScalarLoadLanes));
+                        overlap_loads.back().oracle_address =
+                            overlap_loads.back().address;
+                        environment.expect_load(overlap_loads.back());
+                        environment.hold_dcache_response_at(overlap_line);
+                    }
+                    if (load_at_rob_head &&
+                        !environment.set_rob_head(
+                            overlap_loads.front().rob,
+                            overlap_loads.front().rob_flag)) {
                         return false;
                     }
+                    for (const auto &load : overlap_loads) {
+                        if (!environment.enqueue_load(load) ||
+                            !environment.issue_load(load, 4096)) {
+                            return false;
+                        }
+                    }
+                    const auto all_overlap_responses_held = [&]() {
+                        for (unsigned window = 0; window < window_count;
+                             ++window) {
+                            if (environment.dcache_requests_covering_since(
+                                    overlap_lines[window],
+                                    overlap_requests_before) != 1 ||
+                                !environment.dcache_response_held_at(
+                                    overlap_lines[window]) ||
+                                !environment.scalar_load_pending(
+                                    overlap_loads[window])) {
+                                return false;
+                            }
+                        }
+                        return environment.dcache_held_response_count() ==
+                            window_count;
+                    };
                     for (unsigned cycle = 0;
                          cycle < set_pressure_completion_timeout &&
-                         environment.dcache_requests_covering_since(
-                             overlap_line, overlap_requests_before) == 0;
+                         !all_overlap_responses_held();
                          ++cycle) {
                         if (!environment.run_cycles(1)) {
                             return false;
                         }
                     }
-                    return environment.dcache_requests_covering_since(
-                               overlap_line, overlap_requests_before) == 1 &&
-                        environment.dcache_response_held() &&
-                        environment.scalar_load_pending(*overlap_load);
+                    return all_overlap_responses_held();
                 };
                 const auto prove_release_overlap = [&](bool data_only,
-                                                       std::uint64_t before) {
+                                                       const auto &before) {
                     if (!set_pressure_refill_overlap) {
                         return true;
                     }
                     const std::uint64_t required = depth - dcache_ways;
+                    const auto all_windows_released = [&]() {
+                        for (unsigned window = 0; window < window_count;
+                             ++window) {
+                            if (window_target_releases(
+                                    pressure_windows[window], data_only) -
+                                    before[window] < required) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    };
                     for (unsigned cycle = 0;
                          cycle < set_pressure_completion_timeout &&
-                         target_releases(data_only) - before < required;
+                         !all_windows_released();
                          ++cycle) {
-                        if (!environment.scalar_load_pending(*overlap_load) ||
-                            !environment.run_cycles(1)) {
+                        for (const auto &load : overlap_loads) {
+                            if (!environment.scalar_load_pending(load)) {
+                                return false;
+                            }
+                        }
+                        if (!environment.run_cycles(1)) {
                             return false;
                         }
                     }
-                    releases_while_overlap_pending =
-                        target_releases(data_only) - before;
-                    if (releases_while_overlap_pending < required ||
-                        !environment.dcache_response_held() ||
-                        !environment.scalar_load_pending(*overlap_load)) {
+                    releases_while_overlap_pending = 0;
+                    if (!all_windows_released() ||
+                        environment.dcache_held_response_count() !=
+                            window_count) {
                         return false;
+                    }
+                    for (unsigned window = 0; window < window_count; ++window) {
+                        releases_while_overlap_pending +=
+                            window_target_releases(
+                                pressure_windows[window], data_only) -
+                            before[window];
+                        if (!environment.dcache_response_held_at(
+                                overlap_lines[window]) ||
+                            !environment.scalar_load_pending(
+                                overlap_loads[window])) {
+                            return false;
+                        }
                     }
                     if (data_only &&
                         !environment.set_rob_head(
-                            overlap_load->rob, overlap_load->rob_flag)) {
+                            overlap_loads.front().rob,
+                            overlap_loads.front().rob_flag)) {
                         return false;
                     }
-                    return environment.release_held_dcache_response();
+                    for (const std::uint64_t line : overlap_lines) {
+                        if (!environment.release_held_dcache_response_at(line)) {
+                            return false;
+                        }
+                    }
+                    return true;
                 };
                 const auto overlap_manager_delta = [&]() {
                     if (!set_pressure_refill_overlap) {
                         return std::array<std::uint64_t, 5>{};
                     }
-                    const std::uint64_t overlap_line =
-                        overlap_load->address & ~std::uint64_t{63};
+                    std::uint64_t requests = 0;
+                    for (const std::uint64_t line : overlap_lines) {
+                        requests += environment.dcache_requests_covering_since(
+                            line, overlap_requests_before);
+                    }
                     return std::array<std::uint64_t, 5>{{
-                        1,
-                        environment.dcache_requests_covering_since(
-                            overlap_line, overlap_requests_before),
+                        window_count,
+                        requests,
                         releases_while_overlap_pending,
-                        1,
-                        1,
+                        window_count,
+                        window_count,
                     }};
                 };
 
@@ -5570,9 +5710,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         unsigned_load_ops{{
                             memblock::LoadOp::lbu, memblock::LoadOp::lhu,
                             memblock::LoadOp::lwu, memblock::LoadOp::ld,
-                        }};
+                    }};
                     std::vector<memblock::LoadTransaction> pressure_loads;
-                    pressure_loads.reserve(depth);
+                    pressure_loads.reserve(target_lines.size());
                     if (!set_pressure_refill_overlap) {
                         phase =
                             "random-set-pressure-clean-release-backpressure";
@@ -5580,19 +5720,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             return false;
                         }
                     }
-                    for (unsigned index = 0; index < depth; ++index) {
-                        const std::uint64_t line =
-                            first_line + index * same_set_stride;
+                    for (unsigned index = 0; index < target_lines.size();
+                         ++index) {
+                        const std::uint64_t line = target_lines[index];
+                        const unsigned target_set = static_cast<unsigned>(
+                            (line / line_bytes) % dcache_sets);
                         environment.memory().fill_incrementing(
                             line, line_bytes,
                             static_cast<std::uint8_t>(
-                                0x31U + set_index + index * 17U));
+                                0x31U + target_set + index * 17U));
                         environment.expect_release_line(
                             line,
                             environment.memory().read_beat(line, line_bytes));
                     }
-                    const std::uint64_t target_releases_before_overlap =
-                        target_releases(false);
+                    std::vector<std::uint64_t>
+                        target_releases_before_overlap;
+                    target_releases_before_overlap.reserve(window_count);
+                    for (const auto &window : pressure_windows) {
+                        target_releases_before_overlap.push_back(
+                            window_target_releases(window, false));
+                    }
                     if (set_pressure_refill_overlap) {
                         phase = "random-set-pressure-clean-refill-overlap";
                         if (!start_refill_overlap(true)) {
@@ -5604,9 +5751,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             return false;
                         }
                     }
-                    for (unsigned index = 0; index < depth; ++index) {
-                        const std::uint64_t line =
-                            first_line + index * same_set_stride;
+                    for (unsigned index = 0; index < target_lines.size();
+                         ++index) {
+                        const std::uint64_t line = target_lines[index];
                         auto load = make_load(
                             line + offset,
                             unsigned_load_ops[set_pressure_width],
@@ -5631,7 +5778,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     phase = "random-set-pressure-clean-fill-complete";
                     if (set_pressure_refill_overlap
                             ? !environment.run_until_load_writebacks(
-                                  writebacks_before_pressure + depth,
+                                  writebacks_before_pressure +
+                                      target_lines.size(),
                                   set_pressure_completion_timeout)
                             : (!environment.run_until_queues_retired(8192) ||
                                !environment.run_until_dcache_idle(
@@ -5667,7 +5815,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     const std::uint64_t requests_before_revisit =
                         environment.tilelink_requests();
-                    for (unsigned reverse = depth; reverse != 0; --reverse) {
+                    for (unsigned reverse = pressure_loads.size();
+                         reverse != 0; --reverse) {
                         const unsigned index = reverse - 1U;
                         auto revisit = make_load(
                             pressure_loads[index].address,
@@ -5709,11 +5858,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             environment.observed_dcache_release_data_covering(
                                 load.address & ~std::uint64_t{63});
                     }
+                    for (const auto &window : pressure_windows) {
+                        if (window_target_releases(window, false) <
+                            depth - dcache_ways) {
+                            phase =
+                                "random-set-pressure-clean-window-release";
+                            return false;
+                        }
+                    }
                     const std::array<std::uint64_t, 12> manager_delta{{
                         1,
-                        depth,
+                        target_lines.size(),
                         initial_target_requests,
-                        depth,
+                        target_lines.size(),
                         revisit_target_requests,
                         target_releases,
                         target_release_data,
@@ -5726,16 +5883,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.writebacks() - writebacks_before_pressure,
                         environment.lq_dequeued() - lq_before_pressure,
                     }};
-                    if (manager_delta[2] != depth ||
-                        manager_delta[4] < depth - dcache_ways ||
-                        manager_delta[5] < depth - dcache_ways ||
+                    const std::uint64_t minimum_target_releases =
+                        window_count * (depth - dcache_ways);
+                    const std::uint64_t overlap_load_count =
+                        set_pressure_refill_overlap ? window_count : 0U;
+                    if (manager_delta[2] != target_lines.size() ||
+                        manager_delta[4] < minimum_target_releases ||
+                        manager_delta[5] < minimum_target_releases ||
                         manager_delta[6] != 0 ||
                         manager_delta[7] < manager_delta[5] ||
                         manager_delta[9] != manager_delta[8] ||
                         manager_delta[10] !=
-                            depth * 2U + set_pressure_refill_overlap ||
+                            target_lines.size() * 2U + overlap_load_count ||
                         manager_delta[11] !=
-                            depth * 2U + set_pressure_refill_overlap) {
+                            target_lines.size() * 2U + overlap_load_count) {
                         std::ostringstream detail;
                         detail << "random-set-pressure-clean-manager"
                                << ":depth=" << depth
@@ -5754,13 +5915,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.sample_set_pressure(
                         false, set_pressure_refill_overlap,
                         set_pressure_release_backpressure,
+                        set_pressure_dual_window,
                         set_pressure_depth_index, set_pressure_width,
                         translation.regime, set_pressure_set, {}, {},
                         manager_delta, overlap_manager_delta(),
                         backpressure_manager_delta);
                     ordinary_leaf_addressed = true;
                     ++actions;
-                    coverage.cacheable += depth * 2U;
+                    coverage.cacheable += target_lines.size() * 2U;
                 } else {
                   const std::uint64_t requests_before_pressure =
                       environment.tilelink_requests();
@@ -5774,15 +5936,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       environment.store_writebacks();
                   const std::uint64_t sq_before_pressure =
                       environment.sq_dequeued();
+                  std::vector<std::uint64_t> store_lines;
+                  store_lines.reserve(target_lines.size());
+                  for (unsigned index = 0; index < dcache_ways; ++index) {
+                    for (const auto &window : pressure_windows) {
+                      store_lines.push_back(
+                          window.first_line + index * same_set_stride);
+                    }
+                  }
+                  for (unsigned index = dcache_ways; index < depth; ++index) {
+                    for (const auto &window : pressure_windows) {
+                      store_lines.push_back(
+                          window.first_line + index * same_set_stride);
+                    }
+                  }
                   std::vector<memblock::StoreTransaction> pressure_stores;
-                  pressure_stores.reserve(depth);
+                  std::vector<bool> pressure_store_data_first;
+                  pressure_stores.reserve(store_lines.size());
+                  pressure_store_data_first.reserve(store_lines.size());
                   std::array<std::uint64_t, 2> issue_orders{};
-                  for (unsigned index = 0; index < depth; ++index) {
-                    const std::uint64_t line =
-                        first_line + index * same_set_stride;
+                  for (unsigned index = 0; index < store_lines.size();
+                       ++index) {
+                    const std::uint64_t line = store_lines[index];
+                    const unsigned target_set = static_cast<unsigned>(
+                        (line / line_bytes) % dcache_sets);
                     environment.memory().fill_incrementing(
                         line, line_bytes,
-                        static_cast<std::uint8_t>(0x31U + set_index +
+                        static_cast<std::uint8_t>(0x31U + target_set +
                                                   index * 17U));
                     std::vector<unsigned char> expected_line =
                         environment.memory().read_beat(line, line_bytes);
@@ -5803,36 +5983,70 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             memblock::kScalarStoreLanes));
                     const auto &store = pressure_stores.back();
                     environment.expect_release_line(line, expected_line);
-                    environment.expect_store(store);
                     const bool data_first =
                         ((index + (sequence & 1U)) & 1U) != 0;
+                    pressure_store_data_first.push_back(data_first);
                     ++issue_orders[data_first ? 1U : 0U];
-                    const bool issued =
-                        (index != 0 ||
-                         environment.set_rob_head(store.rob, store.rob_flag)) &&
-                        environment.enqueue_store(
-                            store, memblock::lq_pointer_value(lq_offset)) &&
-                        (data_first
-                             ? environment.issue_store_data(store, 4096) &&
-                                   environment
-                                       .issue_store_address_until_tlb_hit(
-                                           store,
-                                           constrained_completion_timeout)
-                             : environment.issue_store_address_until_tlb_hit(
-                                   store, constrained_completion_timeout) &&
-                                   environment.issue_store_data(store, 4096));
-                    if (!issued) {
+                  }
+                  const auto issue_store_range = [&](std::size_t first,
+                                                     std::size_t last) {
+                    for (std::size_t index = first; index < last; ++index) {
+                      const auto &store = pressure_stores[index];
+                      const bool data_first =
+                          pressure_store_data_first[index];
+                      environment.expect_store(store);
+                      const bool issued =
+                          (index != 0 ||
+                           environment.set_rob_head(
+                               store.rob, store.rob_flag)) &&
+                          environment.enqueue_store(
+                              store, memblock::lq_pointer_value(lq_offset)) &&
+                          (data_first
+                               ? environment.issue_store_data(store, 4096) &&
+                                     environment
+                                         .issue_store_address_until_tlb_hit(
+                                             store,
+                                             constrained_completion_timeout)
+                               : environment
+                                         .issue_store_address_until_tlb_hit(
+                                             store,
+                                             constrained_completion_timeout) &&
+                                     environment.issue_store_data(store, 4096));
+                      if (!issued) {
+                        return false;
+                      }
+                      coverage.sample(store, data_first);
+                    }
+                    return true;
+                  };
+                  const std::size_t baseline_stores =
+                      window_count * dcache_ways;
+                  phase = "random-set-pressure-dirty-baseline-issue";
+                  if (!issue_store_range(0, baseline_stores) ||
+                      !environment.run_until_store_complete(
+                          constrained_completion_timeout)) {
+                    return false;
+                  }
+                  phase = "random-set-pressure-dirty-baseline-commit";
+                  for (std::size_t index = 0; index < baseline_stores;
+                       ++index) {
+                    if (!environment.commit_store(
+                            pressure_stores[index], 8192)) {
                       return false;
                     }
-                    coverage.sample(store, data_first);
                   }
-                  phase = "random-set-pressure-dirty-store-issue-complete";
-                  if (!environment.run_until_store_complete(
-                          constrained_completion_timeout)) {
-                      return false;
+                  if (!environment.run_until_queues_retired(8192) ||
+                      !environment.run_until_sbuffer_empty(
+                          set_pressure_completion_timeout)) {
+                    return false;
                   }
-                  const std::uint64_t target_releases_before_overlap =
-                      target_releases(true);
+                  std::vector<std::uint64_t>
+                      target_releases_before_overlap;
+                  target_releases_before_overlap.reserve(window_count);
+                  for (const auto &window : pressure_windows) {
+                    target_releases_before_overlap.push_back(
+                        window_target_releases(window, true));
+                  }
                   phase = "random-set-pressure-dirty-refill-overlap";
                   if (!start_refill_overlap(false)) {
                     return false;
@@ -5841,11 +6055,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   if (!begin_release_backpressure(true)) {
                     return false;
                   }
-                  phase = "random-set-pressure-dirty-commit";
-                  for (const auto &store : pressure_stores) {
-                    if (!environment.commit_store(store, 8192)) {
+                  phase = "random-set-pressure-dirty-overflow-issue";
+                  if (!issue_store_range(
+                          baseline_stores, pressure_stores.size()) ||
+                      !environment.run_until_store_complete(
+                          constrained_completion_timeout)) {
+                    return false;
+                  }
+                  phase = "random-set-pressure-dirty-overflow-commit";
+                  for (std::size_t index = baseline_stores;
+                       index < pressure_stores.size(); ++index) {
+                    if (!environment.commit_store(
+                            pressure_stores[index], 8192)) {
                       return false;
                     }
+                  }
+                  phase = "random-set-pressure-dirty-store-issue-complete";
+                  if (!environment.run_until_store_complete(
+                          constrained_completion_timeout)) {
+                      return false;
                   }
                   phase = "random-set-pressure-dirty-release-overlap";
                   if (!prove_release_overlap(
@@ -5859,7 +6087,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       !environment.run_until_sbuffer_empty(
                           set_pressure_completion_timeout) ||
                       !environment.run_until_expected_release_data_count(
-                          expected_releases_before + depth - dcache_ways,
+                          expected_releases_before +
+                              window_count * (depth - dcache_ways),
                           set_pressure_completion_timeout) ||
                       !environment.run_until_dcache_idle(
                           set_pressure_completion_timeout)) {
@@ -5899,9 +6128,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       ++preserved_stores;
                     }
                   }
+                  for (const auto &window : pressure_windows) {
+                    if (window_target_releases(window, true) <
+                        depth - dcache_ways) {
+                      phase = "random-set-pressure-dirty-window-release";
+                      return false;
+                    }
+                  }
                   const std::array<std::uint64_t, 9> manager_delta{{
                       1,
-                      depth,
+                      target_lines.size(),
                       target_requests,
                       environment.tilelink_expected_release_data_verified() -
                           expected_releases_before,
@@ -5915,16 +6151,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                       preserved_stores,
                   }};
                   const auto overlap_delta = overlap_manager_delta();
-                  if (manager_delta[2] != depth ||
-                      manager_delta[3] < depth - dcache_ways ||
+                  if (manager_delta[2] != target_lines.size() ||
+                      manager_delta[3] <
+                          window_count * (depth - dcache_ways) ||
                       manager_delta[4] < manager_delta[3] ||
                       manager_delta[5] != manager_delta[4] ||
-                      manager_delta[6] != depth || manager_delta[7] != depth ||
+                      manager_delta[6] != target_lines.size() ||
+                      manager_delta[7] != target_lines.size() ||
                       manager_delta[8] != manager_delta[3] ||
                       (set_pressure_refill_overlap &&
                        (environment.writebacks() - overlap_writebacks_before !=
-                            1 ||
-                        environment.lq_dequeued() - overlap_lq_before != 1))) {
+                            window_count ||
+                        environment.lq_dequeued() - overlap_lq_before !=
+                            window_count))) {
                     std::ostringstream detail;
                     detail << "random-set-pressure-manager"
                            << ":depth=" << depth << ":width=" << width_bytes
@@ -5941,13 +6180,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   constraint_coverage.sample_set_pressure(
                       true, set_pressure_refill_overlap,
                       set_pressure_release_backpressure,
+                      set_pressure_dual_window,
                       set_pressure_depth_index, set_pressure_width,
                       translation.regime, set_pressure_set, issue_orders,
                       manager_delta, {}, overlap_delta,
                       backpressure_manager_delta);
                   ordinary_leaf_addressed = true;
                   ++actions;
-                  coverage.cacheable += depth;
+                  coverage.cacheable += target_lines.size();
                 }
             } else if (kind == RandomConstraints::scalar_store) {
                 const auto op = static_cast<memblock::StoreOp>(random() % 4);

@@ -2598,7 +2598,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_need_data=",
             "actual_probe_overlap=",
             "probe_max_outstanding=",
-            "constraint_schema=29",
+            "constraint_schema=30",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2676,6 +2676,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"set-pressure-dirty"',
             '"set-pressure-refill-overlap"',
             '"set-pressure-release-backpressure"',
+            '"set-pressure-dual-window"',
             "dcache_requests_covering_since",
             "begin_dcache_release_observation",
             "end_dcache_release_observation",
@@ -2710,7 +2711,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, driver)
         for contract in (
-            "held_d_beats_",
+            "held_responses_",
+            "response_held_at",
+            "release_held_response_at",
             "accepted_grant_ack_index_",
             "begin_release_ready_window",
             "observed_release_stall_cycles_covering",

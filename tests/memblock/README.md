@@ -1282,7 +1282,22 @@ unselected actions require zero for all three. Every action must close exactly
 one address-qualified window. For clean overlap, the held refill is established
 before the target set is filled, so replacement is causally concurrent with
 the pending refill. Coverage uses a 500-per-mille C-backpressure share, SPEC 10,
-and corner 750. Multiple simultaneous replacement windows remain separate.
+and corner 750.
+
+Schema 30 adds `set-pressure-dual-window` and expands the cross to 384 bins.
+Selected actions allocate two independent pressure sets in opposite index
+quarters and apply the same depth, width, translation, line-state, overlap, and
+C-backpressure class to both. Refill-overlap actions hold two address-qualified
+D responses at once; each target set must independently emit at least
+`depth - 8` attributed Releases or ReleaseData while both load identities are
+still pending. Dirty actions first commit and drain eight baseline lines in
+each set, then issue the overflow tags, so the checked ReleaseData cannot be
+satisfied by an earlier clean eviction. Target request, refill, writeback, and
+queue accounting scales with the selected window count, while the
+address-qualified C stall remains one transaction per action. Coverage uses a
+500-per-mille dual-window share, SPEC 10, and corner 750. The minimum
+`random-mixed` length is 864 actions; three-or-more simultaneous replacement
+windows remain separate.
 
 For a reproducible local pressure run:
 
@@ -1452,7 +1467,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 672
+  --test random-mixed --seed 17 --transactions 864
 ```
 
 ## Complete Pin Audit

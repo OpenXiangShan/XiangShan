@@ -20,9 +20,9 @@ public:
         forced_next_response_delay_.reset();
         forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
-        hold_next_response_ = false;
-        held_response_address_.reset();
-        building_held_response_ = false;
+        pending_held_response_addresses_.clear();
+        hold_next_response_address_.reset();
+        building_held_response_address_.reset();
         release_ready_window_active_ = false;
         release_ready_window_first_complete_ = false;
         release_ready_window_target_selected_ = false;
@@ -73,27 +73,65 @@ public:
 
     void hold_response_at(std::uint64_t address)
     {
-        if (hold_next_response_ || held_response_address_ ||
-            building_held_response_ || !held_d_beats_.empty()) {
-            error_ = "DCache response hold is already active";
+        const std::uint64_t line = address & ~(kLineBytes - 1U);
+        const bool pending = std::find(
+                                 pending_held_response_addresses_.begin(),
+                                 pending_held_response_addresses_.end(), line) !=
+            pending_held_response_addresses_.end();
+        const bool held = std::find_if(
+                              held_responses_.begin(), held_responses_.end(),
+                              [&](const HeldResponse &response) {
+                                  return response.address == line;
+                              }) != held_responses_.end();
+        if (pending || held || hold_next_response_address_ == line ||
+            building_held_response_address_ == line) {
+            error_ = "DCache response hold address is already active";
             return;
         }
-        held_response_address_ = address & ~(kLineBytes - 1U);
+        pending_held_response_addresses_.push_back(line);
     }
 
-    bool response_held() const { return !held_d_beats_.empty(); }
+    bool response_held() const { return !held_responses_.empty(); }
+    bool response_held_at(std::uint64_t address) const
+    {
+        const std::uint64_t line = address & ~(kLineBytes - 1U);
+        return std::find_if(
+                   held_responses_.begin(), held_responses_.end(),
+                   [&](const HeldResponse &response) {
+                       return response.address == line;
+                   }) != held_responses_.end();
+    }
+    std::size_t held_response_count() const { return held_responses_.size(); }
 
     void release_held_response()
     {
-        if (held_d_beats_.empty() || building_held_response_) {
+        if (held_responses_.size() != 1 ||
+            building_held_response_address_) {
             error_ = "no complete held DCache response to release";
             return;
         }
-        const bool was_empty = d_beats_.empty();
-        while (!held_d_beats_.empty()) {
-            d_beats_.push_back(std::move(held_d_beats_.front()));
-            held_d_beats_.pop_front();
+        release_held_response_at(held_responses_.front().address);
+    }
+
+    void release_held_response_at(std::uint64_t address)
+    {
+        const std::uint64_t line = address & ~(kLineBytes - 1U);
+        const auto held = std::find_if(
+            held_responses_.begin(), held_responses_.end(),
+            [&](const HeldResponse &response) {
+                return response.address == line;
+            });
+        if (held == held_responses_.end() ||
+            building_held_response_address_ == line) {
+            error_ = "no complete held DCache response at requested address";
+            return;
         }
+        const bool was_empty = d_beats_.empty();
+        while (!held->beats.empty()) {
+            d_beats_.push_back(std::move(held->beats.front()));
+            held->beats.pop_front();
+        }
+        held_responses_.erase(held);
         if (was_empty) {
             d_presenting_ = false;
             d_gap_ = d_beats_.front().delay_before;
@@ -135,7 +173,21 @@ public:
             release_ready_window_completed_releases_ != 1 ||
             release_ready_window_target_selected_ ||
             release_ready_window_bypass_non_target_ || release_data_) {
-            error_ = "incomplete DCache release ready window";
+            std::ostringstream message;
+            message << "incomplete DCache release ready window"
+                    << " active=" << release_ready_window_active_
+                    << " target_complete="
+                    << release_ready_window_first_complete_
+                    << " remaining="
+                    << release_ready_window_stall_remaining_
+                    << " completed="
+                    << release_ready_window_completed_releases_
+                    << " target_selected="
+                    << release_ready_window_target_selected_
+                    << " bypass="
+                    << release_ready_window_bypass_non_target_
+                    << " release_data=" << release_data_.has_value();
+            error_ = message.str();
             return;
         }
         release_ready_window_active_ = false;
@@ -146,7 +198,7 @@ public:
     {
         b_beats_.clear();
         d_beats_.clear();
-        held_d_beats_.clear();
+        held_responses_.clear();
         probe_responses_.clear();
         expected_grant_acks_.clear();
         accepted_grant_ack_index_.reset();
@@ -165,9 +217,9 @@ public:
         forced_next_response_delay_.reset();
         forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
-        hold_next_response_ = false;
-        held_response_address_.reset();
-        building_held_response_ = false;
+        pending_held_response_addresses_.clear();
+        hold_next_response_address_.reset();
+        building_held_response_address_.reset();
         release_ready_window_active_ = false;
         release_ready_window_first_complete_ = false;
         release_ready_window_target_selected_ = false;
@@ -687,8 +739,10 @@ public:
     }
     bool responses_idle() const
     {
-        return d_beats_.empty() && held_d_beats_.empty() &&
-            outstanding_requests_ == 0;
+        return d_beats_.empty() && held_responses_.empty() &&
+            pending_held_response_addresses_.empty() &&
+            !hold_next_response_address_ && !building_held_response_address_ &&
+            !release_data_ && outstanding_requests_ == 0;
     }
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes)
@@ -756,6 +810,11 @@ private:
         unsigned delay_before = 0;
     };
 
+    struct HeldResponse {
+        std::uint64_t address;
+        std::deque<DBeat> beats;
+    };
+
     struct PendingResponseError {
         std::optional<std::uint64_t> address;
         bool denied;
@@ -820,11 +879,14 @@ private:
     {
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
-        if (held_response_address_ &&
-            (*held_response_address_ ==
-             (request.address & ~(kLineBytes - 1U)))) {
-            hold_next_response_ = true;
-            held_response_address_.reset();
+        const std::uint64_t request_line =
+            request.address & ~(kLineBytes - 1U);
+        const auto held_address = std::find(
+            pending_held_response_addresses_.begin(),
+            pending_held_response_addresses_.end(), request_line);
+        if (held_address != pending_held_response_addresses_.end()) {
+            hold_next_response_address_ = request_line;
+            pending_held_response_addresses_.erase(held_address);
         }
         bool denied = false;
         bool corrupt = false;
@@ -1185,14 +1247,29 @@ private:
         } else {
             response.delay_before = response_delay(first_beat);
         }
-        if (first_beat && hold_next_response_) {
-            hold_next_response_ = false;
-            building_held_response_ = true;
+        if (first_beat && hold_next_response_address_) {
+            held_responses_.push_back(
+                HeldResponse{*hold_next_response_address_, {}});
+            building_held_response_address_ = hold_next_response_address_;
+            hold_next_response_address_.reset();
         }
-        if (building_held_response_) {
+        if (building_held_response_address_) {
+            const auto held = std::find_if(
+                held_responses_.begin(), held_responses_.end(),
+                [&](const HeldResponse &candidate) {
+                    return candidate.address ==
+                        *building_held_response_address_;
+                });
+            if (held == held_responses_.end()) {
+                error_ = "DCache held response builder lost its transaction";
+                building_held_response_address_.reset();
+                return;
+            }
             const bool last_beat = response.last_beat;
-            held_d_beats_.push_back(std::move(response));
-            building_held_response_ = !last_beat;
+            held->beats.push_back(std::move(response));
+            if (last_beat) {
+                building_held_response_address_.reset();
+            }
             return;
         }
         const bool was_empty = d_beats_.empty();
@@ -1207,7 +1284,7 @@ private:
     const SparseMemory &reference_memory_;
     std::deque<BBeat> b_beats_;
     std::deque<DBeat> d_beats_;
-    std::deque<DBeat> held_d_beats_;
+    std::deque<HeldResponse> held_responses_;
     std::deque<ProbeResponseState> probe_responses_;
     std::deque<std::pair<std::uint16_t, bool>> expected_grant_acks_;
     std::optional<std::size_t> accepted_grant_ack_index_;
@@ -1276,9 +1353,9 @@ private:
     std::optional<unsigned> forced_next_response_delay_;
     std::optional<unsigned> forced_next_cmo_response_delay_;
     std::optional<unsigned> forced_next_interbeat_delay_;
-    bool hold_next_response_ = false;
-    std::optional<std::uint64_t> held_response_address_;
-    bool building_held_response_ = false;
+    std::vector<std::uint64_t> pending_held_response_addresses_;
+    std::optional<std::uint64_t> hold_next_response_address_;
+    std::optional<std::uint64_t> building_held_response_address_;
     bool release_ready_window_active_ = false;
     bool release_ready_window_first_complete_ = false;
     bool release_ready_window_target_selected_ = false;

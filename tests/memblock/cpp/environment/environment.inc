@@ -449,9 +449,25 @@ public:
         return memory_agent_.response_held();
     }
 
+    bool dcache_response_held_at(std::uint64_t address) const
+    {
+        return memory_agent_.response_held_at(address);
+    }
+
+    std::size_t dcache_held_response_count() const
+    {
+        return memory_agent_.held_response_count();
+    }
+
     bool release_held_dcache_response()
     {
         memory_agent_.release_held_response();
+        return check_components();
+    }
+
+    bool release_held_dcache_response_at(std::uint64_t address)
+    {
+        memory_agent_.release_held_response_at(address);
         return check_components();
     }
 
