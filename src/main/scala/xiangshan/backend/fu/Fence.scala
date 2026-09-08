@@ -25,7 +25,7 @@ import xiangshan._
 class FenceIO(implicit p: Parameters) extends XSBundle {
   val sfence = Output(new SfenceBundle)
   val fencei = Output(Bool())
-  val bpuFlush = Output(Bool())
+  val bpuFlush: Option[Bool] = Option.when(HasBpuFlush)(Output(Bool()))
   val sbuffer = new FenceToSbuffer
 }
 
@@ -38,7 +38,6 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val sfence = io.fenceio.get.sfence
   val fencei = io.fenceio.get.fencei
-  val bpuFlush = io.fenceio.get.bpuFlush
   val toSbuffer = io.fenceio.get.sbuffer
   val (valid, src1) = (
     io.in.valid,
@@ -67,14 +66,18 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   sbuffer      := state === s_wait
   fencei       := state === s_icache
 
-  // FENCE.TIME: Priv/AS/SD/VM flags are locked in uop.data.imm(3, 0) (= inst[23:20])
-  val fenceTimeFlags = uop.data.imm(3, 0)
-  val privChange = fenceTimeFlags(3) // inst[23]
-  val asChange   = fenceTimeFlags(2) // inst[22]
-  val sdChange   = fenceTimeFlags(1) // inst[21]
-  val vmChange   = fenceTimeFlags(0) // inst[20]
-  // BPU phase-1 flush request: AS/SD/VM any set; Priv does not trigger flush
-  bpuFlush      := state === s_bpu_flush && (asChange || sdChange || vmChange)
+  // FENCE.TIME BPU subset (RTL-SPEC 13 §4.1): flag extraction, comparison and the phase-1
+  // request output all live inside the HasBpuFlush guard, so nothing is generated when off.
+  if (HasBpuFlush) {
+    // VM/SD/AS/Priv flags are locked in uop.data.imm(3, 0) (= inst[23:20])
+    val fenceTimeFlags = uop.data.imm(3, 0)
+    val vmChange   = fenceTimeFlags(3) // inst[23]
+    val sdChange   = fenceTimeFlags(2) // inst[22]
+    val asChange   = fenceTimeFlags(1) // inst[21]
+    val privChange = fenceTimeFlags(0) // inst[20]
+    // BPU phase-1 flush request: AS/SD/VM any set; Priv does not trigger flush
+    io.fenceio.get.bpuFlush.get := state === s_bpu_flush && (asChange || sdChange || vmChange)
+  }
   sfence.valid := state === s_tlb && (func === FenceOpType.sfence || func === FenceOpType.hfence_v || func === FenceOpType.hfence_g || (if (HasMptCheck) (func === FenceOpType.mfence) else false.B))
   sfence.bits.rs1  := uop.data.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.data.imm(9, 5) === 0.U
@@ -89,9 +92,13 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   } // TODO:implement remaining mfence functionality, not yet finished!!!
 
   when (state === s_idle && io.in.valid) {
-    when (io.in.bits.ctrl.fuOpType === FenceOpType.fencetime) {
-      state := s_bpu_flush
-    }.otherwise {
+    if (HasBpuFlush) {
+      when (io.in.bits.ctrl.fuOpType === FenceOpType.fencetime) {
+        state := s_bpu_flush
+      }.otherwise {
+        state := s_wait
+      }
+    } else {
       state := s_wait
     }
   }
