@@ -57,6 +57,8 @@ class LoadUnitS0(param: ExeUnitParams)(
     // TODO: canAcceptHigh/LowConfPrefetch
     val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
     val ldin = Flipped(DecoupledIO(new ExuInput(param)))
+    val lrqPreAlloc = ValidIO(new LoadReplayPreAllocReq)
+    val lrqPreAllocReady = Input(Bool())
 
     // Tlb request
     val tlbReq = DecoupledIO(new TlbReq)
@@ -182,7 +184,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   val ldinVAddr = ldin.src(0) + SignExt(ldin.imm(11, 0), VAddrBits)
   val ldinFullva = ldin.src(0) + SignExt(ldin.imm(11, 0), XLEN)
   val ldinSize = LSUOpType.size(ldin.fuOpType) // B, H, W, D, excluding of Q
-  scalarIssue.valid := io.ldin.valid
+  val ldinIsPrefetch = LSUOpType.isPrefetch(ldin.fuOpType)
+  scalarIssue.valid := io.ldin.valid && (ldinIsPrefetch || io.lrqPreAllocReady)
   scalarIssue.bits.entrance := LoadEntrance.scalarIssue.U
   scalarIssue.bits.accessType.instrType := Mux(
     LSUOpType.isPrefetch(ldin.fuOpType),
@@ -212,6 +215,38 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
+
+  // Demand loads are consumed independently of S0 source arbitration. Their registered
+  // preallocation record reaches LRQ at the S1 boundary; an arbitration loser is replayed
+  // from that entry. Prefetches deliberately retain the original direct-arbitration path.
+  val lrqPreAllocValid = RegInit(false.B)
+  val lrqPreAllocBits = Reg(new LoadReplayPreAllocReq)
+  lrqPreAllocValid := io.ldin.fire && !ldinIsPrefetch
+  when (io.ldin.fire && !ldinIsPrefetch) {
+    lrqPreAllocBits.uop := scalarIssue.bits.uop
+    lrqPreAllocBits.accessType := scalarIssue.bits.accessType
+    lrqPreAllocBits.vaddr := scalarIssue.bits.vaddr
+    lrqPreAllocBits.fullva := scalarIssue.bits.fullva
+    lrqPreAllocBits.size := scalarIssue.bits.size
+    lrqPreAllocBits.mask := scalarIssue.bits.mask
+    lrqPreAllocBits.isvec := false.B
+    lrqPreAllocBits.isLastElem := false.B
+    lrqPreAllocBits.is128bit := false.B
+    lrqPreAllocBits.uopUnitStrideFof := false.B
+    lrqPreAllocBits.usSecondInv := false.B
+    lrqPreAllocBits.elemIdx := 0.U
+    lrqPreAllocBits.alignedType := scalarIssue.bits.size
+    lrqPreAllocBits.mbIndex := 0.U
+    lrqPreAllocBits.regOffset := 0.U
+    lrqPreAllocBits.elemIdxInsideVd := 0.U
+    lrqPreAllocBits.isFirstElem := false.B
+    lrqPreAllocBits.vecActive := true.B
+    lrqPreAllocBits.issueArbFail := !scalarIssue.fire
+  }
+  io.lrqPreAlloc.valid := lrqPreAllocValid
+  io.lrqPreAlloc.bits := lrqPreAllocBits
+  assert(!io.lrqPreAlloc.valid || !io.lrqPreAlloc.bits.accessType.isPrefetch(),
+    "prefetch requests must not preallocate LRQ entries")
 
   // 7. low-confidence prefetch
   prefetchLoConf.valid := io.prefetchReq.valid
@@ -399,7 +434,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.replay.ready := replayIsHiPrio && replayHiPrio.ready || replayIsLoPrio && replayLoPrio.ready
   io.fastReplay.ready := fastReplay.ready
   io.prefetchReq.ready := Mux(prefetchIsHiConf, prefetchHiConf.ready, prefetchLoConf.ready)
-  io.ldin.ready := scalarIssue.ready
+  io.ldin.ready := Mux(ldinIsPrefetch, scalarIssue.ready, io.lrqPreAllocReady)
 
   io.tlbReq.valid := tlbReqValid
   io.tlbReq.bits.vaddr := tlbVAddr
@@ -544,6 +579,10 @@ class LoadUnitS1(param: ExeUnitParams)(
     // Software instruction prefetch
     val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
 
+    // Cancel an LRQ preallocation when a request terminates before S2.
+    val lrqPreAllocResp = Flipped(ValidIO(UInt(log2Up(LoadQueueReplaySize).W)))
+    val lrqCancel = ValidIO(new LoadReplayControlReq)
+
     // Load trigger
     val csrTrigger = Input(new CsrTriggerBundle)
 
@@ -569,6 +608,18 @@ class LoadUnitS1(param: ExeUnitParams)(
   val fuOpType = uop.fuOpType
   val vaddr = in.vaddr
   val mask = in.mask
+
+  val isFirstIssueDemand = LoadEntrance.isScalarIssue(entrance) && accessType.isScalar()
+  val lrqPreAllocIdxReg = Reg(UInt(log2Up(LoadQueueReplaySize).W))
+  val lrqPreAllocIdxRegValid = RegInit(false.B)
+  when (!pipeIn.valid || pipeIn.fire) {
+    lrqPreAllocIdxRegValid := false.B
+  }.elsewhen (isFirstIssueDemand && io.lrqPreAllocResp.valid) {
+    lrqPreAllocIdxReg := io.lrqPreAllocResp.bits
+    lrqPreAllocIdxRegValid := true.B
+  }
+  val lrqPreAllocIdxValid = io.lrqPreAllocResp.valid || lrqPreAllocIdxRegValid
+  val lrqPreAllocIdx = Mux(io.lrqPreAllocResp.valid, io.lrqPreAllocResp.bits, lrqPreAllocIdxReg)
 
   val isSwInstrPrefetch = accessType.isSwPrefetch() && accessType.isInstrPrefetch()
 
@@ -662,6 +713,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   // TODO: only cross page unalign need to query tlb, but timing will be worse,
   // this let unalignTail always query tlb, even if it come from fastReplay/replay.
   unalignTail.noQuery.get := false.B // unalignTail always need to query tlb
+  unalignTail.replayQueueIdx.get := Mux(isFirstIssueDemand, lrqPreAllocIdx, in.replayQueueIdx.get)
 
   val unalignTailNack = unalignTailInjectValid && !io.unalignTail.ready
 
@@ -715,6 +767,9 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.pbmt.get := pbmt
   stageInfo.gpaddr.get := gpaddr
   stageInfo.isForVSnonLeafPTE.get := tlbResp.bits.isForVSnonLeafPTE
+  stageInfo.replayQueueIdx.get := Mux(isFirstIssueDemand, lrqPreAllocIdx, in.replayQueueIdx.get)
+  assert(!pipeIn.valid || kill || !isFirstIssueDemand || lrqPreAllocIdxValid,
+    "a demand load entering S1 must have an LRQ preallocation index")
   // update replay cause (only nuke is detected in S1)
   stageInfo.cause.get := 0.U.asTypeOf(stageInfo.cause.get)
   stageInfo.cause.get(LoadReplayCauses.C_NK) := nuke
@@ -766,6 +821,9 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   io.swInstrPrefetch.valid := pipeIn.valid && isSwInstrPrefetch
   io.swInstrPrefetch.bits.vaddr := vaddr
+
+  io.lrqCancel.valid := pipeIn.valid && kill && isFirstIssueDemand && lrqPreAllocIdxValid
+  io.lrqCancel.bits.replayQueueIdx := lrqPreAllocIdx
 
   io.debugInfo.isTlbFirstMiss := pipeIn.valid && !kill && tlbMiss && in.isFirstIssue()
   io.debugInfo.isLoadToLoadForward := false.B
@@ -1993,6 +2051,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val ldout = new MemWriteBack(param)
   val vldout = new NewExuOutput(param)
   val lqWrite = DecoupledIO(new LqWriteBundle)
+  val lrq = new LoadToLrqIO
   // TLB / PMA / PMP
   val tlb = new TlbRequestIO(2)
   val tlbHint = Flipped(new TlbHintReq)
@@ -2080,6 +2139,9 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s0.io.replay <> io.replay
   s0.io.prefetchReq <> io.prefetchReq
   s0.io.ldin <> io.ldin
+  io.lrq.preAlloc := s0.io.lrqPreAlloc
+  s0.io.lrqPreAllocReady := io.lrq.preAllocReady
+  s1.io.lrqPreAllocResp := io.lrq.preAllocResp
   io.tlb.req <> s0.io.tlbReq
   io.dcache.req <> s0.io.dcacheReq
   io.dcache.is128Req := s0.io.is128Req
@@ -2118,6 +2180,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s1.io.staNukeQueryReq := io.staNukeQueryReq
   io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
   io.swInstrPrefetch := s1.io.swInstrPrefetch
+  io.lrq.cancel := s1.io.lrqCancel
   s1.io.csrTrigger := io.csrTrigger
 
   // S2

@@ -85,6 +85,40 @@ object Bundles {
     val rep_info = new LoadToLsqReplayIO
   }
 
+  class LoadReplayPreAllocReq(implicit p: Parameters) extends XSBundle
+    with HasVLSUParameters {
+    val uop = new DynInst
+    val accessType = LoadAccessType()
+    val vaddr = UInt(VAddrBits.W)
+    val fullva = UInt(XLEN.W)
+    val size = UInt(MemorySize.Size.width.W)
+    val mask = UInt((VLEN / 8).W)
+    val isvec = Bool()
+    val isLastElem = Bool()
+    val is128bit = Bool()
+    val uopUnitStrideFof = Bool()
+    val usSecondInv = Bool()
+    val elemIdx = UInt(elemIdxBits.W)
+    val alignedType = UInt(alignTypeBits.W)
+    val mbIndex = UInt(max(vlmBindexBits, vsmBindexBits).W)
+    val regOffset = UInt(vOffsetBits.W)
+    val elemIdxInsideVd = UInt(elemIdxBits.W)
+    val isFirstElem = Bool()
+    val vecActive = Bool()
+    val issueArbFail = Bool()
+  }
+
+  class LoadReplayControlReq(implicit p: Parameters) extends XSBundle {
+    val replayQueueIdx = UInt(log2Up(LoadQueueReplaySize).W)
+  }
+
+  class LoadToLrqIO(implicit p: Parameters) extends XSBundle {
+    val preAlloc = ValidIO(new LoadReplayPreAllocReq)
+    val preAllocReady = Input(Bool())
+    val preAllocResp = Flipped(ValidIO(UInt(log2Up(LoadQueueReplaySize).W)))
+    val cancel = ValidIO(new LoadReplayControlReq)
+  }
+
   class StoreForwardReqS0(implicit p: Parameters) extends MemBlockBundle {
     val vaddr = UInt(VAddrBits.W)
     val sqIdx = new SqPtr
