@@ -78,6 +78,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for the four 32-set quarters of the 128-set DCache index space |
 | `set-pressure-dirty` | Per-mille share of dirty-store pressure; zero selects only clean-load replacement, 1000 selects only dirty replacement, and intermediate values require both states |
 | `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response while same-set replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
+| `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -135,7 +136,7 @@ the PMA/PMA PBMT pair and an aligned class; a device-only mix cannot enable a
 non-PMA PBMT pair or misalignment.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
-`random-mixed` requires at least 576 actions so the mandatory architectural
+`random-mixed` requires at least 672 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 An enabled `atomic-error` requires a nonzero atomic operation weight. An
 all-error Uncache mix requires `special-concurrent=0`, because the current
@@ -392,9 +393,9 @@ one cycle, and the target line must produce exactly one DCache request. Global
 refill and GrantAck deltas remain equal and at least one because the same loads
 may also trigger legal hardware prefetches; scalar writebacks must equal the
 sum of the generated batch depths.
-Set pressure reports 96 clean/dirty x no-overlap/refill-overlap x depth x width
-x translation crosses, four set-index quarters, both store-half issue orders,
-and manager tuples. Each
+Set pressure reports 192 clean/dirty x no-overlap/refill-overlap x
+no-C-stall/C-stall x depth x width x translation crosses, four set-index
+quarters, both store-half issue orders, and manager tuples. Each
 action uses fresh lines in one physical set. Generated stores, target requests,
 store writebacks, and SQ dequeues must match exactly. Dirty target ReleaseData
 must reach at least `depth - 8`, every global ReleaseData must pass its byte
@@ -409,9 +410,15 @@ response for one independently addressed cold load outside the pressure set and
 allows later D responses on other sources to bypass it. At least `depth - 8`
 target Releases must complete while that load remains pending; its exact one
 request, writeback, and LQ dequeue are separately conserved. The 4-GiB sparse
-region supports
-at least one million actions per fixed set quarter without reusing a target
-line.
+region supports at least one million actions per fixed set quarter without
+reusing a target line. The C-backpressure manager tuple is `selected actions,
+stalled target releases, target stall cycles, target payload-stability checks,
+completed windows`. A selected action requires exactly `1,1,16,16,1`; an
+unselected action requires `0,0,0,0,1`. The agent selects by target line and
+Release opcode, so ProbeAck and background Release traffic remain legal but do
+not satisfy the oracle. Clean refill-overlap establishes the held response
+before filling the target set; dirty overlap completes all older stores before
+holding the younger refill and committing those stores.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

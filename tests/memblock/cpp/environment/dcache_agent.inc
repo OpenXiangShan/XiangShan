@@ -23,6 +23,14 @@ public:
         hold_next_response_ = false;
         held_response_address_.reset();
         building_held_response_ = false;
+        release_ready_window_active_ = false;
+        release_ready_window_first_complete_ = false;
+        release_ready_window_target_selected_ = false;
+        release_ready_window_bypass_non_target_ = false;
+        release_ready_window_target_lines_.clear();
+        release_ready_window_stall_remaining_ = 0;
+        release_ready_window_stall_cycles_ = 0;
+        release_ready_window_completed_releases_ = 0;
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
     }
@@ -92,6 +100,48 @@ public:
         }
     }
 
+    void begin_release_ready_window(
+        const std::vector<std::uint64_t> &target_lines,
+        unsigned stall_valid_cycles)
+    {
+        if (release_ready_window_active_) {
+            error_ = "DCache release ready window is already active";
+            return;
+        }
+        if (target_lines.empty()) {
+            error_ = "DCache release ready window has no target lines";
+            return;
+        }
+        release_ready_window_active_ = true;
+        release_ready_window_first_complete_ = false;
+        release_ready_window_target_selected_ = false;
+        release_ready_window_bypass_non_target_ = false;
+        release_ready_window_target_lines_.clear();
+        release_ready_window_target_lines_.reserve(target_lines.size());
+        for (const std::uint64_t line : target_lines) {
+            release_ready_window_target_lines_.push_back(
+                line & ~(kLineBytes - 1U));
+        }
+        release_ready_window_stall_remaining_ = stall_valid_cycles;
+        release_ready_window_stall_cycles_ = 0;
+        release_ready_window_completed_releases_ = 0;
+    }
+
+    void end_release_ready_window()
+    {
+        if (!release_ready_window_active_ ||
+            !release_ready_window_first_complete_ ||
+            release_ready_window_stall_remaining_ != 0 ||
+            release_ready_window_completed_releases_ != 1 ||
+            release_ready_window_target_selected_ ||
+            release_ready_window_bypass_non_target_ || release_data_) {
+            error_ = "incomplete DCache release ready window";
+            return;
+        }
+        release_ready_window_active_ = false;
+        release_ready_window_target_lines_.clear();
+    }
+
     void reset_link_state()
     {
         b_beats_.clear();
@@ -102,6 +152,7 @@ public:
         accepted_grant_ack_index_.reset();
         captured_a_.reset();
         captured_c_.reset();
+        stalled_c_request_.reset();
         release_data_.reset();
         expected_release_lines_.clear();
         a_fire_ = false;
@@ -117,6 +168,14 @@ public:
         hold_next_response_ = false;
         held_response_address_.reset();
         building_held_response_ = false;
+        release_ready_window_active_ = false;
+        release_ready_window_first_complete_ = false;
+        release_ready_window_target_selected_ = false;
+        release_ready_window_bypass_non_target_ = false;
+        release_ready_window_target_lines_.clear();
+        release_ready_window_stall_remaining_ = 0;
+        release_ready_window_stall_cycles_ = 0;
+        release_ready_window_completed_releases_ = 0;
         pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
         force_e_stall_ = random_backpressure_;
@@ -132,7 +191,11 @@ public:
     {
         const bool accept_a = !random_backpressure_ ||
                               (!force_a_stall_ && (next_random() & 3U) != 0);
-        const bool accept_c = !random_backpressure_ || (next_random() & 3U) != 0;
+        const bool accept_c = release_ready_window_active_
+            ? release_ready_window_first_complete_ ||
+                  release_ready_window_bypass_non_target_ ||
+                  release_ready_window_stall_remaining_ == 0
+            : !random_backpressure_ || (next_random() & 3U) != 0;
         const bool accept_e = !random_backpressure_ ||
                               (!force_e_stall_ && (next_e_random() & 3U) != 0);
         dut.auto_inner_dcache_client_out_a_ready.ImmSet(accept_a);
@@ -223,19 +286,71 @@ public:
             ++probe_stall_cycles_;
         }
         b_fire_ = b_valid && b_ready;
-        c_fire_ = dut.auto_inner_dcache_client_out_c_valid.B() &&
-                  dut.auto_inner_dcache_client_out_c_ready.B();
-        if (c_fire_) {
-            captured_c_ = CRequest{
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_c_bits_opcode.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_c_bits_param.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_c_bits_size.U()),
-                static_cast<std::uint8_t>(dut.auto_inner_dcache_client_out_c_bits_source.U()),
+        const bool c_valid = dut.auto_inner_dcache_client_out_c_valid.B();
+        const bool c_ready = dut.auto_inner_dcache_client_out_c_ready.B();
+        std::optional<CRequest> current_c;
+        if (c_valid) {
+            current_c = CRequest{
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_opcode.U()),
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_param.U()),
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_size.U()),
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_source.U()),
                 dut.auto_inner_dcache_client_out_c_bits_address.U(),
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_user_alias.U()),
+                dut.auto_inner_dcache_client_out_c_bits_user_vaddr.U(),
+                static_cast<std::uint8_t>(
+                    dut.auto_inner_dcache_client_out_c_bits_user_reqSource.U()),
+                dut.auto_inner_dcache_client_out_c_bits_user_needHint.B(),
                 dut.auto_inner_dcache_client_out_c_bits_echo_isKeyword.B(),
                 dut.auto_inner_dcache_client_out_c_bits_corrupt.B(),
                 dut.auto_inner_dcache_client_out_c_bits_data.GetBytes(),
             };
+        }
+        if (current_c && release_ready_window_active_ &&
+            !release_ready_window_first_complete_ &&
+            !release_ready_window_target_selected_ &&
+            !release_ready_window_bypass_non_target_) {
+            if (is_release_ready_window_target(*current_c)) {
+                release_ready_window_target_selected_ = true;
+            } else {
+                release_ready_window_bypass_non_target_ = true;
+            }
+        }
+        if (stalled_c_request_) {
+            if (!current_c) {
+                error_ = "DCache TileLink C dropped valid while stalled";
+            } else if (*current_c != *stalled_c_request_) {
+                error_ = "DCache TileLink C changed payload while stalled";
+            } else {
+                ++c_payload_stability_checks_;
+                if (release_ready_window_active_ &&
+                    release_ready_window_target_selected_ &&
+                    !release_ready_window_first_complete_) {
+                    ++release_target_payload_stability_checks_;
+                }
+            }
+        }
+        c_fire_ = c_valid && c_ready;
+        if (c_valid && !c_ready) {
+            stalled_c_request_ = current_c;
+            if (release_ready_window_active_ &&
+                !release_ready_window_first_complete_ &&
+                release_ready_window_target_selected_) {
+                if (release_ready_window_stall_remaining_ != 0) {
+                    --release_ready_window_stall_remaining_;
+                    ++release_ready_window_stall_cycles_;
+                }
+            }
+        } else {
+            stalled_c_request_.reset();
+        }
+        if (c_fire_) {
+            captured_c_ = std::move(current_c);
             if (captured_c_->opcode < 4 || captured_c_->opcode > 7) {
                 error_ = "unsupported DCache TileLink C opcode";
             }
@@ -404,6 +519,37 @@ public:
         }
         return count;
     }
+    std::uint64_t observed_stalled_release_covering_count(
+        std::uint64_t address, bool data_only = false) const
+    {
+        std::uint64_t count = 0;
+        for (const ReleaseRecord &release : release_observation_) {
+            if ((data_only && release.opcode != 7) ||
+                release.stall_cycles == 0) {
+                continue;
+            }
+            const std::uint64_t bytes = std::uint64_t{1} << release.size;
+            const std::uint64_t base = release.address & ~(bytes - 1);
+            count += address >= base && address - base < bytes;
+        }
+        return count;
+    }
+    std::uint64_t observed_release_stall_cycles_covering(
+        std::uint64_t address, bool data_only = false) const
+    {
+        std::uint64_t count = 0;
+        for (const ReleaseRecord &release : release_observation_) {
+            if (data_only && release.opcode != 7) {
+                continue;
+            }
+            const std::uint64_t bytes = std::uint64_t{1} << release.size;
+            const std::uint64_t base = release.address & ~(bytes - 1);
+            if (address >= base && address - base < bytes) {
+                count += release.stall_cycles;
+            }
+        }
+        return count;
+    }
     std::uint64_t get_count() const { return get_count_; }
     std::uint64_t refill_count() const { return refill_count_; }
     std::uint64_t keyword_refill_count() const
@@ -486,6 +632,14 @@ public:
     std::uint64_t grant_ack_stall_cycles() const
     {
         return grant_ack_stall_cycles_;
+    }
+    std::uint64_t c_payload_stability_checks() const
+    {
+        return c_payload_stability_checks_;
+    }
+    std::uint64_t release_target_payload_stability_checks() const
+    {
+        return release_target_payload_stability_checks_;
     }
 
     bool request_probe(
@@ -627,15 +781,22 @@ private:
         std::uint8_t size;
         std::uint8_t source;
         std::uint64_t address;
+        std::uint8_t alias;
+        std::uint64_t virtual_address;
+        std::uint8_t request_source;
+        bool need_hint;
         bool keyword;
         bool corrupt;
         std::vector<unsigned char> data;
+
+        bool operator==(const CRequest &) const = default;
     };
 
     struct ReleaseRecord {
         std::uint8_t opcode;
         std::uint8_t size;
         std::uint64_t address;
+        std::uint64_t stall_cycles;
     };
 
     struct ReleaseDataState {
@@ -844,6 +1005,7 @@ private:
         }
         probe_responses_.erase(expected_it);
         ++probe_response_count_;
+        complete_release_ready_window_transaction();
     }
 
     void accept_release(const CRequest &request)
@@ -855,8 +1017,10 @@ private:
             }, true);
             if (observe_releases_) {
                 release_observation_.push_back(
-                    {request.opcode, request.size, request.address});
+                    {request.opcode, request.size, request.address,
+                     current_release_ready_window_stalls()});
             }
+            complete_release_ready_window_transaction();
             ++release_count_;
             return;
         }
@@ -925,10 +1089,48 @@ private:
             }
             if (observe_releases_) {
                 release_observation_.push_back(
-                    {request.opcode, request.size, request.address});
+                    {request.opcode, request.size, request.address,
+                     current_release_ready_window_stalls()});
             }
+            complete_release_ready_window_transaction();
             ++release_count_;
             ++release_data_count_;
+        }
+    }
+
+    std::uint64_t current_release_ready_window_stalls() const
+    {
+        return release_ready_window_active_ &&
+                !release_ready_window_first_complete_ &&
+                release_ready_window_target_selected_
+            ? release_ready_window_stall_cycles_
+            : 0;
+    }
+
+    bool is_release_ready_window_target(const CRequest &request) const
+    {
+        if ((request.opcode != 6 && request.opcode != 7) ||
+            request.size != 6) {
+            return false;
+        }
+        const std::uint64_t line = request.address & ~(kLineBytes - 1U);
+        return std::find(
+                   release_ready_window_target_lines_.begin(),
+                   release_ready_window_target_lines_.end(), line) !=
+            release_ready_window_target_lines_.end();
+    }
+
+    void complete_release_ready_window_transaction()
+    {
+        if (!release_ready_window_active_) {
+            return;
+        }
+        if (release_ready_window_target_selected_) {
+            ++release_ready_window_completed_releases_;
+            release_ready_window_first_complete_ = true;
+            release_ready_window_target_selected_ = false;
+        } else if (release_ready_window_bypass_non_target_) {
+            release_ready_window_bypass_non_target_ = false;
         }
     }
 
@@ -1011,6 +1213,7 @@ private:
     std::optional<std::size_t> accepted_grant_ack_index_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
+    std::optional<CRequest> stalled_c_request_;
     std::vector<ARequest> request_history_;
     std::vector<ReleaseRecord> release_observation_;
     bool observe_releases_ = false;
@@ -1055,6 +1258,8 @@ private:
     std::uint64_t outstanding_requests_ = 0;
     std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t grant_ack_stall_cycles_ = 0;
+    std::uint64_t c_payload_stability_checks_ = 0;
+    std::uint64_t release_target_payload_stability_checks_ = 0;
     std::uint8_t next_probe_source_ = 0;
     std::array<bool, 64> probe_sources_seen_{};
     std::uint64_t random_state_ = 1;
@@ -1074,6 +1279,14 @@ private:
     bool hold_next_response_ = false;
     std::optional<std::uint64_t> held_response_address_;
     bool building_held_response_ = false;
+    bool release_ready_window_active_ = false;
+    bool release_ready_window_first_complete_ = false;
+    bool release_ready_window_target_selected_ = false;
+    bool release_ready_window_bypass_non_target_ = false;
+    std::vector<std::uint64_t> release_ready_window_target_lines_;
+    unsigned release_ready_window_stall_remaining_ = 0;
+    std::uint64_t release_ready_window_stall_cycles_ = 0;
+    std::uint64_t release_ready_window_completed_releases_ = 0;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;

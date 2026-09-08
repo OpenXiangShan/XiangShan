@@ -1271,6 +1271,19 @@ dequeue are conserved exactly. The DCache agent matches GrantAck by sink, so
 legal cross-source D/E reordering is accepted without relaxing identity checks.
 Coverage uses a 500-per-mille overlap share, SPEC 10, and corner 750.
 
+Schema 29 adds `set-pressure-release-backpressure` and expands that cross to
+192 line-state x refill-overlap x C-backpressure x depth x width x translation
+bins. The memory agent searches by the action's target line set, lets unrelated
+C transactions complete without consuming the target budget, and forces the
+first attributed Release or ReleaseData to hold its complete payload for 16
+valid cycles. Selected actions require exactly one stalled target release, 16
+target stall cycles, and 16 independent payload-stability comparisons;
+unselected actions require zero for all three. Every action must close exactly
+one address-qualified window. For clean overlap, the held refill is established
+before the target set is filled, so replacement is causally concurrent with
+the pending refill. Coverage uses a 500-per-mille C-backpressure share, SPEC 10,
+and corner 750. Multiple simultaneous replacement windows remain separate.
+
 For a reproducible local pressure run:
 
 ```sh
@@ -1439,7 +1452,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 576
+  --test random-mixed --seed 17 --transactions 672
 ```
 
 ## Complete Pin Audit

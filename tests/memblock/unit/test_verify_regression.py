@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 29
+        result["constraint_schema"] = 30
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1081,6 +1081,51 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "set-pressure overlap/operation coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 29,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,64",
+                "target_set_pressure_dirty": 500,
+                "target_set_pressure_refill_overlap": 500,
+                "target_set_pressure_release_backpressure": 500,
+                "actual_set_pressure_line_state": "32,32",
+                "actual_set_pressure_refill_overlap": "32,32",
+                "actual_set_pressure_release_backpressure": "32,32",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 64
+                ),
+                "actual_set_pressure_set": "16,16,16,16",
+                "actual_set_pressure_issue_order": "152,152",
+                "actual_set_pressure_manager": (
+                    "32,304,304,48,56,56,304,304,48"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "32,304,304,304,48,48,0,56,8,8,624,624"
+                ),
+                "actual_set_pressure_overlap_manager": "32,32,48,32,32",
+                "actual_set_pressure_backpressure_manager": (
+                    "32,32,512,512,64"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_backpressure_manager"] = (
+            "32,32,511,512,64"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure release-backpressure accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_backpressure_manager"] = (
+            "32,32,512,512,64"
+        )
+        result["actual_set_pressure_release_backpressure"] = "33,31"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure backpressure/operation coverage",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

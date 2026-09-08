@@ -455,6 +455,21 @@ public:
         return check_components();
     }
 
+    bool begin_dcache_release_ready_window(
+        const std::vector<std::uint64_t> &target_lines,
+        unsigned stall_valid_cycles)
+    {
+        memory_agent_.begin_release_ready_window(
+            target_lines, stall_valid_cycles);
+        return check_components();
+    }
+
+    bool end_dcache_release_ready_window()
+    {
+        memory_agent_.end_release_ready_window();
+        return check_components();
+    }
+
     void inject_next_uncache_response_error(bool denied, bool corrupt)
     {
         uncache_agent_.inject_next_response_error(denied, corrupt);
@@ -935,6 +950,18 @@ public:
     {
         return memory_agent_.observed_release_covering_count(address, true);
     }
+    std::uint64_t observed_dcache_stalled_releases_covering(
+        std::uint64_t address, bool data_only = false) const
+    {
+        return memory_agent_.observed_stalled_release_covering_count(
+            address, data_only);
+    }
+    std::uint64_t observed_dcache_release_stall_cycles_covering(
+        std::uint64_t address, bool data_only = false) const
+    {
+        return memory_agent_.observed_release_stall_cycles_covering(
+            address, data_only);
+    }
     std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
     std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
     std::uint64_t dcache_keyword_refills() const
@@ -1041,6 +1068,14 @@ public:
     std::uint64_t dcache_grant_ack_stalls() const
     {
         return memory_agent_.grant_ack_stall_cycles();
+    }
+    std::uint64_t dcache_c_payload_stability_checks() const
+    {
+        return memory_agent_.c_payload_stability_checks();
+    }
+    std::uint64_t dcache_release_target_payload_stability_checks() const
+    {
+        return memory_agent_.release_target_payload_stability_checks();
     }
     bool dcache_grants_drained() const
     {

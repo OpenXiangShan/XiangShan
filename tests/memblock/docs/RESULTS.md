@@ -2799,3 +2799,62 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=576 elapsed_
 
 No CPU RTL defect was observed. Release-channel backpressure and multiple
 simultaneous replacement windows remain explicit DCache breadth gaps.
+
+## Schema 29 Address-Qualified Release Backpressure Closure
+
+On 2026-09-08 `random-mixed` added
+`set-pressure-release-backpressure` and expanded set pressure to 192 required
+clean/dirty x no-overlap/held-refill-overlap x no-C-stall/C-stall x 9/10-line
+x B/H/W/D x Bare/stage-1/nested bins. The DCache agent now samples the complete
+C payload and selects the forced-ready window only when Release/ReleaseData
+belongs to the action's target-line set. ProbeAck and background Release traffic
+are allowed to complete but cannot consume the target stall budget. A selected
+action requires exactly one target release held for 16 valid cycles and 16
+matching payload-stability comparisons; an unselected action requires zero
+target stalls. Both classes require one completed window.
+
+Clean held-refill actions were reordered so the address-qualified refill is
+pending before the target set is filled. Dirty actions continue to issue and
+complete all older stores before holding the younger refill and committing the
+stores. This guarantees that the attributed replacement and the refill really
+overlap without depending on residual C-channel timing. The minimum mixed
+length is now 672 actions, leaving room after scheduling every new cross bin.
+
+The following final-binary endpoint runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/dirty actions | No-overlap/held actions | No-stall/stall actions | Stalled releases/cycles/checks |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| C-stall-only `coverage` | 29001 | 149,920 | 48/50 | 50/48 | 0/98 | 98/1,568/1,568 |
+| no-C-stall `coverage` | 29002 | 154,932 | 49/48 | 48/49 | 97/0 | 0/0/0 |
+| full `coverage` | 29003 | 196,128 | 96/101 | 98/99 | 100/97 | 97/1,552/1,552 |
+| frozen `coverage` artifact | 1 | 183,161 | 99/100 | 99/100 | 99/100 | 100/1,600/1,600 |
+
+Every fully enabled run hit all 192 cross bins and every set quarter. The two
+endpoint runs kept the disabled backpressure class exactly zero. In the frozen
+artifact, 199 set-pressure actions closed 199 target windows; the 100 selected
+actions produced exactly 100 stalled target releases, 1,600 target stall
+cycles, and 1,600 independent stability checks. The same artifact retained
+schema-28 overlap conservation for 100 held refills and 149 target releases
+while those refills were pending.
+
+The first implementation exposed a UT timing assumption rather than an RTL
+defect: opening the clean C-ready window after initial fill could miss a target
+Release already emitted while the held refill was being established. Target
+line qualification fixed background attribution, and placing the held refill
+before clean pressure fixed the causal overlap. Seeds 29001..29003 all pass
+after the correction, so no CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-errors`,
+`dcache-coherence`, `atomic-dchannel-errors`, both C-backpressure endpoints,
+the fully enabled coverage run, and the independent frozen-artifact verifier
+passed. The frozen executable SHA-256 is
+`0df01ca8e5809a73aec7e344726318d1b9282c78481d055a3a4ec4b374aea57a`.
+The accepted artifact is `build/memblock/schema29-coverage-1x672.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=672 elapsed_seconds=70.968521 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=9a5ba6b129961992747b44323e567f5442baab6c74db8381fbbb344a2d7c0906
+```
+
+No CPU RTL defect was observed. Multiple simultaneous replacement windows are
+the next explicit DCache breadth gap.
