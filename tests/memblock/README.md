@@ -998,7 +998,8 @@ can add legal NC/MMIO load overlap, then randomizes issue order, store
 address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
-AMO/LRSC/AMOCAS family, W/D width, and D-channel error presence/kind, CMO
+AMO/LRSC/AMOCAS family, W/D width, D-channel error presence/kind, and atomic
+Probe-burst depth, CMO
 CLEAN/FLUSH/INVAL operation, clean/dirty line state, younger-load overlap, and
 legal CBOAck error presence and kind, hypervisor PBMT/PMA/PMP relation,
 NC/MMIO load/store direction plus legal
@@ -1371,8 +1372,23 @@ close all 48 operation x clean/dirty x depth bins, match every C response by
 source/address, require exact target dirty data, and conserve successful CMO
 Probe traffic separately from error CMOs, which still emit no Probe. Coverage
 weights all depths equally, SPEC strongly favors depth one without disabling a
-class, and corner weights deep bursts progressively. The current minimum
-`random-mixed` length is 1296 actions. Replacement/atomic Probe composition,
+class, and corner weights deep bursts progressively. At schema 36 the minimum
+`random-mixed` length became 1296 actions. Replacement/atomic Probe composition,
+multiple simultaneous CMO sources, and malformed coherence traffic remain.
+
+Schema 37 composes successful AMO, LR/SC, and AMOCAS actions at both W and D
+widths with `atomic-probe-depth0` through `atomic-probe-depth8`. Depth zero
+preserves ordinary atomic traffic. Depths one through eight hold a cold atomic
+refill D response, queue distinct clean auxiliary manager Probes, and then
+release D. The DCache may legally backpressure B while the atomic refill is
+held; after D release, C remains unready until all selected B requests have
+been accepted. Every ProbeAck is matched by source and address, no auxiliary
+Probe may carry data, the atomic old-value/result is checked independently,
+and the 54 family x width x depth bins must all close when enabled. Atomic
+errors remain separate zero-Probe actions. Coverage weights all depths equally,
+SPEC strongly favors depth zero without disabling any burst depth, and corner
+progressively favors deep bursts. The current minimum `random-mixed` length is
+1344 actions. Replacement/Probe composition, five-or-more replacement windows,
 multiple simultaneous CMO sources, and malformed coherence traffic remain.
 
 For a reproducible local pressure run:
@@ -1543,7 +1559,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 1296
+  --test random-mixed --seed 17 --transactions 1344
 ```
 
 ## Complete Pin Audit

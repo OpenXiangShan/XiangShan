@@ -3294,3 +3294,68 @@ No CPU RTL defect was observed. Multiple simultaneous CMO sources,
 replacement/atomic Probe-burst composition, five-or-more simultaneous
 replacement windows, and malformed coherence traffic remain explicit DCache
 breadth gaps.
+
+## Schema 37 Atomic Probe-Burst Composition Closure
+
+Date: 2026-09-09
+
+Schema 37 composes successful AMO, LR/SC, and AMOCAS operations at W and D
+widths with zero through eight auxiliary manager Probes. Depth zero preserves
+the ordinary atomic path. For nonzero depth the action selects a fresh cold
+target, warms distinct clean auxiliary lines, holds the target D response, and
+forbids early atomic writeback. The DCache may legally backpressure B while D
+is held. After D is released, C remains unready until the complete selected B
+burst is accepted; every no-data ProbeAck is matched by source and address
+before exact atomic result and memory checks complete. Atomic error actions
+remain separate zero-Probe paths.
+
+The online and independent offline gates close all 54 family x width x depth
+bins. They reconstruct each clean atomic outcome from the Probe crosses,
+reconstruct every family, width, and depth marginal, add the depth-weighted
+atomic bursts to total manager Probe traffic, and retain the exact 64-source
+unique/reuse/wrap lifecycle check.
+
+| Direction | Seed | Final cycle | Atomic success/error | Probe depth 0/1/2/3/4/5/6/7/8 | Manager Probes and lifecycle |
+| --- | ---: | ---: | ---: | --- | --- |
+| Depth-eight-only coverage endpoint | 37008 | 1,052,983 | 6/12 | 0/0/0/0/0/0/0/0/6 | 430; 64/366/6 |
+| Coverage profile | 37005 | 1,065,652 | 58/12 | 6/6/6/8/7/7/6/6/6 | 610; 64/546/9 |
+| Spec profile | 37006 | 2,082,012 | 54/0 | 6/6/6/6/6/6/6/6/6 | 593; 64/529/9 |
+| Corner profile | 37007 | 2,293,934 | 56/18 | 6/6/6/6/6/6/6/8/6 | 622; 64/558/9 |
+| Frozen coverage artifact | 1 | 1,058,628 | 55/12 | 6/6/6/6/7/6/6/6/6 | 597; 64/533/9 |
+
+The frozen manager count is independently attributable to 32 ordinary primary
+Probe sequences, 16 toB cleanup Probes, 112 ordinary burst auxiliaries, 217
+CMO Probes, and 220 atomic auxiliaries. Its 55 successful atomics comprise
+family counts `23/22/22`, width counts `34/33`, and all 54 enabled crosses;
+the twelve error actions split evenly between corrupt and denied and retain
+the exact `12/12/24/12/12` manager-error tuple. Existing schema-36 CMO and
+schema-35 replacement coverage also remained closed.
+
+The first depth-eight replay exposed an over-constrained UT timing assumption,
+not an RTL defect: the initial oracle expected all B requests to be accepted
+while the atomic refill D response was still held. The observed DCache legally
+backpressured B until D could progress. The final oracle retains D hold and
+early-writeback checks, releases D, and only then requires the exact eight
+accepted outstanding Probe sources under C backpressure. The original seed
+passes with this external ready/valid contract, so no CPU bug report was
+created.
+
+All 187 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-coherence`,
+`dcache-errors`, `cmo-contracts`, `atomic-contracts`,
+`atomic-dchannel-errors`, the depth-eight endpoint, all three complete
+constraint profiles, the all-zero atomic-depth rejection endpoint, and the
+independent frozen-artifact verifier passed. The frozen executable and
+runtime-manifest SHA-256 values are respectively
+`429d8da08f5295931b8c0fe57d5edfdfebfc0b73e17a273112599a9c7eb9414a`
+and `1cde510f6a7e85a6b94584d75be917c6e060b75bf003da1190c12de4deb90229`.
+The accepted artifact is
+`build/memblock/schema37-coverage-1x1344.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1344 elapsed_seconds=409.249387 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=9b34ba4cd55aad2bcdd6d7707fc0cc507d0d6a904924dd8b2aaf8ad8f0e35501
+```
+
+No CPU RTL defect was observed. Multiple simultaneous CMO sources,
+five-or-more simultaneous replacement windows, replacement composition with
+Probe/CMO/atomic traffic, and malformed coherence traffic remain explicit
+DCache breadth gaps.

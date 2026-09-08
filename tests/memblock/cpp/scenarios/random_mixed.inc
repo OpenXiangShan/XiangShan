@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 1296;
+    constexpr unsigned minimum_actions = 1344;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -28,6 +28,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::array<std::uint64_t, 3> cmo_locality_lines{};
     std::uint64_t cmo_overlap_line = 0;
     std::uint64_t cmo_auxiliary_probe_group = 0;
+    std::uint64_t atomic_probe_target_line = 0;
+    std::uint64_t atomic_auxiliary_probe_group = 0;
     std::uint64_t probe_overlap_line = 0;
     std::uint64_t dcache_error_line = 0;
     std::uint64_t atomic_error_line = 0;
@@ -116,13 +118,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t cmo_auxiliary_probe_base =
         probe_overlap_base + probe_overlap_span / 2;
     constexpr std::uint64_t cmo_auxiliary_probe_span =
-        probe_overlap_span / 2;
+        probe_overlap_span / 4;
+    constexpr std::uint64_t atomic_auxiliary_probe_base =
+        probe_overlap_base + 3 * probe_overlap_span / 4;
+    constexpr std::uint64_t atomic_auxiliary_probe_span =
+        probe_overlap_span / 4;
     constexpr std::uint64_t dcache_error_base =
         probe_overlap_base + probe_overlap_span;
     constexpr std::uint64_t dcache_error_span = 0x4000000;
     constexpr std::uint64_t atomic_error_base =
         dcache_error_base + dcache_error_span;
     constexpr std::uint64_t atomic_error_span = 0x4000000;
+    constexpr std::uint64_t atomic_probe_target_base =
+        atomic_error_base + atomic_error_span / 2;
+    constexpr std::uint64_t atomic_probe_target_span =
+        atomic_error_span / 2;
     constexpr std::uint64_t ptw_error_base =
         atomic_error_base + atomic_error_span;
     constexpr std::uint64_t ptw_error_span = 0x100000;
@@ -4065,11 +4075,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             unsigned atomic_family = 0;
             unsigned atomic_width = 0;
+            unsigned atomic_probe_depth = 0;
             std::optional<bool> atomic_error_denied;
             bool atomic_outcome_forced = false;
             if (kind == RandomConstraints::atomic) {
                 atomic_family = constraints.choose_atomic_family(random());
                 atomic_width = constraints.choose_atomic_width(random());
+                if (constraints.atomic_error_per_mille != 1000) {
+                    atomic_probe_depth =
+                        constraints.choose_atomic_probe_depth(random());
+                }
                 for (unsigned family = 0;
                      family < RandomConstraints::atomic_family_count &&
                          !atomic_outcome_forced;
@@ -4105,6 +4120,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             }
                         }
                     }
+                }
+                const std::optional<unsigned> missing_atomic_probe_cross =
+                    constraint_coverage.first_missing_atomic_probe_cross(
+                        constraints);
+                if (missing_atomic_probe_cross) {
+                    constexpr unsigned depth_count =
+                        RandomConstraints::atomic_probe_depth_count;
+                    constexpr unsigned family_stride = 2U * depth_count;
+                    atomic_family =
+                        *missing_atomic_probe_cross / family_stride;
+                    const unsigned remainder =
+                        *missing_atomic_probe_cross % family_stride;
+                    atomic_width = remainder / depth_count;
+                    atomic_probe_depth = remainder % depth_count;
+                    atomic_error_denied.reset();
+                    atomic_outcome_forced = true;
                 }
                 if (!atomic_outcome_forced && choose_binary_class(
                         constraints.atomic_error_per_mille,
@@ -6779,10 +6810,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const bool word = atomic_width == 0;
                 const std::uint64_t operand = random();
                 const bool error_response = atomic_error_denied.has_value();
+                const bool probe_composed =
+                    !error_response && atomic_probe_depth != 0;
                 std::uint64_t address = atomic_base + slot * 64;
                 if (error_response) {
                     constexpr std::uint64_t error_lines =
-                        atomic_error_span / 64;
+                        (atomic_error_span / 2) / 64;
                     if (atomic_error_line >= error_lines) {
                         phase = "random-atomic-error-address-space-exhausted";
                         return false;
@@ -6790,14 +6823,40 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const std::uint64_t sequence = atomic_error_line++;
                     const std::uint64_t line = sequence ^ (sequence >> 1);
                     address = atomic_error_base + line * 64 + (word ? 4 : 0);
+                } else if (probe_composed) {
+                    constexpr std::uint64_t target_lines =
+                        atomic_probe_target_span / 64;
+                    std::optional<std::uint64_t> fresh_target_line;
+                    for (std::uint64_t attempt = 0;
+                         attempt < target_lines && !fresh_target_line;
+                         ++attempt) {
+                        const std::uint64_t sequence =
+                            atomic_probe_target_line++;
+                        const std::uint64_t line =
+                            (sequence ^ (sequence >> 1)) % target_lines;
+                        const std::uint64_t candidate =
+                            atomic_probe_target_base + line * 64;
+                        if (environment.dcache_requests_covering_since(
+                                candidate, 0) == 0) {
+                            fresh_target_line = candidate;
+                        }
+                    }
+                    if (!fresh_target_line) {
+                        phase = "random-atomic-probe-address-space-exhausted";
+                        return false;
+                    }
+                    address = *fresh_target_line;
                 }
                 const memblock::LoadOp read_op = word
                     ? memblock::LoadOp::lwu : memblock::LoadOp::ld;
-                const std::uint64_t original_value = error_response
+                std::uint64_t atomic_value = error_response
                     ? environment.memory().expected_load(address, read_op)
-                    : word
-                    ? static_cast<std::uint32_t>(atomic_values[slot])
+                    : probe_composed
+                    ? environment.memory().expected_load(
+                          address, memblock::LoadOp::ld)
                     : atomic_values[slot];
+                const std::uint64_t original_value = word
+                    ? static_cast<std::uint32_t>(atomic_value) : atomic_value;
                 const auto expect_atomic_writeback = [&] (
                     const auto &transaction, std::uint64_t value,
                     std::uint32_t exception = 0) {
@@ -6835,6 +6894,167 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                              : memblock::AtomicOp::lr_d,
                         0);
                 }
+
+                std::vector<std::uint64_t> atomic_probe_lines;
+                if (probe_composed) {
+                    phase = "random-atomic-probe-drain";
+                    if (!environment.run_until_all_complete(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_queues_retired(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_sbuffer_empty(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    constexpr std::uint64_t group_bytes = 0x800;
+                    constexpr std::uint64_t groups =
+                        atomic_auxiliary_probe_span / group_bytes;
+                    const std::uint64_t group =
+                        atomic_auxiliary_probe_group++ % groups;
+                    const std::uint64_t group_base =
+                        atomic_auxiliary_probe_base + group * group_bytes;
+                    const unsigned target_set =
+                        static_cast<unsigned>((address >> 6) & 0x7fU);
+                    for (unsigned candidate = 0;
+                         atomic_probe_lines.size() < atomic_probe_depth;
+                         ++candidate) {
+                        const std::uint64_t auxiliary_line =
+                            group_base + candidate * 64U;
+                        if (((auxiliary_line >> 6) & 0x7fU) == target_set) {
+                            continue;
+                        }
+                        atomic_probe_lines.push_back(auxiliary_line);
+                    }
+                    for (const std::uint64_t auxiliary_line :
+                         atomic_probe_lines) {
+                        const auto auxiliary_load = make_load(
+                            auxiliary_line + 8U * (random() % 8U),
+                            memblock::LoadOp::ld,
+                            random() % memblock::kScalarLoadLanes);
+                        environment.expect_load(auxiliary_load);
+                        phase = "random-atomic-probe-warm";
+                        if (!environment.set_rob_head(
+                                auxiliary_load.rob, auxiliary_load.rob_flag) ||
+                            !environment.enqueue_load(auxiliary_load) ||
+                            !environment.issue_load(auxiliary_load, 4096) ||
+                            !environment.run_until_complete(
+                                constrained_completion_timeout) ||
+                            !environment.run_until_lq_retired(8192)) {
+                            return false;
+                        }
+                    }
+                }
+
+                const auto issue_atomic_success = [&] (
+                    const memblock::AtomicTransaction &current) {
+                    if (!probe_composed) {
+                        return environment.issue_atomic(current, 4096) &&
+                            environment.run_until_complete(
+                                constrained_completion_timeout);
+                    }
+                    const std::uint64_t target_line =
+                        address & ~std::uint64_t{63};
+                    const std::uint64_t target_requests_before =
+                        environment.tilelink_requests();
+                    const std::uint64_t probes_before =
+                        environment.dcache_probes();
+                    const std::uint64_t probe_responses_before =
+                        environment.dcache_probe_responses();
+                    const std::uint64_t probe_data_before =
+                        environment.dcache_probe_data();
+                    const std::uint64_t writebacks_before =
+                        environment.writebacks();
+                    environment.hold_dcache_response_at(target_line);
+                    phase = "random-atomic-probe-issue";
+                    if (!environment.issue_atomic(current, 4096)) {
+                        phase += ":issue";
+                        return false;
+                    }
+                    for (unsigned cycle = 0;
+                         cycle < constrained_completion_timeout &&
+                         !environment.dcache_response_held_at(target_line);
+                         ++cycle) {
+                        if (!environment.run_cycles(1)) {
+                            phase += ":wait-held";
+                            return false;
+                        }
+                    }
+                    if (!environment.dcache_response_held_at(target_line)) {
+                        phase += ":held-timeout";
+                        return false;
+                    }
+                    if (environment.dcache_requests_covering_since(
+                            target_line, target_requests_before) != 1) {
+                        phase += ":target-request-count";
+                        return false;
+                    }
+                    if (environment.writebacks() != writebacks_before) {
+                        phase += ":early-writeback";
+                        return false;
+                    }
+                    if (!environment.hold_dcache_c_until_probes(
+                            probes_before + atomic_probe_depth)) {
+                        phase += ":hold-c";
+                        return false;
+                    }
+                    for (const std::uint64_t auxiliary_line :
+                         atomic_probe_lines) {
+                        if (!environment.request_dcache_probe(
+                                auxiliary_line, 2, false, 2)) {
+                            phase += ":probe-request";
+                            return false;
+                        }
+                    }
+                    if (environment.dcache_probe_data() != probe_data_before) {
+                        phase += ":early-probe-data";
+                        return false;
+                    }
+                    if (environment.writebacks() != writebacks_before) {
+                        phase += ":writeback-before-d";
+                        return false;
+                    }
+                    if (!environment.dcache_response_held_at(target_line)) {
+                        phase += ":lost-held-d";
+                        return false;
+                    }
+                    if (!environment.release_held_dcache_response_at(
+                            target_line)) {
+                        phase += ":release-d";
+                        return false;
+                    }
+                    if (!environment.run_until_probe_responses(
+                            probe_responses_before + atomic_probe_depth,
+                            constrained_completion_timeout)) {
+                        phase += ":probe-responses";
+                        return false;
+                    }
+                    if (environment.dcache_probes() !=
+                            probes_before + atomic_probe_depth) {
+                        phase += ":probe-count";
+                        return false;
+                    }
+                    if (environment.dcache_probe_data() != probe_data_before) {
+                        phase += ":probe-data";
+                        return false;
+                    }
+                    if (environment.dcache_max_probe_outstanding() <
+                            atomic_probe_depth) {
+                        phase += ":probe-depth";
+                        return false;
+                    }
+                    if (!environment.run_until_complete(
+                            constrained_completion_timeout)) {
+                        phase += ":atomic-completion";
+                        return false;
+                    }
+                    if (environment.dcache_response_held_at(target_line)) {
+                        phase += ":held-d-not-drained";
+                        return false;
+                    }
+                    return true;
+                };
 
                 std::array<std::uint64_t, 5> manager_delta{};
                 if (error_response) {
@@ -6940,27 +7160,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 } else if (atomic_family == RandomConstraints::atomic_amo) {
                     expect_atomic_writeback(
                         transaction,
-                        atomic_writeback(atomic_values[slot], word));
-                    if (!environment.issue_atomic(transaction, 4096) ||
-                        !environment.run_until_complete(
-                            constrained_completion_timeout)) {
+                        atomic_writeback(atomic_value, word));
+                    if (!issue_atomic_success(transaction)) {
                         return false;
                     }
-                    atomic_values[slot] = atomic_result(
-                        transaction.op, atomic_values[slot], operand);
+                    atomic_value = atomic_result(
+                        transaction.op, atomic_value, operand);
                 } else if (atomic_family == RandomConstraints::atomic_cas) {
-                    const std::uint64_t old_value = atomic_values[slot];
+                    const std::uint64_t old_value = atomic_value;
                     const std::uint64_t compare_value = word
                         ? static_cast<std::uint32_t>(old_value) : old_value;
                     expect_atomic_writeback(
                         transaction, atomic_writeback(old_value, word));
-                    if (!environment.issue_atomic(transaction, 4096) ||
-                        !environment.run_until_complete(
-                            constrained_completion_timeout)) {
+                    if (!issue_atomic_success(transaction)) {
                         return false;
                     }
                     if (transaction.compare == compare_value) {
-                        atomic_values[slot] = word
+                        atomic_value = word
                             ? ((old_value & ~std::uint64_t{0xffffffff}) |
                                static_cast<std::uint32_t>(operand))
                             : operand;
@@ -6968,10 +7184,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 } else {
                     expect_atomic_writeback(
                         transaction,
-                        atomic_writeback(atomic_values[slot], word));
-                    if (!environment.issue_atomic(transaction, 4096) ||
-                        !environment.run_until_complete(
-                            constrained_completion_timeout)) {
+                        atomic_writeback(atomic_value, word));
+                    if (!issue_atomic_success(transaction)) {
                         return false;
                     }
                     const auto sc = make_atomic(
@@ -6985,14 +7199,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             constrained_completion_timeout)) {
                         return false;
                     }
-                    atomic_values[slot] = word
-                        ? ((atomic_values[slot] & ~std::uint64_t{0xffffffff}) |
+                    atomic_value = word
+                        ? ((atomic_value & ~std::uint64_t{0xffffffff}) |
                            static_cast<std::uint32_t>(operand))
                         : operand;
                 }
                 if (!error_response) {
-                    environment.record_atomic_result(
-                        address, atomic_values[slot]);
+                    if (!probe_composed) {
+                        atomic_values[slot] = atomic_value;
+                    }
+                    environment.record_atomic_result(address, atomic_value);
+                    constraint_coverage.sample_atomic_probe(
+                        atomic_family, atomic_width, atomic_probe_depth);
                 }
                 constraint_coverage.sample_atomic(
                     atomic_family, atomic_width, atomic_error_denied,

@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 37
+        result["constraint_schema"] = 38
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1288,6 +1288,12 @@ class VerifyRegressionTest(unittest.TestCase):
             {
                 "constraint_schema": 35,
                 "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
+                "actual_atomic_family": "6,6,6",
+                "actual_atomic_width": "9,9",
+                "actual_atomic_error": "6,12",
+                "actual_atomic_error_kind": "6,6",
+                "actual_atomic_outcome": ",".join(["1,1,1"] * 6),
+                "actual_atomic_error_manager": "12,12,24,12,12",
                 "actual_set_pressure_line_state": "128,128",
                 "actual_set_pressure_refill_overlap": "128,128",
                 "actual_set_pressure_release_backpressure": "128,128",
@@ -1408,9 +1414,65 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression._check_mixed_coverage(result)
         result.update(
             {
+                "constraint_schema": 37,
+                "actual_ops": "10,0,3,2,0,0,66,5,5,36,48,90,12,256",
+                "actual_atomic_family": "22,22,22",
+                "actual_atomic_width": "33,33",
+                "actual_atomic_error": "54,12",
+                "actual_atomic_error_kind": "6,6",
+                "actual_atomic_outcome": ",".join(["9,1,1"] * 6),
+                "actual_atomic_error_manager": "12,12,24,12,12",
+                "target_atomic_probe_depth": "1,1,1,1,1,1,1,1,1",
+                "actual_atomic_probe_depth": "6,6,6,6,6,6,6,6,6",
+                "actual_atomic_probe_cross": ",".join(["1"] * 54),
+                "probes": 592,
+                "probe_source_lifecycle": "64,528,9",
+                "probe_max_outstanding": 8,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_probe_cross"] = ",".join(["0"] + ["1"] * 53)
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_atomic_probe_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_probe_cross"] = ",".join(["1"] * 54)
+        result["actual_atomic_probe_depth"] = "7,5,6,6,6,6,6,6,6"
+        result["probes"] = 591
+        result["probe_source_lifecycle"] = "64,527,9"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "depth/cross coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_atomic_probe_depth"] = "6,6,6,6,6,6,6,6,6"
+        result["probes"] = 592
+        result["probe_source_lifecycle"] = "64,528,9"
+        result["target_atomic_probe_depth"] = "0,0,0,0,0,0,0,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_atomic_probe_depth cannot be all zero",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_atomic_probe_depth"] = "1,1,1,1,1,1,1,1,1"
+        result["probe_max_outstanding"] = 7
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "selected outstanding depth",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
                 "constraint_schema": 35,
                 "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
                 "actual_cmo_operation": "2,2,2",
+                "actual_atomic_family": "6,6,6",
+                "actual_atomic_width": "9,9",
+                "actual_atomic_error": "6,12",
+                "actual_atomic_error_kind": "6,6",
+                "actual_atomic_outcome": ",".join(["1,1,1"] * 6),
+                "actual_atomic_error_manager": "12,12,24,12,12",
                 "actual_cmo_line_state": "3,3",
                 "actual_cmo_younger_overlap": "5,1",
                 "target_cmo_error": 1000,

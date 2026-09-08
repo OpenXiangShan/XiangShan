@@ -130,6 +130,8 @@ struct RandomConstraints {
 
     static constexpr unsigned cmo_probe_depth_count =
         memblock::kDcacheProbeEntries;
+    static constexpr unsigned atomic_probe_depth_count =
+        memblock::kDcacheProbeEntries + 1U;
 
     enum TranslationRegime : unsigned {
         translation_bare,
@@ -183,6 +185,7 @@ struct RandomConstraints {
     std::array<unsigned, 2> atomic_width_weights{};
     unsigned atomic_error_per_mille = 0;
     unsigned atomic_error_denied_per_mille = 0;
+    std::array<unsigned, atomic_probe_depth_count> atomic_probe_depth_weights{};
     std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
     unsigned hypervisor_spvp_user_per_mille = 0;
     std::array<unsigned, hypervisor_pbmt_pair_count>
@@ -274,6 +277,7 @@ struct RandomConstraints {
                 .atomic_width_weights = {1, 1},
                 .atomic_error_per_mille = 100,
                 .atomic_error_denied_per_mille = 500,
+                .atomic_probe_depth_weights = {1, 1, 1, 1, 1, 1, 1, 1, 1},
                 .hypervisor_family_weights = {1, 1, 1},
                 .hypervisor_spvp_user_per_mille = 500,
                 .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
@@ -362,6 +366,7 @@ struct RandomConstraints {
                 .atomic_width_weights = {1, 1},
                 .atomic_error_per_mille = 0,
                 .atomic_error_denied_per_mille = 500,
+                .atomic_probe_depth_weights = {1000, 10, 5, 2, 1, 1, 1, 1, 1},
                 .hypervisor_family_weights = {90, 5, 5},
                 .hypervisor_spvp_user_per_mille = 1,
                 .hypervisor_pbmt_pair_weights = {996, 1, 1, 1, 1},
@@ -452,6 +457,7 @@ struct RandomConstraints {
                 .atomic_width_weights = {1, 1},
                 .atomic_error_per_mille = 500,
                 .atomic_error_denied_per_mille = 500,
+                .atomic_probe_depth_weights = {1, 1, 1, 1, 2, 4, 8, 16, 32},
                 .hypervisor_family_weights = {1, 1, 1},
                 .hypervisor_spvp_user_per_mille = 500,
                 .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
@@ -661,6 +667,18 @@ struct RandomConstraints {
             }
             return false;
         };
+        constexpr std::array<std::string_view, atomic_probe_depth_count>
+            atomic_probe_depth_keys{{
+                "atomic-probe-depth0", "atomic-probe-depth1",
+                "atomic-probe-depth2", "atomic-probe-depth3",
+                "atomic-probe-depth4", "atomic-probe-depth5",
+                "atomic-probe-depth6", "atomic-probe-depth7",
+                "atomic-probe-depth8",
+            }};
+        if (assign_weight(
+                atomic_probe_depth_keys, atomic_probe_depth_weights)) {
+            return;
+        }
         constexpr std::array<std::string_view, hypervisor_pbmt_pair_count>
             hypervisor_pbmt_pair_keys{{
                 "hypervisor-pbmt-pma-pma",
@@ -1499,6 +1517,13 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "atomic-error requires a nonzero atomic operation weight");
         }
+        if (operation_weights[atomic] != 0 && atomic_error_per_mille != 1000 &&
+            std::accumulate(
+                atomic_probe_depth_weights.begin(),
+                atomic_probe_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "atomic Probe depth constraint weights cannot all be zero");
+        }
         if (dcache_load_error_per_mille != 0 &&
             operation_weights[scalar_load] == 0) {
             throw std::invalid_argument(
@@ -1663,6 +1688,11 @@ struct RandomConstraints {
     unsigned choose_cmo_operation(std::uint64_t random) const
     {
         return choose_weighted(cmo_operation_weights, random);
+    }
+
+    unsigned choose_atomic_probe_depth(std::uint64_t random) const
+    {
+        return choose_weighted(atomic_probe_depth_weights, random);
     }
 
     unsigned choose_cmo_probe_depth(std::uint64_t random) const
@@ -1904,15 +1934,20 @@ struct RandomConstraints {
                 const unsigned widths = static_cast<unsigned>(std::count_if(
                     atomic_width_weights.begin(), atomic_width_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
-                const unsigned outcomes =
-                    (atomic_error_per_mille == 1000 ? 0U : 1U) +
+                const unsigned success_depths = atomic_error_per_mille == 1000
+                    ? 0U
+                    : static_cast<unsigned>(std::count_if(
+                          atomic_probe_depth_weights.begin(),
+                          atomic_probe_depth_weights.end(),
+                          [](unsigned weight) { return weight != 0; }));
+                const unsigned error_kinds =
                     (atomic_error_per_mille != 0 &&
                          atomic_error_denied_per_mille != 1000
                      ? 1U : 0U) +
                     (atomic_error_per_mille != 0 &&
                          atomic_error_denied_per_mille != 0
                      ? 1U : 0U);
-                actions += families * widths * outcomes;
+                actions += families * widths * (success_depths + error_kinds);
             } else if (operation == scalar_load) {
                 const unsigned error_kinds =
                     dcache_load_error_per_mille == 0 ? 0U :
@@ -2166,7 +2201,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=36 constraints=" << name
+        stream << "constraint_schema=37 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2180,7 +2215,9 @@ struct RandomConstraints {
                << " target_atomic_error=" << atomic_error_per_mille
                << " target_atomic_error_denied="
                << atomic_error_denied_per_mille
-               << " target_hypervisor_family="
+               << " target_atomic_probe_depth=";
+        append_weights(stream, atomic_probe_depth_weights);
+        stream << " target_hypervisor_family="
                << hypervisor_family_weights[0] << ','
                << hypervisor_family_weights[1] << ','
                << hypervisor_family_weights[2]
@@ -2559,6 +2596,16 @@ struct ConstraintCoverage {
         atomic_outcomes{};
     // error responses/denied beats/corrupt beats/GrantAcks/refills.
     std::array<std::uint64_t, 5> atomic_error_manager{};
+    std::array<std::uint64_t, RandomConstraints::atomic_probe_depth_count>
+        atomic_probe_depths{};
+    // [AMO/LRSC/AMOCAS][W/D][zero through eight concurrent Probes].
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t, RandomConstraints::atomic_probe_depth_count>,
+            2>,
+        RandomConstraints::atomic_family_count>
+        atomic_probe_crosses{};
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
     std::array<std::uint64_t, 2> hypervisor_spvp{};
@@ -2750,6 +2797,43 @@ struct ConstraintCoverage {
     {
         return depth_class * 4U + static_cast<unsigned>(to_b) * 2U +
             static_cast<unsigned>(need_data);
+    }
+
+    std::optional<unsigned> first_missing_atomic_probe_cross(
+        const RandomConstraints &constraints) const
+    {
+        if (constraints.atomic_error_per_mille == 1000) {
+            return std::nullopt;
+        }
+        for (unsigned family = 0;
+             family < RandomConstraints::atomic_family_count; ++family) {
+            if (constraints.atomic_family_weights[family] == 0) {
+                continue;
+            }
+            for (unsigned width = 0; width < 2; ++width) {
+                if (constraints.atomic_width_weights[width] == 0) {
+                    continue;
+                }
+                for (unsigned depth = 0;
+                     depth < RandomConstraints::atomic_probe_depth_count;
+                     ++depth) {
+                    if (constraints.atomic_probe_depth_weights[depth] != 0 &&
+                        atomic_probe_crosses[family][width][depth] == 0) {
+                        return family * 2U *
+                                RandomConstraints::atomic_probe_depth_count +
+                            width * RandomConstraints::atomic_probe_depth_count +
+                            depth;
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    void sample_atomic_probe(unsigned family, unsigned width, unsigned depth)
+    {
+        ++atomic_probe_depths.at(depth);
+        ++atomic_probe_crosses.at(family).at(width).at(depth);
     }
 
     std::optional<unsigned> first_missing_cmo_probe_cross(
@@ -3063,6 +3147,10 @@ struct ConstraintCoverage {
             return true;
         }
         if (operation == RandomConstraints::atomic) {
+            std::array<
+                std::uint64_t, RandomConstraints::atomic_probe_depth_count>
+                crossed_depths{};
+            std::uint64_t successful_atomics = 0;
             for (unsigned family = 0; family < atomic_outcomes.size();
                  ++family) {
                 for (unsigned width = 0;
@@ -3087,9 +3175,32 @@ struct ConstraintCoverage {
                             return false;
                         }
                     }
+                    std::uint64_t crossed_successes = 0;
+                    for (unsigned depth = 0;
+                         depth < RandomConstraints::atomic_probe_depth_count;
+                         ++depth) {
+                        const bool enabled =
+                            constraints.atomic_error_per_mille != 1000 &&
+                            constraints.atomic_family_weights[family] != 0 &&
+                            constraints.atomic_width_weights[width] != 0 &&
+                            constraints.atomic_probe_depth_weights[depth] != 0;
+                        const std::uint64_t count =
+                            atomic_probe_crosses[family][width][depth];
+                        if ((count != 0) != enabled) {
+                            return false;
+                        }
+                        crossed_successes += count;
+                        crossed_depths[depth] += count;
+                    }
+                    if (crossed_successes != atomic_outcomes[family][width][0]) {
+                        return false;
+                    }
+                    successful_atomics += crossed_successes;
                 }
             }
-            return operations[operation] != 0;
+            return operations[operation] != 0 &&
+                crossed_depths == atomic_probe_depths &&
+                successful_atomics == atomic_errors[0];
         }
         if (operation == RandomConstraints::scalar_load) {
             const std::array<bool, 3> enabled{{
@@ -4030,7 +4141,21 @@ public:
                << atomic_error_manager[0] << ',' << atomic_error_manager[1]
                << ',' << atomic_error_manager[2] << ','
                << atomic_error_manager[3] << ',' << atomic_error_manager[4]
-               << " actual_hypervisor_family=" << hypervisor_families[0]
+               << " actual_atomic_probe_depth=";
+        for (unsigned depth = 0; depth < atomic_probe_depths.size(); ++depth) {
+            stream << (depth == 0 ? "" : ",") << atomic_probe_depths[depth];
+        }
+        stream << " actual_atomic_probe_cross=";
+        bool first_atomic_probe_cross = true;
+        for (const auto &family : atomic_probe_crosses) {
+            for (const auto &width : family) {
+                for (const auto count : width) {
+                    stream << (first_atomic_probe_cross ? "" : ",") << count;
+                    first_atomic_probe_cross = false;
+                }
+            }
+        }
+        stream << " actual_hypervisor_family=" << hypervisor_families[0]
                << ',' << hypervisor_families[1] << ','
                << hypervisor_families[2]
                << " actual_hypervisor_spvp=" << hypervisor_spvp[0] << ','

@@ -165,7 +165,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36,
+            33, 34, 35, 36, 37,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -442,6 +442,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     cmo_probe_count >= 0,
                     "CMO error count exceeds CMO operation count",
                 )
+        atomic_probe_count = 0
+        if schema >= 37:
+            atomic_probe_depths = _csv_counts(
+                result, "actual_atomic_probe_depth", 9
+            )
+            atomic_probe_count = sum(
+                depth * count
+                for depth, count in enumerate(atomic_probe_depths)
+            )
         _require(
             isinstance(actual_sequences, int)
             and not isinstance(actual_sequences, bool)
@@ -610,8 +619,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             _require(
                 isinstance(probes, int) and not isinstance(probes, bool)
                 and probes == actual_sequences + actual_caps[1]
-                + cmo_probe_count + auxiliary_probes,
-                "manager Probe count does not match constrained/overlap/CMO accounting",
+                + cmo_probe_count + atomic_probe_count + auxiliary_probes,
+                "manager Probe count does not match constrained/overlap/CMO "
+                "accounting including atomic composition",
             )
             if schema >= 34:
                 _require(
@@ -1525,6 +1535,88 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 == [errors, denied * 2, errors * 2, errors, errors],
                 "atomic error manager accounting is not conserved",
             )
+            if schema >= 37:
+                target_atomic_probe_depths = _csv_counts(
+                    result, "target_atomic_probe_depth", 9
+                )
+                actual_atomic_probe_depths = _csv_counts(
+                    result, "actual_atomic_probe_depth", 9
+                )
+                actual_atomic_probe_crosses = _csv_counts(
+                    result, "actual_atomic_probe_cross", 54
+                )
+                _require(
+                    not atomic_enabled
+                    or target_atomic_error == 1000
+                    or any(target_atomic_probe_depths),
+                    "target_atomic_probe_depth cannot be all zero when a "
+                    "successful atomic is enabled",
+                )
+                crossed_families = [0, 0, 0]
+                crossed_widths = [0, 0]
+                crossed_depths = [0] * 9
+                for family in range(3):
+                    for width in range(2):
+                        pair_successes = 0
+                        for depth in range(9):
+                            index = family * 18 + width * 9 + depth
+                            count = actual_atomic_probe_crosses[index]
+                            enabled = (
+                                atomic_enabled
+                                and target_atomic_error != 1000
+                                and target_atomic_families[family] != 0
+                                and target_atomic_widths[width] != 0
+                                and target_atomic_probe_depths[depth] != 0
+                            )
+                            _require(
+                                (count > 0) == enabled,
+                                "actual_atomic_probe_cross has an enabled but "
+                                "uncovered class: "
+                                f"family={family} width={width} depth={depth}",
+                            )
+                            pair_successes += count
+                            crossed_families[family] += count
+                            crossed_widths[width] += count
+                            crossed_depths[depth] += count
+                        _require(
+                            pair_successes
+                            == actual_atomic_outcomes[
+                                family * 6 + width * 3
+                            ],
+                            "atomic Probe crosses do not match success outcomes",
+                        )
+                _require(
+                    crossed_depths == actual_atomic_probe_depths
+                    and sum(actual_atomic_probe_depths) == clean,
+                    "atomic Probe depth/cross coverage is not conserved",
+                )
+                _require(
+                    all(
+                        crossed_families[family] <=
+                        actual_atomic_families[family]
+                        for family in range(3)
+                    )
+                    and all(
+                        crossed_widths[width] <= actual_atomic_widths[width]
+                        for width in range(2)
+                    ),
+                    "atomic Probe crosses exceed family/width marginals",
+                )
+                highest_atomic_probe_depth = max(
+                    (
+                        depth
+                        for depth, count in enumerate(
+                            actual_atomic_probe_depths
+                        )
+                        if count > 0
+                    ),
+                    default=0,
+                )
+                _require(
+                    probe_max_outstanding >= highest_atomic_probe_depth,
+                    "atomic Probe burst never reached its selected "
+                    "outstanding depth",
+                )
 
         if schema >= 19:
             target_ptw_sites = _csv_counts(
