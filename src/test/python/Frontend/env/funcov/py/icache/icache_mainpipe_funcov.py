@@ -492,6 +492,11 @@ def _mark(
 def reset_icache_mainpipe_coverage_state(recorder) -> None:
     recorder._icache_mainpipe_cov_state = {
         "prev": None,
+        # ICacheMainPipe.s2_valid is optimized out of the generated
+        # Verilator model.  Mirror its ValidHold(s1_fire, false, io.flush)
+        # state from observable DUT signals.  This is the value before the
+        # current cycle's sequential update, matching the RTL cover intent.
+        "s2_valid_shadow": False,
         "four_line_ready_cycles": 0,
         "miss_backpressure_cycles": 0,
         "ftq_waylookup_skew_pending": False,
@@ -785,6 +790,28 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             "mshr_valid_reg": mshr_reg,
             "has_send": has_send,
             "s2_corrupt": corrupt,
+        }
+    )
+
+    s2_valid_shadow_before = bool(state["s2_valid_shadow"])
+    if _on(s["io_flush"]):
+        s2_valid_shadow_after = False
+    elif _on(s["s1_fire"]):
+        s2_valid_shadow_after = True
+    else:
+        s2_valid_shadow_after = s2_valid_shadow_before
+    s2_valid_observed = s["s2_valid"]
+    evidence.update(
+        {
+            "s2_valid_shadow_before": int(s2_valid_shadow_before),
+            "s2_valid_shadow_after": int(s2_valid_shadow_after),
+            "s2_valid_shadow_source": "s1_fire_hold_until_global_flush",
+            "s2_valid_observed": s2_valid_observed,
+            "s2_valid_shadow_matches_observed": (
+                None
+                if s2_valid_observed is None
+                else int(_on(s2_valid_observed) == s2_valid_shadow_before)
+            ),
         }
     )
 
@@ -1247,19 +1274,47 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         _on(s["req1_valid"]),
         _on(s["req1_valid"]) and _on(s["cross1"]),
     )
-    mixed_source_known = _known((*s["mshr_reg"], *s["sram_valid"], *s["waymask"]))
+    # ``sram_valid`` is only the one-cycle SRAM response pulse.  MainPipe can
+    # then hold that line through a long miss on its companion line, so at the
+    # later MSHR-response cycle the retained SRAM source is represented by the
+    # held hit plus the original non-zero WayLookup mask.  Requiring the SRAM
+    # pulse and MSHR response in the same cycle made the intended mixed-source
+    # transaction structurally impossible to sample.
+    mixed_source_known = _known((*s["mshr_reg"], *s["hits"], *s["waymask"]))
     mshr_source_lines = tuple(
         valid and bool(mshr_reg_bits[index]) for index, valid in enumerate(valid_lines)
     )
     sram_source_lines = tuple(
         valid
         and not bool(mshr_reg_bits[index])
-        and _on(s["sram_valid"][index])
+        and _on(s["hits"][index])
         and int(s["waymask"][index]) != 0
         for index, valid in enumerate(valid_lines)
     ) if mixed_source_known else (False, False, False, False)
+    mixed_merge_known = _known(
+        (*sram_aligned_maps, *mshr_aligned_maps, *aligned_masks,
+         s["two_fetch_valid"], s["toifu_maybe_rvc_map"])
+    )
+    mixed_expected_map = None
+    mixed_map_matches = False
+    if mixed_merge_known:
+        mixed_expected_map = 0
+        for index, valid in enumerate(valid_lines):
+            if not valid:
+                continue
+            req = index // 2
+            selected = (
+                mshr_aligned_maps[req]
+                if mshr_reg_bits[index]
+                else sram_aligned_maps[index]
+            )
+            mixed_expected_map |= int(selected) & int(aligned_masks[index])
+        mixed_expected_map &= _MAYBE_RVC_MASK
+        mixed_map_matches = int(s["toifu_maybe_rvc_map"]) == mixed_expected_map
     evidence["mshr_source_lines"] = mshr_source_lines
     evidence["sram_source_lines"] = sram_source_lines
+    evidence["mixed_source_expected_map"] = mixed_expected_map
+    evidence["mixed_source_map_matches"] = mixed_map_matches
     _mark(
         recorder,
         "icache_mainpipe_maybe_rvc_align",
@@ -1268,7 +1323,10 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         _on(s["s1_valid"])
         and mixed_source_known
         and any(mshr_source_lines)
-        and any(sram_source_lines),
+        and any(sram_source_lines)
+        and mixed_merge_known
+        and mixed_map_matches
+        and evidence.get("range_output_matches") is True,
         evidence,
     )
 
@@ -1589,7 +1647,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
     prior_s1_fire = bool(prev) and _on(prev["s1_fire"])
-    s2_valid_observed = s["s2_valid"]
     s2_active = (
         prior_s1_fire
         and _off(s["io_flush"])
@@ -1718,7 +1775,10 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s2_ecc",
         "global_flush_clears_s2",
         cycle,
-        _on(s["s2_valid"]) and _on(s["io_flush"]) and _off(s["bpu_valid"]),
+        s2_valid_shadow_before
+        and _on(s["io_flush"])
+        and _off(s["bpu_valid"])
+        and not s2_valid_shadow_after,
         evidence,
     )
     _mark(
@@ -1726,8 +1786,12 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s2_ecc",
         "bpu_s3_flush_keeps_s2",
         cycle,
-        _on(s["s2_valid"]) and _off(s["io_flush"]) and _on(s["bpu_valid"]),
+        s2_valid_shadow_before
+        and _off(s["io_flush"])
+        and _on(s["bpu_valid"])
+        and s2_valid_shadow_after,
         evidence,
     )
 
+    state["s2_valid_shadow"] = s2_valid_shadow_after
     state["prev"] = s

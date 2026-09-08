@@ -2933,6 +2933,67 @@ class BackendModel:
         self.logger.info("backend can_accept=%d", self.can_accept)
         self._publish("backend.can_accept", {"value": self.can_accept}, level="DEBUG")
 
+    def live_ftq_identities(self) -> tuple[dict, ...]:
+        """Snapshot observed, uncommitted instructions with authoritative FTQ start PCs."""
+        identities = []
+        for entry in self._cfvec_queue:
+            if entry.path_state == PATH_STATE_WRONG or self._ftq_ptr_is_stale_relative_to_commit(entry.ftq_flag, entry.ftq_value):
+                continue
+            key = (int(entry.ftq_flag) << 6) | int(entry.ftq_value)
+            start_pc = self._ftq_start_pc_cache.get(key)
+            if start_pc is None:
+                continue
+            cfi = self._classify_cfi(
+                int(entry.instr), int(entry.pc), bool(entry.pred_taken), bool(entry.is_rvc)
+            )
+            identities.append({
+                "inst_pc": int(entry.pc), "start_pc": int(start_pc),
+                "ftq_flag": int(entry.ftq_flag), "ftq_value": int(entry.ftq_value),
+                "ftq_offset": int(entry.ftq_offset), "is_rvc": int(entry.is_rvc),
+                "instr": int(entry.instr), "is_cfi": cfi is not None,
+                "actual_target": None if cfi is None else int(cfi[2]),
+                "branch_type": None if cfi is None else int(cfi[0]),
+                "ras_action": None if cfi is None else int(cfi[1]),
+                "observed_cycle": int(entry.cycle),
+            })
+        return tuple(identities)
+
+    def queue_directed_resolve(self, identity: dict, *, target: int, branch_type: int = 3,
+                               ras_action: int = 0, taken: bool = True, mispredict: bool = True) -> ResolveEntry:
+        """Queue immediate synthetic predictor training on a currently live identity.
+
+        This is a directed testbench resolve, not proof of a naturally executed
+        branch. The normal backend agent drives the real resolve interface.
+        Delay is deliberately unsupported so a captured identity cannot expire
+        while waiting for a future stimulus window.
+        """
+        self._assert_explicit_injection_allowed("resolve")
+        if self.golden_trace is not None:
+            raise AssertionError("directed predictor training requires a non-golden test")
+        if identity not in self.live_ftq_identities():
+            raise AssertionError("directed resolve identity is stale or lacks authoritative startPc")
+        if int(target) < 0 or int(target) & 1 or not 0 <= int(branch_type) <= 3 or not 0 <= int(ras_action) <= 3:
+            raise ValueError("invalid directed resolve target or CFI attributes")
+        if not bool(identity.get("is_cfi")):
+            raise AssertionError("directed resolve identity is not a decoded CFI")
+        if identity.get("actual_target") is not None and int(target) != int(identity["actual_target"]):
+            raise AssertionError("directed resolve target must match decoded CFI target")
+        branch_type = int(identity.get("branch_type", branch_type))
+        ras_action = int(identity.get("ras_action", ras_action))
+        entry = ResolveEntry(
+            ready_cycle=int(self.current_cycle), queued_cycle=int(self.current_cycle),
+            inst_pc=int(identity["inst_pc"]), pc=int(identity["start_pc"]), target=int(target),
+            taken=bool(taken), mispredict=bool(mispredict),
+            ftq_flag=int(identity["ftq_flag"]), ftq_value=int(identity["ftq_value"]),
+            ftq_offset=int(identity["ftq_offset"]), is_rvc=bool(identity["is_rvc"]),
+            branch_type=int(branch_type), ras_action=int(ras_action), queue_index=None,
+        )
+        self._pending_resolves.append(entry)
+        self._recompute_cfi_budgets_from_pending_resolves()
+        self._publish("backend.directed_resolve_queued", {**identity, "target": int(target),
+                      "branch_type": int(branch_type), "synthetic_training": True})
+        return entry
+
     def set_wfi_req(self, value: int) -> None:
         self.wfi_req = 1 if int(value) else 0
         self.logger.info("backend wfi_req=%d", self.wfi_req)

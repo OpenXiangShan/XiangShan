@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional
 from ..agents.backend_agent import BackendAgent
 from ..agents.icache_agent import ICacheAgent
 from ..agents.icache_control_agent import ICacheControlAgent
+from ..agents.icache_ecc_injection_agent import ICacheECCInjectionAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from .backend_model import BackendModel
@@ -39,6 +40,7 @@ from ..support.pmp_pma import (
 )
 from ..support.signal_utils import read_internal_signal
 from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
+from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
@@ -96,6 +98,8 @@ class FrontendEnv:
         self._configure_collaborators(explicit_page_table=page_table_model is not None)
         self._bind_collaborators()
         self._connect_collaborators()
+        self.icache_ecc_agent = ICacheECCInjectionAgent(self)
+        self.bpu_ftq_scheduler = BpuFtqScheduler(self)
 
         self._init_inputs()
         self._register_callbacks(register_callbacks)

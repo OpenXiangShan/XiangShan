@@ -11,6 +11,7 @@ import os
 import pytest
 
 from env.sequences import (
+    WayLookupCapacitySequence,
     TranslationScenario,
     TranslationScenarioBuilder,
 )
@@ -110,6 +111,9 @@ def _waylookup_snapshot(env) -> dict[str, int | None]:
         "to_valid": _waylookup_value(env, "to_valid"),
         "to_ready": _waylookup_value(env, "to_ready"),
         "update_valid": _waylookup_value(env, "update_valid"),
+        "prefetch_s1_valid": _waylookup_value(env, "prefetch_s1_valid"),
+        "prefetch_s1_state": _waylookup_value(env, "prefetch_s1_state"),
+        "prefetch_s1_tlb_finish": _waylookup_value(env, "prefetch_s1_tlb_finish"),
         "flush": _waylookup_value(env, "flush"),
         "bpu_flush": _waylookup_value(env, "bpu_flush"),
         "bpu_flush_match": _waylookup_value(env, "bpu_flush_match"),
@@ -168,6 +172,68 @@ def _wait_waylookup_occupancy(env, minimum: int, *, max_cycles: int) -> None:
         max_cycles=max_cycles,
         label=f"WayLookup occupancy >= {int(minimum)}",
     )
+
+
+def _waylookup_contains_line(env, target: int, waymask: int) -> bool:
+    """Return whether a live queue entry holds the requested SRAM-hit line."""
+    read_value = _waylookup_value(env, "read_value")
+    num_valid = _waylookup_value(env, "num_valid")
+    if read_value is None or num_valid is None:
+        return False
+    expected_ptag = int(target) >> 12
+    expected_vset = (int(target) >> 6) & 0xFF
+    for offset in range(int(num_valid)):
+        index = (int(read_value) + offset) % 32
+        prefix = f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}"
+        cov_prefix = (
+            "Frontend_top.Frontend.inner_icache.wayLookup."
+            f"__Vtogcov__entries_{index}"
+        )
+        if (
+            _try_read_internal(env, (prefix + "_pTag", cov_prefix + "_pTag"))
+            == expected_ptag
+            and _try_read_internal(
+                env, (prefix + "_vSetIdx_0", cov_prefix + "_vSetIdx_0")
+            )
+            == expected_vset
+            and _try_read_internal(
+                env, (prefix + "_waymask_0", cov_prefix + "_waymask_0")
+            )
+            == int(waymask)
+        ):
+            return True
+    return False
+
+
+def _waylookup_live_entries(env) -> list[dict[str, int | None]]:
+    """Return compact metadata for currently live WayLookup entries."""
+    read_value = _waylookup_value(env, "read_value")
+    num_valid = _waylookup_value(env, "num_valid")
+    if read_value is None or num_valid is None:
+        return []
+    entries: list[dict[str, int | None]] = []
+    for offset in range(min(int(num_valid), 32)):
+        index = (int(read_value) + offset) % 32
+        prefix = f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}"
+        cov_prefix = (
+            "Frontend_top.Frontend.inner_icache.wayLookup."
+            f"__Vtogcov__entries_{index}"
+        )
+        entries.append(
+            {
+                "index": index,
+                "ptag": _try_read_internal(
+                    env, (prefix + "_pTag", cov_prefix + "_pTag")
+                ),
+                "vset": _try_read_internal(
+                    env, (prefix + "_vSetIdx_0", cov_prefix + "_vSetIdx_0")
+                ),
+                "waymask": _try_read_internal(
+                    env, (prefix + "_waymask_0", cov_prefix + "_waymask_0")
+                ),
+            }
+        )
+    return entries
 _IFU_CACHEABLE_REQ_VALID = (
     "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
     "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_toIfu_req_valid",
@@ -176,6 +242,46 @@ _IFU_CACHEABLE_REQ_VALID = (
 
 def _load_nops(env, base: int, *, words: int = 512) -> None:
     env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
+
+
+def _load_idle_loop(env, base: int) -> None:
+    """Keep the reset-vector stream in one line while the directed probe runs."""
+    env.load_program(_jal(0, 0).to_bytes(4, "little") + _NOP.to_bytes(4, "little") * 255, int(base))
+
+
+def _jal(rd: int, offset: int) -> int:
+    """Encode a JAL whose signed immediate is within the architectural range."""
+    assert int(offset) % 2 == 0
+    assert -(1 << 20) <= int(offset) < (1 << 20)
+    imm = int(offset) & 0x1F_FFFF
+    return (
+        (((imm >> 20) & 1) << 31)
+        | (((imm >> 1) & 0x3FF) << 21)
+        | (((imm >> 11) & 1) << 20)
+        | (((imm >> 12) & 0xFF) << 12)
+        | ((int(rd) & 0x1F) << 7)
+        | 0x6F
+    )
+
+
+def _load_same_set_jump_loop(
+    env,
+    base: int,
+    *,
+    stride: int,
+    line_count: int,
+    segment_lines: int = 8,
+) -> tuple[int, ...]:
+    """Load sequential segments whose anchors share one set and JAL in a loop."""
+    targets = tuple(int(base) + index * int(stride) for index in range(line_count))
+    payload = bytearray((_NOP.to_bytes(4, "little")) * 32768)
+    for index, target in enumerate(targets):
+        next_target = targets[(index + 1) % len(targets)]
+        branch = target + int(segment_lines) * 64 - 4
+        offset = branch - int(base)
+        payload[offset : offset + 4] = _jal(0, next_target - branch).to_bytes(4, "little")
+    env.load_program(bytes(payload), int(base))
+    return targets
 
 
 def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
@@ -221,6 +327,37 @@ def _wait_funcov_hit(
             ),
             "monitor_errors": env.monitor.get_errors(),
         }
+    )
+
+
+def _wait_funcov_hit_checker_clean(
+    env,
+    group: str,
+    bin_name: str,
+    *,
+    max_cycles: int,
+    label: str,
+) -> None:
+    """Stop a closure probe as soon as its evidence becomes ineligible."""
+    for _ in range(int(max_cycles)):
+        if env.functional_coverage.key_hit(group, bin_name):
+            return
+        errors = env.monitor.get_errors()
+        if errors:
+            raise AssertionError(
+                {
+                    "reason": f"checker error while waiting for {label}",
+                    "first_monitor_error": errors[0],
+                    "current_cycle": int(env.current_cycle),
+                }
+            )
+        env.step(1)
+    _wait_funcov_hit(
+        env,
+        group,
+        bin_name,
+        max_cycles=1,
+        label=label,
     )
 
 
@@ -283,6 +420,167 @@ def _wait_for_target_response(
             "current_cycle": int(env.current_cycle),
             "stats": env.icache_agent.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
+        }
+    )
+
+
+def _wait_for_target_request(
+    env,
+    target: int,
+    *,
+    max_cycles: int,
+    after_cycle: int | None = None,
+) -> dict:
+    """Return the first accepted TileLink request for ``target`` in this phase."""
+    line = int(target) & ~0x3F
+    for _ in range(int(max_cycles)):
+        matches = [
+            record
+            for record in env.icache_agent.get_stats().get("request_records", [])
+            if int(record.get("address", -1)) == line
+            and (
+                after_cycle is None
+                or int(record.get("cycle", -1)) > int(after_cycle)
+            )
+        ]
+        if matches:
+            return matches[0]
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": "timeout while waiting for target ICache request",
+            "target_line": line,
+            "current_cycle": int(env.current_cycle),
+            "stats": env.icache_agent.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        }
+    )
+
+
+def _assert_no_target_request(
+    env,
+    target: int,
+    *,
+    after_cycle: int,
+    label: str,
+) -> None:
+    """Assert that a line was not fetched during the preceding phase."""
+    line = int(target) & ~0x3F
+    records = [
+        record
+        for record in env.icache_agent.get_stats().get("request_records", [])
+        if int(record.get("address", -1)) == line
+        and int(record.get("cycle", -1)) > int(after_cycle)
+    ]
+    assert not records, {
+        "reason": f"unexpected ICache request during {label}",
+        "target_line": hex(line),
+        "after_cycle": int(after_cycle),
+        "requests": records,
+    }
+
+
+def _mixed_source_hit_evidence(env) -> dict:
+    """Return the sampler evidence for BIN-1139's mixed-source hit."""
+    group = "icache_mainpipe_maybe_rvc_align"
+    name = "mixed_source_merge"
+    definition = env.functional_coverage.definition_by_group_bin[(group, name)]
+    hit = env.functional_coverage.hits.get(definition.key)
+    assert hit is not None and hit.hits > 0, {
+        "reason": "BIN-1139 was not marked by the functional-coverage sampler",
+        "coverage_key": definition.key,
+    }
+    assert hit.evidence, {
+        "reason": "BIN-1139 hit has no sampler evidence",
+        "coverage_key": definition.key,
+    }
+    evidence = hit.evidence[-1]
+    assert tuple(evidence.get("mshr_source_lines", ())) and tuple(
+        evidence.get("sram_source_lines", ())
+    ), {"reason": "BIN-1139 hit evidence omitted source-line classification", "evidence": evidence}
+    assert any(evidence["mshr_source_lines"]), evidence
+    assert any(evidence["sram_source_lines"]), evidence
+    return evidence
+
+
+def _wait_mshr_line_released(env, target: int, *, max_cycles: int) -> None:
+    """Wait until no live MissUnit entry owns the target cache line."""
+    block = (int(target) & ~0x3F) >> 6
+    for _ in range(int(max_cycles) + 1):
+        entries = []
+        signals_available = False
+        for index in range(14):
+            prefix = _ICACHE + f"missUnit.allMshr_{index}."
+            valid = _try_read_internal(
+                env, (prefix + "valid", prefix + "__Vtogcov__valid")
+            )
+            paddr = _try_read_internal(
+                env, (prefix + "blkPAddr", prefix + "__Vtogcov__blkPAddr")
+            )
+            signals_available |= valid is not None and paddr is not None
+            if valid == 1 and paddr == block:
+                entries.append(index)
+        assert signals_available, {
+            "reason": "MissUnit MSHR ownership signals are unavailable",
+            "target_block": hex(block),
+        }
+        if not entries:
+            return
+        if _ < int(max_cycles):
+            env.step(1)
+    raise AssertionError(
+        {
+            "reason": "soft-prefetch MSHR was not released",
+            "target_block": hex(block),
+            "live_entries": entries,
+            "current_cycle": int(env.current_cycle),
+        }
+    )
+
+
+def _collect_target_refill_waymasks(
+    env,
+    targets: tuple[int, ...],
+    *,
+    minimum_commits: int,
+    max_cycles: int,
+) -> dict[int, int]:
+    """Collect one-hot refill ways while a legal demand-fetch loop trains."""
+    target_by_block = {(int(target) & ~0x3F) >> 6: int(target) for target in targets}
+    resident_by_waymask: dict[int, int] = {}
+    for _ in range(int(max_cycles)):
+        valid = _waylookup_value(env, "update_valid")
+        paddr = _waylookup_value(env, "update_paddr")
+        waymask = _waylookup_value(env, "update_waymask")
+        if valid == 1 and paddr in target_by_block and waymask is not None:
+            assert int(waymask).bit_count() == 1, {
+                "reason": "demand refill waymask is not one-hot",
+                "paddr": paddr,
+                "waymask": waymask,
+            }
+            resident_by_waymask[int(waymask)] = target_by_block[int(paddr)]
+        if (
+            len(resident_by_waymask) == len(targets)
+            and int(env.backend_model.get_stats().get("commit_count", 0))
+            >= int(minimum_commits)
+        ):
+            return resident_by_waymask
+        errors = env.monitor.get_errors()
+        if errors:
+            raise AssertionError(
+                {
+                    "reason": "checker error while training same-set fetch loop",
+                    "first_monitor_error": errors[0],
+                    "resident_by_waymask": resident_by_waymask,
+                }
+            )
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": "same-set demand loop did not fill four ways and train",
+            "resident_by_waymask": resident_by_waymask,
+            "backend": env.backend_model.get_stats(),
+            "waylookup": _waylookup_snapshot(env),
         }
     )
 
@@ -656,6 +954,212 @@ def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
     )
 
 
+@pytest.mark.funcov_bins("BIN-731")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
+    """Keep the old tag queued while a same-set replacement refill returns."""
+    env = lowrisk_cleanup
+    base = 0x8060_0000
+    same_set_stride = 0x4000
+    loop_targets = _load_same_set_jump_loop(
+        env,
+        base,
+        stride=same_set_stride,
+        line_count=4,
+    )
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=48,
+        miss_rate=1.0,
+        seed=0x731,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    _set_predictors(env, True)
+    env.backend_model.set_can_accept(1)
+
+    # Fill the four ways with normal demand fetches.  Besides giving the SRAM
+    # checker-valid instruction data, repeated execution trains all four JAL
+    # targets without synthetic redirects.
+    resident_by_waymask = _collect_target_refill_waymasks(
+        env,
+        loop_targets,
+        minimum_commits=1024,
+        max_cycles=16384,
+    )
+    assert len(resident_by_waymask) == 4, {
+        "reason": "same-set demand fetches did not occupy four distinct ways",
+        "resident_by_waymask": resident_by_waymask,
+    }
+
+    # Once the backend is blocked, predicted fetches keep running ahead and
+    # retain SRAM-hit entries in WayLookup.  Wait until each possible victim
+    # way has an old-tag entry, then allocate the fifth miss.
+    env.backend_model.set_can_accept(0)
+    for _ in range(4096):
+        if all(
+            _waylookup_contains_line(env, target, waymask)
+            for waymask, target in resident_by_waymask.items()
+        ):
+            break
+        env.step(1)
+    else:
+        raise AssertionError(
+            {
+                "reason": "four possible old victim entries did not queue",
+                "resident_by_waymask": resident_by_waymask,
+                "live_entries": _waylookup_live_entries(env),
+                "waylookup": _waylookup_snapshot(env),
+            }
+        )
+    live_entries = _waylookup_live_entries(env)
+    env.logger.info(
+        "BIN-731 queued old SRAM hits before replacement: entries=%s",
+        live_entries,
+    )
+
+    # Only now allocate the fifth line as a soft prefetch and delay its clean
+    # response.  Soft prefetch does not add another WayLookup entry.
+    replacement = base + 4 * same_set_stride
+    request_phase = int(env.current_cycle)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=512,
+        miss_rate=1.0,
+        seed=0x731,
+    )
+    for _ in range(64):
+        _drive_soft_prefetch(env, [replacement])
+        try:
+            request = _wait_for_target_request(
+                env,
+                replacement,
+                max_cycles=16,
+                after_cycle=request_phase,
+            )
+            break
+        except AssertionError:
+            continue
+    else:
+        raise AssertionError(
+            {
+                "reason": "replacement soft prefetch did not reach MissUnit",
+                "replacement": replacement,
+            }
+        )
+    source = int(request["source"])
+    env.step(1)
+    replacement_way = _try_read_internal(
+        env,
+        (
+            f"Frontend_top.Frontend.inner_icache.missUnit.allMshr_{source}.way",
+            f"Frontend_top.Frontend.inner_icache.missUnit.allMshr_{source}."
+            "__Vtogcov__io_info_bits_way",
+        ),
+    )
+    assert replacement_way is not None, {
+        "reason": "replacement MSHR way is not observable",
+        "source": source,
+    }
+
+    replacement_waymask = 1 << int(replacement_way)
+    assert replacement_waymask in resident_by_waymask, {
+        "replacement_waymask": replacement_waymask,
+        "resident_by_waymask": resident_by_waymask,
+    }
+    old_tag = resident_by_waymask[replacement_waymask]
+    assert _waylookup_contains_line(env, old_tag, replacement_waymask), {
+        "reason": "selected victim no longer has an old-tag WayLookup entry",
+        "old_tag": old_tag,
+        "replacement_waymask": replacement_waymask,
+        "waylookup": _waylookup_snapshot(env),
+    }
+    env.logger.info(
+        "BIN-731 victim mapping: replacement_way=%d replacement_waymask=0x%x old_tag=0x%x residents=%s",
+        int(replacement_way),
+        replacement_waymask,
+        int(old_tag),
+        {hex(int(k)): hex(int(v)) for k, v in resident_by_waymask.items()},
+    )
+    _wait_funcov_hit_checker_clean(
+        env,
+        "icache_waylookup_update",
+        "update_same_way_new_tag",
+        max_cycles=1024,
+        label="same-way different-tag WayLookup refill update",
+    )
+
+    env.backend_model.set_can_accept(1)
+    env.step(32)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-734")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> None:
+    """Update wins over a pending write, which resumes after the update."""
+    env = lowrisk_cleanup
+    base = 0x8070_0000
+    _load_nops(env, base, words=32768)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=1.0,
+        seed=0x734,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_update",
+        "update_priority_over_pending_write",
+        max_cycles=4096,
+        label="WayLookup update priority and pending-write recovery",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-744")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
+    """Flush immediately after an accepted write and discard the old entry."""
+    env = lowrisk_cleanup
+    base = 0x8080_0000
+    _load_nops(env, base, words=32768)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=1.0,
+        seed=0x744,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    _run_until(
+        env,
+        lambda: (
+            _waylookup_value(env, "write0_valid") == 1
+            and _waylookup_value(env, "write0_ready") == 1
+        ),
+        max_cycles=1024,
+        label="accepted WayLookup write before redirect",
+    )
+    target = base + 0x40
+    env.monitor.clear()
+    env.monitor.set_expected_pc(target)
+    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+    env.step(1)
+
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_flush",
+        "flush_wins_write",
+        max_cycles=16,
+        label="WayLookup redirect flush after accepted write",
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins(
     "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741", "BIN-762",
 )
@@ -856,11 +1360,33 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     """Fill WayLookup with dual writes, then release one blocked transaction."""
     env = lowrisk_cleanup
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
+    # Keep the consumer stopped while issuing distinct legal soft-prefetch
+    # lines. This makes queue depth an observed consequence of PrefetchPipe
+    # traffic instead of a direct write to WayLookup state.
+    base = 0x8000_0000
+    _load_nops(env, base, words=4096)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=1.0,
+        seed=0x680,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
 
     env.backend_model.set_can_accept(0)
-    _wait_waylookup_occupancy(env, 32, max_cycles=12000)
+    capacity = WayLookupCapacitySequence(env)
+    max_cycles = int(os.getenv("TB_WAYLOOKUP_CAPACITY_MAX_CYCLES", "12000"))
+    for index in range(max_cycles):
+        address = base + 0x4000 + index * 0x40
+        _drive_soft_prefetch(env, [address, address + 0x1000])
+        snapshot = capacity.sample()
+        if snapshot.full:
+            break
+    else:
+        capacity.wait_full(max_cycles=1)
     _wait_funcov_hits(
         env,
         (
@@ -1097,6 +1623,115 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         label="demand SRAM hit after refill and MSHR release",
     )
     assert int(env.icache_agent.get_stats()["resp_line_count"]) >= 1
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1139")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
+    """Fetch one cross-line transaction from SRAM (line 0) and MSHR (line 1).
+
+    The soft prefetch is deliberately used only to make line 0 resident.  It
+    does not enter WayLookup in the V3 RTL.  The subsequent demand redirect is
+    therefore the first transaction that can observe line 0 as a clean SRAM
+    hit while issuing the independent line-1 miss.
+    """
+    env = lowrisk_cleanup
+    idle_base = 0x8000_0000
+    target = 0x80A0_0000
+    _load_idle_loop(env, idle_base)
+    payload = bytearray((0x0001).to_bytes(2, "little") * 128)
+    # A 32-bit NOP beginning at byte 62 forces the fetch block at +0x20 to
+    # consume bytes from both cachelines.
+    payload[62:66] = _NOP.to_bytes(4, "little")
+    env.load_program(bytes(payload), target)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=48,
+        miss_rate=1.0,
+        seed=0x1139,
+    )
+    env.initialize(reset_vector=idle_base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(idle_base)
+    _set_predictors(env, False)
+    env.backend_model.set_can_accept(0)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    # Every ICache data-bank SRAM clears one set per cycle after reset.  A
+    # refill accepted during that 256-cycle sweep can update metadata while
+    # its data write is superseded by the SRAM's reset write.  Keep this
+    # directed warmup outside that initialization window.
+    env.step(300)
+    phase_cycle = int(env.current_cycle)
+    for _ in range(64):
+        _drive_soft_prefetch(env, [target])
+        try:
+            _wait_for_target_request(
+                env,
+                target,
+                max_cycles=16,
+                after_cycle=phase_cycle,
+            )
+            break
+        except AssertionError:
+            continue
+    else:
+        raise AssertionError("line-0 warmup prefetch did not reach MissUnit")
+    _wait_for_target_response(
+        env,
+        target,
+        max_cycles=4096,
+        label="clean soft-prefetch line-0 refill",
+        after_cycle=phase_cycle,
+    )
+    resident_way = env.icache_ecc_agent.wait_resident(target, max_cycles=4096)
+    assert 0 <= int(resident_way) < 4
+    _wait_mshr_line_released(env, target, max_cycles=64)
+    prefetch_done_cycle = int(env.current_cycle)
+    # The soft-prefetch path requests only line 0 and is not allowed to
+    # speculate line 1.  This makes the later MSHR source unambiguous.
+    _assert_no_target_request(
+        env,
+        target + 0x40,
+        after_cycle=phase_cycle,
+        label="soft-prefetch line-0 warmup",
+    )
+    env.step(8)
+    assert env.icache_ecc_agent.read_resident_line(target) == bytes(payload[:64]), {
+        "reason": "soft-prefetch refill did not persist the expected line-0 data",
+        "resident_way": int(resident_way),
+    }
+
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=96,
+        miss_rate=1.0,
+        seed=0x1139,
+    )
+    fetch_pc = target + 0x20
+    env.monitor.clear()
+    env.monitor.set_expected_pc(fetch_pc)
+    env.backend_model.set_can_accept(1)
+    env.backend_model.inject_redirect(fetch_pc, "ctrl_redirect", delay_cycles=0)
+    _wait_funcov_hit_checker_clean(
+        env,
+        "icache_mainpipe_maybe_rvc_align",
+        "mixed_source_merge",
+        max_cycles=4096,
+        label="cross-line request with SRAM line 0 and MSHR line 1",
+    )
+    demand_line1 = _wait_for_target_request(
+        env,
+        target + 0x40,
+        max_cycles=1,
+        after_cycle=prefetch_done_cycle,
+    )
+    assert int(demand_line1["address"]) == target + 0x40
+    evidence = _mixed_source_hit_evidence(env)
+    assert any(evidence["sram_source_lines"][:2])
+    assert any(evidence["mshr_source_lines"][:2])
+    env.backend_model.set_can_accept(1)
+    env.step(32)
     assert not env.monitor.get_errors()
 
 

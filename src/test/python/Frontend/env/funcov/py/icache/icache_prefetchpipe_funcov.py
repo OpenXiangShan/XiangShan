@@ -58,7 +58,7 @@ ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS = frozenset(
         ("icache_prefetchpipe_s1_completion", "s2_busy_enters_s2_recovery"),
         ("icache_prefetchpipe_s1_completion", "flush_blocks_s1_completion"),
         ("icache_prefetchpipe_s2_miss", "sram_or_clean_mshr_hit"),
-        ("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_backpressured_miss"),
+        ("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_unissued_miss"),
         ("icache_prefetchpipe_s2_miss", "corrupt_refill_reprefetch"),
         ("icache_prefetchpipe_s2_miss", "nonmatching_clean_refill_ignored"),
         ("icache_prefetchpipe_s2_miss", "exception_or_mmio_suppresses"),
@@ -331,7 +331,6 @@ def reset_icache_prefetchpipe_coverage_state(recorder) -> None:
         "waylookup_ftq": None,
         "soft_meta_read_pending": False,
         "s2_blocked": False,
-        "clean_mshr_pending": None,
         "missunit_backpressure_cycles": 0,
         "missunit_backpressure_signature": None,
         "s2_ftq": None,
@@ -688,35 +687,26 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
             "previous_hw_entry_candidate": previous_hw_entry_candidate,
         },
     )
-    pending_clean_mshr_signature = state["clean_mshr_pending"]
+    unissued_clean_refill_ports = tuple(
+        port
+        for port in clean_s2_refill_ports
+        if _off(s[f"s2_sram{port}"]) and _off(s[f"s2_has_send{port}"])
+    )
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s2_miss",
-        "clean_mshr_cancels_backpressured_miss",
+        "clean_mshr_cancels_unissued_miss",
         cycle,
-        pending_clean_mshr_signature is not None
-        and pending_clean_mshr_signature == s2_signature
-        and bool(clean_s2_refill_ports),
-        evidence,
-    )
-    pending_miss = (
         _on(s["s2_valid"])
-        and _on(s["miss_valid"])
-        and _off(s["miss_ready"])
         and _off(s["global_flush"])
-        and not clean_s2_refill_ports
-        and s2_signature is not None
+        and _off(s["s2_exception"])
+        and _off(s["s2_mmio"])
+        and bool(unissued_clean_refill_ports),
+        {
+            **evidence,
+            "unissued_clean_refill_ports": unissued_clean_refill_ports,
+        },
     )
-    if (
-        _on(s["global_flush"])
-        or _off(s["s2_valid"])
-        or clean_s2_refill_ports
-    ):
-        state["clean_mshr_pending"] = None
-    elif pending_miss:
-        state["clean_mshr_pending"] = s2_signature
-    elif state["clean_mshr_pending"] != s2_signature:
-        state["clean_mshr_pending"] = None
 
     bpu_entry_scenario = (
         hw_request

@@ -158,14 +158,21 @@ def _snapshot(env) -> dict:
 
 def _register_s1_observer(env) -> list[dict]:
     samples: list[dict] = []
+    s2_valid_shadow = False
 
     def observe(cycle, active_env) -> None:
-        samples.append(
-            {
-                "cycle": int(cycle),
-                **{key: _read(active_env, key) for key in _SIGNALS},
-            }
-        )
+        nonlocal s2_valid_shadow
+        sample = {
+            "cycle": int(cycle),
+            **{key: _read(active_env, key) for key in _SIGNALS},
+            "s2_valid_shadow_before": int(s2_valid_shadow),
+        }
+        if int(sample["io_flush"]) == 1:
+            s2_valid_shadow = False
+        elif int(sample["s1_fire"]) == 1:
+            s2_valid_shadow = True
+        sample["s2_valid_shadow_after"] = int(s2_valid_shadow)
+        samples.append(sample)
 
     env.register_cycle_observer(observe)
     return samples
@@ -589,3 +596,52 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
             assert not env.monitor.get_errors()
             return
     _wait_hit(env, "flush_cancels_registered_refill", max_cycles=1)
+
+
+@pytest.mark.funcov_bins("BIN-645")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
+    samples = _register_s1_observer(env)
+    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+
+    attempts = _cycle_limit("TB_ICACHE_S2_GLOBAL_FLUSH_ATTEMPTS", 64)
+    for attempt in range(attempts):
+        _run_until(
+            env,
+            lambda: any(
+                sample["s2_valid_shadow_after"] == 1
+                and sample["io_flush"] == 0
+                and sample["bpu_valid"] == 0
+                for sample in samples[-1:]
+            ),
+            max_cycles=_cycle_limit("TB_ICACHE_S2_CONTEXT_WAIT", 6000),
+            label="s1 fire establishing the reconstructed s2 context",
+        )
+        env.backend_model.inject_redirect(
+            _redirect_target(attempt),
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        try:
+            _wait_group_hit(
+                env,
+                "icache_mainpipe_s2_ecc",
+                "global_flush_clears_s2",
+                max_cycles=32,
+            )
+            break
+        except AssertionError:
+            if attempt + 1 >= attempts:
+                raise
+
+    env.step(1)
+    assert any(
+        current["s2_valid_shadow_before"] == 1
+        and current["io_flush"] == 1
+        and current["bpu_valid"] == 0
+        and current["s1_fire"] == 0
+        and current["s2_valid_shadow_after"] == 0
+        and following["s2_valid_shadow_before"] == 0
+        for current, following in zip(samples, samples[1:])
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()

@@ -57,7 +57,7 @@ ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS = frozenset(
         ("icache_waylookup_update", "update_same_way_new_tag"),
         ("icache_waylookup_update", "update_unrelated"),
         ("icache_waylookup_update", "update_corrupt_ignored"),
-        ("icache_waylookup_update", "update_write_concurrent"),
+        ("icache_waylookup_update", "update_priority_over_pending_write"),
         ("icache_waylookup_update", "update_second_entry_stall"),
         ("icache_waylookup_update", "update_flush_same_cycle"),
         ("icache_waylookup_exception", "exception_capture"),
@@ -149,6 +149,22 @@ _SIGNALS = {
         # only port 0 as the shared ready signal.
         _PREFETCH + "io_wayLookupWrite_0_ready",
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
+    ),
+    "prefetch_s1_valid": (
+        _PREFETCH + "s1_valid",
+        _PREFETCH + "__Vtogcov__s1_valid",
+    ),
+    "prefetch_s1_soft": (
+        _PREFETCH + "s1_isSoftPrefetch",
+        _PREFETCH + "__Vtogcov__s1_isSoftPrefetch",
+    ),
+    "prefetch_s1_state": (
+        _PREFETCH + "s1_state",
+        _PREFETCH + "__Vtogcov__s1_state",
+    ),
+    "prefetch_s1_tlb_finish": (
+        _PREFETCH + "tlbValidLatch",
+        _PREFETCH + "__Vtogcov__tlbValidLatch",
     ),
     "update_valid": (
         _MAIN + "io_missResp_valid",
@@ -252,6 +268,8 @@ def _mark(recorder, group: str, name: str, cycle: int, condition: bool, evidence
 def reset_icache_waylookup_coverage_state(recorder) -> None:
     recorder._icache_waylookup_cov_state = {
         "prev": None,
+        "accepted_write": None,
+        "update_priority_write": None,
         "post_flush_write": None,
         "dual_write_tail": None,
         "exception_wait": None,
@@ -439,6 +457,33 @@ def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
         and not flush
         and write0_fire
     )
+    flush_after_accepted_write = state["accepted_write"] is not None and flush
+    prefetch_write_pending = (
+        s["prefetch_s1_state"] is not None
+        and (
+            int(s["prefetch_s1_state"]) == 3
+            or (
+                int(s["prefetch_s1_state"]) == 0
+                and _on(s["prefetch_s1_tlb_finish"])
+            )
+        )
+    )
+    update_priority_start = (
+        update
+        and _on(s["prefetch_s1_valid"])
+        and prefetch_write_pending
+        and _off(s["prefetch_s1_soft"])
+        and not write0_fire
+        and controls_quiescent
+        and no_matching_bpu_flush
+    )
+    update_priority_recovery = (
+        state["update_priority_write"] is not None
+        and not update
+        and write0_fire
+        and controls_quiescent
+        and no_matching_bpu_flush
+    )
     dual_write_tail_flush = (
         state["dual_write_tail"] is not None
         and bpu_flush
@@ -485,8 +530,14 @@ def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
           update and not update_any, evidence)
     _mark(recorder, "icache_waylookup_update", "update_corrupt_ignored", cycle,
           update and _on(s["update_corrupt"]) and any_queue_update_match, evidence)
-    _mark(recorder, "icache_waylookup_update", "update_write_concurrent", cycle,
-          update and write0_fire, evidence)
+    _mark(recorder, "icache_waylookup_update", "update_priority_over_pending_write", cycle,
+          update_priority_recovery, {
+              **evidence,
+              "priority_cycle": None if state["update_priority_write"] is None
+              else state["update_priority_write"]["trigger_cycle"],
+              "priority_write_ptr": None if state["update_priority_write"] is None
+              else state["update_priority_write"]["write_ptr_before"],
+          })
     _mark(recorder, "icache_waylookup_update", "update_second_entry_stall", cycle,
           update and update_second and _on(s["ftq_req1_valid"])
           and num_valid is not None and num_valid >= 2 and controls_quiescent, evidence)
@@ -526,7 +577,13 @@ def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
     _mark(recorder, "icache_waylookup_flush", "flush_wins_read", cycle,
           flush and num_valid is not None and num_valid > 0, evidence)
     _mark(recorder, "icache_waylookup_flush", "flush_wins_write", cycle,
-          flush and write0_fire, evidence)
+          flush_after_accepted_write, {
+              **evidence,
+              "accepted_write_cycle": None if state["accepted_write"] is None
+              else state["accepted_write"]["trigger_cycle"],
+              "accepted_write_ptr": None if state["accepted_write"] is None
+              else state["accepted_write"]["write_ptr_before"],
+          })
     _mark(recorder, "icache_waylookup_flush", "flush_wins_update", cycle,
           flush and update, evidence)
     _mark(recorder, "icache_waylookup_flush", "flush_recovery", cycle,
@@ -625,6 +682,36 @@ def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
         state["post_flush_write"] = {"trigger_cycle": cycle}
     elif post_flush_write:
         state["post_flush_write"] = None
+
+    if flush or _on(s["fencei"]) or (bpu_flush and _on(s["bpu_flush_match"])):
+        state["accepted_write"] = None
+    elif write0_fire:
+        state["accepted_write"] = {
+            "trigger_cycle": cycle,
+            "write_ptr_before": current_write,
+        }
+    elif to_fire:
+        # Conservatively stop tracking after any dequeue: without entry IDs we
+        # cannot prove that the previously accepted entry is still resident.
+        state["accepted_write"] = None
+
+    if flush or _on(s["fencei"]) or (bpu_flush and _on(s["bpu_flush_match"])):
+        state["update_priority_write"] = None
+    elif update_priority_start:
+        state["update_priority_write"] = {
+            "trigger_cycle": cycle,
+            "write_ptr_before": current_write,
+        }
+    elif state["update_priority_write"] is not None:
+        if update_priority_recovery:
+            state["update_priority_write"] = None
+        elif (
+            _off(s["prefetch_s1_valid"])
+            or s["prefetch_s1_state"] is None
+            or int(s["prefetch_s1_state"]) not in (0, 3)
+            or _on(s["prefetch_s1_soft"])
+        ):
+            state["update_priority_write"] = None
 
     if flush or _on(s["fencei"]) or (bpu_flush and _on(s["bpu_flush_match"])):
         state["dual_write_tail"] = None

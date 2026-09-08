@@ -284,19 +284,7 @@ def _restore_predictors(env) -> None:
 
 
 def _trigger_bpu_s3_flush(env) -> None:
-    env.set_bp_ctrl_enable(
-        ubtb_enable=0,
-        abtb_enable=0,
-        mbtb_enable=0,
-        tage_enable=0,
-        sc_enable=0,
-        ittage_enable=0,
-    )
-    fencei = getattr(env.dut, "io_fencei", None)
-    assert fencei is not None, {"missing_signal": "io_fencei"}
-    fencei.value = 1
-    env.step(1)
-    fencei.value = 0
+    env.bpu_ftq_scheduler.pulse_predictor_transition()
 
 
 def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:

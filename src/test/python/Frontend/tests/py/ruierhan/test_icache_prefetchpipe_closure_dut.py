@@ -457,6 +457,66 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-679")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> None:
+    """Hold MetaArray behind fence.i while a translated retry completes."""
+    env = prefetchpipe_env
+    pa = 0x8046_0F00
+    va = 0x4026_0F00
+    _prepare_nops(env, pa, latency=32, seed=0x6679)
+    state = _translation_state(
+        env,
+        scenario_id="prefetchpipe-meta-resend-backpressure",
+        va=va,
+        pa=pa,
+        latency=32,
+    )
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state, page_indexes=(0, 1))
+    env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
+
+    for _ in range(4096):
+        if _signal(env, "s1_valid") == 1 and _signal(env, "s1_wait_itlb") == 1:
+            break
+        env.step(1)
+    else:
+        raise AssertionError("PrefetchPipe did not enter the ITLB retry state")
+
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    try:
+        # fence.i legally owns the single-port MetaArray without flushing the
+        # PrefetchPipe.  Keep it asserted until the completed ITLB retry has
+        # spent two cycles in MetaResend, then release the same transaction.
+        fencei.value = 1
+        blocked_cycles = 0
+        for _ in range(4096):
+            if (
+                _signal(env, "s1_valid") == 1
+                and _signal(env, "s1_state") == 2
+                and _signal(env, "meta_req_valid") == 1
+                and _signal(env, "meta_ready") == 0
+            ):
+                blocked_cycles += 1
+                if blocked_cycles >= 2:
+                    break
+            env.step(1)
+        else:
+            raise AssertionError("MetaRead retry did not remain blocked for two cycles")
+        fencei.value = 0
+        env.step(1)
+    finally:
+        fencei.value = 0
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery")],
+        max_cycles=32,
+    )
+
+
 @pytest.mark.funcov_bins("BIN-661", "BIN-666", "BIN-700")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
@@ -468,6 +528,45 @@ def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
         ("icache_missunit_dedup", "prefetch_merge_any_mshr"),
     }
     _wait_bins(env, targets, max_cycles=4000)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-683")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) -> None:
+    """A clean response for an existing MSHR cancels an unissued s2 miss."""
+    env = prefetchpipe_env
+    _run_trained_refill(env)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_unissued_miss")],
+        max_cycles=4000,
+    )
+    hit = _recorder(env).hits[
+        (
+            "icache_prefetchpipe_s2_miss",
+            "miss_behavior",
+            "clean_mshr_cancels_unissued_miss",
+        )
+    ]
+    evidence = hit.evidence[0]
+    matched_ports = tuple(int(port) for port in evidence["unissued_clean_refill_ports"])
+    assert matched_ports
+    for port in matched_ports:
+        assert int(evidence[f"s2_has_send{port}"]) == 0
+        assert int(evidence[f"s2_miss{port}"]) == 0
+    assert int(evidence["miss_valid"]) == 0
+    target = int(evidence["refill_paddr"]) << 6
+    target_requests_before = sum(
+        int(record["address"]) == (int(target) & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    env.step(8)
+    target_requests_after = sum(
+        int(record["address"]) == (int(target) & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert target_requests_after == target_requests_before
     assert not env.monitor.get_errors()
 
 

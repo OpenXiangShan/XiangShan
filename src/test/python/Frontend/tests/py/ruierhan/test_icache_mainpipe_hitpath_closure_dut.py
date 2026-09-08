@@ -353,6 +353,59 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-628")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.funcov_closure_pending
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the trained current-DUT stream does not retain two cross-line FTQ "
+        "requests with all four miss slots pending for four ready cycles"
+    ),
+)
+def test_tc_icache_mainpipe_four_line_fixed_priority(env) -> None:
+    """Invalidate a trained cross-line dual stream and observe four miss slots."""
+    random_state = random.getstate()
+    random.seed(1)
+    try:
+        _run_multi_branch_positions(env)
+    finally:
+        random.setstate(random_state)
+
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=96,
+        miss_rate=1.0,
+        seed=0x628,
+    )
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    try:
+        for _episode in range(2):
+            fencei.value = 1
+            env.step(1)
+            fencei.value = 0
+            for _ in range(512):
+                if env.functional_coverage.key_hit(
+                    "icache_mainpipe_s1_miss", "four_line_fixed_priority"
+                ):
+                    break
+                env.step(1)
+            if env.functional_coverage.key_hit(
+                "icache_mainpipe_s1_miss", "four_line_fixed_priority"
+            ):
+                break
+        _wait_hit(
+            env,
+            "icache_mainpipe_s1_miss",
+            "four_line_fixed_priority",
+            max_cycles=1,
+        )
+    finally:
+        fencei.value = 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1138")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
