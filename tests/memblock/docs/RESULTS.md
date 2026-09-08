@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `648db97b007d0855d733cd899e7019da8f88698dab3b11cbdaa832a1df9cc862`
+- Current rebuilt and frozen UT executable SHA-256: `d01deab934ce799407ff44ba7fb2ad86e50ae1c4dec54d2d013292e0842bed42`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `d8580e9747c905675ef2e5ffddbf19ff6f91d9fdb27576fe9e717191fa1ba526`
+- Frozen runtime manifest SHA-256: `7683b1481875c432a43ca9e848f1a3098207c70be3a1c6859586f28ad40c6145`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -2510,6 +2510,50 @@ controller fragment and frozen runtime hash:
 
 ```text
 MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=42.921017 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=3575aa22bff04be944400b4bf49deccd801cd929f3a41330affde7e011fb55cd
+```
+
+No CPU RTL defect was observed.
+
+## Schema 24 Random Hypervisor PBMT Closure
+
+On 2026-09-08 the common `random-mixed` hypervisor class added five weighted
+VS/G leaf-PBMT pairs: `PMA/PMA`, `PMA/NC`, `PMA/IO`, `NC/IO`, and `IO/NC`.
+Together they cover final PMA, NC, and IO selection plus both VS-over-G
+priority directions. The scheduler requires every enabled HLV/HLVX/HSV x
+SPVP=S/U x PBMT-pair bin per seed. Distinct VA, GPA, and PA aliases cover all
+four 4-KiB/Svnapot VS/G leaf topologies; the independent walker supplies the
+expected PA and PBMT, and the load/store scoreboards check exact physical bytes.
+PMA requires no Hypervisor Uncache request, while NC/IO require exactly one
+Uncache request and no DCache request. Non-PMA pairs are deliberately naturally
+aligned until their misalignment exception-priority contract is modeled.
+
+The following 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Hypervisor actions | HLV/HLVX/HSV | SPVP S/U | PBMT pair counts | Uncache requests |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: |
+| hypervisor-focused `coverage` | 24001 | 24,558 | 33 | 11/11/11 | 16/17 | 7/6/7/6/7 | 28 |
+| full `coverage` | 24002 | 96,717 | 31 | 10/10/11 | 16/15 | 6/6/6/6/7 | 54 |
+| full `spec` | 24003 | 65,594 | 31 | 11/10/10 | 16/15 | 7/6/6/6/6 | 32 |
+| non-PMA PBMT pairs only | 24004 | 23,711 | 26 | 8/10/8 | 14/12 | 0/6/7/7/6 | 28 |
+| PMA/PMA only | 24005 | 22,016 | 19 | 6/6/7 | 9/10 | 19/0/0/0/0 | 2 |
+| full `corner` | 24006 | 173,639 | 36 | 13/13/10 | 20/16 | 6/7/7/7/9 | 62 |
+| frozen `coverage` artifact | 1 | 103,245 | 31 | 11/10/10 | 15/16 | 7/6/6/6/6 | 48 |
+
+Every fully enabled run covered all 30 family/SPVP/PBMT bins. The two endpoint
+runs proved that disabled PBMT classes remained exactly zero. The PMA-only run
+also covered all 12 family/SPVP/aligned-or-misaligned bins, while the non-PMA
+endpoint accepted only aligned traffic as specified. Its 26 Hypervisor actions
+account for 26 of 28 Uncache requests; the mandatory architectural prefix owns
+the other two. Conversely, the PMA-only run's two Uncache requests both came
+from that prefix, proving that its 19 Hypervisor actions added none.
+
+All 186 Python unit tests, `check-rtl`, a clean Picker C++ rebuild, smoke, and
+the independent finite-artifact verifier passed. The verifier checked all 30
+schema-24 PBMT crosses plus frozen runtime, RTL, runner, and controller hashes:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=40.613562 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=4485b4b5396aef4bc96eec08d2244ba2cda9ea41c00fb611b81a2afd3c60c001
 ```
 
 No CPU RTL defect was observed.

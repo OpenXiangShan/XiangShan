@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 24
+        result["constraint_schema"] = 25
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -782,6 +782,59 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "target_misaligned",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 24,
+                "target_ops": "1,0,3,2,0,0,1,1,1,1,1,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,30,6,90,12,8",
+                "target_hypervisor_family": "1,1,1",
+                "actual_hypervisor_family": "10,10,10",
+                "target_hypervisor_spvp_user": 500,
+                "actual_hypervisor_spvp": "15,15",
+                "actual_hypervisor_cross": "5,5,5,5,5,5",
+                "target_misaligned": 500,
+                "actual_hypervisor_alignment": "24,6",
+                "actual_hypervisor_alignment_cross": ",".join(
+                    ["4,1"] * 6
+                ),
+                "target_hypervisor_pbmt_pair": "1,1,1,1,1",
+                "actual_hypervisor_pbmt_pair": "6,6,6,6,6",
+                "actual_hypervisor_pbmt_cross": ",".join(["1"] * 30),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pbmt_cross"] = ",".join(
+            ["0"] + ["1"] * 29
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_pbmt_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "actual_ops": "10,0,3,2,0,0,18,5,5,24,6,90,12,8",
+                "actual_hypervisor_family": "8,8,8",
+                "actual_hypervisor_spvp": "12,12",
+                "actual_hypervisor_cross": "4,4,4,4,4,4",
+                "actual_hypervisor_alignment": "18,6",
+                "actual_hypervisor_alignment_cross": ",".join(
+                    ["3,1"] * 6
+                ),
+                "target_hypervisor_pbmt_pair": "1,0,1,1,1",
+                "actual_hypervisor_pbmt_pair": "6,0,6,6,6",
+                "actual_hypervisor_pbmt_cross": ",".join(
+                    ["1,0,1,1,1"] * 6
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pbmt_cross"] = ",".join(["1"] * 30)
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_pbmt_cross",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

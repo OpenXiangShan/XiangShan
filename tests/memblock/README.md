@@ -31,6 +31,11 @@ execute behavior, and each operation family across all four Sv39/Sv48 and
 Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
 PMA/NC/IO classification and VS-over-G priority for every hypervisor operation
 family, and cacheable misaligned HLV/HLVX/HSV exercise the scalar split paths.
+The same five PBMT combinations are weighted in schema-24 `random-mixed` and
+closed across every enabled operation family and SPVP value per seed. Exact
+two-stage PA/data/store effects and DCache-versus-Uncache routing are checked;
+NC/IO random actions are naturally aligned while PMA retains the schema-23
+aligned/misaligned cross.
 It also executes HLV, HLVX, and HSV from M-mode under SPVP=U/S with physical
 PMP R-only, X-only, RW, and RX regions. The independent permission oracle
 requires R for HLV, R+X for HLVX, and W for HSV, so an accidental M-mode PMP
@@ -1181,6 +1186,17 @@ with aligned and misaligned addresses when both are enabled. Forced
 misalignment selects only operations wider than one byte, checks the generated
 address class before issue, and retains the independent two-stage physical
 address/data oracle.
+
+Schema 24 adds five relative PBMT-pair weights to the common hypervisor class:
+`PMA/PMA`, `PMA/NC`, `PMA/IO`, `NC/IO`, and `IO/NC`, where the first value is
+the VS-stage leaf and the second is the final G-stage leaf. These combinations
+cover final PMA, NC, and IO selection plus both VS-over-G priority directions.
+Every enabled HLV/HLVX/HSV x SPVP=S/U x PBMT-pair bin must execute per seed.
+The reference walker independently derives the physical address and final PBMT;
+loads and stores check exact physical bytes, PMA traffic must avoid Uncache,
+and NC/IO traffic must issue exactly one Uncache request with no DCache request.
+Non-PMA PBMT pairs are currently naturally aligned; fixed-PMA device boundaries
+and broader hypervisor PMP region edges remain separate verification gaps.
 
 For a reproducible local pressure run:
 

@@ -101,6 +101,15 @@ struct RandomConstraints {
         hypervisor_family_count,
     };
 
+    enum HypervisorPbmtPair : unsigned {
+        hypervisor_pbmt_pma_pma,
+        hypervisor_pbmt_pma_nc,
+        hypervisor_pbmt_pma_io,
+        hypervisor_pbmt_nc_io,
+        hypervisor_pbmt_io_nc,
+        hypervisor_pbmt_pair_count,
+    };
+
     enum CmoOperation : unsigned {
         cmo_clean,
         cmo_flush,
@@ -154,6 +163,8 @@ struct RandomConstraints {
     unsigned atomic_error_denied_per_mille = 0;
     std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
     unsigned hypervisor_spvp_user_per_mille = 0;
+    std::array<unsigned, hypervisor_pbmt_pair_count>
+        hypervisor_pbmt_pair_weights{};
     std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
     unsigned cmo_dirty_per_mille = 0;
     unsigned cmo_younger_overlap_per_mille = 0;
@@ -230,6 +241,7 @@ struct RandomConstraints {
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
                 .hypervisor_spvp_user_per_mille = 500,
+                .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 500,
@@ -306,6 +318,7 @@ struct RandomConstraints {
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {90, 5, 5},
                 .hypervisor_spvp_user_per_mille = 1,
+                .hypervisor_pbmt_pair_weights = {996, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 50,
                 .cmo_younger_overlap_per_mille = 10,
@@ -383,6 +396,7 @@ struct RandomConstraints {
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
                 .hypervisor_spvp_user_per_mille = 500,
+                .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 750,
@@ -574,6 +588,18 @@ struct RandomConstraints {
             }
             return false;
         };
+        constexpr std::array<std::string_view, hypervisor_pbmt_pair_count>
+            hypervisor_pbmt_pair_keys{{
+                "hypervisor-pbmt-pma-pma",
+                "hypervisor-pbmt-pma-nc",
+                "hypervisor-pbmt-pma-io",
+                "hypervisor-pbmt-nc-io",
+                "hypervisor-pbmt-io-nc",
+            }};
+        if (assign_weight(
+                hypervisor_pbmt_pair_keys, hypervisor_pbmt_pair_weights)) {
+            return;
+        }
         constexpr std::array<std::string_view, cmo_operation_count>
             cmo_operation_keys{{"cmo-clean", "cmo-flush", "cmo-inval"}};
         if (assign_weight(cmo_operation_keys, cmo_operation_weights)) {
@@ -871,6 +897,28 @@ struct RandomConstraints {
                 hypervisor_family_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "hypervisor family constraint weights cannot all be zero");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            std::accumulate(
+                hypervisor_pbmt_pair_weights.begin(),
+                hypervisor_pbmt_pair_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "hypervisor PBMT pair constraint weights cannot all be zero");
+        }
+        const bool hypervisor_non_pma_enabled = std::any_of(
+            hypervisor_pbmt_pair_weights.begin() + 1,
+            hypervisor_pbmt_pair_weights.end(),
+            [](unsigned weight) { return weight != 0; });
+        if (operation_weights[hypervisor] != 0 &&
+            misaligned_per_mille != 0 &&
+            hypervisor_pbmt_pair_weights[hypervisor_pbmt_pma_pma] == 0) {
+            throw std::invalid_argument(
+                "misaligned hypervisor traffic requires the PMA/PMA PBMT pair");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            misaligned_per_mille == 1000 && hypervisor_non_pma_enabled) {
+            throw std::invalid_argument(
+                "non-PMA hypervisor PBMT pairs require aligned traffic");
         }
         if (operation_weights[cmo] != 0 &&
             std::accumulate(
@@ -1383,6 +1431,11 @@ struct RandomConstraints {
         return choose_weighted(hypervisor_family_weights, random);
     }
 
+    unsigned choose_hypervisor_pbmt_pair(std::uint64_t random) const
+    {
+        return choose_weighted(hypervisor_pbmt_pair_weights, random);
+    }
+
     unsigned choose_cmo_operation(std::uint64_t random) const
     {
         return choose_weighted(cmo_operation_weights, random);
@@ -1559,9 +1612,14 @@ struct RandomConstraints {
                     hypervisor_family_weights.begin(),
                     hypervisor_family_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
+                const unsigned pbmt_pairs = static_cast<unsigned>(std::count_if(
+                    hypervisor_pbmt_pair_weights.begin(),
+                    hypervisor_pbmt_pair_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
                 actions += families *
                     direction_classes(hypervisor_spvp_user_per_mille) *
-                    direction_classes(misaligned_per_mille);
+                    std::max(
+                        direction_classes(misaligned_per_mille), pbmt_pairs);
             } else if (operation == noncacheable) {
                 uncache_actions +=
                     uncache_outcome_actions(nc_stores_per_mille);
@@ -1772,7 +1830,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=23 constraints=" << name
+        stream << "constraint_schema=24 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1792,6 +1850,9 @@ struct RandomConstraints {
                << hypervisor_family_weights[2]
                << " target_hypervisor_spvp_user="
                << hypervisor_spvp_user_per_mille
+               << " target_hypervisor_pbmt_pair=";
+        append_weights(stream, hypervisor_pbmt_pair_weights);
+        stream
                << " target_cmo_operation=" << cmo_operation_weights[0] << ','
                << cmo_operation_weights[1] << ',' << cmo_operation_weights[2]
                << " target_cmo_dirty=" << cmo_dirty_per_mille
@@ -2151,6 +2212,16 @@ struct ConstraintCoverage {
     std::array<std::array<std::array<std::uint64_t, 2>, 2>,
                RandomConstraints::hypervisor_family_count>
         hypervisor_alignment_crosses{};
+    std::array<std::uint64_t, RandomConstraints::hypervisor_pbmt_pair_count>
+        hypervisor_pbmt_pairs{};
+    // [HLV/HLVX/HSV][SPVP=S/U][VS/G PBMT pair].
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t, RandomConstraints::hypervisor_pbmt_pair_count>,
+            2>,
+        RandomConstraints::hypervisor_family_count>
+        hypervisor_pbmt_crosses{};
     std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
         cmo_operations{};
     std::array<std::uint64_t, 2> cmo_line_states{};
@@ -2575,6 +2646,9 @@ struct ConstraintCoverage {
         if (operation == RandomConstraints::hypervisor) {
             std::array<std::uint64_t, 2> cross_spvp{};
             std::array<std::uint64_t, 2> cross_alignment{};
+            std::array<
+                std::uint64_t, RandomConstraints::hypervisor_pbmt_pair_count>
+                cross_pbmt{};
             std::uint64_t cross_total = 0;
             for (unsigned family = 0; family < hypervisor_crosses.size();
                  ++family) {
@@ -2612,6 +2686,23 @@ struct ConstraintCoverage {
                     if (alignment_total != count) {
                         return false;
                     }
+                    std::uint64_t pbmt_total = 0;
+                    for (unsigned pbmt = 0;
+                         pbmt < hypervisor_pbmt_crosses[family][spvp].size();
+                         ++pbmt) {
+                        const bool pbmt_enabled = enabled &&
+                            constraints.hypervisor_pbmt_pair_weights[pbmt] != 0;
+                        const std::uint64_t pbmt_count =
+                            hypervisor_pbmt_crosses[family][spvp][pbmt];
+                        if ((pbmt_count != 0) != pbmt_enabled) {
+                            return false;
+                        }
+                        pbmt_total += pbmt_count;
+                        cross_pbmt[pbmt] += pbmt_count;
+                    }
+                    if (pbmt_total != count) {
+                        return false;
+                    }
                     cross_family += count;
                     cross_spvp[spvp] += count;
                     cross_total += count;
@@ -2623,6 +2714,7 @@ struct ConstraintCoverage {
             return operations[operation] != 0 &&
                 cross_spvp == hypervisor_spvp &&
                 cross_alignment == hypervisor_alignments &&
+                cross_pbmt == hypervisor_pbmt_pairs &&
                 cross_total == operations[operation];
         }
         if (operation == RandomConstraints::cmo) {
@@ -3132,6 +3224,20 @@ public:
                     stream << (first_hypervisor_alignment ? "" : ",")
                            << count;
                     first_hypervisor_alignment = false;
+                }
+            }
+        }
+        stream << " actual_hypervisor_pbmt_pair=";
+        for (unsigned pbmt = 0; pbmt < hypervisor_pbmt_pairs.size(); ++pbmt) {
+            stream << (pbmt == 0 ? "" : ",") << hypervisor_pbmt_pairs[pbmt];
+        }
+        stream << " actual_hypervisor_pbmt_cross=";
+        bool first_hypervisor_pbmt = true;
+        for (const auto &family : hypervisor_pbmt_crosses) {
+            for (const auto &spvp : family) {
+                for (const auto count : spvp) {
+                    stream << (first_hypervisor_pbmt ? "" : ",") << count;
+                    first_hypervisor_pbmt = false;
                 }
             }
         }
