@@ -28,6 +28,14 @@ class common_data_transaction extends uvm_object;
         longint unsigned          lifecycle_event_seq;
     } memblock_pending_sfence_invalidate_t;
 
+    typedef struct {
+        bit                 ppn_valid;
+        bit [43:0]          ppn;
+        bit [1:0]           s2xlate;
+        longint unsigned    response_token;
+        longint unsigned    complete_sample_seq;
+    } memblock_l2tlb_ppn_history_record_t;
+
     static common_data_transaction m_inst;
 
     int unsigned   main_trans_num;
@@ -61,6 +69,9 @@ class common_data_transaction extends uvm_object;
     // 中文注释：adapter 成功消费 raw fence 后只在此登记 C4 删除工作。
     // 该队列不拥有 L2TLB token/UID；runtime reset 或 C4 delete 后由本类清除。
     memblock_pending_sfence_invalidate_t sfence_invalidate_pending_q[$];
+    // 中文注释：只保存已被 DUT sample 到的 L2TLB response 的最近 PPN 记录。
+    // EN=1 的 responder completion 写入，reset_all_tables/runtime reset 清空；SFENCE/HFENCE live-entry 删除不得清空。
+    memblock_l2tlb_ppn_history_record_t l2tlb_ppn_history_q[$];
     // 中文注释：live entry 的单调身份；普通 reset/flush 只清 table，不回退该计数器。
     longint unsigned         next_tlb_entry_generation;
     memblock_uid_tlb_record  uid_tlb_record_by_uid[memblock_uid_t];
@@ -245,6 +256,7 @@ class common_data_transaction extends uvm_object;
         pma_pmp_last_applied_csr_sample = 0;
         next_tlb_entry_generation = 0;
         sfence_invalidate_pending_q.delete();
+        l2tlb_ppn_history_q.delete();
         uid_waiting_by_vpn_s2xlate.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
@@ -339,6 +351,7 @@ class common_data_transaction extends uvm_object;
         tlb_entry_by_key.delete();
         tlb_anchor_keys_by_range_key.delete();
         sfence_invalidate_pending_q.delete();
+        l2tlb_ppn_history_q.delete();
         uid_tlb_record_by_uid.delete();
         clear_issue_queues();
         clear_feedback_events();
@@ -4350,8 +4363,28 @@ class common_data_transaction extends uvm_object;
         output memblock_tlb_lookup_result_e lookup_result,
         output memblock_tlb_entry entry,
         output bit created);
+        return get_or_create_l2tlb_entry_by_req_with_snapshot(
+            vpn, s2xlate, csr_snapshot, 1'b0, 0, request_key, entry_anchor_key,
+            lookup_result, entry, created);
+    endfunction:get_or_create_tlb_entry_by_req_with_snapshot
+
+    // 中文注释：L2TLB responder 专用 lookup。exact/range hit 保持完全只读，
+    // 只有 miss build 在 canonical entry 插表前可按已冻结的 reuse policy 覆写最终 PPN。
+    function bit get_or_create_l2tlb_entry_by_req_with_snapshot(
+        input bit [37:0] vpn,
+        input bit [1:0] s2xlate,
+        input mmu_csr_runtime_state csr_snapshot,
+        input bit ppn_reuse_en,
+        input int unsigned ppn_reuse_wt,
+        output memblock_tlb_lookup_key_t request_key,
+        output memblock_tlb_lookup_key_t entry_anchor_key,
+        output memblock_tlb_lookup_result_e lookup_result,
+        output memblock_tlb_entry entry,
+        output bit created);
+        bit reused_ppn;
+
         if (csr_snapshot == null) begin
-            `uvm_fatal("COMMON_DATA", "get_or_create_tlb_entry_by_req_with_snapshot got null csr_snapshot")
+            `uvm_fatal("COMMON_DATA", "get_or_create_l2tlb_entry_by_req_with_snapshot got null csr_snapshot")
         end
         request_key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
         entry_anchor_key = '{default:'0};
@@ -4375,6 +4408,10 @@ class common_data_transaction extends uvm_object;
             return 1'b1;
         end
         entry = build_tlb_entry_for_key_with_csr(request_key, csr_snapshot);
+        reused_ppn = 1'b0;
+        if (ppn_reuse_en) begin
+            try_apply_l2tlb_ppn_reuse_to_new_entry(entry, ppn_reuse_wt, reused_ppn);
+        end
         insert_tlb_entry(request_key, entry);
         if (!register_tlb_range_index(request_key, entry)) begin
             tlb_entry_by_key.delete(request_key);
@@ -4383,8 +4420,14 @@ class common_data_transaction extends uvm_object;
         entry_anchor_key = request_key;
         lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
         created = 1'b1;
+        if (reused_ppn) begin
+            `uvm_info("COMMON_DATA",
+                      $sformatf("L2TLB miss reuses completed PPN vpn=0x%0h s2xlate=%0d generation=%0d",
+                                request_key.vpn, request_key.s2xlate,
+                                entry.entry_generation), UVM_LOW)
+        end
         return 1'b1;
-    endfunction:get_or_create_tlb_entry_by_req_with_snapshot
+    endfunction:get_or_create_l2tlb_entry_by_req_with_snapshot
 
     // Abstract responsibility: translate one context-bound raw fence into the
     // immutable stage-specific payload used by the C4 live-entry deleter. It
@@ -4833,6 +4876,131 @@ class common_data_transaction extends uvm_object;
         tlb_anchor_keys_by_range_key.delete();
         tlb_entry_by_key.delete();
     endfunction:clear_dispatch_l2tlb_live_entries
+
+    // 中文注释：清除 completed-response PPN FIFO，不触碰 live entry、range index、UID 或 token。
+    // 调用者只能是 testcase table reset 或已去重的 runtime reset epoch；普通 SFENCE/HFENCE 不调用本函数。
+    function void clear_l2tlb_ppn_history();
+        l2tlb_ppn_history_q.delete();
+    endfunction:clear_l2tlb_ppn_history
+
+    // 中文注释：在真实 response completion 边界记录一个 FIFO 位置。
+    // fault/PMA AF/无法推导最终 PPN 仍写 invalid record，确保 history 表示最近 M 次 completion 而非仅成功翻译。
+    function void record_l2tlb_completed_ppn_history(
+        input bit [1:0] s2xlate,
+        input bit request_derived_valid,
+        input bit [43:0] request_s1_resolved_ppn,
+        input bit [43:0] request_s2_resolved_ppn,
+        input memblock_tlb_entry entry,
+        input longint unsigned response_token,
+        input longint unsigned complete_sample_seq,
+        input int unsigned history_size);
+        memblock_l2tlb_ppn_history_record_t record;
+
+        // request_token 从 0 开始分配；0 是首个真实 request 的合法 provenance，
+        // 不能把它当成未初始化标记。completion sample 和容量仍必须非零。
+        if (entry == null || complete_sample_seq == 0 || history_size == 0) begin
+            `uvm_fatal("COMMON_DATA",
+                       "PPN history record requires entry, non-zero sample and non-zero capacity")
+        end
+        if (entry.s2xlate != s2xlate) begin
+            `uvm_fatal("COMMON_DATA", "PPN history record s2xlate does not match frozen entry")
+        end
+        record = '{default:'0};
+        record.s2xlate = s2xlate;
+        record.response_token = response_token;
+        record.complete_sample_seq = complete_sample_seq;
+        if (!entry.has_effective_fault() && !entry.pmaAF && request_derived_valid) begin
+            case (s2xlate)
+                2'd0,
+                2'd1: begin
+                    record.ppn = request_s1_resolved_ppn;
+                    record.ppn_valid = 1'b1;
+                end
+                2'd2,
+                2'd3: begin
+                    record.ppn = request_s2_resolved_ppn;
+                    record.ppn_valid = 1'b1;
+                end
+                default: begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("unsupported PPN history s2xlate=%0d", s2xlate))
+                end
+            endcase
+        end
+        l2tlb_ppn_history_q.push_back(record);
+        while (l2tlb_ppn_history_q.size() > history_size) begin
+            void'(l2tlb_ppn_history_q.pop_front());
+        end
+        `uvm_info("COMMON_DATA",
+                  $sformatf("record L2TLB completed PPN token=%0d sample=%0d s2xlate=%0d valid=%0d ppn=0x%0h history=%0d/%0d",
+                            response_token, complete_sample_seq, s2xlate,
+                            record.ppn_valid, record.ppn,
+                            l2tlb_ppn_history_q.size(), history_size), UVM_LOW)
+    endfunction:record_l2tlb_completed_ppn_history
+
+    // 中文注释：仅在 miss build 的新 entry 尚未插表时扫描有界 history FIFO。
+    // 该函数不读取主表，也不改已有 entry；WT=0 和无候选路径不消耗新的随机数。
+    function void try_apply_l2tlb_ppn_reuse_to_new_entry(
+        ref memblock_tlb_entry entry,
+        input int unsigned ppn_reuse_wt,
+        output bit reused_ppn);
+        tlb_map_builder builder;
+        int unsigned candidate_indices[$];
+        int unsigned candidate_count;
+        int unsigned candidate_choice;
+        bit choose_reuse;
+
+        reused_ppn = 1'b0;
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "PPN reuse got null new entry")
+        end
+        if (ppn_reuse_wt > 100) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("PPN reuse weight=%0d is outside [0:100]", ppn_reuse_wt))
+        end
+        if (l2tlb_ppn_history_q.size() == 0 || ppn_reuse_wt == 0) begin
+            return;
+        end
+        builder = tlb_map_builder::type_id::create("tlb_builder_ppn_reuse");
+        if (builder == null) begin
+            `uvm_fatal("COMMON_DATA", "failed to create PPN reuse builder")
+        end
+        if (!builder.can_apply_reused_final_ppn(entry, '0)) begin
+            return;
+        end
+        foreach (l2tlb_ppn_history_q[idx]) begin
+            if (l2tlb_ppn_history_q[idx].ppn_valid &&
+                builder.can_apply_reused_final_ppn(entry,
+                                                   l2tlb_ppn_history_q[idx].ppn)) begin
+                candidate_indices.push_back(idx);
+            end
+        end
+        candidate_count = candidate_indices.size();
+        if (candidate_count == 0) begin
+            return;
+        end
+        choose_reuse = 1'b1;
+        if (ppn_reuse_wt < 100) begin
+            if (!std::randomize(choose_reuse) with {
+                    choose_reuse dist {1'b1 := ppn_reuse_wt,
+                                       1'b0 := 100 - ppn_reuse_wt};
+                }) begin
+                `uvm_fatal("COMMON_DATA", "failed to randomize L2TLB PPN reuse decision")
+            end
+        end
+        if (!choose_reuse) begin
+            return;
+        end
+        candidate_choice = 0;
+        if (candidate_count > 1 && !std::randomize(candidate_choice) with {
+                candidate_choice < candidate_count;
+            }) begin
+            `uvm_fatal("COMMON_DATA", "failed to randomize L2TLB PPN reuse candidate")
+        end
+        builder.apply_reused_final_ppn(
+            l2tlb_ppn_history_q[candidate_indices[candidate_choice]].ppn, entry);
+        reused_ppn = 1'b1;
+    endfunction:try_apply_l2tlb_ppn_reuse_to_new_entry
 
     function longint unsigned allocate_tlb_entry_generation();
         if (next_tlb_entry_generation == '1 || next_tlb_entry_generation + 1 == 0)

@@ -104,6 +104,7 @@ package seq_pkg;
     `include "memblock_sfence_control_base_sequence.sv"
     `include "memblock_redirect_dispatch_base_sequence.sv"
     `include "memblock_l2tlb_base_sequence.sv"
+    `include "soft_test_l2tlb_ppn_reuse_sequence.sv"
     // memblock_main_dispatch_auto_build_main_table_base_sequence 的终态审计
     // 需要调用 mem_access_base_sequence 的共享 memory helper；先声明 responder
     // 基类，再声明依赖它的 main orchestration class。

@@ -183,6 +183,72 @@ class tlb_map_builder extends uvm_object;
         return raw_ppn[37:0];
     endfunction:encode_s2_entry_ppn
 
+    // 中文注释：判断一个刚完成 response 的 PPN 能否覆盖新 miss entry 的最终目标 stage。
+    // 仅允许无 fault、无 PMA AF、leaf PTE 的 4KB normal target；allStage 只覆盖 S2，避免改写 raw S1->GVPN 映射。
+    function bit can_apply_reused_final_ppn(input memblock_tlb_entry entry,
+                                            input bit [43:0] ppn);
+        if (entry == null || entry.has_effective_fault() || entry.pmaAF) begin
+            return 1'b0;
+        end
+        case (entry.s2xlate)
+            2'd0,
+            2'd1: begin
+                return entry.s1_stage_active && !entry.s2_stage_active &&
+                       entry.s1_level == 2'd0 && !entry.s1_pte_n &&
+                       entry.s1_resolved_ppn_valid;
+            end
+            2'd2: begin
+                return !entry.s1_stage_active && entry.s2_stage_active &&
+                       entry.s2_level == 2'd0 && !entry.s2_pte_n &&
+                       entry.s2_resolved_ppn_valid &&
+                       (entry.s2_pte_r || entry.s2_pte_w || entry.s2_pte_x) &&
+                       !|ppn[43:38];
+            end
+            2'd3: begin
+                return entry.s1_stage_active && entry.s2_stage_active &&
+                       entry.s2_level == 2'd0 && !entry.s2_pte_n &&
+                       entry.s2_resolved_ppn_valid &&
+                       (entry.s2_pte_r || entry.s2_pte_w || entry.s2_pte_x) &&
+                       !|ppn[43:38];
+            end
+            default: begin
+                `uvm_fatal("L2TLB_PPN_REUSE",
+                           $sformatf("unsupported reused PPN s2xlate=%0d", entry.s2xlate))
+            end
+        endcase
+        return 1'b0;
+    endfunction:can_apply_reused_final_ppn
+
+    // 中文注释：按 V2 response wire 的既有编码覆写新 entry 的最终 PPN。
+    // 调用者已在 canonical table 插入前完成候选选择；本函数不改 key、权限、tag 或 live-index ownership。
+    function void apply_reused_final_ppn(input bit [43:0] ppn,
+                                         ref memblock_tlb_entry entry);
+        if (!can_apply_reused_final_ppn(entry, ppn)) begin
+            `uvm_fatal("L2TLB_PPN_REUSE",
+                       $sformatf("PPN 0x%0h cannot be applied to target s2xlate=%0d",
+                                 ppn, entry == null ? '0 : entry.s2xlate))
+        end
+        case (entry.s2xlate)
+            2'd0,
+            2'd1: begin
+                build_s1_sector_payload(ppn, entry);
+                entry.s1_resolved_ppn = ppn;
+                entry.s1_resolved_ppn_valid = 1'b1;
+            end
+            2'd2,
+            2'd3: begin
+                entry.s2_entry_ppn_raw = encode_s2_entry_ppn(ppn);
+                entry.s2_resolved_ppn = ppn;
+                entry.s2_resolved_ppn_valid = 1'b1;
+            end
+            default: begin
+                `uvm_fatal("L2TLB_PPN_REUSE", "unreachable reused PPN target stage")
+            end
+        endcase
+        entry.check_inactive_stage_defaults("PPN_REUSE");
+        entry.validate_s1_sector_payload_consistency("PPN_REUSE");
+    endfunction:apply_reused_final_ppn
+
     // Abstract responsibility: deterministically make a normal LEGAL PTE a
     // leaf.  It consumes a field group already sampled by the profile and
     // never invokes randomization or changes the other stage.

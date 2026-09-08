@@ -399,6 +399,11 @@ class plus;
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_RESP_MID_WT, int, 3)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_RESP_LONG_WT, int, 1)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_IDLE_STOP_CYCLE, int, 5000)
+    // 中文注释：PPN reuse 只影响 L2TLB responder miss build 的目标 PPN。
+    // EN=0 时既不收集 completion history，也不读取候选或消耗 reuse 随机数。
+    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_PPN_REUSE_EN, bit, 1'b0)
+    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE, int, 5)
+    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_L2TLB_PPN_REUSE_WT, int, 40)
 
     function new();
         reload_from_cmdline();
@@ -726,6 +731,9 @@ class plus;
         load_int("MEMBLOCK_L2TLB_RESP_MID_WT", MEMBLOCK_L2TLB_RESP_MID_WT);
         load_int("MEMBLOCK_L2TLB_RESP_LONG_WT", MEMBLOCK_L2TLB_RESP_LONG_WT);
         load_int("MEMBLOCK_L2TLB_IDLE_STOP_CYCLE", MEMBLOCK_L2TLB_IDLE_STOP_CYCLE);
+        load_bit("MEMBLOCK_L2TLB_PPN_REUSE_EN", MEMBLOCK_L2TLB_PPN_REUSE_EN);
+        load_int("MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE", MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE);
+        load_int("MEMBLOCK_L2TLB_PPN_REUSE_WT", MEMBLOCK_L2TLB_PPN_REUSE_WT);
     endfunction:reload_from_cmdline
 
     static function void load_string(string name, ref string dst);

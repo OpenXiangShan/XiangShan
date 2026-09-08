@@ -110,6 +110,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     int unsigned resp_mid_wt;
     int unsigned resp_long_wt;
     int unsigned idle_stop_cycle;
+    // 中文注释：本 responder 启动时冻结的 PPN reuse 配置。
+    // EN=0 时 request capture 不会扫描 history，response completion 也不会写 FIFO，确保默认随机序列不变。
+    bit          ppn_reuse_en;
+    int unsigned ppn_reuse_history_size;
+    int unsigned ppn_reuse_wt;
 
     // 中文注释：pending_q保存已fire但尚未放上response端口的token；driving_req保存已经驱动、
     // 等待下一DUT sample确认完成的唯一token。两者总数始终不超过max_outstanding。
@@ -839,9 +844,17 @@ function void memblock_l2tlb_base_sequence::configure_from_plus();
     resp_mid_wt = seq_csr_common::get_l2tlb_resp_mid_wt();
     resp_long_wt = seq_csr_common::get_l2tlb_resp_long_wt();
     idle_stop_cycle = seq_csr_common::get_l2tlb_idle_stop_cycle();
+    ppn_reuse_en = seq_csr_common::get_l2tlb_ppn_reuse_en();
+    ppn_reuse_history_size = seq_csr_common::get_l2tlb_ppn_reuse_history_size();
+    ppn_reuse_wt = seq_csr_common::get_l2tlb_ppn_reuse_wt();
     // The parameters have already been snapshotted by seq_csr_common::init;
     // repeat the pure validation before this owner can make ready visible.
     seq_csr_common::check_l2tlb_payload_weight_cfg();
+    seq_csr_common::check_l2tlb_ppn_reuse_cfg();
+    `uvm_info(get_type_name(),
+              $sformatf("L2TLB PPN reuse config enable=%0d history_size=%0d weight=%0d",
+                        ppn_reuse_en, ppn_reuse_history_size, ppn_reuse_wt),
+              UVM_LOW)
 endfunction:configure_from_plus
 
 function void memblock_l2tlb_base_sequence::ensure_context();
@@ -1089,14 +1102,16 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     end
     pending.request_lookup_key = pending.csr_snapshot.make_lookup_key(
         {26'b0, pending.vpn}, pending.s2xlate);
-    if (!data.get_or_create_tlb_entry_by_req_with_snapshot(pending.vpn,
-                                                            pending.s2xlate,
-                                                            pending.csr_snapshot,
-                                                            pending.request_lookup_key,
-                                                            pending.entry_anchor_key,
-                                                            pending.lookup_result,
-                                                            live_entry,
-                                                            created) ||
+    if (!data.get_or_create_l2tlb_entry_by_req_with_snapshot(pending.vpn,
+                                                              pending.s2xlate,
+                                                              pending.csr_snapshot,
+                                                              ppn_reuse_en,
+                                                              ppn_reuse_wt,
+                                                              pending.request_lookup_key,
+                                                              pending.entry_anchor_key,
+                                                              pending.lookup_result,
+                                                              live_entry,
+                                                              created) ||
         live_entry == null) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("failed to get/create L2TLB entry vpn=0x%0h s2xlate=%0d",
@@ -1362,6 +1377,19 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              actual_response_csr_snapshot.m_pbmt_en,
                              actual_response_csr_snapshot.h_pbmt_en,
                              complete_sample_seq))
+    end
+    if (ppn_reuse_en) begin
+        // 中文注释：只在 sampled_resp_valid 已确认的 completion 边界入队；
+        // 使用 frozen token 的 request-specific PPN 和 effective entry，不能回读 live table。
+        data.record_l2tlb_completed_ppn_history(
+            driving_req.s2xlate,
+            driving_req.request_derived_valid,
+            driving_req.request_s1_resolved_ppn,
+            driving_req.request_s2_resolved_ppn,
+            driving_req.entry_snapshot,
+            driving_req.request_token,
+            complete_sample_seq,
+            ppn_reuse_history_size);
     end
     record_update_count = data.complete_waiting_uid_records_by_response(
         driving_req.entry_snapshot,

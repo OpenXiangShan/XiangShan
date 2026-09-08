@@ -82,7 +82,9 @@ DUT 原始 PTW/L2TLB response。
 
 L2TLB responder sequence 的职责是消费 DTLB request 并生成 L2TLB response。
 
-当前 V2 runtime 调度参数为 `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`。结构上限和 flush hold 由 compile-time `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`、`MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 提供。旧 `MEMBLOCK_L2TLB_MIN_LATENCY/MAX_LATENCY` 已删除，不得恢复为第二延迟权威。
+当前 V2 runtime response 调度参数为 `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`。结构上限和 flush hold 由 compile-time `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`、`MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 提供。旧 `MEMBLOCK_L2TLB_MIN_LATENCY/MAX_LATENCY` 已删除，不得恢复为第二延迟权威。
+
+PPN reuse 另使用 `MEMBLOCK_L2TLB_PPN_REUSE_EN=0`、`MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=5` 和 `MEMBLOCK_L2TLB_PPN_REUSE_WT=40`。enable 后只在 L2TLB -> DTLB response 的真实 sample completion 写入最近 `M` 个 record；无论该 token 对应 exact hit、range hit 或 miss build，均占一个 FIFO 位置，fault/PMA AF/unresolvable response 写 invalid record。复用只允许发生在新 4KB miss entry 插入 canonical table 前，不能改写 hit entry、已冻结 token、request key、CSR context 或 response 调度；普通 SFENCE/HFENCE 只删除 live entry，不清 history，runtime reset 才清 history。
 
 `MEMBLOCK_L2TLB_SEQ_EN=1` 时，sequence 启动前必须确认
 `memblock_sync_pkg::l2tlb_responder_active=1`。如果编译期关闭了
@@ -187,7 +189,7 @@ L2TLB response 查表必须与公共 TLB 表方案保持一致：
 修改任何 L2TLB agent、interface、sequence、driver、monitor 或 lookup 行为后，必须同步检查并更新相关文档：
 
 - `AI_DOC/plan/test_framework/plan/do/l2tlb_base_seq_plan_20260614.md`
-- `AI_DOC/plan/test_framework/review_doc/undo/dispatch_plan_v2_review_annotated.md`
+- `AI_DOC/plan/test_framework/review_doc/do/dispatch_plan_v2_review_annotated.md`
 - `AI_DOC/plan/test_framework/plan/do/dispatch_plan_v2_development_detail_20260614.md`
 - `AI_DOC/plan/test_framework/plan/do/dispatch_plan_v2_framework_design_20260614.md`
 - `AI_DOC/analysis/framework_design/dispatch_backend_interface_closure_code_changes.md`

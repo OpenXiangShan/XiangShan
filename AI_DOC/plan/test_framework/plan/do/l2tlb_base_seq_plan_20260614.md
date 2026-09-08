@@ -333,3 +333,18 @@ TLB 表生成或 entry 修正阶段需要保证：
    回包。需要纯观察 DUT 原始 response 时，必须编译期覆盖 takeover 宏为 0；启用接管时
    只驱动 DTLB/L2TLB 交互点，不接 L2Cache 下游路径。
 7. sfence/hfence 只删除 live `tlb_entry_by_key` 中匹配的 entry，不能删除主表、状态表或 `uid_tlb_record_by_uid`。
+
+## 12. 2026-09-08 PPN reuse 实施补充
+
+本文是早期 skeleton plan；completed-response PPN reuse 的当前实现以
+`mem_ut_v2_l2tlb_ppn_reuse_response_history_coding_plan_20260908.md` 及其 implementation review 为准。
+
+- 新增三个 runtime 参数：`MEMBLOCK_L2TLB_PPN_REUSE_EN=0`、
+  `MEMBLOCK_L2TLB_PPN_REUSE_HISTORY_SIZE=5`、`MEMBLOCK_L2TLB_PPN_REUSE_WT=40`。
+- enable 后每个真正完成的 L2TLB -> DTLB response 都写入有界 FIFO；exact hit、range hit 和 miss build
+  同样记录，fault/PMA AF/unresolvable 记录为不可复用的 invalid item。
+- reuse 只发生在新 normal 4KB leaf miss entry 插入 canonical table 前；不会改写 hit entry、frozen token、
+  lookup key、PTE 权限或 response 调度。S2/allStage target 还必须是 R/W/X 非零的 leaf 且 PPN 可编码到
+  V2 38-bit response wire。
+- token `0` 是 responder 第一笔 request 的合法编号，history 只将它作为 audit provenance，不能拒绝。
+- 普通 SFENCE/HFENCE 保留 completed-response history；runtime reset 和 testcase table reset 才清 FIFO。
