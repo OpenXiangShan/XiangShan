@@ -23,8 +23,8 @@ import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait TopHelper extends HasTageParameters {
-  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { implicit tableInfo =>
+  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Seq[TageFoldedHist] =
+    TableInfos.map { implicit tableInfo =>
       val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
@@ -33,7 +33,7 @@ trait TopHelper extends HasTageParameters {
       foldedHist.forTag(0) := tageFoldedHist(1)
       foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
-    })
+    }
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse

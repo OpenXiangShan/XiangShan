@@ -93,14 +93,14 @@ class TageTable(
 
   // use a write buffer to store a entrySram write request
   private val entryWriteBuffers =
-    Seq.tabulate(NumBanks) { bankIdx =>
+    Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
       Module(new WriteBuffer(
         new EntrySramWriteReq,
         WriteBufferSize,
-        numPorts = NumWays,
+        numPorts = 1,
         hasCnt = true,
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
+        nameSuffix = s"tageTable${tableIdx}_${bankIdx}_${wayIdx}"
+      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
   // use a write buffer to store a usefulCtr write request
@@ -139,15 +139,16 @@ class TageTable(
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
   // write to write buffer
-  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
-    buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
+  entryWriteBuffers.zipWithIndex.foreach { case (bankBuffers, bankIdx) =>
+    bankBuffers.zipWithIndex.foreach { case (buffer, wayIdx) =>
+      val bufferIn = buffer.io.write.head
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeEntryEn(wayIdx)
-      bufferIn.valid       := writeValid
-      bufferIn.bits.setIdx := writeReq.setIdx
-      bufferIn.bits.entry  := writeReq.entries(wayIdx)
+      bufferIn.valid               := writeValid
+      bufferIn.bits.setIdx         := writeReq.setIdx
+      bufferIn.bits.entry          := writeReq.entries(wayIdx)
+      buffer.io.takenMask.get.head := writeReq.actualTakenMask(wayIdx)
     }
-    buffer.io.takenMask.get := writeReq.actualTakenMask
   }
 
   usefulCtrWriteBuffers.zipWithIndex.foreach { case (bankBuffer, bankIdx) =>
@@ -162,8 +163,9 @@ class TageTable(
   }
 
   // write entry to sram from write buffer
-  entrySram.zip(entryWriteBuffers).foreach { case (bank, buffer) =>
-    bank.zip(buffer.io.read).foreach { case (way, bufferOut) =>
+  entrySram.zip(entryWriteBuffers).foreach { case (bank, bankBuffers) =>
+    bank.zip(bankBuffers).foreach { case (way, buffer) =>
+      val bufferOut = buffer.io.read.head
       way.io.w.apply(
         bufferOut.valid && !way.io.r.req.valid,
         bufferOut.bits.entry,
@@ -236,6 +238,6 @@ class TageTable(
   XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
   XSPerfAccumulate(
     "overwrite",
-    PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
+    PopCount(entryWriteBuffers.flatten.flatMap(_.io.overwrite))
   )
 }

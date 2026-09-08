@@ -89,15 +89,23 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
 }
 
 class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
-  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
-  val entry:        TageEntry               = new TageEntry
-  override def tag: Option[UInt]            = Some(entry.tag)
+  val setIdx: UInt      = UInt(SetIdxWidth.W)
+  val entry:  TageEntry = new TageEntry
+
+  // Keep invalidation writes separate from valid tag-0 writes.
+  override def tag: Option[UInt]            = Some(Cat(!entry.valid, entry.tag))
   override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
 }
 
 class UsefulCtrSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
   val setIdx:    UInt            = UInt(SetIdxWidth.W)
   val usefulCtr: SaturateCounter = UsefulCounter()
+}
+
+class CleanMultiHitReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:   UInt = UInt(SetIdxWidth.W)
+  val bankMask: UInt = UInt(NumBanks.W)
+  val wayMask:  UInt = UInt(NumWays.W)
 }
 
 class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
@@ -109,6 +117,17 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val actualTakenMask: Vec[Bool]            = Vec(NumWays, Bool())
   val entries:         Vec[TageEntry]       = Vec(NumWays, new TageEntry)
   val usefulCtrs:      Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
+
+  def fromCleanMultiHitReq(req: CleanMultiHitReq): TableWriteReq = {
+    this          := 0.U.asTypeOf(this)
+    setIdx        := req.setIdx
+    bankMask      := req.bankMask
+    wayMask       := req.wayMask
+    writeEntryEn  := VecInit(req.wayMask.asBools)
+    writeUsefulEn := VecInit(req.wayMask.asBools)
+    usefulCtrs    := VecInit.fill(NumWays)(UsefulCounter.Zero)
+    this
+  }
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
