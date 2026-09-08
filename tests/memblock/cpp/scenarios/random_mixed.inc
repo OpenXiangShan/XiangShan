@@ -61,6 +61,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         return 0x200000000ULL + pbmt * 0x400000ULL +
             topology * 0x100000ULL;
     };
+    const auto hypervisor_pma_device_virtual_base = [](unsigned spvp,
+                                                       unsigned topology) {
+        return 0x74000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
+    const auto hypervisor_pma_device_guest_base = [](unsigned spvp,
+                                                     unsigned topology) {
+        return 0x1040000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
+    const auto hypervisor_pma_device_physical_base = [](unsigned spvp,
+                                                        unsigned topology) {
+        return 0x35000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
     struct HypervisorPbmtMapping {
         bool vs_nc;
         bool vs_io;
@@ -130,6 +142,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 hypervisor_physical_base(pbmt, topology), 0x1000,
                 static_cast<unsigned char>(
                     0x35 + pbmt * 0x17 + topology * 0x13));
+        }
+    }
+    for (unsigned spvp = 0; spvp < 2; ++spvp) {
+        for (unsigned topology = 0; topology < 4; ++topology) {
+            environment.memory().fill_incrementing(
+                hypervisor_pma_device_physical_base(spvp, topology), 0x1000,
+                static_cast<unsigned char>(0xb5 + spvp * 0x29 +
+                                           topology * 0x13));
         }
     }
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
@@ -380,9 +400,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     };
     auto constrained_hypervisor_address = [&] (
         unsigned alignment, const TranslationLeafTopology &leaf,
-        unsigned spvp, unsigned pbmt, bool misaligned) {
+        unsigned spvp, unsigned pbmt, bool pma_device, bool misaligned) {
         const unsigned topology = leaf.nested_index();
-        std::uint64_t address = hypervisor_virtual_base(spvp, pbmt, topology) +
+        const std::uint64_t base = pma_device
+            ? hypervisor_pma_device_virtual_base(spvp, topology)
+            : hypervisor_virtual_base(spvp, pbmt, topology);
+        std::uint64_t address = base +
             constrained_locality_line() * 64;
         if (misaligned) {
             address += 1 + random() % (alignment - 1);
@@ -938,6 +961,60 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (unsigned spvp = 0; spvp < 2; ++spvp) {
+            for (unsigned topology = 0; topology < 4; ++topology) {
+                const bool vs_napot = (topology & 2U) != 0;
+                const bool g_napot = (topology & 1U) != 0;
+                for (unsigned mode = 0; mode < 2; ++mode) {
+                    for (std::uint64_t offset = 0;
+                         offset < hypervisor_span; offset += 0x10000) {
+                        const std::uint64_t virtual_base =
+                            hypervisor_pma_device_virtual_base(spvp, topology) +
+                            offset;
+                        const std::uint64_t guest_base =
+                            hypervisor_pma_device_guest_base(spvp, topology) +
+                            offset;
+                        const std::uint64_t physical_base =
+                            hypervisor_pma_device_physical_base(spvp, topology) +
+                            offset;
+                        if (vs_napot) {
+                            if (!map_stage_napot(
+                                    mode, random_vs_roots[mode], virtual_base,
+                                    guest_base, spvp != 0)) {
+                                return false;
+                            }
+                        } else {
+                            for (std::uint64_t page = 0; page < 0x10000;
+                                 page += 0x1000) {
+                                if (!map_stage_page(
+                                        mode, random_vs_roots[mode],
+                                        virtual_base + page, guest_base + page,
+                                        false, false, true, spvp != 0)) {
+                                    return false;
+                                }
+                            }
+                        }
+                        if (g_napot) {
+                            if (!map_g_napot(
+                                    mode, random_g_roots[mode], guest_base,
+                                    physical_base)) {
+                                return false;
+                            }
+                        } else {
+                            for (std::uint64_t page = 0; page < 0x10000;
+                                 page += 0x1000) {
+                                if (!map_g_page(
+                                        mode, random_g_roots[mode],
+                                        guest_base + page, physical_base + page,
+                                        true)) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for (unsigned mode = 0; mode < 2; ++mode) {
             if (!map_stage_page(
                     mode, random_stage1_roots[mode], mmio_virtual,
@@ -990,6 +1067,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         hypervisor_virtual_base(spvp, pbmt, topology) + offset,
                         hypervisor_physical_base(pbmt, topology) + offset);
                 }
+            }
+            for (unsigned topology = 0; topology < 4; ++topology) {
+                const std::uint64_t offset =
+                    ((spvp + topology) % 8) * 0x10000ULL + 0x188;
+                reference_addresses.emplace_back(
+                    hypervisor_pma_device_virtual_base(spvp, topology) + offset,
+                    hypervisor_pma_device_physical_base(spvp, topology) + offset);
             }
         }
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
@@ -4007,6 +4091,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             std::optional<unsigned> hypervisor_family;
             bool hypervisor_spvp_user = false;
             bool hypervisor_misaligned = false;
+            bool hypervisor_pma_device = false;
             unsigned hypervisor_pbmt_pair =
                 RandomConstraints::hypervisor_pbmt_pma_pma;
             if (kind == RandomConstraints::hypervisor) {
@@ -4018,11 +4103,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 hypervisor_misaligned = choose_binary_class(
                     constraints.misaligned_per_mille,
                     constraint_coverage.hypervisor_alignments);
-                hypervisor_pbmt_pair =
-                    constraints.choose_hypervisor_pbmt_pair(random());
-                if (hypervisor_pbmt_pair !=
-                    RandomConstraints::hypervisor_pbmt_pma_pma) {
+                hypervisor_pma_device = choose_binary_class(
+                    constraints.hypervisor_pma_device_per_mille,
+                    constraint_coverage.hypervisor_pma_devices);
+                if (hypervisor_pma_device) {
+                    hypervisor_pbmt_pair =
+                        RandomConstraints::hypervisor_pbmt_pma_pma;
                     hypervisor_misaligned = false;
+                } else {
+                    hypervisor_pbmt_pair =
+                        constraints.choose_hypervisor_pbmt_pair(random());
+                    if (hypervisor_pbmt_pair !=
+                        RandomConstraints::hypervisor_pbmt_pma_pma) {
+                        hypervisor_misaligned = false;
+                    }
                 }
                 bool cross_forced = false;
                 for (unsigned candidate = 0;
@@ -4052,9 +4146,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             hypervisor_family = candidate;
                             hypervisor_spvp_user = spvp != 0;
                             hypervisor_pbmt_pair = pbmt;
-                            hypervisor_misaligned =
-                                pbmt == RandomConstraints::
-                                    hypervisor_pbmt_pma_pma &&
+                            const bool pma_pair = pbmt == RandomConstraints::
+                                hypervisor_pbmt_pma_pma;
+                            hypervisor_pma_device = pma_pair &&
+                                constraints.hypervisor_pma_device_per_mille !=
+                                    0 &&
+                                constraint_coverage.
+                                    hypervisor_pma_device_crosses[
+                                        candidate][spvp][1] == 0;
+                            hypervisor_misaligned = pma_pair &&
+                                !hypervisor_pma_device &&
                                 constraints.misaligned_per_mille != 0 &&
                                 constraint_coverage.
                                     hypervisor_alignment_crosses[
@@ -4063,6 +4164,58 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             break;
                         }
                         if (cross_forced) {
+                            break;
+                        }
+                    }
+                }
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::hypervisor_family_count &&
+                         !cross_forced;
+                     ++candidate) {
+                    if (constraints.hypervisor_family_weights[candidate] == 0) {
+                        continue;
+                    }
+                    for (unsigned spvp = 0;
+                         spvp < 2 && !cross_forced; ++spvp) {
+                        const bool spvp_enabled = spvp == 0
+                            ? constraints.hypervisor_spvp_user_per_mille != 1000
+                            : constraints.hypervisor_spvp_user_per_mille != 0;
+                        if (!spvp_enabled) {
+                            continue;
+                        }
+                        for (unsigned pma_device = 0; pma_device < 2;
+                             ++pma_device) {
+                            const bool address_enabled = pma_device == 0
+                                ? constraints.hypervisor_pma_device_per_mille !=
+                                      1000
+                                : constraints.hypervisor_pma_device_per_mille !=
+                                      0;
+                            if (!address_enabled ||
+                                constraint_coverage.
+                                    hypervisor_pma_device_crosses[
+                                        candidate][spvp][pma_device] != 0) {
+                                continue;
+                            }
+                            hypervisor_family = candidate;
+                            hypervisor_spvp_user = spvp != 0;
+                            hypervisor_pma_device = pma_device != 0;
+                            if (hypervisor_pma_device) {
+                                hypervisor_pbmt_pair = RandomConstraints::
+                                    hypervisor_pbmt_pma_pma;
+                                hypervisor_misaligned = false;
+                            } else {
+                                hypervisor_pbmt_pair =
+                                    constraints.choose_hypervisor_pbmt_pair(
+                                        random());
+                                hypervisor_misaligned =
+                                    hypervisor_pbmt_pair == RandomConstraints::
+                                        hypervisor_pbmt_pma_pma &&
+                                    constraints.misaligned_per_mille != 0 &&
+                                    constraint_coverage.
+                                        hypervisor_alignment_crosses[
+                                            candidate][spvp][1] == 0;
+                            }
+                            cross_forced = true;
                             break;
                         }
                     }
@@ -4098,6 +4251,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                 if (hypervisor_misaligned) {
                                     hypervisor_pbmt_pair = RandomConstraints::
                                         hypervisor_pbmt_pma_pma;
+                                    hypervisor_pma_device = false;
+                                } else if (
+                                    constraints.hypervisor_pma_device_per_mille ==
+                                    1000) {
+                                    hypervisor_pbmt_pair = RandomConstraints::
+                                        hypervisor_pbmt_pma_pma;
+                                    hypervisor_pma_device = true;
                                 }
                                 cross_forced = true;
                                 break;
@@ -5835,9 +5995,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     pbmt_value(pbmt_mapping.vs_nc, pbmt_mapping.vs_io),
                     pbmt_value(pbmt_mapping.g_nc, pbmt_mapping.g_io));
                 const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
-                const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
-                if ((final_nc || final_io) && hypervisor_misaligned) {
-                    phase += ":hypervisor-non-pma-misaligned";
+                const bool final_io = final_pbmt == memblock::ReferencePbmt::io ||
+                    (final_pbmt == memblock::ReferencePbmt::pma &&
+                     hypervisor_pma_device);
+                if (((final_nc || final_io) && hypervisor_misaligned) ||
+                    (hypervisor_pma_device &&
+                     hypervisor_pbmt_pair != RandomConstraints::
+                         hypervisor_pbmt_pma_pma)) {
+                    phase += ":hypervisor-address-class";
                     return false;
                 }
                 if (!environment.run_until_all_complete(8192) ||
@@ -5849,15 +6014,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     leaf_addressed = true;
                     return constrained_hypervisor_address(
                         size, leaf, spvp_index, hypervisor_pbmt_pair,
-                        hypervisor_misaligned);
+                        hypervisor_pma_device, hypervisor_misaligned);
                 };
                 const auto hypervisor_oracle_address = [&](std::uint64_t address) {
                     const unsigned topology = leaf.nested_index();
-                    return hypervisor_physical_base(
-                               hypervisor_pbmt_pair, topology) +
-                        (address - hypervisor_virtual_base(
-                                       spvp_index, hypervisor_pbmt_pair,
-                                       topology));
+                    const std::uint64_t virtual_base = hypervisor_pma_device
+                        ? hypervisor_pma_device_virtual_base(
+                              spvp_index, topology)
+                        : hypervisor_virtual_base(
+                              spvp_index, hypervisor_pbmt_pair, topology);
+                    const std::uint64_t physical_base = hypervisor_pma_device
+                        ? hypervisor_pma_device_physical_base(
+                              spvp_index, topology)
+                        : hypervisor_physical_base(
+                              hypervisor_pbmt_pair, topology);
+                    return physical_base + (address - virtual_base);
                 };
                 if (*hypervisor_family == RandomConstraints::hypervisor_hsv) {
                     const auto op = hypervisor_misaligned
@@ -5890,7 +6061,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         address,
                         random(), op, random() % 2, random() % 2);
                     transaction.oracle_address = reference.physical_address;
-                    transaction.expected_debug_is_mmio = false;
+                    transaction.expected_debug_is_mmio = hypervisor_pma_device;
                     transaction.expected_debug_is_ncio = false;
                     const bool data_first = (random() & 1U) != 0;
                     const std::uint64_t dcache_before =
@@ -6033,16 +6204,31 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     auto transaction = make_load(
                         address, op, random() % 3);
                     transaction.oracle_address = reference.physical_address;
-                    transaction.expected_debug_is_mmio = final_io;
-                    transaction.expected_debug_is_ncio = final_io
+                    const bool physical_pma_execute_denied =
+                        hypervisor_pma_device &&
+                        *hypervisor_family ==
+                            RandomConstraints::hypervisor_hlvx;
+                    transaction.expected_exception_mask =
+                        physical_pma_execute_denied
+                        ? memblock::kExceptionLoadAccessFault : 0U;
+                    transaction.expected_debug_is_mmio =
+                        physical_pma_execute_denied
+                        ? std::nullopt : std::optional<bool>{final_io};
+                    transaction.expected_debug_is_ncio =
+                        final_io && !physical_pma_execute_denied
                         ? std::optional<bool>{false} : std::nullopt;
                     transaction.expected_debug_is_perf_cnt = false;
                     const std::uint64_t dcache_before =
                         environment.tilelink_requests();
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
+                    const auto feedback_before =
+                        environment.scalar_load_feedback_stats();
                     bool completed_load = false;
-                    if (final_io) {
+                    if (physical_pma_execute_denied) {
+                        completed_load = issue_load(transaction) &&
+                            environment.run_until_queues_retired(8192);
+                    } else if (final_io) {
                         environment.expect_load(transaction);
                         completed_load = environment.set_rob_head(
                                              transaction.rob,
@@ -6063,10 +6249,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             environment.run_until_queues_retired(8192);
                     }
                     const std::uint64_t expected_uncache =
-                        uncache_before + (final_nc || final_io ? 1U : 0U);
+                        uncache_before +
+                        (!physical_pma_execute_denied && (final_nc || final_io)
+                             ? 1U : 0U);
                     if (!completed_load ||
                         environment.uncache_requests() != expected_uncache ||
-                        ((final_nc || final_io) &&
+                        ((physical_pma_execute_denied || final_nc || final_io) &&
                          environment.tilelink_requests() != dcache_before)) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-load-manager"
@@ -6077,6 +6265,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << environment.uncache_requests();
                         phase = detail.str();
                         return false;
+                    }
+                    if (physical_pma_execute_denied) {
+                        const auto feedback_after =
+                            environment.scalar_load_feedback_stats();
+                        std::uint64_t wakeups = 0;
+                        std::uint64_t cancels = 0;
+                        for (unsigned lane = 0;
+                             lane < memblock::kScalarLoadLanes; ++lane) {
+                            wakeups += feedback_after.wakeups[lane] -
+                                feedback_before.wakeups[lane];
+                            cancels += feedback_after.ld2_cancels[lane] -
+                                feedback_before.ld2_cancels[lane];
+                        }
+                        if (cancels == 0 || wakeups != cancels) {
+                            phase += ":hypervisor-pma-device-wakeup";
+                            return false;
+                        }
                     }
                 }
                 if (!activate_translation_context(translation)) {
@@ -6095,6 +6300,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     hypervisor_pbmt_pair];
                 ++constraint_coverage.hypervisor_pbmt_crosses[
                     *hypervisor_family][spvp_index][hypervisor_pbmt_pair];
+                const unsigned pma_device_index =
+                    hypervisor_pma_device ? 1U : 0U;
+                ++constraint_coverage.hypervisor_pma_devices[pma_device_index];
+                ++constraint_coverage.hypervisor_pma_device_crosses[
+                    *hypervisor_family][spvp_index][pma_device_index];
                 if (final_nc || final_io) {
                     ++coverage.noncacheable;
                 } else {

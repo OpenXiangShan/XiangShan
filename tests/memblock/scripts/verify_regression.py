@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24,
+            19, 20, 21, 22, 23, 24, 25,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -679,6 +679,59 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 cross_pbmt == actual_pbmt
                 and sum(actual_pbmt) == actual_operations[hypervisor_index],
                 "hypervisor PBMT coverage is not conserved",
+            )
+
+        if schema >= 25:
+            target_pma_device = result.get("target_hypervisor_pma_device")
+            _require(
+                type(target_pma_device) is int and 0 <= target_pma_device <= 1000,
+                "target_hypervisor_pma_device must be an integer in 0..1000",
+            )
+            actual_pma_device = _csv_counts(
+                result, "actual_hypervisor_pma_device", 2
+            )
+            actual_pma_device_cross = _csv_counts(
+                result, "actual_hypervisor_pma_device_cross", 12
+            )
+            cross_pma_device = [0, 0]
+            for family in range(3):
+                for spvp in range(2):
+                    pair_total = 0
+                    for pma_device in range(2):
+                        enabled = (
+                            target_operations[hypervisor_index] != 0
+                            and target_hypervisor[family] != 0
+                            and (
+                                target_spvp_user != 1000
+                                if spvp == 0
+                                else target_spvp_user != 0
+                            )
+                            and (
+                                target_pma_device != 1000
+                                if pma_device == 0
+                                else target_pma_device != 0
+                            )
+                        )
+                        index = family * 4 + spvp * 2 + pma_device
+                        count = actual_pma_device_cross[index]
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_hypervisor_pma_device_cross does not match "
+                            "enabled classes: "
+                            f"family={family} spvp={spvp} "
+                            f"pma_device={pma_device}",
+                        )
+                        pair_total += count
+                        cross_pma_device[pma_device] += count
+                    _require(
+                        pair_total == actual_cross[family * 2 + spvp],
+                        "hypervisor PMA-device/cross coverage is not conserved",
+                    )
+            _require(
+                cross_pma_device == actual_pma_device
+                and sum(actual_pma_device)
+                == actual_operations[hypervisor_index],
+                "hypervisor PMA-device coverage is not conserved",
             )
 
         if schema >= 13:

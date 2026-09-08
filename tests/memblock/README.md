@@ -35,7 +35,11 @@ The same five PBMT combinations are weighted in schema-24 `random-mixed` and
 closed across every enabled operation family and SPVP value per seed. Exact
 two-stage PA/data/store effects and DCache-versus-Uncache routing are checked;
 NC/IO random actions are naturally aligned while PMA retains the schema-23
-aligned/misaligned cross.
+aligned/misaligned cross. Schema 25 adds the fixed SoC PMA device interval as a
+weighted address class and closes every enabled HLV/HLVX/HSV x SPVP x
+DDR/device bin. HLV/HSV require exact Uncache data or store effects; HLVX must
+raise `LoadAccessFault`, cancel every speculative wakeup, and issue no data
+manager request because that PMA interval is not executable.
 It also executes HLV, HLVX, and HSV from M-mode under SPVP=U/S with physical
 PMP R-only, X-only, RW, and RX regions. The independent permission oracle
 requires R for HLV, R+X for HLVX, and W for HSV, so an accidental M-mode PMP
@@ -1197,6 +1201,18 @@ loads and stores check exact physical bytes, PMA traffic must avoid Uncache,
 and NC/IO traffic must issue exactly one Uncache request with no DCache request.
 Non-PMA PBMT pairs are currently naturally aligned; fixed-PMA device boundaries
 and broader hypervisor PMP region edges remain separate verification gaps.
+
+Schema 25 adds `hypervisor-pma-device` as a per-mille selector between the
+ordinary translated DDR aliases and an interior address in the SoC's fixed
+`c=0`, R/W, X=0 PMA device interval. Every enabled HLV/HLVX/HSV x SPVP=S/U x
+DDR/device bin must execute per seed. Device HLV and HSV actions require exactly
+one Uncache request, no DCache request, and exact physical data or committed
+bytes. Device HLVX actions require an exact `LoadAccessFault`, no DCache or
+Uncache request, and equality of newly observed scalar wakeups and cancels with
+at least one cancel. Device actions are naturally aligned and use PMA/PMA leaf
+attributes, keeping fixed-PMA classification independent of PBMT composition
+and unresolved non-PMA-misalignment priority. Exact device-region edges and the
+broader hypervisor PMP matrix remain separate gaps.
 
 For a reproducible local pressure run:
 

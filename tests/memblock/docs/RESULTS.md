@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `d01deab934ce799407ff44ba7fb2ad86e50ae1c4dec54d2d013292e0842bed42`
+- Current rebuilt and frozen UT executable SHA-256: `6d91ec3cb800335d02b15e732e90bf4ae51b12e4077bbef6bdf460795dfd6027`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `7683b1481875c432a43ca9e848f1a3098207c70be3a1c6859586f28ad40c6145`
+- Frozen runtime manifest SHA-256: `0afceb1e07f73ea2486aae9dd4be0ca769f82914a3c649c2f6d9dc37aca1bc1e`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -2554,6 +2554,53 @@ schema-24 PBMT crosses plus frozen runtime, RTL, runner, and controller hashes:
 
 ```text
 MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=40.613562 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=4485b4b5396aef4bc96eec08d2244ba2cda9ea41c00fb611b81a2afd3c60c001
+```
+
+No CPU RTL defect was observed.
+
+## Schema 25 Random Hypervisor Fixed-PMA Closure
+
+On 2026-09-08 the common `random-mixed` hypervisor class added
+`hypervisor-pma-device`, a per-mille selector between the existing translated
+DDR aliases and an interior address in the SoC's fixed `c=0`, R/W, X=0 PMA
+device interval. Distinct VA/GPA/PA aliases retain all four 4-KiB/Svnapot VS/G
+leaf topologies and both SPVP values. The scheduler requires every enabled
+HLV/HLVX/HSV x SPVP=S/U x DDR/device bin per seed.
+
+The independent two-stage walker supplies the expected PA. Device HLV and HSV
+must issue exactly one Uncache request, no DCache request, and return or commit
+the exact physical bytes. Device HLVX must report `LoadAccessFault`, issue no
+DCache or Uncache request, and cancel every newly observed speculative wakeup.
+Device actions are naturally aligned and use PMA/PMA leaves, isolating the
+fixed physical PMA classification from PBMT and unresolved non-PMA
+misalignment priority.
+
+The following final-binary 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Hypervisor actions | HLV/HLVX/HSV | SPVP S/U | DDR/device | Uncache requests |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: |
+| hypervisor-focused `coverage` | 25001 | 85,606 | 408 | 120/138/150 | 198/210 | 224/184 | 300 |
+| device disabled | 25002 | 79,278 | 407 | 149/136/122 | 217/190 | 407/0 | 318 |
+| device only, PMA/PMA only | 25003 | 75,912 | 408 | 132/136/140 | 213/195 | 0/408 | 274 |
+| full `spec` | 25004 | 66,900 | 36 | 12/12/12 | 18/18 | 30/6 | 37 |
+| full `corner` | 25005 | 176,036 | 41 | 16/13/12 | 20/21 | 33/8 | 61 |
+| frozen `coverage` artifact | 1 | 109,959 | 39 | 13/14/12 | 20/19 | 31/8 | 52 |
+
+Every fully enabled run covered all 12 family/SPVP/address-class bins. The two
+endpoint runs proved disabled classes remain exactly zero. In the device-only
+run, the 408 hypervisor actions account for 272 Uncache requests from HLV/HSV;
+the remaining two requests belong to the mandatory architectural prefix. Its
+136 HLVX actions contributed no data-manager request and passed the precise
+fault plus wakeup/cancel oracle.
+
+All 186 Python unit tests, `check-rtl`, a clean Picker C++ rebuild, smoke, and
+the independent finite-artifact verifier passed. The verifier checked all 12
+schema-25 address-class crosses plus frozen runtime, RTL, runner, and
+controller hashes:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=43.401869 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=98b12f749d13549f8757ef5f7f07f8bccf9a2ff65ce548dca6b3c6a175c81cb6
 ```
 
 No CPU RTL defect was observed.

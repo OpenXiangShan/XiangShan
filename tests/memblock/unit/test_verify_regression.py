@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 25
+        result["constraint_schema"] = 26
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -835,6 +835,56 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "actual_hypervisor_pbmt_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 25,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,8",
+                "actual_hypervisor_family": "12,12,12",
+                "actual_hypervisor_spvp": "18,18",
+                "actual_hypervisor_cross": "6,6,6,6,6,6",
+                "actual_hypervisor_alignment": "30,6",
+                "actual_hypervisor_alignment_cross": ",".join(
+                    ["5,1"] * 6
+                ),
+                "target_hypervisor_pbmt_pair": "1,1,1,1,1",
+                "actual_hypervisor_pbmt_pair": "12,6,6,6,6",
+                "actual_hypervisor_pbmt_cross": ",".join(
+                    ["2,1,1,1,1"] * 6
+                ),
+                "target_hypervisor_pma_device": 500,
+                "actual_hypervisor_pma_device": "30,6",
+                "actual_hypervisor_pma_device_cross": ",".join(
+                    ["5,1"] * 6
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pma_device_cross"] = ",".join(
+            ["5,0"] + ["5,1"] * 5
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_pma_device_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_hypervisor_pma_device": 0,
+                "actual_hypervisor_pma_device": "36,0",
+                "actual_hypervisor_pma_device_cross": ",".join(
+                    ["6,0"] * 6
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pma_device_cross"] = ",".join(
+            ["5,1"] + ["6,0"] * 5
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_pma_device_cross",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(
