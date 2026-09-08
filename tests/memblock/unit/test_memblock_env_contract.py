@@ -15,7 +15,7 @@ def read_cpp_source(name: str) -> str:
     """Read a C++ source with local implementation fragments expanded."""
     source = (MEMBLOCK_ROOT / "cpp" / name).read_text()
     include = re.compile(
-        r'^#include "((?:scenarios|environment)/[^"]+\.inc)"$', re.MULTILINE
+        r'^#include "((?:scenarios|environment|random)/[^"]+\.inc)"$', re.MULTILINE
     )
     return include.sub(
         lambda match: (MEMBLOCK_ROOT / "cpp" / match.group(1)).read_text(), source

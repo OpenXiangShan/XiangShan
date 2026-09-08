@@ -63,6 +63,7 @@ def prepare(
         support_source_dirs = [
             main_source.parent / "scenarios",
             main_source.parent / "environment",
+            main_source.parent / "random",
         ]
     copied_names: set[str] = set()
     for source_dir in support_source_dirs:

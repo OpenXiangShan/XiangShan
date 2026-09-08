@@ -39,11 +39,14 @@ class PreparePickerHarnessTest(unittest.TestCase):
             scenarios.mkdir()
             environment_parts = sources / "environment"
             environment_parts.mkdir()
+            random_parts = sources / "random"
+            random_parts.mkdir()
             main.write_text("main")
             environment.write_text("environment")
             defaults.write_text("defaults")
             (scenarios / "random_mixed.inc").write_text("random-mixed")
             (environment_parts / "model.inc").write_text("model")
+            (random_parts / "constraints.inc").write_text("constraints")
 
             target = prepare_picker_harness.prepare(
                 picker, main, environment, defaults
@@ -60,6 +63,9 @@ class PreparePickerHarnessTest(unittest.TestCase):
             )
             self.assertEqual(
                 (target / "environment/model.inc").read_text(), "model"
+            )
+            self.assertEqual(
+                (target / "random/constraints.inc").read_text(), "constraints"
             )
             self.assertEqual((target / "generated.hpp").read_text(), "header")
 

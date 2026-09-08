@@ -117,8 +117,9 @@ load/store sequences -> generated lane adapters -> MemBlock
 The C++ harness is partitioned by verification responsibility while preserving
 Picker's single-translation-unit build:
 
-- `cpp/memblock_main.cpp` owns command-line parsing, constraint resolution,
-  coverage aggregation, scenario dispatch, and includes the scenario modules;
+- `cpp/memblock_main.cpp` owns command-line parsing and scenario dispatch;
+- `cpp/random/*.inc` owns constrained-random policy, profiles, validation,
+  functional coverage models, and closure gates;
 - `cpp/scenarios/*.inc` groups focused and random sequences by verification
   domain, so work on one family does not require loading the entire scenario
   catalog;
@@ -127,7 +128,7 @@ Picker's single-translation-unit build:
   agents, scoreboards, and top-level environment orchestration.
 
 The `.inc` modules are intentional: Picker exports `memblock_main.cpp` as a
-single generated `example.cpp`. `scripts/prepare_picker_harness.py` copies both
+single generated `example.cpp`. `scripts/prepare_picker_harness.py` copies the
 module trees beside that file, and the Makefile includes every module in build
 dependencies and controller provenance hashes. This keeps compilation and ABI
 behavior unchanged while making ownership and review boundaries explicit.
