@@ -708,6 +708,9 @@ access. It then applies the matching stage-1 or hypervisor fence and requires a
 clean same-address retry, an exact reread of the failed block, correct data, and
 one DCache request. This distinguishes a permitted L1 fault-result entry from
 forbidden refill of bad response data into the lower page-table caches.
+Schema 19 lifts the same address-qualified oracle into `random-mixed`, with
+weighted coverage over all five host/G/nested walk sites and every supported
+translation-mode pair.
 
 `uncache-errors` injects denied and independent-corrupt Uncache load responses
 plus a denied store response. Loads check the exception contract through the
@@ -956,6 +959,7 @@ CLEAN/FLUSH/INVAL operation, clean/dirty line state, younger-load overlap, and
 legal CBOAck error presence and kind, NC/MMIO load/store direction plus legal
 Uncache response-error
 presence and kind,
+PTW manager-error site, walk level, access direction, and denied/corrupt beat,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1100,6 +1104,19 @@ the reference model separately predicts any later dirty ReleaseData without
 treating exceptional data as an ISA-visible value. LRSC error actions issue LR
 only because a cold SC without a usable reservation returns failure before a
 D-channel request.
+
+Schema 19 adds one address-qualified PTW manager-error action to the same
+common generator. Five weighted sites cover host stage-1, G-only, implicit
+G-stage translation of a VS PTE address, the VS PTE data read, and the final
+nested G walk. Independent weights select load/store, root/intermediate/leaf,
+Sv39/Sv48, Sv39x4/Sv48x4, and denied versus first- or last-beat corrupt. The
+oracle identifies the target PTE address with its own page-table walk, requires
+the precise access fault and exact walk cutoff, forbids a target DCache or
+Uncache request, then fences the affected translation domains and requires a
+clean same-address retry to reread the failed PTE block. Per-seed gates cover
+90 site/direction/level/outcome bins, 20 site-specific mode bins, 20 target
+level bins, and exact PTW response-beat accounting. Duplicate PTW requests for
+the same faulting block remain legal and are counted rather than hidden.
 
 For a reproducible local pressure run:
 

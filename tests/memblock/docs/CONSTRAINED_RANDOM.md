@@ -49,7 +49,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo` | Relative special-operation weights |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -62,6 +62,11 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `cmo-error-denied` | Per-mille denied share among error CMO actions; false selects independent corrupt and true selects denied |
 | `dcache-load-error` | Per-mille share of weighted scalar-load actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
 | `dcache-load-error-denied` | Per-mille denied share among DCache load errors; the other class is independent corrupt |
+| `ptw-error-stage1`, `ptw-error-gstage`, `ptw-error-nested-g-implicit`, `ptw-error-nested-vs`, `ptw-error-nested-g-final` | Relative PTW manager-error site weights: host stage-1, G-only, implicit G translation of a VS PTE address, VS PTE data, and final nested G walk |
+| `ptw-error-root`, `ptw-error-intermediate`, `ptw-error-leaf` | Relative faulting page-table level classes; Sv48/Sv48x4 intermediate selection also reaches both internal levels |
+| `ptw-error-store` | Per-mille store share for PTW manager-error actions |
+| `ptw-error-denied` | Per-mille denied share; the other class is independent corrupt |
+| `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -106,7 +111,8 @@ Invalid names, all-zero operation/locality, enabled atomic/hypervisor-family,
 atomic-width, or enabled vector-shape dimensions, unreachable vector shape
 classes, incompatible fixed vector shape/policy combinations, out-of-range
 per-mille values, inconsistent special-concurrency or
-manager-latency settings, and unknown latency profiles fail before simulation
+manager-latency settings, enabled PTW errors with no reachable site, level, or
+governing page-table mode, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
 An NC/MMIO-only operation mix cannot also request Bare coverage.
@@ -157,7 +163,7 @@ scenario implementations:
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, and `probe-overlap` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. The overlap class holds an unrelated cold refill for 2048..4096 cycles, queues a clean auxiliary Probe and the dirty primary Probe without an intervening cycle, checks their distinct B sources/address-matched C responses, and requires at least two accepted-but-unanswered Probes before the delayed load can write back | Extend beyond two simultaneous Probe sources and compose Probe overlap with more operation classes and malformed manager traffic |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
-| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. All enabled outcomes close per seed | Lift PTW error controls into the same interface; add per-beat corrupt selection after the response-wide random class is stable |
+| Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
 `corner` are settings of the same generator. Closing them means lifting each
@@ -189,6 +195,12 @@ rare after its mandatory cross closes, and corner traffic emphasizes them.
 Atomic error rates use the same `100`, `0`, and `500` values, with a 500
 per-mille denied share. Error actions use unique cold identity-mapped lines;
 ordinary SPEC-like atomic traffic therefore remains free of synthetic errors.
+PTW error operation weights are `75`, `0`, and `125` for
+`coverage`, `spec`, and `corner`. All presets retain equal nonzero site and
+level weights plus 500-per-mille store, denied, and first-corrupt-beat shares,
+but the zero `spec` operation weight keeps synthetic translation errors out of
+the realistic workload. Coverage and corner runs use fresh page-table roots
+and addresses so each enabled fault is forced through the selected walk level.
 Uncache error rates use the same `100`, `0`, and `500` values, with a 500
 per-mille denied share among error loads. The `spec` preset therefore models
 ordinary traffic without frequent external errors, while `coverage` and
@@ -299,7 +311,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=17`, the resolved target weights,
+Every terminal line prints `constraint_schema=19`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
 clean/corrupt/denied and manager-error accounting, ordinary-vector
@@ -336,6 +348,16 @@ against the outcome bins. For `N` error actions containing `D` denied actions,
 the manager tuple `error responses, denied beats, corrupt beats, errored
 GrantAcks, errored refills` must equal `N, 2D, 2N, N, N`; sink attribution
 keeps this invariant valid when a clean hardware prefetch refill is concurrent.
+PTW errors report 90 site x direction x level-class x outcome bins, 20
+site-specific mode bins, 20 target-level bins, and a manager tuple of error
+responses/denied beats/corrupt beats. Every enabled bin must be nonzero and
+every disabled bin zero. Duplicate requests for one faulting PTE are legal, so
+response count may exceed action count; denied beats must be even and cover at
+least two beats per denied action, while corrupt beats must equal all response
+beats plus the additional denied beat. The action also requires the precise
+access fault, no target DCache or Uncache request, a clean same-address retry,
+and a fresh reread of the injected PTE block. PTW-only constraint sets do not
+inherit ordinary translation-switch or TLB-flush coverage gates.
 Probe subclass counts conserve against the generated sequence count. Manager
 Probe traffic additionally conserves primary sequences, toB cleanup requests,
 CMO-derived Probes, and overlap's auxiliary clean Probes. Any observed overlap

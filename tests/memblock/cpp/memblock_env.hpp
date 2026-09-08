@@ -2009,6 +2009,7 @@ public:
                     max_outstanding_requests_, outstanding_requests_);
             }
             last_request_address_ = captured_a_->address;
+            request_history_.push_back(*captured_a_);
             respond(*captured_a_);
             ++request_count_;
         }
@@ -2040,6 +2041,19 @@ public:
     const std::string &error() const { return error_; }
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t last_request_address() const { return last_request_address_; }
+    std::uint64_t request_covering_count_since(
+        std::uint64_t address, std::uint64_t first_request) const
+    {
+        std::uint64_t count = 0;
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const ARequest &request = request_history_[index];
+            const std::uint64_t bytes = std::uint64_t{1} << request.size;
+            const std::uint64_t base = request.address & ~(bytes - 1);
+            count += address >= base && address - base < bytes;
+        }
+        return count;
+    }
     std::uint64_t get_count() const { return get_count_; }
     std::uint64_t refill_count() const { return refill_count_; }
     std::uint64_t keyword_refill_count() const
@@ -2613,6 +2627,7 @@ private:
     std::deque<bool> expected_grant_ack_errors_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
+    std::vector<ARequest> request_history_;
     std::optional<ReleaseDataState> release_data_;
     std::unordered_map<std::uint64_t, std::vector<unsigned char>>
         expected_release_lines_;
@@ -2691,8 +2706,43 @@ public:
                 "PTW corrupt beat selection requires a corrupt injection");
         }
         pending_response_error_ = PendingResponseError{
-            clean_requests, denied, corrupt, corrupt_beat};
+            std::nullopt, clean_requests, denied, corrupt, corrupt_beat,
+            false};
     }
+
+    void inject_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
+    {
+        if (!denied && !corrupt) {
+            throw std::invalid_argument(
+                "PTW response error injection requires denied or corrupt");
+        }
+        if ((!corrupt || denied) && corrupt_beat != PtwCorruptBeat::all) {
+            throw std::invalid_argument(
+                "PTW per-beat selection requires independent corrupt");
+        }
+        pending_response_error_ = PendingResponseError{
+            address, 0, denied, corrupt, corrupt_beat, false};
+    }
+
+    void inject_persistent_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
+    {
+        if (!denied && !corrupt) {
+            throw std::invalid_argument(
+                "persistent PTW response error requires denied or corrupt");
+        }
+        if ((!corrupt || denied) && corrupt_beat != PtwCorruptBeat::all) {
+            throw std::invalid_argument(
+                "persistent PTW per-beat selection requires independent corrupt");
+        }
+        pending_response_error_ = PendingResponseError{
+            address, 0, denied, corrupt, corrupt_beat, true};
+    }
+
+    void clear_response_error() { pending_response_error_.reset(); }
 
     void configure_backpressure(
         std::uint64_t seed, bool enabled,
@@ -2841,6 +2891,8 @@ public:
     {
         return error_response_requests_;
     }
+    std::uint64_t denied_d_beats() const { return denied_d_beat_count_; }
+    std::uint64_t corrupt_d_beats() const { return corrupt_d_beat_count_; }
     std::uint64_t last_error_response_address() const
     {
         return last_error_response_address_;
@@ -2852,6 +2904,15 @@ public:
     std::uint64_t max_outstanding_requests() const
     {
         return max_outstanding_requests_;
+    }
+    std::uint64_t outstanding_requests() const
+    {
+        return outstanding_requests_;
+    }
+    bool idle() const
+    {
+        return outstanding_requests_ == 0 && responses_.empty() &&
+            !request_.has_value();
     }
     const ResponseLatencyStats &response_latency_stats() const
     {
@@ -2934,10 +2995,12 @@ private:
     };
 
     struct PendingResponseError {
+        std::optional<std::uint64_t> address;
         unsigned clean_requests;
         bool denied;
         bool corrupt;
         PtwCorruptBeat corrupt_beat;
+        bool persistent;
     };
 
     unsigned respond(const Request &request)
@@ -2957,15 +3020,21 @@ private:
         bool corrupt = false;
         PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all;
         if (pending_response_error_) {
-            if (pending_response_error_->clean_requests == 0) {
+            const bool address_matches = !pending_response_error_->address ||
+                ((*pending_response_error_->address &
+                  ~(transfer_bytes - 1)) == base);
+            if (address_matches &&
+                pending_response_error_->clean_requests == 0) {
                 denied = pending_response_error_->denied;
                 corrupt = pending_response_error_->corrupt;
                 corrupt_beat = pending_response_error_->corrupt_beat;
-                pending_response_error_.reset();
+                if (!pending_response_error_->persistent) {
+                    pending_response_error_.reset();
+                }
                 ++error_response_requests_;
                 last_error_response_address_ = request.address;
                 last_error_response_source_ = request.source;
-            } else {
+            } else if (!pending_response_error_->address) {
                 --pending_response_error_->clean_requests;
             }
         }
@@ -2975,6 +3044,9 @@ private:
                 corrupt_beat == PtwCorruptBeat::all ||
                 (corrupt_beat == PtwCorruptBeat::first && beat == 0) ||
                 (corrupt_beat == PtwCorruptBeat::last && beat + 1 == beats);
+            denied_d_beat_count_ += denied;
+            corrupt_d_beat_count_ += denied ||
+                (corrupt && selected_corrupt_beat);
             const unsigned delay = push_response(Response{
                 static_cast<std::uint8_t>(request.opcode == 4 ? 1 : 5),
                 static_cast<std::uint8_t>(request.opcode == 4 ? 0 : 1),
@@ -3057,6 +3129,8 @@ private:
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::uint64_t error_response_requests_ = 0;
+    std::uint64_t denied_d_beat_count_ = 0;
+    std::uint64_t corrupt_d_beat_count_ = 0;
     std::uint64_t last_error_response_address_ = 0;
     std::uint8_t last_error_response_source_ = 0;
     std::string error_;
@@ -3644,7 +3718,10 @@ private:
                 << " ncio=" << actual.debug_is_ncio
                 << " perf_cnt=" << actual.debug_is_perf_cnt;
         if (expected != nullptr) {
-            message << " expected_pdest=" << static_cast<unsigned>(expected->pdest)
+            message << " expected_address=0x" << std::hex
+                    << expected->address
+                    << " expected_op=0x" << expected->op << std::dec
+                    << " expected_pdest=" << static_cast<unsigned>(expected->pdest)
                     << " expected_rob_flag=" << expected->rob_flag
                     << " expected_exception=0x" << std::hex
                     << expected->exception_mask
@@ -4721,6 +4798,27 @@ public:
             clean_requests, denied, corrupt, corrupt_beat);
     }
 
+    void inject_ptw_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
+    {
+        ptw_agent_.inject_response_error_at(
+            address, denied, corrupt, corrupt_beat);
+    }
+
+    void inject_persistent_ptw_response_error_at(
+        std::uint64_t address, bool denied, bool corrupt,
+        PtwCorruptBeat corrupt_beat = PtwCorruptBeat::all)
+    {
+        ptw_agent_.inject_persistent_response_error_at(
+            address, denied, corrupt, corrupt_beat);
+    }
+
+    void clear_ptw_response_error()
+    {
+        ptw_agent_.clear_response_error();
+    }
+
     void force_next_dcache_response_delay(unsigned cycles)
     {
         memory_agent_.force_next_response_delay(cycles);
@@ -5192,6 +5290,12 @@ public:
     {
         return memory_agent_.last_request_address();
     }
+    std::uint64_t dcache_requests_covering_since(
+        std::uint64_t address, std::uint64_t first_request) const
+    {
+        return memory_agent_.request_covering_count_since(
+            address, first_request);
+    }
     std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
     std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
     std::uint64_t dcache_keyword_refills() const
@@ -5308,6 +5412,14 @@ public:
     {
         return ptw_agent_.error_response_requests();
     }
+    std::uint64_t ptw_denied_d_beats() const
+    {
+        return ptw_agent_.denied_d_beats();
+    }
+    std::uint64_t ptw_corrupt_d_beats() const
+    {
+        return ptw_agent_.corrupt_d_beats();
+    }
     std::uint64_t ptw_last_error_response_address() const
     {
         return ptw_agent_.last_error_response_address();
@@ -5348,6 +5460,10 @@ public:
     std::uint64_t ptw_max_outstanding_requests() const
     {
         return ptw_agent_.max_outstanding_requests();
+    }
+    std::uint64_t ptw_outstanding_requests() const
+    {
+        return ptw_agent_.outstanding_requests();
     }
     const ResponseLatencyStats &ptw_response_latency_stats() const
     {
@@ -6676,70 +6792,10 @@ public:
         bool io = false,
         bool global = false)
     {
-        constexpr std::uint64_t page_mask = 0xfff;
-        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
-        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
-        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
-        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
-        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
-        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
-        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
-        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
-        constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
-        constexpr std::uint64_t pte_pbmt_io = std::uint64_t{1} << 62;
-        if ((virtual_address & page_mask) != (physical_address & page_mask) ||
-            (root_page_table & page_mask) != 0) {
-            error_ = "Sv39 4-KiB mapping requires aligned root and equal page offsets";
-            return false;
-        }
-        if (writable && !readable) {
-            error_ = "Sv39 does not permit W=1,R=0 leaf mappings";
-            return false;
-        }
-        if (noncacheable && io) {
-            error_ = "Sv39 PBMT mapping cannot select NC and IO simultaneously";
-            return false;
-        }
-
-        auto allocate_table = [&]() {
-            auto [it, inserted] = next_page_table_.emplace(
-                root_page_table, root_page_table + 0x1000);
-            const std::uint64_t result = it->second;
-            it->second += 0x1000;
-            return result;
-        };
-        const std::uint64_t vpn2 = (virtual_address >> 30) & 0x1ff;
-        const std::uint64_t vpn1 = (virtual_address >> 21) & 0x1ff;
-        const std::uint64_t vpn0 = (virtual_address >> 12) & 0x1ff;
-        const std::uint64_t l1_key = root_page_table ^ (vpn2 << 12);
-        auto [l1_it, l1_inserted] = sv39_l1_tables_.emplace(l1_key, 0);
-        if (l1_inserted) {
-            l1_it->second = allocate_table();
-            memory_.write_u64(
-                root_page_table + vpn2 * 8,
-                ((l1_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
-        auto [l0_it, l0_inserted] = sv39_l0_tables_.emplace(l0_key, 0);
-        if (l0_inserted) {
-            l0_it->second = allocate_table();
-            memory_.write_u64(
-                l1_it->second + vpn1 * 8,
-                ((l0_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t flags = pte_valid |
-            (readable ? pte_read : 0) |
-            (writable ? pte_write : 0) |
-            (executable ? pte_execute : 0) |
-            (user ? pte_user : 0) | (global ? pte_global : 0) |
-            pte_accessed |
-            (writable ? pte_dirty : 0) |
-            (noncacheable ? pte_pbmt_nc : 0) |
-            (io ? pte_pbmt_io : 0);
-        memory_.write_u64(
-            l0_it->second + vpn0 * 8,
-            (((physical_address & ~page_mask) >> 12) << 10) | flags);
-        return true;
+        return map_reference_leaf(
+            virtual_address, physical_address, root_page_table,
+            ReferencePageMode::sv39, false, 0, readable, writable,
+            executable, user, noncacheable, true, std::nullopt, io, global);
     }
 
     bool map_sv48_4k(
@@ -6754,84 +6810,10 @@ public:
         bool io = false,
         bool global = false)
     {
-        constexpr std::uint64_t page_mask = 0xfff;
-        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
-        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
-        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
-        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
-        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
-        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
-        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
-        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
-        constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
-        constexpr std::uint64_t pte_pbmt_io = std::uint64_t{1} << 62;
-        if ((virtual_address & page_mask) != (physical_address & page_mask) ||
-            (root_page_table & page_mask) != 0) {
-            error_ = "Sv48 4-KiB mapping requires aligned root and equal page offsets";
-            return false;
-        }
-        if (writable && !readable) {
-            error_ = "Sv48 does not permit W=1,R=0 leaf mappings";
-            return false;
-        }
-        if (noncacheable && io) {
-            error_ = "Sv48 PBMT mapping cannot select NC and IO simultaneously";
-            return false;
-        }
-        if (!reference_canonical_virtual_address(
-                virtual_address, ReferencePageMode::sv48)) {
-            error_ = "Sv48 mapping requires a canonical virtual address";
-            return false;
-        }
-
-        auto allocate_table = [&]() {
-            auto [it, inserted] = next_page_table_.emplace(
-                root_page_table, root_page_table + 0x1000);
-            const std::uint64_t result = it->second;
-            it->second += 0x1000;
-            return result;
-        };
-        const std::uint64_t vpn3 = (virtual_address >> 39) & 0x1ff;
-        const std::uint64_t vpn2 = (virtual_address >> 30) & 0x1ff;
-        const std::uint64_t vpn1 = (virtual_address >> 21) & 0x1ff;
-        const std::uint64_t vpn0 = (virtual_address >> 12) & 0x1ff;
-        const std::uint64_t l2_key = root_page_table ^ (vpn3 << 12);
-        auto [l2_it, l2_inserted] = sv48_l2_tables_.emplace(l2_key, 0);
-        if (l2_inserted) {
-            l2_it->second = allocate_table();
-            memory_.write_u64(
-                root_page_table + vpn3 * 8,
-                ((l2_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l1_key = l2_it->second ^ (vpn2 << 12);
-        auto [l1_it, l1_inserted] = sv48_l1_tables_.emplace(l1_key, 0);
-        if (l1_inserted) {
-            l1_it->second = allocate_table();
-            memory_.write_u64(
-                l2_it->second + vpn2 * 8,
-                ((l1_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
-        auto [l0_it, l0_inserted] = sv48_l0_tables_.emplace(l0_key, 0);
-        if (l0_inserted) {
-            l0_it->second = allocate_table();
-            memory_.write_u64(
-                l1_it->second + vpn1 * 8,
-                ((l0_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t flags = pte_valid |
-            (readable ? pte_read : 0) |
-            (writable ? pte_write : 0) |
-            (executable ? pte_execute : 0) |
-            (user ? pte_user : 0) | (global ? pte_global : 0) |
-            pte_accessed |
-            (writable ? pte_dirty : 0) |
-            (noncacheable ? pte_pbmt_nc : 0) |
-            (io ? pte_pbmt_io : 0);
-        memory_.write_u64(
-            l0_it->second + vpn0 * 8,
-            (((physical_address & ~page_mask) >> 12) << 10) | flags);
-        return true;
+        return map_reference_leaf(
+            virtual_address, physical_address, root_page_table,
+            ReferencePageMode::sv48, false, 0, readable, writable,
+            executable, user, noncacheable, true, std::nullopt, io, global);
     }
 
     bool activate_sv39(
@@ -6981,77 +6963,10 @@ public:
         bool executable = false,
         bool global = false)
     {
-        constexpr std::uint64_t page_mask = 0xfff;
-        constexpr std::uint64_t root_mask = 0x3fff;
-        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
-        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
-        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
-        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
-        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
-        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
-        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
-        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
-        if ((guest_physical_address & page_mask) !=
-                (host_physical_address & page_mask) ||
-            (root_page_table & root_mask) != 0) {
-            error_ = "Sv48x4 mapping requires a 16-KiB root and equal page offsets";
-            return false;
-        }
-        if (writable && !readable) {
-            error_ = "Sv48x4 does not permit W=1,R=0 leaf mappings";
-            return false;
-        }
-        if (!reference_gpa_in_range(
-                guest_physical_address, ReferencePageMode::sv48)) {
-            error_ = "Sv48x4 mapping exceeds the 50-bit guest physical address space";
-            return false;
-        }
-
-        auto allocate_table = [&]() {
-            auto [it, inserted] = next_gstage_page_table_.emplace(
-                root_page_table, root_page_table + 0x4000);
-            const std::uint64_t result = it->second;
-            it->second += 0x1000;
-            return result;
-        };
-        const std::uint64_t vpn3 = (guest_physical_address >> 39) & 0x7ff;
-        const std::uint64_t vpn2 = (guest_physical_address >> 30) & 0x1ff;
-        const std::uint64_t vpn1 = (guest_physical_address >> 21) & 0x1ff;
-        const std::uint64_t vpn0 = (guest_physical_address >> 12) & 0x1ff;
-        const std::uint64_t l2_key = root_page_table ^ (vpn3 << 14);
-        auto [l2_it, l2_inserted] = gstage_sv48_l2_tables_.emplace(l2_key, 0);
-        if (l2_inserted) {
-            l2_it->second = allocate_table();
-            memory_.write_u64(
-                root_page_table + vpn3 * 8,
-                ((l2_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l1_key = l2_it->second ^ (vpn2 << 12);
-        auto [l1_it, l1_inserted] = gstage_sv48_l1_tables_.emplace(l1_key, 0);
-        if (l1_inserted) {
-            l1_it->second = allocate_table();
-            memory_.write_u64(
-                l2_it->second + vpn2 * 8,
-                ((l1_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
-        auto [l0_it, l0_inserted] = gstage_sv48_l0_tables_.emplace(l0_key, 0);
-        if (l0_inserted) {
-            l0_it->second = allocate_table();
-            memory_.write_u64(
-                l1_it->second + vpn1 * 8,
-                ((l0_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t flags = pte_valid |
-            (readable ? pte_read : 0) |
-            (writable ? pte_write : 0) |
-            (executable ? pte_execute : 0) | pte_user |
-            (global ? pte_global : 0) |
-            pte_accessed | (writable ? pte_dirty : 0);
-        memory_.write_u64(
-            l0_it->second + vpn0 * 8,
-            (((host_physical_address & ~page_mask) >> 12) << 10) | flags);
-        return true;
+        return map_reference_leaf(
+            guest_physical_address, host_physical_address, root_page_table,
+            ReferencePageMode::sv48, true, 0, readable, writable,
+            executable, true, false, true, std::nullopt, false, global);
     }
 
     bool map_sv48x4_leaf(
@@ -7390,63 +7305,10 @@ public:
         bool executable = false,
         bool global = false)
     {
-        constexpr std::uint64_t page_mask = 0xfff;
-        constexpr std::uint64_t root_mask = 0x3fff;
-        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
-        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
-        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
-        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
-        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
-        constexpr std::uint64_t pte_global = std::uint64_t{1} << 5;
-        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
-        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
-        if ((guest_physical_address & page_mask) !=
-                (host_physical_address & page_mask) ||
-            (root_page_table & root_mask) != 0) {
-            error_ = "Sv39x4 mapping requires a 16-KiB root and equal page offsets";
-            return false;
-        }
-        if (writable && !readable) {
-            error_ = "Sv39x4 does not permit W=1,R=0 leaf mappings";
-            return false;
-        }
-
-        auto allocate_table = [&]() {
-            auto [it, inserted] = next_gstage_page_table_.emplace(
-                root_page_table, root_page_table + 0x4000);
-            const std::uint64_t result = it->second;
-            it->second += 0x1000;
-            return result;
-        };
-        const std::uint64_t vpn2 = (guest_physical_address >> 30) & 0x7ff;
-        const std::uint64_t vpn1 = (guest_physical_address >> 21) & 0x1ff;
-        const std::uint64_t vpn0 = (guest_physical_address >> 12) & 0x1ff;
-        const std::uint64_t l1_key = root_page_table ^ (vpn2 << 14);
-        auto [l1_it, l1_inserted] = gstage_l1_tables_.emplace(l1_key, 0);
-        if (l1_inserted) {
-            l1_it->second = allocate_table();
-            memory_.write_u64(
-                root_page_table + vpn2 * 8,
-                ((l1_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
-        auto [l0_it, l0_inserted] = gstage_l0_tables_.emplace(l0_key, 0);
-        if (l0_inserted) {
-            l0_it->second = allocate_table();
-            memory_.write_u64(
-                l1_it->second + vpn1 * 8,
-                ((l0_it->second >> 12) << 10) | pte_valid);
-        }
-        const std::uint64_t flags = pte_valid |
-            (readable ? pte_read : 0) |
-            (writable ? pte_write : 0) |
-            (executable ? pte_execute : 0) | pte_user |
-            (global ? pte_global : 0) | pte_accessed |
-            (writable ? pte_dirty : 0);
-        memory_.write_u64(
-            l0_it->second + vpn0 * 8,
-            (((host_physical_address & ~page_mask) >> 12) << 10) | flags);
-        return true;
+        return map_reference_leaf(
+            guest_physical_address, host_physical_address, root_page_table,
+            ReferencePageMode::sv39, true, 0, readable, writable,
+            executable, true, false, true, std::nullopt, false, global);
     }
 
     bool map_sv39x4_leaf(
@@ -9258,6 +9120,25 @@ public:
         return check_components();
     }
 
+    bool run_until_ptw_idle(unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0; cycle < timeout && !ptw_agent_.idle();
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (!ptw_agent_.idle()) {
+            std::ostringstream message;
+            message << "timed out waiting for PTW manager to become idle"
+                    << " outstanding=" << ptw_agent_.outstanding_requests();
+            error_ = message.str();
+            return false;
+        }
+        return check_components();
+    }
+
     bool wait_for_cmo_store_request(
         const StoreTransaction &transaction, std::uint64_t target,
         unsigned timeout = 4096)
@@ -10836,17 +10717,7 @@ private:
     std::deque<VectorReplayRequest> vector_replay_requests_;
     std::uint64_t vector_replay_feedbacks_ = 0;
     std::unordered_map<std::uint64_t, std::uint64_t> next_page_table_;
-    std::unordered_map<std::uint64_t, std::uint64_t> sv39_l1_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> sv39_l0_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l2_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l1_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l0_tables_;
     std::unordered_map<std::uint64_t, std::uint64_t> next_gstage_page_table_;
-    std::unordered_map<std::uint64_t, std::uint64_t> gstage_l1_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> gstage_l0_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l2_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l1_tables_;
-    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l0_tables_;
     std::string error_;
 };
 

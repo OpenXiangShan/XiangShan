@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 19
+        result["constraint_schema"] = 20
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -571,7 +571,57 @@ class VerifyRegressionTest(unittest.TestCase):
         result["actual_ops"] = "10,0,3,2,0,0,18,5,5,0,6"
         result.update(
             {
+                "constraint_schema": 19,
+                "target_ops": "1,0,3,2,0,0,1,1,1,0,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,0,6,90",
+                "target_stage1_mode": "1,1",
+                "target_vs_mode": "1,1",
+                "target_g_mode": "1,1",
+                "target_ptw_error_site": "1,1,1,1,1",
+                "target_ptw_error_level": "1,1,1",
+                "target_ptw_error_store": 500,
+                "target_ptw_error_denied": 500,
+                "target_ptw_error_corrupt_first": 500,
+                "actual_ptw_error_outcome": ",".join(["1"] * 90),
+                "actual_ptw_error_mode": (
+                    "9,9,0,0,9,9,0,0,4,4,5,5,4,4,5,5,4,4,5,5"
+                ),
+                "actual_ptw_error_target_level": (
+                    "6,4,5,3,6,4,5,3,6,4,5,3,6,4,5,3,6,4,5,3"
+                ),
+                "actual_ptw_error_manager": "90,60,120",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_ptw_error_manager"] = "93,62,124"
+        verify_regression._check_mixed_coverage(result)
+        result["actual_ptw_error_manager"] = "93,62,123"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "PTW error manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_ptw_error_manager"] = "90,59,120"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "PTW error manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_ptw_error_manager"] = "90,60,120"
+        result["actual_ptw_error_outcome"] = ",".join(
+            ["0"] + ["1"] * 89
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_ptw_error_outcome",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_ptw_error_outcome"] = ",".join(["1"] * 90)
+        result.update(
+            {
                 "constraint_schema": 14,
+                "target_ops": "1,0,3,2,0,0,1,1,1,0,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,0,6",
                 "target_probe": 0,
                 "actual_probe_sequences": 0,
                 "actual_probe_caps": "0,0",

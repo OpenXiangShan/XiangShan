@@ -152,7 +152,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         return
     _require(
         schema in (
-            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -358,7 +358,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             )
         cmo_probe_count = 0
         if schema >= 13:
-            cmo_probe_count = _csv_counts(result, "actual_ops", 11)[10]
+            cmo_probe_count = _csv_counts(
+                result, "actual_ops", 12 if schema >= 19 else 11
+            )[10]
             if schema >= 15:
                 cmo_probe_count -= sum(
                     _csv_counts(result, "actual_cmo_error_kind", 2)
@@ -489,7 +491,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             )
 
     if schema >= 7:
-        operation_fields = 11 if schema >= 13 else 10 if schema >= 8 else 9
+        operation_fields = (
+            12 if schema >= 19 else 11 if schema >= 13 else 10 if schema >= 8 else 9
+        )
         target_operations = _csv_counts(
             result, "target_ops", operation_fields
         )
@@ -985,6 +989,207 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 actual_atomic_manager
                 == [errors, denied * 2, errors * 2, errors, errors],
                 "atomic error manager accounting is not conserved",
+            )
+
+        if schema >= 19:
+            target_ptw_sites = _csv_counts(
+                result, "target_ptw_error_site", 5
+            )
+            target_ptw_levels = _csv_counts(
+                result, "target_ptw_error_level", 3
+            )
+            target_ptw_store = result.get("target_ptw_error_store")
+            target_ptw_denied = result.get("target_ptw_error_denied")
+            target_ptw_corrupt_first = result.get(
+                "target_ptw_error_corrupt_first"
+            )
+            for name, value in (
+                ("target_ptw_error_store", target_ptw_store),
+                ("target_ptw_error_denied", target_ptw_denied),
+                (
+                    "target_ptw_error_corrupt_first",
+                    target_ptw_corrupt_first,
+                ),
+            ):
+                _require(
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 1000,
+                    f"{name} is not a per-mille integer: {value!r}",
+                )
+            actual_ptw_outcomes = _csv_counts(
+                result, "actual_ptw_error_outcome", 90
+            )
+            actual_ptw_modes = _csv_counts(
+                result, "actual_ptw_error_mode", 20
+            )
+            actual_ptw_target_levels = _csv_counts(
+                result, "actual_ptw_error_target_level", 20
+            )
+            actual_ptw_manager = _csv_counts(
+                result, "actual_ptw_error_manager", 3
+            )
+            ptw_enabled = target_operations[11] != 0
+            outcome_enabled = (
+                target_ptw_denied != 0,
+                target_ptw_denied != 1000
+                and target_ptw_corrupt_first != 0,
+                target_ptw_denied != 1000
+                and target_ptw_corrupt_first != 1000,
+            )
+            direction_enabled = (
+                target_ptw_store != 1000,
+                target_ptw_store != 0,
+            )
+            site_totals = [0] * 5
+            denied_actions = 0
+            corrupt_actions = 0
+            for site in range(5):
+                for direction in range(2):
+                    for level_class in range(3):
+                        for outcome in range(3):
+                            index = (
+                                site * 18
+                                + direction * 9
+                                + level_class * 3
+                                + outcome
+                            )
+                            count = actual_ptw_outcomes[index]
+                            enabled = (
+                                ptw_enabled
+                                and target_ptw_sites[site] != 0
+                                and direction_enabled[direction]
+                                and target_ptw_levels[level_class] != 0
+                                and outcome_enabled[outcome]
+                            )
+                            _require(
+                                (count > 0) == enabled,
+                                "actual_ptw_error_outcome does not match "
+                                f"enabled classes: site={site} "
+                                f"direction={direction} level={level_class} "
+                                f"outcome={outcome}",
+                            )
+                            site_totals[site] += count
+                            if outcome == 0:
+                                denied_actions += count
+                            else:
+                                corrupt_actions += count
+
+            for site in range(5):
+                mode_counts = actual_ptw_modes[site * 4 : site * 4 + 4]
+                if site == 0:
+                    expected_modes = [
+                        ptw_enabled
+                        and target_ptw_sites[site] != 0
+                        and target_stage1[mode] != 0
+                        if mode < 2
+                        else False
+                        for mode in range(4)
+                    ]
+                elif site == 1:
+                    expected_modes = [
+                        ptw_enabled
+                        and target_ptw_sites[site] != 0
+                        and target_g[mode] != 0
+                        if mode < 2
+                        else False
+                        for mode in range(4)
+                    ]
+                else:
+                    expected_modes = [
+                        ptw_enabled
+                        and target_ptw_sites[site] != 0
+                        and target_vs[mode // 2] != 0
+                        and target_g[mode % 2] != 0
+                        for mode in range(4)
+                    ]
+                _require(
+                    all(
+                        (count > 0) == enabled
+                        for count, enabled in zip(mode_counts, expected_modes)
+                    ),
+                    "actual_ptw_error_mode does not match enabled classes: "
+                    f"site={site} counts={mode_counts}",
+                )
+                _require(
+                    sum(mode_counts) == site_totals[site],
+                    "PTW error mode/site coverage is not conserved",
+                )
+
+                governing_modes = (
+                    target_stage1
+                    if site == 0
+                    else target_vs
+                    if site == 3
+                    else target_g
+                )
+                level_counts = actual_ptw_target_levels[
+                    site * 4 : site * 4 + 4
+                ]
+                expected_levels = []
+                for target_level in range(4):
+                    enabled = False
+                    for mode, mode_weight in enumerate(governing_modes):
+                        levels = 3 if mode == 0 else 4
+                        enabled = enabled or (
+                            ptw_enabled
+                            and target_ptw_sites[site] != 0
+                            and mode_weight != 0
+                            and (
+                                (
+                                    target_level == 0
+                                    and target_ptw_levels[2] != 0
+                                )
+                                or (
+                                    target_level + 1 == levels
+                                    and target_ptw_levels[0] != 0
+                                )
+                                or (
+                                    0 < target_level < levels - 1
+                                    and target_ptw_levels[1] != 0
+                                )
+                            )
+                        )
+                    expected_levels.append(enabled)
+                _require(
+                    all(
+                        (count > 0) == enabled
+                        for count, enabled in zip(
+                            level_counts, expected_levels
+                        )
+                    ),
+                    "actual_ptw_error_target_level does not match enabled "
+                    f"classes: site={site} counts={level_counts}",
+                )
+                _require(
+                    sum(level_counts) == site_totals[site],
+                    "PTW error target-level/site coverage is not conserved",
+                )
+
+            ptw_actions = sum(site_totals)
+            _require(
+                ptw_actions == actual_operations[11],
+                "PTW error outcome/operation coverage is not conserved",
+            )
+            _require(
+                (
+                    actual_ptw_manager == [0, 0, 0]
+                    if ptw_actions == 0
+                    else (
+                        actual_ptw_manager[0] >= ptw_actions
+                        and actual_ptw_manager[1] >= denied_actions * 2
+                        and actual_ptw_manager[1] % 2 == 0
+                        and actual_ptw_manager[1] // 2
+                        <= actual_ptw_manager[0]
+                        and actual_ptw_manager[0]
+                        - actual_ptw_manager[1] // 2
+                        >= corrupt_actions
+                        and actual_ptw_manager[2]
+                        == actual_ptw_manager[0]
+                        + actual_ptw_manager[1] // 2
+                    )
+                ),
+                "PTW error manager accounting is not conserved",
             )
 
     if schema >= 8:

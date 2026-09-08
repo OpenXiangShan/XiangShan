@@ -81,6 +81,7 @@ struct RandomConstraints {
         mmio,
         hypervisor,
         cmo,
+        ptw_error,
         operation_count,
     };
 
@@ -119,6 +120,22 @@ struct RandomConstraints {
         fence_kind_count,
     };
 
+    enum PtwErrorSite : unsigned {
+        ptw_error_stage1,
+        ptw_error_gstage,
+        ptw_error_nested_g_implicit,
+        ptw_error_nested_vs,
+        ptw_error_nested_g_final,
+        ptw_error_site_count,
+    };
+
+    enum PtwErrorLevel : unsigned {
+        ptw_error_root,
+        ptw_error_intermediate,
+        ptw_error_leaf,
+        ptw_error_level_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
@@ -134,6 +151,11 @@ struct RandomConstraints {
     unsigned cmo_error_denied_per_mille = 0;
     unsigned dcache_load_error_per_mille = 0;
     unsigned dcache_load_error_denied_per_mille = 0;
+    std::array<unsigned, ptw_error_site_count> ptw_error_site_weights{};
+    std::array<unsigned, ptw_error_level_count> ptw_error_level_weights{};
+    unsigned ptw_error_stores_per_mille = 0;
+    unsigned ptw_error_denied_per_mille = 0;
+    unsigned ptw_error_corrupt_first_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -183,7 +205,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "coverage",
                 .operation_weights = {
-                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75},
+                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75, 75},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
@@ -197,6 +219,11 @@ struct RandomConstraints {
                 .cmo_error_denied_per_mille = 500,
                 .dcache_load_error_per_mille = 100,
                 .dcache_load_error_denied_per_mille = 500,
+                .ptw_error_site_weights = {1, 1, 1, 1, 1},
+                .ptw_error_level_weights = {1, 1, 1},
+                .ptw_error_stores_per_mille = 500,
+                .ptw_error_denied_per_mille = 500,
+                .ptw_error_corrupt_first_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -248,7 +275,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "spec",
                 .operation_weights = {
-                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1},
+                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
@@ -262,6 +289,11 @@ struct RandomConstraints {
                 .cmo_error_denied_per_mille = 500,
                 .dcache_load_error_per_mille = 0,
                 .dcache_load_error_denied_per_mille = 500,
+                .ptw_error_site_weights = {1, 1, 1, 1, 1},
+                .ptw_error_level_weights = {1, 1, 1},
+                .ptw_error_stores_per_mille = 500,
+                .ptw_error_denied_per_mille = 500,
+                .ptw_error_corrupt_first_per_mille = 500,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -313,7 +345,8 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "corner",
                 .operation_weights = {
-                    125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125},
+                    125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125,
+                    125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
@@ -327,6 +360,11 @@ struct RandomConstraints {
                 .cmo_error_denied_per_mille = 500,
                 .dcache_load_error_per_mille = 500,
                 .dcache_load_error_denied_per_mille = 500,
+                .ptw_error_site_weights = {1, 1, 1, 1, 1},
+                .ptw_error_level_weights = {1, 1, 1},
+                .ptw_error_stores_per_mille = 500,
+                .ptw_error_denied_per_mille = 500,
+                .ptw_error_corrupt_first_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -436,6 +474,7 @@ struct RandomConstraints {
                 {"mmio", mmio},
                 {"hypervisor", hypervisor},
                 {"cmo", cmo},
+                {"ptw-error", ptw_error},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -497,6 +536,24 @@ struct RandomConstraints {
         constexpr std::array<std::string_view, cmo_operation_count>
             cmo_operation_keys{{"cmo-clean", "cmo-flush", "cmo-inval"}};
         if (assign_weight(cmo_operation_keys, cmo_operation_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, ptw_error_site_count>
+            ptw_error_site_keys{{
+                "ptw-error-stage1",
+                "ptw-error-gstage",
+                "ptw-error-nested-g-implicit",
+                "ptw-error-nested-vs",
+                "ptw-error-nested-g-final",
+            }};
+        constexpr std::array<std::string_view, ptw_error_level_count>
+            ptw_error_level_keys{{
+                "ptw-error-root",
+                "ptw-error-intermediate",
+                "ptw-error-leaf",
+            }};
+        if (assign_weight(ptw_error_site_keys, ptw_error_site_weights) ||
+            assign_weight(ptw_error_level_keys, ptw_error_level_weights)) {
             return;
         }
         constexpr std::array<std::string_view, 4> vector_addressing_keys{{
@@ -678,6 +735,12 @@ struct RandomConstraints {
             dcache_load_error_per_mille = parsed;
         } else if (key == "dcache-load-error-denied") {
             dcache_load_error_denied_per_mille = parsed;
+        } else if (key == "ptw-error-store") {
+            ptw_error_stores_per_mille = parsed;
+        } else if (key == "ptw-error-denied") {
+            ptw_error_denied_per_mille = parsed;
+        } else if (key == "ptw-error-corrupt-first") {
+            ptw_error_corrupt_first_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -741,6 +804,48 @@ struct RandomConstraints {
                 0ULL) == 0) {
             throw std::invalid_argument(
                 "CMO operation constraint weights cannot all be zero");
+        }
+        if (operation_weights[ptw_error] != 0 &&
+            std::accumulate(
+                ptw_error_site_weights.begin(), ptw_error_site_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "PTW error site constraint weights cannot all be zero");
+        }
+        if (operation_weights[ptw_error] != 0 &&
+            std::accumulate(
+                ptw_error_level_weights.begin(), ptw_error_level_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "PTW error level constraint weights cannot all be zero");
+        }
+        if (operation_weights[ptw_error] != 0 &&
+            ptw_error_site_weights[ptw_error_stage1] != 0 &&
+            std::accumulate(
+                stage1_mode_weights.begin(), stage1_mode_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "stage-1 PTW errors require a nonzero stage-1 mode weight");
+        }
+        if (operation_weights[ptw_error] != 0 &&
+            std::any_of(
+                ptw_error_site_weights.begin() + ptw_error_gstage,
+                ptw_error_site_weights.end(),
+                [](unsigned weight) { return weight != 0; }) &&
+            std::accumulate(
+                g_mode_weights.begin(), g_mode_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "G-stage PTW errors require a nonzero G-stage mode weight");
+        }
+        if (operation_weights[ptw_error] != 0 &&
+            std::any_of(
+                ptw_error_site_weights.begin() + ptw_error_nested_g_implicit,
+                ptw_error_site_weights.end(),
+                [](unsigned weight) { return weight != 0; }) &&
+            std::accumulate(
+                vs_mode_weights.begin(), vs_mode_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "nested PTW errors require a nonzero VS-stage mode weight");
         }
         if (operation_weights[vector_load] != 0 ||
             operation_weights[vector_store] != 0) {
@@ -965,6 +1070,9 @@ struct RandomConstraints {
             cmo_error_denied_per_mille > 1000 ||
             dcache_load_error_per_mille > 1000 ||
             dcache_load_error_denied_per_mille > 1000 ||
+            ptw_error_stores_per_mille > 1000 ||
+            ptw_error_denied_per_mille > 1000 ||
+            ptw_error_corrupt_first_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -1170,6 +1278,16 @@ struct RandomConstraints {
         return choose_weighted(cmo_operation_weights, random);
     }
 
+    unsigned choose_ptw_error_site(std::uint64_t random) const
+    {
+        return choose_weighted(ptw_error_site_weights, random);
+    }
+
+    unsigned choose_ptw_error_level(std::uint64_t random) const
+    {
+        return choose_weighted(ptw_error_level_weights, random);
+    }
+
     unsigned choose_translation_regime(std::uint64_t random) const
     {
         return choose_weighted(translation_weights, random);
@@ -1329,6 +1447,25 @@ struct RandomConstraints {
                     direction_classes(cmo_dirty_per_mille),
                     direction_classes(cmo_younger_overlap_per_mille),
                     error_actions});
+            } else if (operation == ptw_error) {
+                const unsigned sites = static_cast<unsigned>(std::count_if(
+                    ptw_error_site_weights.begin(),
+                    ptw_error_site_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned levels = static_cast<unsigned>(std::count_if(
+                    ptw_error_level_weights.begin(),
+                    ptw_error_level_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned corrupt_outcomes =
+                    ptw_error_denied_per_mille == 1000
+                    ? 0U
+                    : direction_classes(
+                          ptw_error_corrupt_first_per_mille);
+                const unsigned outcomes =
+                    (ptw_error_denied_per_mille == 0 ? 0U : 1U) +
+                    corrupt_outcomes;
+                actions += sites * direction_classes(
+                    ptw_error_stores_per_mille) * levels * outcomes;
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -1429,10 +1566,27 @@ struct RandomConstraints {
             operation_weights[mmio] != 0;
     }
 
+    bool uses_locality() const
+    {
+        return std::any_of(
+                   operation_weights.begin(),
+                   operation_weights.begin() + atomic,
+                   [](unsigned weight) { return weight != 0; }) ||
+            operation_weights[hypervisor] != 0 ||
+            operation_weights[cmo] != 0;
+    }
+
     bool uses_translation() const
     {
         return translation_weights[translation_stage1] != 0 ||
             translation_weights[translation_nested] != 0;
+    }
+
+    bool samples_translation() const
+    {
+        return std::any_of(
+            operation_weights.begin(), operation_weights.begin() + ptw_error,
+            [](unsigned weight) { return weight != 0; });
     }
 
     unsigned vector_policy_minimum_vlmax() const
@@ -1453,7 +1607,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=18 constraints=" << name
+        stream << "constraint_schema=19 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1483,6 +1637,21 @@ struct RandomConstraints {
                << dcache_load_error_per_mille
                << " target_dcache_load_error_denied="
                << dcache_load_error_denied_per_mille
+               << " target_ptw_error_site=";
+        for (unsigned site = 0; site < ptw_error_site_weights.size(); ++site) {
+            stream << (site == 0 ? "" : ",")
+                   << ptw_error_site_weights[site];
+        }
+        stream << " target_ptw_error_level="
+               << ptw_error_level_weights[0] << ','
+               << ptw_error_level_weights[1] << ','
+               << ptw_error_level_weights[2]
+               << " target_ptw_error_store="
+               << ptw_error_stores_per_mille
+               << " target_ptw_error_denied="
+               << ptw_error_denied_per_mille
+               << " target_ptw_error_corrupt_first="
+               << ptw_error_corrupt_first_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -1800,6 +1969,22 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 3> dcache_load_outcomes{};
     // error responses/denied beats/corrupt beats/GrantAcks/refills.
     std::array<std::uint64_t, 5> dcache_load_error_manager{};
+    // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
+    // corrupt-last].
+    std::array<std::array<std::array<std::array<std::uint64_t, 3>,
+                                     RandomConstraints::ptw_error_level_count>,
+                          2>,
+               RandomConstraints::ptw_error_site_count>
+        ptw_error_outcomes{};
+    // Stage-1/G-only sites use slots 0..1; nested sites use VS x G slots 0..3.
+    std::array<std::array<std::uint64_t, 4>,
+               RandomConstraints::ptw_error_site_count>
+        ptw_error_modes{};
+    std::array<std::array<std::uint64_t, 4>,
+               RandomConstraints::ptw_error_site_count>
+        ptw_error_target_levels{};
+    // Error response requests/denied D beats/corrupt D beats.
+    std::array<std::uint64_t, 3> ptw_error_manager{};
     std::array<std::uint64_t, 2> vector_directions{};
     std::array<std::uint64_t, 4> vector_addressing{};
     std::array<std::uint64_t, 4> vector_eews{};
@@ -1907,6 +2092,20 @@ struct ConstraintCoverage {
         }
     }
 
+    void sample_ptw_error(
+        unsigned site, bool store, unsigned level_class, unsigned outcome,
+        unsigned mode_index, unsigned target_level,
+        const std::array<std::uint64_t, 3> &manager_delta)
+    {
+        ++ptw_error_outcomes.at(site).at(store ? 1U : 0U)
+             .at(level_class).at(outcome);
+        ++ptw_error_modes.at(site).at(mode_index);
+        ++ptw_error_target_levels.at(site).at(target_level);
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            ptw_error_manager[index] += manager_delta[index];
+        }
+    }
+
     void sample_dcache(
         std::uint64_t requests_before, std::uint64_t requests_after)
     {
@@ -1942,6 +2141,9 @@ struct ConstraintCoverage {
 
     bool translation_complete(const RandomConstraints &constraints) const
     {
+        if (!constraints.samples_translation()) {
+            return true;
+        }
         for (unsigned regime = 0;
              regime < RandomConstraints::translation_regime_count; ++regime) {
             if (constraints.translation_weights[regime] != 0 &&
@@ -1995,7 +2197,8 @@ struct ConstraintCoverage {
 
     bool fences_complete(const RandomConstraints &constraints) const
     {
-        if (constraints.tlb_flushes_per_mille == 0) {
+        if (!constraints.samples_translation() ||
+            constraints.tlb_flushes_per_mille == 0) {
             return true;
         }
         for (unsigned kind = 0; kind < RandomConstraints::fence_kind_count;
@@ -2117,6 +2320,107 @@ struct ConstraintCoverage {
                      cmo_error_kinds)) &&
                 error_crosses_complete;
         }
+        if (operation == RandomConstraints::ptw_error) {
+            std::uint64_t observed = 0;
+            std::uint64_t denied_actions = 0;
+            std::uint64_t corrupt_actions = 0;
+            for (unsigned site = 0; site < ptw_error_outcomes.size(); ++site) {
+                const bool site_enabled =
+                    constraints.ptw_error_site_weights[site] != 0;
+                for (unsigned direction = 0; direction < 2; ++direction) {
+                    const bool direction_enabled = direction == 0
+                        ? constraints.ptw_error_stores_per_mille != 1000
+                        : constraints.ptw_error_stores_per_mille != 0;
+                    for (unsigned level = 0;
+                         level < RandomConstraints::ptw_error_level_count;
+                         ++level) {
+                        const bool level_enabled =
+                            constraints.ptw_error_level_weights[level] != 0;
+                        for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                            const bool outcome_enabled = outcome == 0
+                                ? constraints.ptw_error_denied_per_mille != 0
+                                : outcome == 1
+                                ? constraints.ptw_error_denied_per_mille != 1000 &&
+                                    constraints.
+                                        ptw_error_corrupt_first_per_mille != 0
+                                : constraints.ptw_error_denied_per_mille != 1000 &&
+                                    constraints.
+                                        ptw_error_corrupt_first_per_mille != 1000;
+                            const std::uint64_t count =
+                                ptw_error_outcomes[site][direction][level][outcome];
+                            if ((count != 0) !=
+                                (site_enabled && direction_enabled &&
+                                 level_enabled && outcome_enabled)) {
+                                return false;
+                            }
+                            observed += count;
+                            if (outcome == 0) {
+                                denied_actions += count;
+                            } else {
+                                corrupt_actions += count;
+                            }
+                        }
+                    }
+                }
+
+                for (unsigned mode = 0; mode < 4; ++mode) {
+                    bool mode_enabled = false;
+                    if (site == RandomConstraints::ptw_error_stage1) {
+                        mode_enabled = mode < 2 &&
+                            constraints.stage1_mode_weights[mode] != 0;
+                    } else if (site == RandomConstraints::ptw_error_gstage) {
+                        mode_enabled = mode < 2 &&
+                            constraints.g_mode_weights[mode] != 0;
+                    } else {
+                        mode_enabled =
+                            constraints.vs_mode_weights[mode / 2] != 0 &&
+                            constraints.g_mode_weights[mode % 2] != 0;
+                    }
+                    if ((ptw_error_modes[site][mode] != 0) !=
+                        (site_enabled && mode_enabled)) {
+                        return false;
+                    }
+                }
+
+                for (unsigned target_level = 0; target_level < 4;
+                     ++target_level) {
+                    bool target_enabled = false;
+                    for (unsigned mode = 0; mode < 2 && !target_enabled; ++mode) {
+                        const bool mode_enabled =
+                            site == RandomConstraints::ptw_error_stage1
+                            ? constraints.stage1_mode_weights[mode] != 0
+                            : site == RandomConstraints::ptw_error_nested_vs
+                            ? constraints.vs_mode_weights[mode] != 0
+                            : constraints.g_mode_weights[mode] != 0;
+                        const unsigned levels = mode == 0 ? 3U : 4U;
+                        target_enabled = site_enabled && mode_enabled &&
+                            ((target_level == 0 &&
+                              constraints.ptw_error_level_weights[
+                                  RandomConstraints::ptw_error_leaf] != 0) ||
+                             (target_level + 1 == levels &&
+                              constraints.ptw_error_level_weights[
+                                  RandomConstraints::ptw_error_root] != 0) ||
+                             (target_level > 0 && target_level + 1 < levels &&
+                              constraints.ptw_error_level_weights[
+                                  RandomConstraints::ptw_error_intermediate] !=
+                                  0));
+                    }
+                    if ((ptw_error_target_levels[site][target_level] != 0) !=
+                        target_enabled) {
+                        return false;
+                    }
+                }
+            }
+            return observed == operations[operation] &&
+                ptw_error_manager[0] >= observed &&
+                ptw_error_manager[1] >= denied_actions * 2 &&
+                ptw_error_manager[1] / 2 <= ptw_error_manager[0] &&
+                ptw_error_manager[0] - ptw_error_manager[1] / 2 >=
+                    corrupt_actions &&
+                (ptw_error_manager[1] & 1U) == 0 &&
+                ptw_error_manager[2] ==
+                    ptw_error_manager[0] + ptw_error_manager[1] / 2;
+        }
         if (operation == RandomConstraints::vector_load ||
             operation == RandomConstraints::vector_store) {
             const auto target_complete = [](const auto &weights,
@@ -2211,10 +2515,12 @@ struct ConstraintCoverage {
                 return false;
             }
         }
-        for (std::size_t index = 0; index < locality.size(); ++index) {
-            if (constraints.locality_weights[index] != 0 &&
-                locality[index] == 0) {
-                return false;
+        if (constraints.uses_locality()) {
+            for (std::size_t index = 0; index < locality.size(); ++index) {
+                if (constraints.locality_weights[index] != 0 &&
+                    locality[index] == 0) {
+                    return false;
+                }
             }
         }
         if (!translation_complete(constraints) ||
@@ -2283,12 +2589,14 @@ struct ConstraintCoverage {
                       dcache_load_error_actions}))) {
             return false;
         }
-        if (constraints.uses_translation() &&
+        if (constraints.samples_translation() &&
+            constraints.uses_translation() &&
             (translation_walk_windows == 0 ||
              translation_reuse_windows == 0)) {
             return false;
         }
-        if (constraints.tlb_flushes_per_mille != 0 && tlb_flushes == 0) {
+        if (constraints.samples_translation() &&
+            constraints.tlb_flushes_per_mille != 0 && tlb_flushes == 0) {
             return false;
         }
         if (constraints.special_concurrent_per_mille != 0) {
@@ -2444,6 +2752,36 @@ public:
                << dcache_load_error_manager[2] << ','
                << dcache_load_error_manager[3] << ','
                << dcache_load_error_manager[4]
+               << " actual_ptw_error_outcome=";
+        bool first_ptw_outcome = true;
+        for (const auto &site : ptw_error_outcomes) {
+            for (const auto &direction : site) {
+                for (const auto &level : direction) {
+                    for (const auto count : level) {
+                        stream << (first_ptw_outcome ? "" : ",") << count;
+                        first_ptw_outcome = false;
+                    }
+                }
+            }
+        }
+        stream << " actual_ptw_error_mode=";
+        for (unsigned site = 0; site < ptw_error_modes.size(); ++site) {
+            for (unsigned mode = 0; mode < ptw_error_modes[site].size(); ++mode) {
+                stream << (site == 0 && mode == 0 ? "" : ",")
+                       << ptw_error_modes[site][mode];
+            }
+        }
+        stream << " actual_ptw_error_target_level=";
+        for (unsigned site = 0; site < ptw_error_target_levels.size(); ++site) {
+            for (unsigned level = 0;
+                 level < ptw_error_target_levels[site].size(); ++level) {
+                stream << (site == 0 && level == 0 ? "" : ",")
+                       << ptw_error_target_levels[site][level];
+            }
+        }
+        stream << " actual_ptw_error_manager="
+               << ptw_error_manager[0] << ',' << ptw_error_manager[1] << ','
+               << ptw_error_manager[2]
                << " actual_vector_direction=" << vector_directions[0] << ','
                << vector_directions[1]
                << " actual_vector_addressing=" << vector_addressing[0] << ','
@@ -29260,6 +29598,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t probe_overlap_line = 0;
     std::uint64_t dcache_error_line = 0;
     std::uint64_t atomic_error_line = 0;
+    std::uint64_t ptw_error_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -29284,6 +29623,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t atomic_error_base =
         dcache_error_base + dcache_error_span;
     constexpr std::uint64_t atomic_error_span = 0x4000000;
+    constexpr std::uint64_t ptw_error_base =
+        atomic_error_base + atomic_error_span;
+    constexpr std::uint64_t ptw_error_span = 0x100000;
+    // Keep the nested final G-stage walk in a different high-level subtree
+    // from the implicit G-stage walks used to fetch VS page-table entries.
+    constexpr std::uint64_t ptw_error_guest_base = 0x18000000000ULL;
+    constexpr std::uint64_t ptw_error_stage1_root_base = 0xf0000000ULL;
+    constexpr std::uint64_t ptw_error_vs_root_base = 0xf4000000ULL;
+    constexpr std::uint64_t ptw_error_g_root_base = 0xf8000000ULL;
+    constexpr std::uint64_t ptw_error_root_stride = 0x20000;
+    constexpr std::uint64_t ptw_error_root_slots = 256;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -29304,6 +29654,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
     environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
     environment.memory().fill_incrementing(stage1_napot_base, 0x40000, 0xe1);
+    environment.memory().fill_incrementing(
+        ptw_error_base, ptw_error_span, 0xf1);
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
@@ -29897,6 +30249,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
         }
+        for (std::uint64_t page = ptw_error_base;
+             page < ptw_error_base + ptw_error_span; page += 0x1000) {
+            const std::uint64_t guest_page =
+                ptw_error_guest_base + (page - ptw_error_base);
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_page(
+                        mode, random_stage1_roots[mode], page, page,
+                        false, false, true) ||
+                    !map_stage_page(
+                        mode, random_vs_roots[mode], page, guest_page,
+                        false, false, true) ||
+                    !map_g_page(
+                        mode, random_g_roots[mode], page, page, true) ||
+                    !map_g_page(
+                        mode, random_g_roots[mode], guest_page, page, true)) {
+                    return false;
+                }
+            }
+        }
         for (unsigned mode = 0; mode < 2; ++mode) {
             if (!map_stage_napot(
                     mode, random_stage1_roots[mode], stage1_napot_base) ||
@@ -29990,12 +30361,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
-        const std::array<std::pair<std::uint64_t, std::uint64_t>, 4>
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 5>
             reference_addresses{{
                 {cache0_base + 0x106a8, cache0_base + 0x106a8},
                 {cache1_base + 0xf800, cache1_base + 0xf800},
                 {nc_base + 0x188, nc_base + 0x188},
                 {mmio_virtual + 0x188, mmio_physical + 0x188},
+                {ptw_error_base + 0x188, ptw_error_base + 0x188},
             }};
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
             for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
@@ -30247,7 +30619,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             transaction.vm = shape == 0 ? false : (shape == 1 ? true : (random() & 1U) != 0);
             transaction.mask_bits = static_cast<std::uint16_t>(random());
             transaction.vl = static_cast<std::uint8_t>(
-                shape == 1 ? elements : 1U + random() % elements);
+                shape == 1 || shape == 2
+                    ? elements
+                    : shape == 3 ? elements - 1U
+                                 : 1U + random() % elements);
             transaction.vstart = static_cast<std::uint8_t>(
                 shape == 2 && transaction.vl > 1
                     ? 1U + random() % transaction.vl
@@ -30932,6 +31307,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         TranslationContext current_translation{};
         bool translation_context_valid = false;
+        constexpr unsigned pending_sfence = 1U << 0;
+        constexpr unsigned pending_hfence_vvma = 1U << 1;
+        constexpr unsigned pending_hfence_gvma = 1U << 2;
+        unsigned pending_translation_fences = 0;
         bool translation_coverage_closed = false;
         const auto first_enabled_mode = [](const std::array<unsigned, 2> &weights) {
             return weights[0] != 0 ? 0U : 1U;
@@ -31154,14 +31533,32 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             return random_translation_context();
         };
+        const auto flush_pending_translation_fences = [&]() {
+            const bool fenced =
+                ((pending_translation_fences & pending_sfence) == 0 ||
+                 environment.issue_sfence(
+                     0, 0, true, true, false, false)) &&
+                ((pending_translation_fences & pending_hfence_vvma) == 0 ||
+                 environment.issue_sfence(
+                     0, 0, true, true, true, false)) &&
+                ((pending_translation_fences & pending_hfence_gvma) == 0 ||
+                 environment.issue_sfence(
+                     0, 0, true, true, false, true));
+            if (fenced) {
+                pending_translation_fences = 0;
+            }
+            return fenced;
+        };
         const auto enter_translation_context =
             [&](const TranslationContext &context) {
                 if (translation_context_valid &&
-                    context == current_translation) {
+                    context == current_translation &&
+                    pending_translation_fences == 0) {
                     return true;
                 }
                 if (!environment.run_until_all_complete(4096) ||
                     !environment.run_until_queues_retired(4096) ||
+                    !flush_pending_translation_fences() ||
                     !activate_translation_context(context)) {
                     return false;
                 }
@@ -32140,6 +32537,61 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         }
                         const std::uint64_t element_address =
                             memblock::vector_element_address(uop, element);
+                        bool translation_valid = true;
+                        if (current_translation.regime ==
+                                RandomConstraints::translation_stage1) {
+                            const auto reference =
+                                memblock::reference_page_walk_permissions(
+                                    environment.memory(),
+                                    random_stage1_roots[
+                                        current_translation.stage1_mode],
+                                    element_address,
+                                    page_mode(
+                                        current_translation.stage1_mode));
+                            translation_valid = reference.walk.translated &&
+                                reference.walk.physical_address ==
+                                    element_address &&
+                                (!reference.leaf_permissions ||
+                                 memblock::reference_memory_access_permitted(
+                                     store
+                                         ? memblock::ReferenceMemoryAccess::store
+                                         : memblock::ReferenceMemoryAccess::load,
+                                     *reference.leaf_permissions,
+                                     memblock::ReferencePrivilegeMode::supervisor,
+                                     false, false));
+                        } else if (current_translation.regime ==
+                                       RandomConstraints::translation_nested) {
+                            const auto reference =
+                                memblock::reference_two_stage_access(
+                                    environment.memory(),
+                                    random_vs_roots[current_translation.vs_mode],
+                                    random_g_roots[current_translation.g_mode],
+                                    element_address,
+                                    store
+                                        ? memblock::ReferenceMemoryAccess::store
+                                        : memblock::ReferenceMemoryAccess::load,
+                                    page_mode(current_translation.vs_mode),
+                                    page_mode(current_translation.g_mode));
+                            translation_valid = reference.translated &&
+                                reference.physical_address == element_address;
+                        }
+                        if (!translation_valid) {
+                            std::ostringstream detail;
+                            detail << "random-vector-translation-reference"
+                                   << ":store=" << store
+                                   << ":regime=" << current_translation.regime
+                                   << ":stage1_mode="
+                                   << current_translation.stage1_mode
+                                   << ":vs_mode=" << current_translation.vs_mode
+                                   << ":g_mode=" << current_translation.g_mode
+                                   << ":uop="
+                                   << static_cast<unsigned>(uop.vuop_idx)
+                                   << ":element=" << element
+                                   << ":address=0x" << std::hex
+                                   << element_address << std::dec;
+                            phase = detail.str();
+                            return false;
+                        }
                         requires_misaligned_head |= !store &&
                             ((element_address & 0xfU) + element_bytes) > 16U;
                         requires_store_pending |= store &&
@@ -32569,6 +33021,57 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.sq_redirect_canceled_observed() ==
                     sq_cancels_before;
         };
+        const auto ptw_error_outcome_enabled = [&](unsigned outcome) {
+            return outcome == 0
+                ? constraints.ptw_error_denied_per_mille != 0
+                : outcome == 1
+                ? constraints.ptw_error_denied_per_mille != 1000 &&
+                    constraints.ptw_error_corrupt_first_per_mille != 0
+                : constraints.ptw_error_denied_per_mille != 1000 &&
+                    constraints.ptw_error_corrupt_first_per_mille != 1000;
+        };
+        const auto ptw_error_mode_slot_enabled = [&] (
+            unsigned site, unsigned slot) {
+            if (site == RandomConstraints::ptw_error_stage1) {
+                return slot < 2 && constraints.stage1_mode_weights[slot] != 0;
+            }
+            if (site == RandomConstraints::ptw_error_gstage) {
+                return slot < 2 && constraints.g_mode_weights[slot] != 0;
+            }
+            return slot < 4 &&
+                constraints.vs_mode_weights[slot / 2] != 0 &&
+                constraints.g_mode_weights[slot % 2] != 0;
+        };
+        const auto ptw_error_target_level_enabled = [&] (
+            unsigned site, unsigned target_level) {
+            if (constraints.ptw_error_site_weights[site] == 0) {
+                return false;
+            }
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                const bool mode_enabled =
+                    site == RandomConstraints::ptw_error_stage1
+                    ? constraints.stage1_mode_weights[mode] != 0
+                    : site == RandomConstraints::ptw_error_nested_vs
+                    ? constraints.vs_mode_weights[mode] != 0
+                    : constraints.g_mode_weights[mode] != 0;
+                const unsigned levels = mode == 0 ? 3U : 4U;
+                if (!mode_enabled) {
+                    continue;
+                }
+                if ((target_level == 0 &&
+                     constraints.ptw_error_level_weights[
+                         RandomConstraints::ptw_error_leaf] != 0) ||
+                    (target_level + 1 == levels &&
+                     constraints.ptw_error_level_weights[
+                         RandomConstraints::ptw_error_root] != 0) ||
+                    (target_level > 0 && target_level + 1 < levels &&
+                     constraints.ptw_error_level_weights[
+                         RandomConstraints::ptw_error_intermediate] != 0)) {
+                    return true;
+                }
+            }
+            return false;
+        };
 
         while (actions < target_before_redirect) {
             const bool closing_stride_stream =
@@ -32616,6 +33119,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         selected = true;
                     }
                 }
+            }
+            constexpr std::array<const char *,
+                                 RandomConstraints::operation_count>
+                operation_names{{
+                    "scalar-load", "scalar-store", "vector-load",
+                    "vector-store", "vector-segment", "prefetch", "atomic",
+                    "nc", "mmio", "hypervisor", "cmo", "ptw-error",
+                }};
+            {
+                std::ostringstream detail;
+                detail << "random-action:" << operation_names[kind]
+                       << ":index=" << actions;
+                phase = detail.str();
             }
             bool nc_store = kind == RandomConstraints::noncacheable &&
                 random() % 1000 < constraints.nc_stores_per_mille;
@@ -32866,6 +33382,222 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
             }
+            unsigned ptw_error_site = RandomConstraints::ptw_error_stage1;
+            unsigned ptw_error_level_class = RandomConstraints::ptw_error_root;
+            unsigned ptw_error_outcome = 0;
+            unsigned ptw_error_stage1_mode = 0;
+            unsigned ptw_error_vs_mode = 0;
+            unsigned ptw_error_g_mode = 0;
+            unsigned ptw_error_target_level = 0;
+            bool ptw_error_store = false;
+            std::uint64_t ptw_error_address = 0;
+            std::uint64_t ptw_error_guest_address = 0;
+            std::uint64_t ptw_error_stage1_root = 0;
+            std::uint64_t ptw_error_vs_root = 0;
+            std::uint64_t ptw_error_g_root = 0;
+            if (kind == RandomConstraints::ptw_error) {
+                ptw_error_site = constraints.choose_ptw_error_site(random());
+                ptw_error_level_class =
+                    constraints.choose_ptw_error_level(random());
+                ptw_error_store = random() % 1000 <
+                    constraints.ptw_error_stores_per_mille;
+                if (random() % 1000 < constraints.ptw_error_denied_per_mille) {
+                    ptw_error_outcome = 0;
+                } else {
+                    ptw_error_outcome = random() % 1000 <
+                            constraints.ptw_error_corrupt_first_per_mille
+                        ? 1U : 2U;
+                }
+
+                bool forced_cross = false;
+                for (unsigned site = 0;
+                     site < RandomConstraints::ptw_error_site_count &&
+                         !forced_cross;
+                     ++site) {
+                    if (constraints.ptw_error_site_weights[site] == 0) {
+                        continue;
+                    }
+                    for (unsigned direction = 0;
+                         direction < 2 && !forced_cross; ++direction) {
+                        const bool direction_enabled = direction == 0
+                            ? constraints.ptw_error_stores_per_mille != 1000
+                            : constraints.ptw_error_stores_per_mille != 0;
+                        if (!direction_enabled) {
+                            continue;
+                        }
+                        for (unsigned level = 0;
+                             level < RandomConstraints::ptw_error_level_count &&
+                                 !forced_cross;
+                             ++level) {
+                            if (constraints.ptw_error_level_weights[level] == 0) {
+                                continue;
+                            }
+                            for (unsigned outcome = 0; outcome < 3; ++outcome) {
+                                if (ptw_error_outcome_enabled(outcome) &&
+                                    constraint_coverage.ptw_error_outcomes[
+                                        site][direction][level][outcome] == 0) {
+                                    ptw_error_site = site;
+                                    ptw_error_store = direction == 1;
+                                    ptw_error_level_class = level;
+                                    ptw_error_outcome = outcome;
+                                    forced_cross = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                std::optional<unsigned> forced_mode_slot;
+                for (unsigned slot = 0; slot < 4; ++slot) {
+                    if (ptw_error_mode_slot_enabled(ptw_error_site, slot) &&
+                        constraint_coverage.ptw_error_modes[
+                            ptw_error_site][slot] == 0) {
+                        forced_mode_slot = slot;
+                        break;
+                    }
+                }
+                if (!forced_cross && !forced_mode_slot) {
+                    for (unsigned site = 0;
+                         site < RandomConstraints::ptw_error_site_count &&
+                             !forced_mode_slot;
+                         ++site) {
+                        if (constraints.ptw_error_site_weights[site] == 0) {
+                            continue;
+                        }
+                        for (unsigned slot = 0; slot < 4; ++slot) {
+                            if (ptw_error_mode_slot_enabled(site, slot) &&
+                                constraint_coverage.ptw_error_modes[site][slot] ==
+                                    0) {
+                                ptw_error_site = site;
+                                forced_mode_slot = slot;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                std::optional<unsigned> forced_target_level;
+                std::optional<unsigned> forced_governing_mode;
+                if (!forced_cross && !forced_mode_slot) {
+                    for (unsigned site = 0;
+                         site < RandomConstraints::ptw_error_site_count &&
+                             !forced_target_level;
+                         ++site) {
+                        for (unsigned target = 0; target < 4; ++target) {
+                            if (!ptw_error_target_level_enabled(site, target) ||
+                                constraint_coverage.ptw_error_target_levels[
+                                    site][target] != 0) {
+                                continue;
+                            }
+                            for (unsigned mode = 0; mode < 2; ++mode) {
+                                const bool mode_enabled =
+                                    site == RandomConstraints::ptw_error_stage1
+                                    ? constraints.stage1_mode_weights[mode] != 0
+                                    : site == RandomConstraints::ptw_error_nested_vs
+                                    ? constraints.vs_mode_weights[mode] != 0
+                                    : constraints.g_mode_weights[mode] != 0;
+                                const unsigned levels = mode == 0 ? 3U : 4U;
+                                if (!mode_enabled) {
+                                    continue;
+                                }
+                                for (unsigned level_class = 0;
+                                     level_class <
+                                         RandomConstraints::ptw_error_level_count;
+                                     ++level_class) {
+                                    const bool compatible =
+                                        level_class ==
+                                            RandomConstraints::ptw_error_leaf
+                                        ? target == 0
+                                        : level_class ==
+                                              RandomConstraints::ptw_error_root
+                                        ? target + 1 == levels
+                                        : target > 0 && target + 1 < levels;
+                                    if (compatible &&
+                                        constraints.ptw_error_level_weights[
+                                            level_class] != 0) {
+                                        ptw_error_site = site;
+                                        ptw_error_level_class = level_class;
+                                        forced_target_level = target;
+                                        forced_governing_mode = mode;
+                                        break;
+                                    }
+                                }
+                                if (forced_target_level) {
+                                    break;
+                                }
+                            }
+                            if (forced_target_level) {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    ptw_error_stage1_mode =
+                        constraints.choose_stage1_mode(random());
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_gstage) {
+                    ptw_error_g_mode = constraints.choose_g_mode(random());
+                } else {
+                    ptw_error_vs_mode = constraints.choose_vs_mode(random());
+                    ptw_error_g_mode = constraints.choose_g_mode(random());
+                }
+                if (forced_mode_slot) {
+                    if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                        ptw_error_stage1_mode = *forced_mode_slot;
+                    } else if (ptw_error_site ==
+                               RandomConstraints::ptw_error_gstage) {
+                        ptw_error_g_mode = *forced_mode_slot;
+                    } else {
+                        ptw_error_vs_mode = *forced_mode_slot / 2;
+                        ptw_error_g_mode = *forced_mode_slot % 2;
+                    }
+                }
+                if (forced_governing_mode) {
+                    if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                        ptw_error_stage1_mode = *forced_governing_mode;
+                    } else if (ptw_error_site ==
+                               RandomConstraints::ptw_error_nested_vs) {
+                        ptw_error_vs_mode = *forced_governing_mode;
+                    } else {
+                        ptw_error_g_mode = *forced_governing_mode;
+                    }
+                }
+                const unsigned governing_mode =
+                    ptw_error_site == RandomConstraints::ptw_error_stage1
+                    ? ptw_error_stage1_mode
+                    : ptw_error_site == RandomConstraints::ptw_error_nested_vs
+                    ? ptw_error_vs_mode
+                    : ptw_error_g_mode;
+                const unsigned levels = governing_mode == 0 ? 3U : 4U;
+                if (forced_target_level) {
+                    ptw_error_target_level = *forced_target_level;
+                } else if (ptw_error_level_class ==
+                           RandomConstraints::ptw_error_leaf) {
+                    ptw_error_target_level = 0;
+                } else if (ptw_error_level_class ==
+                           RandomConstraints::ptw_error_root) {
+                    ptw_error_target_level = levels - 1;
+                } else {
+                    ptw_error_target_level = 1U + random() % (levels - 2U);
+                }
+                constexpr std::uint64_t ptw_error_lines =
+                    ptw_error_span / 64;
+                const std::uint64_t sequence = ptw_error_line++;
+                const std::uint64_t line =
+                    (sequence ^ (sequence >> 1)) % ptw_error_lines;
+                ptw_error_address = ptw_error_base + line * 64 + 0x18;
+                ptw_error_guest_address =
+                    ptw_error_guest_base + line * 64 + 0x18;
+                const std::uint64_t root_offset =
+                    (sequence % ptw_error_root_slots) * ptw_error_root_stride;
+                ptw_error_stage1_root =
+                    ptw_error_stage1_root_base + root_offset;
+                ptw_error_vs_root = ptw_error_vs_root_base + root_offset;
+                ptw_error_g_root = ptw_error_g_root_base + root_offset;
+            }
             TranslationContext translation = closing_stride_stream
                 ? dominant_translation_context()
                 : choose_translation_context();
@@ -32877,11 +33609,177 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         kind == RandomConstraints::mmio) &&
                 translation.regime == RandomConstraints::translation_bare) {
                 translation = translated_context();
+            } else if (kind == RandomConstraints::ptw_error) {
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    translation.regime = RandomConstraints::translation_stage1;
+                    translation.stage1_mode = ptw_error_stage1_mode;
+                } else if (ptw_error_site !=
+                           RandomConstraints::ptw_error_gstage) {
+                    translation.regime = RandomConstraints::translation_nested;
+                    translation.vs_mode = ptw_error_vs_mode;
+                    translation.g_mode = ptw_error_g_mode;
+                }
             }
             const TranslationLeafTopology leaf =
                 choose_translation_leaf(translation);
-            if (!enter_translation_context(translation) ||
-                (!closing_stride_stream && !issue_constrained_fence(kind))) {
+            if (kind != RandomConstraints::ptw_error) {
+                std::ostringstream detail;
+                detail << phase << ":regime=" << translation.regime
+                       << ":stage1_mode=" << translation.stage1_mode
+                       << ":vs_mode=" << translation.vs_mode
+                       << ":g_mode=" << translation.g_mode
+                       << ":leaf=" << leaf.nested_index();
+                phase = detail.str();
+            }
+            if (kind == RandomConstraints::ptw_error) {
+                phase = "random-ptw-error-context";
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout) ||
+                    !flush_pending_translation_fences()) {
+                    return false;
+                }
+                const std::uint64_t ptw_error_page =
+                    ptw_error_address & ~std::uint64_t{0xfff};
+                const std::uint64_t ptw_error_guest_page =
+                    ptw_error_guest_address & ~std::uint64_t{0xfff};
+                bool mapped = false;
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    mapped = map_stage_page(
+                        ptw_error_stage1_mode, ptw_error_stage1_root,
+                        ptw_error_page, ptw_error_page, false, false, true);
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_gstage) {
+                    mapped = map_g_page(
+                        ptw_error_g_mode, ptw_error_g_root, ptw_error_page,
+                        ptw_error_page, true);
+                } else {
+                    mapped = map_stage_page(
+                        ptw_error_vs_mode, ptw_error_vs_root, ptw_error_page,
+                        ptw_error_guest_page, false, false, true);
+                    const unsigned vs_levels = ptw_error_vs_mode == 0 ? 3U : 4U;
+                    for (unsigned level = 0; mapped && level < vs_levels;
+                         ++level) {
+                        const auto vs_pte =
+                            memblock::reference_pte_address_at_level(
+                                environment.memory(), ptw_error_vs_root,
+                                ptw_error_address,
+                                page_mode(ptw_error_vs_mode), level);
+                        mapped = vs_pte && map_g_page(
+                            ptw_error_g_mode, ptw_error_g_root,
+                            *vs_pte & ~std::uint64_t{0xfff},
+                            *vs_pte & ~std::uint64_t{0xfff});
+                    }
+                    mapped = mapped && map_g_page(
+                        ptw_error_g_mode, ptw_error_g_root,
+                        ptw_error_guest_page, ptw_error_page, true);
+                }
+                bool reference_valid = false;
+                if (mapped && ptw_error_site ==
+                                  RandomConstraints::ptw_error_stage1) {
+                    const auto reference = memblock::reference_page_walk(
+                        environment.memory(), ptw_error_stage1_root,
+                        ptw_error_address,
+                        page_mode(ptw_error_stage1_mode));
+                    reference_valid = reference.translated &&
+                        reference.physical_address == ptw_error_address;
+                } else if (mapped && ptw_error_site ==
+                                         RandomConstraints::ptw_error_gstage) {
+                    const auto reference = memblock::reference_page_walk(
+                        environment.memory(), ptw_error_g_root,
+                        ptw_error_address, page_mode(ptw_error_g_mode), true);
+                    reference_valid = reference.translated &&
+                        reference.physical_address == ptw_error_address;
+                } else if (mapped) {
+                    const auto reference =
+                        memblock::reference_two_stage_walk(
+                            environment.memory(), ptw_error_vs_root,
+                            ptw_error_g_root, ptw_error_address,
+                            page_mode(ptw_error_vs_mode),
+                            page_mode(ptw_error_g_mode));
+                    reference_valid = reference.translated &&
+                        reference.physical_address == ptw_error_address;
+                }
+                if (!reference_valid) {
+                    std::ostringstream detail;
+                    detail << "random-ptw-error-reference"
+                           << ":site=" << ptw_error_site
+                           << ":stage1_mode=" << ptw_error_stage1_mode
+                           << ":vs_mode=" << ptw_error_vs_mode
+                           << ":g_mode=" << ptw_error_g_mode
+                           << ":va=0x" << std::hex << ptw_error_address
+                           << ":gpa=0x" << ptw_error_guest_address
+                           << ":s1root=0x" << ptw_error_stage1_root
+                           << ":vsroot=0x" << ptw_error_vs_root
+                           << ":groot=0x" << ptw_error_g_root << std::dec;
+                    if (ptw_error_site !=
+                            RandomConstraints::ptw_error_stage1 &&
+                        ptw_error_site !=
+                            RandomConstraints::ptw_error_gstage) {
+                        const auto reference =
+                            memblock::reference_two_stage_walk(
+                                environment.memory(), ptw_error_vs_root,
+                                ptw_error_g_root, ptw_error_address,
+                                page_mode(ptw_error_vs_mode),
+                                page_mode(ptw_error_g_mode));
+                        detail << ":translated=" << reference.translated
+                               << ":stage1_pf="
+                               << reference.stage1_page_fault
+                               << ":gpf=" << reference.guest_page_fault
+                               << ":af=" << reference.access_fault
+                               << ":fault_gpa=0x" << std::hex
+                               << reference.faulting_guest_physical_address
+                               << ":pa=0x" << reference.physical_address
+                               << std::dec;
+                    }
+                    phase = detail.str();
+                    return false;
+                }
+                bool activated = false;
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    activated = ptw_error_stage1_mode == 0
+                        ? environment.activate_sv39(
+                              ptw_error_stage1_root, 23)
+                        : environment.activate_sv48(
+                              ptw_error_stage1_root, 23);
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_gstage) {
+                    activated = environment.activate_two_stage_modes(
+                        memblock::ReferencePageMode::bare,
+                        page_mode(ptw_error_g_mode), 0,
+                        ptw_error_g_root, 0, 31);
+                } else {
+                    activated = environment.activate_two_stage_modes(
+                        page_mode(ptw_error_vs_mode),
+                        page_mode(ptw_error_g_mode),
+                        ptw_error_vs_root, ptw_error_g_root, 29, 31);
+                }
+                if (!mapped || !activated ||
+                    ((ptw_error_site == RandomConstraints::ptw_error_stage1)
+                         ? !environment.issue_sfence(
+                               0, 0, true, true, false, false)
+                         : ptw_error_site == RandomConstraints::ptw_error_gstage
+                         ? !environment.issue_sfence(
+                               0, 0, true, true, false, true)
+                         : (!environment.issue_sfence(
+                                0, 0, true, true, true, false) ||
+                            !environment.issue_sfence(
+                                0, 0, true, true, false, true)))) {
+                    return false;
+                }
+                translation_context_valid = false;
+                pending_translation_fences =
+                    ptw_error_site == RandomConstraints::ptw_error_stage1
+                    ? pending_sfence
+                    : ptw_error_site == RandomConstraints::ptw_error_gstage
+                    ? pending_hfence_gvma
+                    : pending_hfence_vvma | pending_hfence_gvma;
+            } else if (!enter_translation_context(translation) ||
+                       (!closing_stride_stream &&
+                        !issue_constrained_fence(kind))) {
                 return false;
             }
 
@@ -32889,6 +33787,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.ptw_requests();
             const std::uint64_t requests_before = environment.tilelink_requests();
             bool sample_dcache = true;
+            bool sample_translation_action =
+                kind != RandomConstraints::ptw_error;
             bool leaf_addressed = false;
             bool ordinary_leaf_addressed = false;
             const auto action_cacheable_address = [&](unsigned alignment) {
@@ -33054,6 +33954,273 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
                 probe_candidate = transaction.address & ~std::uint64_t{63};
                 ++coverage.cacheable;
+            } else if (kind == RandomConstraints::ptw_error) {
+                phase = "random-ptw-error-target";
+                const std::uint64_t address = ptw_error_address;
+                std::optional<std::uint64_t> target_pte;
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    target_pte = memblock::reference_pte_address_at_level(
+                        environment.memory(), ptw_error_stage1_root, address,
+                        page_mode(ptw_error_stage1_mode),
+                        ptw_error_target_level);
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_gstage) {
+                    target_pte = memblock::reference_pte_address_at_level(
+                        environment.memory(), ptw_error_g_root, address,
+                        page_mode(ptw_error_g_mode), ptw_error_target_level,
+                        true);
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_nested_g_implicit) {
+                    const auto vs_root_pte =
+                        memblock::reference_pte_address_at_level(
+                            environment.memory(), ptw_error_vs_root, address,
+                            page_mode(ptw_error_vs_mode),
+                            memblock::reference_page_levels(
+                                page_mode(ptw_error_vs_mode)) - 1U);
+                    if (vs_root_pte) {
+                        target_pte = memblock::reference_pte_address_at_level(
+                            environment.memory(), ptw_error_g_root,
+                            *vs_root_pte,
+                            page_mode(ptw_error_g_mode),
+                            ptw_error_target_level, true);
+                    }
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_nested_vs) {
+                    const auto vs_pte =
+                        memblock::reference_pte_address_at_level(
+                            environment.memory(), ptw_error_vs_root, address,
+                            page_mode(ptw_error_vs_mode),
+                            ptw_error_target_level);
+                    if (vs_pte) {
+                        const auto translated_pte =
+                            memblock::reference_page_walk(
+                                environment.memory(), ptw_error_g_root,
+                                *vs_pte,
+                                page_mode(ptw_error_g_mode), true);
+                        if (translated_pte.translated) {
+                            target_pte = translated_pte.physical_address;
+                        }
+                    }
+                } else {
+                    const auto vs_walk = memblock::reference_page_walk(
+                        environment.memory(), ptw_error_vs_root, address,
+                        page_mode(ptw_error_vs_mode));
+                    if (vs_walk.translated) {
+                        target_pte = memblock::reference_pte_address_at_level(
+                            environment.memory(), ptw_error_g_root,
+                            vs_walk.physical_address,
+                            page_mode(ptw_error_g_mode),
+                            ptw_error_target_level, true);
+                    }
+                }
+                if (!target_pte) {
+                    phase += ":reference-walk";
+                    return false;
+                }
+                {
+                    std::ostringstream detail;
+                    detail << "random-ptw-error"
+                           << ":site=" << ptw_error_site
+                           << ":direction=" << ptw_error_store
+                           << ":level_class=" << ptw_error_level_class
+                           << ":target_level=" << ptw_error_target_level
+                           << ":stage1_mode=" << ptw_error_stage1_mode
+                           << ":vs_mode=" << ptw_error_vs_mode
+                           << ":g_mode=" << ptw_error_g_mode
+                           << ":outcome=" << ptw_error_outcome
+                           << ":target=0x" << std::hex << *target_pte
+                           << std::dec;
+                    phase = detail.str();
+                }
+                const std::string ptw_error_phase = phase;
+
+                const bool denied = ptw_error_outcome == 0;
+                const auto corrupt_beat = denied
+                    ? memblock::PtwCorruptBeat::all
+                    : ptw_error_outcome == 1
+                    ? memblock::PtwCorruptBeat::first
+                    : memblock::PtwCorruptBeat::last;
+                const std::uint64_t error_responses_before =
+                    environment.ptw_error_response_requests();
+                const std::uint64_t denied_beats_before =
+                    environment.ptw_denied_d_beats();
+                const std::uint64_t corrupt_beats_before =
+                    environment.ptw_corrupt_d_beats();
+                const std::uint64_t uncache_before =
+                    environment.uncache_requests();
+                const std::uint64_t bus_data_before =
+                    environment.bus_expected_load(
+                        address, memblock::LoadOp::ld);
+                const std::uint64_t lq_dequeued_before =
+                    environment.lq_dequeued();
+                const std::uint64_t sq_dequeued_before =
+                    environment.sq_dequeued();
+                const std::uint64_t lq_cancels_before =
+                    environment.lq_redirect_canceled_observed();
+                const std::uint64_t sq_cancels_before =
+                    environment.sq_redirect_canceled_observed();
+                environment.inject_persistent_ptw_response_error_at(
+                    *target_pte, denied, !denied, corrupt_beat);
+
+                bool issued = false;
+                std::uint8_t fault_rob = 0;
+                bool fault_rob_flag = false;
+                if (ptw_error_store) {
+                    auto transaction = make_store(
+                        address, random(), memblock::StoreOp::sd,
+                        random() % memblock::kScalarStoreLanes,
+                        random() % memblock::kScalarStoreLanes);
+                    transaction.expected_exception_mask =
+                        memblock::kExceptionStoreAccessFault;
+                    fault_rob = transaction.rob;
+                    fault_rob_flag = transaction.rob_flag;
+                    issued = environment.set_rob_head(
+                                 transaction.rob, transaction.rob_flag) &&
+                        issue_store(transaction, (random() & 1U) != 0);
+                } else {
+                    auto transaction = make_load(
+                        address, memblock::LoadOp::ld,
+                        random() % memblock::kScalarLoadLanes);
+                    transaction.expected_exception_mask =
+                        memblock::kExceptionLoadAccessFault;
+                    fault_rob = transaction.rob;
+                    fault_rob_flag = transaction.rob_flag;
+                    issued = environment.set_rob_head(
+                                 transaction.rob, transaction.rob_flag) &&
+                        issue_load(transaction);
+                }
+                if (!issued) {
+                    std::ostringstream detail;
+                    detail << ptw_error_phase << ":issue-failed"
+                           << ":manager="
+                           << environment.ptw_error_response_requests() -
+                                  error_responses_before
+                           << ','
+                           << environment.ptw_denied_d_beats() -
+                                  denied_beats_before
+                           << ','
+                           << environment.ptw_corrupt_d_beats() -
+                                  corrupt_beats_before
+                           << ":target_requests="
+                           << environment.ptw_requests_covering_since(
+                                  *target_pte, ptw_requests_before)
+                           << ":last=0x" << std::hex
+                           << environment.ptw_last_error_response_address()
+                           << std::dec;
+                    phase = detail.str();
+                    environment.clear_ptw_response_error();
+                    return false;
+                }
+                if (!recover_random_precise_error(
+                        fault_rob, fault_rob_flag, ptw_error_store,
+                        lq_dequeued_before, sq_dequeued_before,
+                        lq_cancels_before, sq_cancels_before)) {
+                    environment.clear_ptw_response_error();
+                    return false;
+                }
+                environment.clear_ptw_response_error();
+                if (!environment.run_until_ptw_idle(
+                        constrained_completion_timeout)) {
+                    phase = ptw_error_phase + ":ptw-drain";
+                    return false;
+                }
+                phase = ptw_error_phase;
+
+                const std::array<std::uint64_t, 3> manager_delta{{
+                    environment.ptw_error_response_requests() -
+                        error_responses_before,
+                    environment.ptw_denied_d_beats() - denied_beats_before,
+                    environment.ptw_corrupt_d_beats() - corrupt_beats_before,
+                }};
+                const std::uint64_t bus_data_after =
+                    environment.bus_expected_load(
+                        address, memblock::LoadOp::ld);
+                const std::uint64_t target_dcache_requests =
+                    environment.dcache_requests_covering_since(
+                        address, requests_before);
+                const bool manager_matches = manager_delta[0] != 0 &&
+                    manager_delta[1] ==
+                        (denied ? manager_delta[0] * 2U : 0U) &&
+                    manager_delta[2] ==
+                        (denied ? manager_delta[0] * 2U : manager_delta[0]);
+                if (!manager_matches ||
+                    target_dcache_requests != 0 ||
+                    environment.uncache_requests() != uncache_before ||
+                    (environment.ptw_last_error_response_address() &
+                     ~std::uint64_t{63}) !=
+                        (*target_pte & ~std::uint64_t{63}) ||
+                    bus_data_after != bus_data_before) {
+                    std::ostringstream detail;
+                    detail << "random-ptw-error-manager"
+                           << ":site=" << ptw_error_site
+                           << ":direction=" << ptw_error_store
+                           << ":level_class=" << ptw_error_level_class
+                           << ":target_level=" << ptw_error_target_level
+                           << ":outcome=" << ptw_error_outcome
+                           << ":manager=" << manager_delta[0] << ','
+                           << manager_delta[1] << ',' << manager_delta[2]
+                           << ":dcache="
+                           << environment.tilelink_requests() - requests_before
+                           << ":dcache_target=" << target_dcache_requests
+                           << ":uncache="
+                           << environment.uncache_requests() - uncache_before
+                           << ":last=0x" << std::hex
+                           << environment.ptw_last_error_response_address()
+                           << ":target=0x" << *target_pte
+                           << ":bus_before=0x" << bus_data_before
+                           << ":bus_after=0x" << bus_data_after << std::dec;
+                    phase = detail.str();
+                    return false;
+                }
+
+                phase += ":recovery";
+                bool fenced = false;
+                if (ptw_error_site == RandomConstraints::ptw_error_stage1) {
+                    fenced = environment.issue_sfence(
+                        0, 0, true, true, false, false);
+                } else if (ptw_error_site ==
+                           RandomConstraints::ptw_error_gstage) {
+                    fenced = environment.issue_sfence(
+                        0, 0, true, true, false, true);
+                } else {
+                    fenced = environment.issue_sfence(
+                                  0, 0, true, true, true, false) &&
+                        environment.issue_sfence(
+                            0, 0, true, true, false, true);
+                }
+                const std::uint64_t recovery_ptw_before =
+                    environment.ptw_requests();
+                auto recovery = make_load(
+                    address, memblock::LoadOp::ld,
+                    random() % memblock::kScalarLoadLanes);
+                environment.expect_load(recovery);
+                if (!fenced ||
+                    !environment.set_rob_head(
+                        recovery.rob, recovery.rob_flag) ||
+                    !environment.enqueue_load(recovery) ||
+                    !environment.issue_load(recovery, 4096) ||
+                    !environment.run_until_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_lq_retired(8192) ||
+                    environment.ptw_error_response_requests() !=
+                        error_responses_before + manager_delta[0] ||
+                    environment.ptw_requests_covering_since(
+                        *target_pte, recovery_ptw_before) == 0) {
+                    return false;
+                }
+                const unsigned mode_index =
+                    ptw_error_site == RandomConstraints::ptw_error_stage1
+                    ? ptw_error_stage1_mode
+                    : ptw_error_site == RandomConstraints::ptw_error_gstage
+                    ? ptw_error_g_mode
+                    : ptw_error_vs_mode * 2 + ptw_error_g_mode;
+                constraint_coverage.sample_ptw_error(
+                    ptw_error_site, ptw_error_store,
+                    ptw_error_level_class, ptw_error_outcome, mode_index,
+                    ptw_error_target_level, manager_delta);
+                sample_dcache = false;
+                ++coverage.cacheable;
+                phase = "seeded-mixed-tail";
             } else if (kind == RandomConstraints::vector_load ||
                        kind == RandomConstraints::vector_store) {
                 const bool store = kind == RandomConstraints::vector_store;
@@ -33542,8 +34709,46 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                               random() % hypervisor_load_operations.size()];
                     const unsigned size =
                         1U << (static_cast<unsigned>(op) & 3U);
+                    const std::uint64_t address =
+                        action_cacheable_address(size);
+                    const auto reference = memblock::reference_two_stage_access(
+                        environment.memory(),
+                        random_vs_roots[translation.vs_mode],
+                        random_g_roots[translation.g_mode], address,
+                        memblock::ReferenceMemoryAccess::load,
+                        page_mode(translation.vs_mode),
+                        page_mode(translation.g_mode),
+                        memblock::ReferencePrivilegeMode::supervisor,
+                        false, false,
+                        *hypervisor_family ==
+                            RandomConstraints::hypervisor_hlvx);
+                    if (!reference.translated ||
+                        reference.physical_address != address) {
+                        std::ostringstream detail;
+                        detail << phase << ":hypervisor-reference"
+                               << ":family=" << *hypervisor_family
+                               << ":op=0x" << std::hex
+                               << static_cast<unsigned>(op)
+                               << ":address=0x" << address
+                               << ":pa=0x" << reference.physical_address
+                               << std::dec
+                               << ":stage1_pf="
+                               << reference.stage1_page_fault
+                               << ":gpf=" << reference.guest_page_fault
+                               << ":af=" << reference.access_fault;
+                        phase = detail.str();
+                        return false;
+                    }
+                    {
+                        std::ostringstream detail;
+                        detail << phase << ":family=" << *hypervisor_family
+                               << ":op=0x" << std::hex
+                               << static_cast<unsigned>(op)
+                               << ":address=0x" << address << std::dec;
+                        phase = detail.str();
+                    }
                     const auto transaction = make_load(
-                        action_cacheable_address(size), op, random() % 3);
+                        address, op, random() % 3);
                     if (!issue_load(transaction) ||
                         !environment.run_until_queues_retired(8192)) {
                         return false;
@@ -33917,10 +35122,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ordinary_leaf_addressed && ordinary_leaf_enabled;
             const TranslationLeafTopology observed_leaf = leaf_addressed
                 ? leaf : TranslationLeafTopology{};
-            constraint_coverage.sample_translation(
-                translation, observed_leaf, ptw_requests_before,
-                environment.ptw_requests(), 1,
-                (leaf_addressed || sample_ordinary_leaf) ? 1 : 0);
+            if (sample_translation_action) {
+                constraint_coverage.sample_translation(
+                    translation, observed_leaf, ptw_requests_before,
+                    environment.ptw_requests(), 1,
+                    (leaf_addressed || sample_ordinary_leaf) ? 1 : 0);
+            }
             if (sample_dcache) {
                 constraint_coverage.sample_dcache(
                     requests_before, environment.tilelink_requests());
@@ -34094,6 +35301,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
         }
 
+        phase = "redirect-recovery-context";
+        if (!environment.run_until_all_complete(4096) ||
+            !environment.run_until_queues_retired(4096) ||
+            !flush_pending_translation_fences() ||
+            !environment.activate_bare()) {
+            return false;
+        }
         phase = "redirect-recovery";
         const std::uint64_t canceled_rob_offset = rob_offset;
         auto canceled = make_load(

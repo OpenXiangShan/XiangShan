@@ -2292,3 +2292,59 @@ The frozen executable and runtime-manifest SHA-256 values are
 `eb14b54fdac43f0e515f482e1fa200445f786b2035be1d3aa0b41263e4b14bcb`
 and `c52b4030cf1229105232103d1b3ac707e4614f047131725b99658e10f50878cf`.
 No CPU RTL defect was observed.
+
+## Schema 19 Random PTW Manager Error Closure
+
+On 2026-09-08 the common `random-mixed` interface added address-qualified PTW
+manager errors. Five sites cover host stage-1, G-only, implicit G translation
+of a VS PTE address, the VS PTE read, and the final nested G walk. The common
+weights independently cross load/store, root/intermediate/leaf, Sv39/Sv48,
+Sv39x4/Sv48x4, and denied/first-beat-corrupt/last-beat-corrupt. Each action
+derives the target PTE address and cutoff from an independent walk, requires
+the precise original-access fault and no target DCache/Uncache request, then
+fences every affected translation domain and requires a clean same-address
+retry that rereads the failed block.
+
+The coverage model has 90 site x direction x level-class x outcome bins, 20
+site-specific mode bins, and 20 target-level bins. PTW request coalescing or
+replay may legally produce more than one manager request for an action, so the
+manager oracle conserves the actual error responses and D beats rather than
+assuming one request per instruction. The following runs used the final
+schema-19 binary and complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Requested actions | Cycle | PTW error actions | PTW requests | Error manager tuple |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `spec` | 19007 | 256 | 24,414 | 0 | 91 | 0/0/0 |
+| `coverage` frozen artifact | 19006 | 512 | 88,669 | 93 | 1,394 | 134/88/178 |
+| `corner` | 19008 | 512 | 149,000 | 93 | 1,458 | 136/90/181 |
+| PTW-only coverage | 19005 | 256 | 78,005 | 155 | 1,953 | 155/124/217 |
+
+The `spec` preset deliberately leaves synthetic PTW errors disabled and
+observed all-zero bins. The other three runs closed every enabled PTW outcome,
+mode, and target-level bin. The PTW-only run kept all ordinary random operation,
+translation, fence, Probe, and stride-stream counters at zero, proving that
+feature-local constraints do not inherit unrelated coverage gates. Five
+invalid site/level/stage-mode configurations were also rejected before cycle 0
+with their specific constraint error.
+
+Three harness issues were corrected during closure. Page-table construction
+now uses collision-free reference mappings instead of XOR-derived 4-KiB keys.
+After a PTW access fault, pending `SFENCE.VMA`, `HFENCE.VVMA`, and
+`HFENCE.GVMA` domains are retained as a bitmask and flushed while the old
+context is active, before another root is installed. Finally, the fixed vector
+shape wave deterministically makes its nonzero-`vstart` and partial-VL classes
+reachable rather than relying on a lucky seed. These were UT environment or
+coverage defects, not CPU RTL defects, so no `CPU_BUG_*` document was created.
+
+All 186 Python unit tests and `check-rtl` passed. The independent verifier
+accepted the frozen-runtime coverage result:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=19006..19006 results=1 transactions=512 elapsed_seconds=34.832519 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=8170e32428ebc8a682b794536ede301ed30a33afab6c3aab81a382ab72435f10
+```
+
+The frozen executable and runtime-manifest SHA-256 values are
+`f73bea1339de2a5592a275af53900becd16a9ab665bb66ada4c413fb79b365f7`
+and `56d61697694583a6b6521875ec1173b984303212c91dc53a2472b97991e894f9`.
+No CPU RTL defect was observed.

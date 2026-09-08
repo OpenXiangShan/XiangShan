@@ -12,6 +12,30 @@ REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
 class MemBlockEnvironmentContractTest(unittest.TestCase):
+    def test_page_mapping_reuses_walk_structure_instead_of_xor_keys(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+
+        for contract in (
+            "ReferencePageMode::sv39, false, 0",
+            "ReferencePageMode::sv48, false, 0",
+            "ReferencePageMode::sv39, true, 0",
+            "ReferencePageMode::sv48, true, 0",
+        ):
+            self.assertIn(contract, environment)
+        for obsolete_cache in (
+            "sv39_l1_tables_",
+            "sv39_l0_tables_",
+            "sv48_l2_tables_",
+            "sv48_l1_tables_",
+            "sv48_l0_tables_",
+            "gstage_l1_tables_",
+            "gstage_l0_tables_",
+            "gstage_sv48_l2_tables_",
+            "gstage_sv48_l1_tables_",
+            "gstage_sv48_l0_tables_",
+        ):
+            self.assertNotIn(obsolete_cache, environment)
+
     def test_single_load_covers_refill_order_merge_and_partial_progress(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
@@ -1451,12 +1475,17 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         for contract in (
             "PtwCorruptBeat",
             "inject_response_error_after",
+            "inject_response_error_at",
             "pending_response_error_->clean_requests",
+            "pending_response_error_->address",
             "selected_corrupt_beat",
             "denied || (corrupt && selected_corrupt_beat)",
             "response.denied",
             "response.corrupt",
             "ptw_error_response_requests",
+            "ptw_denied_d_beats",
+            "ptw_corrupt_d_beats",
+            "dcache_requests_covering_since",
         ):
             self.assertIn(contract, environment)
         for contract in (
@@ -2393,6 +2422,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "atomic_error_denied_per_mille",
             "dcache_load_error_per_mille",
             "dcache_load_error_denied_per_mille",
+            "ptw_error_site_weights",
+            "ptw_error_level_weights",
+            "ptw_error_stores_per_mille",
+            "ptw_error_denied_per_mille",
+            "ptw_error_corrupt_first_per_mille",
             "uncache_error_per_mille",
             "uncache_load_error_denied_per_mille",
             "probes_per_mille",
@@ -2403,6 +2437,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "mmio_stores_per_mille",
             "stride_stream_per_mille",
             "ConstraintCoverage",
+            "uses_locality()",
+            "if (constraints.uses_locality())",
+            "samples_translation()",
+            "if (!constraints.samples_translation())",
             "target_ops=",
             "actual_ops=",
             "target_hypervisor_family=",
@@ -2424,6 +2462,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_dcache_load_error_kind=",
             "actual_dcache_load_outcome=",
             "actual_dcache_load_error_manager=",
+            "target_ptw_error_site=",
+            "target_ptw_error_level=",
+            "target_ptw_error_store=",
+            "target_ptw_error_denied=",
+            "target_ptw_error_corrupt_first=",
+            "actual_ptw_error_outcome=",
+            "actual_ptw_error_mode=",
+            "actual_ptw_error_target_level=",
+            "actual_ptw_error_manager=",
             "target_uncache_error=",
             "target_uncache_load_error_denied=",
             "actual_uncache_error=",
@@ -2502,7 +2549,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_need_data=",
             "actual_probe_overlap=",
             "probe_max_outstanding=",
-            "constraint_schema=18",
+            "constraint_schema=19",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2525,6 +2572,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "dcache_denied_d_beats",
             "dcache_corrupt_d_beats",
             "dcache-load-error=1000 requires concurrent=0",
+            "PTW error site constraint weights cannot all be zero",
+            "PTW error level constraint weights cannot all be zero",
+            "stage-1 PTW errors require a nonzero stage-1 mode weight",
+            "G-stage PTW errors require a nonzero G-stage mode weight",
+            "nested PTW errors require a nonzero VS-stage mode weight",
+            "inject_persistent_ptw_response_error_at",
+            "clear_ptw_response_error",
+            "reference_pte_address_at_level",
+            "pending_translation_fences",
+            "pending_hfence_vvma",
+            "pending_hfence_gvma",
+            "random-vector-translation-reference",
+            "shape == 1 || shape == 2",
+            "shape == 3 ? elements - 1U",
+            "reference_page_walk_permissions",
             "run_until_dcache_idle",
             "uncache_error_response_requests",
             "uncache_denied_d_beats",
@@ -2536,6 +2598,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "dcache_max_probe_outstanding() < 2",
         ):
             self.assertIn(contract, driver)
+        self.assertIn(
+            "!flush_pending_translation_fences() ||\n"
+            "                    !activate_translation_context(context)",
+            driver,
+        )
         self.assertIn(
             "is_cmo(transaction.op) || sq_dequeued_ < target", environment
         )
@@ -2550,6 +2617,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "nc",
             "mmio",
             "cmo",
+            "ptw-error",
             "cmo-clean",
             "cmo-flush",
             "cmo-inval",
@@ -2559,6 +2627,17 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "cmo-error-denied",
             "atomic-error",
             "atomic-error-denied",
+            "ptw-error-stage1",
+            "ptw-error-gstage",
+            "ptw-error-nested-g-implicit",
+            "ptw-error-nested-vs",
+            "ptw-error-nested-g-final",
+            "ptw-error-root",
+            "ptw-error-intermediate",
+            "ptw-error-leaf",
+            "ptw-error-store",
+            "ptw-error-denied",
+            "ptw-error-corrupt-first",
             "uncache-error",
             "uncache-load-error-denied",
             "probe-overlap",
