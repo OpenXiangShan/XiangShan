@@ -1175,6 +1175,13 @@ physical regions. Load data and committed HSV bytes are therefore checked
 against the physical reference image rather than inferred from DUT translation
 state.
 
+Schema 23 uses the existing `misaligned` constraint as a first-class
+hypervisor dimension. Every enabled HLV/HLVX/HSV x SPVP=S/U pair is crossed
+with aligned and misaligned addresses when both are enabled. Forced
+misalignment selects only operations wider than one byte, checks the generated
+address class before issue, and retains the independent two-stage physical
+address/data oracle.
+
 For a reproducible local pressure run:
 
 ```sh

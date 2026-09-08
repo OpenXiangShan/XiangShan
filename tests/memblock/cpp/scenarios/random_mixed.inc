@@ -313,7 +313,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     };
     auto constrained_cacheable_address = [&] (
         unsigned alignment, const TranslationContext &translation,
-        const TranslationLeafTopology &leaf) {
+        const TranslationLeafTopology &leaf,
+        std::optional<bool> force_misaligned = std::nullopt) {
         std::uint64_t line = constrained_locality_line();
         std::uint64_t region_base = cache0_base + 0x10000;
         if (translation.regime == RandomConstraints::translation_stage1 &&
@@ -338,9 +339,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             line = 64 + line % 896;
         }
         std::uint64_t address = region_base + line * 64;
-        const bool misaligned = alignment > 1 &&
-            random() % 1000 < constraints.misaligned_per_mille;
-        if (misaligned) {
+        const bool selected_misaligned = force_misaligned
+            ? *force_misaligned
+            : random() % 1000 < constraints.misaligned_per_mille;
+        const bool misaligned = alignment > 1 && selected_misaligned;
+        if (misaligned && alignment > 1) {
             address += 1 + random() % (alignment - 1);
         } else {
             address += ((random() % 64) / alignment) * alignment;
@@ -348,12 +351,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         return address;
     };
     auto constrained_hypervisor_user_address = [&] (
-        unsigned alignment, const TranslationLeafTopology &leaf) {
+        unsigned alignment, const TranslationLeafTopology &leaf,
+        bool misaligned) {
         const unsigned topology = leaf.nested_index();
         std::uint64_t address = hypervisor_user_virtual_bases[topology] +
             constrained_locality_line() * 64;
-        const bool misaligned = alignment > 1 &&
-            random() % 1000 < constraints.misaligned_per_mille;
         if (misaligned) {
             address += 1 + random() % (alignment - 1);
         } else {
@@ -2653,6 +2655,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             memblock::LoadOp::hlvhu,
             memblock::LoadOp::hlvwu,
         }};
+        const std::array<memblock::LoadOp, 5>
+            hypervisor_misaligned_load_operations{{
+                memblock::LoadOp::hlvh,
+                memblock::LoadOp::hlvw,
+                memblock::LoadOp::hlvd,
+                memblock::LoadOp::hlvhu,
+                memblock::LoadOp::hlvwu,
+            }};
         const std::array<memblock::LoadOp, 2> hypervisor_execute_operations{{
             memblock::LoadOp::hlvxhu,
             memblock::LoadOp::hlvxwu,
@@ -3938,12 +3948,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             std::optional<unsigned> hypervisor_family;
             bool hypervisor_spvp_user = false;
+            bool hypervisor_misaligned = false;
             if (kind == RandomConstraints::hypervisor) {
                 hypervisor_family =
                     constraints.choose_hypervisor_family(random());
                 hypervisor_spvp_user = choose_binary_class(
                     constraints.hypervisor_spvp_user_per_mille,
                     constraint_coverage.hypervisor_spvp);
+                hypervisor_misaligned = choose_binary_class(
+                    constraints.misaligned_per_mille,
+                    constraint_coverage.hypervisor_alignments);
                 bool cross_forced = false;
                 for (unsigned candidate = 0;
                      candidate < RandomConstraints::hypervisor_family_count &&
@@ -3952,17 +3966,30 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (constraints.hypervisor_family_weights[candidate] == 0) {
                         continue;
                     }
-                    for (unsigned spvp = 0; spvp < 2; ++spvp) {
+                    for (unsigned spvp = 0;
+                         spvp < 2 && !cross_forced; ++spvp) {
                         const bool enabled = spvp == 0
                             ? constraints.hypervisor_spvp_user_per_mille != 1000
                             : constraints.hypervisor_spvp_user_per_mille != 0;
-                        if (enabled &&
-                            constraint_coverage.hypervisor_crosses[
-                                candidate][spvp] == 0) {
-                            hypervisor_family = candidate;
-                            hypervisor_spvp_user = spvp != 0;
-                            cross_forced = true;
-                            break;
+                        if (!enabled) {
+                            continue;
+                        }
+                        for (unsigned alignment = 0; alignment < 2;
+                             ++alignment) {
+                            const bool alignment_enabled = alignment == 0
+                                ? constraints.misaligned_per_mille != 1000
+                                : constraints.misaligned_per_mille != 0;
+                            const std::uint64_t observed =
+                                constraint_coverage.
+                                    hypervisor_alignment_crosses[
+                                        candidate][spvp][alignment];
+                            if (alignment_enabled && observed == 0) {
+                                hypervisor_family = candidate;
+                                hypervisor_spvp_user = spvp != 0;
+                                hypervisor_misaligned = alignment != 0;
+                                cross_forced = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -4463,10 +4490,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 kind != RandomConstraints::ptw_error;
             bool leaf_addressed = false;
             bool ordinary_leaf_addressed = false;
-            const auto action_cacheable_address = [&](unsigned alignment) {
+            const auto action_cacheable_address = [&] (
+                unsigned alignment,
+                std::optional<bool> force_misaligned = std::nullopt) {
                 leaf_addressed = true;
                 return constrained_cacheable_address(
-                    alignment, translation, leaf);
+                    alignment, translation, leaf, force_misaligned);
             };
             std::optional<std::uint64_t> probe_candidate;
             if (kind == RandomConstraints::scalar_load) {
@@ -5689,10 +5718,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
                 const auto hypervisor_address = [&](unsigned size) {
                     if (!hypervisor_spvp_user) {
-                        return action_cacheable_address(size);
+                        return action_cacheable_address(
+                            size, hypervisor_misaligned);
                     }
                     leaf_addressed = true;
-                    return constrained_hypervisor_user_address(size, leaf);
+                    return constrained_hypervisor_user_address(
+                        size, leaf, hypervisor_misaligned);
                 };
                 const auto hypervisor_oracle_address = [&](std::uint64_t address) {
                     if (!hypervisor_spvp_user) {
@@ -5703,10 +5734,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         (address - hypervisor_user_virtual_bases[topology]);
                 };
                 if (*hypervisor_family == RandomConstraints::hypervisor_hsv) {
-                    const auto op = hypervisor_store_operations[
-                        random() % hypervisor_store_operations.size()];
+                    const auto op = hypervisor_misaligned
+                        ? hypervisor_store_operations[
+                              1 + random() %
+                                  (hypervisor_store_operations.size() - 1)]
+                        : hypervisor_store_operations[
+                              random() % hypervisor_store_operations.size()];
                     const unsigned size = memblock::scalar_store_bytes(op);
                     const std::uint64_t address = hypervisor_address(size);
+                    if (((address & (size - 1U)) != 0) !=
+                        hypervisor_misaligned) {
+                        phase += ":hypervisor-store-alignment";
+                        return false;
+                    }
                     const auto reference = memblock::reference_two_stage_access(
                         environment.memory(),
                         random_vs_roots[translation.vs_mode],
@@ -5732,15 +5772,27 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     probe_candidate =
                         reference.physical_address & ~std::uint64_t{63};
                 } else {
-                    const auto op = *hypervisor_family ==
-                            RandomConstraints::hypervisor_hlvx
-                        ? hypervisor_execute_operations[
-                              random() % hypervisor_execute_operations.size()]
-                        : hypervisor_load_operations[
-                              random() % hypervisor_load_operations.size()];
+                    memblock::LoadOp op{};
+                    if (*hypervisor_family ==
+                        RandomConstraints::hypervisor_hlvx) {
+                        op = hypervisor_execute_operations[
+                            random() % hypervisor_execute_operations.size()];
+                    } else if (hypervisor_misaligned) {
+                        op = hypervisor_misaligned_load_operations[
+                            random() %
+                                hypervisor_misaligned_load_operations.size()];
+                    } else {
+                        op = hypervisor_load_operations[
+                            random() % hypervisor_load_operations.size()];
+                    }
                     const unsigned size =
                         1U << (static_cast<unsigned>(op) & 3U);
                     const std::uint64_t address = hypervisor_address(size);
+                    if (((address & (size - 1U)) != 0) !=
+                        hypervisor_misaligned) {
+                        phase += ":hypervisor-load-alignment";
+                        return false;
+                    }
                     const auto reference = memblock::reference_two_stage_access(
                         environment.memory(),
                         random_vs_roots[translation.vs_mode],
@@ -5793,6 +5845,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.hypervisor_spvp[spvp_index];
                 ++constraint_coverage.hypervisor_crosses[
                     *hypervisor_family][spvp_index];
+                const unsigned alignment_index =
+                    hypervisor_misaligned ? 1U : 0U;
+                ++constraint_coverage.hypervisor_alignments[alignment_index];
+                ++constraint_coverage.hypervisor_alignment_crosses[
+                    *hypervisor_family][spvp_index][alignment_index];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::cmo) {
                 ordinary_leaf_addressed = true;

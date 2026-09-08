@@ -162,7 +162,7 @@ scenario implementations:
 | --- | --- | --- |
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype and errors | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences. Schema 18 adds `atomic-error`/`atomic-error-denied`, closes all 18 enabled family x width x clean/corrupt/denied outcomes, and checks the exact exception plus two-beat refill, errored GrantAck/refill, unchanged manager memory at response time, and deterministic poisoned-line cache image if it is later released. LRSC error actions stop at LR because a cold SC cannot request a refill | Cross-hart reservation interference remains integration-level |
-| Hypervisor subtype and effective privilege | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation operations. Schema 22 adds `hypervisor-spvp-user`, maps independent U=1 VS regions for all four 4-KiB/Svnapot VS/G leaf combinations to known physical bytes, and closes every enabled family x SPVP=S/U cross per seed | Add PBMT/device, misalignment, and broader PMP crosses to the same class |
+| Hypervisor subtype, effective privilege, and alignment | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation operations. Schema 22 adds `hypervisor-spvp-user`, maps independent U=1 VS regions for all four 4-KiB/Svnapot VS/G leaf combinations to known physical bytes, and closes every enabled family x SPVP=S/U cross per seed. Schema 23 reuses `misaligned` and closes every enabled family x SPVP x aligned/misaligned cross with a physical data/side-effect oracle | Add PBMT/device and broader PMP crosses to the same class |
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths | Add simultaneous multi-class windows and multiple CMO sources |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
@@ -329,8 +329,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=22`, the resolved target weights,
-and actual operation, atomic family/width, hypervisor family/SPVP/cross, CMO operation/
+Every terminal line prints `constraint_schema=23`, the resolved target weights,
+and actual operation, atomic family/width, hypervisor family/SPVP/alignment
+crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
 clean/corrupt/denied and manager-error accounting, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/

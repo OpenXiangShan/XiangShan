@@ -2478,3 +2478,38 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_
 ```
 
 No CPU RTL defect was observed.
+
+## Schema 23 Random Hypervisor Alignment Closure
+
+On 2026-09-08 the existing common `misaligned` constraint became an explicit
+hypervisor coverage dimension. The scheduler now closes every enabled
+HLV/HLVX/HSV x SPVP=S/U x aligned/misaligned bin per seed. Misaligned actions
+select only operations wider than one byte, self-check the generated address
+class, and retain the independent two-stage PA plus exact load/store oracle.
+
+The following final-binary 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Hypervisor actions | HLV/HLVX/HSV | SPVP S/U | Aligned/misaligned |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| hypervisor-only `coverage` | 23001 | 68,960 | 411 | 147/142/122 | 205/206 | 198/213 |
+| hypervisor-only aligned | 23002 | 71,368 | 411 | 132/140/139 | 219/192 | 411/0 |
+| hypervisor-only misaligned | 23003 | 67,164 | 411 | 132/146/133 | 221/190 | 0/411 |
+| `spec` | 23004 | 58,179 | 14 | 6/4/4 | 8/6 | 8/6 |
+| frozen `coverage` artifact | 1 | 108,068 | 15 | 5/6/4 | 8/7 | 7/8 |
+
+The hypervisor-only mixed run covered all twelve enabled cross bins. The two
+endpoint runs proved that disabled alignment classes remain exactly zero. The
+`spec` preset assigns five per mille to misalignment, but deficit scheduling
+still produced all twelve bins; its flattened family/SPVP/alignment counts were
+`3/1,1/1,1/1,1/1,1/1,1/1`.
+
+All 186 Python unit tests, `check-rtl`, a clean Picker C++ rebuild, smoke, and
+the independent finite-artifact verifier passed. The verifier checked every
+controller fragment and frozen runtime hash:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=42.921017 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=3575aa22bff04be944400b4bf49deccd801cd929f3a41330affde7e011fb55cd
+```
+
+No CPU RTL defect was observed.

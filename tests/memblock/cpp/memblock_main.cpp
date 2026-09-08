@@ -1560,7 +1560,8 @@ struct RandomConstraints {
                     hypervisor_family_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
                 actions += families *
-                    direction_classes(hypervisor_spvp_user_per_mille);
+                    direction_classes(hypervisor_spvp_user_per_mille) *
+                    direction_classes(misaligned_per_mille);
             } else if (operation == noncacheable) {
                 uncache_actions +=
                     uncache_outcome_actions(nc_stores_per_mille);
@@ -1771,7 +1772,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=22 constraints=" << name
+        stream << "constraint_schema=23 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2145,6 +2146,11 @@ struct ConstraintCoverage {
     std::array<std::array<std::uint64_t, 2>,
                RandomConstraints::hypervisor_family_count>
         hypervisor_crosses{};
+    std::array<std::uint64_t, 2> hypervisor_alignments{};
+    // [HLV/HLVX/HSV][SPVP=S/U][aligned/misaligned].
+    std::array<std::array<std::array<std::uint64_t, 2>, 2>,
+               RandomConstraints::hypervisor_family_count>
+        hypervisor_alignment_crosses{};
     std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
         cmo_operations{};
     std::array<std::uint64_t, 2> cmo_line_states{};
@@ -2568,6 +2574,7 @@ struct ConstraintCoverage {
         }
         if (operation == RandomConstraints::hypervisor) {
             std::array<std::uint64_t, 2> cross_spvp{};
+            std::array<std::uint64_t, 2> cross_alignment{};
             std::uint64_t cross_total = 0;
             for (unsigned family = 0; family < hypervisor_crosses.size();
                  ++family) {
@@ -2582,7 +2589,27 @@ struct ConstraintCoverage {
                         spvp_enabled;
                     const std::uint64_t count =
                         hypervisor_crosses[family][spvp];
-                    if ((count != 0) != enabled) {
+                    std::uint64_t alignment_total = 0;
+                    for (unsigned alignment = 0;
+                         alignment < hypervisor_alignment_crosses[family][spvp]
+                                         .size();
+                         ++alignment) {
+                        const bool alignment_enabled = alignment == 0
+                            ? constraints.misaligned_per_mille != 1000
+                            : constraints.misaligned_per_mille != 0;
+                        const bool alignment_cross_enabled =
+                            enabled && alignment_enabled;
+                        const std::uint64_t alignment_count =
+                            hypervisor_alignment_crosses[
+                                family][spvp][alignment];
+                        if ((alignment_count != 0) !=
+                            alignment_cross_enabled) {
+                            return false;
+                        }
+                        alignment_total += alignment_count;
+                        cross_alignment[alignment] += alignment_count;
+                    }
+                    if (alignment_total != count) {
                         return false;
                     }
                     cross_family += count;
@@ -2595,6 +2622,7 @@ struct ConstraintCoverage {
             }
             return operations[operation] != 0 &&
                 cross_spvp == hypervisor_spvp &&
+                cross_alignment == hypervisor_alignments &&
                 cross_total == operations[operation];
         }
         if (operation == RandomConstraints::cmo) {
@@ -3092,6 +3120,19 @@ public:
                  spvp < hypervisor_crosses[family].size(); ++spvp) {
                 stream << (family == 0 && spvp == 0 ? "" : ",")
                        << hypervisor_crosses[family][spvp];
+            }
+        }
+        stream << " actual_hypervisor_alignment="
+               << hypervisor_alignments[0] << ',' << hypervisor_alignments[1]
+               << " actual_hypervisor_alignment_cross=";
+        bool first_hypervisor_alignment = true;
+        for (const auto &family : hypervisor_alignment_crosses) {
+            for (const auto &spvp : family) {
+                for (const auto count : spvp) {
+                    stream << (first_hypervisor_alignment ? "" : ",")
+                           << count;
+                    first_hypervisor_alignment = false;
+                }
             }
         }
         stream << " actual_cmo_operation=" << cmo_operations[0] << ','

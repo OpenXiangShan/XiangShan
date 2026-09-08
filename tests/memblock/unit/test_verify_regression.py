@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 23
+        result["constraint_schema"] = 24
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -732,6 +732,56 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "target_hypervisor_spvp_user",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 23,
+                "target_ops": "1,0,3,2,0,0,1,1,1,1,1,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,12,6,90,12,8",
+                "target_hypervisor_family": "1,1,1",
+                "actual_hypervisor_family": "4,4,4",
+                "target_hypervisor_spvp_user": 500,
+                "actual_hypervisor_spvp": "6,6",
+                "actual_hypervisor_cross": "2,2,2,2,2,2",
+                "target_misaligned": 500,
+                "actual_hypervisor_alignment": "6,6",
+                "actual_hypervisor_alignment_cross": ",".join(["1"] * 12),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_alignment_cross"] = (
+            "2,0," + ",".join(["1"] * 10)
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_alignment_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_misaligned": 0,
+                "actual_hypervisor_alignment": "12,0",
+                "actual_hypervisor_alignment_cross": ",".join(
+                    ["2,0"] * 6
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_misaligned": 1000,
+                "actual_hypervisor_alignment": "0,12",
+                "actual_hypervisor_alignment_cross": ",".join(
+                    ["0,2"] * 6
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["target_misaligned"] = 1001
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_misaligned",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22,
+            19, 20, 21, 22, 23,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -577,6 +577,63 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 cross_spvp == actual_spvp
                 and sum(actual_spvp) == actual_operations[hypervisor_index],
                 "hypervisor SPVP/cross coverage is not conserved",
+            )
+
+        if schema >= 23:
+            target_misaligned = result.get("target_misaligned")
+            actual_alignment = _csv_counts(
+                result, "actual_hypervisor_alignment", 2
+            )
+            actual_alignment_cross = _csv_counts(
+                result, "actual_hypervisor_alignment_cross", 12
+            )
+            _require(
+                isinstance(target_misaligned, int)
+                and not isinstance(target_misaligned, bool)
+                and 0 <= target_misaligned <= 1000,
+                "target_misaligned is not a per-mille integer: "
+                f"{target_misaligned!r}",
+            )
+            cross_alignment = [0, 0]
+            for family in range(3):
+                for spvp in range(2):
+                    pair_total = 0
+                    for alignment in range(2):
+                        enabled = (
+                            target_operations[hypervisor_index] != 0
+                            and target_hypervisor[family] != 0
+                            and (
+                                target_spvp_user != 1000
+                                if spvp == 0
+                                else target_spvp_user != 0
+                            )
+                            and (
+                                target_misaligned != 1000
+                                if alignment == 0
+                                else target_misaligned != 0
+                            )
+                        )
+                        index = family * 4 + spvp * 2 + alignment
+                        count = actual_alignment_cross[index]
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_hypervisor_alignment_cross does not "
+                            "match enabled classes: "
+                            f"family={family} spvp={spvp} "
+                            f"alignment={alignment}",
+                        )
+                        pair_total += count
+                        cross_alignment[alignment] += count
+                    _require(
+                        pair_total == actual_cross[family * 2 + spvp],
+                        "hypervisor alignment/cross coverage is not "
+                        "conserved",
+                    )
+            _require(
+                cross_alignment == actual_alignment
+                and sum(actual_alignment)
+                == actual_operations[hypervisor_index],
+                "hypervisor alignment coverage is not conserved",
             )
 
         if schema >= 13:
