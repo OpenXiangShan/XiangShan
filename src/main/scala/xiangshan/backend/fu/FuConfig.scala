@@ -369,7 +369,8 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    flushPipe = true
+    flushPipe = true,
+    immType = Set(Imm_I())
   )
 
   // Todo: split it to simple bitmap exu and complex bku

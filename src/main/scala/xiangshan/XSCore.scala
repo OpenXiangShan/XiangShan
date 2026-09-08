@@ -137,6 +137,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   frontend.io.tlbCsr <> backend.io.frontendTlbCsr
   frontend.io.csrCtrl <> backend.io.frontendCsrCtrl
   frontend.io.fencei <> backend.io.fenceio.fencei
+  frontend.io.bpuFlush <> backend.io.fenceio.bpuFlush
 
   backend.io.fromTop := memBlock.io.mem_to_ooo.topToBackendBypass
 

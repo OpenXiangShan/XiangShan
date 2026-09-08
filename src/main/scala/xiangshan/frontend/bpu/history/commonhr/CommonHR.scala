@@ -98,9 +98,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   // The two S0 outputs are combinational Wires over registers that only clear at the
   // end-of-cycle write, so zero their data on the contextFlush cycle itself (SPEC 12 §4.4).
-  io.s0_imli     := if (HasBpuFlush) Mux(contextFlush, 0.U(ImliHistoryLength.W), s0_imli) else s0_imli
-  io.s0_commonHR := if (HasBpuFlush) Mux(contextFlush, 0.U.asTypeOf(new CommonHREntry), s0_commonHR)
-    else s0_commonHR
+  io.s0_imli     := (if (HasBpuFlush) Mux(contextFlush, 0.U(ImliHistoryLength.W), s0_imli) else s0_imli)
+  io.s0_commonHR := (if (HasBpuFlush) Mux(contextFlush, 0.U.asTypeOf(new CommonHREntry), s0_commonHR) else s0_commonHR)
   io.s3ResolveMeta := s3_commonHRResolveMeta
 
   /*

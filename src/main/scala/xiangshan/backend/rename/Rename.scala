@@ -584,7 +584,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     // Todo: move these shit in decode stage
     // dirty code for fence. The lsrc is passed by imm.
-    when (io.out(i).bits.fuType === FuType.fence.U) {
+    // FENCE.TIME keeps the I-Type immediate (inst[31:20], flags in inst[23:20]) from Decode.
+    when (io.out(i).bits.fuType === FuType.fence.U && io.out(i).bits.fuOpType =/= FenceOpType.fencetime) {
       io.out(i).bits.imm := Cat(io.in(i).bits.lsrc(1), io.in(i).bits.lsrc(0))
     }
 

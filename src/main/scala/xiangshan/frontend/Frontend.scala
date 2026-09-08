@@ -74,6 +74,7 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val reset_vector: PrunedAddr       = Input(PrunedAddr(PAddrBits))
   val sfence:       SfenceBundle     = Input(new SfenceBundle)
   val fencei:       Bool             = Input(Bool())
+  val bpuFlush:     Bool             = Input(Bool())
   val ptw:          TlbPtwIO         = new TlbPtwIO
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
   val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
@@ -240,8 +241,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
   // shared register for iCache flush and BPU phase-1 flush trigger
   val fencei_reg = RegNext(io.fencei)
+  // FENCE.TIME BPU phase-1 flush trigger; ICache is flushed by FENCE.I only
+  val bpuFlush_reg = RegNext(io.bpuFlush)
   icache.io.fencei      := fencei_reg
-  if (HasBpuFlush) { bpu.io.flush.get := fencei_reg }
+  if (HasBpuFlush) { bpu.io.flush.get := fencei_reg || bpuFlush_reg }
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in
