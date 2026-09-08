@@ -4447,6 +4447,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             unsigned set_pressure_depth_index = 0;
             unsigned set_pressure_width = 0;
             unsigned set_pressure_set = 0;
+            bool set_pressure_dirty = false;
             if (kind == RandomConstraints::set_pressure) {
                 set_pressure_depth_index =
                     constraints.choose_set_pressure_depth(random());
@@ -4454,6 +4455,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraints.choose_set_pressure_width(random());
                 set_pressure_set =
                     constraints.choose_set_pressure_set(random());
+                set_pressure_dirty = choose_binary_class(
+                    constraints.set_pressure_dirty_per_mille,
+                    constraint_coverage.set_pressure_line_states);
                 for (unsigned set = 0;
                      set < constraint_coverage.set_pressure_sets.size(); ++set) {
                     if (constraints.set_pressure_set_weights[set] != 0 &&
@@ -4712,45 +4716,64 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             } else if (kind == RandomConstraints::set_pressure) {
                 bool forced_cross = false;
-                for (unsigned depth = 0;
-                     depth < constraint_coverage.set_pressure_crosses.size() &&
+                for (unsigned state = 0;
+                     state < constraint_coverage.set_pressure_crosses.size() &&
                          !forced_cross;
-                     ++depth) {
-                    if (constraints.set_pressure_depth_weights[depth] == 0) {
+                     ++state) {
+                    const bool state_enabled = state == 0
+                        ? constraints.set_pressure_dirty_per_mille != 1000
+                        : constraints.set_pressure_dirty_per_mille != 0;
+                    if (!state_enabled) {
                         continue;
                     }
-                    for (unsigned width = 0;
-                         width < constraint_coverage
-                                     .set_pressure_crosses[depth].size() &&
+                    for (unsigned depth = 0;
+                         depth < constraint_coverage
+                                     .set_pressure_crosses[state].size() &&
                              !forced_cross;
-                         ++width) {
-                        if (constraints.set_pressure_width_weights[width] == 0) {
+                         ++depth) {
+                        if (constraints.set_pressure_depth_weights[depth] == 0) {
                             continue;
                         }
-                        for (unsigned regime = 0;
-                             regime < RandomConstraints::translation_regime_count;
-                             ++regime) {
-                            if (constraints.translation_weights[regime] != 0 &&
-                                constraint_coverage.set_pressure_crosses[
-                                    depth][width][regime] == 0) {
-                                set_pressure_depth_index = depth;
-                                set_pressure_width = width;
-                                translation = TranslationContext{};
-                                translation.regime = regime;
-                                if (regime ==
-                                    RandomConstraints::translation_stage1) {
-                                    translation.stage1_mode = first_enabled_mode(
-                                        constraints.stage1_mode_weights);
-                                } else if (regime ==
-                                           RandomConstraints::
-                                               translation_nested) {
-                                    translation.vs_mode = first_enabled_mode(
-                                        constraints.vs_mode_weights);
-                                    translation.g_mode = first_enabled_mode(
-                                        constraints.g_mode_weights);
+                        for (unsigned width = 0;
+                             width < constraint_coverage
+                                         .set_pressure_crosses[state][depth]
+                                         .size() &&
+                                 !forced_cross;
+                             ++width) {
+                            if (constraints.set_pressure_width_weights[width] ==
+                                0) {
+                                continue;
+                            }
+                            for (unsigned regime = 0;
+                                 regime < RandomConstraints::
+                                     translation_regime_count;
+                                 ++regime) {
+                                if (constraints.translation_weights[regime] !=
+                                        0 &&
+                                    constraint_coverage.set_pressure_crosses[
+                                        state][depth][width][regime] == 0) {
+                                    set_pressure_dirty = state != 0;
+                                    set_pressure_depth_index = depth;
+                                    set_pressure_width = width;
+                                    translation = TranslationContext{};
+                                    translation.regime = regime;
+                                    if (regime == RandomConstraints::
+                                            translation_stage1) {
+                                        translation.stage1_mode =
+                                            first_enabled_mode(
+                                                constraints.
+                                                    stage1_mode_weights);
+                                    } else if (regime ==
+                                               RandomConstraints::
+                                                   translation_nested) {
+                                        translation.vs_mode = first_enabled_mode(
+                                            constraints.vs_mode_weights);
+                                        translation.g_mode = first_enabled_mode(
+                                            constraints.g_mode_weights);
+                                    }
+                                    forced_cross = true;
+                                    break;
                                 }
-                                forced_cross = true;
-                                break;
                             }
                         }
                     }
@@ -5265,38 +5288,188 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     static_cast<unsigned>(random() % (8U / width_bytes)) *
                         width_bytes;
 
-                environment.clear_release_line_expectations();
-                const std::uint64_t requests_before_pressure =
-                    environment.tilelink_requests();
-                const std::uint64_t expected_releases_before =
-                    environment.tilelink_expected_release_data_verified();
-                const std::uint64_t releases_before_pressure =
-                    environment.tilelink_release_data();
-                const std::uint64_t verified_before_pressure =
-                    environment.tilelink_release_data_verified();
-                const std::uint64_t writebacks_before_pressure =
-                    environment.store_writebacks();
-                const std::uint64_t sq_before_pressure =
-                    environment.sq_dequeued();
-                std::vector<memblock::StoreTransaction> pressure_stores;
-                pressure_stores.reserve(depth);
-                std::array<std::uint64_t, 2> issue_orders{};
-                for (unsigned index = 0; index < depth; ++index) {
+                if (!set_pressure_dirty) {
+                    environment.clear_release_line_expectations();
+                    environment.begin_dcache_release_observation();
+                    const std::uint64_t requests_before_pressure =
+                        environment.tilelink_requests();
+                    const std::uint64_t all_releases_before_pressure =
+                        environment.tilelink_releases();
+                    const std::uint64_t releases_before_pressure =
+                        environment.tilelink_release_data();
+                    const std::uint64_t verified_before_pressure =
+                        environment.tilelink_release_data_verified();
+                    const std::uint64_t writebacks_before_pressure =
+                        environment.writebacks();
+                    const std::uint64_t lq_before_pressure =
+                        environment.lq_dequeued();
+                    constexpr std::array<memblock::LoadOp, 4>
+                        unsigned_load_ops{{
+                            memblock::LoadOp::lbu, memblock::LoadOp::lhu,
+                            memblock::LoadOp::lwu, memblock::LoadOp::ld,
+                        }};
+                    std::vector<memblock::LoadTransaction> pressure_loads;
+                    pressure_loads.reserve(depth);
+                    for (unsigned index = 0; index < depth; ++index) {
+                        const std::uint64_t line =
+                            first_line + index * same_set_stride;
+                        environment.memory().fill_incrementing(
+                            line, line_bytes,
+                            static_cast<std::uint8_t>(
+                                0x31U + set_index + index * 17U));
+                        environment.expect_release_line(
+                            line,
+                            environment.memory().read_beat(line, line_bytes));
+                        auto load = make_load(
+                            line + offset,
+                            unsigned_load_ops[set_pressure_width],
+                            (index + set_pressure_set) %
+                                memblock::kScalarLoadLanes);
+                        load.oracle_address = load.address;
+                        if (!issue_load(load, std::nullopt, false)) {
+                            phase = "random-set-pressure-clean-fill";
+                            return false;
+                        }
+                        coverage.sample(load);
+                        pressure_loads.push_back(load);
+                    }
+                    phase = "random-set-pressure-clean-fill-complete";
+                    if (!environment.run_until_queues_retired(8192) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+
+                    std::uint64_t initial_target_requests = 0;
+                    for (const auto &load : pressure_loads) {
+                        const std::uint64_t target_requests =
+                            environment.dcache_requests_covering_since(
+                                load.address & ~std::uint64_t{63},
+                                requests_before_pressure);
+                        if (target_requests != 1) {
+                            phase = "random-set-pressure-clean-initial-request";
+                            return false;
+                        }
+                        initial_target_requests += target_requests;
+                    }
+                    const std::uint64_t requests_before_revisit =
+                        environment.tilelink_requests();
+                    for (unsigned reverse = depth; reverse != 0; --reverse) {
+                        const unsigned index = reverse - 1U;
+                        auto revisit = make_load(
+                            pressure_loads[index].address,
+                            pressure_loads[index].op,
+                            (index + set_pressure_set + 1U) %
+                                memblock::kScalarLoadLanes);
+                        revisit.oracle_address = revisit.address;
+                        if (!issue_load(revisit, std::nullopt, false)) {
+                            phase = "random-set-pressure-clean-revisit";
+                            return false;
+                        }
+                        coverage.sample(revisit);
+                    }
+                    phase = "random-set-pressure-clean-revisit-complete";
+                    if (!environment.run_until_queues_retired(8192) ||
+                        !environment.run_until_dcache_idle(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+
+                    std::uint64_t revisit_target_requests = 0;
+                    std::uint64_t target_releases = 0;
+                    std::uint64_t target_release_data = 0;
+                    for (const auto &load : pressure_loads) {
+                        revisit_target_requests +=
+                            environment.dcache_requests_covering_since(
+                                load.address & ~std::uint64_t{63},
+                                requests_before_revisit);
+                        target_releases +=
+                            environment.observed_dcache_releases_covering(
+                                load.address & ~std::uint64_t{63});
+                        target_release_data +=
+                            environment.observed_dcache_release_data_covering(
+                                load.address & ~std::uint64_t{63});
+                    }
+                    const std::array<std::uint64_t, 12> manager_delta{{
+                        1,
+                        depth,
+                        initial_target_requests,
+                        depth,
+                        revisit_target_requests,
+                        target_releases,
+                        target_release_data,
+                        environment.tilelink_releases() -
+                            all_releases_before_pressure,
+                        environment.tilelink_release_data() -
+                            releases_before_pressure,
+                        environment.tilelink_release_data_verified() -
+                            verified_before_pressure,
+                        environment.writebacks() - writebacks_before_pressure,
+                        environment.lq_dequeued() - lq_before_pressure,
+                    }};
+                    if (manager_delta[2] != depth ||
+                        manager_delta[4] < depth - dcache_ways ||
+                        manager_delta[5] < depth - dcache_ways ||
+                        manager_delta[6] != 0 ||
+                        manager_delta[7] < manager_delta[5] ||
+                        manager_delta[9] != manager_delta[8] ||
+                        manager_delta[10] != depth * 2U ||
+                        manager_delta[11] != depth * 2U) {
+                        std::ostringstream detail;
+                        detail << "random-set-pressure-clean-manager"
+                               << ":depth=" << depth
+                               << ":width=" << width_bytes
+                               << ":set=" << set_index << ":manager=";
+                        for (unsigned index = 0; index < manager_delta.size();
+                             ++index) {
+                            detail << (index == 0 ? "" : ",")
+                                   << manager_delta[index];
+                        }
+                        phase = detail.str();
+                        return false;
+                    }
+                    environment.end_dcache_release_observation();
+                    environment.clear_release_line_expectations();
+                    constraint_coverage.sample_set_pressure(
+                        false, set_pressure_depth_index, set_pressure_width,
+                        translation.regime, set_pressure_set, {}, {},
+                        manager_delta);
+                    ordinary_leaf_addressed = true;
+                    ++actions;
+                    coverage.cacheable += depth * 2U;
+                } else {
+                  environment.clear_release_line_expectations();
+                  const std::uint64_t requests_before_pressure =
+                      environment.tilelink_requests();
+                  const std::uint64_t expected_releases_before =
+                      environment.tilelink_expected_release_data_verified();
+                  const std::uint64_t releases_before_pressure =
+                      environment.tilelink_release_data();
+                  const std::uint64_t verified_before_pressure =
+                      environment.tilelink_release_data_verified();
+                  const std::uint64_t writebacks_before_pressure =
+                      environment.store_writebacks();
+                  const std::uint64_t sq_before_pressure =
+                      environment.sq_dequeued();
+                  std::vector<memblock::StoreTransaction> pressure_stores;
+                  pressure_stores.reserve(depth);
+                  std::array<std::uint64_t, 2> issue_orders{};
+                  for (unsigned index = 0; index < depth; ++index) {
                     const std::uint64_t line =
                         first_line + index * same_set_stride;
                     environment.memory().fill_incrementing(
                         line, line_bytes,
-                        static_cast<std::uint8_t>(
-                            0x31U + set_index + index * 17U));
+                        static_cast<std::uint8_t>(0x31U + set_index +
+                                                  index * 17U));
                     std::vector<unsigned char> expected_line =
                         environment.memory().read_beat(line, line_bytes);
                     std::uint64_t data = random();
                     for (unsigned byte = 0; byte < width_bytes; ++byte) {
-                        const auto stored = static_cast<unsigned char>(
-                            expected_line[offset + byte] ^ 0xffU);
-                        data &= ~(std::uint64_t{0xff} << (8U * byte));
-                        data |= std::uint64_t{stored} << (8U * byte);
-                        expected_line[offset + byte] = stored;
+                      const auto stored = static_cast<unsigned char>(
+                          expected_line[offset + byte] ^ 0xffU);
+                      data &= ~(std::uint64_t{0xff} << (8U * byte));
+                      data |= std::uint64_t{stored} << (8U * byte);
+                      expected_line[offset + byte] = stored;
                     }
                     pressure_stores.push_back(make_store(
                         line + offset, data,
@@ -5311,100 +5484,109 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const bool data_first =
                         ((index + (sequence & 1U)) & 1U) != 0;
                     ++issue_orders[data_first ? 1U : 0U];
-                    const bool issued = environment.set_rob_head(
-                                            store.rob, store.rob_flag) &&
+                    const bool issued =
+                        environment.set_rob_head(store.rob, store.rob_flag) &&
                         environment.enqueue_store(
                             store, memblock::lq_pointer_value(lq_offset)) &&
                         (data_first
                              ? environment.issue_store_data(store, 4096) &&
-                                   environment.issue_store_address_until_tlb_hit(
-                                       store,
-                                       constrained_completion_timeout)
+                                   environment
+                                       .issue_store_address_until_tlb_hit(
+                                           store,
+                                           constrained_completion_timeout)
                              : environment.issue_store_address_until_tlb_hit(
-                                   store,
-                                   constrained_completion_timeout) &&
+                                   store, constrained_completion_timeout) &&
                                    environment.issue_store_data(store, 4096));
-                    if (!issued || !environment.run_until_store_complete(
-                                       constrained_completion_timeout) ||
+                    if (!issued ||
+                        !environment.run_until_store_complete(
+                            constrained_completion_timeout) ||
                         !environment.commit_store(store, 8192)) {
-                        return false;
+                      return false;
                     }
                     coverage.sample(store, data_first);
-                }
-                phase = "random-set-pressure-drain-complete";
-                if (!environment.run_until_queues_retired(8192) ||
-                    !environment.run_until_sbuffer_empty(
-                        constrained_completion_timeout) ||
-                    !environment.run_until_expected_release_data_count(
-                        expected_releases_before + depth - dcache_ways,
-                        constrained_completion_timeout) ||
-                    !environment.run_until_dcache_idle(
-                        constrained_completion_timeout)) {
+                  }
+                  phase = "random-set-pressure-drain-complete";
+                  if (!environment.run_until_queues_retired(8192) ||
+                      !environment.run_until_sbuffer_empty(
+                          constrained_completion_timeout) ||
+                      !environment.run_until_expected_release_data_count(
+                          expected_releases_before + depth - dcache_ways,
+                          constrained_completion_timeout) ||
+                      !environment.run_until_dcache_idle(
+                          constrained_completion_timeout)) {
                     return false;
-                }
+                  }
 
-                std::uint64_t target_requests = 0;
-                std::uint64_t preserved_stores = 0;
-                constexpr std::array<memblock::LoadOp, 4> unsigned_load_ops{{
-                    memblock::LoadOp::lbu, memblock::LoadOp::lhu,
-                    memblock::LoadOp::lwu, memblock::LoadOp::ld,
-                }};
-                const std::uint64_t value_mask = width_bytes == 8
-                    ? ~std::uint64_t{0}
-                    : (std::uint64_t{1} << (width_bytes * 8U)) - 1U;
-                for (const auto &store : pressure_stores) {
-                    target_requests += environment.dcache_requests_covering_since(
-                        store.address & ~std::uint64_t{63},
-                        requests_before_pressure);
+                  std::uint64_t target_requests = 0;
+                  std::uint64_t preserved_stores = 0;
+                  constexpr std::array<memblock::LoadOp, 4> unsigned_load_ops{{
+                      memblock::LoadOp::lbu,
+                      memblock::LoadOp::lhu,
+                      memblock::LoadOp::lwu,
+                      memblock::LoadOp::ld,
+                  }};
+                  const std::uint64_t value_mask =
+                      width_bytes == 8
+                          ? ~std::uint64_t{0}
+                          : (std::uint64_t{1} << (width_bytes * 8U)) - 1U;
+                  for (const auto &store : pressure_stores) {
+                    const std::uint64_t store_requests =
+                        environment.dcache_requests_covering_since(
+                            store.address & ~std::uint64_t{63},
+                            requests_before_pressure);
+                    if (store_requests != 1) {
+                      phase = "random-set-pressure-dirty-target-request";
+                      return false;
+                    }
+                    target_requests += store_requests;
                     if (environment.bus_expected_load(
                             store.address,
                             unsigned_load_ops[set_pressure_width]) ==
                         (store.data & value_mask)) {
-                        ++preserved_stores;
+                      ++preserved_stores;
                     }
-                }
-                const std::array<std::uint64_t, 9> manager_delta{{
-                    1,
-                    depth,
-                    target_requests,
-                    environment.tilelink_expected_release_data_verified() -
-                        expected_releases_before,
-                    environment.tilelink_release_data() -
-                        releases_before_pressure,
-                    environment.tilelink_release_data_verified() -
-                        verified_before_pressure,
-                    environment.store_writebacks() -
-                        writebacks_before_pressure,
-                    environment.sq_dequeued() - sq_before_pressure,
-                    preserved_stores,
-                }};
-                if (manager_delta[2] != depth ||
-                    manager_delta[3] < depth - dcache_ways ||
-                    manager_delta[4] < manager_delta[3] ||
-                    manager_delta[5] != manager_delta[4] ||
-                    manager_delta[6] != depth || manager_delta[7] != depth ||
-                    manager_delta[8] != manager_delta[3]) {
+                  }
+                  const std::array<std::uint64_t, 9> manager_delta{{
+                      1,
+                      depth,
+                      target_requests,
+                      environment.tilelink_expected_release_data_verified() -
+                          expected_releases_before,
+                      environment.tilelink_release_data() -
+                          releases_before_pressure,
+                      environment.tilelink_release_data_verified() -
+                          verified_before_pressure,
+                      environment.store_writebacks() -
+                          writebacks_before_pressure,
+                      environment.sq_dequeued() - sq_before_pressure,
+                      preserved_stores,
+                  }};
+                  if (manager_delta[2] != depth ||
+                      manager_delta[3] < depth - dcache_ways ||
+                      manager_delta[4] < manager_delta[3] ||
+                      manager_delta[5] != manager_delta[4] ||
+                      manager_delta[6] != depth || manager_delta[7] != depth ||
+                      manager_delta[8] != manager_delta[3]) {
                     std::ostringstream detail;
                     detail << "random-set-pressure-manager"
-                           << ":depth=" << depth
-                           << ":width=" << width_bytes
+                           << ":depth=" << depth << ":width=" << width_bytes
                            << ":set=" << set_index << ":manager=";
                     for (unsigned index = 0; index < manager_delta.size();
                          ++index) {
-                        detail << (index == 0 ? "" : ",")
-                               << manager_delta[index];
+                      detail << (index == 0 ? "" : ",") << manager_delta[index];
                     }
                     phase = detail.str();
                     return false;
+                  }
+                  environment.clear_release_line_expectations();
+                  constraint_coverage.sample_set_pressure(
+                      true, set_pressure_depth_index, set_pressure_width,
+                      translation.regime, set_pressure_set, issue_orders,
+                      manager_delta);
+                  ordinary_leaf_addressed = true;
+                  ++actions;
+                  coverage.cacheable += depth;
                 }
-                environment.clear_release_line_expectations();
-                constraint_coverage.sample_set_pressure(
-                    set_pressure_depth_index, set_pressure_width,
-                    translation.regime, set_pressure_set, issue_orders,
-                    manager_delta);
-                ordinary_leaf_addressed = true;
-                ++actions;
-                coverage.cacheable += depth;
             } else if (kind == RandomConstraints::scalar_store) {
                 const auto op = static_cast<memblock::StoreOp>(random() % 4);
                 const unsigned size = 1U << static_cast<unsigned>(op);
@@ -5879,16 +6061,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     for (unsigned uop = 0; uop < data_uops; ++uop) {
                         environment.record_committed_vector_store(uops[uop]);
-                    }
-                    const std::uint16_t active =
-                        memblock::active_vector_elements(uops.front());
-                    for (unsigned element = 0;
-                         element < 16U / data_bytes; ++element) {
-                        if (((active >> element) & 1U) != 0) {
-                            probe_candidate = memblock::vector_element_address(
-                                uops.front(), element) & ~std::uint64_t{63};
-                            break;
-                        }
                     }
                 }
                 ++actions;
@@ -6402,9 +6574,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             phase += ":hypervisor-store-physical-image";
                             return false;
                         }
-                    } else {
-                        probe_candidate =
-                            reference.physical_address & ~std::uint64_t{63};
                     }
                 } else {
                     memblock::LoadOp op{};
@@ -7072,8 +7241,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const std::uint64_t block =
                         (sequence / lines_per_half) % overlap_blocks;
                     const std::uint64_t line_index = sequence % lines_per_half;
+                    const unsigned candidate_set = static_cast<unsigned>(
+                        (*probe_candidate >> 6) & 0x7fU);
+                    const std::uint64_t clean_line_index =
+                        (line_index & 0x7fU) == candidate_set
+                        ? (line_index + 1U) % lines_per_half
+                        : line_index;
                     const std::uint64_t clean_line = probe_overlap_base +
-                        block * block_bytes + line_index * 64;
+                        block * block_bytes + clean_line_index * 64;
                     const std::uint64_t miss_line = clean_line + half_block_bytes;
                     const auto clean_load = make_load(
                         clean_line + 8 * (random() % 8),

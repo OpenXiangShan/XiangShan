@@ -901,6 +901,24 @@ public:
         return memory_agent_.request_covering_count_since(
             address, first_request);
     }
+    void begin_dcache_release_observation()
+    {
+        memory_agent_.begin_release_observation();
+    }
+    void end_dcache_release_observation()
+    {
+        memory_agent_.end_release_observation();
+    }
+    std::uint64_t observed_dcache_releases_covering(
+        std::uint64_t address) const
+    {
+        return memory_agent_.observed_release_covering_count(address);
+    }
+    std::uint64_t observed_dcache_release_data_covering(
+        std::uint64_t address) const
+    {
+        return memory_agent_.observed_release_covering_count(address, true);
+    }
     std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
     std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
     std::uint64_t dcache_keyword_refills() const

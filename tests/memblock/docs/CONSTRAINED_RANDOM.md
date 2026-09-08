@@ -49,7 +49,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains nine or ten same-set dirty stores |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains nine or ten same-set clean loads or dirty stores |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -73,9 +73,10 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
 | `load-merge-depth2`, `load-merge-depth3` | Relative two- and three-load batch weights inside `load-merge` |
 | `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns inside `load-merge`: exact duplicate, distinct offsets in the critical 32-byte beat, or distinct offsets spanning both beats |
-| `set-pressure-depth9`, `set-pressure-depth10` | Relative same-set store counts; an eight-way DCache must replace at least one or two target lines respectively |
-| `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative store-width weights inside `set-pressure` |
+| `set-pressure-depth9`, `set-pressure-depth10` | Relative same-set access counts; an eight-way DCache must replace at least one or two target lines respectively |
+| `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative access-width weights inside `set-pressure`; clean actions use the corresponding unsigned load width and dirty actions use the store width |
 | `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for the four 32-set quarters of the 128-set DCache index space |
+| `set-pressure-dirty` | Per-mille share of dirty-store pressure; zero selects only clean-load replacement, 1000 selects only dirty replacement, and intermediate values require both states |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -263,6 +264,9 @@ Their stride-stream rates are `500`, `100`, and `750` per mille. The lower
 `spec` value keeps prefetch training present without turning ordinary load
 traffic into an artificial continuous stream; mandatory closing loads retain
 the per-seed output gate even at this low rate.
+Set-pressure dirty shares are `500`, `50`, and `500` per mille. Thus `spec`
+keeps clean replacement dominant while preserving a nonzero dirty floor;
+coverage and corner balance both line states.
 `spec` and `corner` use the calibrated long-tail profile independently on all
 three managers; `coverage` uses compact latency.
 
@@ -339,7 +343,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=26`, the resolved target weights,
+Every terminal line prints `constraint_schema=27`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -387,11 +391,17 @@ sum of the generated batch depths.
 Set pressure reports 24 depth x width x translation crosses, four set-index
 quarters, both store-half issue orders, and a nine-field manager tuple. Each
 action uses fresh lines in one physical set. Generated stores, target requests,
-store writebacks, and SQ dequeues must match exactly; target ReleaseData must
-reach at least `depth - 8`, every global ReleaseData must pass its byte oracle,
-and every attributed target release must appear with the stored bytes in the
-manager memory. The 4-GiB sparse region supports at least one million actions
-per fixed set quarter without reusing a target line.
+store writebacks, and SQ dequeues must match exactly. Dirty target ReleaseData
+must reach at least `depth - 8`, every global ReleaseData must pass its byte
+oracle, and every attributed dirty target release must appear with the stored
+bytes in manager memory. Clean actions require exact data on both the initial
+fill and reverse revisit, one initial request per target line, at least
+`depth - 8` revisit misses and address-attributed target Releases, zero target
+ReleaseData, and exact load-writeback/LQ-dequeue conservation. Release address
+history is enabled only for the duration of one clean action, so this oracle
+does not grow memory with regression length. The 4-GiB sparse region supports
+at least one million actions per fixed set quarter without reusing a target
+line.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

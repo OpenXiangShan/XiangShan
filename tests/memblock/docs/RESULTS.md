@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `84df82ba65d979b1ea41c6bd17ef1e61ddb21e815e00740b5b1da71debc84482`
+- Current rebuilt and frozen UT executable SHA-256: `32b3b29c89a561d527001e5dc5435b0a96abbdd5cd27e148ab1c8fc4e2a2405e`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `eb3cf3c54c86191181e352e0760cfb0be7026cd6a40efc2399d2fbffa28e0a44`
+- Frozen runtime manifest SHA-256: `e784a3977cd19e838c59e226eff7e605e1875e4923745705cda8b3b73d4f4e20`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -2670,3 +2670,65 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_
 
 No CPU RTL defect was observed. Other NAPOT sizes, TOR boundary composition,
 and the full lock/permission/overlap-by-edge matrix remain explicit gaps.
+
+## Schema 27 Random Clean/Dirty Set-Replacement Closure
+
+On 2026-09-08 `random-mixed` extended the schema-21 dirty `set-pressure`
+action with a `set-pressure-dirty` line-state selector. Clean actions load nine
+or ten fresh tags in one eight-way set and revisit them in reverse. The oracle
+requires exact initial and revisit load results, one initial target request per
+line, at least `depth - 8` revisit misses, and exact load-WB/LQ-dequeue
+conservation. A compact TileLink C observation window is enabled only for one
+clean action; it attributes target Releases by address without retaining
+regression-length history, requires at least `depth - 8` target Releases, and
+rejects any target ReleaseData. Dirty actions retain immutable line-image,
+manager-memory, store-WB/SQ-dequeue, and issue-order checks. Both states cross
+9/10 lines, B/H/W/D accesses, four set quarters, and Bare/stage-1/nested
+translation, producing 48 required bins.
+
+The following final-binary 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/dirty actions | Clean target Release/ReleaseData | Dirty target/global ReleaseData |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| full `coverage` | 27007 | 137,444 | 25/27 | 53/0 | 40/50 |
+| clean-only endpoint | 27008 | 118,719 | 29/0 | 61/0 | 0/17 |
+| full `spec` | 27009 | 88,457 | 24/24 | 50/0 | 36/55 |
+| full `corner` | 27010 | 229,201 | 26/28 | 55/0 | 42/55 |
+| dirty-only endpoint | 27011 | 118,052 | 0/29 | 0/0 | 43/60 |
+| frozen `coverage` artifact | 1 | 130,229 | 24/24 | 53/0 | 36/42 |
+
+Every fully enabled run hit all 48 state/depth/width/translation bins and every
+set quarter. The endpoint runs kept all disabled-state crosses and accounting
+at zero. In the frozen artifact, 228 clean initial loads generated 228 exact
+target requests; 228 reverse revisits generated 36 target misses. Those clean
+actions produced 53 address-attributed target Releases and zero target
+ReleaseData, while all six background ReleaseData transactions were
+byte-verified. Its 228 dirty stores generated exactly 228 target requests,
+store writebacks, and SQ dequeues, with 36 target ReleaseData lines preserving
+their immutable bytes.
+
+The first deterministic `corner` replay of seed 27010 exposed a UT state-model
+error, not an RTL defect. The Probe generator had accepted a hypervisor PMP
+store as a dirty candidate even though that action performs a physical
+readback; legal dirty eviction and clean refill can leave the line in Branch.
+It then incorrectly expected TtoB `ProbeAckData` instead of the observed BtoB
+`ProbeAck`. Probe candidates are now confined to committed scalar stores, as
+the documented constraint promised, and overlap auxiliary lines are selected
+from a different DCache set so window preparation cannot replace the primary
+line. The same seed then completed all 512 actions and closed both values of
+Probe cap, data request, and overlap at outstanding depth two. No standalone
+CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, clean C++ rebuild, smoke, both endpoint
+profiles, all three complete presets, and the independent finite-artifact
+verifier passed. The frozen executable SHA-256 is
+`32b3b29c89a561d527001e5dc5435b0a96abbdd5cd27e148ab1c8fc4e2a2405e`.
+The accepted artifact is `build/memblock/schema27-coverage.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=51.337290 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=f9053e14707ec97504ba2a53e2ecf3a1c6743e51c83070ae2012544de7730fca
+```
+
+No CPU RTL defect was observed. Wider simultaneous replacement/refill/release
+pressure remains the next DCache breadth gap.

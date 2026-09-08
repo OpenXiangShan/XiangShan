@@ -1006,7 +1006,7 @@ Uncache response-error
 presence and kind,
 PTW manager-error site, walk level, access direction, and denied/corrupt beat,
 same-line scalar-load merge depth and same-address/same-beat/cross-beat pattern,
-same-set dirty-store pressure depth, store width, and set-index quartile,
+same-set clean/dirty pressure depth, access width, and set-index quartile,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1018,7 +1018,7 @@ EEW/SEW/LMUL/derived-EMUL shapes, 1..8-uop expansion with capacity-bounded
 queue windows, scalar/vector misalignment, software
 `prefetch.i/r/w`, both cross-forwarding directions, randomized cold/warm
 translation, a vector guest-page fault with exact VA/GPA metadata, PBMT=NC,
-dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
+clean/dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
 uncache backpressure. Every seed drives all six LSQ dispatch lanes and widths,
 checks committed scalar/vector stores through architectural readback, validates
 dirty ReleaseData before updating the separate bus memory, and meets bounded
@@ -1245,6 +1245,20 @@ legally expose zero external request on a hit or one request for its allowed
 prefix cache line before the final fault; every other denied relation forbids
 a new data-manager request. Other PMP region sizes, TOR boundary composition,
 and the full lock/permission/overlap-by-edge matrix remain separate gaps.
+
+Schema 27 extends the existing `set-pressure` action with a clean/dirty line
+state selected by `set-pressure-dirty`. Clean actions fill nine or ten fresh
+same-set lines with unsigned loads, then revisit them in reverse order. The
+independent oracle checks exact values and metadata twice, one initial target
+request per line, at least `depth - 8` target revisit misses, and matching load
+writeback/LQ-dequeue counts. A phase-local TileLink C monitor attributes
+Release or ReleaseData by target line address: clean replacement must emit at
+least `depth - 8` target Releases and no target ReleaseData, while every
+background ReleaseData remains byte-checked. Dirty actions retain schema 21's
+immutable line-image, manager-memory, store-writeback, SQ-dequeue, and both
+issue-order checks. Coverage closes all 48 line-state x depth x width x
+translation bins and rejects traffic in disabled endpoint bins. Coverage and
+corner balance clean/dirty actions; SPEC uses a 50-per-mille dirty share.
 
 For a reproducible local pressure run:
 

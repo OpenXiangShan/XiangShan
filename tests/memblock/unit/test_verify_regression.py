@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 27
+        result["constraint_schema"] = 28
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -924,6 +924,9 @@ class VerifyRegressionTest(unittest.TestCase):
             "actual_hypervisor_pmp_relation_cross",
         ):
             verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pmp_relation_cross"] = ",".join(
+            ["6,0,0,0,0,0,0"] * 6
+        )
         result.update(
             {
                 "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,8",
@@ -956,6 +959,92 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "actual_hypervisor_pmp_relation_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_pmp_relation_cross"] = ",".join(
+            ["6,0,0,0,0,0,0"] * 6
+        )
+        result.update(
+            {
+                "constraint_schema": 27,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,16",
+                "target_set_pressure_dirty": 500,
+                "actual_set_pressure_line_state": "8,8",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 16
+                ),
+                "actual_set_pressure_set": "4,4,4,4",
+                "actual_set_pressure_issue_order": "38,38",
+                "actual_set_pressure_manager": (
+                    "8,76,76,12,14,14,76,76,12"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "8,76,76,76,12,12,0,14,2,2,152,152"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,11,12,0,14,2,2,152,152"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "clean set-pressure manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,12,0,14,2,2,152,152"
+        )
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,11,0,14,2,2,152,152"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "clean set-pressure manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,12,1,14,2,2,152,152"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "clean set-pressure manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,12,0,14,2,2,152,152"
+        )
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,12,0,12,13,13,152,152"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "clean set-pressure manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_clean_manager"] = (
+            "8,76,76,76,12,12,0,14,2,2,152,152"
+        )
+        result.update(
+            {
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,8",
+                "target_set_pressure_dirty": 0,
+                "actual_set_pressure_line_state": "8,0",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 8 + ["0,0,0"] * 8
+                ),
+                "actual_set_pressure_set": "2,2,2,2",
+                "actual_set_pressure_issue_order": "0,0",
+                "actual_set_pressure_manager": "0,0,0,0,0,0,0,0,0",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_cross"] = ",".join(
+            ["1,0,0"] * 9 + ["0,0,0"] * 7
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_set_pressure_cross",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

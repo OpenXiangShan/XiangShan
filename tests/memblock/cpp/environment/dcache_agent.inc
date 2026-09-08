@@ -340,6 +340,30 @@ public:
         }
         return count;
     }
+    void begin_release_observation()
+    {
+        release_observation_.clear();
+        observe_releases_ = true;
+    }
+    void end_release_observation()
+    {
+        observe_releases_ = false;
+        release_observation_.clear();
+    }
+    std::uint64_t observed_release_covering_count(
+        std::uint64_t address, bool data_only = false) const
+    {
+        std::uint64_t count = 0;
+        for (const ReleaseRecord &release : release_observation_) {
+            if (data_only && release.opcode != 7) {
+                continue;
+            }
+            const std::uint64_t bytes = std::uint64_t{1} << release.size;
+            const std::uint64_t base = release.address & ~(bytes - 1);
+            count += address >= base && address - base < bytes;
+        }
+        return count;
+    }
     std::uint64_t get_count() const { return get_count_; }
     std::uint64_t refill_count() const { return refill_count_; }
     std::uint64_t keyword_refill_count() const
@@ -568,6 +592,12 @@ private:
         std::vector<unsigned char> data;
     };
 
+    struct ReleaseRecord {
+        std::uint8_t opcode;
+        std::uint8_t size;
+        std::uint64_t address;
+    };
+
     struct ReleaseDataState {
         std::uint64_t base;
         std::uint8_t size;
@@ -779,6 +809,10 @@ private:
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
             }, true);
+            if (observe_releases_) {
+                release_observation_.push_back(
+                    {request.opcode, request.size, request.address});
+            }
             ++release_count_;
             return;
         }
@@ -844,6 +878,10 @@ private:
             if (has_expected_line) {
                 ++expected_release_data_verified_count_;
                 expected_release_lines_.erase(base);
+            }
+            if (observe_releases_) {
+                release_observation_.push_back(
+                    {request.opcode, request.size, request.address});
             }
             ++release_count_;
             ++release_data_count_;
@@ -919,6 +957,8 @@ private:
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
     std::vector<ARequest> request_history_;
+    std::vector<ReleaseRecord> release_observation_;
+    bool observe_releases_ = false;
     std::optional<ReleaseDataState> release_data_;
     std::unordered_map<std::uint64_t, std::vector<unsigned char>>
         expected_release_lines_;

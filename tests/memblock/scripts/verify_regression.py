@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25, 26,
+            19, 20, 21, 22, 23, 24, 25, 26, 27,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1521,9 +1521,31 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             target_pressure_set = _csv_counts(
                 result, "target_set_pressure_set", 4
             )
-            actual_pressure_cross = _csv_counts(
-                result, "actual_set_pressure_cross", 24
-            )
+            if schema >= 27:
+                target_pressure_dirty = result.get("target_set_pressure_dirty")
+                _require(
+                    isinstance(target_pressure_dirty, int)
+                    and not isinstance(target_pressure_dirty, bool)
+                    and 0 <= target_pressure_dirty <= 1000,
+                    "target_set_pressure_dirty is not a per-mille integer: "
+                    f"{target_pressure_dirty!r}",
+                )
+                actual_pressure_state = _csv_counts(
+                    result, "actual_set_pressure_line_state", 2
+                )
+                actual_pressure_cross = _csv_counts(
+                    result, "actual_set_pressure_cross", 48
+                )
+                actual_pressure_clean_manager = _csv_counts(
+                    result, "actual_set_pressure_clean_manager", 12
+                )
+            else:
+                target_pressure_dirty = 1000
+                actual_pressure_state = [0, actual_operations[13]]
+                actual_pressure_cross = _csv_counts(
+                    result, "actual_set_pressure_cross", 24
+                )
+                actual_pressure_clean_manager = [0] * 12
             actual_pressure_set = _csv_counts(
                 result, "actual_set_pressure_set", 4
             )
@@ -1537,31 +1559,68 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             pressure_actions = 0
             pressure_stores = 0
             pressure_min_releases = 0
-            for depth in range(2):
-                for width in range(4):
-                    for regime in range(3):
-                        count = actual_pressure_cross[
-                            depth * 12 + width * 3 + regime
-                        ]
-                        enabled = (
-                            pressure_enabled
-                            and target_pressure_depth[depth] != 0
-                            and target_pressure_width[width] != 0
-                            and target_translation[regime] != 0
-                        )
-                        _require(
-                            (count > 0) == enabled,
-                            "actual_set_pressure_cross does not match enabled "
-                            f"classes: depth={depth} width={width} "
-                            f"regime={regime}",
-                        )
-                        pressure_actions += count
-                        pressure_stores += count * (depth + 9)
-                        pressure_min_releases += count * (depth + 1)
+            pressure_clean_loads = 0
+            pressure_min_revisits = 0
+            for state in range(2):
+                state_enabled = (
+                    target_pressure_dirty != 1000
+                    if state == 0
+                    else target_pressure_dirty != 0
+                )
+                for depth in range(2):
+                    for width in range(4):
+                        for regime in range(3):
+                            if schema >= 27:
+                                index = (
+                                    state * 24
+                                    + depth * 12
+                                    + width * 3
+                                    + regime
+                                )
+                                count = actual_pressure_cross[index]
+                            elif state == 0:
+                                count = 0
+                            else:
+                                count = actual_pressure_cross[
+                                    depth * 12 + width * 3 + regime
+                                ]
+                            enabled = (
+                                pressure_enabled
+                                and state_enabled
+                                and target_pressure_depth[depth] != 0
+                                and target_pressure_width[width] != 0
+                                and target_translation[regime] != 0
+                            )
+                            _require(
+                                (count > 0) == enabled,
+                                "actual_set_pressure_cross does not match "
+                                "enabled classes: "
+                                f"state={state} depth={depth} width={width} "
+                                f"regime={regime}",
+                            )
+                            pressure_actions += count
+                            if state == 0:
+                                pressure_clean_loads += count * (depth + 9)
+                                pressure_min_revisits += count * (depth + 1)
+                            else:
+                                pressure_stores += count * (depth + 9)
+                                pressure_min_releases += count * (depth + 1)
             _require(
-                pressure_actions == actual_operations[13],
+                pressure_actions == actual_operations[13]
+                and sum(actual_pressure_state) == pressure_actions,
                 "set-pressure cross/operation coverage is not conserved",
             )
+            for state, count in enumerate(actual_pressure_state):
+                state_enabled = (
+                    target_pressure_dirty != 1000
+                    if state == 0
+                    else target_pressure_dirty != 0
+                )
+                _require(
+                    (count > 0) == (pressure_enabled and state_enabled),
+                    "actual_set_pressure_line_state does not match enabled "
+                    f"classes: {actual_pressure_state}",
+                )
             for set_quartile, count in enumerate(actual_pressure_set):
                 _require(
                     (count > 0) == (
@@ -1578,13 +1637,19 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             _require(
                 sum(actual_pressure_issue) == pressure_stores
                 and (
-                    pressure_actions == 0
-                    or all(count > 0 for count in actual_pressure_issue)
+                    (
+                        actual_pressure_state[1] == 0
+                        and actual_pressure_issue == [0, 0]
+                    )
+                    or (
+                        actual_pressure_state[1] != 0
+                        and all(count > 0 for count in actual_pressure_issue)
+                    )
                 ),
                 "set-pressure issue-order coverage is not conserved",
             )
             _require(
-                actual_pressure_manager[0] == pressure_actions
+                actual_pressure_manager[0] == actual_pressure_state[1]
                 and actual_pressure_manager[1] == pressure_stores
                 and actual_pressure_manager[2] == pressure_stores
                 and actual_pressure_manager[3] >= pressure_min_releases
@@ -1597,6 +1662,26 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and actual_pressure_manager[8] ==
                     actual_pressure_manager[3],
                 "set-pressure manager accounting is not conserved",
+            )
+            _require(
+                actual_pressure_clean_manager[0] == actual_pressure_state[0]
+                and actual_pressure_clean_manager[1] == pressure_clean_loads
+                and actual_pressure_clean_manager[2] == pressure_clean_loads
+                and actual_pressure_clean_manager[3] == pressure_clean_loads
+                and actual_pressure_clean_manager[4] >= pressure_min_revisits
+                and actual_pressure_clean_manager[5] >= pressure_min_revisits
+                and actual_pressure_clean_manager[6] == 0
+                and actual_pressure_clean_manager[7]
+                >= actual_pressure_clean_manager[5]
+                and actual_pressure_clean_manager[7]
+                >= actual_pressure_clean_manager[8]
+                and actual_pressure_clean_manager[9]
+                == actual_pressure_clean_manager[8]
+                and actual_pressure_clean_manager[10]
+                == pressure_clean_loads * 2
+                and actual_pressure_clean_manager[11]
+                == pressure_clean_loads * 2,
+                "clean set-pressure manager accounting is not conserved",
             )
 
     if schema >= 8:
