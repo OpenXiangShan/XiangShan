@@ -255,12 +255,15 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   predInstAccept.in.flush         := redirect
   predInstAccept.in.decodeAccept  := io.backend.toIBuf.decodeCanAccept && presentationEnable
 
-  private val predAccNum = Mux(
+  // The predictor determines Decode's expected acceptance, but this adapter must
+  // consume only MOPs that Decode has actually accepted. Otherwise a prediction
+  // mismatch leaves an already-decoded suffix in holdEntries and replays it.
+  private val decodeAccNum = Mux(
     io.backend.toIBuf.decodeCanAccept && presentationEnable,
-    predInstAccept.out.predAccNum.min(holdValidNum),
+    io.backend.toIBuf.accNum.get.min(holdValidNum),
     0.U
   )
-  private val holdKeepNum = holdValidNum - predAccNum
+  private val holdKeepNum = holdValidNum - decodeAccNum
   private val issueFetch = redirect || (!fetchPending && !io.backend.toIBuf.resumingVType && holdKeepNum =/= DecodeWidth.U)
   private val fetchOffset = Mux(redirect, 0.U, holdKeepNum)
   private val fetchCount = Mux(redirect, DecodeWidth.U, DecodeWidth.U - holdKeepNum)
@@ -268,7 +271,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   fetchHelper.clock := this.clock
   fetchHelper.reset := this.reset
 
-  fetchHelper.io.updatePtrCount := Mux(redirect, 0.U, predAccNum)
+  fetchHelper.io.updatePtrCount := Mux(redirect, 0.U, decodeAccNum)
   fetchHelper.io.fetchOffset := Mux(issueFetch, fetchOffset, 0.U)
   fetchHelper.io.fetchCount := Mux(issueFetch, fetchCount, 0.U)
 
@@ -335,7 +338,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
     for (i <- 0 until DecodeWidth) {
       holdEntries(i) := Mux(
         i.U < holdKeepNum,
-        holdEntries(i.U + predAccNum),
+        holdEntries(i.U + decodeAccNum),
         0.U.asTypeOf(holdEntries(i))
       )
     }
@@ -349,7 +352,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
       (idx + 1).U,
       entry.bits.pc.toUInt,
       entry.bits.inst,
-      predAccNum > idx.U,
+      decodeAccNum > idx.U,
       clock,
       reset
     )
@@ -360,7 +363,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
   vtypeGen.in.walkVType       := io.backend.toIBuf.walkVType
   vtypeGen.in.vsetvlVType     := io.backend.toIBuf.vsetvlVType
   vtypeGen.in.commitVType     := io.backend.toIBuf.commitVType
-  vtypeGen.in.validNum        := predAccNum
+  vtypeGen.in.validNum        := decodeAccNum
   for (i <- 0 until DecodeWidth) {
     vtypeGen.in.vtypeEntries(i) := VTypeGen.Entry.fromInst(holdEntries(i).bits.inst)
   }
