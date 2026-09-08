@@ -152,7 +152,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         return
     _require(
         schema in (
-            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+            2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+            19, 20,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -359,7 +360,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         cmo_probe_count = 0
         if schema >= 13:
             cmo_probe_count = _csv_counts(
-                result, "actual_ops", 12 if schema >= 19 else 11
+                result, "actual_ops",
+                13 if schema >= 20 else 12 if schema >= 19 else 11,
             )[10]
             if schema >= 15:
                 cmo_probe_count -= sum(
@@ -492,7 +494,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
 
     if schema >= 7:
         operation_fields = (
-            12 if schema >= 19 else 11 if schema >= 13 else 10 if schema >= 8 else 9
+            13 if schema >= 20 else 12 if schema >= 19 else
+            11 if schema >= 13 else 10 if schema >= 8 else 9
         )
         target_operations = _csv_counts(
             result, "target_ops", operation_fields
@@ -1190,6 +1193,77 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     )
                 ),
                 "PTW error manager accounting is not conserved",
+            )
+
+        if schema >= 20:
+            target_merge_depth = _csv_counts(
+                result, "target_load_merge_depth", 2
+            )
+            target_merge_pattern = _csv_counts(
+                result, "target_load_merge_pattern", 3
+            )
+            actual_merge_shapes = _csv_counts(
+                result, "actual_load_merge_shape", 12
+            )
+            actual_merge_translations = _csv_counts(
+                result, "actual_load_merge_translation", 3
+            )
+            actual_merge_manager = _csv_counts(
+                result, "actual_load_merge_manager", 4
+            )
+            actual_merge_loads = result.get("actual_load_merge_loads")
+            _require(
+                isinstance(actual_merge_loads, int)
+                and not isinstance(actual_merge_loads, bool)
+                and actual_merge_loads >= 0,
+                "actual_load_merge_loads is not a nonnegative integer: "
+                f"{actual_merge_loads!r}",
+            )
+            merge_enabled = target_operations[12] != 0
+            shape_total = 0
+            derived_loads = 0
+            for depth in range(2):
+                for pattern in range(3):
+                    enabled = (
+                        merge_enabled
+                        and target_merge_depth[depth] != 0
+                        and target_merge_pattern[pattern] != 0
+                    )
+                    for beat in range(2):
+                        count = actual_merge_shapes[
+                            depth * 6 + pattern * 2 + beat
+                        ]
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_load_merge_shape does not match enabled "
+                            f"classes: depth={depth} pattern={pattern} "
+                            f"beat={beat}",
+                        )
+                        shape_total += count
+                        derived_loads += count * (depth + 2)
+            _require(
+                shape_total == actual_operations[12],
+                "load-merge shape/operation coverage is not conserved",
+            )
+            for regime, count in enumerate(actual_merge_translations):
+                _require(
+                    (count > 0) ==
+                    (merge_enabled and target_translation[regime] != 0),
+                    "actual_load_merge_translation does not match enabled "
+                    f"classes: {actual_merge_translations}",
+                )
+            _require(
+                sum(actual_merge_translations) == actual_operations[12],
+                "load-merge translation/operation coverage is not conserved",
+            )
+            merge_actions = actual_operations[12]
+            _require(
+                actual_merge_loads == derived_loads
+                and actual_merge_manager[0] == merge_actions
+                and actual_merge_manager[1] >= merge_actions
+                and actual_merge_manager[2] == actual_merge_manager[1]
+                and actual_merge_manager[3] == actual_merge_loads,
+                "load-merge manager accounting is not conserved",
             )
 
     if schema >= 8:

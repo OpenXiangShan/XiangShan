@@ -2348,3 +2348,46 @@ The frozen executable and runtime-manifest SHA-256 values are
 `f73bea1339de2a5592a275af53900becd16a9ab665bb66ada4c413fb79b365f7`
 and `56d61697694583a6b6521875ec1173b984303212c91dc53a2472b97991e894f9`.
 No CPU RTL defect was observed.
+
+## Schema 20 Random Same-Line Load-Merge Closure
+
+On 2026-09-08 the common `random-mixed` constraint interface added
+`load-merge`, with independent weights for two- or three-load batches and
+exact-address, same-beat, or cross-beat placement. Every batch issues its
+members in the same cycle against a fresh cold line, crosses both critical
+beats and Bare/stage-1/nested translation, and inherits the selected DCache
+manager-latency distribution. The 64-MiB nonrepeating line permutation permits
+up to 1,048,576 merge actions in one seed without silently reusing a resident
+line.
+
+The online and offline oracles require exact value and metadata for every
+member, all 12 depth x pattern x critical-beat bins, every enabled translation
+regime, and exactly one target-line DCache request per merge action. Global
+refill and GrantAck deltas must remain equal and no smaller than the action
+count; this admits legal hardware-prefetch traffic while retaining exact sink
+conservation. Scalar writebacks must equal the depth-derived load total.
+
+The following 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Merge actions | Bare/stage-1/nested | Target requests/refills/GrantAcks/writebacks |
+| --- | ---: | ---: | ---: | --- | --- |
+| `spec` | 20005 | 40,524 | 15 | 1/1/13 | 15/20/20/36 |
+| `coverage` artifact | 20007 | 85,723 | 14 | 1/5/8 | 14/16/16/34 |
+| `corner` | 20008 | 170,307 | 16 | 6/4/6 | 16/23/23/41 |
+| merge-only `coverage` | 20006 | 25,429 | 411 | 110/158/143 | 411/411/411/1,033 |
+
+The merge-only run spread every enabled shape across 25 to 46 actions and
+proved that the feature-local constraint does not inherit unrelated operation,
+locality, error, Probe, concurrency, or stride-stream coverage gates. The
+universal minimum was raised from 256 to 512 actions so the architectural
+prefix, existing 90-bin PTW-error closure, and all new merge bins can coexist
+in one coverage or corner seed. The independent verifier accepted the finite
+coverage artifact:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=20007..20007 results=1 transactions=512 elapsed_seconds=34.267200 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=01c80a98e17475508649397238b789182aa4110e4bcd6f0986504dc0689edfb0
+```
+
+All 186 Python unit tests and `check-rtl` passed. No CPU RTL defect was
+observed.

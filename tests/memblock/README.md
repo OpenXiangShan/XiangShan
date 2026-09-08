@@ -960,6 +960,7 @@ legal CBOAck error presence and kind, NC/MMIO load/store direction plus legal
 Uncache response-error
 presence and kind,
 PTW manager-error site, walk level, access direction, and denied/corrupt beat,
+same-line scalar-load merge depth and same-address/same-beat/cross-beat pattern,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1117,6 +1118,21 @@ clean same-address retry to reread the failed PTE block. Per-seed gates cover
 90 site/direction/level/outcome bins, 20 site-specific mode bins, 20 target
 level bins, and exact PTW response-beat accounting. Duplicate PTW requests for
 the same faulting block remain legal and are counted rather than hidden.
+
+Schema 20 adds `load-merge` to the common operation mix. Each action chooses a
+two- or three-load same-cycle batch, both possible critical beats, and one of
+three address patterns: exact same address, distinct addresses in one 32-byte
+beat, or distinct addresses across both beats. It uses a nonrepeating cold line
+from a 64-MiB region mapped identically in Bare, Sv39, Sv48, and every nested
+VS/G mode pair. The independent oracle requires every scalar value and metadata
+writeback, exactly one DCache request covering the target line, matched refill/
+GrantAck counts, and no lost batch member. Extra matched refills are allowed
+because the load batch may legally train and trigger the hardware prefetcher.
+Per-seed gates cover all 12 depth/pattern/critical-beat bins and every enabled
+translation regime. The SPEC preset keeps this operation rare and favors
+two-way same-beat locality; coverage and corner presets exercise all shapes
+uniformly. Existing `dcache-latency=spec` supplies the calibrated refill-delay
+distribution, including the 100-400-cycle bucket.
 
 For a reproducible local pressure run:
 
@@ -1286,7 +1302,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 256
+  --test random-mixed --seed 17 --transactions 512
 ```
 
 ## Complete Pin Audit

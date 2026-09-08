@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 20
+        result["constraint_schema"] = 21
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -617,6 +617,36 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["actual_ptw_error_outcome"] = ",".join(["1"] * 90)
+        result.update(
+            {
+                "constraint_schema": 20,
+                "target_ops": "1,0,3,2,0,0,1,1,1,0,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,0,6,90,12",
+                "target_load_merge_depth": "1,1",
+                "target_load_merge_pattern": "1,1,1",
+                "actual_load_merge_shape": ",".join(["1"] * 12),
+                "actual_load_merge_translation": "12,0,0",
+                "actual_load_merge_manager": "12,14,14,30",
+                "actual_load_merge_loads": 30,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_load_merge_shape"] = ",".join(
+            ["0"] + ["1"] * 11
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_load_merge_shape",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_load_merge_shape"] = ",".join(["1"] * 12)
+        result["actual_load_merge_manager"] = "12,14,13,30"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "load-merge manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_load_merge_manager"] = "12,14,14,30"
         result.update(
             {
                 "constraint_schema": 14,

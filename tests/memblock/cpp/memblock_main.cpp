@@ -82,6 +82,7 @@ struct RandomConstraints {
         hypervisor,
         cmo,
         ptw_error,
+        load_merge,
         operation_count,
     };
 
@@ -136,6 +137,13 @@ struct RandomConstraints {
         ptw_error_level_count,
     };
 
+    enum LoadMergePattern : unsigned {
+        load_merge_same_address,
+        load_merge_same_beat,
+        load_merge_cross_beat,
+        load_merge_pattern_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
@@ -156,6 +164,9 @@ struct RandomConstraints {
     unsigned ptw_error_stores_per_mille = 0;
     unsigned ptw_error_denied_per_mille = 0;
     unsigned ptw_error_corrupt_first_per_mille = 0;
+    std::array<unsigned, 2> load_merge_depth_weights{};
+    std::array<unsigned, load_merge_pattern_count>
+        load_merge_pattern_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -205,7 +216,8 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "coverage",
                 .operation_weights = {
-                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75, 75},
+                    200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75, 75,
+                    100},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
@@ -224,6 +236,8 @@ struct RandomConstraints {
                 .ptw_error_stores_per_mille = 500,
                 .ptw_error_denied_per_mille = 500,
                 .ptw_error_corrupt_first_per_mille = 500,
+                .load_merge_depth_weights = {1, 1},
+                .load_merge_pattern_weights = {1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -275,7 +289,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "spec",
                 .operation_weights = {
-                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0},
+                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
@@ -294,6 +308,8 @@ struct RandomConstraints {
                 .ptw_error_stores_per_mille = 500,
                 .ptw_error_denied_per_mille = 500,
                 .ptw_error_corrupt_first_per_mille = 500,
+                .load_merge_depth_weights = {19, 1},
+                .load_merge_pattern_weights = {1, 8, 1},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -346,7 +362,7 @@ struct RandomConstraints {
                 .name = "corner",
                 .operation_weights = {
                     125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125,
-                    125},
+                    125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
@@ -365,6 +381,8 @@ struct RandomConstraints {
                 .ptw_error_stores_per_mille = 500,
                 .ptw_error_denied_per_mille = 500,
                 .ptw_error_corrupt_first_per_mille = 500,
+                .load_merge_depth_weights = {1, 1},
+                .load_merge_pattern_weights = {1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -475,6 +493,7 @@ struct RandomConstraints {
                 {"hypervisor", hypervisor},
                 {"cmo", cmo},
                 {"ptw-error", ptw_error},
+                {"load-merge", load_merge},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -554,6 +573,21 @@ struct RandomConstraints {
             }};
         if (assign_weight(ptw_error_site_keys, ptw_error_site_weights) ||
             assign_weight(ptw_error_level_keys, ptw_error_level_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, 2> load_merge_depth_keys{{
+            "load-merge-depth2", "load-merge-depth3",
+        }};
+        constexpr std::array<std::string_view, load_merge_pattern_count>
+            load_merge_pattern_keys{{
+                "load-merge-same-address",
+                "load-merge-same-beat",
+                "load-merge-cross-beat",
+            }};
+        if (assign_weight(
+                load_merge_depth_keys, load_merge_depth_weights) ||
+            assign_weight(
+                load_merge_pattern_keys, load_merge_pattern_weights)) {
             return;
         }
         constexpr std::array<std::string_view, 4> vector_addressing_keys{{
@@ -818,6 +852,20 @@ struct RandomConstraints {
                 0ULL) == 0) {
             throw std::invalid_argument(
                 "PTW error level constraint weights cannot all be zero");
+        }
+        if (operation_weights[load_merge] != 0 &&
+            std::accumulate(
+                load_merge_depth_weights.begin(),
+                load_merge_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "load-merge depth constraint weights cannot all be zero");
+        }
+        if (operation_weights[load_merge] != 0 &&
+            std::accumulate(
+                load_merge_pattern_weights.begin(),
+                load_merge_pattern_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "load-merge pattern constraint weights cannot all be zero");
         }
         if (operation_weights[ptw_error] != 0 &&
             ptw_error_site_weights[ptw_error_stage1] != 0 &&
@@ -1288,6 +1336,16 @@ struct RandomConstraints {
         return choose_weighted(ptw_error_level_weights, random);
     }
 
+    unsigned choose_load_merge_depth(std::uint64_t random) const
+    {
+        return choose_weighted(load_merge_depth_weights, random);
+    }
+
+    unsigned choose_load_merge_pattern(std::uint64_t random) const
+    {
+        return choose_weighted(load_merge_pattern_weights, random);
+    }
+
     unsigned choose_translation_regime(std::uint64_t random) const
     {
         return choose_weighted(translation_weights, random);
@@ -1466,6 +1524,16 @@ struct RandomConstraints {
                     corrupt_outcomes;
                 actions += sites * direction_classes(
                     ptw_error_stores_per_mille) * levels * outcomes;
+            } else if (operation == load_merge) {
+                const unsigned depths = static_cast<unsigned>(std::count_if(
+                    load_merge_depth_weights.begin(),
+                    load_merge_depth_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned patterns = static_cast<unsigned>(std::count_if(
+                    load_merge_pattern_weights.begin(),
+                    load_merge_pattern_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                actions += depths * patterns * 2;
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -1557,7 +1625,8 @@ struct RandomConstraints {
             operation_weights.begin(), operation_weights.begin() + noncacheable,
             [](unsigned weight) { return weight != 0; }) ||
             operation_weights[hypervisor] != 0 ||
-            operation_weights[cmo] != 0;
+            operation_weights[cmo] != 0 ||
+            operation_weights[load_merge] != 0;
     }
 
     bool uses_uncache() const
@@ -1586,7 +1655,8 @@ struct RandomConstraints {
     {
         return std::any_of(
             operation_weights.begin(), operation_weights.begin() + ptw_error,
-            [](unsigned weight) { return weight != 0; });
+            [](unsigned weight) { return weight != 0; }) ||
+            operation_weights[load_merge] != 0;
     }
 
     unsigned vector_policy_minimum_vlmax() const
@@ -1607,7 +1677,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=19 constraints=" << name
+        stream << "constraint_schema=20 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1652,6 +1722,13 @@ struct RandomConstraints {
                << ptw_error_denied_per_mille
                << " target_ptw_error_corrupt_first="
                << ptw_error_corrupt_first_per_mille
+               << " target_load_merge_depth="
+               << load_merge_depth_weights[0] << ','
+               << load_merge_depth_weights[1]
+               << " target_load_merge_pattern="
+               << load_merge_pattern_weights[0] << ','
+               << load_merge_pattern_weights[1] << ','
+               << load_merge_pattern_weights[2]
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -1969,6 +2046,16 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 3> dcache_load_outcomes{};
     // error responses/denied beats/corrupt beats/GrantAcks/refills.
     std::array<std::uint64_t, 5> dcache_load_error_manager{};
+    // [depth2/depth3][same address/same beat/cross beat][critical beat].
+    std::array<
+        std::array<std::array<std::uint64_t, 2>,
+                   RandomConstraints::load_merge_pattern_count>,
+        2> load_merge_shapes{};
+    std::array<std::uint64_t, RandomConstraints::translation_regime_count>
+        load_merge_translations{};
+    // Target-line requests/global refills/global GrantAcks/scalar writebacks.
+    std::array<std::uint64_t, 4> load_merge_manager{};
+    std::uint64_t load_merge_loads = 0;
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
     std::array<std::array<std::array<std::array<std::uint64_t, 3>,
@@ -2089,6 +2176,19 @@ struct ConstraintCoverage {
         }
         for (unsigned index = 0; index < manager_delta.size(); ++index) {
             dcache_load_error_manager[index] += manager_delta[index];
+        }
+    }
+
+    void sample_load_merge(
+        unsigned depth_index, unsigned pattern, unsigned critical_beat,
+        unsigned translation_regime, unsigned loads,
+        const std::array<std::uint64_t, 4> &manager_delta)
+    {
+        ++load_merge_shapes.at(depth_index).at(pattern).at(critical_beat);
+        ++load_merge_translations.at(translation_regime);
+        load_merge_loads += loads;
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            load_merge_manager[index] += manager_delta[index];
         }
     }
 
@@ -2266,6 +2366,32 @@ struct ConstraintCoverage {
             }};
             for (unsigned outcome = 0; outcome < enabled.size(); ++outcome) {
                 if ((dcache_load_outcomes[outcome] != 0) != enabled[outcome]) {
+                    return false;
+                }
+            }
+            return operations[operation] != 0;
+        }
+        if (operation == RandomConstraints::load_merge) {
+            for (unsigned depth = 0; depth < load_merge_shapes.size(); ++depth) {
+                for (unsigned pattern = 0;
+                     pattern < load_merge_shapes[depth].size(); ++pattern) {
+                    for (unsigned beat = 0;
+                         beat < load_merge_shapes[depth][pattern].size();
+                         ++beat) {
+                        const bool enabled =
+                            constraints.load_merge_depth_weights[depth] != 0 &&
+                            constraints.load_merge_pattern_weights[pattern] != 0;
+                        if ((load_merge_shapes[depth][pattern][beat] != 0) !=
+                            enabled) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            for (unsigned regime = 0;
+                 regime < load_merge_translations.size(); ++regime) {
+                if ((load_merge_translations[regime] != 0) !=
+                    (constraints.translation_weights[regime] != 0)) {
                     return false;
                 }
             }
@@ -2589,6 +2715,18 @@ struct ConstraintCoverage {
                       dcache_load_error_actions}))) {
             return false;
         }
+        const std::uint64_t load_merge_actions =
+            operations[RandomConstraints::load_merge];
+        if (load_merge_loads != load_merge_manager[3] ||
+            load_merge_actions != load_merge_manager[0] ||
+            load_merge_manager[1] < load_merge_actions ||
+            load_merge_manager[2] != load_merge_manager[1] ||
+            std::accumulate(
+                load_merge_translations.begin(),
+                load_merge_translations.end(), std::uint64_t{0}) !=
+                load_merge_actions) {
+            return false;
+        }
         if (constraints.samples_translation() &&
             constraints.uses_translation() &&
             (translation_walk_windows == 0 ||
@@ -2752,6 +2890,25 @@ public:
                << dcache_load_error_manager[2] << ','
                << dcache_load_error_manager[3] << ','
                << dcache_load_error_manager[4]
+               << " actual_load_merge_shape=";
+        bool first_load_merge_shape = true;
+        for (const auto &depth : load_merge_shapes) {
+            for (const auto &pattern : depth) {
+                for (const auto count : pattern) {
+                    stream << (first_load_merge_shape ? "" : ",") << count;
+                    first_load_merge_shape = false;
+                }
+            }
+        }
+        stream << " actual_load_merge_translation="
+               << load_merge_translations[0] << ','
+               << load_merge_translations[1] << ','
+               << load_merge_translations[2]
+               << " actual_load_merge_manager="
+               << load_merge_manager[0] << ',' << load_merge_manager[1]
+               << ',' << load_merge_manager[2] << ','
+               << load_merge_manager[3]
+               << " actual_load_merge_loads=" << load_merge_loads
                << " actual_ptw_error_outcome=";
         bool first_ptw_outcome = true;
         for (const auto &site : ptw_error_outcomes) {
@@ -29574,7 +29731,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 256;
+    constexpr unsigned minimum_actions = 512;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -29599,6 +29756,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t dcache_error_line = 0;
     std::uint64_t atomic_error_line = 0;
     std::uint64_t ptw_error_line = 0;
+    std::uint64_t load_merge_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -29626,6 +29784,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t ptw_error_base =
         atomic_error_base + atomic_error_span;
     constexpr std::uint64_t ptw_error_span = 0x100000;
+    constexpr std::uint64_t load_merge_base = cache1_base + 0xe00000;
+    constexpr std::uint64_t load_merge_span = 0x4000000;
     // Keep the nested final G-stage walk in a different high-level subtree
     // from the implicit G-stage walks used to fetch VS page-table entries.
     constexpr std::uint64_t ptw_error_guest_base = 0x18000000000ULL;
@@ -30325,6 +30485,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (std::uint64_t block = load_merge_base;
+             block < load_merge_base + load_merge_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
         if (!map_all_contexts(
                 cache1_base + 0xf000, cache1_base + 0xf000,
                 false, false, true) ||
@@ -30361,13 +30532,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
-        const std::array<std::pair<std::uint64_t, std::uint64_t>, 5>
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 6>
             reference_addresses{{
                 {cache0_base + 0x106a8, cache0_base + 0x106a8},
                 {cache1_base + 0xf800, cache1_base + 0xf800},
                 {nc_base + 0x188, nc_base + 0x188},
                 {mmio_virtual + 0x188, mmio_physical + 0x188},
                 {ptw_error_base + 0x188, ptw_error_base + 0x188},
+                {load_merge_base + 0x188, load_merge_base + 0x188},
             }};
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
             for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
@@ -31618,6 +31790,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     virtual_address = nc_base;
                 } else if (operation_kind == RandomConstraints::mmio) {
                     virtual_address = mmio_virtual;
+                } else if (operation_kind == RandomConstraints::load_merge) {
+                    virtual_address = load_merge_base;
                 }
                 std::uint64_t fence_address = global ? 0 : virtual_address;
                 std::uint16_t id = 0;
@@ -33126,6 +33300,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     "scalar-load", "scalar-store", "vector-load",
                     "vector-store", "vector-segment", "prefetch", "atomic",
                     "nc", "mmio", "hypervisor", "cmo", "ptw-error",
+                    "load-merge",
                 }};
             {
                 std::ostringstream detail;
@@ -33619,6 +33794,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     translation.vs_mode = ptw_error_vs_mode;
                     translation.g_mode = ptw_error_g_mode;
                 }
+            } else if (kind == RandomConstraints::load_merge) {
+                for (unsigned regime = 0;
+                     regime < RandomConstraints::translation_regime_count;
+                     ++regime) {
+                    if (constraints.translation_weights[regime] == 0 ||
+                        constraint_coverage.load_merge_translations[regime] !=
+                            0) {
+                        continue;
+                    }
+                    translation = TranslationContext{};
+                    translation.regime = regime;
+                    if (regime == RandomConstraints::translation_stage1) {
+                        translation.stage1_mode = first_enabled_mode(
+                            constraints.stage1_mode_weights);
+                    } else if (regime ==
+                               RandomConstraints::translation_nested) {
+                        translation.vs_mode = first_enabled_mode(
+                            constraints.vs_mode_weights);
+                        translation.g_mode = first_enabled_mode(
+                            constraints.g_mode_weights);
+                    }
+                    break;
+                }
             }
             const TranslationLeafTopology leaf =
                 choose_translation_leaf(translation);
@@ -33941,6 +34139,149 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.sample_dcache_load(std::nullopt);
                 }
                 ++coverage.cacheable;
+            } else if (kind == RandomConstraints::load_merge) {
+                phase = "random-load-merge";
+                unsigned depth_index =
+                    constraints.choose_load_merge_depth(random());
+                unsigned pattern =
+                    constraints.choose_load_merge_pattern(random());
+                unsigned critical_beat = random() & 1U;
+                bool shape_forced = false;
+                for (unsigned candidate_depth = 0;
+                     candidate_depth < 2 && !shape_forced;
+                     ++candidate_depth) {
+                    if (constraints.load_merge_depth_weights[
+                            candidate_depth] == 0) {
+                        continue;
+                    }
+                    for (unsigned candidate_pattern = 0;
+                         candidate_pattern <
+                             RandomConstraints::load_merge_pattern_count &&
+                             !shape_forced;
+                         ++candidate_pattern) {
+                        if (constraints.load_merge_pattern_weights[
+                                candidate_pattern] == 0) {
+                            continue;
+                        }
+                        for (unsigned candidate_beat = 0;
+                             candidate_beat < 2; ++candidate_beat) {
+                            if (constraint_coverage.load_merge_shapes[
+                                    candidate_depth][candidate_pattern]
+                                    [candidate_beat] == 0) {
+                                depth_index = candidate_depth;
+                                pattern = candidate_pattern;
+                                critical_beat = candidate_beat;
+                                shape_forced = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                constexpr std::uint64_t merge_lines = load_merge_span / 64;
+                if (load_merge_line >= merge_lines) {
+                    phase = "random-load-merge-address-space-exhausted";
+                    return false;
+                }
+                const std::uint64_t sequence = load_merge_line++;
+                const std::uint64_t line_index =
+                    sequence ^ (sequence >> 1);
+                const std::uint64_t line =
+                    load_merge_base + line_index * 64;
+                const unsigned depth = depth_index + 2;
+                std::array<unsigned, 3> offsets{};
+                const unsigned leader_offset = critical_beat ? 40U : 8U;
+                offsets[0] = leader_offset;
+                if (pattern == RandomConstraints::load_merge_same_address) {
+                    offsets[1] = leader_offset;
+                    offsets[2] = leader_offset;
+                } else if (pattern ==
+                           RandomConstraints::load_merge_same_beat) {
+                    offsets[1] = critical_beat ? 48U : 16U;
+                    offsets[2] = critical_beat ? 56U : 24U;
+                } else {
+                    offsets[1] = critical_beat ? 8U : 40U;
+                    offsets[2] = critical_beat ? 16U : 48U;
+                }
+
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                std::vector<memblock::LoadTransaction> transactions;
+                transactions.reserve(depth);
+                for (unsigned index = 0; index < depth; ++index) {
+                    const auto op = static_cast<memblock::LoadOp>(random() % 7);
+                    const std::uint64_t address = line + offsets[index];
+                    environment.memory().write_byte(
+                        address,
+                        static_cast<std::uint8_t>(1U + random() % 255U));
+                    transactions.push_back(make_load(address, op, index));
+                }
+                for (const auto &transaction : transactions) {
+                    environment.expect_load(transaction);
+                }
+
+                const std::uint64_t merge_requests_before =
+                    environment.tilelink_requests();
+                const std::uint64_t refills_before =
+                    environment.dcache_refills();
+                const std::uint64_t grant_acks_before =
+                    environment.dcache_grant_acks();
+                const std::uint64_t writebacks_before =
+                    environment.writebacks();
+                std::vector<unsigned> dispatch_lanes(depth);
+                std::iota(
+                    dispatch_lanes.begin(), dispatch_lanes.end(), 0U);
+                if (!environment.set_rob_head(
+                        transactions.front().rob,
+                        transactions.front().rob_flag) ||
+                    !environment.enqueue_load_batch(
+                        transactions, dispatch_lanes) ||
+                    !environment.issue_load_batch(
+                        transactions, 4096, true) ||
+                    !environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                const std::array<std::uint64_t, 4> manager_delta{{
+                    environment.dcache_requests_covering_since(
+                        line, merge_requests_before),
+                    environment.dcache_refills() - refills_before,
+                    environment.dcache_grant_acks() - grant_acks_before,
+                    environment.writebacks() - writebacks_before,
+                }};
+                if (manager_delta[0] != 1 || manager_delta[1] < 1 ||
+                    manager_delta[2] != manager_delta[1] ||
+                    manager_delta[3] != depth) {
+                    std::ostringstream detail;
+                    detail << "random-load-merge-manager"
+                           << ":depth=" << depth
+                           << ":pattern=" << pattern
+                           << ":critical_beat=" << critical_beat
+                           << ":manager=" << manager_delta[0] << ','
+                           << manager_delta[1] << ',' << manager_delta[2]
+                           << ',' << manager_delta[3];
+                    phase = detail.str();
+                    return false;
+                }
+                for (const auto &transaction : transactions) {
+                    coverage.sample(transaction);
+                }
+                constraint_coverage.sample_load_merge(
+                    depth_index, pattern, critical_beat,
+                    translation.regime, depth, manager_delta);
+                ordinary_leaf_addressed = true;
+                ++actions;
+                coverage.cacheable += depth;
             } else if (kind == RandomConstraints::scalar_store) {
                 const auto op = static_cast<memblock::StoreOp>(random() % 4);
                 const unsigned size = 1U << static_cast<unsigned>(op);

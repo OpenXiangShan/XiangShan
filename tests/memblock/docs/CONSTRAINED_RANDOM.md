@@ -49,7 +49,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error` | Relative special-operation weights |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -67,6 +67,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `ptw-error-store` | Per-mille store share for PTW manager-error actions |
 | `ptw-error-denied` | Per-mille denied share; the other class is independent corrupt |
 | `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
+| `load-merge-depth2`, `load-merge-depth3` | Relative two- and three-load batch weights inside `load-merge` |
+| `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns inside `load-merge`: exact duplicate, distinct offsets in the critical 32-byte beat, or distinct offsets spanning both beats |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -112,7 +114,8 @@ atomic-width, or enabled vector-shape dimensions, unreachable vector shape
 classes, incompatible fixed vector shape/policy combinations, out-of-range
 per-mille values, inconsistent special-concurrency or
 manager-latency settings, enabled PTW errors with no reachable site, level, or
-governing page-table mode, and unknown latency profiles fail before simulation
+governing page-table mode, enabled load merging with no reachable depth or
+address pattern, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
 An NC/MMIO-only operation mix cannot also request Bare coverage.
@@ -120,7 +123,7 @@ Hypervisor traffic requires nested translation; a hypervisor-only mix cannot
 also require Bare or host-stage-1 contexts.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
-`random-mixed` requires at least 256 actions so the mandatory architectural
+`random-mixed` requires at least 512 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 An enabled `atomic-error` requires a nonzero atomic operation weight. An
 all-error Uncache mix requires `special-concurrent=0`, because the current
@@ -201,6 +204,11 @@ level weights plus 500-per-mille store, denied, and first-corrupt-beat shares,
 but the zero `spec` operation weight keeps synthetic translation errors out of
 the realistic workload. Coverage and corner runs use fresh page-table roots
 and addresses so each enabled fault is forced through the selected walk level.
+Load-merge operation weights are `100`, `10`, and `125` for `coverage`, `spec`,
+and `corner`. Coverage and corner use equal `2/3`-way and
+same-address/same-beat/cross-beat weights. SPEC favors depth two by `19/1` and
+same-beat locality by `1/8/1`, retaining low-rate duplicate and cross-beat
+cases without making them look like ordinary traffic.
 Uncache error rates use the same `100`, `0`, and `500` values, with a 500
 per-mille denied share among error loads. The `spec` preset therefore models
 ordinary traffic without frequent external errors, while `coverage` and
@@ -311,7 +319,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=19`, the resolved target weights,
+Every terminal line prints `constraint_schema=20`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
 clean/corrupt/denied and manager-error accounting, ordinary-vector
@@ -348,6 +356,13 @@ against the outcome bins. For `N` error actions containing `D` denied actions,
 the manager tuple `error responses, denied beats, corrupt beats, errored
 GrantAcks, errored refills` must equal `N, 2D, 2N, N, N`; sink attribution
 keeps this invariant valid when a clean hardware prefetch refill is concurrent.
+Load merging reports 12 depth x address-pattern x critical-beat bins plus three
+translation-regime bins. Every enabled shape and Bare/stage-1/nested regime
+must occur. A batch uses a fresh line from a 64-MiB region, all members issue in
+one cycle, and the target line must produce exactly one DCache request. Global
+refill and GrantAck deltas remain equal and at least one because the same loads
+may also trigger legal hardware prefetches; scalar writebacks must equal the
+sum of the generated batch depths.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and
