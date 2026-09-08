@@ -40,6 +40,12 @@ weighted address class and closes every enabled HLV/HLVX/HSV x SPVP x
 DDR/device bin. HLV/HSV require exact Uncache data or store effects; HLVX must
 raise `LoadAccessFault`, cancel every speculative wakeup, and issue no data
 manager request because that PMA interval is not executable.
+Schema 26 adds seven physical-PMP relation weights: no-PMP control, first and
+last naturally aligned accesses inside a 4-KiB NAPOT allow region, naturally
+aligned accesses immediately below and above it, and accesses crossing either
+edge. Every enabled relation is crossed with HLV/HLVX/HSV and SPVP=S/U. A
+hand-built first-match PMP model independently predicts success or exact
+load/store access fault and constrains DCache/Uncache side effects.
 It also executes HLV, HLVX, and HSV from M-mode under SPVP=U/S with physical
 PMP R-only, X-only, RW, and RX regions. The independent permission oracle
 requires R for HLV, R+X for HLVX, and W for HSV, so an accidental M-mode PMP
@@ -78,8 +84,9 @@ and is checked as a 4-KiB minimum region. Instruction X permission, HLVX
 physical R+X permission, M-mode/SPVP hypervisor PMP selection, and DebugModule
 access are covered by focused tests. HLV/HLVX/HSV also cross one fixed PMA
 device mapping, both sides of the exact `0x80000000` device-to-DDR PMA edge,
-and locked R/RWX PMP entries; other hypervisor PMP region edges and PMA
-interval matrices remain gaps.
+and locked R/RWX PMP entries. Schema 26 adds the seven-class 4-KiB NAPOT edge
+cross; other PMP size/TOR/lock/permission/overlap-by-edge and PMA interval
+matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks read-request acceptance, ordinary and prefetch miss
@@ -562,7 +569,8 @@ three-stage level, while scan mode must directly follow active-low
 `lgc_rst_n`. The scenario restores functional DFT controls and performs a fresh
 reset before checking idle behavior.
 `random-mixed` keeps constant-space lane counters and
-requires both canceled and uncanceled wakeups on every lane. When hardware
+requires both wakeup and cancel observations on every lane without comparing
+their totals, because one split/replayed load may emit multiple cancels. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
 because prefetch traffic produces load-pipeline cancel pulses without backend
 wakeups; full-run raw counters remain in the result.
@@ -992,7 +1000,8 @@ in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family, W/D width, and D-channel error presence/kind, CMO
 CLEAN/FLUSH/INVAL operation, clean/dirty line state, younger-load overlap, and
-legal CBOAck error presence and kind, NC/MMIO load/store direction plus legal
+legal CBOAck error presence and kind, hypervisor PBMT/PMA/PMP relation,
+NC/MMIO load/store direction plus legal
 Uncache response-error
 presence and kind,
 PTW manager-error site, walk level, access direction, and denied/corrupt beat,
@@ -1209,7 +1218,7 @@ The reference walker independently derives the physical address and final PBMT;
 loads and stores check exact physical bytes, PMA traffic must avoid Uncache,
 and NC/IO traffic must issue exactly one Uncache request with no DCache request.
 Non-PMA PBMT pairs are currently naturally aligned; fixed-PMA device boundaries
-and broader hypervisor PMP region edges remain separate verification gaps.
+remain a separate verification gap.
 
 Schema 25 adds `hypervisor-pma-device` as a per-mille selector between the
 ordinary translated DDR aliases and an interior address in the SoC's fixed
@@ -1217,11 +1226,25 @@ ordinary translated DDR aliases and an interior address in the SoC's fixed
 DDR/device bin must execute per seed. Device HLV and HSV actions require exactly
 one Uncache request, no DCache request, and exact physical data or committed
 bytes. Device HLVX actions require an exact `LoadAccessFault`, no DCache or
-Uncache request, and equality of newly observed scalar wakeups and cancels with
-at least one cancel. Device actions are naturally aligned and use PMA/PMA leaf
+Uncache request, at least one cancel, and no newly observed wakeup left without
+a later same-lane cancel. Device actions are naturally aligned and use PMA/PMA leaf
 attributes, keeping fixed-PMA classification independent of PBMT composition
-and unresolved non-PMA-misalignment priority. Exact device-region edges and the
-broader hypervisor PMP matrix remain separate gaps.
+and unresolved non-PMA-misalignment priority.
+
+Schema 26 adds relative weights `hypervisor-pmp-none`,
+`hypervisor-pmp-first`, `hypervisor-pmp-last`, `hypervisor-pmp-below`,
+`hypervisor-pmp-above`, `hypervisor-pmp-cross-lower`, and
+`hypervisor-pmp-cross-upper`. Non-control actions use PMA/PMA leaves and a DDR
+target so PMP is the only physical protection variable. The first/last cases
+must complete at the exact allowed bytes; every active-PMP HSV is read back
+through HLV after installing a global allow entry, so denied stores must also
+prove byte preservation. Below/above/crossing cases must raise
+the access-specific fault, suppress Uncache and architectural side effects,
+and retire through checked redirect/queue recovery. A cross-upper load may
+legally expose zero external request on a hit or one request for its allowed
+prefix cache line before the final fault; every other denied relation forbids
+a new data-manager request. Other PMP region sizes, TOR boundary composition,
+and the full lock/permission/overlap-by-edge matrix remain separate gaps.
 
 For a reproducible local pressure run:
 

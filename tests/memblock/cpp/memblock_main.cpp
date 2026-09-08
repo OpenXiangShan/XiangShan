@@ -110,6 +110,17 @@ struct RandomConstraints {
         hypervisor_pbmt_pair_count,
     };
 
+    enum HypervisorPmpRelation : unsigned {
+        hypervisor_pmp_none,
+        hypervisor_pmp_first,
+        hypervisor_pmp_last,
+        hypervisor_pmp_below,
+        hypervisor_pmp_above,
+        hypervisor_pmp_cross_lower,
+        hypervisor_pmp_cross_upper,
+        hypervisor_pmp_relation_count,
+    };
+
     enum CmoOperation : unsigned {
         cmo_clean,
         cmo_flush,
@@ -166,6 +177,8 @@ struct RandomConstraints {
     std::array<unsigned, hypervisor_pbmt_pair_count>
         hypervisor_pbmt_pair_weights{};
     unsigned hypervisor_pma_device_per_mille = 0;
+    std::array<unsigned, hypervisor_pmp_relation_count>
+        hypervisor_pmp_relation_weights{};
     std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
     unsigned cmo_dirty_per_mille = 0;
     unsigned cmo_younger_overlap_per_mille = 0;
@@ -244,6 +257,7 @@ struct RandomConstraints {
                 .hypervisor_spvp_user_per_mille = 500,
                 .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
                 .hypervisor_pma_device_per_mille = 500,
+                .hypervisor_pmp_relation_weights = {1, 1, 1, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 500,
@@ -322,6 +336,8 @@ struct RandomConstraints {
                 .hypervisor_spvp_user_per_mille = 1,
                 .hypervisor_pbmt_pair_weights = {996, 1, 1, 1, 1},
                 .hypervisor_pma_device_per_mille = 1,
+                .hypervisor_pmp_relation_weights = {
+                    999994, 1, 1, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 50,
                 .cmo_younger_overlap_per_mille = 10,
@@ -401,6 +417,7 @@ struct RandomConstraints {
                 .hypervisor_spvp_user_per_mille = 500,
                 .hypervisor_pbmt_pair_weights = {1, 1, 1, 1, 1},
                 .hypervisor_pma_device_per_mille = 500,
+                .hypervisor_pmp_relation_weights = {1, 1, 1, 1, 1, 1, 1},
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 750,
@@ -606,6 +623,21 @@ struct RandomConstraints {
             }};
         if (assign_weight(
                 hypervisor_pbmt_pair_keys, hypervisor_pbmt_pair_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, hypervisor_pmp_relation_count>
+            hypervisor_pmp_relation_keys{{
+                "hypervisor-pmp-none",
+                "hypervisor-pmp-first",
+                "hypervisor-pmp-last",
+                "hypervisor-pmp-below",
+                "hypervisor-pmp-above",
+                "hypervisor-pmp-cross-lower",
+                "hypervisor-pmp-cross-upper",
+            }};
+        if (assign_weight(
+                hypervisor_pmp_relation_keys,
+                hypervisor_pmp_relation_weights)) {
             return;
         }
         constexpr std::array<std::string_view, cmo_operation_count>
@@ -913,6 +945,13 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "hypervisor PBMT pair constraint weights cannot all be zero");
         }
+        if (operation_weights[hypervisor] != 0 &&
+            std::accumulate(
+                hypervisor_pmp_relation_weights.begin(),
+                hypervisor_pmp_relation_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "hypervisor PMP relation constraint weights cannot all be zero");
+        }
         const bool hypervisor_non_pma_enabled = std::any_of(
             hypervisor_pbmt_pair_weights.begin() + 1,
             hypervisor_pbmt_pair_weights.end(),
@@ -951,6 +990,50 @@ struct RandomConstraints {
             misaligned_per_mille == 1000) {
             throw std::invalid_argument(
                 "fixed-PMA hypervisor device traffic requires an aligned class");
+        }
+        const bool hypervisor_pmp_edge_enabled = std::any_of(
+            hypervisor_pmp_relation_weights.begin() + 1,
+            hypervisor_pmp_relation_weights.end(),
+            [](unsigned weight) { return weight != 0; });
+        const bool hypervisor_pmp_natural_edge_enabled = std::any_of(
+            hypervisor_pmp_relation_weights.begin() + hypervisor_pmp_first,
+            hypervisor_pmp_relation_weights.begin() +
+                hypervisor_pmp_cross_lower,
+            [](unsigned weight) { return weight != 0; });
+        const bool hypervisor_pmp_cross_edge_enabled = std::any_of(
+            hypervisor_pmp_relation_weights.begin() +
+                hypervisor_pmp_cross_lower,
+            hypervisor_pmp_relation_weights.end(),
+            [](unsigned weight) { return weight != 0; });
+        if (operation_weights[hypervisor] != 0 &&
+            hypervisor_pmp_edge_enabled &&
+            hypervisor_pmp_relation_weights[hypervisor_pmp_none] == 0) {
+            throw std::invalid_argument(
+                "hypervisor PMP edge relations require the no-PMP control");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            hypervisor_pmp_edge_enabled &&
+            hypervisor_pbmt_pair_weights[hypervisor_pbmt_pma_pma] == 0) {
+            throw std::invalid_argument(
+                "hypervisor PMP edge relations require the PMA/PMA PBMT pair");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            hypervisor_pmp_edge_enabled &&
+            hypervisor_pma_device_per_mille == 1000) {
+            throw std::invalid_argument(
+                "hypervisor PMP edge relations require the DDR address class");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            hypervisor_pmp_natural_edge_enabled &&
+            misaligned_per_mille == 1000) {
+            throw std::invalid_argument(
+                "natural hypervisor PMP edges require an aligned class");
+        }
+        if (operation_weights[hypervisor] != 0 &&
+            hypervisor_pmp_cross_edge_enabled &&
+            misaligned_per_mille == 0) {
+            throw std::invalid_argument(
+                "crossing hypervisor PMP edges require a misaligned class");
         }
         if (operation_weights[cmo] != 0 &&
             std::accumulate(
@@ -1469,6 +1552,11 @@ struct RandomConstraints {
         return choose_weighted(hypervisor_pbmt_pair_weights, random);
     }
 
+    unsigned choose_hypervisor_pmp_relation(std::uint64_t random) const
+    {
+        return choose_weighted(hypervisor_pmp_relation_weights, random);
+    }
+
     unsigned choose_cmo_operation(std::uint64_t random) const
     {
         return choose_weighted(cmo_operation_weights, random);
@@ -1653,14 +1741,17 @@ struct RandomConstraints {
                     direction_classes(misaligned_per_mille);
                 const unsigned address_classes =
                     direction_classes(hypervisor_pma_device_per_mille);
-                unsigned cross_actions = std::max(
-                    pbmt_pairs, std::max(alignment_classes, address_classes));
-                if (pbmt_pairs > 1 && alignment_classes == 2 &&
-                    address_classes == 2) {
-                    // Fixed-PMA device accesses are aligned PMA/PMA actions;
-                    // another PMA/PMA action is needed for misalignment.
-                    ++cross_actions;
-                }
+                const unsigned pmp_relations =
+                    static_cast<unsigned>(std::count_if(
+                        hypervisor_pmp_relation_weights.begin(),
+                        hypervisor_pmp_relation_weights.end(),
+                        [](unsigned weight) { return weight != 0; }));
+                // PMP edge actions are fixed to DDR, PMA/PMA, and a
+                // relation-specific alignment. Reserve independent no-PMP
+                // actions for every other enabled PBMT/address/alignment
+                // class rather than assuming all dimensions can overlap.
+                const unsigned cross_actions = pmp_relations + pbmt_pairs +
+                    alignment_classes + address_classes;
                 actions += families *
                     direction_classes(hypervisor_spvp_user_per_mille) *
                     cross_actions;
@@ -1874,7 +1965,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=25 constraints=" << name
+        stream << "constraint_schema=26 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1898,6 +1989,9 @@ struct RandomConstraints {
         append_weights(stream, hypervisor_pbmt_pair_weights);
         stream << " target_hypervisor_pma_device="
                << hypervisor_pma_device_per_mille
+               << " target_hypervisor_pmp_relation=";
+        append_weights(stream, hypervisor_pmp_relation_weights);
+        stream
                << " target_cmo_operation=" << cmo_operation_weights[0] << ','
                << cmo_operation_weights[1] << ',' << cmo_operation_weights[2]
                << " target_cmo_dirty=" << cmo_dirty_per_mille
@@ -2272,6 +2366,18 @@ struct ConstraintCoverage {
     std::array<std::array<std::array<std::uint64_t, 2>, 2>,
                RandomConstraints::hypervisor_family_count>
         hypervisor_pma_device_crosses{};
+    std::array<
+        std::uint64_t, RandomConstraints::hypervisor_pmp_relation_count>
+        hypervisor_pmp_relations{};
+    // [HLV/HLVX/HSV][SPVP=S/U][no PMP/first/last/below/above/crosses].
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t,
+                RandomConstraints::hypervisor_pmp_relation_count>,
+            2>,
+        RandomConstraints::hypervisor_family_count>
+        hypervisor_pmp_relation_crosses{};
     std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
         cmo_operations{};
     std::array<std::uint64_t, 2> cmo_line_states{};
@@ -2700,6 +2806,10 @@ struct ConstraintCoverage {
                 std::uint64_t, RandomConstraints::hypervisor_pbmt_pair_count>
                 cross_pbmt{};
             std::array<std::uint64_t, 2> cross_pma_device{};
+            std::array<
+                std::uint64_t,
+                RandomConstraints::hypervisor_pmp_relation_count>
+                cross_pmp_relation{};
             std::uint64_t cross_total = 0;
             for (unsigned family = 0; family < hypervisor_crosses.size();
                  ++family) {
@@ -2777,6 +2887,26 @@ struct ConstraintCoverage {
                     if (pma_device_total != count) {
                         return false;
                     }
+                    std::uint64_t pmp_relation_total = 0;
+                    for (unsigned relation = 0;
+                         relation < hypervisor_pmp_relation_crosses[family][spvp]
+                                        .size();
+                         ++relation) {
+                        const bool relation_enabled = enabled &&
+                            constraints.hypervisor_pmp_relation_weights[
+                                relation] != 0;
+                        const std::uint64_t relation_count =
+                            hypervisor_pmp_relation_crosses[
+                                family][spvp][relation];
+                        if ((relation_count != 0) != relation_enabled) {
+                            return false;
+                        }
+                        pmp_relation_total += relation_count;
+                        cross_pmp_relation[relation] += relation_count;
+                    }
+                    if (pmp_relation_total != count) {
+                        return false;
+                    }
                     cross_family += count;
                     cross_spvp[spvp] += count;
                     cross_total += count;
@@ -2790,6 +2920,7 @@ struct ConstraintCoverage {
                 cross_alignment == hypervisor_alignments &&
                 cross_pbmt == hypervisor_pbmt_pairs &&
                 cross_pma_device == hypervisor_pma_devices &&
+                cross_pmp_relation == hypervisor_pmp_relations &&
                 cross_total == operations[operation];
         }
         if (operation == RandomConstraints::cmo) {
@@ -3327,6 +3458,23 @@ public:
                     stream << (first_hypervisor_pma_device ? "" : ",")
                            << count;
                     first_hypervisor_pma_device = false;
+                }
+            }
+        }
+        stream << " actual_hypervisor_pmp_relation=";
+        for (unsigned relation = 0;
+             relation < hypervisor_pmp_relations.size(); ++relation) {
+            stream << (relation == 0 ? "" : ",")
+                   << hypervisor_pmp_relations[relation];
+        }
+        stream << " actual_hypervisor_pmp_relation_cross=";
+        bool first_hypervisor_pmp_relation = true;
+        for (const auto &family : hypervisor_pmp_relation_crosses) {
+            for (const auto &spvp : family) {
+                for (const auto count : spvp) {
+                    stream << (first_hypervisor_pmp_relation ? "" : ",")
+                           << count;
+                    first_hypervisor_pmp_relation = false;
                 }
             }
         }

@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `6653b868f7fe4d1e1cd251ee5bbe16389f45110d93c764cf51d933908a900cab`
+- Current rebuilt and frozen UT executable SHA-256: `84df82ba65d979b1ea41c6bd17ef1e61ddb21e815e00740b5b1da71debc84482`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `be17195c5776591f4b774a559deded1706c70a5a779e3c460ea3cdfc70d4778c`
+- Frozen runtime manifest SHA-256: `eb3cf3c54c86191181e352e0760cfb0be7026cd6a40efc2399d2fbffa28e0a44`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -2611,3 +2611,62 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_
 ```
 
 No CPU RTL defect was observed.
+
+## Schema 26 Random Hypervisor PMP-Edge Closure
+
+On 2026-09-08 the common `random-mixed` hypervisor class added seven weighted
+physical-PMP relations: no-PMP control, the first and last naturally aligned
+accesses in a 4-KiB NAPOT RWX region, naturally aligned accesses immediately
+below and above it, and accesses crossing its lower and upper edges. The allow
+entry is first match inside a 16-KiB deny entry; a final allow entry keeps page
+table walks and unrelated traffic independent. Distinct VA/GPA/PA aliases
+retain all four 4-KiB/Svnapot nested leaf topologies.
+
+Every enabled HLV/HLVX/HSV x SPVP=S/U x relation bin is a per-seed obligation.
+The independent two-stage walker supplies the physical address and hand-coded
+PMP interval arithmetic supplies allow/fault. Allowed loads check exact data and
+every active-PMP HSV is followed by an HLV readback after installing a global
+allow entry, proving exact committed bytes on success and unchanged bytes on
+denial. Denied actions require the exact load/store access fault, no Uncache
+request, no architectural side effect, and checked redirect plus LSQ recovery.
+A cross-upper load may
+legally hit in cache or issue one exact allowed-prefix cache-line request before
+the terminal fault; all other denied relations forbid a data-manager request.
+
+The following final-binary 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Hypervisor actions | HLV/HLVX/HSV | SPVP S/U | PMP none/first/last/below/above/cross-lower/cross-upper |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| hypervisor-focused `coverage` | 26001 | 94,593 | 411 | 131/140/140 | 198/213 | 56/66/65/54/60/50/60 |
+| full `coverage` | 26002 | 119,380 | 71 | 24/24/23 | 35/36 | 35/6/6/6/6/6/6 |
+| full `spec` | 26003 | 66,577 | 71 | 23/24/24 | 36/35 | 35/6/6/6/6/6/6 |
+| full `corner` | 26004 | 202,439 | 75 | 25/24/26 | 37/38 | 36/6/6/7/7/6/7 |
+| no-PMP endpoint | 26005 | 80,086 | 411 | 134/124/153 | 198/213 | 411/0/0/0/0/0/0 |
+| frozen `coverage` artifact | 1 | 115,382 | 73 | 24/24/25 | 37/36 | 36/6/6/7/6/6/6 |
+
+All five fully enabled runs covered every one of the 42 family/SPVP/relation
+bins and conserved each flattened cross against both its relation and
+family/SPVP marginals. The no-PMP endpoint kept all 36 disabled edge bins at
+zero while retaining the PBMT/PMA/translation paths. The SPEC preset assigns
+weights `999994/1/1/1/1/1/1`; deficit scheduling still executed every rare
+edge class without changing its workload-like steady-state distribution.
+
+Focused split-fault testing exposed a UT oracle error rather than an RTL bug.
+One replayed load can legally emit several lane-local cancel pulses, so the old
+global requirement `wakeups > cancels` was implementation-dependent. The gate
+now requires both event types on every lane without comparing aggregate counts,
+while the action-local fault oracle still requires every newly observed wakeup
+to have a later same-lane cancel. No standalone CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, smoke, the three complete constraint
+presets, and the independent finite-artifact verifier passed. The verifier
+checked schema-26 target/actual fields, all 42 crosses, disabled-bin and
+conservation rules, plus frozen runtime, RTL, runner, and controller hashes:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=45.210955 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=81d90c2030edb3d2d6c4dc6bca389d648af963529c36cad197c3b5d5abd7cc62
+```
+
+No CPU RTL defect was observed. Other NAPOT sizes, TOR boundary composition,
+and the full lock/permission/overlap-by-edge matrix remain explicit gaps.

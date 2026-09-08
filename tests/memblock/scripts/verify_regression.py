@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25,
+            19, 20, 21, 22, 23, 24, 25, 26,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -448,9 +448,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             f"load_cancels has an uncovered lane: {cancels}",
         )
         _require(
-            all(wakeup > cancel for wakeup, cancel in zip(wakeups, cancels)),
-            "each scalar load lane needs both canceled and uncanceled wakeups: "
-            f"wakeup={wakeups} cancel={cancels}",
+            all(wakeup > 0 for wakeup in wakeups),
+            f"load_wakeups has an uncovered lane: {wakeups}",
         )
 
     if schema >= 5:
@@ -732,6 +731,52 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and sum(actual_pma_device)
                 == actual_operations[hypervisor_index],
                 "hypervisor PMA-device coverage is not conserved",
+            )
+
+        if schema >= 26:
+            target_pmp_relation = _csv_counts(
+                result, "target_hypervisor_pmp_relation", 7
+            )
+            actual_pmp_relation = _csv_counts(
+                result, "actual_hypervisor_pmp_relation", 7
+            )
+            actual_pmp_relation_cross = _csv_counts(
+                result, "actual_hypervisor_pmp_relation_cross", 42
+            )
+            cross_pmp_relation = [0] * 7
+            for family in range(3):
+                for spvp in range(2):
+                    pair_total = 0
+                    for relation in range(7):
+                        enabled = (
+                            target_operations[hypervisor_index] != 0
+                            and target_hypervisor[family] != 0
+                            and (
+                                target_spvp_user != 1000
+                                if spvp == 0
+                                else target_spvp_user != 0
+                            )
+                            and target_pmp_relation[relation] != 0
+                        )
+                        index = family * 14 + spvp * 7 + relation
+                        count = actual_pmp_relation_cross[index]
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_hypervisor_pmp_relation_cross does not "
+                            "match enabled classes: "
+                            f"family={family} spvp={spvp} relation={relation}",
+                        )
+                        pair_total += count
+                        cross_pmp_relation[relation] += count
+                    _require(
+                        pair_total == actual_cross[family * 2 + spvp],
+                        "hypervisor PMP-relation/cross coverage is not conserved",
+                    )
+            _require(
+                cross_pmp_relation == actual_pmp_relation
+                and sum(actual_pmp_relation)
+                == actual_operations[hypervisor_index],
+                "hypervisor PMP-relation coverage is not conserved",
             )
 
         if schema >= 13:

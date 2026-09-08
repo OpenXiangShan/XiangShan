@@ -73,6 +73,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                                         unsigned topology) {
         return 0x35000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
     };
+    const auto hypervisor_pmp_virtual_base = [](unsigned spvp,
+                                                unsigned topology) {
+        return 0x75000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
+    const auto hypervisor_pmp_guest_base = [](unsigned spvp,
+                                              unsigned topology) {
+        return 0x1050000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
+    const auto hypervisor_pmp_physical_base = [](unsigned spvp,
+                                                 unsigned topology) {
+        return 0x240000000ULL + spvp * 0x400000ULL + topology * 0x100000ULL;
+    };
+    constexpr std::uint64_t hypervisor_pmp_region_offset = 0x1000;
+    constexpr std::uint64_t hypervisor_pmp_region_size = 0x1000;
     struct HypervisorPbmtMapping {
         bool vs_nc;
         bool vs_io;
@@ -150,6 +164,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 hypervisor_pma_device_physical_base(spvp, topology), 0x1000,
                 static_cast<unsigned char>(0xb5 + spvp * 0x29 +
                                            topology * 0x13));
+            environment.memory().fill_incrementing(
+                hypervisor_pmp_physical_base(spvp, topology), 0x4000,
+                static_cast<unsigned char>(0xd5 + spvp * 0x29 +
+                                           topology * 0x13));
         }
     }
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
@@ -166,7 +184,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const auto load_feedback_complete = [&](const auto &feedback) {
         for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
             if (feedback.ld2_cancels[lane] == 0 ||
-                feedback.wakeups[lane] <= feedback.ld2_cancels[lane]) {
+                feedback.wakeups[lane] == 0) {
                 return false;
             }
         }
@@ -400,8 +418,31 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     };
     auto constrained_hypervisor_address = [&] (
         unsigned alignment, const TranslationLeafTopology &leaf,
-        unsigned spvp, unsigned pbmt, bool pma_device, bool misaligned) {
+        unsigned spvp, unsigned pbmt, bool pma_device, bool misaligned,
+        unsigned pmp_relation) {
         const unsigned topology = leaf.nested_index();
+        if (pmp_relation != RandomConstraints::hypervisor_pmp_none) {
+            const std::uint64_t base =
+                hypervisor_pmp_virtual_base(spvp, topology);
+            const std::uint64_t first = base + hypervisor_pmp_region_offset;
+            const std::uint64_t above = first + hypervisor_pmp_region_size;
+            switch (pmp_relation) {
+            case RandomConstraints::hypervisor_pmp_first:
+                return first;
+            case RandomConstraints::hypervisor_pmp_last:
+                return above - alignment;
+            case RandomConstraints::hypervisor_pmp_below:
+                return first - alignment;
+            case RandomConstraints::hypervisor_pmp_above:
+                return above;
+            case RandomConstraints::hypervisor_pmp_cross_lower:
+                return first - alignment / 2;
+            case RandomConstraints::hypervisor_pmp_cross_upper:
+                return above - alignment / 2;
+            default:
+                return std::uint64_t{0};
+            }
+        }
         const std::uint64_t base = pma_device
             ? hypervisor_pma_device_virtual_base(spvp, topology)
             : hypervisor_virtual_base(spvp, pbmt, topology);
@@ -436,7 +477,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         constraints.response_latency.uncache == memblock::ResponseLatencyProfile::spec
         ? 16384 : 2048;
     auto issue_load = [&](const memblock::LoadTransaction &transaction,
-                          std::optional<std::uint64_t> expected = std::nullopt) {
+                          std::optional<std::uint64_t> expected = std::nullopt,
+                          bool count_action = true) {
         if (expected) {
             environment.expect_load_data(transaction, *expected);
         } else {
@@ -447,8 +489,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             !environment.run_until_all_complete(constrained_completion_timeout)) {
             return false;
         }
-        coverage.sample(transaction);
-        ++actions;
+        if (count_action) {
+            coverage.sample(transaction);
+            ++actions;
+        }
         return true;
     };
     auto issue_vector = [&](
@@ -496,7 +540,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         return true;
     };
     auto issue_store = [&](const memblock::StoreTransaction &transaction,
-                           bool data_first) {
+                           bool data_first,
+                           bool hold_pending_store = false) {
         environment.expect_store(transaction);
         const bool issued = environment.enqueue_store(
                                 transaction,
@@ -507,7 +552,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                  : environment.issue_store_address(transaction) &&
                                        environment.issue_store_data(transaction));
         if (!issued || !environment.run_until_store_complete_with_replay(
-                           transaction, constrained_completion_timeout)) {
+                           transaction, constrained_completion_timeout,
+                           hold_pending_store)) {
             return false;
         }
         coverage.sample(transaction, data_first);
@@ -1015,6 +1061,59 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (unsigned spvp = 0; spvp < 2; ++spvp) {
+            for (unsigned topology = 0; topology < 4; ++topology) {
+                const bool vs_napot = (topology & 2U) != 0;
+                const bool g_napot = (topology & 1U) != 0;
+                for (unsigned mode = 0; mode < 2; ++mode) {
+                    for (std::uint64_t offset = 0;
+                         offset < hypervisor_span; offset += 0x10000) {
+                        const std::uint64_t virtual_base =
+                            hypervisor_pmp_virtual_base(spvp, topology) +
+                            offset;
+                        const std::uint64_t guest_base =
+                            hypervisor_pmp_guest_base(spvp, topology) + offset;
+                        const std::uint64_t physical_base =
+                            hypervisor_pmp_physical_base(spvp, topology) +
+                            offset;
+                        if (vs_napot) {
+                            if (!map_stage_napot(
+                                    mode, random_vs_roots[mode], virtual_base,
+                                    guest_base, spvp != 0)) {
+                                return false;
+                            }
+                        } else {
+                            for (std::uint64_t page = 0; page < 0x10000;
+                                 page += 0x1000) {
+                                if (!map_stage_page(
+                                        mode, random_vs_roots[mode],
+                                        virtual_base + page, guest_base + page,
+                                        false, false, true, spvp != 0)) {
+                                    return false;
+                                }
+                            }
+                        }
+                        if (g_napot) {
+                            if (!map_g_napot(
+                                    mode, random_g_roots[mode], guest_base,
+                                    physical_base)) {
+                                return false;
+                            }
+                        } else {
+                            for (std::uint64_t page = 0; page < 0x10000;
+                                 page += 0x1000) {
+                                if (!map_g_page(
+                                        mode, random_g_roots[mode],
+                                        guest_base + page,
+                                        physical_base + page, true)) {
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for (unsigned mode = 0; mode < 2; ++mode) {
             if (!map_stage_page(
                     mode, random_stage1_roots[mode], mmio_virtual,
@@ -1074,6 +1173,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 reference_addresses.emplace_back(
                     hypervisor_pma_device_virtual_base(spvp, topology) + offset,
                     hypervisor_pma_device_physical_base(spvp, topology) + offset);
+                reference_addresses.emplace_back(
+                    hypervisor_pmp_virtual_base(spvp, topology) +
+                        hypervisor_pmp_region_offset + 0x188,
+                    hypervisor_pmp_physical_base(spvp, topology) +
+                        hypervisor_pmp_region_offset + 0x188);
             }
         }
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
@@ -4092,6 +4196,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             bool hypervisor_spvp_user = false;
             bool hypervisor_misaligned = false;
             bool hypervisor_pma_device = false;
+            unsigned hypervisor_pmp_relation =
+                RandomConstraints::hypervisor_pmp_none;
             unsigned hypervisor_pbmt_pair =
                 RandomConstraints::hypervisor_pbmt_pma_pma;
             if (kind == RandomConstraints::hypervisor) {
@@ -4106,7 +4212,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 hypervisor_pma_device = choose_binary_class(
                     constraints.hypervisor_pma_device_per_mille,
                     constraint_coverage.hypervisor_pma_devices);
-                if (hypervisor_pma_device) {
+                hypervisor_pmp_relation =
+                    constraints.choose_hypervisor_pmp_relation(random());
+                if (hypervisor_pmp_relation !=
+                    RandomConstraints::hypervisor_pmp_none) {
+                    hypervisor_pbmt_pair =
+                        RandomConstraints::hypervisor_pbmt_pma_pma;
+                    hypervisor_pma_device = false;
+                    hypervisor_misaligned =
+                        hypervisor_pmp_relation >= RandomConstraints::
+                            hypervisor_pmp_cross_lower;
+                } else if (hypervisor_pma_device) {
                     hypervisor_pbmt_pair =
                         RandomConstraints::hypervisor_pbmt_pma_pma;
                     hypervisor_misaligned = false;
@@ -4119,6 +4235,49 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
                 bool cross_forced = false;
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::hypervisor_family_count &&
+                         !cross_forced;
+                     ++candidate) {
+                    if (constraints.hypervisor_family_weights[candidate] == 0) {
+                        continue;
+                    }
+                    for (unsigned spvp = 0;
+                         spvp < 2 && !cross_forced; ++spvp) {
+                        const bool spvp_enabled = spvp == 0
+                            ? constraints.hypervisor_spvp_user_per_mille != 1000
+                            : constraints.hypervisor_spvp_user_per_mille != 0;
+                        if (!spvp_enabled) {
+                            continue;
+                        }
+                        for (unsigned relation = 0;
+                             relation < RandomConstraints::
+                                 hypervisor_pmp_relation_count;
+                             ++relation) {
+                            if (constraints.hypervisor_pmp_relation_weights[
+                                    relation] == 0 ||
+                                constraint_coverage.
+                                    hypervisor_pmp_relation_crosses[
+                                        candidate][spvp][relation] != 0) {
+                                continue;
+                            }
+                            hypervisor_family = candidate;
+                            hypervisor_spvp_user = spvp != 0;
+                            hypervisor_pmp_relation = relation;
+                            if (relation !=
+                                RandomConstraints::hypervisor_pmp_none) {
+                                hypervisor_pbmt_pair = RandomConstraints::
+                                    hypervisor_pbmt_pma_pma;
+                                hypervisor_pma_device = false;
+                                hypervisor_misaligned = relation >=
+                                    RandomConstraints::
+                                        hypervisor_pmp_cross_lower;
+                            }
+                            cross_forced = true;
+                            break;
+                        }
+                    }
+                }
                 for (unsigned candidate = 0;
                      candidate < RandomConstraints::hypervisor_family_count &&
                          !cross_forced;
@@ -4145,6 +4304,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             }
                             hypervisor_family = candidate;
                             hypervisor_spvp_user = spvp != 0;
+                            hypervisor_pmp_relation =
+                                RandomConstraints::hypervisor_pmp_none;
                             hypervisor_pbmt_pair = pbmt;
                             const bool pma_pair = pbmt == RandomConstraints::
                                 hypervisor_pbmt_pma_pma;
@@ -4198,6 +4359,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             }
                             hypervisor_family = candidate;
                             hypervisor_spvp_user = spvp != 0;
+                            hypervisor_pmp_relation =
+                                RandomConstraints::hypervisor_pmp_none;
                             hypervisor_pma_device = pma_device != 0;
                             if (hypervisor_pma_device) {
                                 hypervisor_pbmt_pair = RandomConstraints::
@@ -4247,6 +4410,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             if (alignment_enabled && observed == 0) {
                                 hypervisor_family = candidate;
                                 hypervisor_spvp_user = spvp != 0;
+                                hypervisor_pmp_relation =
+                                    RandomConstraints::hypervisor_pmp_none;
                                 hypervisor_misaligned = alignment != 0;
                                 if (hypervisor_misaligned) {
                                     hypervisor_pbmt_pair = RandomConstraints::
@@ -5998,32 +6163,73 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const bool final_io = final_pbmt == memblock::ReferencePbmt::io ||
                     (final_pbmt == memblock::ReferencePbmt::pma &&
                      hypervisor_pma_device);
+                const bool physical_pmp_active = hypervisor_pmp_relation !=
+                    RandomConstraints::hypervisor_pmp_none;
+                const bool physical_pmp_denied =
+                    hypervisor_pmp_relation >=
+                    RandomConstraints::hypervisor_pmp_below;
                 if (((final_nc || final_io) && hypervisor_misaligned) ||
                     (hypervisor_pma_device &&
                      hypervisor_pbmt_pair != RandomConstraints::
-                         hypervisor_pbmt_pma_pma)) {
+                         hypervisor_pbmt_pma_pma) ||
+                    (physical_pmp_active &&
+                     (hypervisor_pma_device ||
+                      hypervisor_pbmt_pair != RandomConstraints::
+                          hypervisor_pbmt_pma_pma))) {
                     phase += ":hypervisor-address-class";
                     return false;
                 }
                 if (!environment.run_until_all_complete(8192) ||
                     !environment.run_until_queues_retired(8192) ||
-                    !environment.set_hypervisor_access_permissions(spvp)) {
+                    !environment.set_hypervisor_access_permissions(
+                        spvp, false, false, false,
+                        physical_pmp_active
+                            ? memblock::ReferencePrivilegeMode::machine
+                            : memblock::ReferencePrivilegeMode::supervisor)) {
                     return false;
+                }
+                const unsigned topology = leaf.nested_index();
+                const std::uint64_t pmp_outer_base =
+                    hypervisor_pmp_physical_base(spvp_index, topology);
+                constexpr std::uint8_t pmp_napot_deny = 0x18;
+                constexpr std::uint8_t pmp_napot_rwx = 0x1f;
+                if (physical_pmp_active) {
+                    const auto napot_address = [](
+                                                   std::uint64_t base,
+                                                   std::uint64_t size) {
+                        return (base | (size / 2 - 1)) >> 2;
+                    };
+                    if (!environment.configure_pmp(
+                            {napot_address(
+                                 pmp_outer_base +
+                                     hypervisor_pmp_region_offset,
+                                 hypervisor_pmp_region_size),
+                             napot_address(pmp_outer_base, 0x4000),
+                             ~std::uint64_t{0}},
+                            {pmp_napot_rwx, pmp_napot_deny,
+                             pmp_napot_rwx})) {
+                        phase += ":hypervisor-pmp-configuration";
+                        return false;
+                    }
                 }
                 const auto hypervisor_address = [&](unsigned size) {
                     leaf_addressed = true;
                     return constrained_hypervisor_address(
                         size, leaf, spvp_index, hypervisor_pbmt_pair,
-                        hypervisor_pma_device, hypervisor_misaligned);
+                        hypervisor_pma_device, hypervisor_misaligned,
+                        hypervisor_pmp_relation);
                 };
                 const auto hypervisor_oracle_address = [&](std::uint64_t address) {
-                    const unsigned topology = leaf.nested_index();
-                    const std::uint64_t virtual_base = hypervisor_pma_device
+                    const std::uint64_t virtual_base = physical_pmp_active
+                        ? hypervisor_pmp_virtual_base(spvp_index, topology)
+                        : hypervisor_pma_device
                         ? hypervisor_pma_device_virtual_base(
                               spvp_index, topology)
                         : hypervisor_virtual_base(
                               spvp_index, hypervisor_pbmt_pair, topology);
-                    const std::uint64_t physical_base = hypervisor_pma_device
+                    const std::uint64_t physical_base = physical_pmp_active
+                        ? pmp_outer_base
+                        : hypervisor_pma_device
                         ? hypervisor_pma_device_physical_base(
                               spvp_index, topology)
                         : hypervisor_physical_base(
@@ -6063,13 +6269,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     transaction.oracle_address = reference.physical_address;
                     transaction.expected_debug_is_mmio = hypervisor_pma_device;
                     transaction.expected_debug_is_ncio = false;
+                    transaction.expected_exception_mask = physical_pmp_denied
+                        ? memblock::kExceptionStoreAccessFault : 0U;
                     const bool data_first = (random() & 1U) != 0;
                     const std::uint64_t dcache_before =
                         environment.tilelink_requests();
                     const std::uint64_t uncache_before =
                         environment.uncache_requests();
                     bool completed_store = false;
-                    if (final_io) {
+                    if (physical_pmp_denied) {
+                        const std::uint64_t lq_dequeued_before =
+                            environment.lq_dequeued();
+                        const std::uint64_t sq_dequeued_before =
+                            environment.sq_dequeued();
+                        const std::uint64_t lq_cancels_before =
+                            environment.lq_redirect_canceled_observed();
+                        const std::uint64_t sq_cancels_before =
+                            environment.sq_redirect_canceled_observed();
+                        completed_store = environment.set_rob_head(
+                                              transaction.rob,
+                                              transaction.rob_flag) &&
+                            issue_store(
+                                transaction, data_first,
+                                hypervisor_misaligned) &&
+                            recover_random_precise_error(
+                                transaction.rob, transaction.rob_flag, true,
+                                lq_dequeued_before, sq_dequeued_before,
+                                lq_cancels_before, sq_cancels_before);
+                    } else if (final_io) {
                         environment.expect_store(transaction);
                         completed_store = environment.set_rob_head(
                                               transaction.rob,
@@ -6108,23 +6335,59 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             environment.commit_store(transaction, 8192);
                     }
                     const std::uint64_t expected_uncache =
-                        uncache_before + (final_nc || final_io ? 1U : 0U);
+                        uncache_before +
+                        (!physical_pmp_denied && (final_nc || final_io)
+                             ? 1U : 0U);
                     if (!completed_store ||
                         !environment.run_until_queues_retired(8192) ||
                         environment.uncache_requests() != expected_uncache ||
-                        ((final_nc || final_io) &&
+                        ((physical_pmp_denied || final_nc || final_io) &&
                          environment.tilelink_requests() != dcache_before)) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-store-manager"
                                << ":pbmt=" << hypervisor_pbmt_pair
                                << ":dcache=" << dcache_before << '/'
                                << environment.tilelink_requests()
+                               << ":last_dcache=0x" << std::hex
+                               << environment.dcache_last_request_address()
+                               << std::dec
                                << ":uncache=" << uncache_before << '/'
                                << environment.uncache_requests();
                         phase = detail.str();
                         return false;
                     }
-                    if (final_nc || final_io) {
+                    if (physical_pmp_active) {
+                        const auto readback_op = static_cast<memblock::LoadOp>(
+                            static_cast<unsigned>(op));
+                        const std::uint64_t readback_rob = rob_offset++;
+                        const std::uint64_t readback_lq = lq_offset++;
+                        auto readback = memblock::LoadTransaction{
+                            .address = address,
+                            .op = readback_op,
+                            .rob = memblock::rob_pointer_value(readback_rob),
+                            .rob_flag = memblock::rob_pointer_flag(readback_rob),
+                            .lq = memblock::lq_pointer_value(readback_lq),
+                            .lq_flag = memblock::lq_pointer_flag(readback_lq),
+                            .sq = memblock::sq_pointer_value(sq_offset),
+                            .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                            .pdest = static_cast<std::uint8_t>(
+                                1U + readback_rob % 255U),
+                            .lane = static_cast<std::uint8_t>(
+                                readback_rob % memblock::kScalarLoadLanes),
+                        };
+                        readback.oracle_address = reference.physical_address;
+                        readback.expected_debug_is_mmio = false;
+                        readback.expected_debug_is_ncio = false;
+                        readback.expected_debug_is_perf_cnt = false;
+                        if (!environment.configure_pmp(
+                                {~std::uint64_t{0}}, {pmp_napot_rwx}) ||
+                            !issue_load(readback, std::nullopt, false) ||
+                            !environment.run_until_queues_retired(8192)) {
+                            phase += ":hypervisor-pmp-store-readback";
+                            return false;
+                        }
+                    }
+                    if (!physical_pmp_denied && (final_nc || final_io)) {
                         const std::array<memblock::LoadOp, 4> read_ops{{
                             memblock::LoadOp::lbu, memblock::LoadOp::lhu,
                             memblock::LoadOp::lwu, memblock::LoadOp::ld,
@@ -6209,10 +6472,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         *hypervisor_family ==
                             RandomConstraints::hypervisor_hlvx;
                     transaction.expected_exception_mask =
-                        physical_pma_execute_denied
+                        physical_pma_execute_denied || physical_pmp_denied
                         ? memblock::kExceptionLoadAccessFault : 0U;
                     transaction.expected_debug_is_mmio =
-                        physical_pma_execute_denied
+                        physical_pma_execute_denied || physical_pmp_denied
                         ? std::nullopt : std::optional<bool>{final_io};
                     transaction.expected_debug_is_ncio =
                         final_io && !physical_pma_execute_denied
@@ -6225,7 +6488,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const auto feedback_before =
                         environment.scalar_load_feedback_stats();
                     bool completed_load = false;
-                    if (physical_pma_execute_denied) {
+                    if (physical_pmp_denied) {
+                        const std::uint64_t lq_dequeued_before =
+                            environment.lq_dequeued();
+                        const std::uint64_t sq_dequeued_before =
+                            environment.sq_dequeued();
+                        const std::uint64_t lq_cancels_before =
+                            environment.lq_redirect_canceled_observed();
+                        const std::uint64_t sq_cancels_before =
+                            environment.sq_redirect_canceled_observed();
+                        completed_load = environment.set_rob_head(
+                                             transaction.rob,
+                                             transaction.rob_flag) &&
+                            issue_load(transaction) &&
+                            recover_random_precise_error(
+                                transaction.rob, transaction.rob_flag, false,
+                                lq_dequeued_before, sq_dequeued_before,
+                                lq_cancels_before, sq_cancels_before);
+                    } else if (physical_pma_execute_denied) {
                         completed_load = issue_load(transaction) &&
                             environment.run_until_queues_retired(8192);
                     } else if (final_io) {
@@ -6250,36 +6530,76 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     const std::uint64_t expected_uncache =
                         uncache_before +
-                        (!physical_pma_execute_denied && (final_nc || final_io)
+                        (!physical_pma_execute_denied && !physical_pmp_denied &&
+                             (final_nc || final_io)
                              ? 1U : 0U);
+                    const std::uint64_t dcache_after =
+                        environment.tilelink_requests();
+                    const std::uint64_t dcache_delta =
+                        dcache_after - dcache_before;
+                    const bool pmp_prefix_request_valid =
+                        physical_pmp_denied &&
+                        hypervisor_pmp_relation == RandomConstraints::
+                            hypervisor_pmp_cross_upper &&
+                        dcache_delta <= 1 &&
+                        (dcache_delta == 0 ||
+                         environment.dcache_last_request_address() ==
+                             (reference.physical_address &
+                              ~std::uint64_t{63}));
+                    const bool suppressed_dcache_valid =
+                        !(physical_pma_execute_denied || physical_pmp_denied ||
+                          final_nc || final_io) ||
+                        (physical_pmp_denied
+                             ? pmp_prefix_request_valid || dcache_delta == 0
+                             : dcache_delta == 0);
                     if (!completed_load ||
                         environment.uncache_requests() != expected_uncache ||
-                        ((physical_pma_execute_denied || final_nc || final_io) &&
-                         environment.tilelink_requests() != dcache_before)) {
+                        !suppressed_dcache_valid) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-load-manager"
                                << ":pbmt=" << hypervisor_pbmt_pair
+                               << ":pmp_relation="
+                               << hypervisor_pmp_relation
                                << ":dcache=" << dcache_before << '/'
                                << environment.tilelink_requests()
+                               << ":last_dcache=0x" << std::hex
+                               << environment.dcache_last_request_address()
+                               << std::dec
                                << ":uncache=" << uncache_before << '/'
                                << environment.uncache_requests();
                         phase = detail.str();
                         return false;
                     }
-                    if (physical_pma_execute_denied) {
+                    if (physical_pma_execute_denied || physical_pmp_denied) {
                         const auto feedback_after =
                             environment.scalar_load_feedback_stats();
                         std::uint64_t wakeups = 0;
                         std::uint64_t cancels = 0;
+                        bool all_wakeups_canceled = true;
                         for (unsigned lane = 0;
                              lane < memblock::kScalarLoadLanes; ++lane) {
-                            wakeups += feedback_after.wakeups[lane] -
+                            const std::uint64_t lane_wakeups =
+                                feedback_after.wakeups[lane] -
                                 feedback_before.wakeups[lane];
-                            cancels += feedback_after.ld2_cancels[lane] -
+                            const std::uint64_t lane_cancels =
+                                feedback_after.ld2_cancels[lane] -
                                 feedback_before.ld2_cancels[lane];
+                            wakeups += lane_wakeups;
+                            cancels += lane_cancels;
+                            all_wakeups_canceled &= lane_wakeups == 0 ||
+                                (lane_cancels != 0 &&
+                                 feedback_after.last_cancel_cycle[lane] >=
+                                     feedback_after.last_wakeup[lane].cycle);
                         }
-                        if (cancels == 0 || wakeups != cancels) {
-                            phase += ":hypervisor-pma-device-wakeup";
+                        if (cancels == 0 || !all_wakeups_canceled) {
+                            std::ostringstream detail;
+                            detail << phase
+                                   << ":hypervisor-fault-wakeup"
+                                   << ":pmp_relation="
+                                   << hypervisor_pmp_relation
+                                   << ":wakeups=" << wakeups
+                                   << ":cancels=" << cancels;
+                            phase = detail.str();
                             return false;
                         }
                     }
@@ -6305,6 +6625,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.hypervisor_pma_devices[pma_device_index];
                 ++constraint_coverage.hypervisor_pma_device_crosses[
                     *hypervisor_family][spvp_index][pma_device_index];
+                ++constraint_coverage.hypervisor_pmp_relations[
+                    hypervisor_pmp_relation];
+                ++constraint_coverage.hypervisor_pmp_relation_crosses[
+                    *hypervisor_family][spvp_index][hypervisor_pmp_relation];
                 if (final_nc || final_io) {
                     ++coverage.noncacheable;
                 } else {

@@ -58,6 +58,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `hypervisor-spvp-user` | Per-mille share of hypervisor actions using SPVP=U; zero selects only SPVP=S, 1000 only SPVP=U, and intermediate values require both |
 | `hypervisor-pbmt-pma-pma`, `hypervisor-pbmt-pma-nc`, `hypervisor-pbmt-pma-io`, `hypervisor-pbmt-nc-io`, `hypervisor-pbmt-io-nc` | Relative VS/G leaf-PBMT pair weights inside the hypervisor class. The five-pair basis covers final PMA/NC/IO selection and both VS-over-G priority directions |
 | `hypervisor-pma-device` | Per-mille share of hypervisor actions translated to an interior address in the fixed SoC `c=0`, R/W, X=0 PMA device interval. Zero selects only ordinary DDR aliases, 1000 only the device interval, and intermediate values require both |
+| `hypervisor-pmp-none`, `hypervisor-pmp-first`, `hypervisor-pmp-last`, `hypervisor-pmp-below`, `hypervisor-pmp-above`, `hypervisor-pmp-cross-lower`, `hypervisor-pmp-cross-upper` | Relative physical-PMP relation weights. Edge actions use a PMA/PMA DDR alias and a first-match 4-KiB NAPOT RWX region inside an enclosing deny region; first/last are allowed, while below/above/crossing relations fault |
 | `cmo-clean`, `cmo-flush`, `cmo-inval` | Relative operation weights inside the `cmo` class |
 | `cmo-dirty` | Per-mille share of CMO target lines made dirty by a committed store that CMO must drain from SBuffer |
 | `cmo-younger-overlap` | Per-mille share of CMO actions that issue a younger cold load into another MSHR and require `flushPipe` cancellation with no writeback |
@@ -166,7 +167,7 @@ scenario implementations:
 | --- | --- | --- |
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype and errors | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences. Schema 18 adds `atomic-error`/`atomic-error-denied`, closes all 18 enabled family x width x clean/corrupt/denied outcomes, and checks the exact exception plus two-beat refill, errored GrantAck/refill, unchanged manager memory at response time, and deterministic poisoned-line cache image if it is later released. LRSC error actions stop at LR because a cold SC cannot request a refill | Cross-hart reservation interference remains integration-level |
-| Hypervisor subtype, effective privilege, alignment, PBMT, and PMA class | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation operations. Schema 22 adds `hypervisor-spvp-user`, maps independent U=1 VS regions for all four 4-KiB/Svnapot VS/G leaf combinations to known physical bytes, and closes every enabled family x SPVP=S/U cross per seed. Schema 23 reuses `misaligned` and closes every enabled family x SPVP x aligned/misaligned cross with a physical data/side-effect oracle. Schema 24 adds the five-pair `PMA/PMA`, `PMA/NC`, `PMA/IO`, `NC/IO`, and `IO/NC` PBMT basis and closes every enabled family x SPVP x PBMT pair while checking final PA, bytes, and DCache/Uncache route. Schema 25 adds `hypervisor-pma-device` and closes every enabled family x SPVP x DDR/fixed-device cross; HLV/HSV check exact Uncache effects, while HLVX checks PMA execute denial, manager non-use, and wakeup/cancel conservation | Compose non-PMA PBMT with misalignment only after its exception-priority contract is modeled; add other fixed-PMA boundaries and broader PMP region-edge crosses to the same class |
+| Hypervisor subtype, effective privilege, alignment, PBMT, PMA class, and PMP edge relation | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation operations. Schema 22 adds `hypervisor-spvp-user`, maps independent U=1 VS regions for all four 4-KiB/Svnapot VS/G leaf combinations to known physical bytes, and closes every enabled family x SPVP=S/U cross per seed. Schema 23 reuses `misaligned` and closes every enabled family x SPVP x aligned/misaligned cross with a physical data/side-effect oracle. Schema 24 adds the five-pair `PMA/PMA`, `PMA/NC`, `PMA/IO`, `NC/IO`, and `IO/NC` PBMT basis and closes every enabled family x SPVP x PBMT pair while checking final PA, bytes, and DCache/Uncache route. Schema 25 adds `hypervisor-pma-device` and closes every enabled family x SPVP x DDR/fixed-device cross. Schema 26 adds no-PMP/first/last/below/above/cross-lower/cross-upper weights for a 4-KiB NAPOT allow region nested in a 16-KiB deny region and closes every family x SPVP x relation with exact fault, manager, queue-recovery, and post-HSV HLV-readback checks | Compose non-PMA PBMT with misalignment only after its exception-priority contract is modeled; add other fixed-PMA boundaries and PMP sizes/TOR/lock/permission/overlap-by-edge crosses to the same class |
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths | Add simultaneous multi-class windows and multiple CMO sources |
 | Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
@@ -198,6 +199,9 @@ Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 hypervisor family weights (HLV/HLVX/HSV) are `1/1/1`, `90/5/5`, and `1/1/1`.
 Their fixed-PMA device shares are `500`, `1`, and `500` per mille, preserving a
 low-probability but coverage-forced device sample in the SPEC-like profile.
+Their physical-PMP relation weights are `1/1/1/1/1/1/1`,
+`999994/1/1/1/1/1/1`, and `1/1/1/1/1/1/1`; the first slot is the no-PMP
+control. Deficit scheduling still closes each rare SPEC-like edge relation.
 Their CMO operation weights (CLEAN/FLUSH/INVAL) are `1/1/1` in every preset.
 Dirty-line rates are `500`, `50`, and `500` per mille, and younger-load overlap
 rates are `500`, `10`, and `750`. Thus `spec` retains a verification floor
@@ -335,9 +339,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=25`, the resolved target weights,
+Every terminal line prints `constraint_schema=26`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family/SPVP/alignment/PBMT/
-DDR-versus-fixed-PMA-device crosses, CMO operation/
+DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
 clean/corrupt/denied and manager-error accounting, ordinary-vector
 direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
@@ -402,8 +406,9 @@ Probe subclass counts conserve against the generated sequence count. Manager
 Probe traffic additionally conserves primary sequences, toB cleanup requests,
 CMO-derived Probes, and overlap's auxiliary clean Probes. Any observed overlap
 requires a maximum accepted-but-unanswered Probe depth of at least two. Every
-load lane must observe both canceled and uncanceled wakeups without constraining
-the legal replay count, and every seed must emit at least one `prefetch.i`
+load lane must observe both backend wakeup and cancel events without constraining
+their count relationship: a split or replayed request can legally emit multiple
+cancels for one architectural load. Every seed must emit at least one `prefetch.i`
 request toward the frontend. More than one
 enabled translation context also
 requires an observed switch, and any translated profile requires both a PTW
