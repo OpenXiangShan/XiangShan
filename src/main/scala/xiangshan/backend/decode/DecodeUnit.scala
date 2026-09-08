@@ -536,6 +536,14 @@ object HypervisorDecode extends DecodeConstants {
   )
 }
 
+// FENCE.TIME BPU subset (RTL-SPEC 13 §2.2): decode entry exists only when HasBpuFlush is set;
+// otherwise the encoding falls through to the illegal-instruction path.
+object FenceTimeDecode extends DecodeConstants {
+  override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
+    FENCE_TIME -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.fence, FenceOpType.fencetime, SelImm.IMM_I, noSpec = T, blockBack = T, flushPipe = T),
+  )
+}
+
 object MptFenceDecode extends DecodeConstants {
   override val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     MFENCE -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.fence, FenceOpType.mfence, SelImm.X, noSpec = T, blockBack = T, flushPipe = T),
@@ -835,7 +843,8 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
     ZicondDecode.table ++
     ZimopDecode.table ++
     ZfaDecode.table ++
-    (if (HasMptCheck) MptFenceDecode.table else Array.empty[(BitPat, List[BitPat])])
+    (if (HasMptCheck) MptFenceDecode.table else Array.empty[(BitPat, List[BitPat])]) ++
+    (if (HasBpuFlush) FenceTimeDecode.table else Array.empty[(BitPat, List[BitPat])])
   require(decode_table.map(_._2.length == 14).reduce(_ && _), "Decode tables have different column size")
   // assertion for LUI: only LUI should be assigned `selImm === SelImm.IMM_U && fuType === FuType.alu`
   val luiMatch = (t: Seq[BitPat]) => t(3).value == FuType.alu.ohid && t.reverse.head.value == SelImm.IMM_U.litValue
