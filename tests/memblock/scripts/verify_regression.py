@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21,
+            19, 20, 21, 22,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -534,6 +534,49 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             _require(
                 sum(actual_hypervisor) == actual_operations[hypervisor_index],
                 "hypervisor operation/family coverage is not conserved",
+            )
+
+        if schema >= 22:
+            target_spvp_user = result.get("target_hypervisor_spvp_user")
+            actual_spvp = _csv_counts(result, "actual_hypervisor_spvp", 2)
+            actual_cross = _csv_counts(result, "actual_hypervisor_cross", 6)
+            _require(
+                isinstance(target_spvp_user, int)
+                and not isinstance(target_spvp_user, bool)
+                and 0 <= target_spvp_user <= 1000,
+                "target_hypervisor_spvp_user is not a per-mille integer: "
+                f"{target_spvp_user!r}",
+            )
+            hypervisor_enabled = target_operations[hypervisor_index] != 0
+            cross_spvp = [0, 0]
+            for family in range(3):
+                cross_family = 0
+                for spvp in range(2):
+                    enabled = (
+                        hypervisor_enabled
+                        and target_hypervisor[family] != 0
+                        and (
+                            target_spvp_user != 1000
+                            if spvp == 0
+                            else target_spvp_user != 0
+                        )
+                    )
+                    count = actual_cross[family * 2 + spvp]
+                    _require(
+                        (count > 0) == enabled,
+                        "actual_hypervisor_cross does not match enabled "
+                        f"classes: family={family} spvp={spvp}",
+                    )
+                    cross_family += count
+                    cross_spvp[spvp] += count
+                _require(
+                    cross_family == actual_hypervisor[family],
+                    "hypervisor family/cross coverage is not conserved",
+                )
+            _require(
+                cross_spvp == actual_spvp
+                and sum(actual_spvp) == actual_operations[hypervisor_index],
+                "hypervisor SPVP/cross coverage is not conserved",
             )
 
         if schema >= 13:

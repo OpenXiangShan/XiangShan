@@ -2437,3 +2437,44 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=21003..21003 results=1 transactions=512 
 ```
 
 No CPU RTL defect was observed.
+
+## Schema 22 Random Hypervisor SPVP Closure
+
+On 2026-09-08 the common `random-mixed` constraint interface added
+`hypervisor-spvp-user`. Hypervisor actions now choose SPVP=S or SPVP=U and
+close every enabled HLV/HLVX/HSV x SPVP cross per seed. SPVP=S continues to
+use supervisor identity mappings. SPVP=U uses independent U=1 VS regions for
+all four 4-KiB/Svnapot VS/G leaf combinations, mapped to separately known
+cacheable physical regions. `reference_two_stage_access` independently predicts
+each PA, and scalar load/store scoreboards consume the physical
+`oracle_address` for exact data and committed-byte checks.
+
+The following 512-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Hypervisor actions | HLV/HLVX/HSV | SPVP S/U | Family x SPVP S/U |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| hypervisor-only `coverage` | 22001 | 68,432 | 411 | 131/137/143 | 208/203 | 73/58, 68/69, 67/76 |
+| hypervisor-only SPVP=U | 22006 | 65,868 | 411 | 125/138/148 | 0/411 | 0/125, 0/138, 0/148 |
+| `coverage` | 22002 | 93,434 | 9 | 4/2/3 | 4/5 | 2/2, 1/1, 1/2 |
+| `spec` | 22003 | 58,011 | 6 | 2/2/2 | 3/3 | 1/1, 1/1, 1/1 |
+| `corner` | 22004 | 168,868 | 8 | 2/2/4 | 5/3 | 1/1, 1/1, 3/1 |
+| frozen `coverage` artifact | 1 | 106,316 | 7 | 3/2/2 | 4/3 | 2/1, 1/1, 1/1 |
+
+The `spec` preset assigns only one per mille to SPVP=U, but the deficit-driven
+cross scheduler still guarantees one U-mode action for each enabled family
+before returning to the workload-like distribution. The hypervisor-only run
+also demonstrates that the class remains independently constrainable without
+inheriting unrelated operation coverage gates. The SPVP=U-only endpoint run
+recorded 108/102/96/105 actions in the 4-KiB/4-KiB, 4-KiB/G-NAPOT,
+VS-NAPOT/4-KiB, and VS-NAPOT/G-NAPOT leaf combinations respectively.
+
+All 186 Python unit tests, `check-rtl`, a clean Picker C++ rebuild, and smoke
+passed. The independent verifier accepted the frozen finite artifact with all
+controller fragment and runtime hashes checked:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_seconds=42.346380 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=737816f4f83ea34a702488cdef2eaff69f2df41f71691dbded1ef51608d1e33f
+```
+
+No CPU RTL defect was observed.

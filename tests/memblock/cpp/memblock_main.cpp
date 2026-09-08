@@ -153,6 +153,7 @@ struct RandomConstraints {
     unsigned atomic_error_per_mille = 0;
     unsigned atomic_error_denied_per_mille = 0;
     std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
+    unsigned hypervisor_spvp_user_per_mille = 0;
     std::array<unsigned, cmo_operation_count> cmo_operation_weights{};
     unsigned cmo_dirty_per_mille = 0;
     unsigned cmo_younger_overlap_per_mille = 0;
@@ -228,6 +229,7 @@ struct RandomConstraints {
                 .atomic_error_per_mille = 100,
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
+                .hypervisor_spvp_user_per_mille = 500,
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 500,
@@ -303,6 +305,7 @@ struct RandomConstraints {
                 .atomic_error_per_mille = 0,
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {90, 5, 5},
+                .hypervisor_spvp_user_per_mille = 1,
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 50,
                 .cmo_younger_overlap_per_mille = 10,
@@ -379,6 +382,7 @@ struct RandomConstraints {
                 .atomic_error_per_mille = 500,
                 .atomic_error_denied_per_mille = 500,
                 .hypervisor_family_weights = {1, 1, 1},
+                .hypervisor_spvp_user_per_mille = 500,
                 .cmo_operation_weights = {1, 1, 1},
                 .cmo_dirty_per_mille = 500,
                 .cmo_younger_overlap_per_mille = 750,
@@ -554,6 +558,10 @@ struct RandomConstraints {
                 hypervisor_family_weights[family] = parsed;
                 return;
             }
+        }
+        if (key == "hypervisor-spvp-user") {
+            hypervisor_spvp_user_per_mille = parsed;
+            return;
         }
         const auto assign_weight = [&]<std::size_t N>(
             const std::array<std::string_view, N> &keys,
@@ -1163,6 +1171,7 @@ struct RandomConstraints {
             vector_partial_vl_per_mille > 1000 ||
             vector_nonzero_vstart_per_mille > 1000 ||
             vector_segment_stores_per_mille > 1000 ||
+            hypervisor_spvp_user_per_mille > 1000 ||
             atomic_error_per_mille > 1000 ||
             atomic_error_denied_per_mille > 1000 ||
             cmo_dirty_per_mille > 1000 ||
@@ -1546,10 +1555,12 @@ struct RandomConstraints {
                 actions += error_kinds +
                     (dcache_load_error_per_mille == 1000 ? 0U : 1U);
             } else if (operation == hypervisor) {
-                actions += static_cast<unsigned>(std::count_if(
+                const unsigned families = static_cast<unsigned>(std::count_if(
                     hypervisor_family_weights.begin(),
                     hypervisor_family_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
+                actions += families *
+                    direction_classes(hypervisor_spvp_user_per_mille);
             } else if (operation == noncacheable) {
                 uncache_actions +=
                     uncache_outcome_actions(nc_stores_per_mille);
@@ -1760,7 +1771,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=21 constraints=" << name
+        stream << "constraint_schema=22 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1778,6 +1789,8 @@ struct RandomConstraints {
                << hypervisor_family_weights[0] << ','
                << hypervisor_family_weights[1] << ','
                << hypervisor_family_weights[2]
+               << " target_hypervisor_spvp_user="
+               << hypervisor_spvp_user_per_mille
                << " target_cmo_operation=" << cmo_operation_weights[0] << ','
                << cmo_operation_weights[1] << ',' << cmo_operation_weights[2]
                << " target_cmo_dirty=" << cmo_dirty_per_mille
@@ -2127,6 +2140,11 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 5> atomic_error_manager{};
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
+    std::array<std::uint64_t, 2> hypervisor_spvp{};
+    // [HLV/HLVX/HSV][SPVP=S/U].
+    std::array<std::array<std::uint64_t, 2>,
+               RandomConstraints::hypervisor_family_count>
+        hypervisor_crosses{};
     std::array<std::uint64_t, RandomConstraints::cmo_operation_count>
         cmo_operations{};
     std::array<std::uint64_t, 2> cmo_line_states{};
@@ -2549,14 +2567,35 @@ struct ConstraintCoverage {
             return operations[operation] != 0;
         }
         if (operation == RandomConstraints::hypervisor) {
-            const bool families_complete = std::equal(
-                constraints.hypervisor_family_weights.begin(),
-                constraints.hypervisor_family_weights.end(),
-                hypervisor_families.begin(),
-                [](unsigned weight, std::uint64_t count) {
-                    return weight == 0 || count != 0;
-                });
-            return operations[operation] != 0 && families_complete;
+            std::array<std::uint64_t, 2> cross_spvp{};
+            std::uint64_t cross_total = 0;
+            for (unsigned family = 0; family < hypervisor_crosses.size();
+                 ++family) {
+                std::uint64_t cross_family = 0;
+                for (unsigned spvp = 0;
+                     spvp < hypervisor_crosses[family].size(); ++spvp) {
+                    const bool spvp_enabled = spvp == 0
+                        ? constraints.hypervisor_spvp_user_per_mille != 1000
+                        : constraints.hypervisor_spvp_user_per_mille != 0;
+                    const bool enabled =
+                        constraints.hypervisor_family_weights[family] != 0 &&
+                        spvp_enabled;
+                    const std::uint64_t count =
+                        hypervisor_crosses[family][spvp];
+                    if ((count != 0) != enabled) {
+                        return false;
+                    }
+                    cross_family += count;
+                    cross_spvp[spvp] += count;
+                    cross_total += count;
+                }
+                if (cross_family != hypervisor_families[family]) {
+                    return false;
+                }
+            }
+            return operations[operation] != 0 &&
+                cross_spvp == hypervisor_spvp &&
+                cross_total == operations[operation];
         }
         if (operation == RandomConstraints::cmo) {
             const bool operations_complete = std::equal(
@@ -3044,7 +3083,18 @@ public:
                << " actual_hypervisor_family=" << hypervisor_families[0]
                << ',' << hypervisor_families[1] << ','
                << hypervisor_families[2]
-               << " actual_cmo_operation=" << cmo_operations[0] << ','
+               << " actual_hypervisor_spvp=" << hypervisor_spvp[0] << ','
+               << hypervisor_spvp[1]
+               << " actual_hypervisor_cross=";
+        for (unsigned family = 0; family < hypervisor_crosses.size();
+             ++family) {
+            for (unsigned spvp = 0;
+                 spvp < hypervisor_crosses[family].size(); ++spvp) {
+                stream << (family == 0 && spvp == 0 ? "" : ",")
+                       << hypervisor_crosses[family][spvp];
+            }
+        }
+        stream << " actual_cmo_operation=" << cmo_operations[0] << ','
                << cmo_operations[1] << ',' << cmo_operations[2]
                << " actual_cmo_line_state=" << cmo_line_states[0] << ','
                << cmo_line_states[1]

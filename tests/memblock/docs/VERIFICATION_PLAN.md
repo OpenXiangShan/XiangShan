@@ -140,8 +140,8 @@ prefix; only the tail is constrained-random:
   forwarding directions;
 - fixed-PC stride streams mixed with scalar/vector/atomic/NC/MMIO traffic,
   translation changes, cache refills, Probes, and variable manager latency.
-- HLV/HLVX/HSV traffic under nested translation, with independent family
-  weights and per-seed family coverage.
+- HLV/HLVX/HSV traffic under nested translation, with independent family and
+  SPVP=U/S constraints plus per-seed family x effective-privilege coverage.
 - address-qualified PTW manager errors across host stage-1, G-only, and all
   three nested walk sites, with root/intermediate/leaf and denied/first-beat-
   corrupt/last-beat-corrupt coverage.
@@ -153,7 +153,7 @@ selects a baseline and repeatable `--constraint key=value` arguments override
 operation mix, address locality, heterogeneous overlap, translation regime and
 Sv39/Sv48/VS/G modes, context-switch and legal fence kind/scope rates,
 misalignment, vector corner bias, vector-segment direction, atomic family/width,
-hypervisor family, CMO operation/line state/younger overlap/error presence and
+hypervisor family/SPVP, CMO operation/line state/younger overlap/error presence and
 kind, NC/MMIO direction and Uncache error presence/load-error kind,
 PTW error site/level/direction/error kind,
 legal special overlap, Probe/refill overlap, hardware stride-stream pressure, and independent
@@ -181,6 +181,10 @@ same-beat, or cross-beat locality under the shared translation and manager-
 latency constraints. Schema 21 adds weighted same-set dirty-store replacement
 with adjustable 9/10-line depth, SB/SH/SW/SD width, and set-index quarter,
 crossed with Bare/stage-1/nested translation and the same manager latency.
+Schema 22 crosses every enabled HLV/HLVX/HSV family with SPVP=U/S and uses
+independently mapped user regions for all four 4-KiB/Svnapot VS/G leaf
+combinations, so translated data and store side effects remain checked against
+physical reference memory.
 
 Every result records both resolved targets and observed counts. Each nonzero
 operation/locality and enabled atomic family/width or NC/MMIO direction is a
@@ -276,7 +280,7 @@ cacheable tests pass.
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC/IO, all lanes, signed `src + imm`, duplicate and outstanding requests | Partial: `ifetch-prefetch` checks every class/lane, all signed-12-bit boundary classes through 0/1/2047/-1/-2048, a same-cycle `i/r/w` batch, unmapped cold data-hint drop without PTW/data traffic, warmed Sv39 cacheable data-prefetch hits, individual `r/w` DCache requests, and the intentional PBMT policy: resident-TLB NC `r/w` issue DCache hints without Uncache while IO `r/w` reach neither manager; broader duplicate/same-line contention remains |
 | Atomics | LR/SC, AMOADD/XOR/AND/OR/SWAP/MIN/MAX and signed/unsigned variants, AMOCAS, reservation loss, alignment | Partial; all exposed W/D-width AMO variants, AMOCAS.W/D compare success/failure, LR/SC success/failure, all 24 W/D opcodes crossed with every illegal byte offset (120 cases), and a fixed-device-PMA `AMOADD.D` denial execute in `atomic-contracts`. The alignment matrix checks LR load-misaligned versus all other store-misaligned exception classes, suppressed RF write, zero new DCache traffic, and ROB pointer wrap; the PMA fault suppresses RF write and all manager/memory side effects. `atomic-dchannel-errors` crosses denied/corrupt with all 22 refill-capable W/D LR/AMO/AMOCAS operations, checks initial exception/RF contracts, later poisoned-line load hits, SC.W/D hits on denied/corrupt metadata, exact request counts, and clean AMO recovery. Schema-18 `random-mixed` adds common `atomic-error`/`atomic-error-denied` controls and requires all 18 enabled family x width x clean/corrupt/denied outcomes, exact exception and manager accounting, unchanged backing memory at response time, and a deterministic private poisoned-line image for later ReleaseData. The SC checks do not claim internal reservation observability. SC cannot have a cold-miss D response because MainPipe returns failure before a request when the line or usable reservation is absent. Cross-hart reservation interference and ordering with concurrent traffic remain |
 | CBO/CMO/fences | clean/invalidate/flush/zero, `fence`, `fence.i`, `sfence.vma`, ordering with outstanding traffic | Partial; cacheable `CBO.ZERO` StoreQueue/SBuffer line-zero and readback are executable (`cbo-zero-contracts`). `cmo-contracts` covers CLEAN/FLUSH/INVAL opcode/source/line alignment, all six operation x clean/dirty line states with exact TtoB/BtoB/TtoN/BtoN reports, automatic SBuffer drain of a previously committed dirty store without a direct flush, SBuffer-before-request ordering proven by the resulting exact dirty Probe data, clean no-data transitions, retained-hit/cold-refill outcomes, delayed completion, `flushPipe`, and every operation crossed with denied/corrupt CBOAck. It also accepts a younger cold load into a distinct MSHR while CBOAck is pending, then requires the legal CMO `flushAfter` to cancel exactly that LQ entry and suppress its delayed response. Schema-15 `random-mixed` exposes CLEAN/FLUSH/INVAL, clean/dirty, younger-overlap, error presence, and corrupt/denied kind as common constraints. It runs in the active Bare/stage-1/nested context, randomizes CBOAck and younger-refill latency, requires every enabled operation x error-kind cross, and conserves failed CMOs separately from success-path Probes. Error responses require the exact StoreAccessFault/HardwareError, no C response, unchanged bus memory, and redirect cleanup. The internal `cmoOpResp` is inferred through external DCache A/B/C/D and final StoreQueue writeback. Translation fences are covered separately; full ISA `fence.i` is outside this top-level transaction boundary and wider simultaneous multi-class CMO ordering remains |
-| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, VSUM/VMXR, execute permission, guest/host faults | Partial: `hypervisor-contracts` executes all exposed HLV/HLVX/HSV encodings, SPVP user/supervisor cases, VSUM/VMXR permission changes, VS- and G-stage faults, HLVX execute-only access, representative operations under all four Sv39/Sv48 and Sv39x4/Sv48x4 pairs, a five-combination PBMT basis, and cacheable misaligned split paths. Eighteen M-mode cases cross all three families and SPVP=U/S with R/X/RW/RX plus locked R/RWX physical PMP regions, requiring R, R+X, and W; three more target the fixed `c=0` PMA device interval and check HLV/HSV Uncache plus HLVX access fault. Schema-7+ `random-mixed` weights all three families. Broader PMA and hypervisor PMP region-edge crosses remain |
+| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, VSUM/VMXR, execute permission, guest/host faults | Partial: `hypervisor-contracts` executes all exposed HLV/HLVX/HSV encodings, SPVP user/supervisor cases, VSUM/VMXR permission changes, VS- and G-stage faults, HLVX execute-only access, representative operations under all four Sv39/Sv48 and Sv39x4/Sv48x4 pairs, a five-combination PBMT basis, and cacheable misaligned split paths. Eighteen M-mode cases cross all three families and SPVP=U/S with R/X/RW/RX plus locked R/RWX physical PMP regions, requiring R, R+X, and W; three more target the fixed `c=0` PMA device interval and check HLV/HSV Uncache plus HLVX access fault. Schema-22 `random-mixed` independently constrains SPVP and closes all enabled family x SPVP crosses through supervisor identity mappings or separate user-region physical aliases covering every 4-KiB/Svnapot VS/G leaf combination. Broader PMA and hypervisor PMP region-edge crosses remain |
 
 ### Address, translation, and protection points
 

@@ -41,6 +41,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         memblock::kDefaultMemoryBase + (std::uint64_t{2} << 30) + 0x200000;
     constexpr std::uint64_t mmio_virtual = 0x50038000ULL;
     constexpr std::uint64_t mmio_physical = 0x90038000ULL;
+    constexpr std::uint64_t hypervisor_user_span = 0x80000;
+    constexpr std::array<std::uint64_t, 4> hypervisor_user_virtual_bases{{
+        0x70000000ULL, 0x70100000ULL, 0x70200000ULL, 0x70300000ULL}};
+    constexpr std::array<std::uint64_t, 4> hypervisor_user_guest_bases{{
+        0x1000000000ULL, 0x1000100000ULL,
+        0x1000200000ULL, 0x1000300000ULL}};
+    constexpr std::array<std::uint64_t, 4> hypervisor_user_physical_bases{{
+        cache1_base + 0x100000, cache1_base + 0x200000,
+        cache1_base + 0x300000, cache1_base + 0x400000}};
     constexpr std::uint64_t sv39_root = 0x90000000ULL;
     constexpr std::uint64_t atomic_base = cache0_base + 0xa0000;
     constexpr std::uint64_t stage1_napot_base = cache0_base + 0xb0000;
@@ -89,6 +98,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(bare_base, 0x20000, 0x19);
     environment.memory().fill_incrementing(cache0_base, 0x90000, 0x43);
     environment.memory().fill_incrementing(cache1_base, 0x10000, 0x71);
+    for (unsigned topology = 0;
+         topology < hypervisor_user_physical_bases.size(); ++topology) {
+        environment.memory().fill_incrementing(
+            hypervisor_user_physical_bases[topology], hypervisor_user_span,
+            static_cast<unsigned char>(0x75 + topology * 0x13));
+    }
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
     environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
     environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
@@ -273,9 +288,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const std::uint64_t offset = random() % span;
         return region + ((offset / alignment) * alignment);
     };
-    auto constrained_cacheable_address = [&] (
-        unsigned alignment, const TranslationContext &translation,
-        const TranslationLeafTopology &leaf) {
+    auto constrained_locality_line = [&]() {
         unsigned locality = constraints.choose_locality(random());
         for (unsigned candidate = 0;
              candidate < constraint_coverage.locality.size(); ++candidate) {
@@ -296,6 +309,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             // making the line sequence trivially ascending.
             line = (constrained_cold_line++ * 4051U) % 8192;
         }
+        return line;
+    };
+    auto constrained_cacheable_address = [&] (
+        unsigned alignment, const TranslationContext &translation,
+        const TranslationLeafTopology &leaf) {
+        std::uint64_t line = constrained_locality_line();
         std::uint64_t region_base = cache0_base + 0x10000;
         if (translation.regime == RandomConstraints::translation_stage1 &&
             leaf.stage1_napot) {
@@ -319,6 +338,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             line = 64 + line % 896;
         }
         std::uint64_t address = region_base + line * 64;
+        const bool misaligned = alignment > 1 &&
+            random() % 1000 < constraints.misaligned_per_mille;
+        if (misaligned) {
+            address += 1 + random() % (alignment - 1);
+        } else {
+            address += ((random() % 64) / alignment) * alignment;
+        }
+        return address;
+    };
+    auto constrained_hypervisor_user_address = [&] (
+        unsigned alignment, const TranslationLeafTopology &leaf) {
+        const unsigned topology = leaf.nested_index();
+        std::uint64_t address = hypervisor_user_virtual_bases[topology] +
+            constrained_locality_line() * 64;
         const bool misaligned = alignment > 1 &&
             random() % 1000 < constraints.misaligned_per_mille;
         if (misaligned) {
@@ -595,16 +628,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                     std::uint64_t physical_address,
                                     bool noncacheable = false,
                                     bool io = false,
-                                    bool executable = false) {
+                                    bool executable = false,
+                                    bool user = false) {
         return mode == 0
             ? environment.map_sv39_4k(
                   virtual_address, physical_address, root, true, true,
-                  executable,
-                  false, noncacheable, io)
+                  executable, user, noncacheable, io)
             : environment.map_sv48_4k(
                   virtual_address, physical_address, root, true, true,
-                  executable,
-                  false, noncacheable, io);
+                  executable, user, noncacheable, io);
     };
     const auto map_g_page = [&](unsigned mode, std::uint64_t root,
                                 std::uint64_t guest_physical_address,
@@ -634,22 +666,32 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             : environment.map_sv48x4_2m(
                   address, address, root, true, true, true);
     };
-    const auto map_stage_napot = [&](unsigned mode, std::uint64_t root,
-                                     std::uint64_t virtual_base) {
+    const auto map_stage_napot = [&](
+                                     unsigned mode, std::uint64_t root,
+                                     std::uint64_t virtual_base,
+                                     std::optional<std::uint64_t> physical_base =
+                                         std::nullopt,
+                                     bool user = false) {
+        const std::uint64_t physical = physical_base.value_or(virtual_base);
         return mode == 0
             ? environment.map_sv39_napot64k(
-                  virtual_base, virtual_base, root, true, true, true)
+                  virtual_base, physical, root, true, true, true, user)
             : environment.map_sv48_napot64k(
-                  virtual_base, virtual_base, root, true, true, true);
+                  virtual_base, physical, root, true, true, true, user);
     };
-    const auto map_g_napot = [&](unsigned mode, std::uint64_t root,
-                                 std::uint64_t guest_physical_base) {
+    const auto map_g_napot = [&](
+                                 unsigned mode, std::uint64_t root,
+                                 std::uint64_t guest_physical_base,
+                                 std::optional<std::uint64_t> host_physical_base =
+                                     std::nullopt) {
+        const std::uint64_t physical =
+            host_physical_base.value_or(guest_physical_base);
         return mode == 0
             ? environment.map_sv39x4_napot64k(
-                  guest_physical_base, guest_physical_base, root,
+                  guest_physical_base, physical, root,
                   true, true, true)
             : environment.map_sv48x4_napot64k(
-                  guest_physical_base, guest_physical_base, root,
+                  guest_physical_base, physical, root,
                   true, true, true);
     };
     const auto prepare_random_translation_contexts = [&]() {
@@ -793,6 +835,56 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             !map_all_contexts(nc_base, nc_base, true, false)) {
             return false;
         }
+        for (unsigned topology = 0;
+             topology < hypervisor_user_virtual_bases.size(); ++topology) {
+            const bool vs_napot = (topology & 2U) != 0;
+            const bool g_napot = (topology & 1U) != 0;
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                for (std::uint64_t offset = 0;
+                     offset < hypervisor_user_span; offset += 0x10000) {
+                    const std::uint64_t virtual_base =
+                        hypervisor_user_virtual_bases[topology] + offset;
+                    const std::uint64_t guest_base =
+                        hypervisor_user_guest_bases[topology] + offset;
+                    const std::uint64_t physical_base =
+                        hypervisor_user_physical_bases[topology] + offset;
+                    if (vs_napot) {
+                        if (!map_stage_napot(
+                                mode, random_vs_roots[mode], virtual_base,
+                                guest_base, true)) {
+                            return false;
+                        }
+                    } else {
+                        for (std::uint64_t page = 0; page < 0x10000;
+                             page += 0x1000) {
+                            if (!map_stage_page(
+                                    mode, random_vs_roots[mode],
+                                    virtual_base + page, guest_base + page,
+                                    false, false, true, true)) {
+                                return false;
+                            }
+                        }
+                    }
+                    if (g_napot) {
+                        if (!map_g_napot(
+                                mode, random_g_roots[mode], guest_base,
+                                physical_base)) {
+                            return false;
+                        }
+                    } else {
+                        for (std::uint64_t page = 0; page < 0x10000;
+                             page += 0x1000) {
+                            if (!map_g_page(
+                                    mode, random_g_roots[mode],
+                                    guest_base + page, physical_base + page,
+                                    true)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for (unsigned mode = 0; mode < 2; ++mode) {
             if (!map_stage_page(
                     mode, random_stage1_roots[mode], mmio_virtual,
@@ -822,7 +914,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
-        const std::array<std::pair<std::uint64_t, std::uint64_t>, 7>
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 11>
             reference_addresses{{
                 {cache0_base + 0x106a8, cache0_base + 0x106a8},
                 {cache1_base + 0xf800, cache1_base + 0xf800},
@@ -831,6 +923,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 {ptw_error_base + 0x188, ptw_error_base + 0x188},
                 {load_merge_base + 0x188, load_merge_base + 0x188},
                 {set_pressure_base + 0x188, set_pressure_base + 0x188},
+                {hypervisor_user_virtual_bases[0] + 0x188,
+                 hypervisor_user_physical_bases[0] + 0x188},
+                {hypervisor_user_virtual_bases[1] + 0x10188,
+                 hypervisor_user_physical_bases[1] + 0x10188},
+                {hypervisor_user_virtual_bases[2] + 0x20188,
+                 hypervisor_user_physical_bases[2] + 0x20188},
+                {hypervisor_user_virtual_bases[3] + 0x30188,
+                 hypervisor_user_physical_bases[3] + 0x30188},
             }};
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
             for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
@@ -3837,16 +3937,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.cmo_younger_overlaps);
             }
             std::optional<unsigned> hypervisor_family;
+            bool hypervisor_spvp_user = false;
             if (kind == RandomConstraints::hypervisor) {
                 hypervisor_family =
                     constraints.choose_hypervisor_family(random());
+                hypervisor_spvp_user = choose_binary_class(
+                    constraints.hypervisor_spvp_user_per_mille,
+                    constraint_coverage.hypervisor_spvp);
+                bool cross_forced = false;
                 for (unsigned candidate = 0;
-                     candidate < RandomConstraints::hypervisor_family_count;
+                     candidate < RandomConstraints::hypervisor_family_count &&
+                         !cross_forced;
                      ++candidate) {
-                    if (constraints.hypervisor_family_weights[candidate] != 0 &&
-                        constraint_coverage.hypervisor_families[candidate] == 0) {
-                        hypervisor_family = candidate;
-                        break;
+                    if (constraints.hypervisor_family_weights[candidate] == 0) {
+                        continue;
+                    }
+                    for (unsigned spvp = 0; spvp < 2; ++spvp) {
+                        const bool enabled = spvp == 0
+                            ? constraints.hypervisor_spvp_user_per_mille != 1000
+                            : constraints.hypervisor_spvp_user_per_mille != 0;
+                        if (enabled &&
+                            constraint_coverage.hypervisor_crosses[
+                                candidate][spvp] == 0) {
+                            hypervisor_family = candidate;
+                            hypervisor_spvp_user = spvp != 0;
+                            cross_forced = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -5562,25 +5679,58 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::hypervisor) {
+                const auto spvp = hypervisor_spvp_user
+                    ? memblock::ReferencePrivilegeMode::user
+                    : memblock::ReferencePrivilegeMode::supervisor;
                 if (!environment.run_until_all_complete(8192) ||
                     !environment.run_until_queues_retired(8192) ||
-                    !environment.set_hypervisor_access_permissions(
-                        memblock::ReferencePrivilegeMode::supervisor)) {
+                    !environment.set_hypervisor_access_permissions(spvp)) {
                     return false;
                 }
+                const auto hypervisor_address = [&](unsigned size) {
+                    if (!hypervisor_spvp_user) {
+                        return action_cacheable_address(size);
+                    }
+                    leaf_addressed = true;
+                    return constrained_hypervisor_user_address(size, leaf);
+                };
+                const auto hypervisor_oracle_address = [&](std::uint64_t address) {
+                    if (!hypervisor_spvp_user) {
+                        return address;
+                    }
+                    const unsigned topology = leaf.nested_index();
+                    return hypervisor_user_physical_bases[topology] +
+                        (address - hypervisor_user_virtual_bases[topology]);
+                };
                 if (*hypervisor_family == RandomConstraints::hypervisor_hsv) {
                     const auto op = hypervisor_store_operations[
                         random() % hypervisor_store_operations.size()];
-                    const auto transaction = make_store(
-                        action_cacheable_address(
-                            memblock::scalar_store_bytes(op)),
+                    const unsigned size = memblock::scalar_store_bytes(op);
+                    const std::uint64_t address = hypervisor_address(size);
+                    const auto reference = memblock::reference_two_stage_access(
+                        environment.memory(),
+                        random_vs_roots[translation.vs_mode],
+                        random_g_roots[translation.g_mode], address,
+                        memblock::ReferenceMemoryAccess::store,
+                        page_mode(translation.vs_mode),
+                        page_mode(translation.g_mode), spvp);
+                    if (!reference.translated ||
+                        reference.physical_address !=
+                            hypervisor_oracle_address(address)) {
+                        phase += ":hypervisor-store-reference";
+                        return false;
+                    }
+                    auto transaction = make_store(
+                        address,
                         random(), op, random() % 2, random() % 2);
+                    transaction.oracle_address = reference.physical_address;
                     if (!issue_store(transaction, (random() & 1U) != 0) ||
                         !environment.commit_store(transaction, 8192) ||
                         !environment.run_until_queues_retired(8192)) {
                         return false;
                     }
-                    probe_candidate = transaction.address & ~std::uint64_t{63};
+                    probe_candidate =
+                        reference.physical_address & ~std::uint64_t{63};
                 } else {
                     const auto op = *hypervisor_family ==
                             RandomConstraints::hypervisor_hlvx
@@ -5590,8 +5740,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                               random() % hypervisor_load_operations.size()];
                     const unsigned size =
                         1U << (static_cast<unsigned>(op) & 3U);
-                    const std::uint64_t address =
-                        action_cacheable_address(size);
+                    const std::uint64_t address = hypervisor_address(size);
                     const auto reference = memblock::reference_two_stage_access(
                         environment.memory(),
                         random_vs_roots[translation.vs_mode],
@@ -5599,12 +5748,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         memblock::ReferenceMemoryAccess::load,
                         page_mode(translation.vs_mode),
                         page_mode(translation.g_mode),
-                        memblock::ReferencePrivilegeMode::supervisor,
-                        false, false,
+                        spvp, false, false,
                         *hypervisor_family ==
                             RandomConstraints::hypervisor_hlvx);
                     if (!reference.translated ||
-                        reference.physical_address != address) {
+                        reference.physical_address !=
+                            hypervisor_oracle_address(address)) {
                         std::ostringstream detail;
                         detail << phase << ":hypervisor-reference"
                                << ":family=" << *hypervisor_family
@@ -5628,8 +5777,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                << ":address=0x" << address << std::dec;
                         phase = detail.str();
                     }
-                    const auto transaction = make_load(
+                    auto transaction = make_load(
                         address, op, random() % 3);
+                    transaction.oracle_address = reference.physical_address;
                     if (!issue_load(transaction) ||
                         !environment.run_until_queues_retired(8192)) {
                         return false;
@@ -5639,6 +5789,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return false;
                 }
                 ++constraint_coverage.hypervisor_families[*hypervisor_family];
+                const unsigned spvp_index = hypervisor_spvp_user ? 1U : 0U;
+                ++constraint_coverage.hypervisor_spvp[spvp_index];
+                ++constraint_coverage.hypervisor_crosses[
+                    *hypervisor_family][spvp_index];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::cmo) {
                 ordinary_leaf_addressed = true;

@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 22
+        result["constraint_schema"] = 23
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -684,6 +684,56 @@ class VerifyRegressionTest(unittest.TestCase):
         result["actual_set_pressure_manager"] = (
             "8,76,76,12,14,14,76,76,12"
         )
+        result.update(
+            {
+                "constraint_schema": 22,
+                "target_ops": "1,0,3,2,0,0,1,1,1,1,1,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,6,6,90,12,8",
+                "target_hypervisor_family": "1,1,1",
+                "actual_hypervisor_family": "2,2,2",
+                "target_hypervisor_spvp_user": 500,
+                "actual_hypervisor_spvp": "3,3",
+                "actual_hypervisor_cross": "1,1,1,1,1,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_cross"] = "2,0,1,1,1,1"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_hypervisor_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_hypervisor_cross"] = "1,1,1,1,1,1"
+        result["actual_hypervisor_spvp"] = "4,2"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "hypervisor SPVP/cross coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "actual_ops": "10,0,3,2,0,0,18,5,5,3,6,90,12,8",
+                "actual_hypervisor_family": "1,1,1",
+                "target_hypervisor_spvp_user": 0,
+                "actual_hypervisor_spvp": "3,0",
+                "actual_hypervisor_cross": "1,0,1,0,1,0",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "target_hypervisor_spvp_user": 1000,
+                "actual_hypervisor_spvp": "0,3",
+                "actual_hypervisor_cross": "0,1,0,1,0,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["target_hypervisor_spvp_user"] = 1001
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_hypervisor_spvp_user",
+        ):
+            verify_regression._check_mixed_coverage(result)
         result.update(
             {
                 "constraint_schema": 14,

@@ -1167,6 +1167,14 @@ legal without weakening target attribution. Coverage and corner weight all
 dimensions uniformly; SPEC keeps the operation rare, favors nine-line pressure,
 and biases toward SW/SD.
 
+Schema 22 adds `hypervisor-spvp-user` to the common hypervisor class. Every
+enabled HLV/HLVX/HSV family is crossed with each enabled SPVP=S/U class per
+seed. SPVP=U accesses use independent U=1 VS regions covering all four
+4-KiB/Svnapot VS/G leaf combinations and mapping to separately known cacheable
+physical regions. Load data and committed HSV bytes are therefore checked
+against the physical reference image rather than inferred from DUT translation
+state.
+
 For a reproducible local pressure run:
 
 ```sh
