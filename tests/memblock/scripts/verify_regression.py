@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -1591,11 +1591,41 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                 "actual_set_pressure_dual_window",
                                 2,
                             )
+                            if schema >= 31:
+                                target_pressure_triple = result.get(
+                                    "target_set_pressure_triple_window"
+                                )
+                                _require(
+                                    isinstance(target_pressure_triple, int)
+                                    and not isinstance(
+                                        target_pressure_triple, bool
+                                    )
+                                    and 0 <= target_pressure_triple <= 1000,
+                                    "target_set_pressure_triple_window is not "
+                                    "a per-mille integer: "
+                                    f"{target_pressure_triple!r}",
+                                )
+                                actual_pressure_windows = _csv_counts(
+                                    result,
+                                    "actual_set_pressure_window_count",
+                                    3,
+                                )
+                            else:
+                                target_pressure_triple = 0
+                                actual_pressure_windows = [
+                                    actual_pressure_dual[0],
+                                    actual_pressure_dual[1],
+                                    0,
+                                ]
                         else:
                             target_pressure_dual = 0
                             actual_pressure_dual = [
                                 actual_operations[13],
                                 0,
+                            ]
+                            target_pressure_triple = 0
+                            actual_pressure_windows = [
+                                actual_operations[13], 0, 0
                             ]
                     else:
                         target_pressure_backpressure = 0
@@ -1606,6 +1636,10 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         actual_pressure_backpressure_manager = [0] * 5
                         target_pressure_dual = 0
                         actual_pressure_dual = [actual_operations[13], 0]
+                        target_pressure_triple = 0
+                        actual_pressure_windows = [
+                            actual_operations[13], 0, 0
+                        ]
                 else:
                     target_pressure_overlap = 0
                     actual_pressure_overlap = [actual_operations[13], 0]
@@ -1615,10 +1649,13 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     actual_pressure_backpressure_manager = [0] * 5
                     target_pressure_dual = 0
                     actual_pressure_dual = [actual_operations[13], 0]
+                    target_pressure_triple = 0
+                    actual_pressure_windows = [actual_operations[13], 0, 0]
                 actual_pressure_cross = _csv_counts(
                     result,
                     "actual_set_pressure_cross",
-                    384 if schema >= 30
+                    576 if schema >= 31
+                    else 384 if schema >= 30
                     else 192 if schema >= 29
                     else 96 if schema >= 28
                     else 48,
@@ -1637,6 +1674,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 actual_pressure_backpressure_manager = [0] * 5
                 target_pressure_dual = 0
                 actual_pressure_dual = [actual_operations[13], 0]
+                target_pressure_triple = 0
+                actual_pressure_windows = [actual_operations[13], 0, 0]
                 actual_pressure_cross = _csv_counts(
                     result, "actual_set_pressure_cross", 24
                 )
@@ -1661,7 +1700,14 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             pressure_clean_overlap_windows = 0
             pressure_overlap_min_releases = 0
             pressure_backpressure_actions = 0
-            pressure_dual_actions = 0
+            pressure_window_actions = [0, 0, 0]
+            window_enabled_classes = [
+                target_pressure_triple != 1000
+                and target_pressure_dual != 1000,
+                target_pressure_triple != 1000
+                and target_pressure_dual != 0,
+                target_pressure_triple != 0,
+            ]
             for state in range(2):
                 state_enabled = (
                     target_pressure_dirty != 1000
@@ -1680,28 +1726,35 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                             if backpressure == 0
                             else target_pressure_backpressure != 0
                         )
-                        for dual in range(2):
-                            dual_enabled = (
-                                target_pressure_dual != 1000
-                                if dual == 0
-                                else target_pressure_dual != 0
-                            )
-                            windows = dual + 1
+                        for window_class in range(3):
+                            window_enabled = window_enabled_classes[window_class]
+                            windows = window_class + 1
                             for depth in range(2):
                                 for width in range(4):
                                     for regime in range(3):
-                                        if schema >= 30:
+                                        if schema >= 31:
                                             index = (
-                                                state * 192
-                                                + overlap * 96
-                                                + backpressure * 48
-                                                + dual * 24
+                                                state * 288
+                                                + overlap * 144
+                                                + backpressure * 72
+                                                + window_class * 24
                                                 + depth * 12
                                                 + width * 3
                                                 + regime
                                             )
                                             count = actual_pressure_cross[index]
-                                        elif dual != 0:
+                                        elif schema >= 30 and window_class < 2:
+                                            index = (
+                                                state * 192
+                                                + overlap * 96
+                                                + backpressure * 48
+                                                + window_class * 24
+                                                + depth * 12
+                                                + width * 3
+                                                + regime
+                                            )
+                                            count = actual_pressure_cross[index]
+                                        elif window_class != 0:
                                             count = 0
                                         elif schema >= 29:
                                             index = (
@@ -1744,7 +1797,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                             and state_enabled
                                             and overlap_enabled
                                             and backpressure_enabled
-                                            and dual_enabled
+                                            and window_enabled
                                             and target_pressure_depth[depth] != 0
                                             and target_pressure_width[width] != 0
                                             and target_translation[regime] != 0
@@ -1755,10 +1808,14 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                             "not match enabled classes: "
                                             f"state={state} overlap={overlap} "
                                             f"backpressure={backpressure} "
-                                            f"dual={dual} depth={depth} "
+                                            f"window_class={window_class} "
+                                            f"depth={depth} "
                                             f"width={width} regime={regime}",
                                         )
                                         pressure_actions += count
+                                        pressure_window_actions[
+                                            window_class
+                                        ] += count
                                         if state == 0:
                                             pressure_clean_loads += (
                                                 count * windows * (depth + 9)
@@ -1787,8 +1844,6 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                                                 )
                                         if backpressure != 0:
                                             pressure_backpressure_actions += count
-                                        if dual != 0:
-                                            pressure_dual_actions += count
             _require(
                 pressure_actions == actual_operations[13]
                 and sum(actual_pressure_state) == pressure_actions,
@@ -1844,22 +1899,26 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 "set-pressure backpressure/operation coverage is not "
                 "conserved",
             )
-            for dual, count in enumerate(actual_pressure_dual):
-                dual_enabled = (
-                    target_pressure_dual != 1000
-                    if dual == 0
-                    else target_pressure_dual != 0
-                )
+            for window_class, count in enumerate(actual_pressure_windows):
                 _require(
-                    (count > 0) == (pressure_enabled and dual_enabled),
-                    "actual_set_pressure_dual_window does not match enabled "
-                    f"classes: {actual_pressure_dual}",
+                    (count > 0)
+                    == (pressure_enabled and window_enabled_classes[window_class]),
+                    "actual_set_pressure_window_count does not match enabled "
+                    f"classes: {actual_pressure_windows}",
                 )
             _require(
-                actual_pressure_dual[1] == pressure_dual_actions
-                and actual_pressure_dual[0]
-                == pressure_actions - pressure_dual_actions,
-                "set-pressure dual-window/operation coverage is not "
+                actual_pressure_windows == pressure_window_actions
+                and sum(actual_pressure_windows) == pressure_actions,
+                "set-pressure window-count/operation coverage is not "
+                "conserved",
+            )
+            _require(
+                actual_pressure_dual
+                == [
+                    actual_pressure_windows[0] + actual_pressure_windows[2],
+                    actual_pressure_windows[1],
+                ],
+                "set-pressure dual-window compatibility projection is not "
                 "conserved",
             )
             for set_quartile, count in enumerate(actual_pressure_set):

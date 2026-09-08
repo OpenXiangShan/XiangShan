@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 864;
+    constexpr unsigned minimum_actions = 1056;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -4450,7 +4450,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             bool set_pressure_dirty = false;
             bool set_pressure_refill_overlap = false;
             bool set_pressure_release_backpressure = false;
-            bool set_pressure_dual_window = false;
+            unsigned set_pressure_window_class =
+                RandomConstraints::set_pressure_single_window;
             if (kind == RandomConstraints::set_pressure) {
                 set_pressure_depth_index =
                     constraints.choose_set_pressure_depth(random());
@@ -4467,9 +4468,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 set_pressure_release_backpressure = choose_binary_class(
                     constraints.set_pressure_release_backpressure_per_mille,
                     constraint_coverage.set_pressure_release_backpressures);
-                set_pressure_dual_window = choose_binary_class(
-                    constraints.set_pressure_dual_window_per_mille,
-                    constraint_coverage.set_pressure_dual_windows);
+                set_pressure_window_class =
+                    constraints.choose_set_pressure_window(random());
                 for (unsigned set = 0;
                      set < constraint_coverage.set_pressure_sets.size(); ++set) {
                     if (constraints.set_pressure_set_weights[set] != 0 &&
@@ -4769,22 +4769,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             if (!backpressure_enabled) {
                                 continue;
                             }
-                            for (unsigned dual = 0;
-                                 dual < constraint_coverage
-                                            .set_pressure_crosses[state]
-                                                                 [overlap]
-                                                                 [backpressure]
-                                            .size() &&
+                            for (unsigned window_class = 0;
+                                 window_class < constraint_coverage
+                                                    .set_pressure_crosses[state]
+                                                                         [overlap]
+                                                                         [backpressure]
+                                                    .size() &&
                                      !forced_cross;
-                                 ++dual) {
-                                const bool dual_enabled = dual == 0
-                                    ? constraints
-                                              .set_pressure_dual_window_per_mille !=
-                                          1000
-                                    : constraints
-                                              .set_pressure_dual_window_per_mille !=
-                                          0;
-                                if (!dual_enabled) {
+                                 ++window_class) {
+                                if (!constraints.set_pressure_window_enabled(
+                                        window_class)) {
                                     continue;
                                 }
                                 for (unsigned depth = 0;
@@ -4792,7 +4786,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                                  .set_pressure_crosses[state]
                                                                       [overlap]
                                                                       [backpressure]
-                                                                      [dual]
+                                                                      [window_class]
                                                  .size() &&
                                          !forced_cross;
                                      ++depth) {
@@ -4803,9 +4797,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                     for (unsigned width = 0;
                                          width < constraint_coverage
                                                      .set_pressure_crosses[state]
-                                                                          [overlap]
-                                                                          [backpressure]
-                                                                          [dual]
+                                                                         [overlap]
+                                                                         [backpressure]
+                                                                         [window_class]
                                                                           [depth]
                                                      .size() &&
                                              !forced_cross;
@@ -4824,7 +4818,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                                 constraint_coverage
                                                         .set_pressure_crosses
                                                             [state][overlap]
-                                                            [backpressure][dual]
+                                                            [backpressure]
+                                                            [window_class]
                                                             [depth][width]
                                                             [regime] == 0) {
                                                 set_pressure_dirty = state != 0;
@@ -4832,8 +4827,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                                     overlap != 0;
                                                 set_pressure_release_backpressure =
                                                     backpressure != 0;
-                                                set_pressure_dual_window =
-                                                    dual != 0;
+                                                set_pressure_window_class =
+                                                    window_class;
                                                 set_pressure_depth_index = depth;
                                                 set_pressure_width = width;
                                                 translation =
@@ -5363,40 +5358,58 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     unsigned set_index;
                 };
                 const unsigned window_count =
-                    set_pressure_dual_window ? 2U : 1U;
-                const std::array<unsigned, 2> window_quartiles{{
+                    set_pressure_window_class + 1U;
+                const unsigned depth = set_pressure_depth_index + 9U;
+                const std::array<unsigned, 3> window_quartiles{{
                     set_pressure_set,
                     (set_pressure_set + 2U) % 4U,
+                    (set_pressure_set + 1U) % 4U,
                 }};
-                for (unsigned window = 0; window < window_count; ++window) {
-                    if (set_pressure_sequences.at(window_quartiles[window]) >=
-                        sequences_per_quartile) {
-                        phase = "random-set-pressure-address-space-exhausted";
-                        return false;
-                    }
-                }
                 std::vector<SetPressureWindow> pressure_windows;
                 pressure_windows.reserve(window_count);
                 for (unsigned window = 0; window < window_count; ++window) {
                     const unsigned quartile = window_quartiles[window];
-                    const std::uint64_t sequence =
-                        set_pressure_sequences.at(quartile)++;
-                    const std::uint64_t group =
-                        sequence / sets_per_quartile;
-                    const unsigned set_index = quartile * sets_per_quartile +
-                        static_cast<unsigned>(sequence % sets_per_quartile);
-                    pressure_windows.push_back(SetPressureWindow{
-                        sequence,
-                        set_pressure_base + group * group_stride +
-                            set_index * line_bytes,
-                        set_index,
-                    });
+                    std::optional<SetPressureWindow> fresh_window;
+                    while (set_pressure_sequences.at(quartile) <
+                           sequences_per_quartile) {
+                        const std::uint64_t sequence =
+                            set_pressure_sequences.at(quartile)++;
+                        const std::uint64_t group =
+                            sequence / sets_per_quartile;
+                        const unsigned set_index =
+                            quartile * sets_per_quartile +
+                            static_cast<unsigned>(
+                                sequence % sets_per_quartile);
+                        const std::uint64_t first_line =
+                            set_pressure_base + group * group_stride +
+                            set_index * line_bytes;
+                        bool fresh = true;
+                        for (unsigned index = 0; index < depth; ++index) {
+                            const std::uint64_t line =
+                                first_line + index * same_set_stride;
+                            if (environment.dcache_requests_covering_since(
+                                    line, 0) != 0) {
+                                fresh = false;
+                                break;
+                            }
+                        }
+                        if (fresh) {
+                            fresh_window = SetPressureWindow{
+                                sequence, first_line, set_index};
+                            break;
+                        }
+                    }
+                    if (!fresh_window) {
+                        phase =
+                            "random-set-pressure-target-address-exhausted";
+                        return false;
+                    }
+                    pressure_windows.push_back(*fresh_window);
                 }
                 const std::uint64_t sequence =
                     pressure_windows.front().sequence;
                 const unsigned set_index =
                     pressure_windows.front().set_index;
-                const unsigned depth = set_pressure_depth_index + 9U;
                 std::vector<std::uint64_t> target_lines;
                 target_lines.reserve(window_count * depth);
                 for (const auto &window : pressure_windows) {
@@ -5915,7 +5928,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.sample_set_pressure(
                         false, set_pressure_refill_overlap,
                         set_pressure_release_backpressure,
-                        set_pressure_dual_window,
+                        set_pressure_window_class,
                         set_pressure_depth_index, set_pressure_width,
                         translation.regime, set_pressure_set, {}, {},
                         manager_delta, overlap_manager_delta(),
@@ -6180,7 +6193,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   constraint_coverage.sample_set_pressure(
                       true, set_pressure_refill_overlap,
                       set_pressure_release_backpressure,
-                      set_pressure_dual_window,
+                      set_pressure_window_class,
                       set_pressure_depth_index, set_pressure_width,
                       translation.regime, set_pressure_set, issue_orders,
                       manager_delta, {}, overlap_delta,

@@ -1295,9 +1295,22 @@ each set, then issue the overflow tags, so the checked ReleaseData cannot be
 satisfied by an earlier clean eviction. Target request, refill, writeback, and
 queue accounting scales with the selected window count, while the
 address-qualified C stall remains one transaction per action. Coverage uses a
-500-per-mille dual-window share, SPEC 10, and corner 750. The minimum
-`random-mixed` length is 864 actions; three-or-more simultaneous replacement
-windows remain separate.
+500-per-mille dual-window share, SPEC 10, and corner 750.
+
+Schema 31 adds `set-pressure-triple-window` and expands the cross to 576 bins.
+Window selection is hierarchical: the triple-window probability is applied
+first; when triple is not selected, `set-pressure-dual-window` selects between
+one and two windows. Triple actions allocate a third distinct set from the
+quarter adjacent to the first. The same address-qualified refill holding,
+per-set replacement minimum, byte oracle, and window-weighted manager/queue
+conservation now cover one, two, or three simultaneous windows. Before writing
+new backing bytes, the allocator rejects any target window containing a line
+seen in prior DCache request history; this prevents the testbench from changing
+memory behind a potentially resident clean line. Coverage uses 333 per mille
+for triple and 500 per mille for conditional dual selection, making the three
+classes approximately balanced; SPEC uses 1/10 and corner 500/750 respectively.
+The minimum `random-mixed` length is 1056 actions. Four-or-more simultaneous
+replacement windows remain separate.
 
 For a reproducible local pressure run:
 
@@ -1467,7 +1480,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 864
+  --test random-mixed --seed 17 --transactions 1056
 ```
 
 ## Complete Pin Audit

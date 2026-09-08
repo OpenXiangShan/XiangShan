@@ -165,6 +165,13 @@ struct RandomConstraints {
         load_merge_pattern_count,
     };
 
+    enum SetPressureWindowClass : unsigned {
+        set_pressure_single_window,
+        set_pressure_dual_window,
+        set_pressure_triple_window,
+        set_pressure_window_class_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
@@ -201,6 +208,7 @@ struct RandomConstraints {
     unsigned set_pressure_refill_overlap_per_mille = 0;
     unsigned set_pressure_release_backpressure_per_mille = 0;
     unsigned set_pressure_dual_window_per_mille = 0;
+    unsigned set_pressure_triple_window_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -283,6 +291,7 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 500,
                 .set_pressure_release_backpressure_per_mille = 500,
                 .set_pressure_dual_window_per_mille = 500,
+                .set_pressure_triple_window_per_mille = 333,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -367,6 +376,7 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 10,
                 .set_pressure_release_backpressure_per_mille = 10,
                 .set_pressure_dual_window_per_mille = 10,
+                .set_pressure_triple_window_per_mille = 1,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -451,6 +461,7 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 750,
                 .set_pressure_release_backpressure_per_mille = 750,
                 .set_pressure_dual_window_per_mille = 750,
+                .set_pressure_triple_window_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -905,6 +916,8 @@ struct RandomConstraints {
             set_pressure_release_backpressure_per_mille = parsed;
         } else if (key == "set-pressure-dual-window") {
             set_pressure_dual_window_per_mille = parsed;
+        } else if (key == "set-pressure-triple-window") {
+            set_pressure_triple_window_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -1375,6 +1388,7 @@ struct RandomConstraints {
             set_pressure_refill_overlap_per_mille > 1000 ||
             set_pressure_release_backpressure_per_mille > 1000 ||
             set_pressure_dual_window_per_mille > 1000 ||
+            set_pressure_triple_window_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -1625,6 +1639,36 @@ struct RandomConstraints {
         return choose_weighted(set_pressure_set_weights, random);
     }
 
+    std::array<unsigned, set_pressure_window_class_count>
+    set_pressure_window_weights() const
+    {
+        const unsigned non_triple =
+            1000U - set_pressure_triple_window_per_mille;
+        return {{
+            non_triple * (1000U - set_pressure_dual_window_per_mille),
+            non_triple * set_pressure_dual_window_per_mille,
+            set_pressure_triple_window_per_mille * 1000U,
+        }};
+    }
+
+    unsigned choose_set_pressure_window(std::uint64_t random) const
+    {
+        return choose_weighted(set_pressure_window_weights(), random);
+    }
+
+    bool set_pressure_window_enabled(unsigned window_class) const
+    {
+        return set_pressure_window_weights().at(window_class) != 0;
+    }
+
+    unsigned enabled_set_pressure_window_classes() const
+    {
+        const auto weights = set_pressure_window_weights();
+        return static_cast<unsigned>(std::count_if(
+            weights.begin(), weights.end(),
+            [](unsigned weight) { return weight != 0; }));
+    }
+
     unsigned choose_translation_regime(std::uint64_t random) const
     {
         return choose_weighted(translation_weights, random);
@@ -1851,7 +1895,7 @@ struct RandomConstraints {
                     direction_classes(set_pressure_refill_overlap_per_mille) *
                     direction_classes(
                         set_pressure_release_backpressure_per_mille) *
-                    direction_classes(set_pressure_dual_window_per_mille) *
+                    enabled_set_pressure_window_classes() *
                     depths * widths * regimes;
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
@@ -1998,7 +2042,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=30 constraints=" << name
+        stream << "constraint_schema=31 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2080,6 +2124,8 @@ struct RandomConstraints {
                << set_pressure_release_backpressure_per_mille
                << " target_set_pressure_dual_window="
                << set_pressure_dual_window_per_mille
+               << " target_set_pressure_triple_window="
+               << set_pressure_triple_window_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -2445,13 +2491,15 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 4> load_merge_manager{};
     std::uint64_t load_merge_loads = 0;
     // [clean/dirty][no overlap/refill overlap][C ready/release backpressure]
-    // [single/dual window][depth9/depth10][B/H/W/D]
+    // [single/dual/triple window][depth9/depth10][B/H/W/D]
     // [Bare/stage-1/nested].
     using SetPressureRegimeBins = std::array<
         std::uint64_t, RandomConstraints::translation_regime_count>;
     using SetPressureWidthBins = std::array<SetPressureRegimeBins, 4>;
     using SetPressureDepthBins = std::array<SetPressureWidthBins, 2>;
-    using SetPressureWindowBins = std::array<SetPressureDepthBins, 2>;
+    using SetPressureWindowBins = std::array<
+        SetPressureDepthBins,
+        RandomConstraints::set_pressure_window_class_count>;
     using SetPressureBackpressureBins =
         std::array<SetPressureWindowBins, 2>;
     using SetPressureOverlapBins =
@@ -2460,7 +2508,9 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> set_pressure_line_states{};
     std::array<std::uint64_t, 2> set_pressure_refill_overlaps{};
     std::array<std::uint64_t, 2> set_pressure_release_backpressures{};
-    std::array<std::uint64_t, 2> set_pressure_dual_windows{};
+    std::array<
+        std::uint64_t, RandomConstraints::set_pressure_window_class_count>
+        set_pressure_window_counts{};
     std::array<std::uint64_t, 4> set_pressure_sets{};
     // Dirty stores only: STA-first/SDA-first.
     std::array<std::uint64_t, 2> set_pressure_issue_orders{};
@@ -2616,7 +2666,7 @@ struct ConstraintCoverage {
 
     void sample_set_pressure(
         bool dirty, bool refill_overlap, bool release_backpressure,
-        bool dual_window, unsigned depth_index, unsigned width,
+        unsigned window_class, unsigned depth_index, unsigned width,
         unsigned translation_regime, unsigned set_quartile,
         const std::array<std::uint64_t, 2> &issue_orders = {},
         const std::array<std::uint64_t, 9> &manager_delta = {},
@@ -2627,7 +2677,7 @@ struct ConstraintCoverage {
         ++set_pressure_crosses.at(dirty ? 1U : 0U)
               .at(refill_overlap ? 1U : 0U)
               .at(release_backpressure ? 1U : 0U)
-              .at(dual_window ? 1U : 0U)
+              .at(window_class)
               .at(depth_index)
               .at(width)
               .at(translation_regime);
@@ -2635,7 +2685,7 @@ struct ConstraintCoverage {
         ++set_pressure_refill_overlaps.at(refill_overlap ? 1U : 0U);
         ++set_pressure_release_backpressures.at(
             release_backpressure ? 1U : 0U);
-        ++set_pressure_dual_windows.at(dual_window ? 1U : 0U);
+        ++set_pressure_window_counts.at(window_class);
         ++set_pressure_sets.at(set_quartile);
         for (unsigned index = 0; index < issue_orders.size(); ++index) {
             set_pressure_issue_orders[index] += issue_orders[index];
@@ -2884,39 +2934,37 @@ struct ConstraintCoverage {
                             : constraints
                                       .set_pressure_release_backpressure_per_mille !=
                                   0;
-                        for (unsigned dual = 0;
-                             dual < set_pressure_crosses[state][overlap]
-                                        [backpressure]
-                                            .size();
-                             ++dual) {
-                            const bool dual_enabled = dual == 0
-                                ? constraints
-                                          .set_pressure_dual_window_per_mille !=
-                                      1000
-                                : constraints
-                                          .set_pressure_dual_window_per_mille !=
-                                      0;
+                        for (unsigned window_class = 0;
+                             window_class < set_pressure_crosses[state][overlap]
+                                                [backpressure]
+                                                    .size();
+                             ++window_class) {
+                            const bool window_enabled =
+                                constraints.set_pressure_window_enabled(
+                                    window_class);
                             for (unsigned depth = 0;
                                  depth < set_pressure_crosses[state][overlap]
-                                             [backpressure][dual]
+                                             [backpressure][window_class]
                                                  .size();
                                  ++depth) {
                                 for (unsigned width = 0;
                                      width < set_pressure_crosses[state]
-                                                 [overlap][backpressure][dual]
+                                                 [overlap][backpressure]
+                                                 [window_class]
                                                  [depth]
                                                      .size();
                                      ++width) {
                                     for (unsigned regime = 0;
                                          regime < set_pressure_crosses[state]
                                                       [overlap][backpressure]
-                                                      [dual][depth][width]
+                                                      [window_class][depth]
+                                                      [width]
                                                           .size();
                                          ++regime) {
                                         const bool enabled = state_enabled &&
                                             overlap_enabled &&
                                             backpressure_enabled &&
-                                            dual_enabled &&
+                                            window_enabled &&
                                             constraints
                                                     .set_pressure_depth_weights
                                                         [depth] !=
@@ -2929,7 +2977,8 @@ struct ConstraintCoverage {
                                                     [regime] !=
                                                 0;
                                         if ((set_pressure_crosses[state]
-                                                 [overlap][backpressure][dual]
+                                                 [overlap][backpressure]
+                                                 [window_class]
                                                  [depth][width][regime] != 0) !=
                                             enabled) {
                                             return false;
@@ -2969,12 +3018,11 @@ struct ConstraintCoverage {
                     return false;
                 }
             }
-            for (unsigned dual = 0;
-                 dual < set_pressure_dual_windows.size(); ++dual) {
-                const bool enabled = dual == 0
-                    ? constraints.set_pressure_dual_window_per_mille != 1000
-                    : constraints.set_pressure_dual_window_per_mille != 0;
-                if ((set_pressure_dual_windows[dual] != 0) != enabled) {
+            for (unsigned window_class = 0;
+                 window_class < set_pressure_window_counts.size();
+                 ++window_class) {
+                if ((set_pressure_window_counts[window_class] != 0) !=
+                    constraints.set_pressure_window_enabled(window_class)) {
                     return false;
                 }
             }
@@ -3436,7 +3484,6 @@ struct ConstraintCoverage {
         std::uint64_t set_pressure_clean_overlap_windows = 0;
         std::uint64_t set_pressure_overlap_min_releases = 0;
         std::uint64_t set_pressure_backpressure_actions = 0;
-        std::uint64_t set_pressure_dual_actions = 0;
         for (unsigned state = 0;
              state < set_pressure_crosses.size(); ++state) {
             for (unsigned overlap = 0;
@@ -3444,21 +3491,21 @@ struct ConstraintCoverage {
                 for (unsigned backpressure = 0;
                      backpressure < set_pressure_crosses[state][overlap].size();
                      ++backpressure) {
-                    for (unsigned dual = 0;
-                         dual < set_pressure_crosses[state][overlap]
-                                    [backpressure]
-                                        .size();
-                         ++dual) {
-                        const std::uint64_t windows = dual + 1U;
+                    for (unsigned window_class = 0;
+                         window_class < set_pressure_crosses[state][overlap]
+                                            [backpressure]
+                                                .size();
+                         ++window_class) {
+                        const std::uint64_t windows = window_class + 1U;
                         for (unsigned depth = 0;
                              depth < set_pressure_crosses[state][overlap]
-                                         [backpressure][dual]
+                                         [backpressure][window_class]
                                              .size();
                              ++depth) {
                             for (const auto &width : set_pressure_crosses[state]
                                                                    [overlap]
                                                                    [backpressure]
-                                                                   [dual]
+                                                                   [window_class]
                                                                    [depth]) {
                                 for (const auto count : width) {
                                     set_pressure_cross_total += count;
@@ -3488,9 +3535,6 @@ struct ConstraintCoverage {
                                         set_pressure_backpressure_actions +=
                                             count;
                                     }
-                                    if (dual != 0) {
-                                        set_pressure_dual_actions += count;
-                                    }
                                 }
                             }
                         }
@@ -3511,9 +3555,10 @@ struct ConstraintCoverage {
                 set_pressure_actions ||
             set_pressure_release_backpressures[1] !=
                 set_pressure_backpressure_actions ||
-            set_pressure_dual_windows[0] + set_pressure_dual_windows[1] !=
+            std::accumulate(
+                set_pressure_window_counts.begin(),
+                set_pressure_window_counts.end(), std::uint64_t{0}) !=
                 set_pressure_actions ||
-            set_pressure_dual_windows[1] != set_pressure_dual_actions ||
             std::accumulate(
                 set_pressure_sets.begin(), set_pressure_sets.end(),
                 std::uint64_t{0}) != set_pressure_actions ||
@@ -3828,15 +3873,20 @@ public:
                << set_pressure_release_backpressures[0] << ','
                << set_pressure_release_backpressures[1]
                << " actual_set_pressure_dual_window="
-               << set_pressure_dual_windows[0] << ','
-               << set_pressure_dual_windows[1]
+               << set_pressure_window_counts[0] +
+                       set_pressure_window_counts[2]
+               << ',' << set_pressure_window_counts[1]
+               << " actual_set_pressure_window_count="
+               << set_pressure_window_counts[0] << ','
+               << set_pressure_window_counts[1] << ','
+               << set_pressure_window_counts[2]
                << " actual_set_pressure_cross=";
         bool first_set_pressure_cross = true;
         for (const auto &state : set_pressure_crosses) {
             for (const auto &overlap : state) {
                 for (const auto &backpressure : overlap) {
-                    for (const auto &dual : backpressure) {
-                        for (const auto &depth : dual) {
+                    for (const auto &window_class : backpressure) {
+                        for (const auto &depth : window_class) {
                             for (const auto &width : depth) {
                                 for (const auto count : width) {
                                     stream <<

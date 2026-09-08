@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `32b3b29c89a561d527001e5dc5435b0a96abbdd5cd27e148ab1c8fc4e2a2405e`
+- Current rebuilt and frozen UT executable SHA-256: `025c266cbab23194da3eb25a120d0644bcd37a649b8bae910c6b6ce9f011ee7f`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `e784a3977cd19e838c59e226eff7e605e1875e4923745705cda8b3b73d4f4e20`
+- Frozen runtime manifest SHA-256: `9f9df43b207122b57e64e0cfba7419846208140e5c206dc2cbb3872b7f98d339`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -2926,4 +2926,74 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=864 elapsed_
 ```
 
 No CPU RTL defect was observed. Three-or-more simultaneous replacement windows
+and composition with Probe/CMO traffic remain explicit DCache breadth gaps.
+
+## Schema 31 Triple Replacement-Window Closure
+
+On 2026-09-09 `random-mixed` added `set-pressure-triple-window` and expanded
+set-pressure coverage to 576 required clean/dirty x no-overlap/held-refill x
+no-C-stall/C-stall x single/dual/triple-window x 9/10-line x B/H/W/D x
+Bare/stage-1/nested bins. Selection is hierarchical: triple is chosen first;
+otherwise the existing dual probability selects single or dual. A triple action
+allocates a third distinct set in the quarter adjacent to the first. The
+address-qualified D-response queue holds one complete refill per selected set,
+and every set must independently reach `depth - 8` attributed target releases
+while all corresponding loads remain pending before any response is released.
+All target-request, writeback, dequeue, and overlap accounting scales with the
+one/two/three-window class. The action-scoped C stall remains exactly one target
+transaction when enabled.
+
+Coverage uses a 333-per-mille triple selection followed by a 500-per-mille dual
+selection, approximately balancing all three classes. SPEC uses 1/10 and corner
+uses 500/750 respectively. The minimum mixed length is now 1056 actions,
+leaving a random tail after all 576 enabled cross bins have been scheduled.
+
+The following final-binary runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/dirty | No-overlap/held | No-stall/stall | Single/dual/triple | Held windows/releases while held |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| single-only `coverage` | 31001 | 216,176 | 97/98 | 97/98 | 97/98 | 195/0/0 | 98/147 |
+| dual-only `coverage` | 31002 | 278,900 | 97/101 | 100/98 | 99/99 | 0/198/0 | 196/296 |
+| triple-only `coverage` | 31003 | 365,157 | 100/97 | 97/100 | 97/100 | 0/0/197 | 300/453 |
+| full `coverage` | 31004 | 571,110 | 291/293 | 292/292 | 294/290 | 195/196/193 | 583/876 |
+| full `spec` | 31005 | 1,183,616 | 289/288 | 289/288 | 289/288 | 193/192/192 | 576/864 |
+| full `corner` | 31006 | 1,315,066 | 288/293 | 288/293 | 288/293 | 193/193/195 | 588/886 |
+| frozen `coverage` artifact | 1 | 571,546 | 290/290 | 288/292 | 291/289 | 192/196/192 | 584/874 |
+
+Each endpoint hit all 192 reachable bins and kept both disabled window classes
+at zero. All four fully enabled runs hit all 576 bins and every set quarter. In the
+frozen artifact, 290 dirty actions generated 5,508 exact target requests, store
+writebacks, and SQ dequeues; 868 target ReleaseData lines were byte-verified.
+The 290 clean actions generated 5,510 exact initial target requests and
+revisits, at least 870 revisit misses, 1,526 attributed target Releases, zero
+target ReleaseData, and 11,312 load writebacks/LQ dequeues including auxiliary
+overlap loads. Its 292 overlap actions represented 584 held windows, each with
+one request, writeback, and dequeue; 874 target releases completed while all
+corresponding loads were pending. The 289 selected C-backpressure actions
+produced exactly 289 stalled target transactions, 4,624 stall cycles, and 4,624
+payload-stability checks.
+
+The first `spec` and `corner` runs exposed a deterministic UT address-allocation
+bug rather than an RTL defect. An earlier held-refill line could occupy the
+same group/set/tag later chosen as a pressure target. The harness then rewrote
+the backing memory directly while the old clean line could legally remain in
+DCache; the returned mismatch exactly matched the earlier overlap fill byte.
+The pressure allocator now skips any candidate window containing a line covered
+by a prior DCache request. Seeds 31005 and 31006 pass their complete 1,056-action
+runs with the corrected allocator, so no standalone CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-errors`,
+`dcache-coherence`, `atomic-dchannel-errors`, the dirty triple-overlap
+reproducer, all three window-count endpoints, all three constraint profiles,
+and the independent frozen-artifact verifier passed. The frozen executable
+SHA-256 is
+`025c266cbab23194da3eb25a120d0644bcd37a649b8bae910c6b6ce9f011ee7f`.
+The accepted artifact is `build/memblock/schema31-coverage-1x1056.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed_seconds=222.686042 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=fb6dd5a96af8ac872a4477b46eeca3e18496bca79dd659e67e7516ac8974817d
+```
+
+No CPU RTL defect was observed. Four-or-more simultaneous replacement windows
 and composition with Probe/CMO traffic remain explicit DCache breadth gaps.
