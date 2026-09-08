@@ -2083,6 +2083,10 @@ public:
     {
         return release_data_verified_count_;
     }
+    std::uint64_t expected_release_data_verified_count() const
+    {
+        return expected_release_data_verified_count_;
+    }
     std::uint64_t probe_request_count() const { return probe_request_count_; }
     std::uint64_t probe_response_count() const { return probe_response_count_; }
     std::uint64_t probe_data_count() const { return probe_data_count_; }
@@ -2552,6 +2556,7 @@ private:
             release_data_.reset();
             ++release_data_verified_count_;
             if (has_expected_line) {
+                ++expected_release_data_verified_count_;
                 expected_release_lines_.erase(base);
             }
             ++release_count_;
@@ -2649,6 +2654,7 @@ private:
     std::uint64_t release_count_ = 0;
     std::uint64_t release_data_count_ = 0;
     std::uint64_t release_data_verified_count_ = 0;
+    std::uint64_t expected_release_data_verified_count_ = 0;
     std::uint64_t probe_request_count_ = 0;
     std::uint64_t probe_response_count_ = 0;
     std::uint64_t probe_canceled_count_ = 0;
@@ -5330,6 +5336,10 @@ public:
     std::uint64_t tilelink_release_data_verified() const
     {
         return memory_agent_.release_data_verified_count();
+    }
+    std::uint64_t tilelink_expected_release_data_verified() const
+    {
+        return memory_agent_.expected_release_data_verified_count();
     }
     std::uint64_t dcache_probes() const
     {
@@ -9821,6 +9831,26 @@ public:
         }
         if (memory_agent_.release_data_count() < target) {
             error_ = "timed out waiting for target DCache ReleaseData count";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_expected_release_data_count(
+        std::uint64_t target, unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout &&
+                 memory_agent_.expected_release_data_verified_count() < target;
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (memory_agent_.expected_release_data_verified_count() < target) {
+            error_ =
+                "timed out waiting for expected DCache ReleaseData count";
             return false;
         }
         return check_components();

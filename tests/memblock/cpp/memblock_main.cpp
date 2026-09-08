@@ -83,6 +83,7 @@ struct RandomConstraints {
         cmo,
         ptw_error,
         load_merge,
+        set_pressure,
         operation_count,
     };
 
@@ -167,6 +168,9 @@ struct RandomConstraints {
     std::array<unsigned, 2> load_merge_depth_weights{};
     std::array<unsigned, load_merge_pattern_count>
         load_merge_pattern_weights{};
+    std::array<unsigned, 2> set_pressure_depth_weights{};
+    std::array<unsigned, 4> set_pressure_width_weights{};
+    std::array<unsigned, 4> set_pressure_set_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -217,7 +221,7 @@ struct RandomConstraints {
                 .name = "coverage",
                 .operation_weights = {
                     200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75, 75,
-                    100},
+                    100, 75},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
@@ -238,6 +242,9 @@ struct RandomConstraints {
                 .ptw_error_corrupt_first_per_mille = 500,
                 .load_merge_depth_weights = {1, 1},
                 .load_merge_pattern_weights = {1, 1, 1},
+                .set_pressure_depth_weights = {1, 1},
+                .set_pressure_width_weights = {1, 1, 1, 1},
+                .set_pressure_set_weights = {1, 1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -289,7 +296,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "spec",
                 .operation_weights = {
-                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10},
+                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10, 2},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
@@ -310,6 +317,9 @@ struct RandomConstraints {
                 .ptw_error_corrupt_first_per_mille = 500,
                 .load_merge_depth_weights = {19, 1},
                 .load_merge_pattern_weights = {1, 8, 1},
+                .set_pressure_depth_weights = {9, 1},
+                .set_pressure_width_weights = {1, 2, 6, 20},
+                .set_pressure_set_weights = {1, 1, 1, 1},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -362,7 +372,7 @@ struct RandomConstraints {
                 .name = "corner",
                 .operation_weights = {
                     125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125,
-                    125, 125},
+                    125, 125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
@@ -383,6 +393,9 @@ struct RandomConstraints {
                 .ptw_error_corrupt_first_per_mille = 500,
                 .load_merge_depth_weights = {1, 1},
                 .load_merge_pattern_weights = {1, 1, 1},
+                .set_pressure_depth_weights = {1, 1},
+                .set_pressure_width_weights = {1, 1, 1, 1},
+                .set_pressure_set_weights = {1, 1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -494,6 +507,7 @@ struct RandomConstraints {
                 {"cmo", cmo},
                 {"ptw-error", ptw_error},
                 {"load-merge", load_merge},
+                {"set-pressure", set_pressure},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -588,6 +602,24 @@ struct RandomConstraints {
                 load_merge_depth_keys, load_merge_depth_weights) ||
             assign_weight(
                 load_merge_pattern_keys, load_merge_pattern_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, 2> set_pressure_depth_keys{{
+            "set-pressure-depth9", "set-pressure-depth10",
+        }};
+        constexpr std::array<std::string_view, 4> set_pressure_width_keys{{
+            "set-pressure-sb", "set-pressure-sh", "set-pressure-sw",
+            "set-pressure-sd",
+        }};
+        constexpr std::array<std::string_view, 4> set_pressure_set_keys{{
+            "set-pressure-set-q0", "set-pressure-set-q1",
+            "set-pressure-set-q2", "set-pressure-set-q3",
+        }};
+        if (assign_weight(
+                set_pressure_depth_keys, set_pressure_depth_weights) ||
+            assign_weight(
+                set_pressure_width_keys, set_pressure_width_weights) ||
+            assign_weight(set_pressure_set_keys, set_pressure_set_weights)) {
             return;
         }
         constexpr std::array<std::string_view, 4> vector_addressing_keys{{
@@ -866,6 +898,27 @@ struct RandomConstraints {
                 load_merge_pattern_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "load-merge pattern constraint weights cannot all be zero");
+        }
+        if (operation_weights[set_pressure] != 0 &&
+            std::accumulate(
+                set_pressure_depth_weights.begin(),
+                set_pressure_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "set-pressure depth constraint weights cannot all be zero");
+        }
+        if (operation_weights[set_pressure] != 0 &&
+            std::accumulate(
+                set_pressure_width_weights.begin(),
+                set_pressure_width_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "set-pressure width constraint weights cannot all be zero");
+        }
+        if (operation_weights[set_pressure] != 0 &&
+            std::accumulate(
+                set_pressure_set_weights.begin(),
+                set_pressure_set_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "set-pressure set constraint weights cannot all be zero");
         }
         if (operation_weights[ptw_error] != 0 &&
             ptw_error_site_weights[ptw_error_stage1] != 0 &&
@@ -1346,6 +1399,21 @@ struct RandomConstraints {
         return choose_weighted(load_merge_pattern_weights, random);
     }
 
+    unsigned choose_set_pressure_depth(std::uint64_t random) const
+    {
+        return choose_weighted(set_pressure_depth_weights, random);
+    }
+
+    unsigned choose_set_pressure_width(std::uint64_t random) const
+    {
+        return choose_weighted(set_pressure_width_weights, random);
+    }
+
+    unsigned choose_set_pressure_set(std::uint64_t random) const
+    {
+        return choose_weighted(set_pressure_set_weights, random);
+    }
+
     unsigned choose_translation_regime(std::uint64_t random) const
     {
         return choose_weighted(translation_weights, random);
@@ -1534,6 +1602,19 @@ struct RandomConstraints {
                     load_merge_pattern_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
                 actions += depths * patterns * 2;
+            } else if (operation == set_pressure) {
+                const unsigned depths = static_cast<unsigned>(std::count_if(
+                    set_pressure_depth_weights.begin(),
+                    set_pressure_depth_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned widths = static_cast<unsigned>(std::count_if(
+                    set_pressure_width_weights.begin(),
+                    set_pressure_width_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned regimes = static_cast<unsigned>(std::count_if(
+                    translation_weights.begin(), translation_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                actions += depths * widths * regimes;
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -1626,7 +1707,8 @@ struct RandomConstraints {
             [](unsigned weight) { return weight != 0; }) ||
             operation_weights[hypervisor] != 0 ||
             operation_weights[cmo] != 0 ||
-            operation_weights[load_merge] != 0;
+            operation_weights[load_merge] != 0 ||
+            operation_weights[set_pressure] != 0;
     }
 
     bool uses_uncache() const
@@ -1656,7 +1738,8 @@ struct RandomConstraints {
         return std::any_of(
             operation_weights.begin(), operation_weights.begin() + ptw_error,
             [](unsigned weight) { return weight != 0; }) ||
-            operation_weights[load_merge] != 0;
+            operation_weights[load_merge] != 0 ||
+            operation_weights[set_pressure] != 0;
     }
 
     unsigned vector_policy_minimum_vlmax() const
@@ -1677,7 +1760,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=20 constraints=" << name
+        stream << "constraint_schema=21 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1729,6 +1812,19 @@ struct RandomConstraints {
                << load_merge_pattern_weights[0] << ','
                << load_merge_pattern_weights[1] << ','
                << load_merge_pattern_weights[2]
+               << " target_set_pressure_depth="
+               << set_pressure_depth_weights[0] << ','
+               << set_pressure_depth_weights[1]
+               << " target_set_pressure_width="
+               << set_pressure_width_weights[0] << ','
+               << set_pressure_width_weights[1] << ','
+               << set_pressure_width_weights[2] << ','
+               << set_pressure_width_weights[3]
+               << " target_set_pressure_set="
+               << set_pressure_set_weights[0] << ','
+               << set_pressure_set_weights[1] << ','
+               << set_pressure_set_weights[2] << ','
+               << set_pressure_set_weights[3]
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -2056,6 +2152,18 @@ struct ConstraintCoverage {
     // Target-line requests/global refills/global GrantAcks/scalar writebacks.
     std::array<std::uint64_t, 4> load_merge_manager{};
     std::uint64_t load_merge_loads = 0;
+    // [depth9/depth10][SB/SH/SW/SD][Bare/stage-1/nested].
+    std::array<std::array<
+                   std::array<std::uint64_t,
+                              RandomConstraints::translation_regime_count>,
+                   4>,
+               2>
+        set_pressure_crosses{};
+    std::array<std::uint64_t, 4> set_pressure_sets{};
+    std::array<std::uint64_t, 2> set_pressure_issue_orders{};
+    // actions/stores/target requests/target ReleaseData/global ReleaseData/
+    // globally verified ReleaseData/store writebacks/SQ dequeues/preserved.
+    std::array<std::uint64_t, 9> set_pressure_manager{};
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
     std::array<std::array<std::array<std::array<std::uint64_t, 3>,
@@ -2189,6 +2297,22 @@ struct ConstraintCoverage {
         load_merge_loads += loads;
         for (unsigned index = 0; index < manager_delta.size(); ++index) {
             load_merge_manager[index] += manager_delta[index];
+        }
+    }
+
+    void sample_set_pressure(
+        unsigned depth_index, unsigned width, unsigned translation_regime,
+        unsigned set_quartile, const std::array<std::uint64_t, 2> &issue_orders,
+        const std::array<std::uint64_t, 9> &manager_delta)
+    {
+        ++set_pressure_crosses.at(depth_index).at(width).at(
+            translation_regime);
+        ++set_pressure_sets.at(set_quartile);
+        for (unsigned index = 0; index < issue_orders.size(); ++index) {
+            set_pressure_issue_orders[index] += issue_orders[index];
+        }
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            set_pressure_manager[index] += manager_delta[index];
         }
     }
 
@@ -2392,6 +2516,33 @@ struct ConstraintCoverage {
                  regime < load_merge_translations.size(); ++regime) {
                 if ((load_merge_translations[regime] != 0) !=
                     (constraints.translation_weights[regime] != 0)) {
+                    return false;
+                }
+            }
+            return operations[operation] != 0;
+        }
+        if (operation == RandomConstraints::set_pressure) {
+            for (unsigned depth = 0;
+                 depth < set_pressure_crosses.size(); ++depth) {
+                for (unsigned width = 0;
+                     width < set_pressure_crosses[depth].size(); ++width) {
+                    for (unsigned regime = 0;
+                         regime < set_pressure_crosses[depth][width].size();
+                         ++regime) {
+                        const bool enabled =
+                            constraints.set_pressure_depth_weights[depth] != 0 &&
+                            constraints.set_pressure_width_weights[width] != 0 &&
+                            constraints.translation_weights[regime] != 0;
+                        if ((set_pressure_crosses[depth][width][regime] != 0) !=
+                            enabled) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            for (unsigned set = 0; set < set_pressure_sets.size(); ++set) {
+                if ((set_pressure_sets[set] != 0) !=
+                    (constraints.set_pressure_set_weights[set] != 0)) {
                     return false;
                 }
             }
@@ -2727,6 +2878,41 @@ struct ConstraintCoverage {
                 load_merge_actions) {
             return false;
         }
+        const std::uint64_t set_pressure_actions =
+            operations[RandomConstraints::set_pressure];
+        std::uint64_t set_pressure_cross_total = 0;
+        std::uint64_t set_pressure_stores = 0;
+        std::uint64_t set_pressure_min_releases = 0;
+        for (unsigned depth = 0;
+             depth < set_pressure_crosses.size(); ++depth) {
+            for (const auto &width : set_pressure_crosses[depth]) {
+                for (const auto count : width) {
+                    set_pressure_cross_total += count;
+                    set_pressure_stores += count * (depth + 9U);
+                    set_pressure_min_releases += count * (depth + 1U);
+                }
+            }
+        }
+        if (set_pressure_cross_total != set_pressure_actions ||
+            std::accumulate(
+                set_pressure_sets.begin(), set_pressure_sets.end(),
+                std::uint64_t{0}) != set_pressure_actions ||
+            set_pressure_issue_orders[0] + set_pressure_issue_orders[1] !=
+                set_pressure_stores ||
+            (set_pressure_actions != 0 &&
+             (set_pressure_issue_orders[0] == 0 ||
+              set_pressure_issue_orders[1] == 0)) ||
+            set_pressure_manager[0] != set_pressure_actions ||
+            set_pressure_manager[1] != set_pressure_stores ||
+            set_pressure_manager[2] != set_pressure_stores ||
+            set_pressure_manager[3] < set_pressure_min_releases ||
+            set_pressure_manager[4] < set_pressure_manager[3] ||
+            set_pressure_manager[5] != set_pressure_manager[4] ||
+            set_pressure_manager[6] != set_pressure_stores ||
+            set_pressure_manager[7] != set_pressure_stores ||
+            set_pressure_manager[8] != set_pressure_manager[3]) {
+            return false;
+        }
         if (constraints.samples_translation() &&
             constraints.uses_translation() &&
             (translation_walk_windows == 0 ||
@@ -2909,7 +3095,27 @@ public:
                << ',' << load_merge_manager[2] << ','
                << load_merge_manager[3]
                << " actual_load_merge_loads=" << load_merge_loads
-               << " actual_ptw_error_outcome=";
+               << " actual_set_pressure_cross=";
+        bool first_set_pressure_cross = true;
+        for (const auto &depth : set_pressure_crosses) {
+            for (const auto &width : depth) {
+                for (const auto count : width) {
+                    stream << (first_set_pressure_cross ? "" : ",") << count;
+                    first_set_pressure_cross = false;
+                }
+            }
+        }
+        stream << " actual_set_pressure_set="
+               << set_pressure_sets[0] << ',' << set_pressure_sets[1] << ','
+               << set_pressure_sets[2] << ',' << set_pressure_sets[3]
+               << " actual_set_pressure_issue_order="
+               << set_pressure_issue_orders[0] << ','
+               << set_pressure_issue_orders[1]
+               << " actual_set_pressure_manager=";
+        for (unsigned index = 0; index < set_pressure_manager.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << set_pressure_manager[index];
+        }
+        stream << " actual_ptw_error_outcome=";
         bool first_ptw_outcome = true;
         for (const auto &site : ptw_error_outcomes) {
             for (const auto &direction : site) {
@@ -29757,6 +29963,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t atomic_error_line = 0;
     std::uint64_t ptw_error_line = 0;
     std::uint64_t load_merge_line = 0;
+    std::array<std::uint64_t, 4> set_pressure_sequences{};
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -29786,6 +29993,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t ptw_error_span = 0x100000;
     constexpr std::uint64_t load_merge_base = cache1_base + 0xe00000;
     constexpr std::uint64_t load_merge_span = 0x4000000;
+    constexpr std::uint64_t set_pressure_base =
+        load_merge_base + load_merge_span;
+    constexpr std::uint64_t set_pressure_span = 0x100000000ULL;
     // Keep the nested final G-stage walk in a different high-level subtree
     // from the implicit G-stage walks used to fetch VS page-table entries.
     constexpr std::uint64_t ptw_error_guest_base = 0x18000000000ULL;
@@ -30496,6 +30706,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
+        for (std::uint64_t block = set_pressure_base;
+             block < set_pressure_base + set_pressure_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
         if (!map_all_contexts(
                 cache1_base + 0xf000, cache1_base + 0xf000,
                 false, false, true) ||
@@ -30532,7 +30753,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
-        const std::array<std::pair<std::uint64_t, std::uint64_t>, 6>
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 7>
             reference_addresses{{
                 {cache0_base + 0x106a8, cache0_base + 0x106a8},
                 {cache1_base + 0xf800, cache1_base + 0xf800},
@@ -30540,6 +30761,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 {mmio_virtual + 0x188, mmio_physical + 0x188},
                 {ptw_error_base + 0x188, ptw_error_base + 0x188},
                 {load_merge_base + 0x188, load_merge_base + 0x188},
+                {set_pressure_base + 0x188, set_pressure_base + 0x188},
             }};
         for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
             for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
@@ -31792,6 +32014,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     virtual_address = mmio_virtual;
                 } else if (operation_kind == RandomConstraints::load_merge) {
                     virtual_address = load_merge_base;
+                } else if (operation_kind == RandomConstraints::set_pressure) {
+                    virtual_address = set_pressure_base;
                 }
                 std::uint64_t fence_address = global ? 0 : virtual_address;
                 std::uint16_t id = 0;
@@ -33300,7 +33524,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     "scalar-load", "scalar-store", "vector-load",
                     "vector-store", "vector-segment", "prefetch", "atomic",
                     "nc", "mmio", "hypervisor", "cmo", "ptw-error",
-                    "load-merge",
+                    "load-merge", "set-pressure",
                 }};
             {
                 std::ostringstream detail;
@@ -33570,6 +33794,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             std::uint64_t ptw_error_stage1_root = 0;
             std::uint64_t ptw_error_vs_root = 0;
             std::uint64_t ptw_error_g_root = 0;
+            unsigned set_pressure_depth_index = 0;
+            unsigned set_pressure_width = 0;
+            unsigned set_pressure_set = 0;
+            if (kind == RandomConstraints::set_pressure) {
+                set_pressure_depth_index =
+                    constraints.choose_set_pressure_depth(random());
+                set_pressure_width =
+                    constraints.choose_set_pressure_width(random());
+                set_pressure_set =
+                    constraints.choose_set_pressure_set(random());
+                for (unsigned set = 0;
+                     set < constraint_coverage.set_pressure_sets.size(); ++set) {
+                    if (constraints.set_pressure_set_weights[set] != 0 &&
+                        constraint_coverage.set_pressure_sets[set] == 0) {
+                        set_pressure_set = set;
+                        break;
+                    }
+                }
+            }
             if (kind == RandomConstraints::ptw_error) {
                 ptw_error_site = constraints.choose_ptw_error_site(random());
                 ptw_error_level_class =
@@ -33816,6 +34059,51 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             constraints.g_mode_weights);
                     }
                     break;
+                }
+            } else if (kind == RandomConstraints::set_pressure) {
+                bool forced_cross = false;
+                for (unsigned depth = 0;
+                     depth < constraint_coverage.set_pressure_crosses.size() &&
+                         !forced_cross;
+                     ++depth) {
+                    if (constraints.set_pressure_depth_weights[depth] == 0) {
+                        continue;
+                    }
+                    for (unsigned width = 0;
+                         width < constraint_coverage
+                                     .set_pressure_crosses[depth].size() &&
+                             !forced_cross;
+                         ++width) {
+                        if (constraints.set_pressure_width_weights[width] == 0) {
+                            continue;
+                        }
+                        for (unsigned regime = 0;
+                             regime < RandomConstraints::translation_regime_count;
+                             ++regime) {
+                            if (constraints.translation_weights[regime] != 0 &&
+                                constraint_coverage.set_pressure_crosses[
+                                    depth][width][regime] == 0) {
+                                set_pressure_depth_index = depth;
+                                set_pressure_width = width;
+                                translation = TranslationContext{};
+                                translation.regime = regime;
+                                if (regime ==
+                                    RandomConstraints::translation_stage1) {
+                                    translation.stage1_mode = first_enabled_mode(
+                                        constraints.stage1_mode_weights);
+                                } else if (regime ==
+                                           RandomConstraints::
+                                               translation_nested) {
+                                    translation.vs_mode = first_enabled_mode(
+                                        constraints.vs_mode_weights);
+                                    translation.g_mode = first_enabled_mode(
+                                        constraints.g_mode_weights);
+                                }
+                                forced_cross = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             const TranslationLeafTopology leaf =
@@ -34279,6 +34567,189 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 constraint_coverage.sample_load_merge(
                     depth_index, pattern, critical_beat,
                     translation.regime, depth, manager_delta);
+                ordinary_leaf_addressed = true;
+                ++actions;
+                coverage.cacheable += depth;
+            } else if (kind == RandomConstraints::set_pressure) {
+                phase = "random-set-pressure-drain";
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(8192) ||
+                    !environment.run_until_sbuffer_empty(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+
+                constexpr unsigned dcache_sets = 128;
+                constexpr unsigned dcache_ways = 8;
+                constexpr unsigned line_bytes = 64;
+                constexpr unsigned sets_per_quartile = dcache_sets / 4;
+                constexpr std::uint64_t same_set_stride =
+                    dcache_sets * line_bytes;
+                constexpr std::uint64_t group_stride = 0x20000;
+                constexpr std::uint64_t groups =
+                    set_pressure_span / group_stride;
+                constexpr std::uint64_t sequences_per_quartile =
+                    groups * sets_per_quartile;
+                std::uint64_t &quartile_sequence =
+                    set_pressure_sequences.at(set_pressure_set);
+                if (quartile_sequence >= sequences_per_quartile) {
+                    phase = "random-set-pressure-address-space-exhausted";
+                    return false;
+                }
+                const std::uint64_t sequence = quartile_sequence++;
+                const std::uint64_t group = sequence / sets_per_quartile;
+                const unsigned set_index = set_pressure_set *
+                        sets_per_quartile +
+                    static_cast<unsigned>(sequence % sets_per_quartile);
+                const std::uint64_t first_line = set_pressure_base +
+                    group * group_stride + set_index * line_bytes;
+                const unsigned depth = set_pressure_depth_index + 9U;
+                const unsigned width_bytes = 1U << set_pressure_width;
+                const unsigned bank = static_cast<unsigned>(random() % 8U);
+                const unsigned offset = bank * 8U +
+                    static_cast<unsigned>(random() % (8U / width_bytes)) *
+                        width_bytes;
+
+                environment.clear_release_line_expectations();
+                const std::uint64_t requests_before_pressure =
+                    environment.tilelink_requests();
+                const std::uint64_t expected_releases_before =
+                    environment.tilelink_expected_release_data_verified();
+                const std::uint64_t releases_before_pressure =
+                    environment.tilelink_release_data();
+                const std::uint64_t verified_before_pressure =
+                    environment.tilelink_release_data_verified();
+                const std::uint64_t writebacks_before_pressure =
+                    environment.store_writebacks();
+                const std::uint64_t sq_before_pressure =
+                    environment.sq_dequeued();
+                std::vector<memblock::StoreTransaction> pressure_stores;
+                pressure_stores.reserve(depth);
+                std::array<std::uint64_t, 2> issue_orders{};
+                for (unsigned index = 0; index < depth; ++index) {
+                    const std::uint64_t line =
+                        first_line + index * same_set_stride;
+                    environment.memory().fill_incrementing(
+                        line, line_bytes,
+                        static_cast<std::uint8_t>(
+                            0x31U + set_index + index * 17U));
+                    std::vector<unsigned char> expected_line =
+                        environment.memory().read_beat(line, line_bytes);
+                    std::uint64_t data = random();
+                    for (unsigned byte = 0; byte < width_bytes; ++byte) {
+                        const auto stored = static_cast<unsigned char>(
+                            expected_line[offset + byte] ^ 0xffU);
+                        data &= ~(std::uint64_t{0xff} << (8U * byte));
+                        data |= std::uint64_t{stored} << (8U * byte);
+                        expected_line[offset + byte] = stored;
+                    }
+                    pressure_stores.push_back(make_store(
+                        line + offset, data,
+                        static_cast<memblock::StoreOp>(set_pressure_width),
+                        (index + set_pressure_set) %
+                            memblock::kScalarStoreLanes,
+                        (index + set_pressure_set + 1U) %
+                            memblock::kScalarStoreLanes));
+                    const auto &store = pressure_stores.back();
+                    environment.expect_release_line(line, expected_line);
+                    environment.expect_store(store);
+                    const bool data_first =
+                        ((index + (sequence & 1U)) & 1U) != 0;
+                    ++issue_orders[data_first ? 1U : 0U];
+                    const bool issued = environment.set_rob_head(
+                                            store.rob, store.rob_flag) &&
+                        environment.enqueue_store(
+                            store, memblock::lq_pointer_value(lq_offset)) &&
+                        (data_first
+                             ? environment.issue_store_data(store, 4096) &&
+                                   environment.issue_store_address_until_tlb_hit(
+                                       store,
+                                       constrained_completion_timeout)
+                             : environment.issue_store_address_until_tlb_hit(
+                                   store,
+                                   constrained_completion_timeout) &&
+                                   environment.issue_store_data(store, 4096));
+                    if (!issued || !environment.run_until_store_complete(
+                                       constrained_completion_timeout) ||
+                        !environment.commit_store(store, 8192)) {
+                        return false;
+                    }
+                    coverage.sample(store, data_first);
+                }
+                phase = "random-set-pressure-drain-complete";
+                if (!environment.run_until_queues_retired(8192) ||
+                    !environment.run_until_sbuffer_empty(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_expected_release_data_count(
+                        expected_releases_before + depth - dcache_ways,
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+
+                std::uint64_t target_requests = 0;
+                std::uint64_t preserved_stores = 0;
+                constexpr std::array<memblock::LoadOp, 4> unsigned_load_ops{{
+                    memblock::LoadOp::lbu, memblock::LoadOp::lhu,
+                    memblock::LoadOp::lwu, memblock::LoadOp::ld,
+                }};
+                const std::uint64_t value_mask = width_bytes == 8
+                    ? ~std::uint64_t{0}
+                    : (std::uint64_t{1} << (width_bytes * 8U)) - 1U;
+                for (const auto &store : pressure_stores) {
+                    target_requests += environment.dcache_requests_covering_since(
+                        store.address & ~std::uint64_t{63},
+                        requests_before_pressure);
+                    if (environment.bus_expected_load(
+                            store.address,
+                            unsigned_load_ops[set_pressure_width]) ==
+                        (store.data & value_mask)) {
+                        ++preserved_stores;
+                    }
+                }
+                const std::array<std::uint64_t, 9> manager_delta{{
+                    1,
+                    depth,
+                    target_requests,
+                    environment.tilelink_expected_release_data_verified() -
+                        expected_releases_before,
+                    environment.tilelink_release_data() -
+                        releases_before_pressure,
+                    environment.tilelink_release_data_verified() -
+                        verified_before_pressure,
+                    environment.store_writebacks() -
+                        writebacks_before_pressure,
+                    environment.sq_dequeued() - sq_before_pressure,
+                    preserved_stores,
+                }};
+                if (manager_delta[2] != depth ||
+                    manager_delta[3] < depth - dcache_ways ||
+                    manager_delta[4] < manager_delta[3] ||
+                    manager_delta[5] != manager_delta[4] ||
+                    manager_delta[6] != depth || manager_delta[7] != depth ||
+                    manager_delta[8] != manager_delta[3]) {
+                    std::ostringstream detail;
+                    detail << "random-set-pressure-manager"
+                           << ":depth=" << depth
+                           << ":width=" << width_bytes
+                           << ":set=" << set_index << ":manager=";
+                    for (unsigned index = 0; index < manager_delta.size();
+                         ++index) {
+                        detail << (index == 0 ? "" : ",")
+                               << manager_delta[index];
+                    }
+                    phase = detail.str();
+                    return false;
+                }
+                environment.clear_release_line_expectations();
+                constraint_coverage.sample_set_pressure(
+                    set_pressure_depth_index, set_pressure_width,
+                    translation.regime, set_pressure_set, issue_orders,
+                    manager_delta);
                 ordinary_leaf_addressed = true;
                 ++actions;
                 coverage.cacheable += depth;

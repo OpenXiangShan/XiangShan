@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20,
+            19, 20, 21,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -361,7 +361,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         if schema >= 13:
             cmo_probe_count = _csv_counts(
                 result, "actual_ops",
-                13 if schema >= 20 else 12 if schema >= 19 else 11,
+                14 if schema >= 21 else 13 if schema >= 20 else
+                12 if schema >= 19 else 11,
             )[10]
             if schema >= 15:
                 cmo_probe_count -= sum(
@@ -494,7 +495,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
 
     if schema >= 7:
         operation_fields = (
-            13 if schema >= 20 else 12 if schema >= 19 else
+            14 if schema >= 21 else 13 if schema >= 20 else
+            12 if schema >= 19 else
             11 if schema >= 13 else 10 if schema >= 8 else 9
         )
         target_operations = _csv_counts(
@@ -1264,6 +1266,94 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and actual_merge_manager[2] == actual_merge_manager[1]
                 and actual_merge_manager[3] == actual_merge_loads,
                 "load-merge manager accounting is not conserved",
+            )
+
+        if schema >= 21:
+            target_pressure_depth = _csv_counts(
+                result, "target_set_pressure_depth", 2
+            )
+            target_pressure_width = _csv_counts(
+                result, "target_set_pressure_width", 4
+            )
+            target_pressure_set = _csv_counts(
+                result, "target_set_pressure_set", 4
+            )
+            actual_pressure_cross = _csv_counts(
+                result, "actual_set_pressure_cross", 24
+            )
+            actual_pressure_set = _csv_counts(
+                result, "actual_set_pressure_set", 4
+            )
+            actual_pressure_issue = _csv_counts(
+                result, "actual_set_pressure_issue_order", 2
+            )
+            actual_pressure_manager = _csv_counts(
+                result, "actual_set_pressure_manager", 9
+            )
+            pressure_enabled = target_operations[13] != 0
+            pressure_actions = 0
+            pressure_stores = 0
+            pressure_min_releases = 0
+            for depth in range(2):
+                for width in range(4):
+                    for regime in range(3):
+                        count = actual_pressure_cross[
+                            depth * 12 + width * 3 + regime
+                        ]
+                        enabled = (
+                            pressure_enabled
+                            and target_pressure_depth[depth] != 0
+                            and target_pressure_width[width] != 0
+                            and target_translation[regime] != 0
+                        )
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_set_pressure_cross does not match enabled "
+                            f"classes: depth={depth} width={width} "
+                            f"regime={regime}",
+                        )
+                        pressure_actions += count
+                        pressure_stores += count * (depth + 9)
+                        pressure_min_releases += count * (depth + 1)
+            _require(
+                pressure_actions == actual_operations[13],
+                "set-pressure cross/operation coverage is not conserved",
+            )
+            for set_quartile, count in enumerate(actual_pressure_set):
+                _require(
+                    (count > 0) == (
+                        pressure_enabled
+                        and target_pressure_set[set_quartile] != 0
+                    ),
+                    "actual_set_pressure_set does not match enabled classes: "
+                    f"{actual_pressure_set}",
+                )
+            _require(
+                sum(actual_pressure_set) == pressure_actions,
+                "set-pressure set/operation coverage is not conserved",
+            )
+            _require(
+                sum(actual_pressure_issue) == pressure_stores
+                and (
+                    pressure_actions == 0
+                    or all(count > 0 for count in actual_pressure_issue)
+                ),
+                "set-pressure issue-order coverage is not conserved",
+            )
+            _require(
+                actual_pressure_manager[0] == pressure_actions
+                and actual_pressure_manager[1] == pressure_stores
+                and actual_pressure_manager[2] == pressure_stores
+                and actual_pressure_manager[3] >= pressure_min_releases
+                and actual_pressure_manager[4] >=
+                    actual_pressure_manager[3]
+                and actual_pressure_manager[5] ==
+                    actual_pressure_manager[4]
+                and actual_pressure_manager[6] == pressure_stores
+                and actual_pressure_manager[7] == pressure_stores
+                and actual_pressure_manager[8] ==
+                    actual_pressure_manager[3],
+                "set-pressure manager accounting is not conserved",
             )
 
     if schema >= 8:

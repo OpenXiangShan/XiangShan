@@ -49,7 +49,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains nine or ten same-set dirty stores |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -69,6 +69,9 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `ptw-error-corrupt-first` | Per-mille first-beat share among corrupt responses; the other class corrupts the last beat |
 | `load-merge-depth2`, `load-merge-depth3` | Relative two- and three-load batch weights inside `load-merge` |
 | `load-merge-same-address`, `load-merge-same-beat`, `load-merge-cross-beat` | Relative address patterns inside `load-merge`: exact duplicate, distinct offsets in the critical 32-byte beat, or distinct offsets spanning both beats |
+| `set-pressure-depth9`, `set-pressure-depth10` | Relative same-set store counts; an eight-way DCache must replace at least one or two target lines respectively |
+| `set-pressure-sb`, `set-pressure-sh`, `set-pressure-sw`, `set-pressure-sd` | Relative store-width weights inside `set-pressure` |
+| `set-pressure-set-q0` .. `set-pressure-set-q3` | Relative weights for the four 32-set quarters of the 128-set DCache index space |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -115,7 +118,8 @@ classes, incompatible fixed vector shape/policy combinations, out-of-range
 per-mille values, inconsistent special-concurrency or
 manager-latency settings, enabled PTW errors with no reachable site, level, or
 governing page-table mode, enabled load merging with no reachable depth or
-address pattern, and unknown latency profiles fail before simulation
+address pattern, enabled set pressure with no reachable depth, width, or set
+quarter, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
 An NC/MMIO-only operation mix cannot also request Bare coverage.
@@ -209,6 +213,11 @@ and `corner`. Coverage and corner use equal `2/3`-way and
 same-address/same-beat/cross-beat weights. SPEC favors depth two by `19/1` and
 same-beat locality by `1/8/1`, retaining low-rate duplicate and cross-beat
 cases without making them look like ordinary traffic.
+Set-pressure operation weights are `75`, `2`, and `125` for `coverage`, `spec`,
+and `corner`. Coverage and corner use equal depth, width, and set-quarter
+weights. SPEC favors depth nine by `9/1`, widths by `1/2/6/20`, and keeps set
+quarters uniform. Thus realistic traffic retains occasional conflict eviction
+without turning every ordinary store into an artificial capacity test.
 Uncache error rates use the same `100`, `0`, and `500` values, with a 500
 per-mille denied share among error loads. The `spec` preset therefore models
 ordinary traffic without frequent external errors, while `coverage` and
@@ -319,7 +328,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=20`, the resolved target weights,
+Every terminal line prints `constraint_schema=21`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
 clean/corrupt/denied and manager-error accounting, ordinary-vector
@@ -363,6 +372,14 @@ one cycle, and the target line must produce exactly one DCache request. Global
 refill and GrantAck deltas remain equal and at least one because the same loads
 may also trigger legal hardware prefetches; scalar writebacks must equal the
 sum of the generated batch depths.
+Set pressure reports 24 depth x width x translation crosses, four set-index
+quarters, both store-half issue orders, and a nine-field manager tuple. Each
+action uses fresh lines in one physical set. Generated stores, target requests,
+store writebacks, and SQ dequeues must match exactly; target ReleaseData must
+reach at least `depth - 8`, every global ReleaseData must pass its byte oracle,
+and every attributed target release must appear with the stored bytes in the
+manager memory. The 4-GiB sparse region supports at least one million actions
+per fixed set quarter without reusing a target line.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

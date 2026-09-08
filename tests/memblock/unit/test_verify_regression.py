@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 21
+        result["constraint_schema"] = 22
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -647,6 +647,43 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["actual_load_merge_manager"] = "12,14,14,30"
+        result.update(
+            {
+                "constraint_schema": 21,
+                "target_ops": "1,0,3,2,0,0,1,1,1,0,1,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,18,5,5,0,6,90,12,8",
+                "target_set_pressure_depth": "1,1",
+                "target_set_pressure_width": "1,1,1,1",
+                "target_set_pressure_set": "1,1,1,1",
+                "actual_set_pressure_cross": ",".join(["1,0,0"] * 8),
+                "actual_set_pressure_set": "2,2,2,2",
+                "actual_set_pressure_issue_order": "38,38",
+                "actual_set_pressure_manager": (
+                    "8,76,76,12,14,14,76,76,12"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_cross"] = ",".join(
+            ["0,0,0"] + ["1,0,0"] * 7
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_set_pressure_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_cross"] = ",".join(["1,0,0"] * 8)
+        result["actual_set_pressure_manager"] = (
+            "8,76,75,12,14,14,76,76,12"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_manager"] = (
+            "8,76,76,12,14,14,76,76,12"
+        )
         result.update(
             {
                 "constraint_schema": 14,

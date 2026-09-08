@@ -2391,3 +2391,49 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=20007..20007 results=1 transactions=512 
 
 All 186 Python unit tests and `check-rtl` passed. No CPU RTL defect was
 observed.
+
+## Schema 21 Random Dirty Set-Pressure Closure
+
+On 2026-09-08 the common `random-mixed` constraint interface added
+`set-pressure`. Each compound action selects one of the 128 DCache sets,
+initializes nine or ten fresh same-set lines, and commits a byte-, half-,
+word-, or doubleword-store to every line. The interface independently weights
+depth, width, and four 32-set quarters, then crosses depth and width with
+Bare/stage-1/nested translation under the common manager-latency profile. Both
+STA-before-SDA and SDA-before-STA issue orders are exercised within each
+action.
+
+The online oracle requires one target request, one store writeback, and one SQ
+dequeue per store. At least `depth - 8` current target lines must be evicted
+from the eight-way set. Their ReleaseData beats are checked against immutable
+whole-line snapshots, their stored bytes must reach manager memory, and every
+background ReleaseData beat emitted during the action must also pass the
+global line-data oracle. A 4-GiB collision-free address schedule permits
+1,048,576 actions even when constraints select only one set quarter.
+
+The following runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Actions/stores | Target/global verified ReleaseData | Set quarters | STA/SDA first |
+| --- | ---: | ---: | ---: | ---: | --- | --- |
+| set-pressure-only `coverage` | 21002 | 118,758 | 411/3,905 | 617/2,905 | 110/92/113/96 | 1,957/1,948 |
+| `coverage` frozen artifact | 21003 | 92,846 | 25/238 | 38/57 | 8/3/5/9 | 120/118 |
+| `spec` | 21004 | 56,802 | 25/237 | 37/51 | 7/7/7/4 | 120/117 |
+| `corner` | 21005 | 163,597 | 30/286 | 46/59 | 6/10/6/8 | 143/143 |
+| `coverage` final binary | 21006 | 99,825 | 29/275 | 43/56 | 9/5/8/7 | 138/137 |
+
+All five runs covered every enabled depth x width x translation bin. The
+set-pressure-only run generated 3,905 target DCache requests, 3,905 store
+writebacks, and 3,905 SQ dequeues exactly; all 2,905 global ReleaseData lines
+were byte-verified, including the 617 releases attributed to the current
+target sets. The existing directed `dcache-release` scenario also passed with
+10 stores, two ReleaseData lines, and two preserved manager-memory updates.
+
+All 186 Python unit tests and `check-rtl` passed. The independent verifier
+accepted the finite coverage artifact:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=21003..21003 results=1 transactions=512 elapsed_seconds=37.767780 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=145e8177b24dbf13673a0f6247360ca0b0162e75a82df8b66f7a13cf78ccb369
+```
+
+No CPU RTL defect was observed.

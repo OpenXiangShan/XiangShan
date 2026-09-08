@@ -961,6 +961,7 @@ Uncache response-error
 presence and kind,
 PTW manager-error site, walk level, access direction, and denied/corrupt beat,
 same-line scalar-load merge depth and same-address/same-beat/cross-beat pattern,
+same-set dirty-store pressure depth, store width, and set-index quartile,
 Bare/Sv39/Sv48 and all four nested VS/G mode pairs, host-stage NAPOT plus
 independent nested VS/G NAPOT placement, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data/overlap crosses, and DCache, PTW,
@@ -1133,6 +1134,20 @@ translation regime. The SPEC preset keeps this operation rare and favors
 two-way same-beat locality; coverage and corner presets exercise all shapes
 uniformly. Existing `dcache-latency=spec` supplies the calibrated refill-delay
 distribution, including the 100-400-cycle bucket.
+
+Schema 21 adds `set-pressure` as a compound random operation. One action
+commits nine or ten cold stores to distinct tags in one physical DCache set,
+crossing SB/SH/SW/SD, both STA-before-SDA and SDA-before-STA issue orders,
+all four set-index quartiles, and Bare/stage-1/nested translation. A 4-GiB
+sparse identity-mapped region supplies at least one million nonrepeating
+actions even when one set quartile is selected exclusively. The oracle requires
+one target DCache request and one store writeback/SQ dequeue per store, at least
+`depth - 8` target ReleaseData transactions, byte-exact immutable line images,
+and matching manager-memory preservation. Global ReleaseData is independently
+counted and byte-checked so eviction of older dirty workload lines remains
+legal without weakening target attribution. Coverage and corner weight all
+dimensions uniformly; SPEC keeps the operation rare, favors nine-line pressure,
+and biases toward SW/SD.
 
 For a reproducible local pressure run:
 
