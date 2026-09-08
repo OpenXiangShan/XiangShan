@@ -245,6 +245,7 @@ struct RandomConstraints {
     unsigned probe_to_b_per_mille = 0;
     unsigned probe_need_data_per_mille = 0;
     unsigned probe_overlap_per_mille = 0;
+    unsigned probe_triple_overlap_per_mille = 0;
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
     unsigned uncache_error_per_mille = 0;
@@ -328,6 +329,7 @@ struct RandomConstraints {
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 500,
+                .probe_triple_overlap_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .uncache_error_per_mille = 100,
@@ -413,6 +415,7 @@ struct RandomConstraints {
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 10,
+                .probe_triple_overlap_per_mille = 10,
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
                 .uncache_error_per_mille = 0,
@@ -498,6 +501,7 @@ struct RandomConstraints {
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
                 .probe_overlap_per_mille = 750,
+                .probe_triple_overlap_per_mille = 750,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .uncache_error_per_mille = 500,
@@ -926,6 +930,8 @@ struct RandomConstraints {
             probe_need_data_per_mille = parsed;
         } else if (key == "probe-overlap") {
             probe_overlap_per_mille = parsed;
+        } else if (key == "probe-triple-overlap") {
+            probe_triple_overlap_per_mille = parsed;
         } else if (key == "nc-store") {
             nc_stores_per_mille = parsed;
         } else if (key == "mmio-store") {
@@ -1392,6 +1398,7 @@ struct RandomConstraints {
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
+            probe_triple_overlap_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
             mmio_stores_per_mille > 1000 ||
             uncache_error_per_mille > 1000 ||
@@ -1667,6 +1674,26 @@ struct RandomConstraints {
         return static_cast<unsigned>(std::count_if(
             weights.begin(), weights.end(),
             [](unsigned weight) { return weight != 0; }));
+    }
+
+    std::array<unsigned, 3> probe_depth_weights() const
+    {
+        const unsigned overlap = probe_overlap_per_mille;
+        return {{
+            (1000U - overlap) * 1000U,
+            overlap * (1000U - probe_triple_overlap_per_mille),
+            overlap * probe_triple_overlap_per_mille,
+        }};
+    }
+
+    unsigned choose_probe_depth(std::uint64_t random) const
+    {
+        return choose_weighted(probe_depth_weights(), random);
+    }
+
+    bool probe_depth_enabled(unsigned depth_class) const
+    {
+        return probe_depth_weights().at(depth_class) != 0;
     }
 
     unsigned choose_translation_regime(std::uint64_t random) const
@@ -2042,7 +2069,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=31 constraints=" << name
+        stream << "constraint_schema=32 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2186,6 +2213,8 @@ struct RandomConstraints {
                << " target_probe_need_data="
                << probe_need_data_per_mille
                << " target_probe_overlap=" << probe_overlap_per_mille
+               << " target_probe_triple_overlap="
+               << probe_triple_overlap_per_mille
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
                << " target_uncache_error=" << uncache_error_per_mille
@@ -2597,6 +2626,7 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> probe_caps{};
     std::array<std::uint64_t, 2> probe_need_data{};
     std::array<std::uint64_t, 2> probe_overlaps{};
+    std::array<std::uint64_t, 3> probe_depths{};
     std::uint64_t actions = 0;
 
     void sample_operation(unsigned operation)
@@ -3641,6 +3671,19 @@ struct ConstraintCoverage {
                  constraints.probe_overlap_per_mille, probe_overlaps))) {
             return false;
         }
+        if (constraints.probes_per_mille != 0) {
+            for (unsigned depth = 0; depth < probe_depths.size(); ++depth) {
+                if ((probe_depths[depth] != 0) !=
+                    constraints.probe_depth_enabled(depth)) {
+                    return false;
+                }
+            }
+            if (std::accumulate(
+                    probe_depths.begin(), probe_depths.end(),
+                    std::uint64_t{0}) != probe_sequences) {
+                return false;
+            }
+        }
         if (backpressure) {
             const auto complete_latency = [](
                 memblock::ResponseLatencyProfile profile,
@@ -4077,6 +4120,8 @@ public:
                << probe_need_data[1]
                << " actual_probe_overlap=" << probe_overlaps[0] << ','
                << probe_overlaps[1]
+               << " actual_probe_depth=" << probe_depths[0] << ','
+               << probe_depths[1] << ',' << probe_depths[2]
                << latency_summary("dcache_latency", dcache_latency)
                << latency_summary("ptw_latency", ptw_latency)
                << latency_summary("uncache_latency", uncache_latency);

@@ -3487,9 +3487,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                  constraint_coverage.probe_overlaps[0] == 0) ||
                 (constraints.probe_overlap_per_mille != 0 &&
                  constraint_coverage.probe_overlaps[1] == 0);
+            bool missing_depth = false;
+            for (unsigned depth = 0;
+                 depth < constraint_coverage.probe_depths.size(); ++depth) {
+                missing_depth = missing_depth ||
+                    (constraints.probe_depth_enabled(depth) &&
+                     constraint_coverage.probe_depths[depth] == 0);
+            }
             return constraints.probes_per_mille != 0 &&
                 (constraint_coverage.probe_sequences == 0 ||
-                 missing_cap || missing_data || missing_overlap);
+                 missing_cap || missing_data || missing_overlap ||
+                 missing_depth);
         };
         const auto issue_random_cmo = [&] (
             unsigned operation, bool dirty, bool younger_overlap,
@@ -7817,16 +7825,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     need_data = random() % 1000 <
                         constraints.probe_need_data_per_mille;
                 }
-                const bool probe_overlap = choose_binary_class(
-                    constraints.probe_overlap_per_mille,
-                    constraint_coverage.probe_overlaps);
+                unsigned probe_depth_class =
+                    constraints.choose_probe_depth(random());
+                for (unsigned depth = 0;
+                     depth < constraint_coverage.probe_depths.size(); ++depth) {
+                    if (constraints.probe_depth_enabled(depth) &&
+                        constraint_coverage.probe_depths[depth] == 0) {
+                        probe_depth_class = depth;
+                        break;
+                    }
+                }
+                const unsigned probe_depth = probe_depth_class + 1U;
+                const bool probe_overlap = probe_depth > 1U;
 
                 std::ostringstream probe_phase;
                 probe_phase << "random-probe:address=0x" << std::hex
                             << *probe_candidate << std::dec
                             << ":cap=" << (to_b ? "toB" : "toN")
                             << ":need_data=" << need_data
-                            << ":overlap=" << probe_overlap;
+                            << ":depth=" << probe_depth;
                 phase = probe_phase.str();
 
                 const auto expected_line = environment.memory().read_beat(
@@ -7858,28 +7875,37 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const std::uint64_t line_index = sequence % lines_per_half;
                     const unsigned candidate_set = static_cast<unsigned>(
                         (*probe_candidate >> 6) & 0x7fU);
-                    const std::uint64_t clean_line_index =
-                        (line_index & 0x7fU) == candidate_set
-                        ? (line_index + 1U) % lines_per_half
-                        : line_index;
-                    const std::uint64_t clean_line = probe_overlap_base +
-                        block * block_bytes + clean_line_index * 64;
-                    const std::uint64_t miss_line = clean_line + half_block_bytes;
-                    const auto clean_load = make_load(
-                        clean_line + 8 * (random() % 8),
-                        memblock::LoadOp::ld,
-                        random() % memblock::kScalarLoadLanes);
-                    environment.expect_load(clean_load);
-                    if (!environment.set_rob_head(
-                            clean_load.rob, clean_load.rob_flag) ||
-                        !environment.enqueue_load(clean_load) ||
-                        !environment.issue_load(clean_load, 4096) ||
-                        !environment.run_until_complete(
-                            probe_completion_timeout) ||
-                        !environment.run_until_lq_retired(8192)) {
-                        return false;
+                    std::vector<std::uint64_t> clean_lines;
+                    for (std::uint64_t offset = 0;
+                         clean_lines.size() < probe_depth - 1U; ++offset) {
+                        const std::uint64_t clean_line_index =
+                            (line_index + offset) % lines_per_half;
+                        if ((clean_line_index & 0x7fU) == candidate_set) {
+                            continue;
+                        }
+                        clean_lines.push_back(
+                            probe_overlap_base + block * block_bytes +
+                            clean_line_index * 64);
+                    }
+                    for (const std::uint64_t clean_line : clean_lines) {
+                        const auto clean_load = make_load(
+                            clean_line + 8 * (random() % 8),
+                            memblock::LoadOp::ld,
+                            random() % memblock::kScalarLoadLanes);
+                        environment.expect_load(clean_load);
+                        if (!environment.set_rob_head(
+                                clean_load.rob, clean_load.rob_flag) ||
+                            !environment.enqueue_load(clean_load) ||
+                            !environment.issue_load(clean_load, 4096) ||
+                            !environment.run_until_complete(
+                                probe_completion_timeout) ||
+                            !environment.run_until_lq_retired(8192)) {
+                            return false;
+                        }
                     }
 
+                    const std::uint64_t miss_line =
+                        clean_lines.front() + half_block_bytes;
                     overlap_load = make_load(
                         miss_line + 8 * (random() % 8),
                         memblock::LoadOp::ld,
@@ -7896,10 +7922,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         !environment.issue_load(*overlap_load, 4096) ||
                         !environment.run_until_dcache_requests(
                             requests_before_overlap + 1, 8192) ||
-                        environment.writebacks() != overlap_writebacks_before ||
-                        !environment.request_dcache_probe(
-                            clean_line, 2, false, 2)) {
+                        environment.writebacks() != overlap_writebacks_before) {
                         return false;
+                    }
+                    for (const std::uint64_t clean_line : clean_lines) {
+                        if (!environment.request_dcache_probe(
+                                clean_line, 2, false, 2)) {
+                            return false;
+                        }
                     }
                 }
 
@@ -7913,7 +7943,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return false;
                 }
                 if (!environment.run_until_probe_responses(
-                        responses_before + (probe_overlap ? 2U : 1U),
+                        responses_before + probe_depth,
                         probe_completion_timeout)) {
                     phase = probe_phase.str() + ":response-drain";
                     return false;
@@ -7925,7 +7955,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
                 if (probe_overlap &&
                     environment.dcache_max_probe_outstanding() <
-                        std::max<std::uint64_t>(2, probe_depth_before)) {
+                        std::max<std::uint64_t>(probe_depth,
+                                                probe_depth_before)) {
                     phase = probe_phase.str() + ":outstanding-depth";
                     return false;
                 }
@@ -7936,7 +7967,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         return false;
                     }
                     if (!environment.run_until_probe_responses(
-                            responses_before + (probe_overlap ? 3U : 2U),
+                            responses_before + probe_depth + 1U,
                             probe_completion_timeout)) {
                         phase = probe_phase.str() + ":cleanup-response";
                         return false;
@@ -7962,6 +7993,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.probe_caps[to_b ? 1 : 0];
                 ++constraint_coverage.probe_need_data[need_data ? 1 : 0];
                 ++constraint_coverage.probe_overlaps[probe_overlap ? 1 : 0];
+                ++constraint_coverage.probe_depths[probe_depth_class];
                 phase = "seeded-mixed-tail";
             }
         }
@@ -8046,7 +8078,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.uncache_response_latency_stats()) ||
             (constraints.probes_per_mille != 0 &&
              constraints.probe_overlap_per_mille != 0 &&
-             environment.dcache_max_probe_outstanding() < 2) ||
+             environment.dcache_max_probe_outstanding() <
+                 (constraints.probe_depth_enabled(2) ? 3U : 2U)) ||
             (constraints.stride_stream_per_mille != 0 &&
              environment.hardware_prefetch_stats().l2_source_counts[12] == 0) ||
             total_ifetch_prefetches() == 0 ||

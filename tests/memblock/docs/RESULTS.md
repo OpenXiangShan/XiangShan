@@ -2997,3 +2997,61 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed
 
 No CPU RTL defect was observed. Four-or-more simultaneous replacement windows
 and composition with Probe/CMO traffic remain explicit DCache breadth gaps.
+
+## Schema 32 Triple Probe-Overlap Closure
+
+On 2026-09-09 the common `random-mixed` generator extended Probe/refill
+overlap from a binary class to hierarchical one/two/three-request depth.
+`probe-overlap` first selects a standalone primary Probe or an overlapping
+burst; within the burst, `probe-triple-overlap` selects one or two clean
+auxiliary lines before the dirty primary line. All requests are queued without
+an intervening simulation cycle, receive distinct active B-source IDs, and are
+matched to ProbeAck(Data) responses by source and line address. The unrelated
+held refill cannot write back until every Probe finishes, and the measured
+accepted-but-unanswered depth must reach the selected burst size.
+
+The schema retains `actual_probe_overlap` as the binary compatibility
+projection and adds authoritative `actual_probe_depth=depth1,depth2,depth3`.
+The simulator and offline verifier require every enabled depth, conserve depth
+counts to generated sequences, project them exactly onto overlap counts, and
+account for `depth - 1` auxiliary manager Probes per sequence. Coverage uses a
+500-per-mille conditional triple share, SPEC uses 10, and corner uses 750.
+
+The following final-binary runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Depth 1/2/3 | Maximum accepted outstanding |
+| --- | ---: | ---: | ---: | ---: |
+| depth-1-only `coverage` | 32002 | 122,929 | 2/0/0 | 1 |
+| depth-2-only `coverage` | 32003 | 134,002 | 0/2/0 | 2 |
+| depth-3-only `coverage` | 32001 | 128,899 | 0/0/2 | 3 |
+| full `coverage` | 32004 | 591,929 | 1/2/1 | 3 |
+| full `spec` | 32005 | 1,165,928 | 1/1/1 | 3 |
+| full `corner` | 32006 | 1,322,762 | 1/1/1 | 3 |
+| frozen `coverage` artifact | 1 | 575,357 | 1/1/1 | 3 |
+
+The full coverage, SPEC, and corner seeds retained all 576 schema-31
+replacement bins while closing all three Probe depths. The frozen seed ran
+three primary sequences with one toN and two toB caps, one requested-data
+class, two mandatory-data classes, three auxiliary Probes, two toB cleanup
+Probes, and five successful CMO-derived Probes, for exactly 13 manager Probes.
+Its set-pressure window counts were 194/194/192; clean/dirty,
+no-overlap/held-refill, and no-stall/stall counts were respectively 290/290,
+290/290, and 289/291.
+
+All 186 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-coherence`,
+`dcache-errors`, `atomic-dchannel-errors`, all three Probe-depth endpoints, all
+three complete constraint profiles, and the independent frozen-artifact
+verifier passed. The frozen executable and runtime-manifest SHA-256 values are
+`e93f003a84736d97b5bebc9cb515991a7167b5ffbb55e074e89e309d369db2ad`
+and `d276144cf27531894555ebc8b94731b7553dab121689a6c1ad1517ab5f111a88`.
+The accepted artifact is `build/memblock/schema32-coverage-1x1056.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed_seconds=224.536673 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=bebcc0a7bc90f76c3f2dae21482dd977d98f8048c3a1b9362d545172fb03df51
+```
+
+No CPU RTL defect was observed. Four-or-more simultaneous Probe sources,
+cross-operation Probe bursts, malformed coherence traffic, four-or-more
+replacement windows, and replacement composition with Probe/CMO traffic remain
+explicit DCache breadth gaps.

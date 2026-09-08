@@ -153,7 +153,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     _require(
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
-            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -334,10 +334,18 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         target_probe_overlap = (
             result.get("target_probe_overlap") if schema >= 14 else 0
         )
+        target_probe_triple_overlap = (
+            result.get("target_probe_triple_overlap") if schema >= 32 else 0
+        )
         actual_probe_overlap = (
             _csv_counts(result, "actual_probe_overlap", 2)
             if schema >= 14
             else [0, 0]
+        )
+        actual_probe_depth = (
+            _csv_counts(result, "actual_probe_depth", 3)
+            if schema >= 32
+            else [actual_probe_overlap[0], actual_probe_overlap[1], 0]
         )
         probe_max_outstanding = (
             result.get("probe_max_outstanding") if schema >= 14 else 0
@@ -356,6 +364,14 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and probe_max_outstanding >= 0,
                 "probe_max_outstanding is invalid: "
                 f"{probe_max_outstanding!r}",
+            )
+        if schema >= 32:
+            _require(
+                isinstance(target_probe_triple_overlap, int)
+                and not isinstance(target_probe_triple_overlap, bool)
+                and 0 <= target_probe_triple_overlap <= 1000,
+                "target_probe_triple_overlap is not a per-mille integer: "
+                f"{target_probe_triple_overlap!r}",
             )
         cmo_probe_count = 0
         if schema >= 13:
@@ -394,7 +410,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 actual_sequences == 0
                 and actual_caps == [0, 0]
                 and actual_need_data == [0, 0]
-                and (schema < 14 or actual_probe_overlap == [0, 0]),
+                and (schema < 14 or actual_probe_overlap == [0, 0])
+                and (schema < 32 or actual_probe_depth == [0, 0, 0]),
                 "disabled constrained Probe has coverage observations",
             )
         if target_probe != 0 or schema >= 13:
@@ -432,11 +449,49 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                         probe_max_outstanding >= 2,
                         "Probe overlap never reached two outstanding sources",
                     )
+                if schema >= 32:
+                    depth_enabled = [
+                        target_probe_overlap != 1000,
+                        target_probe_overlap != 0
+                        and target_probe_triple_overlap != 1000,
+                        target_probe_overlap != 0
+                        and target_probe_triple_overlap != 0,
+                    ]
+                    _require(
+                        all(
+                            (actual_probe_depth[index] > 0) == enabled
+                            for index, enabled in enumerate(depth_enabled)
+                        ),
+                        "actual_probe_depth has an enabled but uncovered class: "
+                        f"{actual_probe_depth}",
+                    )
+                    _require(
+                        sum(actual_probe_depth) == actual_sequences,
+                        "Probe depth coverage is not conserved",
+                    )
+                    _require(
+                        actual_probe_overlap
+                        == [
+                            actual_probe_depth[0],
+                            actual_probe_depth[1] + actual_probe_depth[2],
+                        ],
+                        "Probe overlap compatibility projection is not conserved",
+                    )
+                    if actual_probe_depth[2] > 0:
+                        _require(
+                            probe_max_outstanding >= 3,
+                            "triple Probe overlap never reached three outstanding sources",
+                        )
             probes = result.get("probes")
+            auxiliary_probes = (
+                actual_probe_depth[1] + 2 * actual_probe_depth[2]
+                if schema >= 32
+                else actual_probe_overlap[1]
+            )
             _require(
                 isinstance(probes, int) and not isinstance(probes, bool)
                 and probes == actual_sequences + actual_caps[1]
-                + cmo_probe_count + actual_probe_overlap[1],
+                + cmo_probe_count + auxiliary_probes,
                 "manager Probe count does not match constrained/overlap/CMO accounting",
             )
 

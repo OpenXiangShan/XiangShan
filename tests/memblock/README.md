@@ -1026,11 +1026,12 @@ coverage plus final LSQ-accounting gates. The deterministic coherence scenario
 covers its directed coherence state sequence. The random tail can follow a
 completed dirty scalar store with a byte-exact manager Probe, independently
 crosses toB/toN and requested/mandatory data, and cleans up retained toB lines.
-The `probe-overlap` class holds an unrelated refill open while clean auxiliary
-and dirty primary Probes with distinct B-source IDs are queued together. Both
-address-matched C responses must complete at a measured outstanding depth of
-at least two before the delayed load writes back. More than two simultaneous
-Probe sources and wider operation-class overlap remain follow-on coverage.
+The Probe overlap classes hold an unrelated refill open while one or two clean
+auxiliary Probes and a dirty primary Probe with distinct B-source IDs are queued
+together. Every address-matched C response must complete at the selected
+accepted-outstanding depth of two or three before the delayed load writes back.
+Four-or-more Probe sources and wider operation-class overlap remain follow-on
+coverage.
 
 For example, these commands run the same generator in two directions:
 
@@ -1311,6 +1312,18 @@ for triple and 500 per mille for conditional dual selection, making the three
 classes approximately balanced; SPEC uses 1/10 and corner 500/750 respectively.
 The minimum `random-mixed` length is 1056 actions. Four-or-more simultaneous
 replacement windows remain separate.
+
+Schema 32 adds `probe-triple-overlap` as a conditional depth selector after
+`probe-overlap`. Non-overlap actions use one primary Probe, ordinary overlap
+uses one clean auxiliary plus the primary, and triple overlap uses two clean
+auxiliaries plus the primary. Every request is assigned a distinct active B
+source and every ProbeAck(Data) is matched by source and address. The terminal
+record preserves `actual_probe_overlap` for schema-14 compatibility and adds
+the authoritative `actual_probe_depth=depth1,depth2,depth3`; the offline gate
+also requires a measured maximum accepted-outstanding depth of three whenever
+the triple class is enabled. Coverage/SPEC/corner use conditional triple shares
+of 500/10/750 per mille. Four-or-more sources and composition with other
+operation classes remain separate.
 
 For a reproducible local pressure run:
 

@@ -2457,6 +2457,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_to_b_per_mille",
             "probe_need_data_per_mille",
             "probe_overlap_per_mille",
+            "probe_triple_overlap_per_mille",
             "nc_stores_per_mille",
             "mmio_stores_per_mille",
             "stride_stream_per_mille",
@@ -2587,6 +2588,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "target_probe_to_b=",
             "target_probe_need_data=",
             "target_probe_overlap=",
+            "target_probe_triple_overlap=",
             "target_stride_stream=",
             "l2_stride_prefetches=",
             "backend_load_feedback_frozen",
@@ -2597,8 +2599,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_caps=",
             "actual_probe_need_data=",
             "actual_probe_overlap=",
+            "actual_probe_depth=",
             "probe_max_outstanding=",
-            "constraint_schema=31",
+            "constraint_schema=32",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2710,7 +2713,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "retire_random_nc_store_error",
             "probe_overlap_base",
             "candidate_set",
-            "dcache_max_probe_outstanding() < 2",
+            "constraints.probe_depth_enabled(2)",
         ):
             self.assertIn(contract, driver)
         for contract in (
@@ -2770,6 +2773,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "uncache-error",
             "uncache-load-error-denied",
             "probe-overlap",
+            "probe-triple-overlap",
             "stride-stream",
             "atomic-amo",
             "atomic-lrsc",

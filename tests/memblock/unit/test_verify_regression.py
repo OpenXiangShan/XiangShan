@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 32
+        result["constraint_schema"] = 33
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1196,6 +1196,34 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "set-pressure window-count/operation coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 32,
+                "actual_set_pressure_window_count": "64,64,64",
+                "target_probe_triple_overlap": 500,
+                "actual_probe_sequences": 3,
+                "actual_probe_caps": "1,2",
+                "actual_probe_need_data": "1,2",
+                "actual_probe_overlap": "1,2",
+                "actual_probe_depth": "1,1,1",
+                "probe_max_outstanding": 3,
+                "probes": 8,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 2
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "three outstanding sources",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_max_outstanding"] = 3
+        result["actual_probe_depth"] = "1,2,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_probe_depth",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(
