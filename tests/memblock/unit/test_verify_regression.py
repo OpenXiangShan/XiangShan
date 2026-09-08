@@ -214,7 +214,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 28
+        result["constraint_schema"] = 29
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1045,6 +1045,42 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "actual_set_pressure_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 28,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,32",
+                "target_set_pressure_dirty": 500,
+                "target_set_pressure_refill_overlap": 500,
+                "actual_set_pressure_line_state": "16,16",
+                "actual_set_pressure_refill_overlap": "16,16",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 32
+                ),
+                "actual_set_pressure_set": "8,8,8,8",
+                "actual_set_pressure_issue_order": "76,76",
+                "actual_set_pressure_manager": (
+                    "16,152,152,24,28,28,152,152,24"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "16,152,152,152,24,24,0,28,4,4,312,312"
+                ),
+                "actual_set_pressure_overlap_manager": "16,16,24,16,16",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_overlap_manager"] = "16,16,23,16,16"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure refill-overlap accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_overlap_manager"] = "16,16,24,16,16"
+        result["actual_set_pressure_refill_overlap"] = "17,15"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure overlap/operation coverage",
         ):
             verify_regression._check_mixed_coverage(result)
         result.update(

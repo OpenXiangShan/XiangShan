@@ -2732,3 +2732,70 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=512 elapsed_
 
 No CPU RTL defect was observed. Wider simultaneous replacement/refill/release
 pressure remains the next DCache breadth gap.
+
+## Schema 28 Held-Refill Replacement Overlap Closure
+
+On 2026-09-08 `random-mixed` added the
+`set-pressure-refill-overlap` constraint and expanded set replacement to 96
+required clean/dirty x no-overlap/held-refill-overlap x 9/10-line x B/H/W/D x
+Bare/stage-1/nested bins. Each overlap action issues one cold load to a
+reserved line in a different set and holds that address-qualified D response.
+The target same-set replacement then has to produce at least `depth - 8`
+address-attributed Release or ReleaseData transactions while the held load is
+still pending. Only after this observation may the manager release the D
+response. The auxiliary request, load writeback, and LQ dequeue are all
+conserved exactly. GrantAck expectations are matched by sink identity so legal
+later D sources may bypass the held response.
+
+Dirty overlap keeps program order legal: all older stores are issued and
+complete first, the younger refill is then made pending, and the stores are
+committed in order to cause replacement. Clean overlap places the held load at
+the ROB head before issuing the younger reverse revisits. Phase-local C-channel
+observation bounds retained history independently of regression length. The
+minimum `random-mixed` length is now 576 actions, leaving a 48-action random
+tail after all newly mandatory cross bins have been scheduled.
+
+The following final-binary 576-action runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Clean/dirty actions | No-overlap/held actions | Clean/dirty target releases | Releases while held |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| overlap-only `coverage` | 28001 | 139,641 | 26/28 | 0/54 | 56/40 | 79 |
+| no-overlap `coverage` | 28002 | 126,998 | 30/26 | 56/0 | 65/39 | 0 |
+| full `coverage` | 28003 | 144,855 | 49/53 | 51/51 | 110/79 | 75 |
+| full `spec` | 28004 | 140,118 | 50/48 | 50/48 | 120/72 | 72 |
+| full `corner` | 28005 | 278,601 | 50/52 | 48/54 | 124/78 | 81 |
+| frozen `coverage` artifact | 1 | 151,668 | 53/53 | 53/53 | 119/81 | 80 |
+
+Every fully enabled run hit all 96 cross bins and every set quarter. The two
+endpoint runs kept every disabled overlap class exactly zero. In the frozen
+artifact, 53 dirty actions generated 505 exact target requests, store
+writebacks, and SQ dequeues; 81 target ReleaseData lines were byte-verified.
+The 53 clean actions generated 504 exact initial target requests, at least 80
+revisit misses, 119 target Releases, zero target ReleaseData, and 1,034 exact
+load writebacks/LQ dequeues including the 53 auxiliary loads. All 53 held
+loads generated one request, one writeback, and one dequeue, while 80 target
+releases were observed before their responses were released.
+
+Initial development exposed two UT issues rather than RTL defects. A fixed
+six-kilocycle D-response delay expired before some replacements, so it was
+replaced by the explicit address-qualified held-response queue. The first dirty
+version also advanced the ROB head to the younger held load before committing
+older stores, leaving an illegal pending-load sequence; stores are now issued
+and completed first, then committed while the younger load remains pending.
+Both failing seeds pass after these oracle/stimulus corrections, so no
+standalone CPU bug report was created.
+
+All 186 Python unit tests, `check-rtl`, smoke, `dcache-errors`,
+`atomic-dchannel-errors`, `dcache-coherence`, both endpoints, all three complete
+constraint presets, and the independent finite-artifact verifier passed. The
+frozen executable SHA-256 is
+`5a4d01d2826ee6a4db83a6c500e6dfa268ac71f76c8f46e3b3982e09f8371845`.
+The accepted artifact is `build/memblock/schema28-coverage-1x576.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=576 elapsed_seconds=59.377165 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=fc04469c660d1027311b5a037c0b902d34f163ae722b2a2d7a50e4ba1f1d535d
+```
+
+No CPU RTL defect was observed. Release-channel backpressure and multiple
+simultaneous replacement windows remain explicit DCache breadth gaps.

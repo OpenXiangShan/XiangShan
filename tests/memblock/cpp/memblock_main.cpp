@@ -198,6 +198,7 @@ struct RandomConstraints {
     std::array<unsigned, 4> set_pressure_width_weights{};
     std::array<unsigned, 4> set_pressure_set_weights{};
     unsigned set_pressure_dirty_per_mille = 0;
+    unsigned set_pressure_refill_overlap_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -277,6 +278,7 @@ struct RandomConstraints {
                 .set_pressure_width_weights = {1, 1, 1, 1},
                 .set_pressure_set_weights = {1, 1, 1, 1},
                 .set_pressure_dirty_per_mille = 500,
+                .set_pressure_refill_overlap_per_mille = 500,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -358,6 +360,7 @@ struct RandomConstraints {
                 .set_pressure_width_weights = {1, 2, 6, 20},
                 .set_pressure_set_weights = {1, 1, 1, 1},
                 .set_pressure_dirty_per_mille = 50,
+                .set_pressure_refill_overlap_per_mille = 10,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -439,6 +442,7 @@ struct RandomConstraints {
                 .set_pressure_width_weights = {1, 1, 1, 1},
                 .set_pressure_set_weights = {1, 1, 1, 1},
                 .set_pressure_dirty_per_mille = 500,
+                .set_pressure_refill_overlap_per_mille = 750,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -887,6 +891,8 @@ struct RandomConstraints {
             ptw_error_corrupt_first_per_mille = parsed;
         } else if (key == "set-pressure-dirty") {
             set_pressure_dirty_per_mille = parsed;
+        } else if (key == "set-pressure-refill-overlap") {
+            set_pressure_refill_overlap_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -1354,6 +1360,7 @@ struct RandomConstraints {
             ptw_error_denied_per_mille > 1000 ||
             ptw_error_corrupt_first_per_mille > 1000 ||
             set_pressure_dirty_per_mille > 1000 ||
+            set_pressure_refill_overlap_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -1827,6 +1834,7 @@ struct RandomConstraints {
                     translation_weights.begin(), translation_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
                 actions += direction_classes(set_pressure_dirty_per_mille) *
+                    direction_classes(set_pressure_refill_overlap_per_mille) *
                     depths * widths * regimes;
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
@@ -1973,7 +1981,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=27 constraints=" << name
+        stream << "constraint_schema=28 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2049,6 +2057,8 @@ struct RandomConstraints {
                << set_pressure_set_weights[3]
                << " target_set_pressure_dirty="
                << set_pressure_dirty_per_mille
+               << " target_set_pressure_refill_overlap="
+               << set_pressure_refill_overlap_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -2413,16 +2423,19 @@ struct ConstraintCoverage {
     // Target-line requests/global refills/global GrantAcks/scalar writebacks.
     std::array<std::uint64_t, 4> load_merge_manager{};
     std::uint64_t load_merge_loads = 0;
-    // [clean/dirty][depth9/depth10][B/H/W/D][Bare/stage-1/nested].
-    std::array<std::array<std::array<
+    // [clean/dirty][no overlap/refill overlap][depth9/depth10][B/H/W/D]
+    // [Bare/stage-1/nested].
+    std::array<std::array<std::array<std::array<
                        std::array<
                            std::uint64_t,
                            RandomConstraints::translation_regime_count>,
                        4>,
                    2>,
+               2>,
                2>
         set_pressure_crosses{};
     std::array<std::uint64_t, 2> set_pressure_line_states{};
+    std::array<std::uint64_t, 2> set_pressure_refill_overlaps{};
     std::array<std::uint64_t, 4> set_pressure_sets{};
     // Dirty stores only: STA-first/SDA-first.
     std::array<std::uint64_t, 2> set_pressure_issue_orders{};
@@ -2434,6 +2447,9 @@ struct ConstraintCoverage {
     // target requests/target releases/target ReleaseData/global releases/global
     // ReleaseData/globally verified ReleaseData/load writebacks/LQ dequeues.
     std::array<std::uint64_t, 12> set_pressure_clean_manager{};
+    // Overlap actions/delayed target requests/target releases while the
+    // delayed refill is pending/delayed load writebacks/LQ dequeues.
+    std::array<std::uint64_t, 5> set_pressure_overlap_manager{};
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
     std::array<std::array<std::array<std::array<std::uint64_t, 3>,
@@ -2571,15 +2587,20 @@ struct ConstraintCoverage {
     }
 
     void sample_set_pressure(
-        bool dirty, unsigned depth_index, unsigned width,
+        bool dirty, bool refill_overlap, unsigned depth_index, unsigned width,
         unsigned translation_regime, unsigned set_quartile,
         const std::array<std::uint64_t, 2> &issue_orders = {},
         const std::array<std::uint64_t, 9> &manager_delta = {},
-        const std::array<std::uint64_t, 12> &clean_manager_delta = {})
+        const std::array<std::uint64_t, 12> &clean_manager_delta = {},
+        const std::array<std::uint64_t, 5> &overlap_manager_delta = {})
     {
-        ++set_pressure_crosses.at(dirty ? 1U : 0U).at(depth_index).at(width).at(
-            translation_regime);
+        ++set_pressure_crosses.at(dirty ? 1U : 0U)
+              .at(refill_overlap ? 1U : 0U)
+              .at(depth_index)
+              .at(width)
+              .at(translation_regime);
         ++set_pressure_line_states.at(dirty ? 1U : 0U);
+        ++set_pressure_refill_overlaps.at(refill_overlap ? 1U : 0U);
         ++set_pressure_sets.at(set_quartile);
         for (unsigned index = 0; index < issue_orders.size(); ++index) {
             set_pressure_issue_orders[index] += issue_orders[index];
@@ -2589,6 +2610,9 @@ struct ConstraintCoverage {
         }
         for (unsigned index = 0; index < clean_manager_delta.size(); ++index) {
             set_pressure_clean_manager[index] += clean_manager_delta[index];
+        }
+        for (unsigned index = 0; index < overlap_manager_delta.size(); ++index) {
+            set_pressure_overlap_manager[index] += overlap_manager_delta[index];
         }
     }
 
@@ -2803,24 +2827,38 @@ struct ConstraintCoverage {
                 const bool state_enabled = state == 0
                     ? constraints.set_pressure_dirty_per_mille != 1000
                     : constraints.set_pressure_dirty_per_mille != 0;
-                for (unsigned depth = 0;
-                     depth < set_pressure_crosses[state].size(); ++depth) {
-                    for (unsigned width = 0;
-                         width < set_pressure_crosses[state][depth].size();
-                         ++width) {
-                        for (unsigned regime = 0;
-                             regime < set_pressure_crosses[state][depth][width]
-                                          .size();
-                             ++regime) {
-                            const bool enabled = state_enabled &&
-                                constraints.set_pressure_depth_weights[depth] !=
-                                    0 &&
-                                constraints.set_pressure_width_weights[width] !=
-                                    0 &&
-                                constraints.translation_weights[regime] != 0;
-                            if ((set_pressure_crosses[state][depth][width]
-                                     [regime] != 0) != enabled) {
-                                return false;
+                for (unsigned overlap = 0;
+                     overlap < set_pressure_crosses[state].size(); ++overlap) {
+                    const bool overlap_enabled = overlap == 0
+                        ? constraints.set_pressure_refill_overlap_per_mille !=
+                              1000
+                        : constraints.set_pressure_refill_overlap_per_mille != 0;
+                    for (unsigned depth = 0;
+                         depth < set_pressure_crosses[state][overlap].size();
+                         ++depth) {
+                        for (unsigned width = 0;
+                             width < set_pressure_crosses[state][overlap][depth]
+                                         .size();
+                             ++width) {
+                            for (unsigned regime = 0;
+                                 regime <
+                                 set_pressure_crosses[state][overlap][depth]
+                                     [width]
+                                         .size();
+                                 ++regime) {
+                                const bool enabled = state_enabled &&
+                                    overlap_enabled &&
+                                    constraints
+                                            .set_pressure_depth_weights[depth] !=
+                                        0 &&
+                                    constraints
+                                            .set_pressure_width_weights[width] !=
+                                        0 &&
+                                    constraints.translation_weights[regime] != 0;
+                                if ((set_pressure_crosses[state][overlap][depth]
+                                         [width][regime] != 0) != enabled) {
+                                    return false;
+                                }
                             }
                         }
                     }
@@ -2829,6 +2867,15 @@ struct ConstraintCoverage {
             for (unsigned set = 0; set < set_pressure_sets.size(); ++set) {
                 if ((set_pressure_sets[set] != 0) !=
                     (constraints.set_pressure_set_weights[set] != 0)) {
+                    return false;
+                }
+            }
+            for (unsigned overlap = 0;
+                 overlap < set_pressure_refill_overlaps.size(); ++overlap) {
+                const bool enabled = overlap == 0
+                    ? constraints.set_pressure_refill_overlap_per_mille != 1000
+                    : constraints.set_pressure_refill_overlap_per_mille != 0;
+                if ((set_pressure_refill_overlaps[overlap] != 0) != enabled) {
                     return false;
                 }
             }
@@ -3285,19 +3332,35 @@ struct ConstraintCoverage {
         std::uint64_t set_pressure_min_releases = 0;
         std::uint64_t set_pressure_clean_loads = 0;
         std::uint64_t set_pressure_min_revisits = 0;
+        std::uint64_t set_pressure_overlap_actions = 0;
+        std::uint64_t set_pressure_clean_overlap_actions = 0;
+        std::uint64_t set_pressure_overlap_min_releases = 0;
         for (unsigned state = 0;
              state < set_pressure_crosses.size(); ++state) {
-            for (unsigned depth = 0;
-                 depth < set_pressure_crosses[state].size(); ++depth) {
-                for (const auto &width : set_pressure_crosses[state][depth]) {
-                    for (const auto count : width) {
-                        set_pressure_cross_total += count;
-                        if (state == 0) {
-                            set_pressure_clean_loads += count * (depth + 9U);
-                            set_pressure_min_revisits += count * (depth + 1U);
-                        } else {
-                            set_pressure_stores += count * (depth + 9U);
-                            set_pressure_min_releases += count * (depth + 1U);
+            for (unsigned overlap = 0;
+                 overlap < set_pressure_crosses[state].size(); ++overlap) {
+                for (unsigned depth = 0;
+                     depth < set_pressure_crosses[state][overlap].size();
+                     ++depth) {
+                    for (const auto &width :
+                         set_pressure_crosses[state][overlap][depth]) {
+                        for (const auto count : width) {
+                            set_pressure_cross_total += count;
+                            if (state == 0) {
+                                set_pressure_clean_loads += count * (depth + 9U);
+                                set_pressure_min_revisits += count * (depth + 1U);
+                            } else {
+                                set_pressure_stores += count * (depth + 9U);
+                                set_pressure_min_releases += count * (depth + 1U);
+                            }
+                            if (overlap != 0) {
+                                set_pressure_overlap_actions += count;
+                                if (state == 0) {
+                                    set_pressure_clean_overlap_actions += count;
+                                }
+                                set_pressure_overlap_min_releases +=
+                                    count * (depth + 1U);
+                            }
                         }
                     }
                 }
@@ -3306,6 +3369,11 @@ struct ConstraintCoverage {
         if (set_pressure_cross_total != set_pressure_actions ||
             set_pressure_line_states[0] + set_pressure_line_states[1] !=
                 set_pressure_actions ||
+            set_pressure_refill_overlaps[0] +
+                    set_pressure_refill_overlaps[1] !=
+                set_pressure_actions ||
+            set_pressure_refill_overlaps[1] !=
+                set_pressure_overlap_actions ||
             std::accumulate(
                 set_pressure_sets.begin(), set_pressure_sets.end(),
                 std::uint64_t{0}) != set_pressure_actions ||
@@ -3336,8 +3404,18 @@ struct ConstraintCoverage {
             set_pressure_clean_manager[7] < set_pressure_clean_manager[8] ||
             set_pressure_clean_manager[9] !=
                 set_pressure_clean_manager[8] ||
-            set_pressure_clean_manager[10] != set_pressure_clean_loads * 2U ||
-            set_pressure_clean_manager[11] != set_pressure_clean_loads * 2U) {
+            set_pressure_clean_manager[10] !=
+                set_pressure_clean_loads * 2U +
+                    set_pressure_clean_overlap_actions ||
+            set_pressure_clean_manager[11] !=
+                set_pressure_clean_loads * 2U +
+                    set_pressure_clean_overlap_actions ||
+            set_pressure_overlap_manager[0] != set_pressure_overlap_actions ||
+            set_pressure_overlap_manager[1] != set_pressure_overlap_actions ||
+            set_pressure_overlap_manager[2] <
+                set_pressure_overlap_min_releases ||
+            set_pressure_overlap_manager[3] != set_pressure_overlap_actions ||
+            set_pressure_overlap_manager[4] != set_pressure_overlap_actions) {
             return false;
         }
         if (constraints.samples_translation() &&
@@ -3594,15 +3672,20 @@ public:
                << " actual_set_pressure_line_state="
                << set_pressure_line_states[0] << ','
                << set_pressure_line_states[1]
+               << " actual_set_pressure_refill_overlap="
+               << set_pressure_refill_overlaps[0] << ','
+               << set_pressure_refill_overlaps[1]
                << " actual_set_pressure_cross=";
         bool first_set_pressure_cross = true;
         for (const auto &state : set_pressure_crosses) {
-            for (const auto &depth : state) {
-                for (const auto &width : depth) {
-                    for (const auto count : width) {
-                        stream << (first_set_pressure_cross ? "" : ",")
-                               << count;
-                        first_set_pressure_cross = false;
+            for (const auto &overlap : state) {
+                for (const auto &depth : overlap) {
+                    for (const auto &width : depth) {
+                        for (const auto count : width) {
+                            stream << (first_set_pressure_cross ? "" : ",")
+                                   << count;
+                            first_set_pressure_cross = false;
+                        }
                     }
                 }
             }
@@ -3622,6 +3705,12 @@ public:
              index < set_pressure_clean_manager.size(); ++index) {
             stream << (index == 0 ? "" : ",")
                    << set_pressure_clean_manager[index];
+        }
+        stream << " actual_set_pressure_overlap_manager=";
+        for (unsigned index = 0;
+             index < set_pressure_overlap_manager.size(); ++index) {
+            stream << (index == 0 ? "" : ",")
+                   << set_pressure_overlap_manager[index];
         }
         stream << " actual_ptw_error_outcome=";
         bool first_ptw_outcome = true;

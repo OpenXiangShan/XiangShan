@@ -144,6 +144,12 @@ public:
     }
 
     bool done() const { return expected_.empty(); }
+    bool pending(const LoadTransaction &transaction) const
+    {
+        return expected_.find(
+                   rob_identity(transaction.rob, transaction.rob_flag)) !=
+            expected_.end();
+    }
     std::size_t pending() const { return expected_.size(); }
     std::size_t pending_prefetch() const { return pending_prefetch_; }
     std::size_t pending_load() const { return expected_.size() - pending_prefetch_; }

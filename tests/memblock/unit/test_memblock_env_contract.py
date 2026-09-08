@@ -2450,6 +2450,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "set_pressure_width_weights",
             "set_pressure_set_weights",
             "set_pressure_dirty_per_mille",
+            "set_pressure_refill_overlap_per_mille",
             "uncache_error_per_mille",
             "uncache_load_error_denied_per_mille",
             "probes_per_mille",
@@ -2509,12 +2510,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "target_set_pressure_width=",
             "target_set_pressure_set=",
             "target_set_pressure_dirty=",
+            "target_set_pressure_refill_overlap=",
             "actual_set_pressure_line_state=",
+            "actual_set_pressure_refill_overlap=",
             "actual_set_pressure_cross=",
             "actual_set_pressure_set=",
             "actual_set_pressure_issue_order=",
             "actual_set_pressure_manager=",
             "actual_set_pressure_clean_manager=",
+            "actual_set_pressure_overlap_manager=",
             "target_uncache_error=",
             "target_uncache_load_error_denied=",
             "actual_uncache_error=",
@@ -2594,7 +2598,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_need_data=",
             "actual_probe_overlap=",
             "probe_max_outstanding=",
-            "constraint_schema=27",
+            "constraint_schema=28",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2670,6 +2674,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"set-pressure-set-q0"',
             '"set-pressure-set-q3"',
             '"set-pressure-dirty"',
+            '"set-pressure-refill-overlap"',
             "dcache_requests_covering_since",
             "begin_dcache_release_observation",
             "end_dcache_release_observation",
@@ -2678,6 +2683,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "tilelink_expected_release_data_verified",
             "random-set-pressure-clean-fill",
             "random-set-pressure-clean-revisit",
+            "random-set-pressure-clean-release-overlap",
+            "random-set-pressure-dirty-release-overlap",
+            "scalar_load_pending",
+            "hold_dcache_response_at",
+            "dcache_response_held",
+            "release_held_dcache_response",
             "pending_translation_fences",
             "pending_hfence_vvma",
             "pending_hfence_gvma",
@@ -2697,6 +2708,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "dcache_max_probe_outstanding() < 2",
         ):
             self.assertIn(contract, driver)
+        for contract in (
+            "held_d_beats_",
+            "accepted_grant_ack_index_",
+        ):
+            self.assertIn(contract, environment)
         self.assertEqual(driver.count("probe_candidate ="), 1)
         self.assertIn(
             "!flush_pending_translation_fences() ||\n"

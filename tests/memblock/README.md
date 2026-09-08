@@ -1260,6 +1260,17 @@ issue-order checks. Coverage closes all 48 line-state x depth x width x
 translation bins and rejects traffic in disabled endpoint bins. Coverage and
 corner balance clean/dirty actions; SPEC uses a 50-per-mille dirty share.
 
+Schema 28 adds `set-pressure-refill-overlap` and crosses both endpoint values
+with every schema-27 line-state, depth, width, and translation bin, for 96 bins.
+An overlap action reserves a cold line in a different physical set and holds
+only that address-qualified D response; later sources remain free to respond.
+The pressure target must emit at least `depth - 8` address-attributed Release or
+ReleaseData transactions while the delayed load identity is still pending.
+The response is then released and the auxiliary request, load writeback, and LQ
+dequeue are conserved exactly. The DCache agent matches GrantAck by sink, so
+legal cross-source D/E reordering is accepted without relaxing identity checks.
+Coverage uses a 500-per-mille overlap share, SPEC 10, and corner 750.
+
 For a reproducible local pressure run:
 
 ```sh
@@ -1428,7 +1439,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 512
+  --test random-mixed --seed 17 --transactions 576
 ```
 
 ## Complete Pin Audit

@@ -20,6 +20,9 @@ public:
         forced_next_response_delay_.reset();
         forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
+        hold_next_response_ = false;
+        held_response_address_.reset();
+        building_held_response_ = false;
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
     }
@@ -60,13 +63,43 @@ public:
         forced_next_interbeat_delay_ = cycles;
     }
 
+    void hold_response_at(std::uint64_t address)
+    {
+        if (hold_next_response_ || held_response_address_ ||
+            building_held_response_ || !held_d_beats_.empty()) {
+            error_ = "DCache response hold is already active";
+            return;
+        }
+        held_response_address_ = address & ~(kLineBytes - 1U);
+    }
+
+    bool response_held() const { return !held_d_beats_.empty(); }
+
+    void release_held_response()
+    {
+        if (held_d_beats_.empty() || building_held_response_) {
+            error_ = "no complete held DCache response to release";
+            return;
+        }
+        const bool was_empty = d_beats_.empty();
+        while (!held_d_beats_.empty()) {
+            d_beats_.push_back(std::move(held_d_beats_.front()));
+            held_d_beats_.pop_front();
+        }
+        if (was_empty) {
+            d_presenting_ = false;
+            d_gap_ = d_beats_.front().delay_before;
+        }
+    }
+
     void reset_link_state()
     {
         b_beats_.clear();
         d_beats_.clear();
+        held_d_beats_.clear();
         probe_responses_.clear();
         expected_grant_acks_.clear();
-        expected_grant_ack_errors_.clear();
+        accepted_grant_ack_index_.reset();
         captured_a_.reset();
         captured_c_.reset();
         release_data_.reset();
@@ -81,6 +114,9 @@ public:
         forced_next_response_delay_.reset();
         forced_next_cmo_response_delay_.reset();
         forced_next_interbeat_delay_.reset();
+        hold_next_response_ = false;
+        held_response_address_.reset();
+        building_held_response_ = false;
         pending_response_error_.reset();
         force_a_stall_ = random_backpressure_;
         force_e_stall_ = random_backpressure_;
@@ -215,12 +251,16 @@ public:
         }
         e_fire_ = e_valid && e_ready;
         if (e_fire_) {
-            if (expected_grant_acks_.empty() ||
-                expected_grant_ack_errors_.empty()) {
+            const std::uint16_t sink = static_cast<std::uint16_t>(
+                dut.auto_inner_dcache_client_out_e_bits_sink.U());
+            const auto expected = std::find_if(
+                expected_grant_acks_.begin(), expected_grant_acks_.end(),
+                [&](const auto &entry) { return entry.first == sink; });
+            if (expected == expected_grant_acks_.end()) {
                 error_ = "unexpected DCache TileLink E GrantAck";
-            } else if (dut.auto_inner_dcache_client_out_e_bits_sink.U() !=
-                       expected_grant_acks_.front()) {
-                error_ = "DCache TileLink E GrantAck sink mismatch";
+            } else {
+                accepted_grant_ack_index_ = static_cast<std::size_t>(
+                    std::distance(expected_grant_acks_.begin(), expected));
             }
         }
         d_fire_ = !d_beats_.empty() &&
@@ -306,12 +346,11 @@ public:
                 accept_release(*captured_c_);
             }
         }
-        if (e_fire_ && !expected_grant_acks_.empty() &&
-            !expected_grant_ack_errors_.empty()) {
-            error_response_grant_ack_count_ +=
-                expected_grant_ack_errors_.front();
-            expected_grant_ack_errors_.pop_front();
-            expected_grant_acks_.pop_front();
+        if (e_fire_ && accepted_grant_ack_index_) {
+            const auto expected = expected_grant_acks_.begin() +
+                static_cast<std::ptrdiff_t>(*accepted_grant_ack_index_);
+            error_response_grant_ack_count_ += expected->second;
+            expected_grant_acks_.erase(expected);
             ++grant_ack_count_;
         }
         a_fire_ = false;
@@ -319,6 +358,7 @@ public:
         c_fire_ = false;
         d_fire_ = false;
         e_fire_ = false;
+        accepted_grant_ack_index_.reset();
         captured_a_.reset();
         captured_c_.reset();
     }
@@ -489,12 +529,12 @@ public:
     }
     bool grant_acks_idle() const
     {
-        return expected_grant_acks_.empty() &&
-            expected_grant_ack_errors_.empty();
+        return expected_grant_acks_.empty();
     }
     bool responses_idle() const
     {
-        return d_beats_.empty() && outstanding_requests_ == 0;
+        return d_beats_.empty() && held_d_beats_.empty() &&
+            outstanding_requests_ == 0;
     }
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes)
@@ -619,6 +659,12 @@ private:
     {
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
+        if (held_response_address_ &&
+            (*held_response_address_ ==
+             (request.address & ~(kLineBytes - 1U)))) {
+            hold_next_response_ = true;
+            held_response_address_.reset();
+        }
         bool denied = false;
         bool corrupt = false;
         DcacheCorruptBeat corrupt_beat = DcacheCorruptBeat::all;
@@ -676,8 +722,7 @@ private:
                     beat + 1 == beats,
                 }, beat == 0);
             }
-            expected_grant_acks_.push_back(sink);
-            expected_grant_ack_errors_.push_back(denied || corrupt);
+            expected_grant_acks_.emplace_back(sink, denied || corrupt);
             break;
         }
         case 7: { // AcquirePerm -> Grant
@@ -693,8 +738,7 @@ private:
                 std::vector<unsigned char>(kBeatBytes, 0),
                 denied, false,
             }, true);
-            expected_grant_acks_.push_back(sink);
-            expected_grant_ack_errors_.push_back(denied);
+            expected_grant_acks_.emplace_back(sink, denied);
             break;
         }
         case 12: // CBOClean -> CBOAck
@@ -933,13 +977,23 @@ private:
         DBeat response, bool first_beat,
         std::optional<unsigned> forced_delay = std::nullopt)
     {
-        const bool was_empty = d_beats_.empty();
         if (first_beat && forced_delay) {
             response.delay_before = *forced_delay;
             response_latency_stats_.sample(*forced_delay);
         } else {
             response.delay_before = response_delay(first_beat);
         }
+        if (first_beat && hold_next_response_) {
+            hold_next_response_ = false;
+            building_held_response_ = true;
+        }
+        if (building_held_response_) {
+            const bool last_beat = response.last_beat;
+            held_d_beats_.push_back(std::move(response));
+            building_held_response_ = !last_beat;
+            return;
+        }
+        const bool was_empty = d_beats_.empty();
         d_beats_.push_back(std::move(response));
         if (was_empty) {
             d_presenting_ = false;
@@ -951,9 +1005,10 @@ private:
     const SparseMemory &reference_memory_;
     std::deque<BBeat> b_beats_;
     std::deque<DBeat> d_beats_;
+    std::deque<DBeat> held_d_beats_;
     std::deque<ProbeResponseState> probe_responses_;
-    std::deque<std::uint16_t> expected_grant_acks_;
-    std::deque<bool> expected_grant_ack_errors_;
+    std::deque<std::pair<std::uint16_t, bool>> expected_grant_acks_;
+    std::optional<std::size_t> accepted_grant_ack_index_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
     std::vector<ARequest> request_history_;
@@ -1016,6 +1071,9 @@ private:
     std::optional<unsigned> forced_next_response_delay_;
     std::optional<unsigned> forced_next_cmo_response_delay_;
     std::optional<unsigned> forced_next_interbeat_delay_;
+    bool hold_next_response_ = false;
+    std::optional<std::uint64_t> held_response_address_;
+    bool building_held_response_ = false;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;

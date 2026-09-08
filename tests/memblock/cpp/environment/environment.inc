@@ -439,6 +439,22 @@ public:
         memory_agent_.force_next_interbeat_delay(cycles);
     }
 
+    void hold_dcache_response_at(std::uint64_t address)
+    {
+        memory_agent_.hold_response_at(address);
+    }
+
+    bool dcache_response_held() const
+    {
+        return memory_agent_.response_held();
+    }
+
+    bool release_held_dcache_response()
+    {
+        memory_agent_.release_held_response();
+        return check_components();
+    }
+
     void inject_next_uncache_response_error(bool denied, bool corrupt)
     {
         uncache_agent_.inject_next_response_error(denied, corrupt);
@@ -1222,6 +1238,10 @@ public:
         return vector_scoreboard_.fof_fix_observed();
     }
     std::size_t pending_scalar_loads() const { return scoreboard_.pending_load(); }
+    bool scalar_load_pending(const LoadTransaction &transaction) const
+    {
+        return scoreboard_.pending(transaction);
+    }
     std::size_t pending_prefetches() const { return scoreboard_.pending_prefetch(); }
     std::size_t pending_scalar_stores() const { return store_scoreboard_.pending(); }
     std::size_t pending_vector_loads() const
