@@ -169,6 +169,7 @@ struct RandomConstraints {
         set_pressure_single_window,
         set_pressure_dual_window,
         set_pressure_triple_window,
+        set_pressure_quad_window,
         set_pressure_window_class_count,
     };
 
@@ -209,6 +210,7 @@ struct RandomConstraints {
     unsigned set_pressure_release_backpressure_per_mille = 0;
     unsigned set_pressure_dual_window_per_mille = 0;
     unsigned set_pressure_triple_window_per_mille = 0;
+    unsigned set_pressure_quad_window_per_mille = 0;
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -295,6 +297,7 @@ struct RandomConstraints {
                 .set_pressure_release_backpressure_per_mille = 500,
                 .set_pressure_dual_window_per_mille = 500,
                 .set_pressure_triple_window_per_mille = 333,
+                .set_pressure_quad_window_per_mille = 250,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -382,6 +385,7 @@ struct RandomConstraints {
                 .set_pressure_release_backpressure_per_mille = 10,
                 .set_pressure_dual_window_per_mille = 10,
                 .set_pressure_triple_window_per_mille = 1,
+                .set_pressure_quad_window_per_mille = 1,
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -469,6 +473,7 @@ struct RandomConstraints {
                 .set_pressure_release_backpressure_per_mille = 750,
                 .set_pressure_dual_window_per_mille = 750,
                 .set_pressure_triple_window_per_mille = 500,
+                .set_pressure_quad_window_per_mille = 750,
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -936,6 +941,8 @@ struct RandomConstraints {
             set_pressure_dual_window_per_mille = parsed;
         } else if (key == "set-pressure-triple-window") {
             set_pressure_triple_window_per_mille = parsed;
+        } else if (key == "set-pressure-quad-window") {
+            set_pressure_quad_window_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -1409,6 +1416,7 @@ struct RandomConstraints {
             set_pressure_release_backpressure_per_mille > 1000 ||
             set_pressure_dual_window_per_mille > 1000 ||
             set_pressure_triple_window_per_mille > 1000 ||
+            set_pressure_quad_window_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -1671,12 +1679,16 @@ struct RandomConstraints {
     std::array<unsigned, set_pressure_window_class_count>
     set_pressure_window_weights() const
     {
+        const unsigned non_quad =
+            1000U - set_pressure_quad_window_per_mille;
         const unsigned non_triple =
             1000U - set_pressure_triple_window_per_mille;
         return {{
-            non_triple * (1000U - set_pressure_dual_window_per_mille),
-            non_triple * set_pressure_dual_window_per_mille,
-            set_pressure_triple_window_per_mille * 1000U,
+            non_quad * non_triple *
+                (1000U - set_pressure_dual_window_per_mille),
+            non_quad * non_triple * set_pressure_dual_window_per_mille,
+            non_quad * set_pressure_triple_window_per_mille * 1000U,
+            set_pressure_quad_window_per_mille * 1000000U,
         }};
     }
 
@@ -2121,7 +2133,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=34 constraints=" << name
+        stream << "constraint_schema=35 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2205,6 +2217,8 @@ struct RandomConstraints {
                << set_pressure_dual_window_per_mille
                << " target_set_pressure_triple_window="
                << set_pressure_triple_window_per_mille
+               << " target_set_pressure_quad_window="
+               << set_pressure_quad_window_per_mille
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -2575,7 +2589,7 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 4> load_merge_manager{};
     std::uint64_t load_merge_loads = 0;
     // [clean/dirty][no overlap/refill overlap][C ready/release backpressure]
-    // [single/dual/triple window][depth9/depth10][B/H/W/D]
+    // [single/dual/triple/quad window][depth9/depth10][B/H/W/D]
     // [Bare/stage-1/nested].
     using SetPressureRegimeBins = std::array<
         std::uint64_t, RandomConstraints::translation_regime_count>;
@@ -4032,12 +4046,14 @@ public:
                << set_pressure_release_backpressures[1]
                << " actual_set_pressure_dual_window="
                << set_pressure_window_counts[0] +
-                       set_pressure_window_counts[2]
+                       set_pressure_window_counts[2] +
+                       set_pressure_window_counts[3]
                << ',' << set_pressure_window_counts[1]
                << " actual_set_pressure_window_count="
                << set_pressure_window_counts[0] << ','
                << set_pressure_window_counts[1] << ','
-               << set_pressure_window_counts[2]
+               << set_pressure_window_counts[2] << ','
+               << set_pressure_window_counts[3]
                << " actual_set_pressure_cross=";
         bool first_set_pressure_cross = true;
         for (const auto &state : set_pressure_crosses) {

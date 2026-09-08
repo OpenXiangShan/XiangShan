@@ -3191,3 +3191,51 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed
 No CPU RTL defect was observed. Cross-operation Probe bursts, malformed
 coherence traffic, four-or-more replacement windows, and replacement
 composition with Probe/CMO traffic remain explicit DCache breadth gaps.
+
+## Schema 35 Quad Replacement-Window Closure
+
+Date: 2026-09-09
+
+Schema 35 extends the set-pressure replacement oracle from one through three
+simultaneous eight-way sets to one through four. The new
+`set-pressure-quad-window` constraint is resolved hierarchically ahead of the
+triple and dual selectors, so each profile has an explicit, reproducible
+distribution. A fourth address quartile selects another independent set, and
+the online and offline oracles now close all 768 state x overlap x
+backpressure x window-count x dirty-depth x width x latency-regime bins.
+Compatibility output still projects the old dual counter as
+`non-dual,dual`; quad windows are included in `non-dual`.
+
+| Direction | Seed | Final cycle | 1/2/3/4-window actions | Held-refill windows |
+| --- | ---: | ---: | ---: | ---: |
+| Quad-only coverage endpoint | 35004 | 508,376 | 0/0/0/195 | 384 |
+| Coverage profile | 35005 | 957,523 | 192/193/193/193 | 964 |
+| Spec profile | 35006 | 2,025,194 | 192/192/192/192 | 960 |
+| Corner profile | 35007 | 2,170,876 | 193/192/193/195 | 976 |
+| Frozen coverage artifact | 1 | 957,969 | 193/193/194/193 | 961 |
+
+Every run closed every enabled schema-35 cross bin. The frozen seed executed
+773 set-pressure actions with balanced valid/invalid state (385/388),
+overlap (388/385), and target-C backpressure (386/387). It observed 9,222
+dirty data beats and 9,140 clean releases, held 6,192 complete D transactions
+across 387 backpressured actions, and retained the schema-34 Probe lifecycle
+coverage with 64 unique B sources, 99 completed-source reuses, and two wraps.
+
+The implementation passed all 187 Python unit tests, `check-rtl`, a rebuilt
+smoke test, `dcache-coherence`, `dcache-errors`, and
+`atomic-dchannel-errors`. Direct coverage/spec/corner endpoints and the
+quad-only endpoint passed before the controller produced the frozen artifact.
+The frozen runtime executable and manifest SHA-256 values are respectively
+`711ae289cb74fef837b8a00dd6a1a29560e1186e3088be4f3790d3b5c8731fc9`
+and `d51f87399bd9b57609b55aae990dbeb95815af3ef19c01945ee142b1af02dd37`.
+The accepted artifact is
+`build/memblock/schema35-coverage-1x1248.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1248 elapsed_seconds=369.451136 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=340ac6bd878559d537f7a95fe7ac68b2524fa7054436be06599d09ca800be5e1
+```
+
+No CPU RTL defect was observed. Five-or-more simultaneous replacement
+windows, replacement composition with Probe/CMO traffic, cross-operation
+Probe bursts, and malformed coherence traffic remain explicit DCache breadth
+gaps.

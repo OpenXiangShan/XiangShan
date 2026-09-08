@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 35
+        result["constraint_schema"] = 36
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1283,6 +1283,51 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["probe_source_space"] = 64
+        verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 35,
+                "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
+                "actual_set_pressure_line_state": "128,128",
+                "actual_set_pressure_refill_overlap": "128,128",
+                "actual_set_pressure_release_backpressure": "128,128",
+                "target_set_pressure_quad_window": 250,
+                "actual_set_pressure_dual_window": "192,64",
+                "actual_set_pressure_window_count": "64,64,64,64",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 256
+                ),
+                "actual_set_pressure_set": "64,64,64,64",
+                "actual_set_pressure_issue_order": "1520,1520",
+                "actual_set_pressure_manager": (
+                    "128,3040,3040,480,480,480,3040,3040,480"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "128,3040,3040,3040,480,480,0,480,0,0,6240,6240"
+                ),
+                "actual_set_pressure_overlap_manager": (
+                    "320,320,480,320,320"
+                ),
+                "actual_set_pressure_backpressure_manager": (
+                    "128,128,2048,2048,256"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_window_count"] = "65,63,64,64"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure window-count/operation coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_window_count"] = "64,64,64,64"
+        result["target_set_pressure_quad_window"] = 1001
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "target_set_pressure_quad_window",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["target_set_pressure_quad_window"] = 250
         verify_regression._check_mixed_coverage(result)
         result["probe_max_outstanding"] = 7
         with self.assertRaisesRegex(

@@ -81,6 +81,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
 | `set-pressure-dual-window` | Per-mille share that selects two independently allocated pressure sets instead of one; an overlap action holds one address-qualified cold refill per set, and zero/1000 are strict single/dual endpoints |
 | `set-pressure-triple-window` | Per-mille share that selects three pressure sets before single/dual selection. If triple is not selected, `set-pressure-dual-window` chooses between one and two sets; zero disables triple and 1000 selects only triple |
+| `set-pressure-quad-window` | Per-mille share that selects four pressure sets before triple/dual selection. If quad is not selected, `set-pressure-triple-window` chooses three versus the single/dual group; zero disables quad and 1000 selects only quad |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -140,7 +141,7 @@ the PMA/PMA PBMT pair and an aligned class; a device-only mix cannot enable a
 non-PMA PBMT pair or misalignment.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
-`random-mixed` requires at least 1056 actions so the mandatory architectural
+`random-mixed` requires at least 1248 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 An enabled `atomic-error` requires a nonzero atomic operation weight. An
 all-error Uncache mix requires `special-concurrent=0`, because the current
@@ -182,7 +183,7 @@ scenario implementations:
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback. Schema 34 walks the complete six-bit B-source namespace across sequences, rejects active-ID reuse, and exactly checks unique IDs, completed-ID reuse, and every 63-to-0 wrap | Compose Probe overlap with more operation classes and malformed manager traffic |
-| Set replacement concurrency | Schema 31 adds hierarchical `set-pressure-triple-window` selection after schema 30's single/dual control, crosses one/two/three windows with every clean/dirty, refill-overlap, C-backpressure, depth, width, and translation class, and closes 576 bins. Multi-window actions allocate distinct set quarters. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count | Extend to four-or-more independent sets and compose replacement with Probe/CMO concurrency only after their legal scheduling and attribution contracts are explicit |
+| Set replacement concurrency | Schema 35 extends the hierarchical `set-pressure-quad-window`/`set-pressure-triple-window`/`set-pressure-dual-window` selection to one/two/three/four windows, crosses every class with clean/dirty, refill-overlap, C-backpressure, depth, width, and translation, and closes 768 bins. Multi-window actions allocate distinct set quarters. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count | Extend to five-or-more independent sets and compose replacement with Probe/CMO concurrency only after their legal scheduling and attribution contracts are explicit |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
 | Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
 
@@ -353,7 +354,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=34`, the resolved target weights,
+Every terminal line prints `constraint_schema=35`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -398,10 +399,11 @@ one cycle, and the target line must produce exactly one DCache request. Global
 refill and GrantAck deltas remain equal and at least one because the same loads
 may also trigger legal hardware prefetches; scalar writebacks must equal the
 sum of the generated batch depths.
-Set pressure reports 192 clean/dirty x no-overlap/refill-overlap x
-no-C-stall/C-stall x depth x width x translation crosses, four set-index
-quarters, both store-half issue orders, and manager tuples. Each
-action uses fresh lines in one physical set. Generated stores, target requests,
+Set pressure reports 768 clean/dirty x no-overlap/refill-overlap x
+no-C-stall/C-stall x single/dual/triple/quad-window x depth x width x
+translation crosses, four set-index quarters, both store-half issue orders, and
+manager tuples. Each action uses fresh lines in one through four physical sets.
+Generated stores, target requests,
 store writebacks, and SQ dequeues must match exactly. Dirty target ReleaseData
 must reach at least `depth - 8`, every global ReleaseData must pass its byte
 oracle, and every attributed dirty target release must appear with the stored
@@ -424,6 +426,13 @@ Release opcode, so ProbeAck and background Release traffic remain legal but do
 not satisfy the oracle. Clean refill-overlap establishes the held response
 before filling the target set; dirty overlap completes all older stores before
 holding the younger refill and committing those stores.
+Schema 35 serializes `target_set_pressure_quad_window` and the authoritative
+four-field `actual_set_pressure_window_count`. The quad selector is applied
+before triple and dual selection; the compatibility
+`actual_set_pressure_dual_window` still reports exact dual actions versus all
+non-dual actions. The 768-field cross and every manager tuple are recomputed by
+the offline verifier with transaction counts weighted by one through four
+windows.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

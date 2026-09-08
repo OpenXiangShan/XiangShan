@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 1056;
+    constexpr unsigned minimum_actions = 1248;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -5344,10 +5344,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const unsigned window_count =
                     set_pressure_window_class + 1U;
                 const unsigned depth = set_pressure_depth_index + 9U;
-                const std::array<unsigned, 3> window_quartiles{{
+                const std::array<unsigned, 4> window_quartiles{{
                     set_pressure_set,
                     (set_pressure_set + 2U) % 4U,
                     (set_pressure_set + 1U) % 4U,
+                    (set_pressure_set + 3U) % 4U,
                 }};
                 std::vector<SetPressureWindow> pressure_windows;
                 pressure_windows.reserve(window_count);

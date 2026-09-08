@@ -1313,8 +1313,9 @@ seen in prior DCache request history; this prevents the testbench from changing
 memory behind a potentially resident clean line. Coverage uses 333 per mille
 for triple and 500 per mille for conditional dual selection, making the three
 classes approximately balanced; SPEC uses 1/10 and corner 500/750 respectively.
-The minimum `random-mixed` length is 1056 actions. Four-or-more simultaneous
-replacement windows remain separate.
+At schema 31 the minimum `random-mixed` length became 1056 actions.
+Four-or-more simultaneous replacement windows remained separate at that
+revision.
 
 Schema 32 adds `probe-triple-overlap` as a conditional depth selector after
 `probe-overlap`. Non-overlap actions use one primary Probe, ordinary overlap
@@ -1347,6 +1348,18 @@ accepted manager Probes, both the simulator and the offline verifier require
 `unique=min(N,64)`, `reuse=N-unique`, and
 `wrap=(N == 0 ? 0 : (N - 1) / 64)`. The active-source scoreboard
 continues to reject reuse before the earlier ProbeAck(Data) completes.
+
+Schema 35 adds `set-pressure-quad-window` ahead of the existing
+triple/dual hierarchy and expands the authoritative replacement cross to 768
+bins. A four-window action uses all four set-index quartiles, may hold four
+independently address-qualified D responses, and requires each target set to
+reach its own Release or ReleaseData minimum while all selected loads remain
+pending. Request, byte-image, writeback, dequeue, C-backpressure, and held-load
+accounting continue to scale from the selected window count. Coverage uses
+quad/triple/dual conditional shares of 250/333/500 per mille, SPEC uses 1/1/10,
+and corner uses 750/500/750. The current minimum `random-mixed` length is
+1248 actions. Five-or-more windows and replacement composition with Probe/CMO
+traffic remain separate.
 
 For a reproducible local pressure run:
 
@@ -1516,7 +1529,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 1056
+  --test random-mixed --seed 17 --transactions 1248
 ```
 
 ## Complete Pin Audit
