@@ -101,10 +101,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   replacer.io.predTouch.bits  := s1_hitIdx
 
   /* *** train stage 0 ***
-   * - read entries
-   * - check if hits entries
-   * - check if hits t1 stage
-   * - calculate hit flags
+   * - select from fastTrain (Bpu s3) or resolveTrain (Backend) and latch
    */
   private val t0_useFast    = io.fastTrain.get.valid
   private val t0_useResolve = io.stageCtrl.t0_fire && io.train.mispredictBranch.valid
