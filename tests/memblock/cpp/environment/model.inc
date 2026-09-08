@@ -17,6 +17,11 @@ constexpr unsigned kEnqueueSettleCycles = 16;
 constexpr unsigned kRobEntries = 160;
 constexpr unsigned kDcacheMissEntries = 16;
 constexpr unsigned kDcacheProbeEntries = 8;
+constexpr unsigned kDcacheProbeSourceBits = 6;
+constexpr unsigned kDcacheProbeSourceCount = 1U << kDcacheProbeSourceBits;
+static_assert(
+    (kDcacheProbeSourceCount & (kDcacheProbeSourceCount - 1U)) == 0 &&
+    kDcacheProbeSourceCount <= 256U);
 constexpr unsigned kDcacheCmoSource = kDcacheMissEntries + 1;
 constexpr std::uint64_t kFuTypeLoad = std::uint64_t{1} << 15;
 constexpr std::uint64_t kFuTypeStore = std::uint64_t{1} << 16;

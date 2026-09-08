@@ -58,6 +58,7 @@
     "identity.sq_value_bits": "io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value",
     "tilelink.dcache_data_bits": "auto_inner_dcache_client_out_a_bits_data",
     "tilelink.dcache_source_bits": "auto_inner_dcache_client_out_a_bits_source",
+    "tilelink.dcache_probe_source_bits": "auto_inner_dcache_client_out_b_bits_source",
     "tilelink.ptw_data_bits": "auto_inner_ptw_to_l2_buffer_out_a_bits_data",
     "tilelink.uncache_data_bits": "auto_inner_buffers_out_a_bits_data"
   },
@@ -91,6 +92,7 @@
     "identity.sq_value_bits": 6,
     "tilelink.dcache_data_bits": 256,
     "tilelink.dcache_source_bits": 6,
+    "tilelink.dcache_probe_source_bits": 6,
     "tilelink.ptw_data_bits": 256,
     "tilelink.uncache_data_bits": 64,
     "queue.dcache_probe_entries": 8,

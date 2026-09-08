@@ -146,6 +146,17 @@ def _csv_counts(result: dict[str, Any], name: str, fields: int) -> list[int]:
     return counts
 
 
+def _expected_probe_source_lifecycle(
+    probes: int, source_space: int
+) -> list[int]:
+    unique_sources = min(probes, source_space)
+    return [
+        unique_sources,
+        probes - unique_sources,
+        0 if probes == 0 else (probes - 1) // source_space,
+    ]
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -154,7 +165,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33,
+            33, 34,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -361,6 +372,19 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         probe_max_outstanding = (
             result.get("probe_max_outstanding") if schema >= 14 else 0
         )
+        probe_source_space = (
+            result.get("probe_source_space") if schema >= 34 else 0
+        )
+        probe_source_lifecycle = (
+            _csv_counts(result, "probe_source_lifecycle", 3)
+            if schema >= 34
+            else [0, 0, 0]
+        )
+        if schema >= 34:
+            _require(
+                probe_source_space == 64,
+                f"unexpected DCache Probe source space: {probe_source_space!r}",
+            )
         if schema >= 14:
             _require(
                 isinstance(target_probe_overlap, int)
@@ -581,6 +605,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 + cmo_probe_count + auxiliary_probes,
                 "manager Probe count does not match constrained/overlap/CMO accounting",
             )
+            if schema >= 34:
+                _require(
+                    probe_source_lifecycle
+                    == _expected_probe_source_lifecycle(
+                        probes, probe_source_space
+                    ),
+                    "DCache Probe source lifecycle does not match accepted "
+                    "manager traffic",
+                )
 
     if schema >= 4:
         wakeups = _csv_counts(result, "load_wakeups", 3)

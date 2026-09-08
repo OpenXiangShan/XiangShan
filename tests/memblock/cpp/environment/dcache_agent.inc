@@ -248,6 +248,7 @@ public:
             probe_response_count_ - probe_canceled_count_;
         next_probe_source_ = 0;
         probe_sources_seen_.fill(false);
+        last_accepted_probe_source_.reset();
     }
 
     void drive(UTMemBlock &dut)
@@ -469,10 +470,18 @@ public:
     {
         if (b_fire_) {
             const std::uint8_t source = b_beats_.front().source;
-            if (!probe_sources_seen_[source]) {
+            if (probe_sources_seen_[source]) {
+                ++probe_source_reuse_count_;
+            } else {
                 probe_sources_seen_[source] = true;
                 ++probe_source_count_;
             }
+            if (last_accepted_probe_source_ ==
+                    memblock::kDcacheProbeSourceCount - 1U &&
+                source == 0) {
+                ++probe_source_wrap_count_;
+            }
+            last_accepted_probe_source_ = source;
             b_beats_.pop_front();
             ++probe_request_count_;
             max_probe_outstanding_ = std::max(
@@ -657,6 +666,14 @@ public:
     std::uint64_t probe_response_count() const { return probe_response_count_; }
     std::uint64_t probe_data_count() const { return probe_data_count_; }
     std::uint64_t probe_source_count() const { return probe_source_count_; }
+    std::uint64_t probe_source_reuse_count() const
+    {
+        return probe_source_reuse_count_;
+    }
+    std::uint64_t probe_source_wrap_count() const
+    {
+        return probe_source_wrap_count_;
+    }
     std::uint64_t max_probe_outstanding() const
     {
         return max_probe_outstanding_;
@@ -738,7 +755,8 @@ public:
             return false;
         }
         next_probe_source_ = static_cast<std::uint8_t>(
-            (next_probe_source_ + 1U) & 0x3fU);
+            (next_probe_source_ + 1U) &
+            (memblock::kDcacheProbeSourceCount - 1U));
         b_beats_.push_back(BBeat{
             6, cap, 6, source, address, 0xffffffffU,
             std::move(data), false});
@@ -1339,6 +1357,8 @@ private:
     std::uint64_t probe_canceled_count_ = 0;
     std::uint64_t probe_data_count_ = 0;
     std::uint64_t probe_source_count_ = 0;
+    std::uint64_t probe_source_reuse_count_ = 0;
+    std::uint64_t probe_source_wrap_count_ = 0;
     std::uint64_t max_probe_outstanding_ = 0;
     std::uint64_t probe_stall_cycles_ = 0;
     std::uint64_t grant_ack_count_ = 0;
@@ -1356,7 +1376,8 @@ private:
     std::uint64_t c_payload_stability_checks_ = 0;
     std::uint64_t release_target_payload_stability_checks_ = 0;
     std::uint8_t next_probe_source_ = 0;
-    std::array<bool, 64> probe_sources_seen_{};
+    std::array<bool, memblock::kDcacheProbeSourceCount> probe_sources_seen_{};
+    std::optional<std::uint8_t> last_accepted_probe_source_;
     std::uint64_t random_state_ = 1;
     std::uint64_t e_random_state_ = 1;
     unsigned d_gap_ = 0;

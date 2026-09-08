@@ -1,6 +1,6 @@
 {
   "complete_rtl_sha256": "27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057",
-  "config_sha256": "229ddc921b98d9920fecf3f9f110377c6a23b3ed6ad7ad2a2c795449973a3ab5",
+  "config_sha256": "0e6e420fae32d58a7535767112602cf67b81582cc7ee326ac6c19110da051042",
   "dimensions": {
     "identity": {
       "lq_value_bits": 7,
@@ -19,6 +19,7 @@
     },
     "tilelink": {
       "dcache_data_bits": 256,
+      "dcache_probe_source_bits": 6,
       "dcache_source_bits": 6,
       "ptw_data_bits": 256,
       "uncache_data_bits": 64

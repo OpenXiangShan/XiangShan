@@ -450,9 +450,17 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         )
         scala_probe_entries = re.search(r"nProbeEntries\s*=\s*(\d+)", parameters)
         cpp_probe_entries = re.search(r"kDcacheProbeEntries = (\d+)", environment)
+        configured_probe_source_bits = re.search(
+            r'"tilelink\.dcache_probe_source_bits"\s*:\s*(\d+)', config
+        )
+        cpp_probe_source_bits = re.search(
+            r"kDcacheProbeSourceBits = (\d+)", environment
+        )
         self.assertIsNotNone(configured_probe_entries)
         self.assertIsNotNone(scala_probe_entries)
         self.assertIsNotNone(cpp_probe_entries)
+        self.assertIsNotNone(configured_probe_source_bits)
+        self.assertIsNotNone(cpp_probe_source_bits)
         self.assertEqual(
             int(configured_probe_entries.group(1)),
             int(scala_probe_entries.group(1)),
@@ -460,6 +468,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertEqual(
             int(cpp_probe_entries.group(1)),
             int(scala_probe_entries.group(1)),
+        )
+        self.assertEqual(
+            int(configured_probe_source_bits.group(1)),
+            int(cpp_probe_source_bits.group(1)),
         )
 
     def test_vector_fu_type_constants_match_scala_one_hot_order(self) -> None:
@@ -2620,7 +2632,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "target_probe_deep_depth=",
             "actual_probe_cross=",
             "probe_max_outstanding=",
-            "constraint_schema=33",
+            "probe_source_space=",
+            "probe_source_lifecycle=",
+            "constraint_schema=34",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2737,6 +2751,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "first_missing_probe_cross",
             "return probes_per_mille != 0 && probe_depth_enabled",
             "sample_probe",
+            "dcache_probe_source_reuses",
+            "dcache_probe_source_wraps",
         ):
             self.assertIn(contract, driver)
         for contract in (

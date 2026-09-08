@@ -1032,7 +1032,9 @@ queued together. The manager holds C unready until every selected B request is
 accepted, then address-matches every response and requires the exact selected
 accepted-outstanding depth from one through the configured eight-entry queue
 before the delayed load writes back. Wider operation-class overlap remains
-follow-on coverage.
+follow-on coverage. Across sequences, schema 34 walks the complete six-bit
+DCache B-source space, permits an ID to reappear only after its prior response
+has completed, and records every 63-to-0 wrap at the accepted B boundary.
 
 For example, these commands run the same generator in two directions:
 
@@ -1336,8 +1338,15 @@ rather than scheduler-dependent. `actual_probe_depth` now has eight fields and
 `actual_probe_cross` records all 32 depth x toN/toB x requested/mandatory-data
 bins. Simulator and offline gates require every enabled bin, exact projection
 onto the legacy overlap/cap/data counters, and manager Probe conservation.
-Cross-operation bursts, malformed responses, and longer source-wrap/reuse
-stress remain separate.
+Cross-operation bursts and malformed responses remain separate.
+
+Schema 34 makes the B-source lifecycle authoritative. The generated port
+manifest fixes `tilelink.dcache_probe_source_bits=6`; the DCache agent records
+unique accepted IDs, completed-ID reuses, and 63-to-0 transitions. For `N`
+accepted manager Probes, both the simulator and the offline verifier require
+`unique=min(N,64)`, `reuse=N-unique`, and
+`wrap=(N == 0 ? 0 : (N - 1) / 64)`. The active-source scoreboard
+continues to reject reuse before the earlier ProbeAck(Data) completes.
 
 For a reproducible local pressure run:
 

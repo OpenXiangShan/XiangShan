@@ -155,6 +155,20 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_probe_source_lifecycle_boundaries(self) -> None:
+        for probes, expected in (
+            (0, [0, 0, 0]),
+            (1, [1, 0, 0]),
+            (64, [64, 0, 0]),
+            (65, [64, 1, 1]),
+            (128, [64, 64, 1]),
+            (129, [64, 65, 2]),
+        ):
+            self.assertEqual(
+                verify_regression._expected_probe_source_lifecycle(probes, 64),
+                expected,
+            )
+
     def test_lsq_enqueue_monitor_must_match_queue_allocation(self) -> None:
         result = mixed_result(7)
         verify_regression._check_mixed_coverage(result)
@@ -214,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 34
+        result["constraint_schema"] = 35
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1240,6 +1254,35 @@ class VerifyRegressionTest(unittest.TestCase):
                 "probes": 160,
             }
         )
+        verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
+                "constraint_schema": 34,
+                "probe_source_space": 64,
+                "probe_source_lifecycle": "64,96,2",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["probe_source_lifecycle"] = "64,95,2"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "source lifecycle",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_source_lifecycle"] = "64,96,1"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "source lifecycle",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_source_lifecycle"] = "64,96,2"
+        result["probe_source_space"] = 32
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "source space",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["probe_source_space"] = 64
         verify_regression._check_mixed_coverage(result)
         result["probe_max_outstanding"] = 7
         with self.assertRaisesRegex(

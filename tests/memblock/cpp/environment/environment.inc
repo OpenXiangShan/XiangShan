@@ -1038,6 +1038,14 @@ public:
     {
         return memory_agent_.probe_source_count();
     }
+    std::uint64_t dcache_probe_source_reuses() const
+    {
+        return memory_agent_.probe_source_reuse_count();
+    }
+    std::uint64_t dcache_probe_source_wraps() const
+    {
+        return memory_agent_.probe_source_wrap_count();
+    }
     std::uint64_t dcache_max_probe_outstanding() const
     {
         return memory_agent_.max_probe_outstanding();

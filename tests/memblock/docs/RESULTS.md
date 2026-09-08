@@ -3132,3 +3132,62 @@ No CPU RTL defect was observed. Cross-operation Probe bursts, malformed
 coherence traffic, wider B-source wrap/reuse campaigns, four-or-more
 replacement windows, and replacement composition with Probe/CMO traffic remain
 explicit DCache breadth gaps.
+
+## Schema 34 Full B-Source Lifecycle Closure
+
+On 2026-09-09 the common `random-mixed` environment extended Probe coverage
+from simultaneous ProbeQueue depth to the complete accepted B-source
+lifecycle. The generated-port contract now records
+`tilelink.dcache_probe_source_bits=6`, from which the manager derives a
+64-ID source space. The agent samples IDs only on accepted B handshakes,
+rejects an ID while an earlier same-source Probe response remains active,
+counts its first appearance, permits reuse after completion, and records every
+63-to-0 transition.
+
+For `N` accepted manager Probes, the simulator requires
+`unique=min(N,64)`, `reuse=N-unique`, and
+`wrap=(N == 0 ? 0 : (N - 1) / 64)`. The serialized terminal record
+contains the source-space size and all three lifecycle counts; the offline
+verifier independently recomputes the tuple from the accepted manager-Probe
+count. This keeps the oracle at the top-level B/C protocol boundary rather than
+using internal ProbeQueue state.
+
+The following final-behavior runs passed against complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`:
+
+| Constraint direction | Seed | Cycle | Manager Probes | Unique/reuse/wrap | Maximum accepted outstanding |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Probe-focused `coverage` | 34001 | 209,300 | 164 | 64/100/2 | 8 |
+| full `coverage` | 34002 | 662,335 | 165 | 64/101/2 | 8 |
+| full `spec` | 34003 | 1,262,591 | 163 | 64/99/2 | 8 |
+| full `corner` | 34004 | 1,412,728 | 164 | 64/100/2 | 8 |
+| Probe-disabled `coverage` | 34005 | 574,513 | 4 | 4/0/0 | 1 (CMO only) |
+| frozen `coverage` artifact | 1 | 653,484 | 161 | 64/97/2 | 8 |
+
+The focused and all fully enabled runs retained all 32 depth x cap x data
+crosses and every one-through-eight depth. Coverage, SPEC, and corner also
+retained all 576 schema-31 replacement bins. The frozen seed hit every Probe
+cross exactly once, balanced cap and data marginals at 16/16, and accounted
+for its 32 primary, 112 auxiliary, 16 toB cleanup, and one successful CMO
+Probe. Its replacement window counts were 192/192/193; clean/dirty,
+no-overlap/held-refill, and no-stall/stall counts were respectively 288/289,
+289/288, and 289/288. The Probe-disabled run proves that lifecycle accounting
+also handles manager Probes originating only from successful CMO traffic.
+
+All 187 Python unit tests, `check-rtl`, rebuilt smoke,
+`dcache-coherence`, `dcache-errors`,
+`atomic-dchannel-errors`, the focused and Probe-disabled runs, all three
+complete constraint profiles, and the independent frozen-artifact verifier
+passed. The frozen executable and runtime-manifest SHA-256 values are
+`8415402d22e58ca608bbb0b98cf670aa89a7cc1edddf5b16bbbfe22b7fa47769`
+and `b398534f1ed553677ae8bf7f7d4ba2ab208f01af356025870e1080f3972d2706`.
+The accepted artifact is
+`build/memblock/schema34-coverage-1x1056.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=1056 elapsed_seconds=253.945383 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=38bebbe18ea484b9e8923a94a203e15f34526a92a6923a0e87901f4ff3133cad
+```
+
+No CPU RTL defect was observed. Cross-operation Probe bursts, malformed
+coherence traffic, four-or-more replacement windows, and replacement
+composition with Probe/CMO traffic remain explicit DCache breadth gaps.

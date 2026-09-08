@@ -8015,6 +8015,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             environment.lsq_enqueue_widths_observed();
         coverage.dispatch_lanes =
             environment.lsq_enqueue_lanes_observed();
+        const std::uint64_t probe_requests = environment.dcache_probes();
+        const std::uint64_t expected_probe_sources = std::min<std::uint64_t>(
+            probe_requests, memblock::kDcacheProbeSourceCount);
+        const std::uint64_t expected_probe_source_reuses =
+            probe_requests - expected_probe_sources;
+        const std::uint64_t expected_probe_source_wraps = probe_requests == 0
+            ? 0
+            : (probe_requests - 1U) / memblock::kDcacheProbeSourceCount;
         if (actions != options.transactions || environment.ptw_requests() < 3 ||
             environment.uncache_requests() < 2 ||
             !environment.dcache_grants_drained() ||
@@ -8040,6 +8048,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             (constraints.probes_per_mille != 0 &&
              environment.dcache_max_probe_outstanding() <
                  constraints.maximum_enabled_probe_depth()) ||
+            environment.dcache_probe_sources() != expected_probe_sources ||
+            environment.dcache_probe_source_reuses() !=
+                expected_probe_source_reuses ||
+            environment.dcache_probe_source_wraps() !=
+                expected_probe_source_wraps ||
             (constraints.stride_stream_per_mille != 0 &&
              environment.hardware_prefetch_stats().l2_source_counts[12] == 0) ||
             total_ifetch_prefetches() == 0 ||
@@ -8079,6 +8092,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " release_data=" << environment.tilelink_release_data()
                   << " probe_max_outstanding="
                   << environment.dcache_max_probe_outstanding()
+                  << " probe_source_space="
+                  << memblock::kDcacheProbeSourceCount
+                  << " probe_source_lifecycle="
+                  << environment.dcache_probe_sources() << ','
+                  << environment.dcache_probe_source_reuses() << ','
+                  << environment.dcache_probe_source_wraps()
                   << " ifetch_prefetches=" << total_ifetch_prefetches()
                   << " l2_stride_prefetches="
                   << environment.hardware_prefetch_stats().l2_source_counts[12]
@@ -8119,6 +8138,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " release_data=" << environment.tilelink_release_data()
               << " probe_max_outstanding="
               << environment.dcache_max_probe_outstanding()
+              << " probe_source_space=" << memblock::kDcacheProbeSourceCount
+              << " probe_source_lifecycle="
+              << environment.dcache_probe_sources() << ','
+              << environment.dcache_probe_source_reuses() << ','
+              << environment.dcache_probe_source_wraps()
               << " ifetch_prefetches=" << total_ifetch_prefetches()
               << " l2_stride_prefetches="
               << environment.hardware_prefetch_stats().l2_source_counts[12]

@@ -181,7 +181,7 @@ scenario implementations:
 | NC/MMIO direction and errors | `nc-store` and `mmio-store` steer load/store direction. Schema 16 adds `uncache-error` and `uncache-load-error-denied`; all enabled NC/MMIO x load/store x legal clean/corrupt/denied outcomes close per seed. Loads require exact HardwareError/LoadAccessFault, MMIO denied stores require final StoreAccessFault, and committed NC denied stores require only an external error report, unchanged memory, normal SQ dequeue, and no redirect | Concurrent special stores and malformed/duplicate/early/late responses remain deferred |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
-| Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback | Compose Probe overlap with more operation classes and malformed manager traffic; add longer source-wrap/reuse campaigns |
+| Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback. Schema 34 walks the complete six-bit B-source namespace across sequences, rejects active-ID reuse, and exactly checks unique IDs, completed-ID reuse, and every 63-to-0 wrap | Compose Probe overlap with more operation classes and malformed manager traffic |
 | Set replacement concurrency | Schema 31 adds hierarchical `set-pressure-triple-window` selection after schema 30's single/dual control, crosses one/two/three windows with every clean/dirty, refill-overlap, C-backpressure, depth, width, and translation class, and closes 576 bins. Multi-window actions allocate distinct set quarters. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count | Extend to four-or-more independent sets and compose replacement with Probe/CMO concurrency only after their legal scheduling and attribution contracts are explicit |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
 | Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
@@ -353,7 +353,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=33`, the resolved target weights,
+Every terminal line prints `constraint_schema=34`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -363,7 +363,7 @@ addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
 locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
 kind/scope, cold-walk/reuse,
 TLB-flush, hit/miss, Probe sequence/cap/need-data/overlap and maximum outstanding
-depth, all three scalar-load
+depth plus B-source lifecycle, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, L2
 stride-prefetch observations, and per-manager latency counts. Each enabled
 class must be observed at least once. Every ordinary shape dimension conserves
@@ -444,7 +444,12 @@ CMO-derived Probes, and `depth - 1` auxiliary clean Probes. Schema 33 uses
 the compatibility `actual_probe_overlap` counts. `actual_probe_cross` closes
 all 32 enabled depth x cap x need-data bins and must reproduce every depth/cap/
 data marginal. Holding C until all selected B requests fire makes the maximum
-accepted-but-unanswered depth an exact external observation. Every
+accepted-but-unanswered depth an exact external observation. Schema 34 reports
+`probe_source_space=64` from the generated B-source width and
+`probe_source_lifecycle=unique,reuse,wrap`. For `N` accepted manager
+Probes, the required tuple is `min(N,64),N-min(N,64),(N == 0 ? 0 :
+(N - 1) / 64)`; the source allocator also forbids reuse while an earlier
+response with that ID is active. Every
 load lane must observe both backend wakeup and cancel events without constraining
 their count relationship: a split or replayed request can legally emit multiple
 cancels for one architectural load. Every seed must emit at least one `prefetch.i`
