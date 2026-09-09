@@ -94,6 +94,18 @@ def _cross_page_fault_scenario(
                 s2xlate=s2xlate,
                 patch=((response_field, 1),),
             ),
+            *(
+                (
+                    TranslationPtwResponseOverride(
+                        vpn=(va >> 12) + 1,
+                        s2xlate=s2xlate,
+                        get_gpa=1,
+                        patch=((response_field, 1),),
+                    ),
+                )
+                if s2xlate == 3 and response_field == "s2_gpf"
+                else ()
+            ),
         ),
         expected_path="fault",
         expected_result=expected_result,
@@ -301,8 +313,9 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
     assert active["expected_fault"] == "instruction_access_fault"
     assert env.monitor.get_stats()["foldpc_recovery_count"] == 1
     assert any(
-        record["kind"] == "cfvec_exception_foldpc_match"
-        and int(record["expected_va"]) == int(cross_page_va)
+        record["kind"] == "cfvec_exception"
+        and int(record["pc"]) == int(cross_page_va)
+        and int(record["folded_pc"]) == fold_pc(cross_page_va)
         for record in env.translation_oracle.get_stats()["records"]
     )
     assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2

@@ -401,6 +401,7 @@ _PERMISSION_CASES = (
             pma_entries=(
                 _entry("pma", 0, PmpPmaConfig(match="off"), 0x8040_0000),
                 _entry("pma", 1, PmpPmaConfig(match="tor", read=True, execute=False, cacheable=True), 0x8040_1000),
+                _entry("pma", 2, PmpPmaConfig(match="tor", read=True, execute=False, cacheable=True), 0x8040_2000),
             ),
         ),
         "instruction_access_fault",

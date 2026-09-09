@@ -626,6 +626,7 @@ class PageTableModel:
                 or pte is None
                 or int(pte.v) == 0
                 or (int(pte.w) == 1 and int(pte.r) == 0)
+                or int(pte.pbmt) == 3
                 or pbmt_disabled
             ) else 0
             if pte is None:
