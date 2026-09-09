@@ -149,7 +149,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
-  mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
+  // d_mmio_port: no TL master in phase 2.3a (data-side Uncache uses CHI d_mmio_cchi)
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
   if (icacheCtrlEnabled) {
     icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar

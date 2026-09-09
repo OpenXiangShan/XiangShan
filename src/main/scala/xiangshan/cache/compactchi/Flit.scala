@@ -3,6 +3,13 @@ package oceanus.compactchi
 import chisel3._
 import chisel3.util._
 
+// Compact CHI DAT channel data width (spec allows 64/128/256/512; default 256).
+object CompactCHIDatWidth {
+  val Coherent = 256
+  val Type3Uncache = 64
+  def type3BeWidth = Type3Uncache / 8
+}
+
 class FlitEVTStripped extends Bundle {
   val TxnID = UInt(8.W) // TODO: configured by L1 parameter
   val SrcID = UInt(8.W) // TODO: configured by UpstreamNodeID_Width
@@ -95,7 +102,11 @@ class FlitDnDATWithoutData extends Bundle {
 }
 
 class FlitDnDAT extends FlitDnDATWithoutData {
-  val Data = UInt(256.W)
+  val Data = UInt(CompactCHIDatWidth.Coherent.W)
+}
+
+class FlitDnDAT64 extends FlitDnDATWithoutData {
+  val Data = UInt(CompactCHIDatWidth.Type3Uncache.W)
 }
 
 class FlitUpDATWithoutData extends Bundle {
@@ -110,6 +121,11 @@ class FlitUpDATWithoutData extends Bundle {
 }
 
 class FlitUpDAT extends FlitUpDATWithoutData {
-  val Data = UInt(256.W)
-  val BE = UInt(32.W)
+  val Data = UInt(CompactCHIDatWidth.Coherent.W)
+  val BE = UInt((CompactCHIDatWidth.Coherent / 8).W)
+}
+
+class FlitUpDAT64 extends FlitUpDATWithoutData {
+  val Data = UInt(CompactCHIDatWidth.Type3Uncache.W)
+  val BE = UInt(CompactCHIDatWidth.type3BeWidth.W)
 }

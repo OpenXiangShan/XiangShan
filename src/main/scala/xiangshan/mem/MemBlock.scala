@@ -292,6 +292,34 @@ object PTWCCHIBuffer {
     Queue(Queue(x, depth), depth)
 }
 
+// single Queue buffer on Uncache CHI path (replaces legacy uncache_port chainNode(2))
+object UncacheCCHIBuffer {
+  private val depth = 2
+  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
+    Queue(x, depth)
+}
+
+// Temporary TL client tie-off until Commit 3 removes DCacheWrapper.uncacheNode.
+class DCacheCtrlTlTieoff(implicit p: Parameters) extends LazyModule {
+  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
+    clients = Seq(TLMasterParameters.v1(
+      name = "dcache_ctrl_tl_tieoff",
+      sourceId = IdRange(0, 1)
+    ))
+  )))
+  lazy val module = new LazyModuleImp(this) {
+    val (bus, _) = node.out.head
+    bus.a.valid := false.B
+    bus.a.bits := DontCare
+    bus.b.ready := false.B
+    bus.c.valid := false.B
+    bus.c.bits := DontCare
+    bus.d.ready := true.B
+    bus.e.valid := false.B
+    bus.e.bits := DontCare
+  }
+}
+
 // triple buffer applied in L1I ctrl-mmio path (two at MemBlock, one at L2Top)
 class ICacheCtrlBuffer()(implicit p: Parameters) extends LazyModule {
   val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
@@ -320,8 +348,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
 
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
-  val uncache_port = TLTempNode()
-  val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
   // muti buffer and port for multi-channel L1-L2 interface
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty)
@@ -342,11 +368,11 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
   val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
-  uncache_xbar := TLBuffer() := uncache.clientNode
+  val dcache_ctrl_tl_tieoff = Option.when(dcache.uncacheNode.isDefined)(LazyModule(new DCacheCtrlTlTieoff()))
+  // D$ Ctrl TL path disabled; requests to 0x38022000 go via Uncache CHI Type3Router (Commit 2: CHI CtrlUnit)
   if (dcache.uncacheNode.isDefined) {
-    dcache.uncacheNode.get := TLBuffer.chainNode(2) := uncache_xbar
+    dcache.uncacheNode.get := dcache_ctrl_tl_tieoff.get.node
   }
-  uncache_port := TLBuffer.chainNode(2) := uncache_xbar
 
   lazy val module = new MemBlockInlinedImp(this)
 }
@@ -421,6 +447,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // PTW Compact CHI Type 4 (page-table refill); buffered in MemBlock like legacy ptw_to_l2_buffer
     val inner_ptw_cchi = Flipped(new CCHIType4Port)
     val outer_ptw_cchi = new CCHIType4Port
+
+    // Uncache Compact CHI Type 3 (NC + MMIO); buffered in MemBlock like legacy uncache_port
+    val inner_d_mmio_cchi = Flipped(new CCHIType3Port)
+    val outer_d_mmio_cchi = new CCHIType3Port
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1489,6 +1519,24 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_ptw_cchi.txreq <> PTWCCHIBuffer(io.inner_ptw_cchi.txreq)
   io.inner_ptw_cchi.rxdat <> PTWCCHIBuffer(io.outer_ptw_cchi.rxdat)
   ptw.io.cchi <> io.inner_ptw_cchi
+
+  io.outer_d_mmio_cchi.txreq <> UncacheCCHIBuffer(io.inner_d_mmio_cchi.txreq)
+  io.outer_d_mmio_cchi.txdat <> UncacheCCHIBuffer(io.inner_d_mmio_cchi.txdat)
+  io.inner_d_mmio_cchi.rxrsp <> UncacheCCHIBuffer(io.outer_d_mmio_cchi.rxrsp)
+  io.inner_d_mmio_cchi.rxdat <> UncacheCCHIBuffer(io.outer_d_mmio_cchi.rxdat)
+
+  val type3Router = Module(new Type3Router)
+  uncache.io.cchi <> type3Router.io.up
+  type3Router.io.txdatAddr := uncache.io.txdatAddr
+  type3Router.io.downL2 <> io.inner_d_mmio_cchi
+  // Commit 1: ctrl downstream tie-off until D$ CtrlUnit CHI slave (Commit 2).
+  // Uncache always uses L2TgtId; Router demuxes ctrl by address; CtrlUnit echoes TgtID as SrcID.
+  type3Router.io.downCtrl.txreq.ready := false.B
+  type3Router.io.downCtrl.txdat.ready := false.B
+  type3Router.io.downCtrl.rxrsp.valid := false.B
+  type3Router.io.downCtrl.rxrsp.bits := DontCare
+  type3Router.io.downCtrl.rxdat.valid := false.B
+  type3Router.io.downCtrl.rxdat.bits := DontCare
 
   // vector segmentUnit
   // TODO: DONT use `head` find segment

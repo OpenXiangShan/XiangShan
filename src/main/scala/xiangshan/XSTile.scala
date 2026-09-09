@@ -61,6 +61,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
   // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
   // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
+  // Data-side Uncache uses Compact CHI Type 3, 64b DAT (see XSCore.io.d_mmio_cchi); not connected to L2 yet.
 
   // L2 Prefetch
   l2top.inner.l2cache match {
@@ -86,7 +87,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   if (icacheCtrlEnabled) {
     memBlock.frontendBridge.icachectrl_node := l2top.inner.icachectrl_port_opt.get
   }
-  l2top.inner.d_mmio_port := memBlock.uncache_port
+  // d_mmio_port TL disconnected in phase 2.3a (Uncache uses CHI d_mmio_cchi instead)
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {

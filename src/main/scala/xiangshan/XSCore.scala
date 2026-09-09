@@ -33,7 +33,7 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.cache.CCHIType4Port
+import xiangshan.cache.{CCHIType3Port, CCHIType4Port}
 import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -121,6 +121,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val icache_cchi = new CCHIType4Port
     // Compact CHI Type 4 PTW (from MemBlock); not wired to L2 in phase 2.2
     val ptw_cchi = new CCHIType4Port
+    // Compact CHI Type 3 Uncache (from MemBlock); not wired to L2 in phase 2.3a
+    val d_mmio_cchi = new CCHIType3Port
   })
 
   dontTouch(io.l2_flush_done)
@@ -210,6 +212,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.ptw_cchi.txreq.ready := true.B
   io.ptw_cchi.rxdat.valid := false.B
   io.ptw_cchi.rxdat.bits  := DontCare
+  // Uncache Compact CHI Type 3: MemBlock <-> tile; RX not wired to L2 in phase 2.3a
+  io.d_mmio_cchi.txreq <> memBlock.io.outer_d_mmio_cchi.txreq
+  io.d_mmio_cchi.txdat <> memBlock.io.outer_d_mmio_cchi.txdat
+  io.d_mmio_cchi.rxrsp <> memBlock.io.outer_d_mmio_cchi.rxrsp
+  io.d_mmio_cchi.rxdat <> memBlock.io.outer_d_mmio_cchi.rxdat
+  io.d_mmio_cchi.txreq.ready := true.B
+  io.d_mmio_cchi.txdat.ready := true.B
+  io.d_mmio_cchi.rxrsp.valid := false.B
+  io.d_mmio_cchi.rxrsp.bits  := DontCare
+  io.d_mmio_cchi.rxdat.valid := false.B
+  io.d_mmio_cchi.rxdat.bits  := DontCare
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.vecIssue <> backend.io.mem.vecIssue
