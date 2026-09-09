@@ -22,6 +22,11 @@ class csr_ctrl_agent_agent_driver  extends tcnt_driver_base#(virtual csr_ctrl_ag
     int unsigned                     l2_flush_level_hold_action_generation;
     int unsigned                     l2_flush_level_hold_kind_code;
     int unsigned                     l2_flush_level_hold_control_reset_epoch;
+    // 中文注释：专项 CSR 场景的 level 基线，仅在 csr_special_sequence_active=1
+    // 时由普通 CSR item 刷新，并在无 item 周期持续驱动。普通场景完全不读取该状态；
+    // 物理 reset/control runtime reset 会清除它，避免跨 epoch 泄漏配置。
+    bit                              csr_level_hold_valid;
+    csr_ctrl_agent_agent_xaction     csr_level_hold_tr;
 
     extern function new(string name, uvm_component parent);
     extern virtual function void build_phase(uvm_phase phase);
@@ -30,6 +35,8 @@ class csr_ctrl_agent_agent_driver  extends tcnt_driver_base#(virtual csr_ctrl_ag
     extern task send_pkt(csr_ctrl_agent_agent_xaction tr);
     extern task drive_pkt_fields(csr_ctrl_agent_agent_xaction tr);
     extern task drive_l2_flush_level_hold();
+    extern task drive_csr_level_hold();
+    extern task clear_csr_change_pulses();
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
     extern function bit control_l2_flush_metadata_complete(
         input csr_ctrl_agent_agent_xaction tr
@@ -41,6 +48,8 @@ class csr_ctrl_agent_agent_driver  extends tcnt_driver_base#(virtual csr_ctrl_ag
         input csr_ctrl_agent_agent_xaction tr
     );
     extern function void clear_l2_flush_level_hold(input string reason);
+    extern function void capture_csr_level_hold(input csr_ctrl_agent_agent_xaction tr);
+    extern function void clear_csr_level_hold(input string reason);
     extern function bit service_control_runtime_reset_request();
 endclass:csr_ctrl_agent_agent_driver
 
@@ -53,6 +62,8 @@ function csr_ctrl_agent_agent_driver::new(string name, uvm_component parent);
     l2_flush_level_hold_action_generation = 0;
     l2_flush_level_hold_kind_code = 0;
     l2_flush_level_hold_control_reset_epoch = 0;
+    csr_level_hold_valid = 1'b0;
+    csr_level_hold_tr = null;
 endfunction:new
 
 function void csr_ctrl_agent_agent_driver::build_phase(uvm_phase phase);
@@ -62,6 +73,7 @@ endfunction:build_phase
 task csr_ctrl_agent_agent_driver::reset_phase(uvm_phase phase);
 
     clear_l2_flush_level_hold("reset_phase");
+    clear_csr_level_hold("reset_phase");
     super.reset_phase(phase);
     phase.raise_objection(this);
 
@@ -127,6 +139,7 @@ function bit csr_ctrl_agent_agent_driver::service_control_runtime_reset_request(
         return 1'b0;
     end
     clear_l2_flush_level_hold("control_runtime_reset_request");
+    clear_csr_level_hold("control_runtime_reset_request");
     memblock_sync_pkg::ack_control_csr_driver_reset(control_reset_epoch);
     return 1'b1;
 endfunction:service_control_runtime_reset_request
@@ -212,6 +225,58 @@ task csr_ctrl_agent_agent_driver::drive_l2_flush_level_hold();
     drive_pkt_fields(l2_flush_level_hold_tr);
 endtask:drive_l2_flush_level_hold
 
+function void csr_ctrl_agent_agent_driver::capture_csr_level_hold(
+    input csr_ctrl_agent_agent_xaction tr
+);
+    if (!memblock_sync_pkg::csr_special_sequence_active || tr == null ||
+        tr.control_l2_flush_metadata_valid) begin
+        `uvm_fatal(get_type_name(), "invalid CSR level hold capture")
+    end
+    if (csr_level_hold_tr == null) begin
+        csr_level_hold_tr = csr_ctrl_agent_agent_xaction::type_id::create("csr_level_hold");
+    end
+    csr_level_hold_tr.copy(tr);
+    csr_level_hold_tr.io_ooo_to_mem_tlbCsr_satp_changed = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_tlbCsr_mbmc_BCLEAR = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr = '0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data = '0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_power_down_enable = 1'b0;
+    csr_level_hold_tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b0;
+    csr_level_hold_valid = 1'b1;
+endfunction:capture_csr_level_hold
+
+// 中文注释：仅 reset 边界清除专项 CSR level，reason 保留用于与 L2 flush
+// hold helper 形成一致接口，便于后续诊断扩展。
+function void csr_ctrl_agent_agent_driver::clear_csr_level_hold(input string reason);
+    csr_level_hold_valid = 1'b0;
+    csr_level_hold_tr = null;
+endfunction:clear_csr_level_hold
+
+// 中文注释：专项场景没有新 item 时复用已消毒的完整 CSR level；protocol pulse、
+// generic write valid 和 flush 请求均已在 capture 阶段清零。
+task csr_ctrl_agent_agent_driver::drive_csr_level_hold();
+    if (!csr_level_hold_valid || csr_level_hold_tr == null ||
+        !memblock_sync_pkg::csr_special_sequence_active) begin
+        `uvm_fatal(get_type_name(), "invalid dedicated CSR level hold")
+    end
+    drive_pkt_fields(csr_level_hold_tr);
+endtask:drive_csr_level_hold
+
+// 中文注释：非专项兼容路径没有 CSR level hold，但动态 item 的四路 changed
+// 仍必须只保持一个 driver clock。只清协议脉冲，不重置其余 CSR level 字段。
+task csr_ctrl_agent_agent_driver::clear_csr_change_pulses();
+    vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_changed <= 1'b0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_vsatp_changed <= 1'b0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_hgatp_changed <= 1'b0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_virt_changed <= 1'b0;
+endtask:clear_csr_change_pulses
+
 // 抽象职责：在真实 item 边界处理 ASSERT/RELEASE 的 owner 生命周期，然后驱动完整
 // CSR payload。普通 item 不能与 high hold 并发，避免两条 producer 同时维护 level。
 task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
@@ -227,7 +292,26 @@ task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
         if (l2_flush_level_hold_valid) begin
             `uvm_fatal(get_type_name(), "ordinary CSR item arrived while L2 flush hold is active")
         end
+        if (memblock_sync_pkg::csr_special_sequence_active) begin
+            capture_csr_level_hold(tr);
+        end
         drive_pkt_fields(tr);
+        // Keep the historical dedicated three-ATP hold trigger compatible,
+        // while requiring the new dynamic path to carry all four pulses.
+        if ((memblock_sync_pkg::csr_special_sequence_active &&
+             tr.io_ooo_to_mem_tlbCsr_satp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_vsatp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_hgatp_changed) ||
+            (tr.io_ooo_to_mem_tlbCsr_satp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_vsatp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_hgatp_changed &&
+             tr.io_ooo_to_mem_tlbCsr_priv_virt_changed)) begin
+            @this.vif.drv_mp.drv_cb;
+            if (memblock_sync_pkg::csr_special_sequence_active)
+                drive_csr_level_hold();
+            else
+                clear_csr_change_pulses();
+        end
         return;
     end
     if (!control_l2_flush_metadata_complete(tr)) begin
@@ -357,6 +441,11 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
 
     if (l2_flush_level_hold_valid) begin
         drive_l2_flush_level_hold();
+        return;
+    end
+
+    if (memblock_sync_pkg::csr_special_sequence_active && csr_level_hold_valid) begin
+        drive_csr_level_hold();
         return;
     end
 

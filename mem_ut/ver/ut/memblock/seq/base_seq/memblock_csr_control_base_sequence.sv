@@ -20,14 +20,6 @@ class memblock_csr_control_base_sequence extends uvm_sequence #(csr_ctrl_agent_a
     extern function new(string name = "memblock_csr_control_base_sequence");
     extern virtual task body();
     extern virtual task wait_for_csr_work_or_shutdown();
-    extern virtual task configure_csr_control_xaction(
-        ref memblock_csr_control_action_t action,
-        output csr_ctrl_agent_agent_xaction tr
-    );
-    extern virtual task drive_csr_control_xaction(
-        input memblock_csr_control_action_t action,
-        input csr_ctrl_agent_agent_xaction tr
-    );
     extern virtual task configure_l2_flush_assert_xaction(
         input memblock_csr_control_action_t action,
         output csr_ctrl_agent_agent_xaction tr
@@ -121,12 +113,19 @@ task memblock_csr_control_base_sequence::body();
         if (data.try_pop_csr_control_action(action)) begin
             case (action.completion_profile)
                 MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT: begin
+                    memblock_dynamic_csr_change_sequence dynamic_csr_seq;
                     if (action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
                         `uvm_fatal(get_type_name(),
                                    "ordinary CSR action carries an unexpected L2 flush phase")
                     end
-                    configure_csr_control_xaction(action, tr);
-                    drive_csr_control_xaction(action, tr);
+                    dynamic_csr_seq = memblock_dynamic_csr_change_sequence::type_id::create(
+                        $sformatf("dynamic_csr_uid_%0d_gen_%0d", action.owner.uid,
+                                  action.owner.action_generation));
+                    if (dynamic_csr_seq == null) begin
+                        `uvm_fatal(get_type_name(), "failed to create dynamic CSR child sequence")
+                    end
+                    dynamic_csr_seq.set_action(action);
+                    dynamic_csr_seq.start(m_sequencer, this);
                 end
                 MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL: begin
                     if (action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_ASSERT) begin
@@ -164,55 +163,6 @@ task memblock_csr_control_base_sequence::wait_for_csr_work_or_shutdown();
     disable fork;
 endtask:wait_for_csr_work_or_shutdown
 
-// 抽象职责：从 action-local monitor baseline 构造一个不随机化的 CSR xaction，
-// 并选择首版可由 runtime snapshot 证明的 SATP ASID 改动。该函数不等待、不驱动、
-// 不更新 status completion；后续 CSR 专项只能在这里扩展 payload。
-task memblock_csr_control_base_sequence::configure_csr_control_xaction(
-    ref memblock_csr_control_action_t action,
-    output csr_ctrl_agent_agent_xaction tr
-);
-    memblock_sync_pkg::dispatch_raw_csr_t expected_runtime;
-
-    if (!action.owner.valid || !action.csr_baseline_valid ||
-        action.completion_profile !=
-            MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT ||
-        action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
-        `uvm_fatal(get_type_name(), "CSR action is missing owner/baseline/profile")
-    end
-    tr = csr_ctrl_agent_agent_xaction::type_id::create(
-        $sformatf("csr_control_uid_%0d_gen_%0d", action.owner.uid,
-                  action.owner.action_generation));
-    if (tr == null) begin
-        `uvm_fatal(get_type_name(), "failed to create CSR control xaction")
-    end
-
-    expected_runtime = action.csr_baseline;
-    expected_runtime.valid = 1'b1;
-    expected_runtime.satp_asid =
-        (action.csr_baseline.satp_asid == 16'hffff) ? 16'h0000 :
-        action.csr_baseline.satp_asid + 16'h0001;
-    expected_runtime.satp_changed = 1'b1;
-    // 旧 monitor pulse 不能被重驱；首版只定义 SATP 变化作为 completion evidence。
-    expected_runtime.vsatp_changed = 1'b0;
-    expected_runtime.hgatp_changed = 1'b0;
-    expected_runtime.priv_virt_changed = 1'b0;
-    if (!memblock_sync_pkg::raw_csr_payload_changed(action.csr_baseline,
-                                                     expected_runtime)) begin
-        expected_runtime.satp_asid = action.csr_baseline.satp_asid ^ 16'h0001;
-        if (!memblock_sync_pkg::raw_csr_payload_changed(action.csr_baseline,
-                                                         expected_runtime)) begin
-            `uvm_fatal(get_type_name(), "CSR control payload is monitor-visible no-op")
-        end
-    end
-
-    initialize_csr_xaction_from_runtime(expected_runtime, tr);
-    tr.pre_pkt_gap = 0;
-    tr.post_pkt_gap = 0;
-    tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b0;
-    action.expected_runtime_csr_valid = 1'b1;
-    action.expected_runtime_csr = expected_runtime;
-endtask:configure_csr_control_xaction
-
 // 抽象职责：用 monitor raw 中存在的字段填写完整 CSR driver item，并显式关闭
 // 不在该 raw snapshot completion 语义中的一次性写/trigger pulse。其余 agent xaction
 // 字段均是 2-state 类型，new() 的确定零值构成 driver-safe baseline，不允许 randomize。
@@ -222,6 +172,11 @@ function void memblock_csr_control_base_sequence::initialize_csr_xaction_from_ru
 );
     if (tr == null || !runtime.valid) begin
         `uvm_fatal(get_type_name(), "initialize_csr_xaction_from_runtime got invalid input")
+    end
+    if (memblock_sync_pkg::csr_special_sequence_active &&
+        data != null && data.csr_committed_state_valid &&
+        data.csr_committed_state != null) begin
+        tr.copy(data.csr_committed_state);
     end
     tr.io_ooo_to_mem_tlbCsr_satp_mode = runtime.satp_mode;
     tr.io_ooo_to_mem_tlbCsr_satp_asid = runtime.satp_asid;
@@ -262,25 +217,6 @@ function void memblock_csr_control_base_sequence::initialize_csr_xaction_from_ru
     tr.control_l2_flush_owner_kind_code = 0;
     tr.control_l2_flush_control_reset_epoch = 0;
 endfunction:initialize_csr_xaction_from_runtime
-
-// 抽象职责：将已经配置的 action 交给 CSR driver，并只在 finish_item() 返回后登记
-// sendover。完成证据仍必须由 control service 之后读取的 runtime monitor snapshot 提供。
-task memblock_csr_control_base_sequence::drive_csr_control_xaction(
-    input memblock_csr_control_action_t action,
-    input csr_ctrl_agent_agent_xaction tr
-);
-    memblock_sync_pkg::dispatch_raw_csr_t ignored_runtime;
-    int unsigned runtime_seq_before_drive;
-
-    if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(ignored_runtime,
-                                                             runtime_seq_before_drive)) begin
-        `uvm_fatal(get_type_name(), "CSR action lost runtime snapshot before drive")
-    end
-    action.runtime_snapshot_seq_before_drive = runtime_seq_before_drive;
-    start_item(tr);
-    finish_item(tr);
-    data.mark_csr_control_sendover(action);
-endtask:drive_csr_control_xaction
 
 // 抽象职责：把 seq 层 owner 转成 CSR agent 可见的 primitive metadata。agent 不解释
 // control kind，只在 driver 内逐字段比较，从而避免 agent package 依赖 seq typedef。

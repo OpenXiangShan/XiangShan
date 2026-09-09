@@ -15,6 +15,83 @@ localparam int unsigned MEMBLOCK_LQ_SIZE  = `MEMBLOCK_DUT_LQ_SIZE;
 localparam int unsigned MEMBLOCK_SQ_SIZE  = `MEMBLOCK_DUT_SQ_SIZE;
 localparam int unsigned MEMBLOCK_COMMIT_WIDTH = `MEMBLOCK_DUT_COMMIT_WIDTH;
 
+// 中文注释：CSR sequence 参数的冻结快照。plus.sv 集中解析，seq_csr_common
+// 统一校验并持有不可变副本，每次 initial/dynamic action 只接收一份值拷贝。
+typedef struct {
+    int init_satp_bare_wt, init_satp_sv39_wt, init_satp_sv48_wt;
+    int init_vsatp_bare_wt, init_vsatp_sv39_wt, init_vsatp_sv48_wt;
+    int init_hgatp_bare_wt, init_hgatp_sv39x4_wt, init_hgatp_sv48x4_wt;
+    int init_satp_asid_min, init_satp_asid_max;
+    int init_vsatp_asid_min, init_vsatp_asid_max;
+    int init_hgatp_vmid_min, init_hgatp_vmid_max;
+    int init_mxr_0_wt, init_mxr_1_wt;
+    int init_sum_0_wt, init_sum_1_wt;
+    int init_vmxr_0_wt, init_vmxr_1_wt;
+    int init_vsum_0_wt, init_vsum_1_wt;
+    int init_priv_virt_0_wt, init_priv_virt_1_wt;
+    int init_priv_imode_u_wt, init_priv_imode_s_wt, init_priv_imode_m_wt;
+    int init_priv_dmode_u_wt, init_priv_dmode_s_wt, init_priv_dmode_m_wt;
+    int enable_l1d_pf_0_wt, enable_l1d_pf_1_wt;
+    int enable_l1d_pf_agt_0_wt, enable_l1d_pf_agt_1_wt;
+    int enable_l1d_pf_pht_0_wt, enable_l1d_pf_pht_1_wt;
+    int enable_l1d_pf_stride_0_wt, enable_l1d_pf_stride_1_wt;
+    int enable_l2_pf_master_0_wt, enable_l2_pf_master_1_wt;
+    int enable_l2_pf_recv_0_wt, enable_l2_pf_recv_1_wt;
+    int enable_l2_pf_pbop_0_wt, enable_l2_pf_pbop_1_wt;
+    int enable_l2_pf_vbop_0_wt, enable_l2_pf_vbop_1_wt;
+    int enable_ldld_vio_0_wt, enable_ldld_vio_1_wt;
+    int enable_cache_error_0_wt, enable_cache_error_1_wt;
+    int enable_uncache_outstanding_0_wt, enable_uncache_outstanding_1_wt;
+    int enable_misalign_ld_0_wt, enable_misalign_ld_1_wt;
+    int enable_misalign_st_0_wt, enable_misalign_st_1_wt;
+    bit change_satp_enable, change_vsatp_enable, change_hgatp_enable;
+    bit change_permission_enable, change_priv_context_enable, change_pmp_pma_enable;
+    int change_satp_bare_wt, change_satp_sv39_wt, change_satp_sv48_wt;
+    int change_vsatp_bare_wt, change_vsatp_sv39_wt, change_vsatp_sv48_wt;
+    int change_hgatp_bare_wt, change_hgatp_sv39x4_wt, change_hgatp_sv48x4_wt;
+    int change_satp_asid_min, change_satp_asid_max;
+    int change_vsatp_asid_min, change_vsatp_asid_max;
+    int change_hgatp_vmid_min, change_hgatp_vmid_max;
+    int change_mxr_0_wt, change_mxr_1_wt;
+    int change_sum_0_wt, change_sum_1_wt;
+    int change_vmxr_0_wt, change_vmxr_1_wt;
+    int change_vsum_0_wt, change_vsum_1_wt;
+    int change_priv_virt_0_wt, change_priv_virt_1_wt;
+    int change_priv_imode_u_wt, change_priv_imode_s_wt, change_priv_imode_m_wt;
+    int change_priv_dmode_u_wt, change_priv_dmode_s_wt, change_priv_dmode_m_wt;
+    bit pmp_pma_exception_enable;
+    bit [63:0] pmp_pma_exception_base, pmp_pma_exception_range;
+    int pmp_exception_r_0_wt, pmp_exception_r_1_wt;
+    int pmp_exception_w_0_wt, pmp_exception_w_1_wt;
+    int pmp_exception_x_0_wt, pmp_exception_x_1_wt;
+    int pma_exception_c_0_wt, pma_exception_c_1_wt;
+    int pma_exception_atomic_0_wt, pma_exception_atomic_1_wt;
+} memblock_csr_sequence_cfg_t;
+
+// 中文注释：由 CSR 随机器一次求解得到的 PMA/PMP 区域与属性，write plan、
+// monitor 回放 model 和最终提交确认共同使用同一份 profile。
+typedef struct {
+    bit          valid;
+    bit          exception_enable;
+    bit [63:0]   normal_base;
+    bit [63:0]   normal_range;
+    bit [63:0]   exception_base;
+    bit [63:0]   exception_range;
+    bit          pmp_r;
+    bit          pmp_w;
+    bit          pmp_x;
+    bit          pma_c;
+    bit          pma_atomic;
+} memblock_csr_pmp_pma_profile_t;
+
+// 中文注释：generic CSR write 的原子拍描述；sequence 按队列顺序发送，model
+// 只根据 monitor 观测回放，不能由 sequence 直接修改。
+typedef struct {
+    bit          valid;
+    bit [11:0]   addr;
+    bit [63:0]   data;
+} memblock_csr_write_beat_t;
+
 // 中文注释：DUT物理LSQ enqueue slot和scalar issue pipe数量。
 // interface/driver/scheduler直接消费这些编译期常量；runtime plus只能调小行为使用量。
 localparam int unsigned MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM = `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
