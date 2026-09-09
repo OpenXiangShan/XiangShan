@@ -284,11 +284,26 @@ def _restore_predictors(env) -> None:
 
 
 def _trigger_bpu_s3_flush(env) -> None:
+    """Compatibility helper used by the s1 closure module."""
     env.bpu_ftq_scheduler.pulse_predictor_transition()
 
 
+def _bpu_miss_s0_candidate(sample: dict) -> bool:
+    """Return whether one sample has every BIN-607 input predicate."""
+    return (
+        sample["ftq_valid"] == 1
+        and sample["from_valid"] == 1
+        and sample["data_ready"] == 1
+        and sample["s1_ready"] == 1
+        and sample["io_flush"] == 0
+        and sample["bpu_valid"] == 1
+        and _bpu_is_after_s0(sample)
+    )
+
+
 def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
-    disable_cycles: list[int] = []
+    scheduler = env.bpu_ftq_scheduler
+    attempts: list[dict] = []
     bpu_samples: list[dict] = []
     s0_windows = 0
     elapsed = 0
@@ -301,21 +316,81 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
             sample = _snapshot(env)
             if _s0_sampling_window(env):
                 s0_windows += 1
-                disable_cycles.append(int(env.current_cycle))
                 env.backend_model.set_can_accept(0)
-                _trigger_bpu_s3_flush(env)
-                elapsed += 1
-                for _ in range(min(40, int(max_cycles) - elapsed)):
-                    sample = _snapshot(env)
-                    if sample["bpu_valid"] == 1:
-                        bpu_samples.append(sample)
+                remaining = int(max_cycles) - elapsed
+                identity_wait = min(128, max(0, remaining - 1))
+                try:
+                    # Capture a fresh identity for every attempt.  Reusing a
+                    # saved identity after stepping can inject a stale FTQ
+                    # pointer and cannot create a legal predictor update.
+                    wait_start = int(env.current_cycle)
+                    try:
+                        identity = scheduler.wait_live_identity(
+                            cfi_only=True,
+                            max_cycles=identity_wait,
+                        )
+                    finally:
+                        elapsed += int(env.current_cycle) - wait_start
+                    scheduler.queue_mispredict(
+                        identity,
+                        target=int(identity["actual_target"]),
+                    )
+                    attempts.append(
+                        {
+                            "cycle": int(env.current_cycle),
+                            "ftq_flag": int(identity["ftq_flag"]),
+                            "ftq_value": int(identity["ftq_value"]),
+                            "inst_pc": int(identity["inst_pc"]),
+                        }
+                    )
+                    # Let the legal resolve reach the predictor before asking
+                    # it to revisit the stream.  The transition is only a
+                    # revisit aid; success still requires a sampled, real
+                    # BPU-s3 valid with the exact nonmatching pointer relation.
+                    settle = min(4, int(max_cycles) - elapsed)
+                    if settle:
+                        env.step(settle)
+                        elapsed += settle
+                    if elapsed < int(max_cycles):
+                        scheduler.pulse_predictor_transition()
+                        elapsed += 1
+
+                    observe = min(128, int(max_cycles) - elapsed)
+                    observe_start = int(env.current_cycle)
+                    try:
+                        matched = scheduler.wait_for_bpu_flush(
+                            _snapshot,
+                            _bpu_miss_s0_candidate,
+                            max_cycles=observe,
+                        )
+                        bpu_samples.append(matched)
                         bpu_samples[:] = bpu_samples[-16:]
-                    if env.functional_coverage.key_hit(
-                        "icache_mainpipe_s0_flush", bin_name
-                    ):
-                        return
-                    env.step(1)
-                    elapsed += 1
+                        # The recorder samples on env.step.  Advance once if
+                        # the matching values were first seen before callbacks.
+                        if not env.functional_coverage.key_hit(
+                            "icache_mainpipe_s0_flush", bin_name
+                        ) and elapsed < int(max_cycles):
+                            env.step(1)
+                        if env.functional_coverage.key_hit(
+                            "icache_mainpipe_s0_flush", bin_name
+                        ):
+                            return
+                    except AssertionError:
+                        bpu_samples.extend(
+                            sample
+                            for sample in scheduler.history
+                            if sample.get("bpu_valid") == 1
+                        )
+                        bpu_samples[:] = bpu_samples[-16:]
+                    finally:
+                        elapsed += int(env.current_cycle) - observe_start
+                except AssertionError as error:
+                    attempts.append(
+                        {
+                            "cycle": int(env.current_cycle),
+                            "identity_error": str(error),
+                        }
+                    )
                 _restore_predictors(env)
                 env.backend_model.set_can_accept(1)
             else:
@@ -330,7 +405,7 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
         "bin": bin_name,
         "max_cycles": int(max_cycles),
         "s0_windows": int(s0_windows),
-        "predictor_disable_cycles": disable_cycles,
+        "training_attempts": attempts[-16:],
         "last_bpu_samples": bpu_samples,
         "last": _snapshot(env),
         "icache": env.icache_agent.get_stats(),
@@ -349,7 +424,7 @@ def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _drive_bpu_s3_until_hit(
         env,
         "bpu_miss_allows_entry",
-        max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MISS_MAX_CYCLES", 512),
+        max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MISS_MAX_CYCLES", 4096),
     )
     assert any(
         sample["ftq_valid"] == 1

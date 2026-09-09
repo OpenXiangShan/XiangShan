@@ -13,12 +13,20 @@ pytestmark = pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason=
 
 def test_bpu_scheduler_drives_live_identity_resolve(env):
     base = 0x80000000
-    env.load_program((0x13).to_bytes(4, "little") * 16, base)
+    # Use decoded control-flow instructions so the captured identity is a
+    # legal source for directed resolve injection.  JAL x0,+4 keeps execution
+    # inside the loaded image while providing an exact decoded target.
+    jal_x0_plus_4 = 0x0040006F
+    env.load_program(jal_x0_plus_4.to_bytes(4, "little") * 16, base)
     env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
-    identity = env.bpu_ftq_scheduler.wait_live_identity(max_cycles=1000)
-    assert identity["is_cfi"] is False
+    identity = env.bpu_ftq_scheduler.wait_live_identity(
+        cfi_only=True,
+        max_cycles=1000,
+    )
+    assert identity["is_cfi"] is True
+    target = int(identity["actual_target"])
     env.backend_model.set_can_accept(0)
     observed = []
     def sample(_cycle, active):
@@ -31,9 +39,14 @@ def test_bpu_scheduler_drives_live_identity_resolve(env):
                     int(bundle.resolve_bits_target_addr[lane].value) << 1))
     env.register_cycle_observer(sample)
     try:
-        env.bpu_ftq_scheduler.queue_mispredict(identity, target=base + 0x1000)
+        env.bpu_ftq_scheduler.queue_mispredict(identity, target=target)
         env.step(4)
-        assert (identity["ftq_flag"], identity["ftq_value"], identity["start_pc"], base + 0x1000) in observed
+        assert (
+            identity["ftq_flag"],
+            identity["ftq_value"],
+            identity["start_pc"],
+            target,
+        ) in observed
         assert not env.get_errors()
     finally:
         env.backend_model.set_can_accept(1)

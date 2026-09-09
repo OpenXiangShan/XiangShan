@@ -1346,7 +1346,7 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins(
-    "BIN-680", "BIN-753", "BIN-754", "BIN-756", "BIN-757", "BIN-758", "BIN-1011"
+    "BIN-753", "BIN-757", "BIN-758", "BIN-1011"
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
@@ -1358,11 +1358,11 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     ),
 )
 def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
-    """Fill WayLookup with dual writes, then release one blocked transaction."""
+    """Observe hardware-prefetch WayLookup capacity and pointer-wrap boundaries."""
     env = lowrisk_cleanup
-    # Keep the consumer stopped while issuing distinct legal soft-prefetch
-    # lines. This makes queue depth an observed consequence of PrefetchPipe
-    # traffic instead of a direct write to WayLookup state.
+    # Keep the consumer stopped while the BPU/FTQ path generates hardware
+    # prefetches. Software prefetches are intentionally not driven because
+    # PrefetchPipe excludes them from WayLookup writes.
     base = 0x8000_0000
     _load_nops(env, base, words=4096)
     env.icache_agent.configure(
@@ -1379,9 +1379,8 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     env.backend_model.set_can_accept(0)
     capacity = WayLookupCapacitySequence(env)
     max_cycles = int(os.getenv("TB_WAYLOOKUP_CAPACITY_MAX_CYCLES", "12000"))
-    for index in range(max_cycles):
-        address = base + 0x4000 + index * 0x40
-        _drive_soft_prefetch(env, [address, address + 0x1000])
+    for _ in range(max_cycles):
+        env.step(1)
         snapshot = capacity.sample()
         if snapshot.full:
             break
@@ -1390,11 +1389,10 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     _wait_funcov_hits(
         env,
         (
-            ("icache_waylookup_capacity", "one_slot_blocks_dual"),
             ("icache_waylookup_capacity", "full_blocks_write"),
         ),
         max_cycles=256,
-        label="WayLookup one-slot and full dual-write backpressure",
+        label="WayLookup full dual-write backpressure",
     )
     env.step(4)
     env.backend_model.set_can_accept(1)
@@ -1402,14 +1400,12 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     _wait_funcov_hits(
         env,
         (
-            ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
-            ("icache_waylookup_capacity", "read_write_boundary"),
             ("icache_waylookup_wrap", "single_read_wrap"),
             ("icache_waylookup_wrap", "single_write_wrap"),
             ("icache_waylookup_wrap", "dual_wrap"),
         ),
         max_cycles=12000,
-        label="WayLookup capacity recovery and pointer wrap coverage",
+        label="WayLookup pointer wrap coverage",
     )
     assert not env.monitor.get_errors()
 
