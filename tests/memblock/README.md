@@ -1435,6 +1435,11 @@ load/store weights `90/45` and vector-segment weight `20`, making the measured
 SPEC vector event classes materially present while keeping scalar memory
 traffic dominant. The minimum run is 3072 actions.
 
+For deterministic reduction of a failure, `--allow-short-mixed` permits a
+smaller `random-mixed` run after the constraint set has been narrowed. It does
+not disable any online oracle or coverage gate, and normal regression commands
+do not pass it.
+
 For a reproducible local pressure run:
 
 ```sh

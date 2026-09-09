@@ -7,7 +7,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
     constexpr unsigned minimum_actions = 3072;
-    if (options.transactions < minimum_actions) {
+    if (!options.allow_short_mixed && options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
                   << " reason=random-mixed_requires_at_least_"
@@ -2510,6 +2510,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         };
 
         phase = "seeded-mixed-tail";
+        if (options.transactions < actions + 2U) {
+            phase = "short-mixed-prefix-exceeds-transaction-budget";
+            return false;
+        }
         const unsigned target_before_redirect = options.transactions - 2;
         if (!environment.configure_stride_prefetch(
                 constraints.stride_stream_per_mille != 0)) {

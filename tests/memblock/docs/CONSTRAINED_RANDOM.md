@@ -150,6 +150,10 @@ correctness oracle.
 prefix, eight replacement windows, the 48 CMO/Probe bins, the 54 atomic/Probe
 bins, all enabled ordinary miss-burst depth/width/translation bins, and each
 enabled constrained class can coexist.
+`--allow-short-mixed` relaxes only this conservative global minimum for a
+focused, explicitly narrowed constraint set. The normal online coverage and
+accounting gates remain active, and the run fails if its action budget cannot
+close every enabled class; regression controllers never add this debug option.
 An enabled `atomic-error` requires a nonzero atomic operation weight. An
 all-error Uncache mix requires `special-concurrent=0`, because the current
 special overlap slot is a nonfaulting load and cannot legally satisfy a
