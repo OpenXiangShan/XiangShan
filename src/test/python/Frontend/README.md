@@ -142,6 +142,18 @@
 
 ## 运行入口
 
+Frontend Verilator/Python 的构建、测试和覆盖率工具必须在干净 shell 中只激活
+赵欣冉维护的 mcpgateway 环境：
+
+```bash
+source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
+```
+
+禁止 source `/nfs/share/unitychip/activate`。该环境会把旧版
+`libxspcomm.so` 注入 `LD_LIBRARY_PATH`，使当前生成的 Frontend Python DUT
+无法加载。若当前 shell 已经激活过 share 环境，应新开干净 shell，不能依靠再次
+source 或手工调整库顺序作为正式回归环境。
+
 - 构建 Verilator 版 Frontend Python DUT：
 
 ```bash
