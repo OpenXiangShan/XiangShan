@@ -188,12 +188,16 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
-    s0_use_flow_rs,
-    s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), XLEN),
+    s0_use_flow_ma,
+    if (VAddrBits > 48) io.misalign_stin.bits.fullva else s0_vaddr,
     Mux(
-      s0_use_flow_vec,
-      s0_vecstin.vaddr,
-      s0_vaddr
+      s0_use_flow_rs,
+      s0_stin.src(0) + SignExt(s0_stin.uop.imm(11,0), XLEN),
+      Mux(
+        s0_use_flow_vec,
+        s0_vecstin.vaddr,
+        s0_vaddr
+      )
     )
   )
 
@@ -304,7 +308,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s1_isHyper   = io.tlb.resp.bits.excp(0).isHyper
   val s1_paddr     = io.tlb.resp.bits.paddr(0)
   val s1_gpaddr    = io.tlb.resp.bits.gpaddr(0)
-  val s1_fullva    = Mux(s1_frm_mabuf, s1_out.vaddr, io.tlb.resp.bits.fullva)
+  val s1_fullva    = io.tlb.resp.bits.fullva
   val s1_isForVSnonLeafPTE   = io.tlb.resp.bits.isForVSnonLeafPTE
   val s1_tlb_miss  = io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
   val s1_tlb_hit   = !io.tlb.resp.bits.miss && io.tlb.resp.valid && s1_valid
