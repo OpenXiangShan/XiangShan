@@ -3484,3 +3484,15 @@ without turning any implementation detail into a correctness condition. The
 full default seed-1 replay was stopped after 18 minutes without reaching a
 terminal summary; it remains a known-reproducer control, not a pass or a new
 failure classification.
+
+The same schema-41 generator was then run with a vector-only constrained tail
+(`seed=7`, 3,072 actions). All enabled ordinary vector dimensions were left
+nonzero: both directions, all four unit/strided/indexed addressing modes, all
+EEW/SEW values, all legal LMUL/derived-EMUL classes, and all five policy
+dimensions. The run passed in 251,390 cycles with 1,790 complete vector
+instructions and 5,101 vector uops (983 multi-uop instructions). The terminal
+oracle reported 4,022 vector-load and 3,171 vector-store writebacks, exact
+queue conservation, and no unaccounted cancellation. This closes the basic
+ordinary-vector shape stimulus and per-element data/readback oracle; full
+shapes inside every heterogeneous overlap-window slot remain a separate
+composition gap.
