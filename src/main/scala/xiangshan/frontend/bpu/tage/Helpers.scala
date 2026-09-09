@@ -37,6 +37,59 @@ trait TopHelper extends HasTageParameters {
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
+
+  private def encodeLocation(
+      valid:        Bool,
+      tableOH:      Seq[Bool],
+      wayOH:        UInt,
+      numTables:    Int,
+      encodedWidth: Int
+  ): UInt = {
+    val encoded      = Wire(UInt(encodedWidth.W))
+    val numLocations = TableInfos.take(numTables).map(_.NumWays).sum
+    if (numTables == 0) {
+      encoded := numLocations.U
+    } else {
+      val wayIdx = OHToUInt(wayOH)
+      val flatLocation = Mux1H(
+        tableOH.take(numTables),
+        TableWayOffsets.take(numTables).map(offset => offset.U(encodedWidth.W) + wayIdx)
+      )
+      encoded := Mux(valid, flatLocation, numLocations.U)
+    }
+    encoded
+  }
+
+  private def decodeLocation(encoded: UInt, numTables: Int): (Bool, UInt, UInt) = {
+    val numLocations = TableInfos.take(numTables).map(_.NumWays).sum
+    val valid        = encoded < numLocations.U
+    val flatLocation = encoded
+    val tableOH = VecInit(TableInfos.zipWithIndex.map { case (info, tableIdx) =>
+      if (tableIdx < numTables) {
+        val offset = TableWayOffsets(tableIdx)
+        valid && flatLocation >= offset.U && flatLocation < (offset + info.NumWays).U
+      } else {
+        false.B
+      }
+    })
+    val wayOH = Mux1H(TableInfos.zipWithIndex.map { case (info, tableIdx) =>
+      val localWayIdx = flatLocation - TableWayOffsets(tableIdx).U
+      tableOH(tableIdx) -> UIntToOH(localWayIdx, info.NumWays).pad(MaxNumWays)
+    })
+    (valid, tableOH.asUInt, wayOH)
+  }
+
+  def encodeProviderLocation(valid: Bool, tableOH: Seq[Bool], wayOH: UInt): UInt =
+    encodeLocation(valid, tableOH, wayOH, NumTables, ProviderLocationWidth)
+
+  def encodeAltLocation(valid: Bool, tableOH: Seq[Bool], wayOH: UInt): UInt =
+    encodeLocation(valid, tableOH, wayOH, NumTables - 1, AltLocationWidth)
+
+  def decodeProviderLocation(encoded: UInt): (Bool, UInt, UInt) =
+    decodeLocation(encoded, NumTables)
+
+  def decodeAltLocation(encoded: UInt): (Bool, UInt, UInt) =
+    decodeLocation(encoded, NumTables - 1)
 }
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
