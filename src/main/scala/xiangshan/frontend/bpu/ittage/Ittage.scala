@@ -46,6 +46,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     // prediction bundles
     val s1_foldedPhr:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s2_flush:       Bool                  = Input(Bool())
 
     val prediction: IttagePrediction = Output(new IttagePrediction)
     val meta:       IttageMeta       = Output(new IttageMeta)
@@ -188,7 +189,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   // Predict
   tables.foreach { t =>
-    t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
+    t.io.req.valid           := !io.s2_flush && s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
     t.io.req.bits.startPc    := s1_startPc.unGuard
     t.io.req.bits.foldedHist := io.s1_foldedPhr
   }

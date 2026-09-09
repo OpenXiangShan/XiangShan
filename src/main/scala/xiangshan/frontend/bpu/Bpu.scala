@@ -239,6 +239,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
+  ittage.io.s2_flush       := s2_flush
 
   sc.io.mbtbResult          := mbtb.io.result
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
