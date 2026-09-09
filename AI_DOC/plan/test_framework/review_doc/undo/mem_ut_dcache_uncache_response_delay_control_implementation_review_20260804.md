@@ -1,5 +1,8 @@
 # DCache/Uncache 返回延迟分组控制专项 Implementation Review
 
+> 历史实现注记：本文记录 2026-08-04 的旧版响应模型实现。后续 E.sink X/Z 门控语义以
+> `mem_ut_v2_dcache_grantack_e_sink_xz_gate_implementation_review_20260909.md` 及其关联 plan 为准。
+
 | 项目 | 内容 |
 |---|---|
 | 关联 Plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` |
