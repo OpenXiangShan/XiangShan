@@ -1,6 +1,6 @@
 # User Prompts
 
-This file records every user prompt from the three Codex sessions that performed
+This file records every user prompt from the Codex sessions that performed
 the MemBlock verification work. Entries are copied verbatim from
 `/home/xuyinan/.codex/history.jsonl` and kept in chronological order, including
 repeated commands and incomplete input. Timestamps use `Asia/Shanghai` (`CST`,
@@ -205,7 +205,7 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
 51. [`2026-09-07 17:58:53 CST`] `不需要统计token了，可以忘掉这件事情`
 
-## Current Session: 4 Prompts
+## Main September 8 Session: 13 Prompts
 
 Session: `01a07f80-9241-7653-ade7-5b447e1cc8c6`.
 
@@ -213,6 +213,56 @@ Session: `01a07f80-9241-7653-ade7-5b447e1cc8c6`.
 
 2. [`2026-09-08 13:38:34 CST`] `1. 记得在工作之前把PROMPTS给记录下来。 2. 现在的UT测试框架代码可能过于粗暴了，导致context一下子就占用很大，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化。3. 重构后再继续完成UT测试工作`
 
-3. [`2026-09-09 09:39:06 CST`] `能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些。因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来`
+3. [`2026-09-08 22:09:44 CST`] `/goal resume`
 
-4. [`2026-09-09 09:59:09 CST`] `speccpu也有很多向量负载的吧。我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs，里面有跑spec06_gcc15_rva23_lmul1_260723 rva23u64_lmul8  rva23_lmul2等的负载，应该是有很多向量指令的`
+4. [`2026-09-09 09:37:46 CST`] `能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些。因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来`
+
+5. [`2026-09-09 09:55:49 CST`] `speccpu也有很多向量负载的吧。我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs，里面有跑spec06_gcc15_rva23_lmul1_260723 rva23u64_lmul8  rva23_lmul2等的负载，应该是有很多向量指令的`
+
+6. [`2026-09-09 10:24:20 CST`] `/goal resume`
+
+7. [`2026-09-09 10:24:44 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。`
+
+8. [`2026-09-09 10:24:55 CST`] `/goal`
+
+9. [`2026-09-09 10:25:11 CST`] `/goal clear`
+
+10. [`2026-09-09 10:25:31 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。`
+
+11. [`2026-09-09 10:25:45 CST`] `speccpu也有很多向量负载的吧。我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs，里面有跑spec06_gcc15_rva23_lmul1_260723 rva23u64_lmul8  rva23_lmul2等的负载，应该是有很多向量指令的`
+
+12. [`2026-09-09 10:26:12 CST`] `/goal clear`
+
+13. [`2026-09-09 10:26:35 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。`
+
+## Associated SPEC Log-Copy Session: 4 Prompts
+
+Session: `01a083da-321f-7c73-a9c7-91dbc0904cd4`.
+
+1. [`2026-09-09 09:49:41 CST`] `scp -rq node040:/nfs/home/cirunner/perf-report/cr260902-5d3934132-KunminghuV2Config . 这个拷贝的内容太多了，我只想拷贝simulator_err.txt，你帮我拷贝一下吧，给我写个脚本，输入一个远程的地址，只从那个地址里面拷贝simulator_err.txt和simulator_out.txt哪间`
+
+2. [`2026-09-09 09:59:43 CST`] `默认就是-r的，不用停，你就一直传就行，内网理论上应该很快呀`
+
+3. [`2026-09-09 10:04:28 CST`] `是不是可以看看内网这么慢`
+
+4. [`2026-09-09 10:04:54 CST`] `为什么内网这么慢`
+
+## Goal Consolidation Session: 2 Prompts
+
+Session: `01a08401-c258-74a1-8d9a-2db16dba0b6f`.
+
+1. [`2026-09-09 10:36:03 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。工作的过程中，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化；其次，能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来，我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs。`
+
+2. [`2026-09-09 10:36:46 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。工作的过程中，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化；其次，能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来，我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs。记得在工作之前把PROMPTS给记录下来。`
+
+## Current Goal Session: 4 Prompts
+
+Session: `01a08406-da41-7071-94a6-a310976264c3`.
+
+1. [`2026-09-09 10:38:13 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。工作的过程中，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化；其次，能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来，我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs。记得在工作之前把PROMPTS给记录下来。`
+
+2. [`2026-09-09 11:13:45 CST`] `/goal resume`
+
+3. [`2026-09-09 11:16:02 CST`] `/goal resume`
+
+4. [`2026-09-09 11:43:30 CST`] `记得把我的/goal和其他prompt也都记录下来`
