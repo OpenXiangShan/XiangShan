@@ -362,9 +362,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   })
 
   private val s2_takenMask = VecInit(mbtb.io.result.zipWithIndex.map { case (entry, i) =>
-    val tagePredValid = tage.io.prediction.fastTakenVec(i).valid
-    val tagePred      = tage.io.prediction.fastTakenVec(i).bits
-    s2_isJumpVec(i) || (s2_isCondVec(i) && Mux(tagePredValid, tagePred, entry.bits.taken))
+    s2_isJumpVec(i) || (s2_isCondVec(i) && entry.bits.taken)
   })
   private val s2_taken              = s2_takenMask.reduce(_ || _)
   private val s2_firstTakenBranchOH = s2_compareMatrix.getLeastElementOH(s2_takenMask)
