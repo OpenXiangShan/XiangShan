@@ -534,8 +534,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   trainFoldedPhr := phr.io.trainFoldedPhr
   phrBits        := phr.io.phr.asUInt
 
-  dontTouch(phrBits)
-
   // ghr update
   private val s1_cfiPc = getCfiPcFromPosition(s1_startPc.get, s1_prediction.cfiPosition)
   private val s1_imliTaken =

@@ -17,7 +17,6 @@ package xiangshan.frontend.bpu.history.commonhr
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.XSError
@@ -184,9 +183,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val r1_metaGhr      = r1_redirect.meta.ghr
   private val r1_metaBW       = r1_redirect.meta.bw
   private val r1_oldPositions = r1_redirect.meta.position
-  private val r1_oldCondHits = VecInit(r1_redirect.meta.hitMask.zip(r1_redirect.meta.attribute).map {
-    case (hit, attr) => hit && attr.isConditional
-  })
   // TODO:Need pipeline stage for redirect update CommonHR if dedup calc skipped?
   private val r1_oldHits       = r1_redirect.meta.hitMask
   private val r1_taken         = r1_redirect.taken
@@ -205,9 +201,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   r1_commonHR.bw := getNewHR(r1_metaBW, r1_numLess, r1_numHit, r1_taken, r1_isCond, Option(r1_bwTaken && r1_taken))(
     BWHistoryLength
   )
-
-  dontTouch(r1_valid)
-  dontTouch(r1_commonHR)
 
   /*
    * Directly resume and update commonHR after redirection for debugging
@@ -366,25 +359,4 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     (!r1_valid && diffCommonHR) || (r1_valid && diffDebugAndR1CommonHR),
     "debugCommonHR is not equal commonHR!"
   )
-
-  dontTouch(diffCommonHR)
-  dontTouch(writePtr)
-  dontTouch(enqPtr)
-  dontTouch(predPtr)
-  dontTouch(predEnable)
-  dontTouch(sync)
-  dontTouch(hasOverrideHist)
-  dontTouch(recoverInc)
-
-  if (EnableCommitGHistDiff) {
-    val r1_lessThanPcUInt = r1_lessThanPc.asUInt
-    val ghrUInt           = commonHR.ghr.asUInt
-    val bwUInt            = commonHR.bw.asUInt
-    dontTouch(s3_newCommonHR)
-    dontTouch(r1_numLess)
-    dontTouch(r1_commonHR)
-    dontTouch(r1_lessThanPcUInt)
-    dontTouch(ghrUInt)
-    dontTouch(bwUInt)
-  }
 }

@@ -17,12 +17,9 @@ package xiangshan.frontend.ifu
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SeqToAugmentedSeq
-import math.pow
 import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
 import utility.ParallelPriorityEncoder
-import utility.XSPerfAccumulate
 import utils.SeqUtils.prefixOr
 import xiangshan.ValidUndirectioned
 import xiangshan.frontend.GuardedPc
@@ -60,7 +57,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   private val instrVec     = io.req.bits.instrVec
   private val endOffsetVec = VecInit(instrVec.map(_.endOffset))
-  private val blockSel     = VecInit(instrVec.map(_.blockSel))
   private val instrValid   = VecInit(instrVec.map(_.valid))
   private val isPredTaken  = VecInit(instrVec.map(_.isPredTaken))
   private val invalidTaken = VecInit(instrVec.map(_.invalidTaken))
@@ -100,8 +96,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   // which retains all valid instruction entries before the first fault occurs (including the fault position itself).
   private val maskFaultOrBefore = false.B +: prefixOr(remaskFault)
 
-  dontTouch(remaskFault.asUInt)
-
   // keep entries before and including the first remask fault
   private val fixedRange = VecInit((0 until IBufferEnqueueWidth).map {
     i => instrValid(i) && !maskFaultOrBefore(i)
@@ -121,7 +115,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val stage1Fault = VecInit.tabulate(IBufferEnqueueWidth)(i =>
     jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || notCfiTaken(i) || invalidTaken(i)
   )
-  dontTouch(stage1Fault.asUInt)
   mispredIdx.valid := ParallelOR(stage1Fault)
   mispredIdx.bits  := ParallelPriorityEncoder(stage1Fault)
 

@@ -108,9 +108,6 @@ class WriteBuffer[T <: WriteReqBundle](
 
   writePortValid := io.write.map(_.valid)
   writePortBits  := io.write.map(_.bits)
-  dontTouch(readValidVec)
-  dontTouch(replacerWay)
-  dontTouch(emptyVec)
 
   // Apply drain first. Write requests below override it when they update the same slot,
   // and flush overrides both at the end of the next-state calculation.
@@ -178,8 +175,6 @@ class WriteBuffer[T <: WriteReqBundle](
     val hitIdx        = hitRowIdxVec(rowIdx) // hit entry's idx
     val hitNotWritten = hit && dirty(rowIdx)(hitIdx)
     val hitWritten    = hit && !dirty(rowIdx)(hitIdx)
-    dontTouch(hitRowsVec)
-    dontTouch(hitRowIdxVec)
 
     when(writeValid) {
       // if the entry is not written, it is useful

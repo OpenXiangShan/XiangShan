@@ -181,15 +181,10 @@ class MainBtbAlignBank(
 
   // add an alias for hitMask for later use & debug purpose
   private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
-  dontTouch(s2_hitMask)
 
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  private val s3_fire           = io.stageCtrl.s3_fire
-  private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
-  private val s3_takenMask      = io.s3_takenMask
-
   /* *** t0 ***
    * read replacer in advance for better timing
    */
@@ -266,7 +261,7 @@ class MainBtbAlignBank(
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
-  private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
+  private val t1_actualTakenMask = VecInit(t1_meta.map { meta =>
     val hitMask = t1_branches.map(branch =>
       branch.valid && meta.position === branch.bits.cfiPosition && meta.rawHit && branch.bits.taken
     )

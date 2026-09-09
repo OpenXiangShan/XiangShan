@@ -172,7 +172,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 1
    *  calculate each ctr's percsum
    */
-  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
   private val s1_pathResp = Mux(
     PathEnable.B,
     VecInit(pathTable.map(_.io.predictReadResp)),
@@ -203,8 +202,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry()))
   )
 
-  private val s1_mergeResp = VecInit(s1_pathResp ++ s1_globalResp ++ s1_bwResp ++ Seq(s1_imliResp))
-
   private val s1_pathPercsum =
     VecInit.tabulate(NumWays)(w => s1_pathResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
 
@@ -221,8 +218,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
    */
-  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
-
   private val s2_biasPercsum = VecInit(s1_biasPercsum.map(RegEnable(_, s1_fire)))
 
   private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(RegEnable(_, s1_fire)))
@@ -290,14 +285,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
 
   private val s2_scPred        = VecInit(s2_totalPercsum.map(_ >= 0.S))
-  private val s2_thresholds    = VecInit(scThreshold.map(_.value >> 3))
   private val s2_useScPred     = WireInit(VecInit.fill(NumWays)(false.B))
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
   for (i <- 0 until NumWays) {
     val predValid    = s2_hitMask(i) && s2_providerValid(i)
-    val sum          = s2_totalPercsum(i)
-    val thres        = s2_thresholds(s2_wayIdx(i))
     val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
     val tageConfMid  = s2_providerCtr(i).isMid
     val tageConfLow  = s2_providerCtr(i).isWeak
@@ -312,10 +304,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     )
     s2_useScPred(i)     := conf
     s2_sumAboveThres(i) := Mux(predValid, conf, true.B)
-    dontTouch(tageConfHigh)
-    dontTouch(tageConfMid)
-    dontTouch(tageConfLow)
-    dontTouch(conf)
   }
 
   io.scTakenMask := s2_scPred
@@ -418,7 +406,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   biasTable.io.trainReadReq.bits.setIdx   := t0_biasIdx
   biasTable.io.trainReadReq.bits.bankMask := t0_bankMask
 
-  dontTouch(t0_bankConflict)
   XSPerfAccumulate("t0_writeConflict", t0_bankConflict)
 
   /*
@@ -465,9 +452,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   private val t1_oldBiasLowBits = RegEnable(t0_meta.scBiasLowerBits, t0_fire)
 
-  private val t1_branchesWayIdxVec   = VecInit(t1_branches.map(b => getWayIdx(b.bits.cfiPosition)))
-  private val t1_branchesScIdxHitVec = RegEnable(t0_branchesScIdxHitVec, t0_fire)
-  private val t1_branchesScIdxVec    = RegEnable(t0_branchesScIdxVec, t0_fire)
+  private val t1_branchesWayIdxVec = VecInit(t1_branches.map(b => getWayIdx(b.bits.cfiPosition)))
+  private val t1_branchesScIdxVec  = RegEnable(t0_branchesScIdxVec, t0_fire)
 
   private val t1_writeTakenVec    = RegEnable(t0_writeTakenVec, t0_fire)
   private val t1_writeValidVecReg = RegEnable(t0_writeValidVec, t0_fire)
@@ -512,7 +498,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       scThreshold(i)
     )
   }
-  dontTouch(t1_writeThresVec)
 
   // calculate new path table entries
   private val t1_writePathEntryVec = WireInit(
@@ -529,7 +514,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         t1_meta
       )
   }
-  dontTouch(t1_writePathEntryVec)
 
   // calculate new global table entries
   private val t1_writeGlobalEntryVec = WireInit(
@@ -595,11 +579,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
     newEntry.ctr := Mux(inc >= dec, oldEntry.ctr.getIncrease(inc - dec), oldEntry.ctr.getDecrease(dec - inc))
   }
-  dontTouch(t1_startPc)
-  dontTouch(t1_branchesScIdxHitVec)
-  dontTouch(writeBiasWayMask)
-  dontTouch(writeBiasDirMask)
-  dontTouch(t1_writeBiasEntryVec)
 
   when(t1_writeValid) {
     scThreshold := t1_writeThresVec
@@ -826,17 +805,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate(s"threshold_try_overflow", t1_writeValid && t1_thresholdOverflowVec.reduce(_ || _))
   XSPerfAccumulate(s"threshold_try_underflow", t1_writeValid && t1_thresholdUnderflowVec.reduce(_ || _))
 
-  dontTouch(s2_sumPercsum)
-  dontTouch(s2_totalPercsum)
-  dontTouch(s2_hitMask)
-  dontTouch(s2_scPred)
-  dontTouch(s2_useScPred)
-  dontTouch(t1_branchesWayIdxVec)
-  dontTouch(t1_writeThresVec)
-  dontTouch(t1_meta)
-  dontTouch(scCorrectVec)
-  dontTouch(scWrongVec)
-
   private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
     case (predIdx, trainIdx) => predIdx =/= trainIdx
   }.reduce(_ || _))
@@ -845,10 +813,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       case (predIdx, trainIdx) => predIdx =/= trainIdx
     }.reduce(_ || _))
   private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
-
-  dontTouch(sc_path_predIdx_diff_trainIdx)
-  dontTouch(sc_global_predIdx_diff_trainIdx)
-  dontTouch(sc_bias_predIdx_diff_trainIdx)
 
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_commonHR.valid)
   XSPerfAccumulate("sc_global_table_valid", s0_fire && s0_commonHR.valid)
