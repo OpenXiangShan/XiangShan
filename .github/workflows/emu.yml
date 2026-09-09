@@ -144,42 +144,42 @@ jobs:
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Build EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 16 \
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --build --threads 8 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata --trace-fst
       - name: Basic Test - cputest
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci cputest 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci cputest 2> /dev/zero
       - name: Basic Test - riscv-tests
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --rvtest /nfs/home/share/ci-workloads/riscv-tests --ci riscv-tests 2> /dev/zero
       - name: Basic Test - misc-tests
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci misc-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci misc-tests 2> /dev/zero
       - name: Extension Test - hypervisor
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvh-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci rvh-tests 2> /dev/zero
       - name: Simple Test - microbench
         id: microbench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --ci microbench 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --ci microbench 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/microbench.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Simple Test - CoreMark
         id: coremark
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci coremark 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci coremark 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/coremark.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: System Test - Linux
         id: linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci linux-hello-opensbi 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/linux.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Floating-point Test - povray
         id: povray
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --max-instr 5000000 --ci povray --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --max-instr 5000000 --ci povray --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/povray.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Uncache Fetch Test - copy and run
@@ -190,13 +190,13 @@ jobs:
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: V Extension Test - rvv-bench
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci rvv-bench 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci rvv-bench 2> /dev/zero
       - name: F16 Test - f16_test
         run: |
-          python3 ./scripts/xiangshan.py --wave-dump ./build --thread 16 --numa --ci f16_test 2> /dev/zero
+          python3 ./scripts/xiangshan.py --wave-dump ./build --thread 8 --numa --ci f16_test 2> /dev/zero
       - name: Zcb Extension Test - zcb-test
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --ci zcb-test 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci zcb-test 2> /dev/zero
       - name: Generate summary
         if: always()
         run: |
@@ -298,66 +298,66 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --yaml-config $GITHUB_WORKSPACE/src/main/resources/config/Default.yml \
-            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 16 \
+            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 8 \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata --trace-fst
       - name: SPEC06 Test - hmmer-Vector
         id: hmmer_vector
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci hmmer-Vector 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci hmmer-Vector 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/hmmer-Vector.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - mcf
         id: mcf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci mcf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci mcf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/mcf.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - xalancbmk
         id: xalancbmk
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci xalancbmk --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci xalancbmk --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/xalancbmk.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - gcc
         id: gcc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gcc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci gcc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/gcc.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - namd
         id: namd
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci namd --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci namd --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/namd.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - milc
         id: milc
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci milc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci milc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/milc.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - lbm
         id: lbm
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci lbm --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci lbm --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/lbm.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - gromacs
         id: gromacs
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci gromacs --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci gromacs --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/gromacs.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - wrf
         id: wrf
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci wrf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci wrf --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/wrf.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: SPEC06 Test - astar
         id: astar
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --max-instr 5000000 --numa --ci astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
           cat perf.log | sort | tee $PERF_HOME/astar.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Generate summary
@@ -398,6 +398,16 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
+          # determine emulation threads, verilator 5.050+ has refactored multi-threading,
+          # with which 8-thread can achieve better performance then 16-thread in verilator 5.048
+          VERILATOR_VERSION=$(verilator --version | grep -oP 'Verilator \K\d+\.\d+')
+          if [ $(echo $VERILATOR_VERSION | sed 's/\.//') -ge 5050 ]; then
+            EMU_THREADS=8
+          else
+            EMU_THREADS=16
+          fi
+          echo "Using $EMU_THREADS threads for verilator $VERILATOR_VERSION"
+          echo "EMU_THREADS=$EMU_THREADS" >> $GITHUB_ENV
       - name: Initialize submodules
         run: |
           make init-force || {
@@ -410,15 +420,15 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
             --num-cores 2 --emu-optimize "" \
-            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 16 \
+            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads ${EMU_THREADS} \
             --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
             --trace-fst --trace-all
       - name: MC Test
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads ${EMU_THREADS} --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
       - name: SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads ${EMU_THREADS} --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
 
   simv-basics:
     runs-on: eda
