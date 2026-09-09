@@ -664,7 +664,7 @@ object FuConfig {
   val VfaluCfg = FuConfig (
     name = "vfalu",
     fuType = FuType.vfalu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFAlu(cfg)(p).suggestName("Vfalu")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
