@@ -21,8 +21,6 @@ package object vector {
   }
 
   trait HasVectorSettings {
-    def VLEN = 128
-    def VLENB: Int = VLEN / 8
     // non-configurable parameters
     def nVecLogReg = 32
     def maxSrc = 5
@@ -32,6 +30,10 @@ package object vector {
     def maxLMUL = 8
 
     def uopBufferLength = 7
+  }
+
+  trait HasSimpleSettings {
+    def maxSimpleSplitUopNum = 2
   }
 
   trait HasVectorParam extends HasVectorSettings {

@@ -40,6 +40,7 @@ import xiangshan.backend.fu.NewCSR.Tdata1Bundle
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.mem.LqPtr
@@ -110,7 +111,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
   val vtype            = VType()
-  val specvtype        = VType()
+  val oldVType         = VType()
+  val uopNumOH         = NumUopOH()
   val debug_seqNum = InstSeqNum()
 }
 
@@ -428,7 +430,7 @@ class WfiReqBundle extends Bundle {
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
-  val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val cfVec = Vec(DecodeWidth, ValidIO(new CtrlFlow))
   val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
   val fromIfu = new IfuToBackendIO
@@ -699,6 +701,8 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
 
   def shouldBeSext: Bool = sv39 || sv48
   def shouldBeZext: Bool = bare || sv39x4 || sv48x4
+
+  def extend(pc: UInt, len: Int): UInt = Mux(shouldBeSext, SignExt(pc, len), ZeroExt(pc, len))
 }
 
 object AddrTransType {

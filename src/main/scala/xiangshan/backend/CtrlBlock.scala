@@ -28,7 +28,9 @@ import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo,
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
+import xiangshan.backend.fu.vector.Bundles.{Vstart, VType, Vl}
+import xiangshan.backend.vector.Decoder.NumUopOH
+import xiangshan.backend.vector.Decoder.Types.UopBufferNum
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
@@ -65,6 +67,10 @@ class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
     val vtype = ValidIO(new VType)
     val hasVsetvl = Bool()
   }
+  val fromCSR = new CSRToDecode
+  val vstart = Vstart()
+  val uopBufferNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UopBufferNum())
+  val accNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UInt(log2Up(DecodeWidth + 1).W))
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -94,7 +100,7 @@ class CtrlBlockImp(
     "memPredLoad"   -> 1,
     "memPredStore"  -> 1,
     "robFlush"  -> 1,
-    "bjuPc"     -> params.BrhCnt,
+    "aluBjuPc"  -> params.aluBjuPcPortNum,
     "bjuTarget" -> params.BrhCnt,
     "load"      -> params.LduCnt,
     "hybrid"    -> params.HyuCnt,
@@ -108,6 +114,8 @@ class CtrlBlockImp(
   println(s"pcMem read num: $numPcMemRead")
 
   val io = IO(new CtrlBlockIO())
+
+  val debugEn = backendParams.debugEn
 
   val dispatch = Module(new Dispatch)
   val gpaMem = wrapper.gpaMem.module
@@ -128,6 +136,7 @@ class CtrlBlockImp(
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
 
+  println(s"[CtrlBlock] pcMem read port for \"robFlush\": ${pcMemRdIndexes("robFlush").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
   val robFlushPCOffset = Reg(UInt(GuardedVAddrBits.W))
@@ -230,10 +239,12 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
+  println(s"[CtrlBlock] pcMem read port for \"redirect\": ${pcMemRdIndexes("redirect").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
   val mdpTrainValid = io.fromMem.mdpTrain.valid
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredLoad").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"memPredLoad\" index $i: $pcMemIdx")
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.ftqIdx.value
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset(), mdpTrainValid)
@@ -247,6 +258,7 @@ class CtrlBlockImp(
     memCtrl.io.memPredUpdate.wdata := true.B
   }
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"memPredStore\" index $i: $pcMemIdx")
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.stFtqIdx.value
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset(), mdpTrainValid)
@@ -271,7 +283,8 @@ class CtrlBlockImp(
     reset = reset
   )
 
-  for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
+  for ((pcMemIdx, i) <- pcMemRdIndexes("aluBjuPc").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"aluBjuPc\" index $i: $pcMemIdx. EXU index: $i")
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
@@ -281,17 +294,28 @@ class CtrlBlockImp(
     io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
+  private val pcReadExuParams = params.allExuParams.filter(_.needPc)
+  private val targetReadPcPortIndexes = params.allRealExuParams.filter(_.needTarget).map { targetExu =>
+    val pcPortIdx = pcReadExuParams.indexOf(targetExu)
+    require(pcPortIdx >= 0, s"${targetExu.name} needs target PC but has no matching pcMem read port")
+    pcPortIdx
+  }
+  require(targetReadPcPortIndexes.size == params.numTargetReadPort)
+  println(s"targetReadPcPortIndexes list: $targetReadPcPortIndexes")
+
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
-    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
-    val baseAddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
-    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
+    val pcPortIdx = targetReadPcPortIndexes(i)
+    println(s"[CtrlBlock] pcMem read port for \"bjuTarget\" index $i: $pcMemIdx. EXU index: $pcPortIdx")
+    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(pcPortIdx)
+    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(pcPortIdx).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
     io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
-  val baseIdx = params.BrhCnt
+  val baseIdx = params.aluBjuPcPortNum
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"load\" index $i: $pcMemIdx. EXU index: ${baseIdx + i}")
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(baseIdx+i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(baseIdx+i).value
@@ -302,6 +326,7 @@ class CtrlBlockImp(
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"hybrid\" index $i: $pcMemIdx.")
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
@@ -310,6 +335,7 @@ class CtrlBlockImp(
 
   if (EnableStorePrefetchSMS) {
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
+      println(s"[CtrlBlock] pcMem read port for \"store\" index $i: $pcMemIdx.")
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
       // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
@@ -329,6 +355,7 @@ class CtrlBlockImp(
   rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
   val tracePcStart = Wire(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"trace\" index $i: $pcMemIdx.")
     val traceValid = trace.toPcMem.blocks(i).valid
     pcMem.io.ren.get(pcMemIdx) := traceValid
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
@@ -466,108 +493,22 @@ class CtrlBlockImp(
   io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
   io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
 
-  // add decode Buf for in.ready better timing
-  /**
-   * Decode buffer: when decode.in cannot accept all insts, use this buffer to temporarily store insts that cannot
-   * be sent to DecodeStage.
-   *
-   * Decode buffer is a "DecodeWidth"-element long register Vector of DecodeInUop (in decodeBufBits), with valid signals
-   * (in decodeBufValid). At the same time, fetch insts input from frontend and their valid bits. All valid elements
-   * in these two vector of insts are at the beginning, with all invalid vector elements followed.
-   *
-   * After dealing with redirection, try to use all insts in decode buffer to fulfill decoder.io.in. If decode buffer
-   * has no valid insts, use insts from frontend to supply decoder.
-   */
+  io.frontend.toIBuf.fromCSR := io.fromCSR.toDecode
+  io.frontend.toIBuf.vstart := io.toDecode.vstart
 
-  /** Insts to be decoded, Registers in vector of DecodeWidth */
-  val decodeBufBits = Reg(Vec(DecodeWidth, new DecodeInUop))
+  if (debugEn) {
+    io.frontend.toIBuf.uopBufferNum.get := decode.out.toFrontend.uopBufferNum.get
+    io.frontend.toIBuf.accNum.get := decode.out.toFrontend.accNum.get
+  }
 
-  /** Valid receiving signals of instructions to be decoded, Registers in vector of DecodeWidth */
-  val decodeBufValid = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
-
-  /** Insts input from frontend, in vector of DecodeWidth */
   val decodeFromFrontend = io.frontend.cfVec
 
-  /** Insts in buffer that is not ready but valid in decodeBufValid */
-  val decodeBufNotAccept = VecInit(decodeBufValid.zip(decode.in.mop).map(x => x._1 && !x._2.ready))
-
-  /** Number of insts in decode buffer that is accepted. All accepted insts are before the first unaccepted one. */
-  val decodeBufAcceptNum = PriorityMuxDefault(decodeBufNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
-
-  /** Input valid insts from frontend that is not ready to be accepted, or decoder prefer insts in decode buffer */
-  val decodeFromFrontendNotAccept = VecInit(decodeFromFrontend.zip(decode.in.mop).map(x => decodeBufValid(0) || x._1.valid && !x._2.ready))
-
-  /** Number of input insts that is accepted.
-   * All accepted insts are before the first unaccepted one. */
-  val decodeFromFrontendAcceptNum = PriorityMuxDefault(decodeFromFrontendNotAccept.zip(Seq.tabulate(DecodeWidth)(i => i.U)), DecodeWidth.U)
-
-  if (backendParams.debugEn) {
-    dontTouch(decodeBufNotAccept)
-    dontTouch(decodeBufAcceptNum)
-    dontTouch(decodeFromFrontendNotAccept)
-    dontTouch(decodeFromFrontendAcceptNum)
+  decode.in.mop.zip(decodeFromFrontend).foreach { case (decodeIn, frontend) =>
+    decodeIn.valid := frontend.valid
+    decodeIn.bits.connectCtrlFlow(frontend.bits)
   }
 
-  /**
-   * State machine of "decodeBufValid(i)":
-   *   redirect || decodeBufValid(i) is the last accepted instr in decodeBuf:
-   *     false
-   *   decodeBufValid(i) is true, decodeBufNotAccept.drop(i) has some true signals
-   *     (decodeBufAcceptNum > DecodeWidth-1-i) ? false
-   *                                     if not : decodeBufValid(i+decodeBufAcceptNum)
-   *     Pop "decodeBufAcceptNum" insts out of the decodeBufValid, and move others forward
-   *   decodeBufValid(0) is false, decodeFromFrontendNotAccept.drop(i) has some true signals
-   *     (decodeFromFrontendAcceptNum > DecodeWidth-1-i) ? false
-   *                                              if not : decodeFromFrontend(i+decodeFromFrontendAcceptNum).valid
-   *     Get first "decodeFromFrontendAcceptNum" insts from decodeFromFrontend, and move others to decodeBufValid
-   *
-   * State machine of "decodeBufBits(i)":
-   *   decodeBufValid(i) is true, decodeBufNotAccept.drop(i) has some true signals
-   *     decodeBufBits(i+decodeBufAcceptNum)
-   *   decodeBufValid(0) is false, decodeFromFrontendNotAccept.drop(i) has some true signals
-   *     decodeFromFrontend(i+decodeFromFrontendAcceptNum)
-   */
-  for (i <- 0 until DecodeWidth) {
-    // decodeBufValid update
-    when(decode.in.redirect.valid || decodeBufValid(0) && decodeBufValid(i) && decode.in.mop(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
-      decodeBufValid(i) := false.B
-    }.elsewhen(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
-      decodeBufValid(i) := Mux(decodeBufAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeBufValid(i.U + decodeBufAcceptNum))
-    }.elsewhen(!decodeBufValid(0) && VecInit(decodeFromFrontendNotAccept.drop(i)).asUInt.orR) {
-      decodeBufValid(i) := Mux(decodeFromFrontendAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).valid)
-    }
-    // decodeBufBits update
-    when(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
-      decodeBufBits(i) := decodeBufBits(i.U + decodeBufAcceptNum)
-    }.elsewhen(!decodeBufValid(0) && VecInit(decodeFromFrontendNotAccept.drop(i)).asUInt.orR) {
-      decodeBufBits(i).connectCtrlFlow(decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).bits)
-    }
-  }
-  /** Insts input from frontend, in vector of DecodeWidth */
-  val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new DecodeInUop))
-  decodeConnectFromFrontend.zip(decodeFromFrontend).map(x => x._1.connectCtrlFlow(x._2.bits))
-
-  /**
-   * DecodeStage's input:
-   *   decode.in(i).valid:
-   *     decodeBufValid(0) is true : decodeBufValid(i)            | from decode buffer
-   *                         false : decodeFromFrontend(i).valid  | from frontend
-   *
-   *   decodeFromFrontend(i).ready:
-   *     decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.in.redirect
-   *     valid instr in input, no instr in decode buffer, decodeFromFrontend(i) is valid, no redirection
-   *
-   *   decode.in(i).bits:
-   *     decodeBufValid(i) is true : decodeBufBits(i)             | from decode buffer
-   *                         false : decodeConnectFromFrontend(i) | from frontend
-   */
-  decode.in.mop.zipWithIndex.foreach { case (decodeIn, i) =>
-    decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
-    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.in.redirect.valid
-    decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
-  }
-  /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
-  io.frontend.toIBuf.decodeCanAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.toIBuf.decodeCanAccept := decode.out.toFrontend.canAccept
 
   Seq(
     rename.io.intReadPorts -> decode.out.intRat,
