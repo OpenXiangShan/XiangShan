@@ -250,11 +250,13 @@ seed.
 The seed fails if any required class has a zero count, fewer than four mixed
 windows, no sample with two unresolved classes, or if final queue conservation
 fails. Each window first enqueues all five producer classes and may add an NC or
-MMIO load, then varies issue
-order, scalar store address/data order, vector address mode, mask, alignment,
-cache residency, translation state, and manager delay while scoreboards remain
-outstanding. A bounded drain occurs only after the window, preserving real
-heterogeneous overlap without allowing unbounded pointer reuse.
+MMIO load. Its vector members are complete legal 1..8-uop load/store
+instructions rather than representative single uops. Schema 42 rotates through
+all reachable direction x addressing x single/multi-uop composition classes,
+then varies issue order, scalar store address/data order, vector shape and
+policy, alignment, cache residency, translation state, and manager delay while
+scoreboards remain outstanding. A bounded drain occurs only after the window,
+preserving real heterogeneous overlap without allowing unbounded pointer reuse.
 
 ### Translation Closure Phases
 
@@ -478,8 +480,13 @@ and same-cycle isolation crosses are now executable, as are the complete legal
 whole-register NF/EEW matrix and ordinary unit-stride/strided/indexed
 EEW/SEW/LMUL/EMUL matrices. Schema-11 `random-mixed` now carries those ordinary
 vector shapes through the common constraint interface with per-seed coverage
-and uop conservation; heterogeneous overlap windows still use their baseline
-single-uop vector members. All six LSQ dispatch lanes now have passive
+and uop conservation. Schema 42 now uses complete legal 1..8-uop vector load
+and store instructions in every heterogeneous overlap window and closes all 16
+reachable direction x addressing x single/multi-uop composition bins. The
+focused `vector-issue-order` scenario independently checks a two-uop indexed-
+unordered instruction in both forward and reverse issue order, plus an
+eight-uop masked indexed-ordered instruction, using the same identity-matched
+per-element data oracle. All six LSQ dispatch lanes now have passive
 pre-edge acceptance and flow-count observation, including width histograms
 used by the common random coverage gate. Redirect cancellation is likewise
 sampled from the elaborated top after its defined latency and checked by the

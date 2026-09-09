@@ -3545,3 +3545,51 @@ The final verification pass completed all 195 Python unit tests,
 `check-rtl`, and a clean standard Picker harness rebuild plus `smoke` without
 the debug macro. The smoke test passed at cycle 38 on complete RTL SHA-256
 `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+### Schema-42 Heterogeneous Vector Closure And Picker 5.052 Recheck
+
+On 2026-09-10, Picker was repinned and rebuilt from scratch at
+`5e9e38d7087006440ae1c533073b13e798a36927`, with xcomm
+`29c290bb1f14fa2a4a72c01ab746a10cff504b2c` and Verilator 5.052. The forced
+`make -B picker-model JOBS=16` path completed export, model generation,
+mem-direct address-generator compilation, and linking. The export uses
+`--rw mem_direct`; a checked helper supplies the missing C++ language argument
+to Picker's nested export command. VPI is neither enabled nor called. The
+resulting 482,626-line `MemBlock_offset.yaml` has SHA-256
+`94939076a5b09e7438bb74d391fe62746a81ffcda650f933b4b28fcc6286608f`.
+
+The previously observed seed-42 vector-load mismatch was then reproduced and
+root-caused as illegal UT stimulus. The load used base `0x802106e0` and index
+`0x10`, so its effective address was `0x802106f0`, the address of a younger
+scalar store. Its SQ value was 1, but the generator had forced `sq_flag=0`
+after the absolute SQ cursor had wrapped and required flag 1. The RTL therefore
+legally treated the scalar store as older and forwarded `0xc8`, while the UT's
+invalid age model expected the pre-store byte `0x33`. Vector-load SQ,
+vector-store LQ, and vector-store-readback SQ value/flag pairs now derive from
+their respective single absolute cursors. This is a generator-legality fix;
+no `CPU_BUG_*` report is warranted and no internal signal enters the oracle.
+
+The 160-action reduced seed-42 replay constrained traffic to scalar and vector
+loads/stores plus prefetch, Bare translation, and masked/VMA indexed-unordered
+EEW64/SEW8/LMUL1/EMUL8 vectors. It passed at cycle 8,465 with six
+heterogeneous windows, 176 ordinary vector uops, 139/66 vector load/store
+writebacks, 48/48 concurrent vector load/store uops, and exact queue accounting
+of LQ `378+1/379` and SQ `182+0/182`. The focused `vector-issue-order` test also
+passed all three cases and 12 uops: indexed-unordered two-uop traffic in both
+forward and reverse issue order and one eight-uop masked indexed-ordered case.
+
+The full schema-42 coverage replay
+`random-mixed --seed 42 --transactions 3072 --constraints coverage` passed at
+cycle 3,128,557. It reached all 16 enabled heterogeneous direction x addressing
+x single/multi-uop vector classes, 28 heterogeneous windows, 95/67 concurrent
+vector load/store uops, 1,046/1,003 vector load/store writebacks, LQ
+`76312+27/76339`, SQ `37369+0/37369`, 78,779 DCache refills, one AcquirePerm,
+and 78,780 GrantAcks. The identical-size SPEC-profile replay exceeded its
+2,400-second external timeout before printing a terminal summary. That run is
+incomplete, not a PASS and not an RTL failure; it requires a later replay with
+at least a 3,600-second allowance.
+
+The final local verification passed all 202 Python unit tests, `check-rtl`,
+`git diff --check`, and the standard non-debug `smoke` at cycle 38 on complete
+RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.

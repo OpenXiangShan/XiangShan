@@ -188,7 +188,7 @@ scenario implementations:
 | Atomic subtype, errors, and Probe composition | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences. Schema 18 adds `atomic-error`/`atomic-error-denied`, closes all 18 enabled family x width x clean/corrupt/denied outcomes, and checks the exact exception plus two-beat refill, errored GrantAck/refill, unchanged manager memory at response time, and deterministic poisoned-line cache image if it is later released. LRSC error actions stop at LR because a cold SC cannot request a refill. Schema 37 adds `atomic-probe-depth0`..`atomic-probe-depth8`, closes all 54 successful family x width x depth bins, and checks exact old-value/result, cold target refill attribution, accepted Probe depth, source/address completion, zero auxiliary data, and manager conservation | Cross-hart reservation interference remains integration-level; compose atomics with replacement traffic after its external ordering oracle is modeled |
 | Hypervisor subtype, effective privilege, alignment, PBMT, PMA class, and PMP edge relation | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation operations. Schema 22 adds `hypervisor-spvp-user`, maps independent U=1 VS regions for all four 4-KiB/Svnapot VS/G leaf combinations to known physical bytes, and closes every enabled family x SPVP=S/U cross per seed. Schema 23 reuses `misaligned` and closes every enabled family x SPVP x aligned/misaligned cross with a physical data/side-effect oracle. Schema 24 adds the five-pair `PMA/PMA`, `PMA/NC`, `PMA/IO`, `NC/IO`, and `IO/NC` PBMT basis and closes every enabled family x SPVP x PBMT pair while checking final PA, bytes, and DCache/Uncache route. Schema 25 adds `hypervisor-pma-device` and closes every enabled family x SPVP x DDR/fixed-device cross. Schema 26 adds no-PMP/first/last/below/above/cross-lower/cross-upper weights for a 4-KiB NAPOT allow region nested in a 16-KiB deny region and closes every family x SPVP x relation with exact fault, manager, queue-recovery, and post-HSV HLV-readback checks | Compose non-PMA PBMT with misalignment only after its exception-priority contract is modeled; add other fixed-PMA boundaries and PMP sizes/TOR/lock/permission/overlap-by-edge crosses to the same class |
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths. Schema 36 adds `cmo-probe-depth1`..`cmo-probe-depth8`, holds C until every B request is accepted while CBOAck remains pending, and closes 48 operation x line-state x depth bins with exact source/address/data and manager conservation | Add multiple simultaneous CMO sources and composition with replacement/atomic traffic |
-| Ordinary vector shape | Schema 41 enumerates all legal direction x addressing x EEW/SEW/LMUL combinations, derives EMUL from the RVV relation, prioritizes uncovered crosses, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and retains the independent per-element data/readback oracle | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
+| Ordinary vector shape | Schema 42 retains the schema-41 legal direction x addressing x EEW/SEW/LMUL cross and derived EMUL, expands every instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and retains the independent per-element data/readback oracle. Heterogeneous windows now contain complete legal vector load/store instructions and close the 16 reachable direction x addressing x single/multi-uop classes | Cross all 624 exact ordinary shapes against the other four concurrent producer classes only if that extra Cartesian coverage proves useful; current windows deliberately close the coarser composition classes while global shape closure remains exact |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction and errors | `nc-store` and `mmio-store` steer load/store direction. Schema 16 adds `uncache-error` and `uncache-load-error-denied`; all enabled NC/MMIO x load/store x legal clean/corrupt/denied outcomes close per seed. Loads require exact HardwareError/LoadAccessFault, MMIO denied stores require final StoreAccessFault, and committed NC denied stores require only an external error report, unchanged memory, normal SQ dequeue, and no redirect | Concurrent special stores and malformed/duplicate/early/late responses remain deferred |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
@@ -391,7 +391,7 @@ The corresponding constrained-random audit is:
 
 | Observed priority class | Canonical `random-mixed` coverage | Remaining limitation |
 | --- | --- | --- |
-| Ordinary and segment vector memory | Schema 41 closes ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses; segment matrices, mask/tail policy, `vl`/`vstart`, NF, translation, and exact per-element data oracle remain active | Full vector shapes are not yet placed in every heterogeneous overlap slot |
+| Ordinary and segment vector memory | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and now places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Sixteen direction x addressing x single/multi-uop composition classes close independently; segment matrices, mask/tail policy, `vl`/`vstart`, NF, translation, and the exact per-element data oracle remain active | The full 624-way ordinary-vector shape cross is closed globally, but is not separately crossed against every other producer in the heterogeneous window |
 | DCache bank conflict/replay | Schema 40: resident 2/3-way x eight address banks x Bare/stage-1/nested as stimulus coverage, with only identity-matched terminal data/writeback/LQ conservation used as the oracle | Vector/atomic same-bank composition is still open |
 | Miss-queue multi-enqueue | Schema 39: distinct-line depth 2..16 x initial issue width 1..3 x translation, with held-response outstanding-depth oracle | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
 | Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema-40 resident same-bank traffic may incidentally create pressure, but replay/reject observations remain diagnostic | An externally attributable miss-queue-reject stimulus and oracle remain open, as do malformed replay responses |
@@ -427,7 +427,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=41`, the resolved target weights,
+Every terminal line prints `constraint_schema=42`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -447,6 +447,13 @@ the 896-slot `actual_vector_cross` direction x addressing x EEW x SEW x LMUL
 cross, of which 624 legal RVV classes are enabled;
 uops must remain in the architectural 1..8
 range and any enabled multi-uop shape must produce a multi-uop instruction.
+Schema 42 additionally reports `actual_concurrent_vector_shape` for the 16
+direction x addressing x single/multi-uop classes and
+`actual_concurrent_vector_uops` for load/store uop conservation. Each
+heterogeneous window contains one complete vector load and store selected from
+the enabled legal shape set, subject only to the external LQ/SQ flow capacity
+of that window. These are stimulus-coverage gates; terminal data, exceptions,
+identity, cancellation, and queue conservation remain the correctness oracle.
 The five ordinary-vector binary policies report false/true instruction counts.
 A target of zero permits only false, 1000 permits only true, and an intermediate
 target requires both; each pair also conserves against
@@ -547,6 +554,13 @@ relations and policy-incompatible VLMAX classes remain zero. The cross and all
 five ordinary shape marginals are conserved, and each enabled legal class must
 occur once per run. This is a stimulus closure gate, independent of the exact
 vector data/readback oracle.
+Schema 42 replaces the heterogeneous window's former single-uop vector
+members with complete ordinary vector instructions drawn from the same legal
+shape space. Selection rotates across every enabled direction/addressing/
+single-versus-multi class that fits the window's externally modeled queue-flow
+budget. The online and offline gates require all 16 reachable classes and
+conserve instruction and uop counts; they do not predict bank selection,
+replay count, prefetch traffic, or completion timing.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and
@@ -622,3 +636,8 @@ Scalar store retirement uses the same enqueue-time target. This matters for a
 misaligned store held at the ROB head: it can legally leave the SQ while the
 other transaction classes in the overlap window are still draining, before
 the driver reaches its explicit architectural-memory update.
+Every generated LQ/SQ identity derives its modulo value and wrap flag from the
+same absolute cursor. The pair is an input-legality invariant: changing only
+the flag changes architectural age and may make a younger store legally
+forward to a load. It is therefore checked by UT unit tests but is not inferred
+from DUT internals or used as a replacement for the architectural data oracle.

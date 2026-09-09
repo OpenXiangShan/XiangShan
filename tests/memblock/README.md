@@ -132,6 +132,10 @@ single generated `example.cpp`. `scripts/prepare_picker_harness.py` copies the
 module trees beside that file, and the Makefile includes every module in build
 dependencies and controller provenance hashes. This keeps compilation and ABI
 behavior unchanged while making ownership and review boundaries explicit.
+The Picker export enables read-only `mem_direct`, generates and copies
+`MemBlock_offset.yaml`, and does not enable VPI. `mem_direct` access is used
+only for optional RTL localization; architectural PASS/FAIL never depends on
+an internal signal.
 
 The reusable environment components provide:
 
@@ -201,7 +205,9 @@ MemBlock model from `tests/memblock`.
 
 The environment used for the recorded results was Ubuntu 24.04 with JDK 17,
 Mill 0.12.3, Python 3.12, GNU Make 4.3, GCC/G++ 13.3, CMake 3.28, and Verilator
-5.048. These are a known-working baseline, not all strict minimum versions.
+5.048 or 5.052. A forced clean model build has qualified Picker
+`5e9e38d7087006440ae1c533073b13e798a36927` with Verilator 5.052. These are
+known-working baselines, not all strict minimum versions.
 Picker requires SWIG 4.2 or newer; `bootstrap-picker` uses a system SWIG when
 available and otherwise attempts a local extraction with `apt-get download`
 and `dpkg-deb`.
@@ -240,7 +246,9 @@ compile. Later test targets reuse
 rebuild the small C++ harness after a testbench source change. A successful
 bootstrap records the exact Picker/xcomm revisions and executable path in
 `build/memblock/tools/picker.json`; the generated RTL identity is recorded in
-`build/memblock/rtl.json`.
+`build/memblock/rtl.json`. The model build also writes the generated read-only
+offset map to `build/memblock/picker/MemBlock_offset.yaml`. Picker's generic
+base may compile unused VPI methods, but this UT neither enables nor calls VPI.
 
 For an existing Picker binary, skip `bootstrap-picker` and pass it explicitly:
 
@@ -985,9 +993,11 @@ another scenario implementation. See
 interface, preset values, SPEC counter calibration, and coverage gates.
 The mixed scenario keeps heterogeneous transactions outstanding in one
 simulation. Its constrained-random tail enqueues scalar load, scalar store,
-vector load, vector store, and software prefetch in the same rolling window,
+one complete 1..8-uop vector load, one complete 1..8-uop vector store, and
+software prefetch in the same rolling window,
 can add legal NC/MMIO load overlap, then randomizes issue order, store
-address/data order, and vector mode before a bounded drain. Atomic traffic stays
+address/data order, and the legal vector addressing/EEW/SEW/LMUL/EMUL shape
+before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family, W/D width, D-channel error presence/kind, and atomic

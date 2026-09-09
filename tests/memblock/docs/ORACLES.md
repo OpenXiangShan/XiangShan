@@ -35,6 +35,12 @@ historical failing value.
    coherence actions. Directly rewriting backing memory behind a potentially
    resident line does not require the DUT to observe the new bytes and cannot
    form a valid load-data oracle.
+9. Generate every circular LQ/SQ identity as one `(value, wrap flag)` pair from
+   a single absolute cursor. This is an input-legality rule, not an observation
+   of RTL state. An inconsistent pair changes the specified age and forwarding
+   relation; a mismatch caused by such stimulus is a UT error, while expected
+   load/store data is still calculated independently from the legal pair and
+   architectural memory model.
 
 The translation oracle follows the supported Kunminghu-v2 mode set, rather
 than treating all page-based modes as interchangeable: `satp`/`vsatp` support
@@ -267,8 +273,8 @@ over-constraining implementation timing:
   one target PTE are permitted and conserved; malformed response injection is
   planned;
 - an accepted non-canceled operation eventually completes under a fair agent;
-- queue pointers may wrap, but identity flags and architectural age remain
-  unambiguous.
+- queue pointers may wrap, but each value/flag pair is generated atomically and
+  identity flags and architectural age remain unambiguous.
 
 The oracle never requires a particular number of retries, a particular cache
 bank, an internal FSM state, or a fixed cycle count unless the public protocol
