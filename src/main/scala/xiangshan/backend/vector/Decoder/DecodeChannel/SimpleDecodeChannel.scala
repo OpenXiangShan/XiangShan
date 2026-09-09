@@ -9,6 +9,7 @@ import utility.LookupTree
 import xiangshan.CommitType
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.isa.Instructions.ZICBOType
 import xiangshan.backend.decode.opcode.Opcode
@@ -27,7 +28,7 @@ import xiangshan.backend.vector.HasSimpleSettings
 import xiangshan._
 
 @instantiable
-class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
+class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
   import SimpleDecodeChannel._
 
@@ -54,9 +55,11 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   println("[tmp-SimpleDecodeChannel]")
   patternsCboI2f.foreach(println)
 
-  val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i))
-  val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i))
-  val fuTypeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new FuTypeField(i))
+  val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i, extensions))
+  val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i, extensions))
+  val fuTypeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new FuTypeField(i, extensions))
+  val numUopOhField = new NumUopOhField(extensions)
+  val numUopField = new NumUopField(extensions)
 
   val isJFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJField(i))
   val isJrFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJrField(i))
@@ -68,8 +71,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     SelImmField,
     CommitTypeField,
     CanRobCompressField,
-    NumUopField,
-    NumUopOhField,
+    numUopField,
+    numUopOhField,
     NeedFsField,
     PrivExceptionCauseField,
     NumWbField,
@@ -98,8 +101,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   val fflagsWen      = result(FFlagsWenField)
   val commitType     = result(CommitTypeField)
   val canRobCompress = result(CanRobCompressField)
-  val numUop         = result(NumUopField)
-  val numUopOH       = result(NumUopOhField)
+  val numUop         = result(numUopField)
+  val numUopOH       = result(numUopOhField)
   val numWb          = result(NumWbField)
 
   val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
@@ -222,7 +225,7 @@ object SimpleDecodeChannelMain extends App {
   val targetDir = "build/decoder"
 
   Verilog.emitVerilog(
-    new SimpleDecodeChannel(insts)(defaultConfig),
+    new SimpleDecodeChannel(insts, extensions)(defaultConfig),
     Array("--full-stacktrace", "--target-dir", targetDir),
   )
 

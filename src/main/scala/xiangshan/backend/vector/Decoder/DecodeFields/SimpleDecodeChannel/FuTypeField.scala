@@ -2,6 +2,7 @@ package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.UInt
 import chisel3.util.BitPat
+import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
@@ -12,13 +13,13 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import scala.language.implicitConversions
 
 
-class FuTypeField(uopIdx: Int) extends DecodeField[InstPattern, UInt]{
+class FuTypeField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[InstPattern, UInt]{
   override def name: String = s"fuType$uopIdx"
 
   override def chiselType: UInt = FuType()
 
   override def genTable(op: InstPattern): BitPat = {
-    val uopSeq = UopInfoFieldSimple.genUopSeq(op)
+    val uopSeq = UopInfoFieldSimple.genUopSeq(op, extensions)
     if (!uopSeq.isDefinedAt(uopIdx)) {
       return default
     }

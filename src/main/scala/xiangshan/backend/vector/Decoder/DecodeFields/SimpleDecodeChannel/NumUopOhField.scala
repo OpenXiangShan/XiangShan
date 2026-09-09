@@ -2,12 +2,13 @@ package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3._
 import chisel3.util.BitPat
+import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 
-object NumUopOhField extends DecodeField[
+class NumUopOhField(extensions: Seq[ExtBase]) extends DecodeField[
   InstPattern,
   UInt,
 ] {
@@ -16,7 +17,7 @@ object NumUopOhField extends DecodeField[
   override def chiselType: UInt = NumUopOH()
 
   override def genTable(op: InstPattern): BitPat = {
-    val uopSeq = UopInfoFieldSimple.genUopSeq(op)
+    val uopSeq = UopInfoFieldSimple.genUopSeq(op, extensions)
 
     uopSeq.length match {
       // produce 1 uop to hold illegal instruction info

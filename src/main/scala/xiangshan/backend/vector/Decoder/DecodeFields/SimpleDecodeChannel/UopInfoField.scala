@@ -2,7 +2,7 @@ package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3._
 import chisel3.util.{BitPat, ValidIO}
-import xiangshan.backend.decode.isa.Extensions
+import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameSimple
@@ -11,7 +11,7 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
 
 
-class UopInfoField(uopIdx: Int) extends DecodeField[InstPattern, ValidIO[UopInfoRenameSimple]] {
+class UopInfoField(uopIdx: Int, extensions: Seq[ExtBase]) extends DecodeField[InstPattern, ValidIO[UopInfoRenameSimple]] {
 
   override def name: String = s"uopInfo$uopIdx"
 
@@ -29,8 +29,8 @@ class UopInfoField(uopIdx: Int) extends DecodeField[InstPattern, ValidIO[UopInfo
     //   case e: Throwable => throw e
     // }
 
-    if (UopInfoFieldSimple.genUopSeq(op).isDefinedAt(uopIdx)) {
-      BitPat.Y(1) ## UopInfoFieldSimple.genUopSeq(op)(uopIdx).genUopInfoRenameSimpleBitPat
+    if (UopInfoFieldSimple.genUopSeq(op, extensions).isDefinedAt(uopIdx)) {
+      BitPat.Y(1) ## UopInfoFieldSimple.genUopSeq(op, extensions)(uopIdx).genUopInfoRenameSimpleBitPat
     } else {
       default
     }
@@ -40,12 +40,12 @@ class UopInfoField(uopIdx: Int) extends DecodeField[InstPattern, ValidIO[UopInfo
 
 object UopInfoFieldSimple {
 
-  def genUopSeq(op: InstPattern): Seq[Opcode] = {
-    this.genUopSeqImpl(op)
+  def genUopSeq(op: InstPattern, extensions: Seq[ExtBase]): Seq[Opcode] = {
+    this.genUopSeqImpl(op, extensions)
   }
 
-  def genUopSeqImpl(instP: InstPattern): Seq[Opcode] = {
-    Extensions.extensions.map(_.table).reduce(_ ++ _)(instP.bitPat)
+  def genUopSeqImpl(instP: InstPattern, extensions: Seq[ExtBase]): Seq[Opcode] = {
+    extensions.map(_.table).reduce(_ ++ _)(instP.bitPat)
   }
 
 }

@@ -91,7 +91,7 @@ class DecodeChannels(
 //  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
 //  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
-  val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts))
+  val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, extensions))
   val pseudoDecodeChannel: Definition[PseudoDecodeChannel] = Definition(new PseudoDecodeChannel())
 
 //  out.bits.imm := Mux1HLookUp(
