@@ -42,7 +42,7 @@ class ContractUpdate:
 
 _CACHEABLE = "PMA可缓存且可执行地址"
 _REVIEW = "RTL_REVIEW:c0ca46459"
-_CURRENT_REVIEW = "RTL_REVIEW:e5c70547f"
+_CURRENT_REVIEW = "RTL_REVIEW:3448f4ad4"
 _SUPERSEDED_EVIDENCE = {
     "BIN-1067": (
         f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "

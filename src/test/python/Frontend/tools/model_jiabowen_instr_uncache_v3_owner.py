@@ -31,7 +31,7 @@ _PILOT_PATH = (
 _GROUP = "ifu_instruncache_owner_v3"
 _COVERPOINT = "protocol_leaf"
 _MODEL_EVIDENCE = "MODEL:sample_instr_uncache_owner_coverage"
-_CURRENT_V3_DESIGN_BASELINE = "e5c70547f3a966accf20a4b065ec1d8e33443180"
+_CURRENT_V3_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
 _OBSOLETE_HALF_STATE_TERMS = (
     "halfPc",
     "halfData",

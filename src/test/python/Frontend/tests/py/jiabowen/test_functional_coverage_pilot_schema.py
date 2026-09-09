@@ -950,6 +950,6 @@ def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
 def test_instr_uncache_model_emits_atomic_current_v3_half_contract():
     snapshot = instr_uncache_model.current_v3_contract_snapshot()
 
-    assert snapshot["design_baseline"].startswith("e5c70547f")
+    assert snapshot["design_baseline"].startswith("3448f4ad4")
     assert snapshot["half_state_contract"] == "Valid EndHalfRviInfo / halfRviInfo"
     assert snapshot["legacy_aliases_input_only"] is True

@@ -11,8 +11,9 @@ from env.runtime.pylib import frontend_offset_path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[7]
-_EXPECTED_IMPLEMENTATION = "1a32a9056d993233fa1bf3a394b16e8a762abf52"
-_EXPECTED_DESIGN_BASELINE = "e5c70547f3a966accf20a4b065ec1d8e33443180"
+_EXPECTED_IMPLEMENTATION = "7062a34987e5b97da6f8ecd0d9e8c7b0ef97b535"
+_EXPECTED_SOURCE = "064632f22959c7184634b72ebf3722e30404cbfc"
+_EXPECTED_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
 _REQUIRED_IFU_KEYS = (
     "req_valid",
     "req_ready",
@@ -44,7 +45,7 @@ def test_bin814_review_is_bound_to_the_current_dut_manifest() -> None:
     manifest = json.loads(_read(manifest_path))
 
     assert manifest["implementation_sha"] == _EXPECTED_IMPLEMENTATION
-    assert manifest["dut_source_sha"] == _EXPECTED_IMPLEMENTATION
+    assert manifest["dut_source_sha"] == _EXPECTED_SOURCE
     assert manifest["design_baseline_sha"] == _EXPECTED_DESIGN_BASELINE
     assert manifest["source_tree_dirty"] is False
 
