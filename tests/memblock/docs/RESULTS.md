@@ -3584,10 +3584,20 @@ cycle 3,128,557. It reached all 16 enabled heterogeneous direction x addressing
 x single/multi-uop vector classes, 28 heterogeneous windows, 95/67 concurrent
 vector load/store uops, 1,046/1,003 vector load/store writebacks, LQ
 `76312+27/76339`, SQ `37369+0/37369`, 78,779 DCache refills, one AcquirePerm,
-and 78,780 GrantAcks. The identical-size SPEC-profile replay exceeded its
-2,400-second external timeout before printing a terminal summary. That run is
-incomplete, not a PASS and not an RTL failure; it requires a later replay with
-at least a 3,600-second allowance.
+and 78,780 GrantAcks. An initial identical-size SPEC replay exceeded its
+2,400-second external timeout before printing a terminal summary; that attempt
+was correctly classified as incomplete rather than PASS or RTL failure.
+
+Repeating the exact SPEC command with a 4,800-second allowance completed with
+return code zero in about 45.5 minutes at cycle 7,038,903. It produced 71,729
+scalar-load, 33,069 scalar-store, 1,019 vector-load, 966 vector-store, and 53
+prefetch writebacks; 78,070 DCache refills, three AcquirePerms, 78,073
+GrantAcks, 592 Probes, and 33,081 ReleaseData transactions. All 16 concurrent
+vector classes were nonzero across 42 heterogeneous windows, with 86/71
+concurrent vector load/store uops. Queue accounting closed at LQ
+`75704+2/75706` and SQ `36997+0/36997`. This supersedes only the incomplete
+timeout result; it does not turn any internal bank, replay, or prefetch count
+into a correctness oracle.
 
 The final local verification passed all 202 Python unit tests, `check-rtl`,
 `git diff --check`, and the standard non-debug `smoke` at cycle 38 on complete
