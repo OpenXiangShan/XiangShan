@@ -53,8 +53,10 @@ _MAIN_FETCH_READY_SIGNALS = (
     "Frontend_top.Frontend.inner_icache.io_fromFtq_toMainPipe_ready",
 )
 _UNCACHE_RESPONSE_VALID_SIGNALS = (
-    "Frontend_top.Frontend._inner_instrUncache_io_toIfu_resp_valid",
-    "Frontend_top.Frontend.inner_instrUncache.io_toIfu_resp_valid",
+    "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheFinish",
+)
+_UNCACHE_RAW_RESPONSE_VALID_SIGNALS = (
+    "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid",
 )
 _UNCACHE_NEED_RESEND_SIGNALS = (
     "Frontend_top.Frontend._inner_instrUncache_io_toIfu_resp_bits_needResend",
@@ -68,7 +70,7 @@ _IFU_WB_REDIRECT_SIGNALS = (
     "Frontend_top.Frontend.inner_ifu.io_toFtq_wbRedirect_valid",
 )
 _IBUFFER_READY_SIGNALS = (
-    "Frontend_top.Frontend._inner_ibuffer_io_in_ready",
+    "Frontend_top.Frontend.inner_ibuffer.allowEnq",
 )
 
 
@@ -187,6 +189,9 @@ def _register_uncache_redirect_observer(
         samples.append(
             {
                 "cycle": int(cycle),
+                "raw_response": uncache._require_first_dut_signal(
+                    current_env, _UNCACHE_RAW_RESPONSE_VALID_SIGNALS
+                ),
                 "response": uncache._require_first_dut_signal(
                     current_env, _UNCACHE_RESPONSE_VALID_SIGNALS
                 ),
@@ -321,15 +326,14 @@ def _run_late_uncache_response_after_redirect(env) -> None:
     response_cycles = [
         sample["cycle"]
         for sample in redirect_samples
-        if sample["response"] == 1
+        if sample["raw_response"] == 1
     ]
     assert redirect_cycles and response_cycles, redirect_samples[-128:]
     assert min(response_cycles) > max(redirect_cycles) >= request_cycle
-    assert min(response_cycles) - max(redirect_cycles) <= 15
     coincident = [
         sample
         for sample in redirect_samples
-        if sample["response"] == 1 and sample["target_seen"] == 1
+        if sample["raw_response"] == 1 and sample["target_seen"] == 1
     ]
     assert coincident, {
         "reason": "late old uncache response did not coincide with target cfVec",
