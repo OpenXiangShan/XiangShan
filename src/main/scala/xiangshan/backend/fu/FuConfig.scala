@@ -687,7 +687,7 @@ object FuConfig {
   val VfmaCfg = FuConfig (
     name = "vfma",
     fuType = FuType.vfma,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
