@@ -29,6 +29,7 @@ loop_tail:
 done:
     addi a0, zero, 0
     .word 0x0005006b
-    .rept 16
+    # Keep speculative fetches after the good-trap in valid instruction data.
+    .rept 64
     nop
     .endr
