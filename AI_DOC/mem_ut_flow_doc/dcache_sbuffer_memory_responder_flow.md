@@ -64,7 +64,8 @@ flowchart TD
 DCache：
   确认 A/C fire 后建立 coherent response record；
   以 DCache 自己的 admission、delay timer、选择模式和 D hold 返回 Grant/CBOAck/ReleaseAck；
-  Grant 的 sink 在 E.fire 后才释放；Probe/C assembly 仍由 DCache 私有 owner 处理。
+  Grant 的 sink 在 E.fire 后才释放；E.fire 的 sink 在 hard X/Z 检查开启时必须先通过四态检查，未知值
+  只报告错误并保留 owner；关闭检查时沿用原有二态匹配；Probe/C assembly 仍由 DCache 私有 owner 处理。
 
 Uncache：
   确认 A.fire 后先用白名单解码 PutFullData/PutPartialData/Get；

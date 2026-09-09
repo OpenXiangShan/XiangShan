@@ -3408,16 +3408,22 @@ function void dcache_mem__access_base_sequence::process_d_fire();
 endfunction:process_d_fire
 
 function void dcache_mem__access_base_sequence::process_e_fire();
+    logic [9:0] raw_observed_sink;
     bit [9:0] observed_sink;
 
     if (grant_ack_wait_q.size() == 0) begin
         `uvm_fatal(get_type_name(), "unexpected E.valid when no GrantAck is pending")
     end
+    // 中文注释：严格 X/Z 检查开启时，先保留 DUT E.sink 的四态值；未知 payload
+    // 只能报告错误，不能被折叠成 0 后误消费 GrantAck owner。
+    raw_observed_sink = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink;
     if (seq_csr_common::get_hard_xz_check_en() &&
-        $isunknown(dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink)) begin
+        $isunknown(raw_observed_sink)) begin
         `uvm_error(get_type_name(), "GrantAck E.bits.sink sampled as X/Z on E.fire")
+        return;
     end
-    observed_sink = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink;
+    // hard X/Z 检查关闭时保留原有 logic 到 bit 的转换和匹配行为。
+    observed_sink = raw_observed_sink;
     foreach (grant_ack_wait_q[i]) begin
         if (grant_ack_wait_q[i].sink == observed_sink) begin
             record_cached_line(grant_ack_wait_q[i].line_addr, grant_ack_wait_q[i].line_alias);

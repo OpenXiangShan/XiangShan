@@ -252,13 +252,16 @@ GrantAck wait 占用的编号；`process_e_fire()` 按 DUT E sink 唯一完成 G
 ```text
 Acquire record 创建时：分配未用 sink 并写入 D payload；
 Grant 最后 D.fire：D record 删除，{line_addr, line_alias, sink} 写入 grant_ack_wait_q；
-E.fire：E.bits.sink 必须已知；按 sink 查 grant_ack_wait_q；
-  命中：record_cached_line(line_addr, line_alias)，把 line record 置为 ACTIVE，删除 wait record，sink 释放；
-  无命中：fatal。
+E.fire：先把 E.bits.sink 采样到四态临时值；
+  hard X/Z 检查开启且值含 X/Z：报告 UVM_ERROR，保留 GrantAck owner，不推进 line 生命周期；
+  其它情况：按 sink 查 grant_ack_wait_q；
+    命中：record_cached_line(line_addr, line_alias)，把 line record 置为 ACTIVE，删除 wait record，sink 释放；
+    无命中：fatal。
 ```
 
-`E.valid` 在没有 GrantAck owner 时也是协议错误。`E.bits.sink` 在 E.fire 为 X/Z 会立即 fatal，
-不能因二态转换被误匹配到 sink 0。
+`E.valid` 在没有 GrantAck owner 时也是协议错误。`process_e_fire()` 始终先用四态临时值采样
+`E.bits.sink`；只有 `MEMBLOCK_HARD_XZ_CHECK_EN=1` 时才用 `$isunknown()` 拒绝未知值并报告
+`UVM_ERROR`。开关为 0 时继续执行原有 `logic -> bit` 转换和匹配，因此保留关闭诊断时的二态折叠兼容行为。
 
 ### 5.2 `service_hint()`
 

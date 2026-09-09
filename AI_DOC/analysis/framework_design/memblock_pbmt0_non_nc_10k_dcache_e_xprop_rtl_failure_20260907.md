@@ -71,10 +71,11 @@ writeback valid 为 X。
 输出 E.valid，账本已经没有 owner，才在 `mem_base_sequence.sv:4025` 报出
 `E.valid observed without a pending GrantAck owner`。
 
-这暴露了测试框架在关闭硬 X/Z 检查时会把 malformed E payload 静默二态化的健壮性缺口；它应在
-后续独立的测试框架修复中保留四态 payload 或无条件把 E.fire 的未知 `sink` 报为错误并禁止清账。
-但它不能产生 DUT 的 `E.valid/E.sink` X，因而不是本次 RTL 问题的根因，也不能通过吞掉 fatal
-作为 RTL 修复。
+这暴露了测试框架在关闭硬 X/Z 检查时会把 malformed E payload 静默二态化的健壮性缺口。该缺口
+已由后续 plan `mem_ut_v2_dcache_grantack_e_sink_xz_gate_plan_20260909.md` 修复为门控语义：
+函数始终以四态临时值采样 E.sink；硬 X/Z 检查开启时，未知值报告 `UVM_ERROR` 并禁止清账，
+关闭时保持原有二态折叠。这个框架修复不会产生 DUT 的 `E.valid/E.sink` X，因而不改变本次
+RTL 问题根因，也不能通过吞掉 fatal 作为 RTL 修复。
 
 ## DUT/TB 方向与排除项
 

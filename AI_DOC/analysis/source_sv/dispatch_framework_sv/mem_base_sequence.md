@@ -139,10 +139,14 @@ GrantData：第一个 D.fire 仅推进 beat_idx；最后 beat 才结束 record�
 Grant/GrantData 最后 D.fire：将 {line, alias, sink} 转入 grant_ack_wait_q，并将 line record 标记为 GRANT_WAIT_E；
 CBOAck/ReleaseAck 最后 D.fire：释放 record；CBOAck 仅校验并清 context，命中 CBO 的 line 更新已在 Probe C
   完成时执行；
-E.fire：E.bits.sink 必须已知并唯一命中 grant_ack_wait_q；命中后建立 ACTIVE line record，释放 sink；
+E.fire：先以四态临时值采样 E.bits.sink；hard X/Z 检查开启且值未知时报告 UVM_ERROR 并保留
+  grant_ack_wait_q owner；否则按 sink 唯一命中 grant_ack_wait_q，命中后建立 ACTIVE line record，释放 sink；
 ```
 
-`process_e_fire()` 拒绝 X/Z sink 和未知 sink，防止二态折叠把错误 GrantAck 误匹配为 sink 0。
+`process_e_fire()` 始终先把 DUT 的 E.sink 保存为 `logic [9:0]`。当
+`MEMBLOCK_HARD_XZ_CHECK_EN=1` 且 `$isunknown()` 命中时，函数报告 `UVM_ERROR` 后返回，
+不调用 `record_cached_line()`，也不删除 `grant_ack_wait_q` owner；当开关为 0 时仍执行原有
+`logic -> bit` 转换，因此兼容关闭硬 X/Z 检查时的二态折叠行为。
 
 ### 3.6 `start_c_assembly()`、`consume_c_beat()` 与 `complete_release_c_assembly()`
 
