@@ -49,7 +49,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
-| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains nine or ten same-set clean loads or dirty stores |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor`, `cmo`, `ptw-error`, `load-merge`, `set-pressure`, `miss-burst` | Relative special-operation weights. `load-merge` is one compound action containing two or three same-line scalar loads; `set-pressure` contains same-set replacement traffic; `miss-burst` issues distinct cold-line scalar loads while their refills are held |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `atomic-error` | Per-mille share of atomic actions receiving an address-qualified error on a cold AcquireBlock; zero strictly disables injection |
@@ -82,6 +82,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response per selected pressure set while replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
 | `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
 | `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independently allocated pressure sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected set |
+| `miss-burst-depth2` .. `miss-burst-depth16` | Relative weights for the number of distinct cold cache lines held outstanding in one ordinary-load burst; the ceiling is the generated DCache miss-entry count |
+| `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative weights for the same-cycle scalar-load issue width at the head of a burst; widths larger than the chosen depth are excluded |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -141,9 +143,10 @@ the PMA/PMA PBMT pair and an aligned class; a device-only mix cannot enable a
 non-PMA PBMT pair or misalignment.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
-`random-mixed` requires at least 2112 actions so the mandatory architectural
+`random-mixed` requires at least 2304 actions so the mandatory architectural
 prefix, eight replacement windows, the 48 CMO/Probe bins, the 54 atomic/Probe
-bins, and each enabled constrained class can coexist.
+bins, all enabled ordinary miss-burst depth/width/translation bins, and each
+enabled constrained class can coexist.
 An enabled `atomic-error` requires a nonzero atomic operation weight. An
 all-error Uncache mix requires `special-concurrent=0`, because the current
 special overlap slot is a nonfaulting load and cannot legally satisfy a
@@ -185,6 +188,7 @@ scenario implementations:
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback. Schema 34 walks the complete six-bit B-source namespace across sequences, rejects active-ID reuse, and exactly checks unique IDs, completed-ID reuse, and every 63-to-0 wrap. Schema 36 repeats all depths while CLEAN/FLUSH/INVAL is pending. Schema 37 queues zero through eight auxiliary Probes around successful atomic refills; B may backpressure while D is held, after which the complete burst is accepted under C backpressure | Compose Probe overlap with replacement traffic and malformed manager traffic |
 | Set replacement concurrency | Schema 38 uses direct `set-pressure-window1`..`set-pressure-window8` weights, crosses every class with clean/dirty, refill-overlap, C-backpressure, depth, width, and translation, and closes 1536 bins. Multi-window actions allocate distinct physical set indexes across repeated quartile order. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count. The eight-window ceiling is checked against the standard configuration's 16 DCache miss entries | Compose replacement with Probe/CMO/atomic traffic only after their legal scheduling and attribution contracts are explicit |
+| Ordinary cold-miss concurrency | Schema 39 adds `miss-burst`, depth 2..16, and initial same-cycle issue width 1..3. Every enabled depth x legal width x translation bin is forced and observed. Each action uses never-repeated cache lines, holds every complete address-qualified refill until the requested outstanding depth is externally visible, then requires one target A request, one scalar completion, one LQ dequeue, and one GrantAck per returned refill | Compose ordinary MLP with replacement/Probe/CMO/atomic traffic after cross-operation scheduling remains externally attributable |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
 | Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
 
@@ -367,7 +371,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=38`, the resolved target weights,
+Every terminal line prints `constraint_schema=39`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -453,6 +457,15 @@ the offline verifier with transaction counts weighted by one through eight
 windows. A tracked 16-entry DCache miss capacity, checked against the standard
 Scala configuration, bounds the selected eight-window maximum with room for
 replacement progress.
+Schema 39 adds `target_miss_burst_depth` (15 depth classes) and
+`target_miss_burst_issue_width` (three initial issue widths). The authoritative
+135-bin cross is depth x width x translation; incompatible width/depth pairs
+are disabled. Each accepted burst holds all selected D responses by line
+address, requires the measured DCache A outstanding count to equal the chosen
+depth, then releases responses and checks one request/refill/GrantAck,
+writeback, and LQ dequeue per line. `actual_miss_burst_max_outstanding` is a
+sanity floor, while per-burst depth and line identity come from the held
+response/request oracle rather than internal MSHR state.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

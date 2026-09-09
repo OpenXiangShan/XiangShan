@@ -1094,6 +1094,10 @@ public:
     {
         return memory_agent_.max_outstanding_requests();
     }
+    std::uint64_t dcache_outstanding_requests() const
+    {
+        return memory_agent_.outstanding_requests();
+    }
     std::uint64_t dcache_grant_ack_stalls() const
     {
         return memory_agent_.grant_ack_stall_cycles();

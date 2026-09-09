@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 39
+        result["constraint_schema"] = 40
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1504,9 +1504,59 @@ class VerifyRegressionTest(unittest.TestCase):
             "set-pressure window-count/operation coverage",
         ):
             verify_regression._check_mixed_coverage(result)
+        miss_cross = []
+        for depth in range(15):
+            for width in range(3):
+                for regime in range(3):
+                    miss_cross.append(
+                        1 if width + 1 <= depth + 2 and regime == 0 else 0
+                    )
+        result.update(
+            {
+                "constraint_schema": 39,
+                "target_ops": "1,0,3,2,0,0,1,1,1,1,1,1,1,1,1",
+                "actual_ops": "10,0,3,2,0,0,66,5,5,36,48,90,12,512,44",
+                "target_miss_burst_depth": ",".join(["1"] * 15),
+                "target_miss_burst_issue_width": "1,1,1",
+                "actual_miss_burst_depth": ",".join(
+                    ["2"] + ["3"] * 14
+                ),
+                "actual_miss_burst_issue_width": "15,15,14",
+                "actual_miss_burst_translation": "44,0,0",
+                "actual_miss_burst_cross": ",".join(
+                    str(count) for count in miss_cross
+                ),
+                "actual_miss_burst_manager": "44,403,403,403,403,403,403",
+                "actual_miss_burst_max_outstanding": 16,
+                "actual_set_pressure_window_count": (
+                    "64,64,64,64,64,64,64,64"
+                ),
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_miss_burst_manager"] = (
+            "44,403,402,403,403,403,403"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "miss-burst manager accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_miss_burst_manager"] = (
+            "44,403,403,403,403,403,403"
+        )
+        result["actual_miss_burst_cross"] = ",".join(
+            ["0"] + [str(count) for count in miss_cross[1:]]
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_miss_burst_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
         result.update(
             {
                 "constraint_schema": 35,
+                "target_ops": "1,0,3,2,0,0,1,1,1,1,1,1,1,1",
                 "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
                 "actual_cmo_operation": "2,2,2",
                 "actual_atomic_family": "6,6,6",

@@ -1408,6 +1408,20 @@ favors wider concurrency. The current minimum `random-mixed` length is 2112
 actions. Replacement composition with Probe/CMO/atomic traffic, multiple
 simultaneous CMO sources, and malformed coherence traffic remain.
 
+Schema 39 adds `miss-burst` to the same operation mix for the ordinary
+multi-MSHR pressure visible in SPEC counters, without treating those counters
+as a correctness oracle. `miss-burst-depth2` through `miss-burst-depth16`
+select distinct never-repeated cold cache lines, and
+`miss-burst-issue-width1` through `miss-burst-issue-width3` select how many
+loads must issue together in the first cycle. Every selected line's complete
+address-qualified D response is held until the DCache manager exposes the
+requested number of outstanding A transactions. The online and offline gates
+close every enabled depth x legal issue-width x Bare/stage-1/nested bin, then
+require exactly one target request, scalar writeback, and LQ dequeue per load,
+plus one GrantAck for every refill. Coverage and corner emphasize depth
+closure; `spec` keeps the operation uncommon but nonzero and biases toward
+shallower bursts. The current minimum `random-mixed` length is 2304 actions.
+
 For a reproducible local pressure run:
 
 ```sh
@@ -1576,7 +1590,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 2112
+  --test random-mixed --seed 17 --transactions 2304
 ```
 
 ## Complete Pin Audit

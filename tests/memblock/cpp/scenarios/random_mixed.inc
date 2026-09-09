@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 2112;
+    constexpr unsigned minimum_actions = 2304;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -36,6 +36,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t ptw_error_line = 0;
     std::uint64_t load_merge_line = 0;
     std::array<std::uint64_t, 4> set_pressure_sequences{};
+    std::uint64_t miss_burst_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -141,6 +142,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t set_pressure_base =
         load_merge_base + load_merge_span;
     constexpr std::uint64_t set_pressure_span = 0x100000000ULL;
+    constexpr std::uint64_t miss_burst_base =
+        set_pressure_base + set_pressure_span;
+    constexpr std::uint64_t miss_burst_span = 0x40000000ULL;
     // Keep the nested final G-stage walk in a different high-level subtree
     // from the implicit G-stage walks used to fetch VS page-table entries.
     constexpr std::uint64_t ptw_error_guest_base = 0x18000000000ULL;
@@ -945,6 +949,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         for (std::uint64_t block = set_pressure_base;
              block < set_pressure_base + set_pressure_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
+        for (std::uint64_t block = miss_burst_base;
+             block < miss_burst_base + miss_burst_span;
              block += 0x200000) {
             for (unsigned mode = 0; mode < 2; ++mode) {
                 if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
@@ -2448,6 +2463,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     virtual_address = load_merge_base;
                 } else if (operation_kind == RandomConstraints::set_pressure) {
                     virtual_address = set_pressure_base;
+                } else if (operation_kind == RandomConstraints::miss_burst) {
+                    virtual_address = miss_burst_base;
                 }
                 std::uint64_t fence_address = global ? 0 : virtual_address;
                 std::uint16_t id = 0;
@@ -4007,7 +4024,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     "scalar-load", "scalar-store", "vector-load",
                     "vector-store", "vector-segment", "prefetch", "atomic",
                     "nc", "mmio", "hypervisor", "cmo", "ptw-error",
-                    "load-merge", "set-pressure",
+                    "load-merge", "set-pressure", "miss-burst",
                 }};
             {
                 std::ostringstream detail;
@@ -4550,6 +4567,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             bool set_pressure_release_backpressure = false;
             unsigned set_pressure_window_class =
                 RandomConstraints::set_pressure_single_window;
+            unsigned miss_burst_depth_index = 0;
+            unsigned miss_burst_issue_width_index = 0;
             if (kind == RandomConstraints::set_pressure) {
                 set_pressure_depth_index =
                     constraints.choose_set_pressure_depth(random());
@@ -4576,6 +4595,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         break;
                     }
                 }
+            } else if (kind == RandomConstraints::miss_burst) {
+                miss_burst_depth_index =
+                    constraints.choose_miss_burst_depth(random());
+                miss_burst_issue_width_index =
+                    constraints.choose_miss_burst_issue_width(
+                        miss_burst_depth_index, random());
             }
             if (kind == RandomConstraints::ptw_error) {
                 ptw_error_site = constraints.choose_ptw_error_site(random());
@@ -4957,6 +4982,49 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            } else if (kind == RandomConstraints::miss_burst) {
+                bool forced_cross = false;
+                for (unsigned depth = 0;
+                     depth < constraint_coverage.miss_burst_crosses.size() &&
+                         !forced_cross;
+                     ++depth) {
+                    for (unsigned width = 0;
+                         width < constraint_coverage
+                                     .miss_burst_crosses[depth].size() &&
+                             !forced_cross;
+                         ++width) {
+                        if (!constraints.miss_burst_cross_enabled(
+                                depth, width)) {
+                            continue;
+                        }
+                        for (unsigned regime = 0;
+                             regime < RandomConstraints::translation_regime_count;
+                             ++regime) {
+                            if (constraints.translation_weights[regime] == 0 ||
+                                constraint_coverage.miss_burst_crosses
+                                    [depth][width][regime] != 0) {
+                                continue;
+                            }
+                            miss_burst_depth_index = depth;
+                            miss_burst_issue_width_index = width;
+                            translation = TranslationContext{};
+                            translation.regime = regime;
+                            if (regime ==
+                                RandomConstraints::translation_stage1) {
+                                translation.stage1_mode = first_enabled_mode(
+                                    constraints.stage1_mode_weights);
+                            } else if (regime ==
+                                       RandomConstraints::translation_nested) {
+                                translation.vs_mode = first_enabled_mode(
+                                    constraints.vs_mode_weights);
+                                translation.g_mode = first_enabled_mode(
+                                    constraints.g_mode_weights);
+                            }
+                            forced_cross = true;
+                            break;
                         }
                     }
                 }
@@ -6366,6 +6434,161 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   ++actions;
                   coverage.cacheable += target_lines.size();
                 }
+            } else if (kind == RandomConstraints::miss_burst) {
+                phase = "random-miss-burst";
+                const unsigned depth = miss_burst_depth_index + 2U;
+                const unsigned issue_width =
+                    miss_burst_issue_width_index + 1U;
+                constexpr std::uint64_t line_bytes = 64;
+                constexpr std::uint64_t lines = miss_burst_span / line_bytes;
+                if (miss_burst_line + depth > lines) {
+                    phase = "random-miss-burst-address-space-exhausted";
+                    return false;
+                }
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                std::vector<memblock::LoadTransaction> transactions;
+                std::vector<std::uint64_t> burst_lines;
+                transactions.reserve(depth);
+                burst_lines.reserve(depth);
+                const std::uint64_t burst_first_line = miss_burst_line;
+                miss_burst_line += depth;
+                for (unsigned index = 0; index < depth; ++index) {
+                    const std::uint64_t line_index =
+                        burst_first_line + index;
+                    const std::uint64_t line =
+                        miss_burst_base + line_index * line_bytes;
+                    const std::uint64_t address = line +
+                        ((index & 1U) != 0 ? 8U : 40U);
+                    const auto op = static_cast<memblock::LoadOp>(
+                        (index + random()) % 4U);
+                    environment.memory().fill_incrementing(
+                        line, line_bytes,
+                        static_cast<unsigned char>(0x61U + index));
+                    transactions.push_back(make_load(
+                        address, op, index % memblock::kScalarLoadLanes));
+                    burst_lines.push_back(line);
+                    environment.expect_load(transactions.back());
+                    environment.hold_dcache_response_at(line);
+                }
+                const std::uint64_t requests_before_burst =
+                    environment.tilelink_requests();
+                const std::uint64_t refills_before_burst =
+                    environment.dcache_refills();
+                const std::uint64_t acks_before_burst =
+                    environment.dcache_grant_acks();
+                const std::uint64_t writebacks_before_burst =
+                    environment.writebacks();
+                const std::uint64_t lq_before_burst =
+                    environment.lq_dequeued();
+                if (!environment.set_rob_head(
+                        transactions.front().rob,
+                        transactions.front().rob_flag)) {
+                    return false;
+                }
+                for (unsigned begin = 0; begin < transactions.size();
+                     begin += memblock::kScalarLoadLanes) {
+                    const unsigned end = std::min<unsigned>(
+                        begin + memblock::kScalarLoadLanes,
+                        transactions.size());
+                    std::vector<memblock::LoadTransaction> batch(
+                        transactions.begin() + begin,
+                        transactions.begin() + end);
+                    std::vector<unsigned> dispatch_lanes(batch.size());
+                    std::iota(dispatch_lanes.begin(), dispatch_lanes.end(), 0U);
+                    if (!environment.enqueue_load_batch(batch, dispatch_lanes)) {
+                        return false;
+                    }
+                }
+                std::vector<memblock::LoadTransaction> first_batch(
+                    transactions.begin(), transactions.begin() + issue_width);
+                if (!environment.issue_load_batch(first_batch, 4096, true)) {
+                    return false;
+                }
+                for (unsigned index = issue_width; index < transactions.size();
+                     ++index) {
+                    if (!environment.issue_load(transactions[index], 4096)) {
+                        return false;
+                    }
+                }
+                const auto held_burst_responses = [&]() {
+                    for (unsigned index = 0; index < depth; ++index) {
+                        if (!environment.dcache_response_held_at(
+                                burst_lines[index]) ||
+                            !environment.scalar_load_pending(
+                                transactions[index])) {
+                            return false;
+                        }
+                    }
+                    return environment.dcache_held_response_count() == depth &&
+                        environment.dcache_outstanding_requests() == depth;
+                };
+                for (unsigned cycle = 0;
+                     cycle < constrained_completion_timeout &&
+                         !held_burst_responses(); ++cycle) {
+                    if (!environment.run_cycles(1)) {
+                        return false;
+                    }
+                }
+                if (!held_burst_responses()) {
+                    phase = "random-miss-burst-outstanding-depth";
+                    return false;
+                }
+                const std::uint64_t observed_outstanding =
+                    environment.dcache_outstanding_requests();
+                for (const auto line : burst_lines) {
+                    if (!environment.release_held_dcache_response_at(line)) {
+                        return false;
+                    }
+                }
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                std::uint64_t target_requests = 0;
+                for (const auto line : burst_lines) {
+                    const std::uint64_t line_requests =
+                        environment.dcache_requests_covering_since(
+                            line, requests_before_burst);
+                    if (line_requests != 1) {
+                        phase = "random-miss-burst-request-accounting";
+                        return false;
+                    }
+                    target_requests += line_requests;
+                }
+                const std::array<std::uint64_t, 7> manager_delta{{
+                    1,
+                    depth,
+                    target_requests,
+                    environment.dcache_refills() - refills_before_burst,
+                    environment.dcache_grant_acks() - acks_before_burst,
+                    environment.writebacks() - writebacks_before_burst,
+                    environment.lq_dequeued() - lq_before_burst,
+                }};
+                if (manager_delta[2] != depth ||
+                    manager_delta[3] < depth ||
+                    manager_delta[4] != manager_delta[3] ||
+                    manager_delta[5] != depth ||
+                    manager_delta[6] != depth) {
+                    phase = "random-miss-burst-manager-accounting";
+                    return false;
+                }
+                constraint_coverage.sample_miss_burst(
+                    miss_burst_depth_index, miss_burst_issue_width_index,
+                    translation.regime, observed_outstanding, manager_delta);
+                ordinary_leaf_addressed = true;
+                ++actions;
+                coverage.cacheable += depth;
             } else if (kind == RandomConstraints::scalar_store) {
                 const auto op = static_cast<memblock::StoreOp>(random() % 4);
                 const unsigned size = 1U << static_cast<unsigned>(op);

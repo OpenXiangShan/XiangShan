@@ -247,6 +247,25 @@ struct ConstraintCoverage {
     // Backpressured actions/stalled target releases/target C stall cycles/
     // stable-payload checks/completed ready windows.
     std::array<std::uint64_t, 5> set_pressure_backpressure_manager{};
+    // [depth2..depth16][same-cycle issue width1..3][Bare/stage-1/nested].
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t, RandomConstraints::translation_regime_count>,
+            RandomConstraints::miss_burst_issue_width_count>,
+        RandomConstraints::miss_burst_depth_count>
+        miss_burst_crosses{};
+    std::array<std::uint64_t, RandomConstraints::miss_burst_depth_count>
+        miss_burst_depths{};
+    std::array<
+        std::uint64_t, RandomConstraints::miss_burst_issue_width_count>
+        miss_burst_issue_widths{};
+    std::array<std::uint64_t, RandomConstraints::translation_regime_count>
+        miss_burst_translations{};
+    // Actions/loads/target requests/refills/GrantAcks/scalar writebacks/
+    // LQ dequeues.
+    std::array<std::uint64_t, 7> miss_burst_manager{};
+    std::uint64_t miss_burst_max_outstanding = 0;
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
     std::array<std::array<std::array<std::array<std::uint64_t, 3>,
@@ -537,6 +556,24 @@ struct ConstraintCoverage {
              ++index) {
             set_pressure_backpressure_manager[index] +=
                 backpressure_manager_delta[index];
+        }
+    }
+
+    void sample_miss_burst(
+        unsigned depth_index, unsigned issue_width_index,
+        unsigned translation_regime, std::uint64_t outstanding,
+        const std::array<std::uint64_t, 7> &manager_delta)
+    {
+        ++miss_burst_crosses.at(depth_index)
+              .at(issue_width_index)
+              .at(translation_regime);
+        ++miss_burst_depths.at(depth_index);
+        ++miss_burst_issue_widths.at(issue_width_index);
+        ++miss_burst_translations.at(translation_regime);
+        miss_burst_max_outstanding = std::max(
+            miss_burst_max_outstanding, outstanding);
+        for (unsigned index = 0; index < manager_delta.size(); ++index) {
+            miss_burst_manager[index] += manager_delta[index];
         }
     }
 
@@ -885,6 +922,26 @@ struct ConstraintCoverage {
                 if ((set_pressure_window_counts[window_class] != 0) !=
                     constraints.set_pressure_window_enabled(window_class)) {
                     return false;
+                }
+            }
+            return operations[operation] != 0;
+        }
+        if (operation == RandomConstraints::miss_burst) {
+            for (unsigned depth = 0; depth < miss_burst_crosses.size();
+                 ++depth) {
+                for (unsigned width = 0;
+                     width < miss_burst_crosses[depth].size(); ++width) {
+                    for (unsigned regime = 0;
+                         regime < miss_burst_crosses[depth][width].size();
+                         ++regime) {
+                        const bool enabled =
+                            constraints.miss_burst_cross_enabled(depth, width) &&
+                            constraints.translation_weights[regime] != 0;
+                        if ((miss_burst_crosses[depth][width][regime] != 0) !=
+                            enabled) {
+                            return false;
+                        }
+                    }
                 }
             }
             return operations[operation] != 0;
@@ -1505,6 +1562,48 @@ struct ConstraintCoverage {
             set_pressure_backpressure_manager[4] != set_pressure_actions) {
             return false;
         }
+        const std::uint64_t miss_burst_actions =
+            operations[RandomConstraints::miss_burst];
+        std::uint64_t miss_burst_cross_total = 0;
+        std::uint64_t miss_burst_loads = 0;
+        std::array<std::uint64_t, RandomConstraints::miss_burst_depth_count>
+            crossed_miss_burst_depths{};
+        std::array<
+            std::uint64_t, RandomConstraints::miss_burst_issue_width_count>
+            crossed_miss_burst_widths{};
+        std::array<std::uint64_t, RandomConstraints::translation_regime_count>
+            crossed_miss_burst_translations{};
+        for (unsigned depth = 0; depth < miss_burst_crosses.size(); ++depth) {
+            for (unsigned width = 0;
+                 width < miss_burst_crosses[depth].size(); ++width) {
+                for (unsigned regime = 0;
+                     regime < miss_burst_crosses[depth][width].size();
+                     ++regime) {
+                    const std::uint64_t count =
+                        miss_burst_crosses[depth][width][regime];
+                    miss_burst_cross_total += count;
+                    miss_burst_loads += count * (depth + 2U);
+                    crossed_miss_burst_depths[depth] += count;
+                    crossed_miss_burst_widths[width] += count;
+                    crossed_miss_burst_translations[regime] += count;
+                }
+            }
+        }
+        if (miss_burst_cross_total != miss_burst_actions ||
+            crossed_miss_burst_depths != miss_burst_depths ||
+            crossed_miss_burst_widths != miss_burst_issue_widths ||
+            crossed_miss_burst_translations != miss_burst_translations ||
+            miss_burst_manager[0] != miss_burst_actions ||
+            miss_burst_manager[1] != miss_burst_loads ||
+            miss_burst_manager[2] != miss_burst_loads ||
+            miss_burst_manager[3] < miss_burst_loads ||
+            miss_burst_manager[4] != miss_burst_manager[3] ||
+            miss_burst_manager[5] != miss_burst_loads ||
+            miss_burst_manager[6] != miss_burst_loads ||
+            (miss_burst_actions != 0 &&
+             miss_burst_max_outstanding < 2U)) {
+            return false;
+        }
         if (constraints.samples_translation() &&
             constraints.uses_translation() &&
             (translation_walk_windows == 0 ||
@@ -1893,6 +1992,38 @@ public:
             stream << (index == 0 ? "" : ",")
                    << set_pressure_backpressure_manager[index];
         }
+        stream << " actual_miss_burst_depth=";
+        for (unsigned depth = 0; depth < miss_burst_depths.size(); ++depth) {
+            stream << (depth == 0 ? "" : ",") << miss_burst_depths[depth];
+        }
+        stream << " actual_miss_burst_issue_width=";
+        for (unsigned width = 0; width < miss_burst_issue_widths.size();
+             ++width) {
+            stream << (width == 0 ? "" : ",")
+                   << miss_burst_issue_widths[width];
+        }
+        stream << " actual_miss_burst_translation=";
+        for (unsigned regime = 0; regime < miss_burst_translations.size();
+             ++regime) {
+            stream << (regime == 0 ? "" : ",")
+                   << miss_burst_translations[regime];
+        }
+        stream << " actual_miss_burst_cross=";
+        bool first_miss_burst_cross = true;
+        for (const auto &depth : miss_burst_crosses) {
+            for (const auto &width : depth) {
+                for (const auto count : width) {
+                    stream << (first_miss_burst_cross ? "" : ",") << count;
+                    first_miss_burst_cross = false;
+                }
+            }
+        }
+        stream << " actual_miss_burst_manager=";
+        for (unsigned index = 0; index < miss_burst_manager.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << miss_burst_manager[index];
+        }
+        stream << " actual_miss_burst_max_outstanding="
+               << miss_burst_max_outstanding;
         stream << " actual_ptw_error_outcome=";
         bool first_ptw_outcome = true;
         for (const auto &site : ptw_error_outcomes) {

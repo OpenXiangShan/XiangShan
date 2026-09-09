@@ -17,6 +17,7 @@ struct RandomConstraints {
         ptw_error,
         load_merge,
         set_pressure,
+        miss_burst,
         operation_count,
     };
 
@@ -116,6 +117,10 @@ struct RandomConstraints {
     };
     static_assert(
         set_pressure_window_class_count < memblock::kDcacheMissEntries);
+    static constexpr unsigned miss_burst_depth_count =
+        memblock::kDcacheMissEntries - 1U;
+    static constexpr unsigned miss_burst_issue_width_count =
+        memblock::kScalarLoadLanes;
 
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
@@ -156,6 +161,9 @@ struct RandomConstraints {
     unsigned set_pressure_release_backpressure_per_mille = 0;
     std::array<unsigned, set_pressure_window_class_count>
         set_pressure_window_weights{};
+    std::array<unsigned, miss_burst_depth_count> miss_burst_depth_weights{};
+    std::array<unsigned, miss_burst_issue_width_count>
+        miss_burst_issue_width_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -209,7 +217,7 @@ struct RandomConstraints {
                 .name = "coverage",
                 .operation_weights = {
                     200, 150, 150, 150, 75, 100, 100, 75, 75, 75, 75, 75,
-                    100, 75},
+                    100, 75, 100},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
@@ -243,6 +251,9 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 500,
                 .set_pressure_release_backpressure_per_mille = 500,
                 .set_pressure_window_weights = {1, 1, 1, 1, 1, 1, 1, 1},
+                .miss_burst_depth_weights = {
+                    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                .miss_burst_issue_width_weights = {1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -296,7 +307,8 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "spec",
                 .operation_weights = {
-                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10, 2},
+                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10, 2,
+                    15},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
@@ -331,6 +343,10 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 10,
                 .set_pressure_release_backpressure_per_mille = 10,
                 .set_pressure_window_weights = {1000, 10, 2, 1, 1, 1, 1, 1},
+                .miss_burst_depth_weights = {
+                    1000, 200, 100, 50, 20, 10, 5, 2, 1, 1, 1, 1, 1, 1,
+                    1},
+                .miss_burst_issue_width_weights = {100, 20, 1},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -385,7 +401,7 @@ struct RandomConstraints {
                 .name = "corner",
                 .operation_weights = {
                     125, 125, 125, 125, 125, 125, 125, 125, 125, 125, 125,
-                    125, 125, 125},
+                    125, 125, 125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
@@ -419,6 +435,9 @@ struct RandomConstraints {
                 .set_pressure_refill_overlap_per_mille = 750,
                 .set_pressure_release_backpressure_per_mille = 750,
                 .set_pressure_window_weights = {1, 1, 1, 2, 4, 8, 16, 32},
+                .miss_burst_depth_weights = {
+                    1, 1, 1, 1, 1, 1, 1, 2, 2, 4, 4, 8, 8, 16, 32},
+                .miss_burst_issue_width_weights = {1, 2, 4},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -533,6 +552,7 @@ struct RandomConstraints {
                 {"ptw-error", ptw_error},
                 {"load-merge", load_merge},
                 {"set-pressure", set_pressure},
+                {"miss-burst", miss_burst},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -712,6 +732,29 @@ struct RandomConstraints {
             assign_weight(set_pressure_set_keys, set_pressure_set_weights) ||
             assign_weight(
                 set_pressure_window_keys, set_pressure_window_weights)) {
+            return;
+        }
+        constexpr std::array<std::string_view, miss_burst_depth_count>
+            miss_burst_depth_keys{{
+                "miss-burst-depth2", "miss-burst-depth3",
+                "miss-burst-depth4", "miss-burst-depth5",
+                "miss-burst-depth6", "miss-burst-depth7",
+                "miss-burst-depth8", "miss-burst-depth9",
+                "miss-burst-depth10", "miss-burst-depth11",
+                "miss-burst-depth12", "miss-burst-depth13",
+                "miss-burst-depth14", "miss-burst-depth15",
+                "miss-burst-depth16",
+            }};
+        constexpr std::array<std::string_view, miss_burst_issue_width_count>
+            miss_burst_issue_width_keys{{
+                "miss-burst-issue-width1", "miss-burst-issue-width2",
+                "miss-burst-issue-width3",
+            }};
+        if (assign_weight(
+                miss_burst_depth_keys, miss_burst_depth_weights) ||
+            assign_weight(
+                miss_burst_issue_width_keys,
+                miss_burst_issue_width_weights)) {
             return;
         }
         constexpr std::array<std::string_view,
@@ -1132,6 +1175,38 @@ struct RandomConstraints {
                 set_pressure_window_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "set-pressure window constraint weights cannot all be zero");
+        }
+        if (operation_weights[miss_burst] != 0 &&
+            std::accumulate(
+                miss_burst_depth_weights.begin(),
+                miss_burst_depth_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "miss-burst depth constraint weights cannot all be zero");
+        }
+        if (operation_weights[miss_burst] != 0 &&
+            std::accumulate(
+                miss_burst_issue_width_weights.begin(),
+                miss_burst_issue_width_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "miss-burst issue-width constraint weights cannot all be zero");
+        }
+        if (operation_weights[miss_burst] != 0) {
+            bool compatible = false;
+            for (unsigned depth = 0;
+                 depth < miss_burst_depth_weights.size(); ++depth) {
+                for (unsigned width = 0;
+                     width < miss_burst_issue_width_weights.size(); ++width) {
+                    compatible = compatible ||
+                        (miss_burst_depth_weights[depth] != 0 &&
+                         miss_burst_issue_width_weights[width] != 0 &&
+                         width + 1U <= depth + 2U);
+                }
+            }
+            if (!compatible) {
+                throw std::invalid_argument(
+                    "miss-burst depth and issue-width constraints have no "
+                    "legal combination");
+            }
         }
         if (operation_weights[ptw_error] != 0 &&
             ptw_error_site_weights[ptw_error_stage1] != 0 &&
@@ -1680,6 +1755,31 @@ struct RandomConstraints {
         return choose_weighted(set_pressure_window_weights, random);
     }
 
+    unsigned choose_miss_burst_depth(std::uint64_t random) const
+    {
+        return choose_weighted(miss_burst_depth_weights, random);
+    }
+
+    unsigned choose_miss_burst_issue_width(
+        unsigned depth_index, std::uint64_t random) const
+    {
+        auto compatible = miss_burst_issue_width_weights;
+        for (unsigned width = 0; width < compatible.size(); ++width) {
+            if (width + 1U > depth_index + 2U) {
+                compatible[width] = 0;
+            }
+        }
+        return choose_weighted(compatible, random);
+    }
+
+    bool miss_burst_cross_enabled(
+        unsigned depth_index, unsigned width_index) const
+    {
+        return miss_burst_depth_weights.at(depth_index) != 0 &&
+            miss_burst_issue_width_weights.at(width_index) != 0 &&
+            width_index + 1U <= depth_index + 2U;
+    }
+
     bool set_pressure_window_enabled(unsigned window_class) const
     {
         return set_pressure_window_weights.at(window_class) != 0;
@@ -1980,6 +2080,20 @@ struct RandomConstraints {
                         set_pressure_release_backpressure_per_mille) *
                     enabled_set_pressure_window_classes() *
                     depths * widths * regimes;
+            } else if (operation == miss_burst) {
+                const unsigned regimes = static_cast<unsigned>(std::count_if(
+                    translation_weights.begin(), translation_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                for (unsigned depth = 0;
+                     depth < miss_burst_depth_weights.size(); ++depth) {
+                    for (unsigned width = 0;
+                         width < miss_burst_issue_width_weights.size();
+                         ++width) {
+                        if (miss_burst_cross_enabled(depth, width)) {
+                            actions += regimes;
+                        }
+                    }
+                }
             } else if (operation == vector_load || operation == vector_store) {
                 ++actions;
                 if (operation == vector_load ||
@@ -2073,7 +2187,8 @@ struct RandomConstraints {
             operation_weights[hypervisor] != 0 ||
             operation_weights[cmo] != 0 ||
             operation_weights[load_merge] != 0 ||
-            operation_weights[set_pressure] != 0;
+            operation_weights[set_pressure] != 0 ||
+            operation_weights[miss_burst] != 0;
     }
 
     bool uses_uncache() const
@@ -2104,7 +2219,8 @@ struct RandomConstraints {
             operation_weights.begin(), operation_weights.begin() + ptw_error,
             [](unsigned weight) { return weight != 0; }) ||
             operation_weights[load_merge] != 0 ||
-            operation_weights[set_pressure] != 0;
+            operation_weights[set_pressure] != 0 ||
+            operation_weights[miss_burst] != 0;
     }
 
     unsigned vector_policy_minimum_vlmax() const
@@ -2125,7 +2241,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=38 constraints=" << name
+        stream << "constraint_schema=39 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2211,6 +2327,10 @@ struct RandomConstraints {
                << set_pressure_release_backpressure_per_mille
                << " target_set_pressure_window=";
         append_weights(stream, set_pressure_window_weights);
+        stream << " target_miss_burst_depth=";
+        append_weights(stream, miss_burst_depth_weights);
+        stream << " target_miss_burst_issue_width=";
+        append_weights(stream, miss_burst_issue_width_weights);
         stream << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','

@@ -716,6 +716,10 @@ public:
     {
         return max_outstanding_requests_;
     }
+    std::uint64_t outstanding_requests() const
+    {
+        return outstanding_requests_;
+    }
     std::uint64_t grant_ack_stall_cycles() const
     {
         return grant_ack_stall_cycles_;
