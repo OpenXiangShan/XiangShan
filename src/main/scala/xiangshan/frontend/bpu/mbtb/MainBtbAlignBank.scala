@@ -38,6 +38,7 @@ class MainBtbAlignBank(
         val startPc:       GuardedPc = new GuardedPc
         val posHigherBits: UInt      = UInt(AlignBankIdxLen.W)
         val crossPage:     Bool      = Bool()
+        val isSameSetIdx:  Bool      = Bool()
       }
 
       class Resp extends Bundle {
@@ -103,6 +104,7 @@ class MainBtbAlignBank(
   private val s0_startPc          = r.req.startPc
   private val s0_posHigherBits    = r.req.posHigherBits
   private val s0_crossPage        = r.req.crossPage
+  private val isSameSetIdx        = r.req.isSameSetIdx
   private val s0_setIdx           = getSetIndex(s0_startPc)
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startPc)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx, NumInternalBanks)
@@ -113,7 +115,7 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
+    b.io.read.req.valid       := !isSameSetIdx && s0_fire && s0_internalBankMask(i)
     b.io.read.req.bits.setIdx := s0_setIdx
   }
 

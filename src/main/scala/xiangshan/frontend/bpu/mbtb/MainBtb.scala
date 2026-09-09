@@ -86,7 +86,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   )
   private val s0_posHigherBitsVec = s0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
+  private val prevStartPc = RegNext(s0_startPc, init = 0.U.asTypeOf(s0_startPc))
+  private val prevS0fire  = RegNext(s0_fire, init = false.B)
+  private val tryHold     = RegInit(false.B)
+  tryHold := ~tryHold
   alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.read.req.isSameSetIdx  := tryHold && prevS0fire && (prevStartPc === s0_startPc)
     b.io.read.req.startPc       := s0_startPcVec(i)
     b.io.read.req.posHigherBits := s0_posHigherBitsVec(i)
     b.io.read.req.crossPage     := isCrossPage(s0_startPcVec(i), s0_startPc)
