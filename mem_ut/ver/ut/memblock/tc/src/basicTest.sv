@@ -22,15 +22,25 @@ class basicTest extends tcnt_test_base ;
           return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
                  vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
+                 vseq_name == "memblock_csr_random_config_vseq" ||
+                 vseq_name == "memblock_csr_scalar_load_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_store_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_mixed_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_store_sta_std_10k_vseq" ||
                  vseq_name == "memblock_dispatch_real_cancel_reconcile_vseq" ||
                  vseq_name == "memblock_l2tlb_pbmt_response_fault_vseq";
       endfunction:vseq_starts_l2tlb
 
-      // 中文注释：只有这两个专项 VSEQ 可以成为 active control topology 的显式
+      // 中文注释：只有这些专项 VSEQ 可以成为 active control topology 的显式
       // worker/main sequence owner；普通 VSEQ 不能因为 plus=1/3 被隐式扩展为控制场景。
       function bit vseq_supports_control_worker_topology(input string vseq_name);
           return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
-                 vseq_name == "memblock_dispatch_manual_control_vseq";
+                 vseq_name == "memblock_dispatch_manual_control_vseq" ||
+                 vseq_name == "memblock_csr_random_config_vseq" ||
+                 vseq_name == "memblock_csr_scalar_load_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_store_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_mixed_10k_vseq" ||
+                 vseq_name == "memblock_csr_scalar_store_sta_std_10k_vseq";
       endfunction:vseq_supports_control_worker_topology
 
       // 中文注释：real-smoke 的 disabled topology 由 VSEQ 持续驱动静态 Sv39 CSR。

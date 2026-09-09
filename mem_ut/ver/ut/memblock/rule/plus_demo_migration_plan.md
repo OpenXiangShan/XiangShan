@@ -105,6 +105,11 @@ Dispatch framework 参数分组如下：
 | lsqcommit pendingPtr sequence | `MEMBLOCK_LSQCOMMIT_SEQ_EN` |
 | redirect/recovery sequence | `MEMBLOCK_REDIRECT_SEQ_EN`、`MEMBLOCK_REDIRECT_DRIVE_TIMEOUT`、`MEMBLOCK_REDIRECT_FREEZE_TIMEOUT` |
 | directed flushSb/PTW replay | `MEMBLOCK_FLUSHSB_SEQ_EN`、`MEMBLOCK_FLUSHSB_REQUEST_CYCLE`、`MEMBLOCK_FLUSHSB_TIMEOUT`、`MEMBLOCK_REPLAY_WAIT_PTW_EN`、`MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` |
+| CSR control marker 调度 | `MEMBLOCK_CSR_CONTROL_ENABLE`、`MEMBLOCK_CSR_CONTROL_MIN_INTERVAL`、`MEMBLOCK_CSR_CONTROL_MAX_INTERVAL` |
+| CSR initial profile | `MEMBLOCK_CSR_INIT_*`，共 31 项，覆盖三组 ATP mode/ID、权限和 priv context 候选 |
+| CSR 静态 enable profile | `MEMBLOCK_CSR_ENABLE_*_0_WT/_1_WT`，13 个 allowlist 字段共 26 项 |
+| CSR dynamic profile | 六个 `MEMBLOCK_CSR_CHANGE_*_ENABLE` 及对应 ATP、权限、priv context 候选，共 37 项 |
+| CSR PMP/PMA profile | `MEMBLOCK_CSR_PMP_PMA_EXCEPTION_*`、`MEMBLOCK_CSR_PMP_EXCEPTION_{R,W,X}_*_WT`、`MEMBLOCK_CSR_PMA_EXCEPTION_{C,ATOMIC}_*_WT`，共 13 项 |
 | DCache/Uncache responder 调度 | `MEMBLOCK_L2_RSP_DELAY_ZERO_WT`、`MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_L2_RSP_DELAY_LARGE_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT`、`MEMBLOCK_L2_RSP_REORDER_EN`、`MEMBLOCK_UNCACHE_RSP_REORDER_EN` |
 | DCache/Uncache D-error stimulus | `MEMBLOCK_L2_GRANTDATA_DENIED_WT`、`MEMBLOCK_L2_GRANTDATA_CORRUPT_WT`、`MEMBLOCK_L2_CBO_ACK_DENIED_WT`、`MEMBLOCK_L2_CBO_ACK_CORRUPT_WT`、`MEMBLOCK_UNCACHE_DENIED_WT`、`MEMBLOCK_UNCACHE_CORRUPT_WT` |
 | DCache Hint/Probe | `MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_EN`、`MEMBLOCK_L2_PROBE_PRE_START_WT`、`MEMBLOCK_L2_PROBE_COUNT_{ONE,MID,LARGE}_WT`、`MEMBLOCK_L2_PROBE_TO_B_WT` |
@@ -136,6 +141,23 @@ PPN。两组默认值相同只用于兼容既有 Bare smoke，不表示 VA 和 P
 把当前 `MEMBLOCK_PADDR_BASE/RANGE` 作为严格物理访问窗口；为 `0` 时两个 memory-facing responder
 都允许在 48-bit 物理地址空间按需懒分配 backing line。它不改变 TLB PPN、自动主表虚拟地址或 DUT
 端口结构，统一经 `seq_csr_common::get_main_mem_ranges_en()` 读取。
+
+CSR sequence 参数族共 110 项，其中 3 项是既有 control marker 调度参数，其余 107 项用于
+initial/dynamic CSR profile。`plus.sv` 负责解析，`seq_csr_common::load_from_plus()` 将所有值复制到
+`memblock_csr_sequence_cfg_t`，`check_csr_sequence_cfg()` 在任何 CSR 激励前统一检查权重非负、
+参与组非全零、ID 范围、六个动态组至少一个开启和 exception region 基本配置。initial/dynamic
+randomizer 只读取该冻结快照，不直接访问 `plus`。
+
+13 个静态 enable allowlist 字段分别使用 `_0_WT/_1_WT`；ATP mode、权限、priv context 和 PMP/PMA
+属性的每个随机候选也各有唯一权重入口。固定 PPN、其余 17 个 action/payload/unused enable、trigger
+idle 和其它完整 CSR 静态值直接由 sequence builder 写入，不建立无意义的 plusarg。PMP/PMA exception
+使用独立 enable/base/range，属性权重只在 exception 开启且对应 profile 参与时求解，并始终满足
+`PMP W -> R`。
+
+`default.cfg` 保持专项功能未启动；`tc_memblock_csr_random_config.cfg` 选择 AUTO control topology、
+打开六个动态组、PMA/PMP model 和 exception region。当前该 cfg 将 `INIT_PRIV_VIRT` 与
+`CHANGE_PRIV_VIRT` 固定为 0，以匹配现有 AUTO 主表预建 TLB map 的 stage-1 能力；privilege U/S/M
+仍按权重随机。只修改这些 runtime 权重或范围不需要重编译，新增/删除 CSR plus 字段需要重编译。
 
 `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` 是主动主流程 driver 的统一无进展
 debug 阈值，覆盖 LSQ enqueue、lintsissue dispatch issue 和 LSQ commit sequence。
@@ -398,7 +420,7 @@ int unsigned main_num = seq_csr_common::get_main_trans_num();
 
 ## Non-Goals
 
-- 不复制 L2Tlb 特有的 page-table、TLB、PMP/PMA、LLPTW 或 sequence 控制字段
+- 不复制 L2Tlb 环境私有的 page-table、TLB、LLPTW 或 agent 组件控制字段；CSR 专项只维护自身语义需要的 PMP/PMA region 参数
 - 不通过 plus 配置 `memblock_env_cfg`
 - 不通过 plus 控制 agent 的 `sqr_sw`、`drv_sw`、`mon_sw`、`xz_sw` 或 `drv_mode`
 - 不恢复 `+memblock_user_*` 命令行配置；组件配置仍由 `user_cfg.local.sv` 管理

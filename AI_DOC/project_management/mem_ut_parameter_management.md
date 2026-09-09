@@ -44,6 +44,7 @@
 - 自动主表虚拟地址窗口、TLB 物理地址映射窗口、PTE 权重和 MDP 字段权重
 - send priority 相关公共参数
 - replay / redirect / flushSb / L2TLB responder 等公共 sequence 行为参数
+- CSR initial/dynamic profile、静态 enable allowlist 与 PMP/PMA region 属性权重
 - DCache/Uncache response delay 权重与 ready record 的顺序/乱序选择参数
 - 公共 timeout / idle stop / max cycle 参数
 
@@ -233,7 +234,37 @@ V2 L2TLB responder 的结构参数与 runtime 行为参数必须分开管理：
 - `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 是 runtime sequence 行为参数，统一经过 `env/plus.sv -> seq_csr_common -> getter`。
 - `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY` 已删除，不得在 preset cfg、getter、历史迁移入口之外重新出现；历史文档应注明以当前 V2 L2TLB execution plan 为准。
 
-### 2.6 校验函数命名规则
+### 2.6 CSR sequence 参数当前分层
+
+CSR 参数统一经过以下读取链：
+
+```text
+env/plus.sv 解析 runtime plusarg
+  -> seq_csr_common::load_from_plus() 复制到 memblock_csr_sequence_cfg_t
+  -> seq_csr_common::check_csr_sequence_cfg() 在首包前统一校验
+  -> initial/dynamic randomizer 按值拷贝只读使用
+```
+
+当前 `MEMBLOCK_CSR_*` 共 110 项，分组如下：
+
+| 分组 | 数量 | 参数范围与用途 |
+|---|---:|---|
+| control marker 调度 | 3 | `MEMBLOCK_CSR_CONTROL_ENABLE/MIN_INTERVAL/MAX_INTERVAL`，控制 AUTO 主表 CSR marker 生成，不控制 CSR driver mode。 |
+| initial profile | 31 | `MEMBLOCK_CSR_INIT_*`，覆盖 SATP/VSATP/HGATP mode、ASID/VMID 范围、MXR/SUM/VMXR/VSUM 和 priv context 候选。 |
+| 静态 enable allowlist | 26 | 13 个允许随机 enable 各有 `_0_WT/_1_WT`；其它 17 个 action/payload/unused enable 固定为 0，不建立 plusarg。 |
+| dynamic profile | 37 | 六个 `MEMBLOCK_CSR_CHANGE_*_ENABLE` 加 ATP mode/ID、权限与 priv context 候选；关闭组复制 committed state。 |
+| PMP/PMA profile | 13 | exception enable/base/range，以及 PMP R/W/X、PMA C/ATOMIC 各自 `_0_WT/_1_WT`。 |
+
+参数约束：
+
+- 每个随机候选都必须有唯一对应的权重参数；固定 PPN、完整 CSR 静态 payload、trigger idle、action idle 和 protocol idle 不建立 plusarg。
+- 权重必须非负；参与求解的 pair/triple 不能全 0。ID 范围必须满足 `min <= max`，HGATP VMID 不得超过 14 bit。
+- `PMP W -> R` 是联合约束；exception region 必须 4KB 对齐、非空、位于平台 PMEM、与 normal region 不重叠且不越过 48-bit PA。
+- `memblock_csr_sequence_cfg_t` 是 `seq_csr_common::init()` 后的冻结值快照。sequence/helper 不直接读取 `plus::MEMBLOCK_CSR_*`，driver/monitor 不读取 plus。
+- `default.cfg` 中新增 CSR profile 必须保持旧场景无行为变化；完整配置只由 `tc_memblock_csr_random_config.cfg` 和 `memblock_csr_random_config_vseq` 启用。
+- 专项 cfg 的 `INIT_PRIV_VIRT` 与 `CHANGE_PRIV_VIRT` 当前固定为 0，因为现有 AUTO 主表预建 TLB map 尚未为动态 stage-2 context 注册对应 entry；U/S/M 候选仍参与 `PRIV_CONTEXT` 组。
+
+### 2.7 校验函数命名规则
 
 后续新增合法性检查、模式一致性检查或上下文一致性检查函数时，函数名必须带
 `check_` 前缀。

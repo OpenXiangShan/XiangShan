@@ -3,6 +3,9 @@
 +incdir+./base_seq
 +incdir+./base_seq/soft_test
 +incdir+./virtual_sequence
++incdir+./csr_scalar_stress/base_seq
++incdir+./csr_scalar_stress/main_sequence
++incdir+./csr_scalar_stress/virtual_sequence
 +incdir+../env/src/memblock_rm
 +incdir+../env/src
 seq_pkg.sv
@@ -12,6 +15,8 @@ seq_pkg.sv
 // ./base_seq_help/seq_csr_common.sv
 // ./base_seq_help/mmu_csr_runtime_state.sv
 // ./base_seq_help/memblock_pma_pmp_model.sv
+// ./base_seq_help/memblock_csr_config_state.sv
+// ./base_seq_help/memblock_csr_randomizer.sv
 // ./base_seq_help/main_control_transaction.sv
 // ./base_seq_help/memblock_op_behavior_util.sv
 // ./base_seq_help/status_transaction.sv
@@ -39,6 +44,8 @@ seq_pkg.sv
 // ./base_seq/memblock_issue_dispatch_base_sequence.sv
 // ./base_seq/memblock_lsqcommit_dispatch_base_sequence.sv
 // ./base_seq/memblock_flushsb_base_sequence.sv
+// ./base_seq/memblock_csr_initial_config_sequence.sv
+// ./base_seq/memblock_dynamic_csr_change_sequence.sv
 // ./base_seq/memblock_csr_control_base_sequence.sv
 // ./base_seq/memblock_sfence_control_base_sequence.sv
 // ./base_seq/memblock_redirect_dispatch_base_sequence.sv
@@ -56,6 +63,7 @@ seq_pkg.sv
 // ./virtual_sequence/memblock_pending_mmio_directed_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_smoke_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq.sv
+// ./virtual_sequence/memblock_csr_random_config_vseq.sv
 // ./virtual_sequence/memblock_dispatch_manual_control_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv
 // ./virtual_sequence/memblock_l2tlb_pbmt_response_fault_vseq.sv

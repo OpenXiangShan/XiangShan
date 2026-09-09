@@ -446,6 +446,7 @@ function bit memblock_rm::observer_build_commit_item(
     if (!rm_ls_decode_translation_path(tlb_context.s2xlate,
                                        tlb_context.is_hypervisor_inst,
                                        tlb_context.priv_virt,
+                                       tlb_context.priv_dmode,
                                        tlb_context.satp_mode,
                                        tlb_context.vsatp_mode,
                                        tlb_context.hgatp_mode,

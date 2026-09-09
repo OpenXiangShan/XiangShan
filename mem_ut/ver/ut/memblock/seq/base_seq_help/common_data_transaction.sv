@@ -68,6 +68,24 @@ class common_data_transaction extends uvm_object;
     // vpn/s2xlate；每个 bucket 受 DTLB filter 物理容量限制。
     memblock_uid_t uid_waiting_by_vpn_s2xlate[memblock_uid_tlb_wait_shape_key_t][$];
     mmu_csr_runtime_state    mmu_csr_state;
+    // CSR 专项场景的唯一已提交 level。初始 sequence 写入并发布，动态 child
+    // sequence 只从这里复制/更新；普通 topology 保持该句柄无效。
+    csr_ctrl_agent_agent_xaction csr_committed_state;
+    bit                          csr_committed_state_valid;
+    bit                          csr_initial_config_done;
+    event                        csr_initial_config_done_ev;
+    memblock_csr_pmp_pma_profile_t csr_committed_pmp_pma_profile;
+    // 中文注释：当前 CSR control owner 尚未被 monitor/model 确认的 candidate。
+    // 置位：动态 child sequence 在 sendover 前登记完整 level、PMP/PMA profile 和
+    // drive 前 DUT sample；清零：control service 同时确认完整 CSR snapshot 与
+    // PMP/PMA model 后提交，或 control runtime reset 清理。有效时下一动态 action
+    // 不得覆盖它，避免 candidate 与 committed state 混用。
+    csr_ctrl_agent_agent_xaction csr_dynamic_candidate_state;
+    bit                          csr_dynamic_candidate_valid;
+    memblock_control_owner_t     csr_dynamic_candidate_owner;
+    memblock_csr_pmp_pma_profile_t csr_dynamic_candidate_profile;
+    longint unsigned             csr_dynamic_candidate_after_sample;
+    bit                          csr_dynamic_candidate_pmp_pma_required;
     // 中文注释：PMA/PMP model 是整个 testcase 的唯一运行期表 owner。表项只由
     // CSR monitor 的 raw write 回放更新；UID request-fire 冻结 generation 后，RM
     // 只能通过只读 API 查询对应历史快照，不能读取当前可变表。
@@ -212,6 +230,16 @@ class common_data_transaction extends uvm_object;
         redirect_anchor_history_q.delete();
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         mmu_csr_state.reset();
+        csr_committed_state = null;
+        csr_committed_state_valid = 1'b0;
+        csr_initial_config_done = 1'b0;
+        csr_committed_pmp_pma_profile = '{default:'0};
+        csr_dynamic_candidate_state = null;
+        csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_owner = '{default:'0};
+        csr_dynamic_candidate_profile = '{default:'0};
+        csr_dynamic_candidate_after_sample = 0;
+        csr_dynamic_candidate_pmp_pma_required = 1'b0;
         pma_pmp_model = memblock_pma_pmp_model::get();
         pma_pmp_model.reset_and_init_v2_profile();
         pma_pmp_last_applied_csr_sample = 0;
@@ -333,6 +361,16 @@ class common_data_transaction extends uvm_object;
             mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         end
         mmu_csr_state.reset();
+        csr_committed_state = null;
+        csr_committed_state_valid = 1'b0;
+        csr_initial_config_done = 1'b0;
+        csr_committed_pmp_pma_profile = '{default:'0};
+        csr_dynamic_candidate_state = null;
+        csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_owner = '{default:'0};
+        csr_dynamic_candidate_profile = '{default:'0};
+        csr_dynamic_candidate_after_sample = 0;
+        csr_dynamic_candidate_pmp_pma_required = 1'b0;
         if (pma_pmp_model == null) begin
             pma_pmp_model = memblock_pma_pmp_model::get();
         end
@@ -343,6 +381,136 @@ class common_data_transaction extends uvm_object;
             status_by_uid[uid].reset(uid);
         end
     endfunction:reset_all_tables
+
+    // CSR 专项状态只接受完整、已净化的 level item；调用者必须在 monitor
+    // confirmation 后调用，避免把 candidate 当作 committed state。
+    function void publish_csr_committed_state(input csr_ctrl_agent_agent_xaction source);
+        if (source == null) begin
+            `uvm_fatal("COMMON_DATA", "publish_csr_committed_state got null source")
+        end
+        if (csr_committed_state == null) begin
+            csr_committed_state = csr_ctrl_agent_agent_xaction::type_id::create("csr_committed_state");
+        end
+        csr_committed_state.copy(source);
+        csr_committed_state.io_ooo_to_mem_tlbCsr_satp_changed = 1'b0;
+        csr_committed_state.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b0;
+        csr_committed_state.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b0;
+        csr_committed_state.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b0;
+        csr_committed_state.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
+        csr_committed_state.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr = '0;
+        csr_committed_state.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data = '0;
+        csr_committed_state.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
+        csr_committed_state.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid = 1'b0;
+        csr_committed_state.io_ooo_to_mem_tlbCsr_priv_debug = 1'b0;
+        csr_committed_state_valid = 1'b1;
+    endfunction:publish_csr_committed_state
+
+    function bit get_csr_committed_state(output csr_ctrl_agent_agent_xaction target);
+        if (!csr_committed_state_valid || csr_committed_state == null) begin
+            target = null;
+            return 1'b0;
+        end
+        target = csr_committed_state;
+        return 1'b1;
+    endfunction:get_csr_committed_state
+
+    // 中文注释：登记动态 CSR candidate，不把尚未观察到的 target 提前发布为 committed。
+    // 调用者是动态 CSR child；control service 随后用 owner/sample 边界读取候选并确认。
+    function void stage_csr_dynamic_candidate(
+        input memblock_control_owner_t owner,
+        input csr_ctrl_agent_agent_xaction source,
+        input memblock_csr_pmp_pma_profile_t profile,
+        input longint unsigned after_sample,
+        input bit pmp_pma_required
+    );
+        if (!owner.valid || source == null || !profile.valid || after_sample == 0) begin
+            `uvm_fatal("COMMON_DATA", "invalid CSR dynamic candidate staging request")
+        end
+        if (csr_dynamic_candidate_valid) begin
+            `uvm_fatal("COMMON_DATA", "a CSR dynamic candidate is already pending")
+        end
+        if (csr_dynamic_candidate_state == null) begin
+            csr_dynamic_candidate_state = csr_ctrl_agent_agent_xaction::type_id::create(
+                "csr_dynamic_candidate_state");
+        end
+        csr_dynamic_candidate_state.copy(source);
+        memblock_csr_config_state::clear_protocol_metadata(csr_dynamic_candidate_state);
+        csr_dynamic_candidate_owner = owner;
+        csr_dynamic_candidate_profile = profile;
+        csr_dynamic_candidate_after_sample = after_sample;
+        csr_dynamic_candidate_pmp_pma_required = pmp_pma_required;
+        csr_dynamic_candidate_valid = 1'b1;
+    endfunction:stage_csr_dynamic_candidate
+
+    // 中文注释：control service 的唯一动态 candidate 确认入口。它先消费 monitor
+    // 的 PMA/PMP write FIFO，再检查完整 CSR payload 是否跨过 drive sample；只有两类
+    // 事实同时成立才提交，返回 0 时 status 继续停在 WAIT_CSR_RUNTIME_SNAPSHOT。
+    function bit commit_csr_dynamic_candidate_if_observed(
+        input memblock_control_owner_t owner
+    );
+        memblock_sync_pkg::memblock_csr_full_snapshot_t observed;
+        bit [memblock_sync_pkg::MEMBLOCK_CSR_FULL_PAYLOAD_BITS-1:0] expected_payload;
+        if (!csr_dynamic_candidate_valid)
+            `uvm_fatal("COMMON_DATA", "special CSR completion has no staged dynamic candidate")
+        if (!memblock_control_owner_equal(csr_dynamic_candidate_owner, owner))
+            `uvm_fatal("COMMON_DATA", "special CSR completion owner does not match staged candidate")
+        service_csr_pmp_pma_write_observations();
+        if (!memblock_sync_pkg::get_latest_csr_full_snapshot(observed) ||
+            observed.sample_seq <= csr_dynamic_candidate_after_sample) begin
+            return 1'b0;
+        end
+        expected_payload = memblock_csr_config_state::pack_full_payload(
+            csr_dynamic_candidate_state);
+        if (observed.payload != expected_payload) begin
+            return 1'b0;
+        end
+        if (csr_dynamic_candidate_pmp_pma_required) begin
+            memblock_csr_pmp_pma_write_plan plan;
+            plan = memblock_csr_pmp_pma_write_plan::type_id::create(
+                "csr_dynamic_candidate_observation_plan");
+            if (!plan.model_matches(pma_pmp_model, csr_dynamic_candidate_profile)) begin
+                return 1'b0;
+            end
+        end
+        publish_csr_committed_state(csr_dynamic_candidate_state);
+        publish_csr_pmp_pma_profile(csr_dynamic_candidate_profile);
+        csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_owner = '{default:'0};
+        csr_dynamic_candidate_profile = '{default:'0};
+        csr_dynamic_candidate_after_sample = 0;
+        csr_dynamic_candidate_pmp_pma_required = 1'b0;
+        return 1'b1;
+    endfunction:commit_csr_dynamic_candidate_if_observed
+
+    function void mark_csr_initial_config_done();
+        csr_initial_config_done = 1'b1;
+        ->csr_initial_config_done_ev;
+    endfunction:mark_csr_initial_config_done
+
+    function void publish_csr_pmp_pma_profile(
+        input memblock_csr_pmp_pma_profile_t profile
+    );
+        if (!profile.valid) begin
+            `uvm_fatal("COMMON_DATA", "cannot publish an invalid CSR PMP/PMA profile")
+        end
+        csr_committed_pmp_pma_profile = profile;
+    endfunction:publish_csr_pmp_pma_profile
+
+    function bit get_csr_pmp_pma_profile(
+        output memblock_csr_pmp_pma_profile_t profile
+    );
+        profile = csr_committed_pmp_pma_profile;
+        return profile.valid;
+    endfunction:get_csr_pmp_pma_profile
+
+    function void service_csr_pmp_pma_write_observations();
+        longint unsigned current_sample;
+        current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+        if (current_sample == 0) begin
+            return;
+        end
+        apply_pma_pmp_csr_writes_before_request(current_sample + 1);
+    endfunction:service_csr_pmp_pma_write_observations
 
     function memblock_uid_t alloc_uid();
         memblock_uid_t uid;
@@ -1233,6 +1401,11 @@ class common_data_transaction extends uvm_object;
         control_workers_shutdown_requested = 1'b0;
         csr_control_worker_exited = 1'b0;
         sfence_control_worker_exited = 1'b0;
+        csr_dynamic_candidate_valid = 1'b0;
+        csr_dynamic_candidate_owner = '{default:'0};
+        csr_dynamic_candidate_profile = '{default:'0};
+        csr_dynamic_candidate_after_sample = 0;
+        csr_dynamic_candidate_pmp_pma_required = 1'b0;
     endfunction:reset_control_action_runtime
 
     // 抽象职责：持久化一个已绑定 owner 的 CSR 工作项，再唤醒 CSR worker。

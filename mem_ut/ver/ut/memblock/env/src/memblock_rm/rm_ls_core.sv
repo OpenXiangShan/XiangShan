@@ -37,6 +37,7 @@ function automatic bit rm_ls_decode_translation_path(
     input bit [1:0] s2xlate,
     input bit       is_hypervisor_inst,
     input bit       priv_virt,
+    input bit [1:0] priv_dmode,
     input bit [3:0] satp_mode,
     input bit [3:0] vsatp_mode,
     input bit [3:0] hgatp_mode,
@@ -59,6 +60,14 @@ function automatic bit rm_ls_decode_translation_path(
     selected_s2_mode = '0;
     s1_selected = 1'b0;
     s2_selected = 1'b0;
+
+    // Normal scalar memory accesses bypass address translation in M-mode.
+    // Hypervisor load/store instructions derive their effective mode from
+    // SPVP in the DUT and therefore keep the existing stage decode below.
+    if (!is_hypervisor_inst && priv_dmode == 2'b11) begin
+        bare_identity = 1'b1;
+        return 1'b1;
+    end
 
     if (!(priv_virt || is_hypervisor_inst)) expected_s2xlate = 2'd0;
     else if (vsatp_mode != 4'd0 && hgatp_mode != 4'd0) expected_s2xlate = 2'd3;

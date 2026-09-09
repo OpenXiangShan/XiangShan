@@ -27,6 +27,7 @@ class seq_csr_common;
     // getter 只供静态 CSR sequence 驱动 mPBMTE/hPBMTE；不会改写 CSR monitor runtime state。
     static bit          mmu_sv39_m_pbmte_en = 1'b0;
     static bit          mmu_sv39_h_pbmte_en = 1'b0;
+    static memblock_csr_sequence_cfg_t csr_sequence_cfg = '{default:'0};
     static bit          sfence_control_enable = 1'b0;
     static int          sfence_control_min_interval = 1;
     static int          sfence_control_max_interval = 1;
@@ -303,6 +304,116 @@ class seq_csr_common;
         csr_control_max_interval    = plus::MEMBLOCK_CSR_CONTROL_MAX_INTERVAL;
         mmu_sv39_m_pbmte_en          = plus::MEMBLOCK_MMU_SV39_M_PBMTE_EN;
         mmu_sv39_h_pbmte_en          = plus::MEMBLOCK_MMU_SV39_H_PBMTE_EN;
+        csr_sequence_cfg = '{
+            default: '0,
+            init_satp_bare_wt: plus::MEMBLOCK_CSR_INIT_SATP_BARE_WT,
+            init_satp_sv39_wt: plus::MEMBLOCK_CSR_INIT_SATP_SV39_WT,
+            init_satp_sv48_wt: plus::MEMBLOCK_CSR_INIT_SATP_SV48_WT,
+            init_vsatp_bare_wt: plus::MEMBLOCK_CSR_INIT_VSATP_BARE_WT,
+            init_vsatp_sv39_wt: plus::MEMBLOCK_CSR_INIT_VSATP_SV39_WT,
+            init_vsatp_sv48_wt: plus::MEMBLOCK_CSR_INIT_VSATP_SV48_WT,
+            init_hgatp_bare_wt: plus::MEMBLOCK_CSR_INIT_HGATP_BARE_WT,
+            init_hgatp_sv39x4_wt: plus::MEMBLOCK_CSR_INIT_HGATP_SV39X4_WT,
+            init_hgatp_sv48x4_wt: plus::MEMBLOCK_CSR_INIT_HGATP_SV48X4_WT,
+            init_satp_asid_min: plus::MEMBLOCK_CSR_INIT_SATP_ASID_MIN,
+            init_satp_asid_max: plus::MEMBLOCK_CSR_INIT_SATP_ASID_MAX,
+            init_vsatp_asid_min: plus::MEMBLOCK_CSR_INIT_VSATP_ASID_MIN,
+            init_vsatp_asid_max: plus::MEMBLOCK_CSR_INIT_VSATP_ASID_MAX,
+            init_hgatp_vmid_min: plus::MEMBLOCK_CSR_INIT_HGATP_VMID_MIN,
+            init_hgatp_vmid_max: plus::MEMBLOCK_CSR_INIT_HGATP_VMID_MAX,
+            init_mxr_0_wt: plus::MEMBLOCK_CSR_INIT_MXR_0_WT,
+            init_mxr_1_wt: plus::MEMBLOCK_CSR_INIT_MXR_1_WT,
+            init_sum_0_wt: plus::MEMBLOCK_CSR_INIT_SUM_0_WT,
+            init_sum_1_wt: plus::MEMBLOCK_CSR_INIT_SUM_1_WT,
+            init_vmxr_0_wt: plus::MEMBLOCK_CSR_INIT_VMXR_0_WT,
+            init_vmxr_1_wt: plus::MEMBLOCK_CSR_INIT_VMXR_1_WT,
+            init_vsum_0_wt: plus::MEMBLOCK_CSR_INIT_VSUM_0_WT,
+            init_vsum_1_wt: plus::MEMBLOCK_CSR_INIT_VSUM_1_WT,
+            init_priv_virt_0_wt: plus::MEMBLOCK_CSR_INIT_PRIV_VIRT_0_WT,
+            init_priv_virt_1_wt: plus::MEMBLOCK_CSR_INIT_PRIV_VIRT_1_WT,
+            init_priv_imode_u_wt: plus::MEMBLOCK_CSR_INIT_PRIV_IMODE_U_WT,
+            init_priv_imode_s_wt: plus::MEMBLOCK_CSR_INIT_PRIV_IMODE_S_WT,
+            init_priv_imode_m_wt: plus::MEMBLOCK_CSR_INIT_PRIV_IMODE_M_WT,
+            init_priv_dmode_u_wt: plus::MEMBLOCK_CSR_INIT_PRIV_DMODE_U_WT,
+            init_priv_dmode_s_wt: plus::MEMBLOCK_CSR_INIT_PRIV_DMODE_S_WT,
+            init_priv_dmode_m_wt: plus::MEMBLOCK_CSR_INIT_PRIV_DMODE_M_WT,
+            enable_l1d_pf_0_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_0_WT,
+            enable_l1d_pf_1_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_1_WT,
+            enable_l1d_pf_agt_0_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_AGT_0_WT,
+            enable_l1d_pf_agt_1_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_AGT_1_WT,
+            enable_l1d_pf_pht_0_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_PHT_0_WT,
+            enable_l1d_pf_pht_1_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_PHT_1_WT,
+            enable_l1d_pf_stride_0_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_STRIDE_0_WT,
+            enable_l1d_pf_stride_1_wt: plus::MEMBLOCK_CSR_ENABLE_L1D_PF_STRIDE_1_WT,
+            enable_l2_pf_master_0_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_MASTER_0_WT,
+            enable_l2_pf_master_1_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_MASTER_1_WT,
+            enable_l2_pf_recv_0_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_RECV_0_WT,
+            enable_l2_pf_recv_1_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_RECV_1_WT,
+            enable_l2_pf_pbop_0_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_PBOP_0_WT,
+            enable_l2_pf_pbop_1_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_PBOP_1_WT,
+            enable_l2_pf_vbop_0_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_VBOP_0_WT,
+            enable_l2_pf_vbop_1_wt: plus::MEMBLOCK_CSR_ENABLE_L2_PF_VBOP_1_WT,
+            enable_ldld_vio_0_wt: plus::MEMBLOCK_CSR_ENABLE_LDLD_VIO_0_WT,
+            enable_ldld_vio_1_wt: plus::MEMBLOCK_CSR_ENABLE_LDLD_VIO_1_WT,
+            enable_cache_error_0_wt: plus::MEMBLOCK_CSR_ENABLE_CACHE_ERROR_0_WT,
+            enable_cache_error_1_wt: plus::MEMBLOCK_CSR_ENABLE_CACHE_ERROR_1_WT,
+            enable_uncache_outstanding_0_wt: plus::MEMBLOCK_CSR_ENABLE_UNCACHE_OUTSTANDING_0_WT,
+            enable_uncache_outstanding_1_wt: plus::MEMBLOCK_CSR_ENABLE_UNCACHE_OUTSTANDING_1_WT,
+            enable_misalign_ld_0_wt: plus::MEMBLOCK_CSR_ENABLE_MISALIGN_LD_0_WT,
+            enable_misalign_ld_1_wt: plus::MEMBLOCK_CSR_ENABLE_MISALIGN_LD_1_WT,
+            enable_misalign_st_0_wt: plus::MEMBLOCK_CSR_ENABLE_MISALIGN_ST_0_WT,
+            enable_misalign_st_1_wt: plus::MEMBLOCK_CSR_ENABLE_MISALIGN_ST_1_WT,
+            change_satp_enable: plus::MEMBLOCK_CSR_CHANGE_SATP_ENABLE,
+            change_vsatp_enable: plus::MEMBLOCK_CSR_CHANGE_VSATP_ENABLE,
+            change_hgatp_enable: plus::MEMBLOCK_CSR_CHANGE_HGATP_ENABLE,
+            change_permission_enable: plus::MEMBLOCK_CSR_CHANGE_PERMISSION_ENABLE,
+            change_priv_context_enable: plus::MEMBLOCK_CSR_CHANGE_PRIV_CONTEXT_ENABLE,
+            change_pmp_pma_enable: plus::MEMBLOCK_CSR_CHANGE_PMP_PMA_ENABLE,
+            change_satp_bare_wt: plus::MEMBLOCK_CSR_CHANGE_SATP_BARE_WT,
+            change_satp_sv39_wt: plus::MEMBLOCK_CSR_CHANGE_SATP_SV39_WT,
+            change_satp_sv48_wt: plus::MEMBLOCK_CSR_CHANGE_SATP_SV48_WT,
+            change_vsatp_bare_wt: plus::MEMBLOCK_CSR_CHANGE_VSATP_BARE_WT,
+            change_vsatp_sv39_wt: plus::MEMBLOCK_CSR_CHANGE_VSATP_SV39_WT,
+            change_vsatp_sv48_wt: plus::MEMBLOCK_CSR_CHANGE_VSATP_SV48_WT,
+            change_hgatp_bare_wt: plus::MEMBLOCK_CSR_CHANGE_HGATP_BARE_WT,
+            change_hgatp_sv39x4_wt: plus::MEMBLOCK_CSR_CHANGE_HGATP_SV39X4_WT,
+            change_hgatp_sv48x4_wt: plus::MEMBLOCK_CSR_CHANGE_HGATP_SV48X4_WT,
+            change_satp_asid_min: plus::MEMBLOCK_CSR_CHANGE_SATP_ASID_MIN,
+            change_satp_asid_max: plus::MEMBLOCK_CSR_CHANGE_SATP_ASID_MAX,
+            change_vsatp_asid_min: plus::MEMBLOCK_CSR_CHANGE_VSATP_ASID_MIN,
+            change_vsatp_asid_max: plus::MEMBLOCK_CSR_CHANGE_VSATP_ASID_MAX,
+            change_hgatp_vmid_min: plus::MEMBLOCK_CSR_CHANGE_HGATP_VMID_MIN,
+            change_hgatp_vmid_max: plus::MEMBLOCK_CSR_CHANGE_HGATP_VMID_MAX,
+            change_mxr_0_wt: plus::MEMBLOCK_CSR_CHANGE_MXR_0_WT,
+            change_mxr_1_wt: plus::MEMBLOCK_CSR_CHANGE_MXR_1_WT,
+            change_sum_0_wt: plus::MEMBLOCK_CSR_CHANGE_SUM_0_WT,
+            change_sum_1_wt: plus::MEMBLOCK_CSR_CHANGE_SUM_1_WT,
+            change_vmxr_0_wt: plus::MEMBLOCK_CSR_CHANGE_VMXR_0_WT,
+            change_vmxr_1_wt: plus::MEMBLOCK_CSR_CHANGE_VMXR_1_WT,
+            change_vsum_0_wt: plus::MEMBLOCK_CSR_CHANGE_VSUM_0_WT,
+            change_vsum_1_wt: plus::MEMBLOCK_CSR_CHANGE_VSUM_1_WT,
+            change_priv_virt_0_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_VIRT_0_WT,
+            change_priv_virt_1_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_VIRT_1_WT,
+            change_priv_imode_u_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_IMODE_U_WT,
+            change_priv_imode_s_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_IMODE_S_WT,
+            change_priv_imode_m_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_IMODE_M_WT,
+            change_priv_dmode_u_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_DMODE_U_WT,
+            change_priv_dmode_s_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_DMODE_S_WT,
+            change_priv_dmode_m_wt: plus::MEMBLOCK_CSR_CHANGE_PRIV_DMODE_M_WT,
+            pmp_pma_exception_enable: plus::MEMBLOCK_CSR_PMP_PMA_EXCEPTION_ENABLE,
+            pmp_pma_exception_base: plus::MEMBLOCK_CSR_PMP_PMA_EXCEPTION_BASE,
+            pmp_pma_exception_range: plus::MEMBLOCK_CSR_PMP_PMA_EXCEPTION_RANGE,
+            pmp_exception_r_0_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_R_0_WT,
+            pmp_exception_r_1_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_R_1_WT,
+            pmp_exception_w_0_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_W_0_WT,
+            pmp_exception_w_1_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_W_1_WT,
+            pmp_exception_x_0_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_X_0_WT,
+            pmp_exception_x_1_wt: plus::MEMBLOCK_CSR_PMP_EXCEPTION_X_1_WT,
+            pma_exception_c_0_wt: plus::MEMBLOCK_CSR_PMA_EXCEPTION_C_0_WT,
+            pma_exception_c_1_wt: plus::MEMBLOCK_CSR_PMA_EXCEPTION_C_1_WT,
+            pma_exception_atomic_0_wt: plus::MEMBLOCK_CSR_PMA_EXCEPTION_ATOMIC_0_WT,
+            pma_exception_atomic_1_wt: plus::MEMBLOCK_CSR_PMA_EXCEPTION_ATOMIC_1_WT
+        };
         sfence_control_enable       = plus::MEMBLOCK_SFENCE_CONTROL_ENABLE;
         sfence_control_min_interval = plus::MEMBLOCK_SFENCE_CONTROL_MIN_INTERVAL;
         sfence_control_max_interval = plus::MEMBLOCK_SFENCE_CONTROL_MAX_INTERVAL;
@@ -791,8 +902,125 @@ class seq_csr_common;
                                boundary_cross_4k_wt);
         end
 
+        check_csr_sequence_cfg();
         check_l2tlb_payload_weight_cfg();
     endfunction:validate_and_clamp
+
+    // 中文注释：校验 CSR sequence 的冻结 plus 快照。所有检查只诊断配置，不选择
+    // candidate、不改写权重；使能组必须存在至少一个合法候选，关闭组的 change
+    // 权重可以保持为 0，避免默认配置无意启动动态 CSR 行为。
+    static function void check_csr_sequence_cfg();
+        memblock_csr_sequence_cfg_t cfg;
+        cfg = csr_sequence_cfg;
+        check_csr_weight_pair("INIT_MXR", cfg.init_mxr_0_wt, cfg.init_mxr_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_SUM", cfg.init_sum_0_wt, cfg.init_sum_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_VMXR", cfg.init_vmxr_0_wt, cfg.init_vmxr_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_VSUM", cfg.init_vsum_0_wt, cfg.init_vsum_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_PRIV_VIRT", cfg.init_priv_virt_0_wt, cfg.init_priv_virt_1_wt, 1'b1);
+        check_csr_weight_triple("INIT_PRIV_IMODE", cfg.init_priv_imode_u_wt,
+                                cfg.init_priv_imode_s_wt, cfg.init_priv_imode_m_wt, 1'b1);
+        check_csr_weight_triple("INIT_PRIV_DMODE", cfg.init_priv_dmode_u_wt,
+                                cfg.init_priv_dmode_s_wt, cfg.init_priv_dmode_m_wt, 1'b1);
+        check_csr_weight_triple("INIT_SATP_MODE", cfg.init_satp_bare_wt,
+                                cfg.init_satp_sv39_wt, cfg.init_satp_sv48_wt, 1'b1);
+        check_csr_weight_triple("INIT_VSATP_MODE", cfg.init_vsatp_bare_wt,
+                                cfg.init_vsatp_sv39_wt, cfg.init_vsatp_sv48_wt, 1'b1);
+        check_csr_weight_triple("INIT_HGATP_MODE", cfg.init_hgatp_bare_wt,
+                                cfg.init_hgatp_sv39x4_wt, cfg.init_hgatp_sv48x4_wt, 1'b1);
+
+        check_csr_weight_pair("INIT_L1D_PF", cfg.enable_l1d_pf_0_wt, cfg.enable_l1d_pf_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L1D_PF_AGT", cfg.enable_l1d_pf_agt_0_wt, cfg.enable_l1d_pf_agt_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L1D_PF_PHT", cfg.enable_l1d_pf_pht_0_wt, cfg.enable_l1d_pf_pht_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L1D_PF_STRIDE", cfg.enable_l1d_pf_stride_0_wt, cfg.enable_l1d_pf_stride_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L2_PF_MASTER", cfg.enable_l2_pf_master_0_wt, cfg.enable_l2_pf_master_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L2_PF_RECV", cfg.enable_l2_pf_recv_0_wt, cfg.enable_l2_pf_recv_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L2_PF_PBOP", cfg.enable_l2_pf_pbop_0_wt, cfg.enable_l2_pf_pbop_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_L2_PF_VBOP", cfg.enable_l2_pf_vbop_0_wt, cfg.enable_l2_pf_vbop_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_LDLD", cfg.enable_ldld_vio_0_wt, cfg.enable_ldld_vio_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_CACHE_ERROR", cfg.enable_cache_error_0_wt, cfg.enable_cache_error_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_UNCACHE", cfg.enable_uncache_outstanding_0_wt, cfg.enable_uncache_outstanding_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_MISALIGN_LD", cfg.enable_misalign_ld_0_wt, cfg.enable_misalign_ld_1_wt, 1'b1);
+        check_csr_weight_pair("INIT_MISALIGN_ST", cfg.enable_misalign_st_0_wt, cfg.enable_misalign_st_1_wt, 1'b1);
+
+        check_csr_id_range("INIT_SATP_ASID", cfg.init_satp_asid_min, cfg.init_satp_asid_max, 16'hffff);
+        check_csr_id_range("INIT_VSATP_ASID", cfg.init_vsatp_asid_min, cfg.init_vsatp_asid_max, 16'hffff);
+        check_csr_id_range("INIT_HGATP_VMID", cfg.init_hgatp_vmid_min, cfg.init_hgatp_vmid_max, 14'h3fff);
+        if (cfg.change_satp_enable) begin
+            check_csr_weight_triple("CHANGE_SATP_MODE", cfg.change_satp_bare_wt,
+                                    cfg.change_satp_sv39_wt, cfg.change_satp_sv48_wt, 1'b1);
+            check_csr_id_range("CHANGE_SATP_ASID", cfg.change_satp_asid_min, cfg.change_satp_asid_max, 16'hffff);
+        end
+        if (cfg.change_vsatp_enable) begin
+            check_csr_weight_triple("CHANGE_VSATP_MODE", cfg.change_vsatp_bare_wt,
+                                    cfg.change_vsatp_sv39_wt, cfg.change_vsatp_sv48_wt, 1'b1);
+            check_csr_id_range("CHANGE_VSATP_ASID", cfg.change_vsatp_asid_min, cfg.change_vsatp_asid_max, 16'hffff);
+        end
+        if (cfg.change_hgatp_enable) begin
+            check_csr_weight_triple("CHANGE_HGATP_MODE", cfg.change_hgatp_bare_wt,
+                                    cfg.change_hgatp_sv39x4_wt, cfg.change_hgatp_sv48x4_wt, 1'b1);
+            check_csr_id_range("CHANGE_HGATP_VMID", cfg.change_hgatp_vmid_min, cfg.change_hgatp_vmid_max, 14'h3fff);
+        end
+        if (cfg.change_permission_enable) begin
+            check_csr_weight_pair("CHANGE_MXR", cfg.change_mxr_0_wt, cfg.change_mxr_1_wt, 1'b1);
+            check_csr_weight_pair("CHANGE_SUM", cfg.change_sum_0_wt, cfg.change_sum_1_wt, 1'b1);
+            check_csr_weight_pair("CHANGE_VMXR", cfg.change_vmxr_0_wt, cfg.change_vmxr_1_wt, 1'b1);
+            check_csr_weight_pair("CHANGE_VSUM", cfg.change_vsum_0_wt, cfg.change_vsum_1_wt, 1'b1);
+        end
+        if (cfg.change_priv_context_enable) begin
+            check_csr_weight_pair("CHANGE_PRIV_VIRT", cfg.change_priv_virt_0_wt,
+                                  cfg.change_priv_virt_1_wt, 1'b1);
+            check_csr_weight_triple("CHANGE_PRIV_IMODE", cfg.change_priv_imode_u_wt,
+                                    cfg.change_priv_imode_s_wt, cfg.change_priv_imode_m_wt, 1'b1);
+            check_csr_weight_triple("CHANGE_PRIV_DMODE", cfg.change_priv_dmode_u_wt,
+                                    cfg.change_priv_dmode_s_wt, cfg.change_priv_dmode_m_wt, 1'b1);
+        end
+        if (cfg.pmp_pma_exception_enable) begin
+            check_csr_weight_pair("PMP_EXCEPTION_R", cfg.pmp_exception_r_0_wt,
+                                  cfg.pmp_exception_r_1_wt, 1'b1);
+            check_csr_weight_pair("PMP_EXCEPTION_W", cfg.pmp_exception_w_0_wt,
+                                  cfg.pmp_exception_w_1_wt, 1'b1);
+            check_csr_weight_pair("PMP_EXCEPTION_X", cfg.pmp_exception_x_0_wt,
+                                  cfg.pmp_exception_x_1_wt, 1'b1);
+            check_csr_weight_pair("PMA_EXCEPTION_C", cfg.pma_exception_c_0_wt,
+                                  cfg.pma_exception_c_1_wt, 1'b1);
+            check_csr_weight_pair("PMA_EXCEPTION_ATOMIC", cfg.pma_exception_atomic_0_wt,
+                                  cfg.pma_exception_atomic_1_wt, 1'b1);
+            if (cfg.pmp_exception_w_1_wt > 0 && cfg.pmp_exception_w_0_wt == 0 &&
+                cfg.pmp_exception_r_1_wt == 0)
+                `uvm_fatal("SEQ_CSR_CFG", "PMP W=1 has no legal R=1 candidate")
+        end
+    endfunction:check_csr_sequence_cfg
+
+    static function void check_csr_weight_non_negative(string name, int value);
+        if (value < 0)
+            `uvm_fatal("SEQ_CSR_CFG", $sformatf("%0s weight must not be negative: %0d", name, value))
+    endfunction:check_csr_weight_non_negative
+
+    static function void check_csr_weight_pair(string name, int w0, int w1, bit require_nonzero);
+        check_csr_weight_non_negative({name, "_0"}, w0);
+        check_csr_weight_non_negative({name, "_1"}, w1);
+        if (require_nonzero && w0 == 0 && w1 == 0)
+            `uvm_fatal("SEQ_CSR_CFG", $sformatf("%0s weights must not be all zero", name))
+    endfunction:check_csr_weight_pair
+
+    static function void check_csr_weight_triple(string name, int w0, int w1, int w2,
+                                                  bit require_nonzero);
+        check_csr_weight_non_negative({name, "_0"}, w0);
+        check_csr_weight_non_negative({name, "_1"}, w1);
+        check_csr_weight_non_negative({name, "_2"}, w2);
+        if (require_nonzero && w0 == 0 && w1 == 0 && w2 == 0)
+            `uvm_fatal("SEQ_CSR_CFG", $sformatf("%0s weights must not be all zero", name))
+    endfunction:check_csr_weight_triple
+
+    static function void check_csr_id_range(string name, int min_value, int max_value,
+                                             int unsigned max_allowed);
+        if (min_value < 0 || max_value < 0 || min_value > max_value ||
+            max_value > int'(max_allowed)) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("%0s range is invalid: min=%0d max=%0d allowed=0..%0d",
+                                 name, min_value, max_value, max_allowed))
+        end
+    endfunction:check_csr_id_range
 
     // 中文注释：只检查编译期结构常量的可编码关系，不修改任何runtime参数。
     static function void check_compile_param_consistency();
@@ -1094,6 +1322,11 @@ class seq_csr_common;
         check_initialized("get_mmu_sv39_h_pbmte_en");
         return mmu_sv39_h_pbmte_en;
     endfunction:get_mmu_sv39_h_pbmte_en
+
+    static function memblock_csr_sequence_cfg_t get_csr_sequence_cfg();
+        check_initialized("get_csr_sequence_cfg");
+        return csr_sequence_cfg;
+    endfunction:get_csr_sequence_cfg
 
     static function bit get_sfence_control_enable();
         check_initialized("get_sfence_control_enable");

@@ -47,6 +47,9 @@ package memblock_sync_pkg;
         MEMBLOCK_CONTROL_TOPOLOGY_DISABLED;
     bit control_worker_topology_active = 1'b0;
     string control_worker_topology_initializer = "";
+    // 中文注释：该生命周期标志只由专项 CSR VSEQ 持有；agent 只能读取它来选择
+    // 受限 level-hold 路径，任何普通 testcase 均保持 0 并沿用原 driver idle 行为。
+    bit csr_special_sequence_active = 1'b0;
 
     // 中文注释：当前 active-control runtime 的 CSR 基线许可。CSR monitor 在四路
     // reset ack 完成后的首个 sample 写入；service 只有看到同一 epoch 的 valid
@@ -556,6 +559,16 @@ package memblock_sync_pkg;
         longint unsigned  cycle;
     } dispatch_raw_csr_t;
 
+    // 中文注释：完整快照严格对应 DUT 的 92 个 CSR 输入，总位宽 587；transaction-only
+    // TP 兼容字段不进入 payload。monitor 是唯一发布者，sequence/service 只读取。
+    localparam int unsigned MEMBLOCK_CSR_FULL_PAYLOAD_BITS = 587;
+    typedef struct {
+        bit                                      valid;
+        bit [MEMBLOCK_CSR_FULL_PAYLOAD_BITS-1:0] payload;
+        longint unsigned                         sample_seq;
+        time                                     sample_time;
+    } memblock_csr_full_snapshot_t;
+
     // 中文注释：分发到 PMP/PMA 的通用 CSR 写事实。CSR monitor 在 w.valid 的
     // DUT sample 建立该值型记录；PMA/PMP model 在 request-fire 前按 sample
     // 顺序消费，保证同边沿 request 使用旧表、后续 request 使用新 generation。
@@ -662,6 +675,7 @@ package memblock_sync_pkg;
     dispatch_raw_csr_t         runtime_csr_snapshot;
     bit                        runtime_csr_snapshot_valid;
     int unsigned               runtime_csr_snapshot_seq;
+    memblock_csr_full_snapshot_t csr_full_snapshot;
     // 中文注释：CSR changed或sfence monitor事件的non-destructive history。
     // producer只追加/合并，唯一response owner按连续cursor回收前缀。
     longint unsigned           l2tlb_flush_event_seq;
@@ -833,6 +847,12 @@ package memblock_sync_pkg;
         item.sample_time = 0;
         return item;
     endfunction:make_empty_raw_pma_pmp_csr_write
+
+    function memblock_csr_full_snapshot_t make_empty_csr_full_snapshot();
+        memblock_csr_full_snapshot_t item;
+        item = '{default:'0};
+        return item;
+    endfunction:make_empty_csr_full_snapshot
 
     function dispatch_raw_sfence_t make_empty_raw_sfence();
         dispatch_raw_sfence_t item;
@@ -2172,6 +2192,25 @@ package memblock_sync_pkg;
         return 1'b1;
     endfunction:get_latest_runtime_csr_snapshot
 
+    function void publish_csr_full_snapshot(
+        input bit [MEMBLOCK_CSR_FULL_PAYLOAD_BITS-1:0] payload,
+        input longint unsigned sample_seq,
+        input time sample_time
+    );
+        if (sample_seq == 0) begin
+            `uvm_fatal("MEMBLOCK_CSR_SNAPSHOT", "full CSR snapshot requires a non-zero sample")
+        end
+        csr_full_snapshot.valid = 1'b1;
+        csr_full_snapshot.payload = payload;
+        csr_full_snapshot.sample_seq = sample_seq;
+        csr_full_snapshot.sample_time = sample_time;
+    endfunction:publish_csr_full_snapshot
+
+    function bit get_latest_csr_full_snapshot(output memblock_csr_full_snapshot_t item);
+        item = csr_full_snapshot;
+        return csr_full_snapshot.valid;
+    endfunction:get_latest_csr_full_snapshot
+
     // 抽象职责：由 ctrl monitor 为每个有效 DUT sample 发布 sbIsEmpty 的 latest
     // 事实。序号即使 level 不变也递增，使 flushSb request 可严格要求 sendover 后
     // 的新 sample；该 helper 不判断当前是否存在控制 action。
@@ -2695,6 +2734,7 @@ package memblock_sync_pkg;
         dut_sample_seq = 0;
         dut_sample_time = 0;
         dut_sample_time_valid = 1'b0;
+        csr_full_snapshot = make_empty_csr_full_snapshot();
         l2tlb_sample_anchor_valid = 1'b0;
         l2tlb_owner_claimed_once = 1'b0;
         l2tlb_owner_admission_settled_sample_seq = 0;
@@ -2791,6 +2831,7 @@ package memblock_sync_pkg;
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;
         latest_raw_csr_seq = 0;
+        csr_full_snapshot = make_empty_csr_full_snapshot();
         // Runtime/raw queue clearing must not rewind the DUT global sample or
         // CSR/event history. Testcase-start calls the explicit coordinator
         // initializer; runtime reset has its own direct-writer contract.
