@@ -3460,3 +3460,26 @@ requires reduction across interactions with other `random-mixed` operation
 classes. Correctness remains decided by the external request/completion
 identity and independent sparse-memory model; bank conflict, prefetch, replay,
 and cache residency remain diagnostic observations only.
+
+The first interaction reduction matrix also passed with the same seed and the
+short-mode online gates enabled:
+
+| Focused profile | Actions | Observed focused classes | Final cycle | Result |
+| --- | ---: | --- | ---: | --- |
+| `set-pressure + miss-burst` (one clean 1-window bin) | 256 | 80 set-pressure, 75 miss-burst, max outstanding 2 | 47,200 | pass |
+| scalar load/store + `miss-burst` (depth 2, width 1) | 512 | 135/122 scalar load/store, 154 miss-burst | 20,450 | pass |
+| scalar/vector + `miss-burst` (one unit-stride EEW8/SEW8/LMUL1 shape) | 1,024 | 126/145 scalar load/store, 93/82 vector load/store, 477 miss-burst | 40,915 | pass |
+| CMO CLEAN + `miss-burst` (clean line, depth 1) | 1,024 | 345 CMO, 418 miss-burst, 4,076 refills and GrantAcks | 297,150 | pass |
+| bank-conflict + `miss-burst` | 1,024 | 239 bank waves, 481 miss-burst | 56,894 | pass |
+| load-merge + `miss-burst` (depth 2, same address) | 1,024 | 310 merge actions, 503 miss-burst | 39,919 | pass |
+| AMO.D + `miss-burst` (zero auxiliary Probe depth) | 1,024 | 436 AMO, 487 miss-burst | 85,062 | pass |
+| scalar DCache denied/corrupt loads + `miss-burst` | 1,024 | 157 denied, 171 corrupt, 595 miss-burst; 5,622 refills and GrantAcks | 123,769 | pass |
+
+The profiles intentionally disable unrelated dimensions and pin one legal
+value for each retained cross, so they are reduction experiments rather than
+replacement regression presets. They cover the SPEC-relevant scalar/vector,
+MLP, merge, replacement, atomic, CMO, bank-stress, and error-recovery classes
+without turning any implementation detail into a correctness condition. The
+full default seed-1 replay was stopped after 18 minutes without reaching a
+terminal summary; it remains a known-reproducer control, not a pass or a new
+failure classification.
