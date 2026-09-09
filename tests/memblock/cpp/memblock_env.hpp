@@ -7,6 +7,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <cstdlib>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <optional>

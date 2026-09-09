@@ -324,6 +324,9 @@ public:
         generated::drive_idle_inputs(dut_);
         dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(std::uint64_t{3});
         dut_.io_ooo_to_mem_tlbCsr_priv_imode.ImmSet(std::uint64_t{3});
+#ifdef MEMBLOCK_MEM_DIRECT_DEBUG
+        initialize_internal_debug();
+#endif
     }
 
     ~Environment() { dut_.Finish(); }
@@ -5645,6 +5648,279 @@ public:
     const std::string &error() const { return error_; }
 
 private:
+#ifdef MEMBLOCK_MEM_DIRECT_DEBUG
+    static std::uint64_t debug_line_from_env()
+    {
+        const char *value = std::getenv("MEMBLOCK_MEM_DIRECT_DEBUG_LINE");
+        return value == nullptr ? 0 : std::strtoull(value, nullptr, 0);
+    }
+
+    static bool debug_flag_from_env(const char *name)
+    {
+        const char *value = std::getenv(name);
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }
+
+    static std::string debug_bytes(XData *signal)
+    {
+        if (signal == nullptr) {
+            return "<missing>";
+        }
+        const auto bytes = signal->GetBytes();
+        std::ostringstream value;
+        value << "0x" << std::hex;
+        for (auto it = bytes.rbegin(); it != bytes.rend(); ++it) {
+            value << std::setw(2) << std::setfill('0')
+                  << static_cast<unsigned>(*it);
+        }
+        return value.str();
+    }
+
+    static std::string debug_byte_array(
+        const std::array<XData *, 16> &signals)
+    {
+        if (std::any_of(signals.begin(), signals.end(),
+                        [](const XData *signal) { return signal == nullptr; })) {
+            return "<missing>";
+        }
+        std::ostringstream value;
+        value << "0x" << std::hex;
+        for (auto it = signals.rbegin(); it != signals.rend(); ++it) {
+            value << std::setw(2) << std::setfill('0')
+                  << static_cast<unsigned>((*it)->U() & 0xffU);
+        }
+        return value.str();
+    }
+
+    static std::uint64_t debug_u(XData *signal)
+    {
+        return signal == nullptr ? 0 : signal->U();
+    }
+
+    static XData *debug_signal(UTMemBlock &dut, const std::string &name)
+    {
+        return dut.GetInternalSignal(name);
+    }
+
+    void initialize_internal_debug()
+    {
+        debug_line_ = debug_line_from_env();
+        debug_trace_all_a_ = debug_flag_from_env(
+            "MEMBLOCK_MEM_DIRECT_TRACE_ALL_A");
+        const char *path = std::getenv("MEMBLOCK_MEM_DIRECT_TRACE_FILE");
+        if (path != nullptr && path[0] != '\0') {
+            debug_trace_.open(path, std::ios::out | std::ios::trunc);
+        }
+        if (!debug_trace_.is_open()) {
+            return;
+        }
+        for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+            const auto load_prefix = std::string(
+                "MemBlock_top.MemBlock.inner_LoadUnit_") +
+                std::to_string(lane) + '.';
+            debug_s2_valid_[lane] = debug_signal(dut_, load_prefix + "s2_valid");
+            debug_s2_paddr_[lane] = debug_signal(
+                dut_, load_prefix + "s2_in_r_paddr");
+            debug_s2_vaddr_[lane] = debug_signal(
+                dut_, load_prefix + "s2_in_r_vaddr");
+            debug_s2_rob_value_[lane] = debug_signal(
+                dut_, load_prefix + "s2_in_r_uop_robIdx_value");
+            debug_s2_rob_flag_[lane] = debug_signal(
+                dut_, load_prefix + "s2_in_r_uop_robIdx_flag");
+            debug_s2_from_d_[lane] = debug_signal(
+                dut_, load_prefix + "s2_fwd_frm_d_chan");
+            debug_s2_miss_[lane] = debug_signal(
+                dut_, load_prefix + "s2_dcache_miss");
+            debug_s2_full_fwd_[lane] = debug_signal(
+                dut_, load_prefix + "s2_full_fwd");
+            for (unsigned byte = 0; byte < 16; ++byte) {
+                debug_s2_d_data_[lane][byte] = debug_signal(
+                    dut_, load_prefix + "s2_fwd_data_frm_d_chan_" +
+                        std::to_string(byte));
+            }
+            debug_s3_valid_[lane] = debug_signal(
+                dut_, load_prefix + "s3_out_valid");
+            debug_s3_paddr_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_paddr");
+            debug_s3_vaddr_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_vaddr");
+            debug_s3_rob_value_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_uop_robIdx_value");
+            debug_s3_rob_flag_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_uop_robIdx_flag");
+            debug_s3_handled_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_handledByMSHR");
+            debug_s3_mshrid_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_rep_info_mshr_id");
+            debug_s3_data_select_[lane] = debug_signal(
+                dut_, load_prefix + "s3_data_select");
+            debug_s3_input_data_[lane] = debug_signal(
+                dut_, load_prefix + "s3_in_data");
+            debug_s3_merged_data_[lane] = debug_signal(
+                dut_, load_prefix + "s3_merged_data_frm_pipe");
+            debug_s3_picked_data_[lane] = debug_signal(
+                dut_, load_prefix + "s3_picked_data_frm_pipe_0");
+
+            const auto mshr_prefix = std::string(
+                "MemBlock_top.MemBlock.inner_dcache.dcache.missQueue.");
+            const auto lane_suffix = lane == 0
+                ? std::string{}
+                : std::string("_") + std::to_string(lane);
+            debug_mshr_forward_valid_[lane] = debug_signal(
+                dut_, mshr_prefix + "io_forward_" + std::to_string(lane) +
+                    "_forward_result_valid_REG");
+            debug_mshr_forward_[lane] = debug_signal(
+                dut_, mshr_prefix + "forward_mshr" + lane_suffix);
+            for (unsigned byte = 0; byte < 16; ++byte) {
+                const auto data_suffix = lane == 0
+                    ? std::to_string(byte)
+                    : std::to_string(lane) + '_' + std::to_string(byte);
+                debug_mshr_forward_data_[lane][byte] = debug_signal(
+                    dut_, mshr_prefix + "forwardData_" + data_suffix);
+            }
+        }
+        debug_trace_ << "picker_mem_direct_debug line=0x" << std::hex
+                     << debug_line_ << std::dec
+                     << " trace_all_a=" << debug_trace_all_a_ << '\n';
+        debug_trace_.flush();
+    }
+
+    void sample_internal_debug()
+    {
+        if (!debug_trace_.is_open()) {
+            return;
+        }
+        const auto emit = [&](const std::string &line) {
+            debug_trace_ << "cycle=" << debug_cycle_ << ' ' << line << '\n';
+            debug_trace_.flush();
+        };
+        const bool a_valid = dut_.auto_inner_dcache_client_out_a_valid.B();
+        const bool a_fire = a_valid &&
+            dut_.auto_inner_dcache_client_out_a_ready.B();
+        if (a_fire) {
+            const auto source = static_cast<unsigned>(
+                dut_.auto_inner_dcache_client_out_a_bits_source.U());
+            const auto address =
+                dut_.auto_inner_dcache_client_out_a_bits_address.U();
+            const auto line = address & ~std::uint64_t{63};
+            const bool target = line == debug_line_;
+            if (source < debug_target_sources_.size()) {
+                debug_target_sources_[source] = target;
+                const auto transfer_bytes = std::uint64_t{1} <<
+                    dut_.auto_inner_dcache_client_out_a_bits_size.U();
+                debug_target_beats_remaining_[source] = target
+                    ? static_cast<unsigned>(std::max<std::uint64_t>(
+                          1, transfer_bytes / 32))
+                    : 0;
+            }
+            if (debug_trace_all_a_ || target) {
+                std::ostringstream text;
+                text << "A fire=1 opcode=0x" << std::hex
+                     << dut_.auto_inner_dcache_client_out_a_bits_opcode.U()
+                     << " source=" << source << " address=0x" << address
+                     << " line=0x" << line << std::dec;
+                emit(text.str());
+            }
+        }
+        const bool d_valid = dut_.auto_inner_dcache_client_out_d_valid.B();
+        const bool d_fire = d_valid &&
+            dut_.auto_inner_dcache_client_out_d_ready.B();
+        if (d_fire) {
+            const auto source = static_cast<unsigned>(
+                dut_.auto_inner_dcache_client_out_d_bits_source.U());
+            const bool target = source < debug_target_sources_.size() &&
+                debug_target_sources_[source];
+            if (target) {
+                std::ostringstream text;
+                text << "D fire=1 opcode=0x" << std::hex
+                     << dut_.auto_inner_dcache_client_out_d_bits_opcode.U()
+                     << " source=" << source << " data="
+                     << debug_bytes(&dut_.auto_inner_dcache_client_out_d_bits_data)
+                     << " denied=" << std::dec
+                     << dut_.auto_inner_dcache_client_out_d_bits_denied.B()
+                     << " corrupt="
+                     << dut_.auto_inner_dcache_client_out_d_bits_corrupt.B();
+                emit(text.str());
+                debug_internal_window_ = 4;
+            }
+            if (source < debug_target_sources_.size() &&
+                debug_target_beats_remaining_[source] != 0 &&
+                --debug_target_beats_remaining_[source] == 0) {
+                debug_target_sources_[source] = false;
+            }
+        }
+        if (debug_internal_window_ != 0) {
+            --debug_internal_window_;
+            for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+                if (debug_u(debug_mshr_forward_valid_[lane]) != 0) {
+                    std::ostringstream text;
+                    text << "mshr_forward lane=" << lane << " selected="
+                         << debug_u(debug_mshr_forward_[lane]) << " data="
+                         << debug_byte_array(debug_mshr_forward_data_[lane]);
+                    emit(text.str());
+                }
+            }
+        }
+        for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+            const auto s2_paddr = debug_u(debug_s2_paddr_[lane]);
+            if (debug_u(debug_s2_valid_[lane]) != 0 &&
+                (s2_paddr & ~std::uint64_t{63}) == debug_line_) {
+                std::ostringstream text;
+                text << "load_s2 lane=" << lane << " rob="
+                     << debug_u(debug_s2_rob_value_[lane]) << ':'
+                     << debug_u(debug_s2_rob_flag_[lane]) << " vaddr=0x"
+                     << std::hex << debug_u(debug_s2_vaddr_[lane])
+                     << " paddr=0x" << s2_paddr << std::dec
+                     << " from_d=" << debug_u(debug_s2_from_d_[lane])
+                     << " miss=" << debug_u(debug_s2_miss_[lane])
+                     << " full_fwd=" << debug_u(debug_s2_full_fwd_[lane])
+                     << " d_data="
+                     << debug_byte_array(debug_s2_d_data_[lane]);
+                emit(text.str());
+            }
+            const auto s3_paddr = debug_u(debug_s3_paddr_[lane]);
+            if (debug_u(debug_s3_valid_[lane]) != 0 &&
+                (s3_paddr & ~std::uint64_t{63}) == debug_line_) {
+                std::ostringstream text;
+                text << "load_s3 lane=" << lane << " rob="
+                     << debug_u(debug_s3_rob_value_[lane]) << ':'
+                     << debug_u(debug_s3_rob_flag_[lane]) << " vaddr=0x"
+                     << std::hex << debug_u(debug_s3_vaddr_[lane])
+                     << " paddr=0x" << s3_paddr << " input="
+                     << debug_bytes(debug_s3_input_data_[lane])
+                     << " merged="
+                     << debug_bytes(debug_s3_merged_data_[lane])
+                     << " picked=0x" << debug_u(debug_s3_picked_data_[lane])
+                     << std::dec << " select="
+                     << debug_u(debug_s3_data_select_[lane])
+                     << " handled=" << debug_u(debug_s3_handled_[lane])
+                     << " mshr=" << debug_u(debug_s3_mshrid_[lane]);
+                emit(text.str());
+            }
+        }
+        ++debug_cycle_;
+    }
+
+    void trace_scalar_writeback_debug(
+        unsigned lane, const generated::ScalarLoadWriteback &writeback)
+    {
+        if (!debug_trace_.is_open() || !writeback.valid) {
+            return;
+        }
+        const auto *expected = scoreboard_.expected_for(writeback);
+        if (expected == nullptr ||
+            (expected->address & ~std::uint64_t{63}) != debug_line_) {
+            return;
+        }
+        debug_trace_ << "cycle=" << debug_cycle_ << " writeback lane=" << lane
+                     << " rob=" << static_cast<unsigned>(writeback.rob_value)
+                     << ':' << writeback.rob_flag << " address=0x" << std::hex
+                     << expected->address << " actual=0x" << writeback.data
+                     << " expected=0x" << expected->data << std::dec << '\n';
+        debug_trace_.flush();
+    }
+
+#endif
     bool wait_for_enqueue_capacity(
         unsigned lq_needed, unsigned sq_needed, unsigned timeout = 256)
     {
@@ -5716,6 +5992,9 @@ private:
         memory_agent_.capture_before_tick(dut_);
         ptw_agent_.capture_before_tick(dut_);
         uncache_agent_.capture_before_tick(dut_);
+#ifdef MEMBLOCK_MEM_DIRECT_DEBUG
+        sample_internal_debug();
+#endif
 
         const bool top_down_l2_input =
             dut_.io_topDownInfo_fromL2Top_l2Miss.B();
@@ -6116,8 +6395,12 @@ private:
                     ++scalar_load_feedback_stats_.ld2_cancels[lane];
                     scalar_load_feedback_stats_.last_cancel_cycle[lane] = cycle();
                 }
-                scoreboard_.observe(
-                    lane, generated::sample_scalar_load_writeback(dut_, lane));
+                const auto writeback =
+                    generated::sample_scalar_load_writeback(dut_, lane);
+#ifdef MEMBLOCK_MEM_DIRECT_DEBUG
+                trace_scalar_writeback_debug(lane, writeback);
+#endif
+                scoreboard_.observe(lane, writeback);
             }
             const auto hardware_prefetch =
                 generated::sample_hardware_prefetch_outputs(dut_);
@@ -6453,5 +6736,38 @@ private:
     std::uint64_t vector_replay_feedbacks_ = 0;
     std::unordered_map<std::uint64_t, std::uint64_t> next_page_table_;
     std::unordered_map<std::uint64_t, std::uint64_t> next_gstage_page_table_;
+#ifdef MEMBLOCK_MEM_DIRECT_DEBUG
+    std::ofstream debug_trace_;
+    std::uint64_t debug_line_ = 0;
+    std::uint64_t debug_cycle_ = 0;
+    std::uint32_t debug_internal_window_ = 0;
+    bool debug_trace_all_a_ = false;
+    std::array<bool, 64> debug_target_sources_{};
+    std::array<unsigned, 64> debug_target_beats_remaining_{};
+    std::array<XData *, kScalarLoadLanes> debug_mshr_forward_valid_{};
+    std::array<XData *, kScalarLoadLanes> debug_mshr_forward_{};
+    std::array<std::array<XData *, 16>, kScalarLoadLanes>
+        debug_mshr_forward_data_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_valid_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_paddr_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_vaddr_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_rob_value_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_rob_flag_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_from_d_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_miss_{};
+    std::array<XData *, kScalarLoadLanes> debug_s2_full_fwd_{};
+    std::array<std::array<XData *, 16>, kScalarLoadLanes> debug_s2_d_data_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_valid_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_paddr_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_vaddr_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_rob_value_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_rob_flag_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_handled_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_mshrid_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_data_select_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_input_data_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_merged_data_{};
+    std::array<XData *, kScalarLoadLanes> debug_s3_picked_data_{};
+#endif
     std::string error_;
 };

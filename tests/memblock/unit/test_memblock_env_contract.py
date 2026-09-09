@@ -1587,6 +1587,72 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment)
 
+    def test_random_cacheable_memory_is_stable_before_hardware_prefetch(self) -> None:
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = (MEMBLOCK_ROOT / "cpp/scenarios/random_mixed.inc").read_text()
+
+        for contract in (
+            "define_repeating_incrementing(",
+            "define_reference_repeating_incrementing(",
+            "repeating_incrementing_",
+            "region->first + period_index + offset",
+        ):
+            self.assertIn(contract, environment)
+        first_dut_clock = driver.index("if (!environment.reset()")
+        for definition in (
+            "load_merge_base, load_merge_span, 64, 0x41",
+            "miss_burst_base, miss_burst_span, 64, 0x61",
+            "bank_conflict_base, bank_conflict_span, 64, 0x71",
+        ):
+            self.assertLess(driver.index(definition), first_dut_clock)
+        dirty_pressure = driver[
+            driver.index('phase = "dcache-dirty-pressure"'):
+            driver.index('phase = "random-translation-map"')
+        ]
+        load_merge = driver[
+            driver.index('phase = "random-load-merge"'):
+            driver.index('phase = "random-set-pressure-drain"')
+        ]
+        miss_burst = driver[
+            driver.index('phase = "random-miss-burst"'):
+            driver.index("} else if (kind == RandomConstraints::scalar_store)")
+        ]
+        self.assertNotIn("fill_incrementing", dirty_pressure)
+        self.assertNotIn("write_byte", load_merge)
+        self.assertNotIn("fill_incrementing", miss_burst)
+        for contract in (
+            "dcache_requests_covering_since(line, 0) != 0",
+            "dcache_requests_covering_since(\n                            candidate, 0) == 0",
+            "dcache_outstanding_requests() >= depth",
+            "manager_delta[1] < manager_delta[0]",
+            "manager_delta[2] < depth",
+            "manager_delta[3] < manager_delta[2]",
+        ):
+            self.assertIn(contract, driver)
+
+    def test_mem_direct_debug_is_read_only_and_optional(self) -> None:
+        environment = (
+            MEMBLOCK_ROOT / "cpp/environment/environment.inc"
+        ).read_text()
+        debug = environment[
+            environment.index(
+                "#ifdef MEMBLOCK_MEM_DIRECT_DEBUG\n"
+                "    static std::uint64_t debug_line_from_env()"
+            ):
+            environment.index(
+                "#endif\n    bool wait_for_enqueue_capacity"
+            )
+        ]
+
+        for read_contract in (
+            "GetInternalSignal(name)",
+            "signal->GetBytes()",
+            "signal->U()",
+        ):
+            self.assertIn(read_contract, debug)
+        for forbidden_write_path in ("VPI", "ImmSet", "SetBytes", "->Set("):
+            self.assertNotIn(forbidden_write_path, debug)
+
     def test_uncache_store_order_uses_bus_backing_oracle(self) -> None:
         main = read_cpp_source("memblock_main.cpp")
         self.assertIn("int run_store_rdata_order", main)
@@ -2534,6 +2600,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_cmo_probe_cross=",
             "target_dcache_load_error=",
             "target_dcache_load_error_denied=",
+            "actual_dcache_load_error_presence=",
             "actual_dcache_load_error=",
             "actual_dcache_load_error_kind=",
             "actual_dcache_load_outcome=",

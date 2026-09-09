@@ -14,8 +14,8 @@ from pathlib import Path
 
 
 PICKER_REPOSITORY = "https://github.com/XS-MLVP/picker.git"
-PICKER_COMMIT = "c100874936aad4030d3bc4c8425ab652f2fbc7ad"
-XCOMM_COMMIT = "23ba5c47310a74dab1567a4ca54ad85dec4512cb"
+PICKER_COMMIT = "5e9e38d7087006440ae1c533073b13e798a36927"
+XCOMM_COMMIT = "29c290bb1f14fa2a4a72c01ab746a10cff504b2c"
 
 
 class BootstrapError(RuntimeError):

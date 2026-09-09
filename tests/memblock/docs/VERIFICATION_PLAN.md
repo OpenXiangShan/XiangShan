@@ -188,11 +188,13 @@ response per set pending and require every target set to satisfy its own
 replacement minimum before any response is released.
 Schema 39 adds an independent ordinary cold-miss burst dimension selected by
 depth 2..16 and initial same-cycle scalar issue width 1..3. It closes every
-enabled depth x legal width x Bare/stage-1/nested bin, holds each complete
-address-qualified refill until the externally observed DCache manager request
-depth reaches the target, and then checks request/refill/GrantAck, exact scalar
-writeback, and LQ-dequeue conservation. SPEC performance counters motivate the
-profile weights but are not used as a correctness oracle. Schema 40 adds an
+enabled depth x legal width x Bare/stage-1/nested bin, skips lines already seen
+at the external manager, then arms and holds each address-qualified refill
+until externally observed request depth reaches the target. Exact scalar
+writeback and LQ-dequeue conservation remain mandatory; target-request and
+global refill/GrantAck counts allow legal duplicate/background traffic. SPEC
+performance counters motivate the profile weights but are not used as a
+correctness oracle. Schema 40 adds an
 explicit `bank-conflict` dimension for the SPEC-observed same-bank/replay
 class. It issues two- or three-way resident scalar waves over all eight legal
 8-byte line-offset classes and every enabled Bare/stage-1/nested context. The

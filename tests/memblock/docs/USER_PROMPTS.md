@@ -255,7 +255,7 @@ Session: `01a08401-c258-74a1-8d9a-2db16dba0b6f`.
 
 2. [`2026-09-09 10:36:46 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。工作的过程中，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化；其次，能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来，我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs。记得在工作之前把PROMPTS给记录下来。`
 
-## Current Goal Session: 7 Prompts
+## Current Goal Session: 11 Prompts
 
 Session: `01a08406-da41-7071-94a6-a310976264c3`.
 
@@ -272,3 +272,11 @@ Session: `01a08406-da41-7071-94a6-a310976264c3`.
 6. [Timestamp unavailable in the visible conversation] `你现在工作是否有按照优先级来安排呢？我们的整体目标是：请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。其中，需要优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来。如果你发现现在的IO激励还不足以覆盖这些常见的场景，比如我看你的boundary gaps里面vector指令甚至还没覆盖全，那么久应该优先把这些UT激励和oracle给实现了。`
 
 7. [Timestamp unavailable in the visible conversation] `工作的过程中，也记得把工作进展及时commit & push`
+
+8. [Timestamp unavailable in the visible conversation] `我注意到你前面运行UT的过程中其实发现了一个报错，但你似乎现在已经忘记去定位那个问题的根源了。`
+
+9. [Timestamp unavailable in the visible conversation] `你可以试用一下picker工具的最新debug，看看它能否为你提供硬件debug的类printf/gdb功能，从而让你更精准地看到RTL内部信息，从而判断是否是CPU RTL BUG。`
+
+10. [Timestamp unavailable in the visible conversation] `我问了一下，你的picker使用不对，不需要vpi，mem direct才是对的，mem direct读；vpi能写，但你不需要写。`
+
+11. [Timestamp unavailable in the visible conversation] `我看了一下，picker昨天还有更新，应该能支持你前面说的verilator的问题。`

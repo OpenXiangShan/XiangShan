@@ -153,6 +153,13 @@ public:
     std::size_t pending() const { return expected_.size(); }
     std::size_t pending_prefetch() const { return pending_prefetch_; }
     std::size_t pending_load() const { return expected_.size() - pending_prefetch_; }
+    const Expected *expected_for(
+        const generated::ScalarLoadWriteback &writeback) const
+    {
+        const auto it = expected_.find(
+            rob_identity(writeback.rob_value, writeback.rob_flag));
+        return it == expected_.end() ? nullptr : &it->second;
+    }
     bool ok() const { return error_.empty(); }
     std::uint64_t observed() const { return observed_; }
     std::uint64_t prefetch_observed() const { return prefetch_observed_; }

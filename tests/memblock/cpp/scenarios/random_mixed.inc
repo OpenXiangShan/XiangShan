@@ -212,6 +212,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(
         ptw_error_base, ptw_error_span, 0xf1);
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
+    // Establish pools that lack a per-line external freshness check before
+    // any traffic. Hardware prefetch may legally fetch future lines, so a
+    // later manager rewrite could diverge from an already resident line.
+    environment.memory().define_repeating_incrementing(
+        load_merge_base, load_merge_span, 64, 0x41);
+    environment.memory().define_repeating_incrementing(
+        miss_burst_base, miss_burst_span, 64, 0x61);
+    environment.memory().define_repeating_incrementing(
+        bank_conflict_base, bank_conflict_span, 64, 0x71);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
     const auto load_feedback_summary = [&](const auto &feedback) {
@@ -2087,8 +2096,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         std::array<memblock::StoreTransaction, dirty_lines> dirty_stores{};
         for (unsigned index = 0; index < dirty_lines; ++index) {
             const std::uint64_t line = dirty_base + index * same_set_stride;
-            environment.memory().fill_incrementing(
-                line, line_bytes, static_cast<std::uint8_t>(0x31 + index * 9));
             dirty_stores[index] = make_store(
                 line + 24, 0xc001d00d00000000ULL | index,
                 memblock::StoreOp::sd, index % 2, (index + 1) % 2);
@@ -5306,10 +5313,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         line_index * bank_conflict_line_bytes;
                     const std::uint64_t address =
                         line + bank_conflict_bank * sizeof(std::uint64_t);
-                    environment.memory().fill_incrementing(
-                        line, bank_conflict_line_bytes,
-                        static_cast<std::uint8_t>(
-                            0x37U + bank_conflict_bank * 11U + index * 17U));
                     lines.push_back(line);
                 }
                 for (unsigned index = 0; index < depth; ++index) {
@@ -5588,16 +5591,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
 
-                constexpr std::uint64_t merge_lines = load_merge_span / 64;
-                if (load_merge_line >= merge_lines) {
-                    phase = "random-load-merge-address-space-exhausted";
-                    return false;
-                }
-                const std::uint64_t sequence = load_merge_line++;
-                const std::uint64_t line_index =
-                    sequence ^ (sequence >> 1);
-                const std::uint64_t line =
-                    load_merge_base + line_index * 64;
                 const unsigned depth = depth_index + 2;
                 std::array<unsigned, 3> offsets{};
                 const unsigned leader_offset = critical_beat ? 40U : 8U;
@@ -5622,14 +5615,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constrained_completion_timeout)) {
                     return false;
                 }
+                constexpr std::uint64_t merge_lines = load_merge_span / 64;
+                std::optional<std::uint64_t> fresh_line;
+                while (load_merge_line < merge_lines) {
+                    const std::uint64_t sequence = load_merge_line++;
+                    const std::uint64_t line_index =
+                        sequence ^ (sequence >> 1);
+                    const std::uint64_t candidate =
+                        load_merge_base + line_index * 64;
+                    if (environment.dcache_requests_covering_since(
+                            candidate, 0) == 0) {
+                        fresh_line = candidate;
+                        break;
+                    }
+                }
+                if (!fresh_line) {
+                    phase = "random-load-merge-address-space-exhausted";
+                    return false;
+                }
+                const std::uint64_t line = *fresh_line;
                 std::vector<memblock::LoadTransaction> transactions;
                 transactions.reserve(depth);
                 for (unsigned index = 0; index < depth; ++index) {
                     const auto op = static_cast<memblock::LoadOp>(random() % 7);
                     const std::uint64_t address = line + offsets[index];
-                    environment.memory().write_byte(
-                        address,
-                        static_cast<std::uint8_t>(1U + random() % 255U));
+                    // Preserve the frozen constraint-stream sequence after
+                    // replacing the former late random byte write.
+                    static_cast<void>(random());
                     transactions.push_back(make_load(address, op, index));
                 }
                 for (const auto &transaction : transactions) {
@@ -5669,7 +5681,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     environment.dcache_grant_acks() - grant_acks_before,
                     environment.writebacks() - writebacks_before,
                 }};
-                if (manager_delta[0] != 1 || manager_delta[1] < 1 ||
+                if (manager_delta[0] < 1 ||
+                    manager_delta[1] < manager_delta[0] ||
                     manager_delta[2] != manager_delta[1] ||
                     manager_delta[3] != depth) {
                     std::ostringstream detail;
@@ -6638,10 +6651,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     miss_burst_issue_width_index + 1U;
                 constexpr std::uint64_t line_bytes = 64;
                 constexpr std::uint64_t lines = miss_burst_span / line_bytes;
-                if (miss_burst_line + depth > lines) {
-                    phase = "random-miss-burst-address-space-exhausted";
-                    return false;
-                }
                 if (!environment.run_until_all_complete(
                         constrained_completion_timeout) ||
                     !environment.run_until_queues_retired(
@@ -6654,20 +6663,27 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 std::vector<std::uint64_t> burst_lines;
                 transactions.reserve(depth);
                 burst_lines.reserve(depth);
-                const std::uint64_t burst_first_line = miss_burst_line;
-                miss_burst_line += depth;
-                for (unsigned index = 0; index < depth; ++index) {
-                    const std::uint64_t line_index =
-                        burst_first_line + index;
+                while (transactions.size() < depth) {
+                    if (miss_burst_line >= lines) {
+                        phase = "random-miss-burst-address-space-exhausted";
+                        return false;
+                    }
+                    const std::uint64_t line_index = miss_burst_line++;
                     const std::uint64_t line =
                         miss_burst_base + line_index * line_bytes;
+                    // A prior legal hardware prefetch may already have made a
+                    // sequential candidate resident. Freshness is established
+                    // only from the external manager history, then the hold is
+                    // armed before any new DUT cycle can fetch this line.
+                    if (environment.dcache_requests_covering_since(line, 0) != 0) {
+                        continue;
+                    }
+                    const unsigned index =
+                        static_cast<unsigned>(transactions.size());
                     const std::uint64_t address = line +
                         ((index & 1U) != 0 ? 8U : 40U);
                     const auto op = static_cast<memblock::LoadOp>(
                         (index + random()) % 4U);
-                    environment.memory().fill_incrementing(
-                        line, line_bytes,
-                        static_cast<unsigned char>(0x61U + index));
                     transactions.push_back(make_load(
                         address, op, index % memblock::kScalarLoadLanes));
                     burst_lines.push_back(line);
@@ -6717,14 +6733,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const auto held_burst_responses = [&]() {
                     for (unsigned index = 0; index < depth; ++index) {
                         if (!environment.dcache_response_held_at(
-                                burst_lines[index]) ||
-                            !environment.scalar_load_pending(
-                                transactions[index])) {
+                                burst_lines[index])) {
                             return false;
                         }
                     }
                     return environment.dcache_held_response_count() == depth &&
-                        environment.dcache_outstanding_requests() == depth;
+                        environment.dcache_outstanding_requests() >= depth;
                 };
                 for (unsigned cycle = 0;
                      cycle < constrained_completion_timeout &&
@@ -6757,7 +6771,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const std::uint64_t line_requests =
                         environment.dcache_requests_covering_since(
                             line, requests_before_burst);
-                    if (line_requests != 1) {
+                    if (line_requests == 0) {
                         phase = "random-miss-burst-request-accounting";
                         return false;
                     }
@@ -6772,8 +6786,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     environment.writebacks() - writebacks_before_burst,
                     environment.lq_dequeued() - lq_before_burst,
                 }};
-                if (manager_delta[2] != depth ||
-                    manager_delta[3] < depth ||
+                if (manager_delta[2] < depth ||
+                    manager_delta[3] < manager_delta[2] ||
                     manager_delta[4] != manager_delta[3] ||
                     manager_delta[5] != depth ||
                     manager_delta[6] != depth) {

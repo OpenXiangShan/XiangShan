@@ -654,7 +654,9 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
         result["actual_load_merge_shape"] = ",".join(["1"] * 12)
-        result["actual_load_merge_manager"] = "12,14,13,30"
+        result["actual_load_merge_manager"] = "13,14,14,30"
+        verify_regression._check_mixed_coverage(result)
+        result["actual_load_merge_manager"] = "15,14,14,30"
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "load-merge manager accounting",
@@ -1534,9 +1536,7 @@ class VerifyRegressionTest(unittest.TestCase):
             }
         )
         verify_regression._check_mixed_coverage(result)
-        result["actual_miss_burst_manager"] = (
-            "44,403,402,403,403,403,403"
-        )
+        result["actual_miss_burst_manager"] = "44,403,404,403,403,403,403"
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "miss-burst manager accounting",

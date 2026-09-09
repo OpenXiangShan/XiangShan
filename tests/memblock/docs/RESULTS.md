@@ -27,8 +27,10 @@
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
 - Frozen runtime manifest SHA-256: `145066c38a2f307a20fcfc48b81fd81b4cd179f4824456ba6f52365dc45494f1`
-- Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
-- xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
+- Frozen-runtime Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
+- Frozen-runtime xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
+- Current bootstrap Picker pin: `5e9e38d7087006440ae1c533073b13e798a36927`
+- Current bootstrap xcomm pin: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
 
 ## Scalar Address Immediates And Bus Error Model
 
@@ -3437,9 +3439,8 @@ expected `0x908f8e8d8c8b8a89`; the expected bytes are the requested line's
 incrementing fill at the selected `+40` byte offset. The failure is therefore
 not a vector-cross or bank/replay/prefetch coverage gate.
 
-This is retained as an unconfirmed candidate pending a shorter deterministic
-miss-burst reproducer and request/response attribution review. It is not
-classified as a CPU RTL bug yet, and no `CPU_BUG_*` report is created. A
+This was initially retained as an unconfirmed candidate pending a shorter
+deterministic miss-burst reproducer and request/response attribution review. A
 no-backpressure replay was started to separate response scheduling from data
 or address attribution, then stopped before completion to avoid spending a
 long regression budget without additional evidence.
@@ -3454,12 +3455,13 @@ cancellation out of 73,529 allocations. Two shorter reductions also passed:
 256 actions with only Bare/depth-2/width-1, and 256 actions with all three
 translation choices and depths 2..5.
 
-These passing reductions rule out an isolated ordinary miss-burst path and
-simple repeated LQ/ROB wraparound as sufficient causes. The candidate now
-requires reduction across interactions with other `random-mixed` operation
-classes. Correctness remains decided by the external request/completion
-identity and independent sparse-memory model; bank conflict, prefetch, replay,
-and cache residency remain diagnostic observations only.
+These passing reductions ruled out an isolated ordinary miss-burst path and
+simple repeated LQ/ROB wraparound as sufficient causes, and directed the
+remaining investigation toward interactions with other `random-mixed`
+operation classes. Correctness remained decided by the external
+request/completion identity and independent sparse-memory model; bank
+conflict, prefetch, replay, and cache residency were diagnostic observations
+only.
 
 The first interaction reduction matrix also passed with the same seed and the
 short-mode online gates enabled:
@@ -3481,9 +3483,8 @@ value for each retained cross, so they are reduction experiments rather than
 replacement regression presets. They cover the SPEC-relevant scalar/vector,
 MLP, merge, replacement, atomic, CMO, bank-stress, and error-recovery classes
 without turning any implementation detail into a correctness condition. The
-full default seed-1 replay was stopped after 18 minutes without reaching a
-terminal summary; it remains a known-reproducer control, not a pass or a new
-failure classification.
+first full default seed-1 replay was stopped after 18 minutes without reaching
+a terminal summary; it remained a known-reproducer control at that point.
 
 The same schema-41 generator was then run with a vector-only constrained tail
 (`seed=7`, 3,072 actions). All enabled ordinary vector dimensions were left
@@ -3496,3 +3497,51 @@ queue conservation, and no unaccounted cancellation. This closes the basic
 ordinary-vector shape stimulus and per-element data/readback oracle; full
 shapes inside every heterogeneous overlap-window slot remain a separate
 composition gap.
+
+On 2026-09-10, read-only Picker `mem_direct` debug resolved the seed-1
+candidate as a UT false positive. Picker commit `012670c` fixes `mem_direct`
+generation against the generated Verilator data types (including the observed
+Verilator 5.048 `WData` build failure), and current Picker master `5e9e38d`
+also adapts VCD tracing by Verilator version. The debug build used no VPI and
+never wrote an internal signal: it sampled only Picker `U()`, `B()`, and
+`GetBytes()` accessors. Its 482,626-line offset map SHA-256 was
+`94939076a5b09e7438bb74d391fe62746a81ffcda650f933b4b28fcc6286608f`;
+the diagnostic executable SHA-256 was
+`794d0e9d03936ce2d38a16da9b5a0e6befca084542db3ae8b0ff905a5e8ef540`.
+
+The trace established the complete external cause. A legal earlier request
+for line `0x1c50012c0` fired at cycle 3,068,352 and received two all-zero D
+beats at cycles 3,068,354 and 3,068,357. The test did not fill that backing
+line until the later miss-burst action, after the DUT could already hold the
+zero-valued line. The subsequent demand at `0x1c50012e8` therefore returned
+the legally cached zero while the reference memory had been changed behind
+the DUT to `0x908f8e8d8c8b8a89`. Defining the manager/reference image before
+the first DUT clock changed those same D beats to the expected incrementing
+bytes and produced an exact `0x908f8e8d8c8b8a89` writeback. This is a
+backing-memory lifetime violation in the UT, not evidence of an RTL defect.
+
+The stable fix lazily defines the large merge, miss-burst, and bank-stress
+memory pools before traffic, with explicit modeled writes taking precedence.
+Merge and miss-burst stimulus skips any line already observed at the external
+manager. Their terminal oracle still requires exact per-ROB load data,
+exactly one writeback and LQ dequeue per generated operation, and global
+refill/GrantAck conservation; it no longer treats an exact A-request count,
+arrival timing, hardware-prefetch traffic, or internal MSHR behavior as the
+expected architectural answer. A second replay had exposed the old
+`random-miss-burst-outstanding-depth` equality gate for a legally prefetched
+line, so the external depth check now accepts `>= target` while requiring at
+least one target request for every selected fresh line.
+
+The final unchanged seed and command passed all 3,072 actions at cycle
+3,119,615. It produced 72,076 scalar writebacks, 1,058 vector-load and 982
+vector-store writebacks, 78,382 complete DCache refills, 78,384 GrantAcks, and
+1,263 exact miss-burst scalar completions while reaching external outstanding
+depth 16. LQ accounting was `76400+29/76429`, SQ accounting was
+`37277+0/37277`, and no cancellation was unaccounted. The original line was
+recognized from its earlier A history and was not incorrectly reused as a
+cold miss. No `CPU_BUG_*` report is warranted.
+
+The final verification pass completed all 195 Python unit tests,
+`check-rtl`, and a clean standard Picker harness rebuild plus `smoke` without
+the debug macro. The smoke test passed at cycle 38 on complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.

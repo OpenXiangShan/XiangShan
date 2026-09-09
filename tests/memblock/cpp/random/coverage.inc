@@ -1579,8 +1579,8 @@ struct ConstraintCoverage {
         const std::uint64_t load_merge_actions =
             operations[RandomConstraints::load_merge];
         if (load_merge_loads != load_merge_manager[3] ||
-            load_merge_actions != load_merge_manager[0] ||
-            load_merge_manager[1] < load_merge_actions ||
+            load_merge_manager[0] < load_merge_actions ||
+            load_merge_manager[1] < load_merge_manager[0] ||
             load_merge_manager[2] != load_merge_manager[1] ||
             std::accumulate(
                 load_merge_translations.begin(),
@@ -1761,8 +1761,8 @@ struct ConstraintCoverage {
             crossed_miss_burst_translations != miss_burst_translations ||
             miss_burst_manager[0] != miss_burst_actions ||
             miss_burst_manager[1] != miss_burst_loads ||
-            miss_burst_manager[2] != miss_burst_loads ||
-            miss_burst_manager[3] < miss_burst_loads ||
+            miss_burst_manager[2] < miss_burst_loads ||
+            miss_burst_manager[3] < miss_burst_manager[2] ||
             miss_burst_manager[4] != miss_burst_manager[3] ||
             miss_burst_manager[5] != miss_burst_loads ||
             miss_burst_manager[6] != miss_burst_loads ||
@@ -2052,7 +2052,13 @@ public:
                 }
             }
         }
-        stream << " actual_dcache_load_error="
+        // Keep the historical field for artifact compatibility, but expose
+        // its meaning explicitly: this is [clean,error] presence, not an
+        // error-only count.  PTW faults and ordinary successful loads can
+        // therefore legitimately contribute to the first element.
+        stream << " actual_dcache_load_error_presence="
+               << dcache_load_errors[0] << ',' << dcache_load_errors[1]
+               << " actual_dcache_load_error="
                << dcache_load_errors[0] << ',' << dcache_load_errors[1]
                << " actual_dcache_load_error_kind="
                << dcache_load_error_kinds[0] << ','

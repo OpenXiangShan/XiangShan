@@ -2015,8 +2015,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             merge_actions = actual_operations[12]
             _require(
                 actual_merge_loads == derived_loads
-                and actual_merge_manager[0] == merge_actions
-                and actual_merge_manager[1] >= merge_actions
+                and actual_merge_manager[0] >= merge_actions
+                and actual_merge_manager[1] >= actual_merge_manager[0]
                 and actual_merge_manager[2] == actual_merge_manager[1]
                 and actual_merge_manager[3] == actual_merge_loads,
                 "load-merge manager accounting is not conserved",
@@ -2685,8 +2685,8 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 _require(
                     actual_miss_manager[0] == actual_operations[14]
                     and actual_miss_manager[1] == derived_loads
-                    and actual_miss_manager[2] == derived_loads
-                    and actual_miss_manager[3] >= derived_loads
+                    and actual_miss_manager[2] >= derived_loads
+                    and actual_miss_manager[3] >= actual_miss_manager[2]
                     and actual_miss_manager[4] == actual_miss_manager[3]
                     and actual_miss_manager[5] == derived_loads
                     and actual_miss_manager[6] == derived_loads

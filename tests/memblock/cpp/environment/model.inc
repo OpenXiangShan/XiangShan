@@ -885,10 +885,49 @@ public:
         bytes_[address] = value;
     }
 
+    void define_repeating_incrementing(
+        std::uint64_t address, std::uint64_t size,
+        std::uint64_t period, std::uint8_t first)
+    {
+        define_reference_repeating_incrementing(address, size, period, first);
+        if (write_mirror_ != nullptr) {
+            write_mirror_->define_reference_repeating_incrementing(
+                address, size, period, first);
+        }
+    }
+
+    void define_reference_repeating_incrementing(
+        std::uint64_t address, std::uint64_t size,
+        std::uint64_t period, std::uint8_t first)
+    {
+        if (size == 0 || period == 0) {
+            throw std::invalid_argument(
+                "repeating incrementing memory region must be non-empty");
+        }
+        repeating_incrementing_.push_back(
+            RepeatingIncrementingRegion{address, size, period, first});
+    }
+
     std::uint8_t read_byte(std::uint64_t address) const
     {
         const auto it = bytes_.find(address);
-        return it == bytes_.end() ? 0 : it->second;
+        if (it != bytes_.end()) {
+            return it->second;
+        }
+        for (auto region = repeating_incrementing_.rbegin();
+             region != repeating_incrementing_.rend(); ++region) {
+            if (address >= region->address &&
+                address - region->address < region->size) {
+                const std::uint64_t relative = address - region->address;
+                const std::uint64_t period_index = relative / region->period;
+                const std::uint64_t offset = relative % region->period;
+                // Advance each period as well as each byte so adjacent cache
+                // lines remain distinguishable without materializing them.
+                return static_cast<std::uint8_t>(
+                    region->first + period_index + offset);
+            }
+        }
+        return 0;
     }
 
     void write_u64(std::uint64_t address, std::uint64_t value)
@@ -957,8 +996,16 @@ public:
     }
 
 private:
+    struct RepeatingIncrementingRegion {
+        std::uint64_t address;
+        std::uint64_t size;
+        std::uint64_t period;
+        std::uint8_t first;
+    };
+
     SparseMemory *write_mirror_;
     std::unordered_map<std::uint64_t, std::uint8_t> bytes_;
+    std::vector<RepeatingIncrementingRegion> repeating_incrementing_;
 };
 
 struct ReferenceStageWalkResult {
