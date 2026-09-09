@@ -21,6 +21,8 @@ ENDURANCE_SEEDS ?= 8
 ENDURANCE_TIMEOUT_SECONDS ?= 28800
 BENCHMARK_RESULT ?= $(PREPARED_DIR)/test-scale.json
 BENCHMARK_MARKDOWN ?= $(PREPARED_DIR)/test-scale.md
+SPEC_COUNTER_ROOT ?=
+SPEC_COUNTER_JSON ?= $(PREPARED_DIR)/spec-counters.json
 JOBS ?= 8
 PICKER_ROOT := $(PREPARED_DIR)/tools/picker
 PICKER ?= $(PICKER_ROOT)/build/bin/picker
@@ -46,7 +48,7 @@ CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) $
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
 .PHONY: vector-segment-fof
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
@@ -432,6 +434,10 @@ verify-endurance-results:
 
 benchmark-tests: $(RUNTIME_METADATA)
 	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
+
+analyze-spec-counters:
+	@test -n "$(SPEC_COUNTER_ROOT)" || (echo "set SPEC_COUNTER_ROOT to a checkpoint directory or simulator_err.txt" >&2; exit 2)
+	$(PYTHON) scripts/analyze_spec_counters.py $(SPEC_COUNTER_ROOT) --json $(SPEC_COUNTER_JSON)
 
 verify-extended-results:
 	$(MAKE) check-rtl

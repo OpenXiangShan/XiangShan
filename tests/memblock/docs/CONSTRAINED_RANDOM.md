@@ -321,6 +321,18 @@ SPEC CPU checkpoint logs in these local datasets:
 Only the final counter block in each `simulator_err.txt` was counted, avoiding
 double counting periodic cumulative dumps. Relevant aggregates were:
 
+The checked-in analyzer makes that selection and aggregation reproducible;
+its JSON output stays in the untracked build directory:
+
+```sh
+make analyze-spec-counters \
+  SPEC_COUNTER_ROOT=/path/to/checkpoints \
+  SPEC_COUNTER_JSON=../../build/memblock/spec-counters.json
+```
+
+The output is workload calibration evidence only. These implementation
+counters are never used as DUT correctness oracles.
+
 | Dataset | Loads | Stores | Load-unit first-issue TLB misses | DCache real misses | Miss allocations | Mean MSHR A-to-D |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `4f29a0951` | 5,449,853,667 | 2,335,870,195 | 89,439,821 | 572,769,182 | 483,469,995 | 30.28 cycles |
