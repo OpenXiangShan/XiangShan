@@ -2539,7 +2539,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             : std::min(
                   constraints.special_concurrent_per_mille != 0 &&
                           constraints.uses_concurrent_special_operations()
-                      ? 32U : 28U,
+                      ? 64U : 56U,
                   available_tail_actions);
         const unsigned concurrent_action_budget = std::max(
             requested_concurrent_actions, minimum_concurrent_actions);
@@ -2550,10 +2550,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             std::min(constrained_floor_actions, available_tail_actions);
         const unsigned concurrent_action_limit = std::min(
             maximum_concurrent_limit, actions + concurrent_action_budget);
-        // The tail is a constrained-random issue window. Each window contains
-        // all five producer classes before any completion drain, so cache,
-        // TLB, forwarding, and queue timing can interact in one simulation.
-        while (actions + 7 <= concurrent_action_limit) {
+        constexpr unsigned concurrent_vector_load_flow_limit =
+            memblock::kVirtualLoadQueueEntries -
+            memblock::kLqEnqueueHeadroom - 3U;
+        constexpr unsigned concurrent_vector_store_flow_limit =
+            memblock::kStoreQueueEntries -
+            memblock::kSqEnqueueHeadroom - 1U;
+        // Define the window before the full-shape vector helpers below, then
+        // instantiate it after those helpers are available. No DUT time
+        // advances between this definition and its invocation.
+        const auto run_concurrent_windows = [&] (
+            auto &&choose_concurrent_vector_shape,
+            auto &&make_concurrent_vector_uops,
+            auto &&sample_constrained_vector_instruction,
+            auto &&issue_random_vector_instruction) {
+          // Each window contains all five producer classes before any
+          // completion drain, so cache, TLB, forwarding, and queue timing can
+          // interact in one simulation.
+          while (actions + 7 <= concurrent_action_limit) {
             std::optional<unsigned> special_kind;
             if (actions + 8 <= concurrent_action_limit &&
                 constraints.special_concurrent_per_mille != 0 &&
@@ -2613,14 +2627,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             const bool vector_corner =
                 random() % 1000 < constraints.vector_corner_per_mille;
-            const auto required_load_mode = static_cast<memblock::VectorAddressingMode>(
-                coverage.concurrent_windows < 4
-                    ? coverage.concurrent_windows
-                    : vector_corner ? random() % 4 : 0);
-            const auto required_store_mode = static_cast<memblock::VectorAddressingMode>(
-                coverage.concurrent_windows < 4
-                    ? (coverage.concurrent_windows + 1) % 4
-                    : vector_corner ? random() % 4 : 0);
+            const auto &vector_load_shape = choose_concurrent_vector_shape(
+                0U, concurrent_vector_load_flow_limit, true);
+            const auto &vector_store_shape = choose_concurrent_vector_shape(
+                1U, concurrent_vector_store_flow_limit, true);
             const auto scalar_op =
                 static_cast<memblock::LoadOp>(random() % 7);
             auto scalar = make_load(
@@ -2628,9 +2638,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     window_base,
                     1U << (static_cast<unsigned>(scalar_op) & 3U)),
                 scalar_op, random() % 3);
-            auto vector_load = make_vector(
-                false, window_base + 32, random() % 4, random() % 2,
-                required_load_mode);
+            auto vector_load_uops = make_concurrent_vector_uops(
+                false, window_base + 32, vector_load_shape, vector_corner);
             const auto scalar_store_op =
                 static_cast<memblock::StoreOp>(random() % 4);
             auto scalar_store = make_store(
@@ -2638,35 +2647,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     window_base,
                     1U << static_cast<unsigned>(scalar_store_op)),
                 random(), scalar_store_op, random() % 2, random() % 2);
-            auto vector_store = make_vector(
-                true, window_base + 0x100 + (random() % 8U) * 8U,
-                random() % 4, random() % 2,
-                required_store_mode);
+            auto vector_store_uops = make_concurrent_vector_uops(
+                true, window_base + 0x100, vector_store_shape, vector_corner);
             auto prefetch = make_prefetch(
                 window_base + 0x180 + (random() % 8U) * 8U,
                 static_cast<memblock::PrefetchOp>(8 + random() % 3), random() % 3);
-            vector_load.vm = !vector_corner || (random() & 1U) != 0;
-            vector_load.mask_bits = static_cast<std::uint16_t>(random());
-            vector_store.vm = !vector_corner || (random() & 1U) != 0;
-            vector_store.mask_bits = static_cast<std::uint16_t>(random());
-            vector_load.vl = vector_corner
-                ? static_cast<std::uint8_t>(
-                      random() % ((16U >> vector_load.eew) + 1))
-                : static_cast<std::uint8_t>(16U >> vector_load.eew);
-            vector_store.vl = vector_corner
-                ? static_cast<std::uint8_t>(
-                      random() % ((16U >> vector_store.eew) + 1))
-                : static_cast<std::uint8_t>(16U >> vector_store.eew);
-            vector_load.vstart = vector_load.vl == 0
-                ? 0 : static_cast<std::uint8_t>(random() % (vector_load.vl + 1));
-            vector_store.vstart = vector_store.vl == 0
-                ? 0 : static_cast<std::uint8_t>(random() % (vector_store.vl + 1));
-            vector_load.address = window_base +
-                (random() % 8U) * (1U << vector_load.eew);
-            vector_store.address = window_base + 0x100 +
-                (random() % 8U) * (1U << vector_store.eew);
-            randomize_vector_addressing(vector_load);
-            randomize_vector_addressing(vector_store);
 
             {
                 std::ostringstream window;
@@ -2674,15 +2659,41 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                        << ":window=" << coverage.concurrent_windows
                        << ":scalar=0x" << std::hex << scalar.address
                        << "/" << static_cast<unsigned>(scalar.op)
-                       << ":vload=0x" << vector_load.address << std::dec
-                       << "/" << static_cast<unsigned>(vector_load.addressing)
-                       << "/" << static_cast<unsigned>(vector_load.eew)
+                       << ":vload=0x" << vector_load_uops.front().address
+                       << std::dec << "/" << vector_load_shape.addressing
+                       << "/" << vector_load_shape.eew
+                       << "/" << vector_load_shape.vsew
+                       << "/" << vector_load_shape.lmul_log2
+                       << "/" << vector_load_shape.emul_log2
+                       << "/vl=" << static_cast<unsigned>(
+                              vector_load_uops.front().vl)
+                       << "/vstart=" << static_cast<unsigned>(
+                              vector_load_uops.front().vstart)
+                       << "/vm=" << vector_load_uops.front().vm
+                       << "/vma=" << vector_load_uops.front().vma
+                       << "/vta=" << vector_load_uops.front().vta
+                       << "/mask=0x" << std::hex
+                       << vector_load_uops.front().mask_bits << std::dec
+                       << "/uops=" << vector_load_uops.size()
                        << ":store=0x" << std::hex << scalar_store.address
                        << std::dec << "/" << static_cast<unsigned>(scalar_store.op)
-                       << ":vstore=0x" << std::hex << vector_store.address
-                       << std::dec << "/"
-                       << static_cast<unsigned>(vector_store.addressing)
-                       << "/" << static_cast<unsigned>(vector_store.eew);
+                       << ":vstore=0x" << std::hex
+                       << vector_store_uops.front().address << std::dec
+                       << "/" << vector_store_shape.addressing
+                       << "/" << vector_store_shape.eew
+                       << "/" << vector_store_shape.vsew
+                       << "/" << vector_store_shape.lmul_log2
+                       << "/" << vector_store_shape.emul_log2
+                       << "/vl=" << static_cast<unsigned>(
+                              vector_store_uops.front().vl)
+                       << "/vstart=" << static_cast<unsigned>(
+                              vector_store_uops.front().vstart)
+                       << "/vm=" << vector_store_uops.front().vm
+                       << "/vma=" << vector_store_uops.front().vma
+                       << "/vta=" << vector_store_uops.front().vta
+                       << "/mask=0x" << std::hex
+                       << vector_store_uops.front().mask_bits << std::dec
+                       << "/uops=" << vector_store_uops.size();
                 phase = window.str();
             }
 
@@ -2690,17 +2701,30 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.expect_load(*special_load);
             }
             environment.expect_load(scalar);
-            environment.expect_vector(vector_load);
             environment.expect_store(scalar_store);
-            environment.expect_vector(vector_store);
             environment.expect_prefetch(prefetch);
-            if ((special_load && !environment.enqueue_load(*special_load)) ||
-                !environment.enqueue_load(scalar) ||
-                !environment.enqueue_vector(vector_load) ||
-                !environment.enqueue_store(
-                    scalar_store, memblock::lq_pointer_value(lq_offset)) ||
-                !environment.enqueue_vector(vector_store) ||
-                !environment.enqueue_prefetch(prefetch)) {
+            for (const auto &uop : vector_load_uops) {
+                environment.expect_vector(uop);
+            }
+            for (const auto &uop : vector_store_uops) {
+                environment.expect_vector(uop);
+            }
+            bool window_enqueued =
+                (!special_load || environment.enqueue_load(*special_load)) &&
+                environment.enqueue_load(scalar);
+            for (const auto &uop : vector_load_uops) {
+                window_enqueued = window_enqueued &&
+                    environment.enqueue_vector(uop);
+            }
+            window_enqueued = window_enqueued && environment.enqueue_store(
+                scalar_store, memblock::lq_pointer_value(lq_offset));
+            for (const auto &uop : vector_store_uops) {
+                window_enqueued = window_enqueued &&
+                    environment.enqueue_vector(uop);
+            }
+            window_enqueued = window_enqueued &&
+                environment.enqueue_prefetch(prefetch);
+            if (!window_enqueued) {
                 return false;
             }
 
@@ -2725,8 +2749,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             // Ordered indexed vector loads wait for all older LQ entries.
             // Keep the dependency legal while retaining a randomized order
             // for the remaining independent classes.
-            if (vector_load.addressing ==
-                    memblock::VectorAddressingMode::indexed_ordered) {
+            if (vector_load_shape.addressing == static_cast<unsigned>(
+                    memblock::VectorAddressingMode::indexed_ordered)) {
                 auto scalar_position = std::find(
                     issue_order.begin(), issue_order.end(), 0U);
                 auto vector_position = std::find(
@@ -2749,8 +2773,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     break;
                 case 1:
-                    if (!environment.issue_vector(vector_load, 2048)) {
+                    if (vector_load_shape.addressing ==
+                            static_cast<unsigned>(
+                                memblock::VectorAddressingMode::indexed_ordered) &&
+                        ((special_load &&
+                          !environment.run_until_load_complete(
+                              *special_load, constrained_completion_timeout)) ||
+                         !environment.run_until_load_complete(
+                             scalar, constrained_completion_timeout) ||
+                         !environment.set_rob_head(
+                             vector_load_uops.front().rob,
+                             vector_load_uops.front().rob_flag))) {
                         return false;
+                    }
+                    for (const auto &uop : vector_load_uops) {
+                        if (!environment.issue_vector(uop, 2048)) {
+                            return false;
+                        }
                     }
                     break;
                 case 2:
@@ -2764,8 +2803,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     break;
                 case 3:
-                    if (!environment.issue_vector(vector_store, 2048)) {
-                        return false;
+                    for (const auto &uop : vector_store_uops) {
+                        if (!environment.issue_vector(uop, 2048)) {
+                            return false;
+                        }
                     }
                     break;
                 default:
@@ -2804,16 +2845,27 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
             coverage.sample(scalar);
-            coverage.sample(vector_load);
             coverage.sample(scalar_store, scalar_store_data_first);
-            coverage.sample(vector_store);
+            for (const auto &uop : vector_load_uops) {
+                coverage.sample(uop);
+            }
+            for (const auto &uop : vector_store_uops) {
+                coverage.sample(uop);
+            }
             coverage.sample(prefetch);
             const unsigned scalar_store_bytes =
                 1U << static_cast<unsigned>(scalar_store.op);
             const bool scalar_store_crosses_page =
                 (scalar_store.address & 0xfffU) + scalar_store_bytes > 0x1000U;
-            const std::vector<memblock::VectorMemoryTransaction>
-                window_vectors{vector_load, vector_store};
+            std::vector<memblock::VectorMemoryTransaction> window_vectors;
+            window_vectors.reserve(
+                vector_load_uops.size() + vector_store_uops.size());
+            window_vectors.insert(
+                window_vectors.end(), vector_load_uops.begin(),
+                vector_load_uops.end());
+            window_vectors.insert(
+                window_vectors.end(), vector_store_uops.begin(),
+                vector_store_uops.end());
             if ((scalar_store_crosses_page &&
                  !environment.set_rob_head(
                      scalar_store.rob, scalar_store.rob_flag)) ||
@@ -2825,9 +2877,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 !environment.run_until_all_complete(
                     constrained_completion_timeout) ||
                 !environment.run_cycles(8) ||
-                !environment.commit_store(scalar_store, 4096) ||
-                !environment.commit_vector_store(vector_store, 4096) ||
-                !environment.set_rob_head(prefetch.rob, prefetch.rob_flag) ||
+                !environment.commit_store(scalar_store, 4096)) {
+                return false;
+            }
+            for (const auto &uop : vector_store_uops) {
+                if (!environment.commit_vector_store(uop, 4096)) {
+                    return false;
+                }
+            }
+            if (!environment.set_rob_head(prefetch.rob, prefetch.rob_flag) ||
                 !environment.run_until_queues_retired(4096)) {
                 return false;
             }
@@ -2846,24 +2904,36 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 !environment.run_until_queues_retired(4096)) {
                 return false;
             }
-            auto vector_readback = make_vector(
-                false, vector_store.address, vector_store.eew, random() % 2,
-                vector_store.addressing);
-            vector_readback.vl = vector_store.vl;
-            vector_readback.vstart = vector_store.vstart;
-            vector_readback.vm = vector_store.vm;
-            vector_readback.mask_bits = vector_store.mask_bits;
-            vector_readback.vma = vector_store.vma;
-            vector_readback.vta = vector_store.vta;
-            vector_readback.stride = vector_store.stride;
-            vector_readback.index = vector_store.index;
+            auto vector_readback_uops = vector_store_uops;
+            const std::uint64_t vector_readback_rob = rob_offset++;
+            for (auto &uop : vector_readback_uops) {
+                uop.store = false;
+                uop.rob = memblock::rob_pointer_value(vector_readback_rob);
+                uop.rob_flag = memblock::rob_pointer_flag(vector_readback_rob);
+                uop.lq = memblock::lq_pointer_value(lq_offset);
+                uop.lq_flag = memblock::lq_pointer_flag(lq_offset);
+                uop.sq = memblock::sq_pointer_value(sq_offset);
+                uop.sq_flag = memblock::sq_pointer_flag(sq_offset);
+                lq_offset += uop.flow_num;
+            }
             if (!environment.set_rob_head(
-                    vector_readback.rob, vector_readback.rob_flag) ||
-                !issue_vector(
-                    vector_readback,
-                    environment.memory().expected_vector_load(vector_readback))) {
+                    vector_readback_uops.front().rob,
+                    vector_readback_uops.front().rob_flag) ||
+                !issue_random_vector_instruction(vector_readback_uops)) {
                 return false;
             }
+            sample_constrained_vector_instruction(
+                false, vector_load_shape, vector_load_uops);
+            sample_constrained_vector_instruction(
+                true, vector_store_shape, vector_store_uops);
+            sample_constrained_vector_instruction(
+                false, vector_store_shape, vector_readback_uops);
+            constraint_coverage.sample_concurrent_vector_shape(
+                false, vector_load_shape.addressing,
+                vector_load_uops.size());
+            constraint_coverage.sample_concurrent_vector_shape(
+                true, vector_store_shape.addressing,
+                vector_store_uops.size());
             if (
                 // Keep the commit boundary at the last uop in this window.
                 // StoreQueue treats a uop whose ROB equals pendingPtr as
@@ -2915,7 +2985,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.ptw_requests(), special_kind ? 8 : 7, 7);
             actions += 5;
             coverage.cacheable += 7;
-        }
+          }
+          return true;
+        };
         const std::array<memblock::AtomicOp, 9> atomic_operations_d{{
             memblock::AtomicOp::amoadd_d,
             memblock::AtomicOp::amoxor_d,
@@ -2984,6 +3056,39 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             int emul_log2;
             long double weight;
         };
+        const auto vector_shape_uop_count = [](
+            const RandomVectorShape &shape) {
+            return 1U << static_cast<unsigned>(std::max(
+                shape.addressing >= 2
+                    ? std::max(shape.lmul_log2, shape.emul_log2)
+                    : shape.emul_log2,
+                0));
+        };
+        const auto vector_shape_flow_num = [](
+            const RandomVectorShape &shape) {
+            if (shape.addressing == 0) {
+                return memblock::kVectorUnitStrideMaxFlows;
+            }
+            if (shape.addressing == 1) {
+                const unsigned bytes_per_uop = shape.emul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-shape.emul_log2)
+                    : 16U;
+                return bytes_per_uop >> shape.eew;
+            }
+            const int flow_mul_log2 = std::max(
+                shape.emul_log2, shape.lmul_log2);
+            const unsigned bytes_per_uop = flow_mul_log2 < 0
+                ? 16U >> static_cast<unsigned>(-flow_mul_log2)
+                : 16U;
+            return bytes_per_uop >>
+                (shape.emul_log2 > shape.lmul_log2
+                    ? shape.eew : shape.vsew);
+        };
+        const auto vector_shape_total_flows = [&] (
+            const RandomVectorShape &shape) {
+            return vector_shape_uop_count(shape) *
+                vector_shape_flow_num(shape);
+        };
         std::vector<RandomVectorShape> vector_shapes;
         for (unsigned addressing = 0; addressing < 4; ++addressing) {
             if (constraints.vector_addressing_weights[addressing] == 0) {
@@ -3042,15 +3147,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 (constraint_coverage.vector_lmuls[shape.lmul_log2 + 3] == 0) +
                 (constraint_coverage.vector_emuls[shape.emul_log2 + 3] == 0));
         };
-        auto choose_vector_shape = [&](unsigned direction) -> const RandomVectorShape & {
+        auto choose_vector_shape = [&] (
+            unsigned direction, std::optional<unsigned> maximum_flows,
+            bool concurrent_slot) -> const RandomVectorShape & {
+            const auto eligible = [&](const RandomVectorShape &shape) {
+                return !maximum_flows ||
+                    vector_shape_total_flows(shape) <= *maximum_flows;
+            };
+            const auto selection_deficit = [&](const RandomVectorShape &shape) {
+                const unsigned multi_uop =
+                    vector_shape_uop_count(shape) > 1U ? 1U : 0U;
+                return vector_shape_deficit(shape, direction) +
+                    (concurrent_slot &&
+                         constraint_coverage.concurrent_vector_shapes
+                             .at(direction).at(shape.addressing).at(multi_uop) == 0
+                     ? 16U : 0U);
+            };
             unsigned maximum_deficit = 0;
             for (const auto &shape : vector_shapes) {
+                if (!eligible(shape)) {
+                    continue;
+                }
                 maximum_deficit = std::max(
-                    maximum_deficit, vector_shape_deficit(shape, direction));
+                    maximum_deficit, selection_deficit(shape));
             }
             long double total_weight = 0;
             for (const auto &shape : vector_shapes) {
-                if (vector_shape_deficit(shape, direction) == maximum_deficit) {
+                if (eligible(shape) &&
+                    selection_deficit(shape) == maximum_deficit) {
                     total_weight += shape.weight;
                 }
             }
@@ -3059,7 +3183,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             long double selection = unit * total_weight;
             const RandomVectorShape *fallback = nullptr;
             for (const auto &shape : vector_shapes) {
-                if (vector_shape_deficit(shape, direction) != maximum_deficit) {
+                if (!eligible(shape) ||
+                    selection_deficit(shape) != maximum_deficit) {
                     continue;
                 }
                 fallback = &shape;
@@ -3067,6 +3192,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return shape;
                 }
                 selection -= shape.weight;
+            }
+            if (fallback == nullptr) {
+                throw std::logic_error(
+                    "no enabled vector shape fits the concurrent LSQ budget");
             }
             return *fallback;
         };
@@ -3199,26 +3328,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
                 : 16U << static_cast<unsigned>(shape.lmul_log2);
             const unsigned vlmax = vector_bytes >> shape.vsew;
-            const unsigned uop_count = 1U << static_cast<unsigned>(std::max(
-                indexed ? std::max(shape.lmul_log2, shape.emul_log2)
-                        : shape.emul_log2,
-                0));
-            unsigned flow_num = memblock::kVectorUnitStrideMaxFlows;
-            if (shape.addressing == 1) {
-                const unsigned bytes_per_uop = shape.emul_log2 < 0
-                    ? 16U >> static_cast<unsigned>(-shape.emul_log2)
-                    : 16U;
-                flow_num = bytes_per_uop >> shape.eew;
-            } else if (indexed) {
-                const int flow_mul_log2 = shape.emul_log2 > shape.lmul_log2
-                    ? shape.emul_log2 : shape.lmul_log2;
-                const unsigned bytes_per_uop = flow_mul_log2 < 0
-                    ? 16U >> static_cast<unsigned>(-flow_mul_log2)
-                    : 16U;
-                flow_num = bytes_per_uop >>
-                    (shape.emul_log2 > shape.lmul_log2
-                        ? shape.eew : shape.vsew);
-            }
+            const unsigned uop_count = vector_shape_uop_count(shape);
+            const unsigned flow_num = vector_shape_flow_num(shape);
             std::int64_t stride = 0;
             if (shape.addressing == 1) {
                 const std::int64_t magnitude =
@@ -3320,6 +3431,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     ? uop >> static_cast<unsigned>(
                         shape.emul_log2 - shape.lmul_log2)
                     : uop;
+                const std::uint64_t lq_pointer =
+                    store ? lq_offset : queue_cursor;
+                const std::uint64_t sq_pointer =
+                    store ? queue_cursor : sq_offset;
                 uops.push_back(memblock::VectorMemoryTransaction{
                     .store = store,
                     .address = address,
@@ -3336,12 +3451,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     .vta = vta,
                     .rob = memblock::rob_pointer_value(rob),
                     .rob_flag = memblock::rob_pointer_flag(rob),
-                    .lq = memblock::lq_pointer_value(
-                        store ? lq_offset : queue_cursor),
-                    .lq_flag = !store && memblock::lq_pointer_flag(queue_cursor),
-                    .sq = memblock::sq_pointer_value(
-                        store ? queue_cursor : sq_offset),
-                    .sq_flag = store && memblock::sq_pointer_flag(queue_cursor),
+                    .lq = memblock::lq_pointer_value(lq_pointer),
+                    .lq_flag = memblock::lq_pointer_flag(lq_pointer),
+                    .sq = memblock::sq_pointer_value(sq_pointer),
+                    .sq_flag = memblock::sq_pointer_flag(sq_pointer),
                     .pdest = static_cast<std::uint8_t>(first_pdest + vd_index),
                     .lane = uop % memblock::kVectorMemoryLanes,
                     .flow_num = static_cast<std::uint8_t>(flow_num),
@@ -3375,6 +3488,42 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 queue_cursor += flow_num;
             }
             return uops;
+        };
+        const auto sample_constrained_vector_instruction = [&] (
+            bool store, const RandomVectorShape &shape,
+            const std::vector<memblock::VectorMemoryTransaction> &uops) {
+            ++constraint_coverage.vector_directions[store ? 1U : 0U];
+            ++constraint_coverage.vector_addressing[shape.addressing];
+            ++constraint_coverage.vector_eews[shape.eew];
+            ++constraint_coverage.vector_sews[shape.vsew];
+            ++constraint_coverage.vector_lmuls[shape.lmul_log2 + 3];
+            ++constraint_coverage.vector_emuls[shape.emul_log2 + 3];
+            constraint_coverage.sample_vector_shape(
+                store ? 1U : 0U, shape.addressing, shape.eew, shape.vsew,
+                shape.lmul_log2);
+            const auto &policy = uops.front();
+            const unsigned vector_bytes = shape.lmul_log2 < 0
+                ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
+                : 16U << static_cast<unsigned>(shape.lmul_log2);
+            const unsigned vlmax = vector_bytes >> shape.vsew;
+            ++constraint_coverage.vector_masked[policy.vm ? 0U : 1U];
+            ++constraint_coverage.vector_vma[policy.vma ? 1U : 0U];
+            ++constraint_coverage.vector_vta[policy.vta ? 1U : 0U];
+            ++constraint_coverage.vector_partial_vl[
+                policy.vl < vlmax ? 1U : 0U];
+            ++constraint_coverage.vector_nonzero_vstart[
+                policy.vstart != 0 ? 1U : 0U];
+            constraint_coverage.vector_mask_agnostic += !store && policy.vma &&
+                std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
+                    return memblock::vector_mask_inactive_elements(uop) != 0;
+                });
+            constraint_coverage.vector_tail_agnostic += !store && policy.vta &&
+                std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
+                    return memblock::vector_tail_elements(uop) != 0;
+                });
+            ++constraint_coverage.vector_shape_operations;
+            constraint_coverage.vector_uops += uops.size();
+            constraint_coverage.vector_multi_uop += uops.size() > 1U;
         };
         auto issue_random_vector_instruction = [&] (
             const std::vector<memblock::VectorMemoryTransaction> &uops) {
@@ -3522,6 +3671,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             ++actions;
             return true;
         };
+        if (!run_concurrent_windows(
+                choose_vector_shape, make_random_vector_uops,
+                sample_constrained_vector_instruction,
+                issue_random_vector_instruction)) {
+            return false;
+        }
         const auto probe_coverage_incomplete = [&]() {
             return constraint_coverage
                 .first_missing_probe_cross(constraints).has_value();
@@ -7083,7 +7238,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::vector_load ||
                        kind == RandomConstraints::vector_store) {
                 const bool store = kind == RandomConstraints::vector_store;
-                const auto &shape = choose_vector_shape(store ? 1U : 0U);
+                const auto &shape = choose_vector_shape(
+                    store ? 1U : 0U, std::nullopt, false);
                 const unsigned data_eew = shape.addressing >= 2
                     ? shape.vsew : shape.eew;
                 const bool vector_corner =
@@ -7094,38 +7250,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 if (!issue_random_vector_instruction(uops)) {
                     return false;
                 }
-                ++constraint_coverage.vector_directions[store ? 1U : 0U];
-                ++constraint_coverage.vector_addressing[shape.addressing];
-                ++constraint_coverage.vector_eews[shape.eew];
-                ++constraint_coverage.vector_sews[shape.vsew];
-                ++constraint_coverage.vector_lmuls[shape.lmul_log2 + 3];
-                ++constraint_coverage.vector_emuls[shape.emul_log2 + 3];
-                constraint_coverage.sample_vector_shape(
-                    store ? 1U : 0U, shape.addressing, shape.eew, shape.vsew,
-                    shape.lmul_log2);
-                const auto &policy = uops.front();
-                const unsigned vector_bytes = shape.lmul_log2 < 0
-                    ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
-                    : 16U << static_cast<unsigned>(shape.lmul_log2);
-                const unsigned vlmax = vector_bytes >> shape.vsew;
-                ++constraint_coverage.vector_masked[policy.vm ? 0U : 1U];
-                ++constraint_coverage.vector_vma[policy.vma ? 1U : 0U];
-                ++constraint_coverage.vector_vta[policy.vta ? 1U : 0U];
-                ++constraint_coverage.vector_partial_vl[
-                    policy.vl < vlmax ? 1U : 0U];
-                ++constraint_coverage.vector_nonzero_vstart[
-                    policy.vstart != 0 ? 1U : 0U];
-                constraint_coverage.vector_mask_agnostic += !store && policy.vma &&
-                    std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
-                        return memblock::vector_mask_inactive_elements(uop) != 0;
-                    });
-                constraint_coverage.vector_tail_agnostic += !store && policy.vta &&
-                    std::any_of(uops.begin(), uops.end(), [](const auto &uop) {
-                        return memblock::vector_tail_elements(uop) != 0;
-                    });
-                ++constraint_coverage.vector_shape_operations;
-                constraint_coverage.vector_uops += uops.size();
-                constraint_coverage.vector_multi_uop += uops.size() > 1U;
+                sample_constrained_vector_instruction(store, shape, uops);
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::vector_segment) {
                 if (!environment.run_until_all_complete(8192) ||

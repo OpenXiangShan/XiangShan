@@ -238,6 +238,115 @@ def _check_vector_shape_cross(
     )
 
 
+def _check_concurrent_vector_shapes(
+    result: dict[str, Any],
+    target_operations: list[int],
+    vector_targets: dict[str, list[int]],
+    policy_targets: dict[str, int],
+) -> None:
+    """Check externally defined vector shapes used in heterogeneous windows."""
+
+    shape_counts = _csv_counts(
+        result, "actual_concurrent_vector_shape", 2 * 4 * 2
+    )
+    uop_counts = _csv_counts(result, "actual_concurrent_vector_uops", 2)
+    concurrent_windows = _csv_counts(result, "concurrent", 5)[0]
+    target_concurrent = result.get("target_concurrent")
+    _require(
+        isinstance(target_concurrent, int)
+        and not isinstance(target_concurrent, bool)
+        and 0 <= target_concurrent <= 1000,
+        f"target_concurrent is not a per-mille integer: {target_concurrent!r}",
+    )
+    fixed_policies = sum(
+        policy_targets[name] == 1000
+        for name in ("masked", "partial_vl", "nonzero_vstart")
+    )
+    minimum_vlmax = 3 if fixed_policies == 3 else 2 if fixed_policies == 2 else 1
+    expected = [[[False] * 2 for _ in range(4)] for _ in range(2)]
+    flow_limits = (72 - 6 - 3, 56 - 4 - 1)
+    for direction in range(2):
+        for addressing in range(4):
+            for eew in range(4):
+                for sew in range(4):
+                    for lmul in range(7):
+                        lmul_log2 = lmul - 3
+                        emul_log2 = eew - sew + lmul_log2
+                        vector_bytes = (
+                            16 >> -lmul_log2
+                            if lmul_log2 < 0
+                            else 16 << lmul_log2
+                        )
+                        legal = (
+                            lmul_log2 >= sew - 3
+                            and -3 <= emul_log2 <= 3
+                            and vector_bytes >> sew >= minimum_vlmax
+                        )
+                        enabled = (
+                            legal
+                            and target_concurrent != 0
+                            and target_operations[2 + direction] != 0
+                            and vector_targets["addressing"][addressing] != 0
+                            and vector_targets["eew"][eew] != 0
+                            and vector_targets["sew"][sew] != 0
+                            and vector_targets["lmul"][lmul] != 0
+                            and vector_targets["emul"][emul_log2 + 3] != 0
+                        )
+                        if not enabled:
+                            continue
+                        uop_log2 = (
+                            max(lmul_log2, emul_log2)
+                            if addressing >= 2
+                            else emul_log2
+                        )
+                        uops = 1 << max(uop_log2, 0)
+                        flows_per_uop = 2
+                        if addressing == 1:
+                            flows_per_uop = (
+                                16 >> -emul_log2 if emul_log2 < 0 else 16
+                            ) >> eew
+                        elif addressing >= 2:
+                            flow_log2 = max(emul_log2, lmul_log2)
+                            flows_per_uop = (
+                                16 >> -flow_log2 if flow_log2 < 0 else 16
+                            ) >> (eew if emul_log2 > lmul_log2 else sew)
+                        if uops * flows_per_uop <= flow_limits[direction]:
+                            expected[direction][addressing][int(uops > 1)] = True
+
+    direction_counts = [0, 0]
+    multi_uop_counts = [0, 0]
+    index = 0
+    for direction in range(2):
+        for addressing in range(4):
+            for multi_uop in range(2):
+                count = shape_counts[index]
+                index += 1
+                _require(
+                    (count > 0) == expected[direction][addressing][multi_uop],
+                    "actual_concurrent_vector_shape does not match enabled "
+                    "fitting classes: "
+                    f"direction={direction} addressing={addressing} "
+                    f"multi_uop={multi_uop}",
+                )
+                direction_counts[direction] += count
+                if multi_uop:
+                    multi_uop_counts[direction] += count
+    _require(
+        direction_counts == [concurrent_windows, concurrent_windows],
+        "concurrent vector shape counts do not match heterogeneous windows",
+    )
+    _require(
+        all(
+            direction_counts[direction] + multi_uop_counts[direction]
+            <= uop_counts[direction]
+            <= 8 * direction_counts[direction]
+            for direction in range(2)
+        ),
+        "concurrent vector uop counts are outside the architectural 1..8 "
+        "uops per instruction range",
+    )
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -246,7 +355,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -2977,6 +3086,10 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             policy_targets,
             vector_directions,
             vector_shape_operations,
+        )
+    if schema >= 42:
+        _check_concurrent_vector_shapes(
+            result, target_operations, vector_targets, policy_targets
         )
 
 

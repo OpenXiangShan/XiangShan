@@ -322,6 +322,13 @@ struct ConstraintCoverage {
     std::uint64_t vector_shape_operations = 0;
     std::uint64_t vector_uops = 0;
     std::uint64_t vector_multi_uop = 0;
+    // [load/store][unit/strided/indexed-unordered/indexed-ordered]
+    // [single-uop/multi-uop]. These describe the two primary vector
+    // instructions in heterogeneous issue windows, independent of replay or
+    // cache implementation behavior.
+    std::array<std::array<std::array<std::uint64_t, 2>, 4>, 2>
+        concurrent_vector_shapes{};
+    std::array<std::uint64_t, 2> concurrent_vector_uops{};
     std::array<std::uint64_t, 2> vector_segment_directions{};
     std::array<std::uint64_t, 4> vector_segment_addressing{};
     std::array<std::uint64_t, 4> vector_segment_eews{};
@@ -496,6 +503,106 @@ struct ConstraintCoverage {
     {
         ++vector_shape_crosses.at(vector_shape_cross_index(
             direction, addressing, eew, sew, lmul_log2));
+    }
+
+    void sample_concurrent_vector_shape(
+        bool store, unsigned addressing, std::size_t uops)
+    {
+        ++concurrent_vector_shapes.at(store ? 1U : 0U)
+              .at(addressing).at(uops > 1U ? 1U : 0U);
+        concurrent_vector_uops.at(store ? 1U : 0U) += uops;
+    }
+
+    bool concurrent_vectors_complete(const RandomConstraints &constraints) const
+    {
+        if (constraints.concurrent_actions_per_mille == 0) {
+            return concurrent_vector_shapes ==
+                    decltype(concurrent_vector_shapes){} &&
+                concurrent_vector_uops == std::array<std::uint64_t, 2>{};
+        }
+        std::array<std::uint64_t, 2> instructions{};
+        std::array<std::uint64_t, 2> multi_uop_instructions{};
+        for (unsigned direction = 0; direction < 2; ++direction) {
+            const unsigned flow_limit = direction == 0
+                ? memblock::kVirtualLoadQueueEntries -
+                    memblock::kLqEnqueueHeadroom - 3U
+                : memblock::kStoreQueueEntries -
+                    memblock::kSqEnqueueHeadroom - 1U;
+            for (unsigned addressing = 0; addressing < 4; ++addressing) {
+                for (unsigned multi_uop = 0; multi_uop < 2; ++multi_uop) {
+                    bool enabled = false;
+                    for (unsigned eew = 0; eew < 4; ++eew) {
+                        for (unsigned sew = 0; sew < 4; ++sew) {
+                            for (int lmul_log2 = -3; lmul_log2 <= 3;
+                                 ++lmul_log2) {
+                                const int emul_log2 = static_cast<int>(eew) -
+                                    static_cast<int>(sew) + lmul_log2;
+                                const unsigned vector_bytes = lmul_log2 < 0
+                                    ? 16U >> static_cast<unsigned>(-lmul_log2)
+                                    : 16U << static_cast<unsigned>(lmul_log2);
+                                if (lmul_log2 < static_cast<int>(sew) - 3 ||
+                                    emul_log2 < -3 || emul_log2 > 3 ||
+                                    (vector_bytes >> sew) <
+                                        constraints.vector_policy_minimum_vlmax()) {
+                                    continue;
+                                }
+                                const int uop_log2 = addressing >= 2
+                                    ? std::max(lmul_log2, emul_log2)
+                                    : emul_log2;
+                                const unsigned uops = 1U <<
+                                    static_cast<unsigned>(std::max(uop_log2, 0));
+                                unsigned flows_per_uop =
+                                    memblock::kVectorUnitStrideMaxFlows;
+                                if (addressing == 1) {
+                                    flows_per_uop = (emul_log2 < 0
+                                        ? 16U >> static_cast<unsigned>(-emul_log2)
+                                        : 16U) >> eew;
+                                } else if (addressing >= 2) {
+                                    const int flow_log2 =
+                                        std::max(emul_log2, lmul_log2);
+                                    flows_per_uop = (flow_log2 < 0
+                                        ? 16U >> static_cast<unsigned>(-flow_log2)
+                                        : 16U) >> (emul_log2 > lmul_log2
+                                            ? eew : sew);
+                                }
+                                enabled = enabled ||
+                                    (constraints.operation_weights[
+                                         RandomConstraints::vector_load +
+                                         direction] != 0 &&
+                                     constraints.vector_addressing_weights[
+                                         addressing] != 0 &&
+                                     constraints.vector_eew_weights[eew] != 0 &&
+                                     constraints.vector_sew_weights[sew] != 0 &&
+                                     constraints.vector_lmul_weights[
+                                         lmul_log2 + 3] != 0 &&
+                                     constraints.vector_emul_weights[
+                                         emul_log2 + 3] != 0 &&
+                                     static_cast<unsigned>(uops > 1U) ==
+                                         multi_uop &&
+                                     uops * flows_per_uop <= flow_limit);
+                            }
+                        }
+                    }
+                    const std::uint64_t count =
+                        concurrent_vector_shapes[direction][addressing][multi_uop];
+                    if ((count != 0) != enabled) {
+                        return false;
+                    }
+                    instructions[direction] += count;
+                    if (multi_uop != 0) {
+                        multi_uop_instructions[direction] += count;
+                    }
+                }
+            }
+            if (instructions[direction] == 0 ||
+                concurrent_vector_uops[direction] <
+                    instructions[direction] + multi_uop_instructions[direction] ||
+                concurrent_vector_uops[direction] >
+                    8U * instructions[direction]) {
+                return false;
+            }
+        }
+        return instructions[0] == instructions[1];
     }
 
     void sample_uncache(
@@ -1502,6 +1609,9 @@ struct ConstraintCoverage {
                 return false;
             }
         }
+        if (!concurrent_vectors_complete(constraints)) {
+            return false;
+        }
         if (constraints.uses_locality()) {
             for (std::size_t index = 0; index < locality.size(); ++index) {
                 if (constraints.locality_weights[index] != 0 &&
@@ -2293,6 +2403,20 @@ public:
                << " actual_vector_shape_ops=" << vector_shape_operations
                << " actual_vector_uops=" << vector_uops
                << " actual_vector_multi_uop=" << vector_multi_uop
+               << " actual_concurrent_vector_shape=";
+        bool first_concurrent_vector_shape = true;
+        for (const auto &direction : concurrent_vector_shapes) {
+            for (const auto &addressing : direction) {
+                for (const auto count : addressing) {
+                    stream << (first_concurrent_vector_shape ? "" : ",")
+                           << count;
+                    first_concurrent_vector_shape = false;
+                }
+            }
+        }
+        stream << " actual_concurrent_vector_uops="
+               << concurrent_vector_uops[0] << ','
+               << concurrent_vector_uops[1]
                << " actual_vector_segment_direction="
                << vector_segment_directions[0] << ','
                << vector_segment_directions[1]

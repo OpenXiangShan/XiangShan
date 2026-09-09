@@ -1631,6 +1631,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, driver)
 
     def test_mem_direct_debug_is_read_only_and_optional(self) -> None:
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         environment = (
             MEMBLOCK_ROOT / "cpp/environment/environment.inc"
         ).read_text()
@@ -1652,6 +1653,49 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(read_contract, debug)
         for forbidden_write_path in ("VPI", "ImmSet", "SetBytes", "->Set("):
             self.assertNotIn(forbidden_write_path, debug)
+        export_rule = makefile[
+            makefile.index("$(PICKER) export"):
+            makefile.index("\n\t@touch $@", makefile.index("$(PICKER) export"))
+        ]
+        self.assertIn("--rw mem_direct", export_rule)
+        self.assertNotIn("--vpi", export_rule)
+        self.assertIn("scripts/prepare_picker_export.py", makefile)
+        self.assertIn("mem_direct/export.bin > $(PICKER_OFFSET)", makefile)
+        harness = (
+            MEMBLOCK_ROOT / "scripts/prepare_picker_harness.py"
+        ).read_text()
+        self.assertIn('picker_output / "MemBlock_offset.yaml"', harness)
+
+    def test_vector_timeout_reports_pending_top_level_identities(self) -> None:
+        scoreboards = (
+            MEMBLOCK_ROOT / "cpp/environment/scoreboards.inc"
+        ).read_text()
+        environment = (
+            MEMBLOCK_ROOT / "cpp/environment/environment.inc"
+        ).read_text()
+
+        self.assertIn("std::string pending_summary() const", scoreboards)
+        for field in (
+            "expected.last_uop",
+            "expected.lq",
+            "expected.lq_flag",
+            "expected.sq",
+            "expected.sq_flag",
+            "expected.flow_num",
+            "expected.addressing",
+            "expected.address",
+        ):
+            self.assertIn(field, scoreboards)
+        for field in (
+            "transaction.vuop_idx",
+            "transaction.last_uop",
+            "transaction.lq_flag",
+            "transaction.sq_flag",
+        ):
+            self.assertIn(field, environment)
+        self.assertGreaterEqual(
+            environment.count("vector_scoreboard_.pending_summary()"), 4
+        )
 
     def test_uncache_store_order_uses_bus_backing_oracle(self) -> None:
         main = read_cpp_source("memblock_main.cpp")
@@ -2664,6 +2708,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_vector_shape_ops=",
             "actual_vector_uops=",
             "actual_vector_multi_uop=",
+            "actual_concurrent_vector_shape=",
+            "actual_concurrent_vector_uops=",
             "actual_vector_segment_direction=",
             "target_vector_segment_addressing=",
             "actual_vector_segment_addressing=",
@@ -2720,7 +2766,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=41",
+            "constraint_schema=42",
             "RandomVectorShape",
             "choose_vector_shape",
             "actual_vector_cross=",
@@ -3064,6 +3110,57 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("uses_concurrent_special_operations", concurrent_tail)
         self.assertIn("RandomConstraints::noncacheable + index", concurrent_tail)
         self.assertNotIn("issue_atomic", concurrent_tail)
+
+    def test_random_mixed_windows_use_full_shape_vector_instructions(self) -> None:
+        driver = read_cpp_source("memblock_main.cpp")
+        concurrent_tail = driver[
+            driver.index('phase = "seeded-mixed-tail"'):
+            driver.index("const std::array<memblock::AtomicOp, 9>")
+        ]
+
+        for contract in (
+            "choose_concurrent_vector_shape(",
+            "make_concurrent_vector_uops(",
+            "for (const auto &uop : vector_load_uops)",
+            "for (const auto &uop : vector_store_uops)",
+            "window_vectors.insert(",
+            "auto vector_readback_uops = vector_store_uops",
+            "issue_random_vector_instruction(vector_readback_uops)",
+            "sample_concurrent_vector_shape(",
+            "environment.run_until_load_complete(",
+        ):
+            self.assertIn(contract, concurrent_tail)
+        self.assertNotIn("auto vector_load = make_vector(", concurrent_tail)
+        self.assertNotIn("auto vector_store = make_vector(", concurrent_tail)
+        self.assertNotIn("uop.sq_flag = false", concurrent_tail)
+        self.assertIn(
+            "uop.sq_flag = memblock::sq_pointer_flag(sq_offset)",
+            concurrent_tail,
+        )
+        self.assertIn(
+            ".lq_flag = memblock::lq_pointer_flag(lq_pointer)",
+            driver,
+        )
+        self.assertIn(
+            ".sq_flag = memblock::sq_pointer_flag(sq_pointer)",
+            driver,
+        )
+
+    def test_indexed_unordered_uops_cover_both_issue_orders(self) -> None:
+        driver = read_cpp_source("memblock_main.cpp")
+        scenario = driver[
+            driver.index("int run_vector_issue_order"):
+            driver.index("int run_vector_addressing")
+        ]
+
+        self.assertIn('options.test == "vector-issue-order"', driver)
+        self.assertIn("VectorAddressingMode::indexed_unordered", scenario)
+        self.assertIn("VectorAddressingMode::indexed_ordered", scenario)
+        self.assertIn("case=masked-indexed-ordered", scenario)
+        self.assertIn("const bool reverse = order != 0", scenario)
+        self.assertIn("environment.expect_vector(transaction)", scenario)
+        self.assertIn("run_until_vector_complete_with_replays", scenario)
+        self.assertIn("run_until_lq_retired", scenario)
 
     def test_vector_cross_16_misalignment_advances_rob_head(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")

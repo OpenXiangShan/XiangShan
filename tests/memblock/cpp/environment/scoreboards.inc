@@ -545,9 +545,15 @@ public:
         std::uint8_t vl;
         std::uint8_t vstart;
         std::uint8_t vuop_idx;
+        bool last_uop;
         std::uint8_t nf;
         std::uint8_t pdest;
         bool rob_flag;
+        std::uint8_t lq;
+        bool lq_flag;
+        std::uint8_t sq;
+        bool sq_flag;
+        std::uint8_t flow_num;
         std::uint32_t exception_mask;
         std::optional<std::uint8_t> trigger;
         std::optional<std::uint8_t> expected_writeback_vstart;
@@ -612,9 +618,15 @@ public:
                 output_transaction.vl,
                 transaction.vstart,
                 transaction.vuop_idx,
+                transaction.last_uop,
                 transaction.nf,
                 transaction.pdest,
                 transaction.rob_flag,
+                transaction.lq,
+                transaction.lq_flag,
+                transaction.sq,
+                transaction.sq_flag,
+                transaction.flow_num,
                 transaction.expected_exception_mask,
                 transaction.expected_trigger,
                 transaction.expected_writeback_vstart,
@@ -753,6 +765,37 @@ public:
     std::uint64_t fof_fix_observed() const { return fof_fix_observed_; }
     const std::string &error() const { return error_; }
 
+    std::string pending_summary() const
+    {
+        std::vector<std::string> entries;
+        entries.reserve(expected_.size());
+        for (const auto &[identity, expected] : expected_) {
+            std::ostringstream entry;
+            entry << (expected.store ? "store" : "load")
+                  << ":rob=" << static_cast<unsigned>(identity.value)
+                  << '/' << identity.flag
+                  << ":uop=" << static_cast<unsigned>(expected.vuop_idx)
+                  << ":last=" << expected.last_uop
+                  << ":pdest=" << static_cast<unsigned>(expected.pdest)
+                  << ":lq=" << static_cast<unsigned>(expected.lq)
+                  << '/' << expected.lq_flag
+                  << ":sq=" << static_cast<unsigned>(expected.sq)
+                  << '/' << expected.sq_flag
+                  << ":flows=" << static_cast<unsigned>(expected.flow_num)
+                  << ":addressing="
+                  << static_cast<unsigned>(expected.addressing)
+                  << ":address=0x" << std::hex << expected.address;
+            entries.push_back(entry.str());
+        }
+        std::sort(entries.begin(), entries.end());
+        std::ostringstream summary;
+        summary << " vector_pending=" << entries.size();
+        for (const auto &entry : entries) {
+            summary << " [" << entry << ']';
+        }
+        return summary.str();
+    }
+
 private:
     static bool matches_load_data(
         const std::vector<unsigned char> &actual, const Expected &expected)
@@ -830,6 +873,7 @@ private:
                 << " trigger=" << static_cast<unsigned>(actual.trigger)
                 << " vec_wen=" << actual.vec_wen
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
+                << " uop=" << static_cast<unsigned>(actual.vuop_idx)
                 << " vl=" << static_cast<unsigned>(actual.vl)
                 << " vstart=" << static_cast<unsigned>(actual.vstart)
                 << " sew/eew/lmul=" << static_cast<unsigned>(actual.vsew)
@@ -856,6 +900,13 @@ private:
                     << static_cast<unsigned>(expected->vsew) << '/'
                     << static_cast<unsigned>(expected->eew) << '/'
                     << static_cast<unsigned>(expected->vlmul)
+                    << " expected_uop="
+                    << static_cast<unsigned>(expected->vuop_idx)
+                    << " last=" << expected->last_uop
+                    << " lq=" << static_cast<unsigned>(expected->lq)
+                    << '/' << expected->lq_flag
+                    << " sq=" << static_cast<unsigned>(expected->sq)
+                    << '/' << expected->sq_flag
                     << " addressing="
                     << static_cast<unsigned>(expected->addressing)
                     << " stride=" << expected->stride

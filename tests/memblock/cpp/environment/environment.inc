@@ -4349,11 +4349,20 @@ public:
                 << " store=" << transaction.store
                 << " addressing=" << static_cast<unsigned>(transaction.addressing)
                 << " eew=" << static_cast<unsigned>(transaction.eew)
+                << " vsew=" << static_cast<unsigned>(
+                       vector_vsew(transaction))
+                << " vlmul=" << static_cast<unsigned>(transaction.vlmul)
+                << " vl=" << static_cast<unsigned>(transaction.vl)
+                << " uop=" << static_cast<unsigned>(transaction.vuop_idx)
+                << " last=" << transaction.last_uop
                 << " flow_num=" << static_cast<unsigned>(transaction.flow_num)
                 << " lane=" << transaction.lane
                 << " rob=" << static_cast<unsigned>(transaction.rob)
+                << '/' << transaction.rob_flag
                 << " lq=" << static_cast<unsigned>(transaction.lq)
-                << " sq=" << static_cast<unsigned>(transaction.sq);
+                << '/' << transaction.lq_flag
+                << " sq=" << static_cast<unsigned>(transaction.sq)
+                << '/' << transaction.sq_flag;
         error_ = message.str();
         return false;
     }
@@ -5031,6 +5040,29 @@ public:
         return check_components();
     }
 
+    bool run_until_load_complete(
+        const LoadTransaction &transaction, unsigned timeout)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout && scoreboard_.pending(transaction); ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (scoreboard_.pending(transaction)) {
+            std::ostringstream message;
+            message << "timed out waiting for scalar load transaction"
+                    << " rob=" << static_cast<unsigned>(transaction.rob)
+                    << '/' << transaction.rob_flag
+                    << " pdest=" << static_cast<unsigned>(transaction.pdest)
+                    << " address=0x" << std::hex << transaction.address;
+            error_ = message.str();
+            return false;
+        }
+        return check_components();
+    }
+
     bool run_until_load_writebacks(std::uint64_t target, unsigned timeout)
     {
         for (unsigned cycle = 0;
@@ -5060,7 +5092,8 @@ public:
             }
         }
         if (!vector_scoreboard_.done()) {
-            error_ = "timed out waiting for vector memory writeback";
+            error_ = "timed out waiting for vector memory writeback" +
+                vector_scoreboard_.pending_summary();
             return false;
         }
         return check_components();
@@ -5148,7 +5181,8 @@ public:
                     << " ptw_requests=" << ptw_agent_.request_count()
                     << " dcache_requests=" << memory_agent_.request_count()
                     << " replay_feedbacks=" << vector_replay_feedbacks_
-                    << " pending_replays=" << vector_replay_requests_.size();
+                    << " pending_replays=" << vector_replay_requests_.size()
+                    << vector_scoreboard_.pending_summary();
             error_ = message.str();
             return false;
         }
@@ -5218,7 +5252,8 @@ public:
             message << "timed out waiting for mixed vector replays"
                     << " transactions=" << transactions.size()
                     << " pending_replays=" << vector_replay_requests_.size()
-                    << " ptw_requests=" << ptw_agent_.request_count();
+                    << " ptw_requests=" << ptw_agent_.request_count()
+                    << vector_scoreboard_.pending_summary();
             error_ = message.str();
             return false;
         }
@@ -5244,7 +5279,8 @@ public:
                     << " scalar_load_pending=" << scoreboard_.pending()
                     << " scalar_store_pending=" << store_scoreboard_.pending()
                     << " vector_pending=" << vector_scoreboard_.pending()
-                    << scoreboard_.pending_summary();
+                    << scoreboard_.pending_summary()
+                    << vector_scoreboard_.pending_summary();
             error_ = message.str();
             return false;
         }

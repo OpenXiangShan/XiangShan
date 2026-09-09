@@ -228,11 +228,67 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 42
+        result["constraint_schema"] = 43
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
             verify_regression._check_mixed_coverage(result)
+
+    def test_schema_42_checks_concurrent_full_vector_shapes(self) -> None:
+        result = {
+            "target_concurrent": 1000,
+            "actual_concurrent_vector_shape": ",".join(["1"] * 16),
+            "actual_concurrent_vector_uops": "20,24",
+            "concurrent": "8,56,4,8,5",
+        }
+        target_operations = [1, 1, 1, 1, 1]
+        vector_targets = {
+            "addressing": [1] * 4,
+            "eew": [1] * 4,
+            "sew": [1] * 4,
+            "lmul": [1] * 7,
+            "emul": [1] * 7,
+        }
+        policy_targets = {
+            "masked": 500,
+            "partial_vl": 500,
+            "nonzero_vstart": 500,
+        }
+        verify_regression._check_concurrent_vector_shapes(
+            result, target_operations, vector_targets, policy_targets
+        )
+
+        result["actual_concurrent_vector_shape"] = ",".join(
+            ["0"] + ["1"] * 15
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_concurrent_vector_shape",
+        ):
+            verify_regression._check_concurrent_vector_shapes(
+                result, target_operations, vector_targets, policy_targets
+            )
+
+        result["actual_concurrent_vector_shape"] = ",".join(["1"] * 16)
+        result["actual_concurrent_vector_uops"] = "8,24"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "concurrent vector uop counts"
+        ):
+            verify_regression._check_concurrent_vector_shapes(
+                result, target_operations, vector_targets, policy_targets
+            )
+
+        result.update(
+            {
+                "target_concurrent": 0,
+                "actual_concurrent_vector_shape": ",".join(["0"] * 16),
+                "actual_concurrent_vector_uops": "0,0",
+                "concurrent": "0,0,0,0,0",
+            }
+        )
+        verify_regression._check_concurrent_vector_shapes(
+            result, target_operations, vector_targets, policy_targets
+        )
 
     def test_constraint_schemas_ten_and_eleven_check_vector_shapes_and_policy(
         self,
