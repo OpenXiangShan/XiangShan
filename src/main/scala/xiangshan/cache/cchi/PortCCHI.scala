@@ -39,6 +39,30 @@ class CCHIType4Port extends Bundle {
 }
 
 /*
+ * Compact CHI Type 3 (non-coherent) upstream port.
+ *
+ * Active channels: TXREQ + TXDAT + RXRSP + RXDAT.  DAT data width = 64b (Type3Uncache).
+ * Type3 upstream for data-side Uncache (NC + MMIO)
+ */
+class CCHIType3Port extends Bundle {
+  val txreq = DecoupledIO(new FlitREQ)
+  val txdat = DecoupledIO(new FlitUpDAT64)
+  val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
+  val rxdat = Flipped(DecoupledIO(new FlitDnDAT64))
+}
+
+/*
+ * Compact CHI Type 3 downstream (Completer) port.
+ * Used by in-core MMIO slaves such as D$ CtrlUnit.
+ */
+class CCHIType3SlavePort extends Bundle {
+  val rxreq = Flipped(DecoupledIO(new FlitREQ))
+  val rxdat = Flipped(DecoupledIO(new FlitUpDAT64))
+  val txrsp = DecoupledIO(new FlitDnRSP)
+  val txdat = DecoupledIO(new FlitDnDAT64)
+}
+
+/*
  * DCache-side Compact CHI helpers: phase-1 pinned params, TX builders, RX decoders.
  */
 object DCacheCCHI {
@@ -243,6 +267,83 @@ object PtwCCHI {
       req.WayValid := false.B
       req.Way := 0.U
       req.TraceTag := 0.U(1.W)
+    }
+  }
+
+  object Rx {
+    def denied(respErr: UInt): Bool = DCacheCCHI.Rx.denied(respErr)
+    def corrupt(respErr: UInt): Bool = DCacheCCHI.Rx.corrupt(respErr)
+  }
+}
+
+object UncacheCCHI {
+  object Params {
+    val srcId: UInt = L1CCHINodeId.UncacheSrcId
+    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    // Match MMIOBridgeEntry defaults (needRR=true, bufferableNC=true).
+    val needRR: Boolean = true
+    val bufferableNC: Boolean = true
+  }
+
+  object Tx {
+    def sizeFromLgSize(lgSize: UInt): UInt = lgSize(2, 0)
+
+    // Order/MemAttr aligned with MMIOBridge txreq (L2Param MemBackTypeMM / MemPageTypeNC).
+    private def fillReq(req: FlitREQ, memBackTypeMM: Bool, pageTypeNC: Bool, lgSize: UInt, isRead: Bool): Unit = {
+      val ewa = if (Params.bufferableNC) (pageTypeNC || memBackTypeMM) else false.B
+      req.SrcID := Params.srcId
+      req.TgtID := Params.tgtId
+      req.Size := sizeFromLgSize(lgSize)
+      req.NS := false.B
+      req.Order := {
+        if (Params.needRR) {
+          Mux(!memBackTypeMM, "b11".U(2.W), "b10".U(2.W)) // EndpointOrder / RequestOrder
+        } else {
+          0.U(2.W) // None
+        }
+      }
+      req.MemAttr := Cat(
+        false.B,         // Allocate
+        false.B,         // Cacheable
+        !memBackTypeMM,  // Device
+        ewa              // EWA (bufferable NC/MM when bufferableNC)
+      )
+      req.Excl := false.B
+      req.ExpCompData := isRead
+      req.WayValid := false.B
+      req.Way := 0.U
+      req.TraceTag := 0.U(1.W)
+    }
+
+    def readReq(req: FlitREQ, txnId: UInt, addr: UInt, lgSize: UInt,
+      memBackTypeMM: Bool, pageTypeNC: Bool): Unit = {
+      fillReq(req, memBackTypeMM, pageTypeNC, lgSize, isRead = true.B)
+      req.TxnID := txnId
+      req.Addr := addr(47, 0)
+      req.alias := 0.U(2.W)
+      req.Opcode := CCHIOpcode.ReadNoSnp.U
+    }
+
+    def writeReq(req: FlitREQ, txnId: UInt, addr: UInt, lgSize: UInt,
+      memBackTypeMM: Bool, pageTypeNC: Bool): Unit = {
+      fillReq(req, memBackTypeMM, pageTypeNC, lgSize, isRead = false.B)
+      req.TxnID := txnId
+      req.Addr := addr(47, 0)
+      req.alias := 0.U(2.W)
+      req.Opcode := CCHIOpcode.WriteNoSnpPtl.U
+    }
+
+    def ncbWrData(dat: FlitUpDAT64, dbid: UInt, tgtId: UInt, beatData: UInt, be: UInt): Unit = {
+      dat.SrcID := Params.srcId
+      dat.TgtID := tgtId
+      dat.Opcode := CCHIOpcode.NonCopyBackWrData.U
+      dat.TxnID := dbid
+      dat.Resp := 0.U(3.W)
+      dat.DataID := 0.U(2.W)
+      dat.Data := beatData
+      dat.BE := be
+      dat.RespErr := 0.U(2.W)
+      dat.TraceTag := 0.U(1.W)
     }
   }
 
