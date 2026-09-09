@@ -82,6 +82,8 @@ case class L2TLBParameters
   missqueueExtendSize: Int = 0,
   // llptw
   llptwsize: Int = 6,
+  hptwSize: Int = 2,
+  parallelHptw: Boolean = true,
   // way size
   blockBytes: Int = 64,
   // prefetch
@@ -94,7 +96,7 @@ case class L2TLBParameters
 
 trait MPTCacheParam extends HasTlbConst {
   val perms16Len = 48 // length of the perms
-  val mptSourceWidth = 4 // id len of the source
+  val mptSourceWidth = log2Up(l2tlbParams.llptwsize + 1 + l2tlbParams.hptwSize + PtwWidth)
   val mptLevelLenOH = 4 // level number 4 length in OH
   val mptLevelLenUInt = 2 // level number 4 length in int
   val mptOff = 16 // mpt offset of PA
@@ -137,6 +139,7 @@ trait MPTCacheParam extends HasTlbConst {
   def switch0(switch: Bool, data: UInt, len: Int) = (Fill(len, switch) & data)
 }
 trait HasTlbConst extends HasXSParameter {
+  final val PtwWidth = 2
   val Level = if (EnableSv48) 3 else 2
 
   val mptLevelLEN = 4 // HasMptCheck param
@@ -283,7 +286,6 @@ trait HasTlbConst extends HasXSParameter {
 }
 
 trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
-  val PtwWidth = 2
   val sourceWidth = { if (l2tlbParams.enablePrefetch) PtwWidth + 1 else PtwWidth}
   val prefetchID = PtwWidth
 
@@ -321,11 +323,16 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3))
-  else (l2tlbParams.llptwsize + 1 + 1)
-
-  val mptcMemReqID = l2tlbParams.llptwsize + 2
-  val HptwReqId = l2tlbParams.llptwsize + 1
+  require(l2tlbParams.hptwSize > 0)
+  val HptwMemReqBase = l2tlbParams.llptwsize + 1
+  val PtwMemReqCount = HptwMemReqBase + l2tlbParams.hptwSize
+  // Keep Bitmap capacity independent of HPTW concurrency for single-variable experiments.
+  val BitmapSize = l2tlbParams.llptwsize + 2
+  val BitmapMemReqBase = PtwMemReqCount
+  val MemReqWidth = PtwMemReqCount + (if (HasBitmapCheck) BitmapSize else if (HasMptCheck) 1 else 0)
+  val mptcMemReqID = PtwMemReqCount
+  val MptLastReqBase = PtwMemReqCount
+  val HptwIdWidth = log2Up(l2tlbParams.llptwsize + 1)
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)
 

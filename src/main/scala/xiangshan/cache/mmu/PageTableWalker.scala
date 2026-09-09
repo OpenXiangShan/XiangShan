@@ -69,7 +69,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val hptw = new Bundle {
     val req = DecoupledIO(new Bundle {
       val source = UInt(bSourceWidth.W)
-      val id = UInt(log2Up(l2tlbParams.llptwsize).W)
+      val id = UInt(HptwIdWidth.W)
       val gvpn = UInt(ptePPNLen.W)
     })
     val resp = Flipped(Valid(new Bundle {
@@ -854,16 +854,29 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
   }
 
-  // process hptw requests in serial
+  // A sector keeps one first translation owner until its PTE memory request coalesces duplicates.
+  val firstHptwOwner = state.indices.map { i =>
+    is_hptw_resp(i) || state(i) === state_addr_check || is_mems(i) || is_waiting(i) ||
+      is_stage_mpt_req(i) || is_stage_mpt_resp(i)
+  }
+  val duplicateFirstHptwOwner = state.indices.map { i =>
+    ParallelOR(state.indices.filter(_ != i).map { j =>
+      firstHptwOwner(j) && entries(i).req_info.s2xlate === entries(j).req_info.s2xlate &&
+        dup(entries(i).req_info.vpn, entries(j).req_info.vpn)
+    }).asBool
+  }
+  val hasPendingHptwResponse = Cat(is_hptw_resp).orR || Cat(is_last_hptw_resp).orR
   val hyper_arb1 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for (i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb1.io.in(i).bits := entries(i)
-    hyper_arb1.io.in(i).valid := is_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
+    val blocked = if (l2tlbParams.parallelHptw) duplicateFirstHptwOwner(i) else hasPendingHptwResponse
+    hyper_arb1.io.in(i).valid := is_hptw_req(i) && !blocked
   }
   val hyper_arb2 = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
   for(i <- 0 until l2tlbParams.llptwsize) {
     hyper_arb2.io.in(i).bits := entries(i)
-    hyper_arb2.io.in(i).valid := is_last_hptw_req(i) && !(Cat(is_hptw_resp).orR) && !(Cat(is_last_hptw_resp).orR)
+    val blocked = if (l2tlbParams.parallelHptw) false.B else hasPendingHptwResponse
+    hyper_arb2.io.in(i).valid := is_last_hptw_req(i) && !blocked
   }
 
 
@@ -1024,9 +1037,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val enq_ptr_reg = RegNext(enq_ptr)
   val need_addr_check = GatedValidRegNext(enq_state === state_addr_check && io.in.fire && !flush && (if (HasBitmapCheck) !io.in.bits.bitmapCheck.get.jmp_bitmap_check else true.B))
 
-  val hasHptwResp = ParallelOR(state.map(_ === state_hptw_resp)).asBool
-  val hptw_resp_ptr_reg = RegNext(io.hptw.resp.bits.id)
-  val hptw_need_addr_check = RegNext(hasHptwResp && io.hptw.resp.fire && !flush) && state(hptw_resp_ptr_reg) === state_addr_check
+  val hptwResponseId = io.hptw.resp.bits.id
+  val firstHptwResponse = io.hptw.resp.valid && state(hptwResponseId) === state_hptw_resp
+  val responseNeedsAddressCheck = if (l2tlbParams.parallelHptw) firstHptwResponse else {
+    ParallelOR(is_hptw_resp).asBool && io.hptw.resp.valid
+  }
+  val hptwResponseIdReg = RegEnable(hptwResponseId, responseNeedsAddressCheck)
+  val hptwNeedsAddressCheck = RegNext(responseNeedsAddressCheck && !flush, false.B) &&
+    state(hptwResponseIdReg) === state_addr_check
 
   val ptes = io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, new PteBundle()))
   val gpaddr = MakeGPAddr(entries(io.hptw.resp.bits.id).ppn, getVpnn(entries(io.hptw.resp.bits.id).req_info.vpn, 0))
@@ -1054,12 +1072,12 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     state(ptr) := Mux(accessFault, state_mem_out, (if (HasMptCheck) Mux(mptEn && checkIntermediateNode, stage_mpt_req, state_mem_req) else state_mem_req))
   }
 
-  io.pmp(1).req.valid := hptw_need_addr_check
+  io.pmp(1).req.valid := hptwNeedsAddressCheck
   io.pmp(1).req.bits.addr := hpaddr
   io.pmp(1).req.bits.cmd := TlbCmd.read
   io.pmp(1).req.bits.size := 3.U // TODO: fix it
   when (io.pmp(1).req.valid) {  // same cycle
-    val ptr = hptw_resp_ptr_reg
+    val ptr = hptwResponseIdReg
     val accessFault = io.pmp(1).resp.ld || io.pmp(1).resp.mmio
     entries(ptr).af := accessFault
     state(ptr) := Mux(accessFault, state_mem_out, (if (HasMptCheck) Mux(mptEn && checkIntermediateNode, stage_mpt_req, state_mem_req) else state_mem_req))
@@ -1069,7 +1087,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   if (HasMptCheck) {
     when (mpt_arb.get.io.out.fire) {
       for (i <- state.indices) {
-        when (state(i) =/= state_idle && state(i) =/= state_mem_out && state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp &&
+        // Untranslated duplicates wait for memory coalescing, which also copies their G-stage translation.
+        val canCoalesce = if (l2tlbParams.parallelHptw) !is_hptw_req(i) && !is_hptw_resp(i) else true.B
+        when (canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
+          state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp &&
           entries(i).req_info.s2xlate === mpt_arb.get.io.out.bits.req_info.s2xlate &&
           dup(entries(i).req_info.vpn, mpt_arb.get.io.out.bits.req_info.vpn)) {
           // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
@@ -1091,7 +1112,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   when (mem_arb.io.out.fire) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && state(i) =/= state_mem_out && state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp
+      // Unissued duplicates join this request; an outstanding HPTW must retain its own response ID.
+      val canCoalesce = if (l2tlbParams.parallelHptw) !is_hptw_resp(i) else true.B
+      when (canCoalesce && state(i) =/= state_idle && state(i) =/= state_mem_out &&
+        state(i) =/= state_last_hptw_req && state(i) =/= state_last_hptw_resp
       && (if (HasBitmapCheck) state(i) =/= state_bitmap_check && state(i) =/= state_bitmap_resp else true.B)
       && entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate
       && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
@@ -1320,6 +1344,31 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("llptw_out_count", io.out.fire)
   XSPerfAccumulate("llptw_cache_retry_count", io.cache.fire)
   XSPerfAccumulate("llptw_hptw_req_count", io.hptw.req.fire)
+  XSPerfAccumulate("llptw_hptw_serial_blocked_cycle",
+    !l2tlbParams.parallelHptw.B && hasPendingHptwResponse &&
+      (Cat(is_hptw_req).orR || Cat(is_last_hptw_req).orR) && !flush)
+  if (l2tlbParams.parallelHptw) {
+    val outstandingHptw = PopCount(is_hptw_resp) +& PopCount(is_last_hptw_resp)
+    val duplicateFirstBlocked = is_hptw_req.zip(duplicateFirstHptwOwner).map { case (request, blocked) =>
+      request && blocked
+    }
+    XSPerfAccumulate("llptw_hptw_parallel_cycle", outstandingHptw > 1.U)
+    XSPerfAccumulate("llptw_hptw_outstanding_cycle", outstandingHptw)
+    XSPerfAccumulate("llptw_hptw_duplicate_blocked_cycle", Cat(duplicateFirstBlocked).orR)
+    for (i <- state.indices) {
+      when (!flush && is_hptw_resp(i)) {
+        assert(entries(i).wait_id === i.U, "An outstanding first HPTW must retain its response ID")
+        assert(!duplicateFirstHptwOwner(i), "A sector must have only one first HPTW owner")
+      }
+      when (!flush && is_waiting(i)) {
+        val owner = entries(i).wait_id
+        assert(state(owner) === state_mem_waiting, "A memory waiter must reference a live owner")
+        assert(entries(owner).wait_id === owner, "A memory owner must retain its own ID")
+        assert(io.mem.req_mask(owner), "A memory waiter must have an outstanding memory request")
+        assert(!io.mem.flush_latch(owner), "A memory waiter must not join a flushed request")
+      }
+    }
+  }
 
   val perfEvents = Seq(
     ("tlbllptw_incount           ", io.in.fire               ),
@@ -1332,63 +1381,168 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
 /*========================= HPTW ==============================*/
 
+class HPTWBitmapInfo(implicit p: Parameters) extends PtwBundle {
+  val jmp_bitmap_check = Bool()
+  val pte = UInt(XLEN.W)
+  val ptes = Vec(tlbcontiguous, UInt(XLEN.W))
+  val cfs = Vec(tlbcontiguous, Bool())
+  val hitway = UInt(l2tlbParams.l0nWays.W)
+  val fromSP = Bool()
+  val SPlevel = UInt(log2Up(Level).W)
+}
+
+class HPTWReqBundle(implicit p: Parameters) extends PtwBundle {
+  val source = UInt(bSourceWidth.W)
+  val id = UInt(HptwIdWidth.W)
+  val gvpn = UInt(gvpnLen.W)
+  val ppn = UInt(ppnLen.W)
+  val l3Hit = Option.when(EnableSv48)(Bool())
+  val l2Hit = Bool()
+  val l1Hit = Bool()
+  val bypassed = Bool()
+  val bitmapCheck = Option.when(HasBitmapCheck)(new HPTWBitmapInfo)
+}
+
+class HPTWRespBundle(implicit p: Parameters) extends PtwBundle {
+  val source = UInt(bSourceWidth.W)
+  val resp = new HptwResp
+  val id = UInt(HptwIdWidth.W)
+}
+
+class HPTWMemoryIO(implicit p: Parameters) extends PtwBundle {
+  val req = Decoupled(new L2TlbMemReqBundle)
+  val resp = Flipped(Valid(UInt(XLEN.W)))
+  val mask = Input(Bool())
+}
+
+class HPTWRefillBundle(implicit p: Parameters) extends PtwBundle {
+  val req_info = new L2TlbInnerBundle
+  val level = UInt(log2Up(Level + 1).W)
+}
+
+class HPTWPmpIO(implicit p: Parameters) extends PtwBundle {
+  val req = Valid(new PMPReqBundle)
+  val resp = Flipped(new PMPRespBundle)
+}
+
+class HPTWBitmapIO(implicit p: Parameters) extends PtwBundle {
+  val req = Decoupled(new bitmapReqBundle)
+  val resp = Flipped(Decoupled(new bitmapRespBundle))
+}
+
+class HPTWMptIO(implicit p: Parameters) extends PtwBundle {
+  val req = Decoupled(new MptReqBundle)
+  val resp = Flipped(Valid(new MptRespBundle))
+}
+
+class HPTWClusterIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
+  val req = Flipped(Decoupled(new HPTWReqBundle))
+  val resp = Decoupled(new HPTWRespBundle)
+  val mem = Vec(l2tlbParams.hptwSize, new HPTWMemoryIO)
+  val refill = Output(Vec(l2tlbParams.hptwSize, new HPTWRefillBundle))
+  val pmp = Vec(l2tlbParams.hptwSize, new HPTWPmpIO)
+  val bitmap = Option.when(HasBitmapCheck)(new HPTWBitmapIO)
+  val l0_way_info = Option.when(HasBitmapCheck)(Input(UInt(l2tlbParams.l0nWays.W)))
+  val mptCheck = Option.when(HasMptCheck)(new HPTWMptIO)
+}
+
+class HPTWCluster(implicit p: Parameters) extends XSModule with HasPtwConst {
+  val io = IO(new HPTWClusterIO)
+  val flush = io.sfence.valid || io.csr.hgatp.changed || io.csr.satp.changed ||
+    io.csr.vsatp.changed || io.csr.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+  val engines = Seq.tabulate(l2tlbParams.hptwSize)(i => Module(new HPTW(i)))
+  val available = VecInit(engines.zipWithIndex.map { case (engine, i) =>
+    engine.io.req.ready && !io.mem(i).mask
+  })
+  val selected = PriorityEncoderOH(available.asUInt)
+  val respArb = Module(new RRArbiterInit(new HPTWRespBundle, l2tlbParams.hptwSize))
+
+  for ((engine, i) <- engines.zipWithIndex) {
+    engine.io.csr := io.csr
+    engine.io.sfence := io.sfence
+    engine.io.req.valid := io.req.valid && selected(i) && !flush
+    engine.io.req.bits := io.req.bits
+    io.mem(i).req.valid := engine.io.mem.req.valid && !flush
+    io.mem(i).req.bits := engine.io.mem.req.bits
+    engine.io.mem.req.ready := io.mem(i).req.ready && !flush
+    engine.io.mem.resp.valid := io.mem(i).resp.valid && !flush
+    engine.io.mem.resp.bits := io.mem(i).resp.bits
+    engine.io.mem.mask := io.mem(i).mask
+    io.refill(i) := engine.io.refill
+    io.pmp(i) <> engine.io.pmp
+    respArb.io.in(i) <> engine.io.resp
+    if (HasBitmapCheck) {
+      engine.io.l0_way_info.get := io.l0_way_info.get
+    }
+  }
+  io.req.ready := available.asUInt.orR && !flush
+  io.resp.valid := respArb.io.out.valid && !flush
+  io.resp.bits := respArb.io.out.bits
+  respArb.io.out.ready := io.resp.ready && !flush
+
+  if (HasBitmapCheck) {
+    val arb = Module(new RRArbiterInit(new bitmapReqBundle, l2tlbParams.hptwSize))
+    for ((engine, i) <- engines.zipWithIndex) {
+      arb.io.in(i) <> engine.io.bitmap.get.req
+      engine.io.bitmap.get.resp.valid := io.bitmap.get.resp.valid &&
+        io.bitmap.get.resp.bits.id === (HptwMemReqBase + i).U && !flush
+      engine.io.bitmap.get.resp.bits := io.bitmap.get.resp.bits
+    }
+    io.bitmap.get.req.valid := arb.io.out.valid && !flush
+    io.bitmap.get.req.bits := arb.io.out.bits
+    arb.io.out.ready := io.bitmap.get.req.ready && !flush
+    io.bitmap.get.resp.ready := engines.zipWithIndex.map { case (engine, i) =>
+      engine.io.bitmap.get.resp.ready && io.bitmap.get.resp.bits.id === (HptwMemReqBase + i).U
+    }.reduce(_ || _) && !flush
+  }
+
+  if (HasMptCheck) {
+    val arb = Module(new RRArbiterInit(new MptReqBundle, l2tlbParams.hptwSize))
+    for ((engine, i) <- engines.zipWithIndex) {
+      arb.io.in(i) <> engine.io.mptCheck.get.req
+      engine.io.mptCheck.get.resp.valid := io.mptCheck.get.resp.valid &&
+        io.mptCheck.get.resp.bits.id === (HptwMemReqBase + i).U && !flush
+      engine.io.mptCheck.get.resp.bits := io.mptCheck.get.resp.bits
+    }
+    io.mptCheck.get.req.valid := arb.io.out.valid && !flush
+    io.mptCheck.get.req.bits := arb.io.out.bits
+    arb.io.out.ready := io.mptCheck.get.req.ready && !flush
+  }
+
+  val activeCount = PopCount(engines.map(engine => !engine.io.req.ready))
+  XSPerfAccumulate("hptw_req_count", io.req.fire)
+  XSPerfAccumulate("hptw_req_valid_cycle", io.req.valid && !flush)
+  XSPerfAccumulate("hptw_busy_cycle", activeCount.orR)
+  XSPerfAccumulate("hptw_active_bank_cycle", activeCount)
+  XSPerfAccumulate("hptw_resp_count", io.resp.fire)
+  XSPerfAccumulate("hptw_mem_req_count", PopCount(io.mem.map(_.req.fire)))
+  XSPerfAccumulate("hptw_mem_req_blocked_cycle", PopCount(io.mem.map(m => m.req.valid && !m.req.ready)))
+  XSPerfAccumulate("hptw_no_free_cycle", io.req.valid && !available.asUInt.orR && !flush)
+  XSPerfAccumulate("hptw_resp_blocked_cycle", PopCount(engines.map(e => e.io.resp.valid && !e.io.resp.ready)))
+  for (count <- 0 to l2tlbParams.hptwSize) {
+    XSPerfAccumulate(s"hptw_occupancy_$count", activeCount === count.U)
+  }
+}
+
 /** HPTW : Hypervisor Page Table Walker
   * the page walker take the virtual machine's page walk.
   * guest physical address translation, guest physical address -> host physical address
   **/
 class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
-  val req = Flipped(DecoupledIO(new Bundle {
-    val source = UInt(bSourceWidth.W)
-    val id = UInt(log2Up(l2tlbParams.llptwsize).W)
-    val gvpn = UInt(gvpnLen.W)
-    val ppn = UInt(ppnLen.W)
-    val l3Hit = if (EnableSv48) Some(new Bool()) else None
-    val l2Hit = Bool()
-    val l1Hit = Bool()
-    val bypassed = Bool() // if bypass, don't refill
-    val bitmapCheck = Option.when(HasBitmapCheck)(new Bundle {
-      val jmp_bitmap_check = Bool() // find pte in l0 or sp, but need bitmap check
-      val pte = UInt(XLEN.W) // Page Table Entry
-      val ptes = Vec(tlbcontiguous, UInt(XLEN.W)) // Page Table Entry Vector
-      val cfs = Vec(tlbcontiguous, Bool()) // Bitmap Check Failed Vector
-      val hitway = UInt(l2tlbParams.l0nWays.W)
-      val fromSP = Bool()
-      val SPlevel = UInt(log2Up(Level).W)
-    })
-  }))
-  val resp = DecoupledIO(new Bundle {
-    val source = UInt(bSourceWidth.W)
-    val resp = Output(new HptwResp())
-    val id = Output(UInt(bMemID.W))
-  })
-
-  val mem = new Bundle {
-    val req = DecoupledIO(new L2TlbMemReqBundle())
-    val resp = Flipped(ValidIO(UInt(XLEN.W)))
-    val mask = Input(Bool())
-  }
-  val refill = Output(new Bundle {
-    val req_info = new L2TlbInnerBundle()
-    val level = UInt(log2Up(Level + 1).W)
-  })
-  val pmp = new Bundle {
-    val req = ValidIO(new PMPReqBundle())
-    val resp = Flipped(new PMPRespBundle())
-  }
-  val bitmap = Option.when(HasBitmapCheck)(new Bundle {
-      val req = DecoupledIO(new bitmapReqBundle())
-      val resp = Flipped(DecoupledIO(new bitmapRespBundle()))
-  })
-
+  val req = Flipped(DecoupledIO(new HPTWReqBundle))
+  val resp = DecoupledIO(new HPTWRespBundle)
+  val mem = new HPTWMemoryIO
+  val refill = Output(new HPTWRefillBundle)
+  val pmp = new HPTWPmpIO
+  val bitmap = Option.when(HasBitmapCheck)(new HPTWBitmapIO)
   val l0_way_info = Option.when(HasBitmapCheck)(Input(UInt(l2tlbParams.l0nWays.W)))
-
-  val mptCheck = Option.when(HasMptCheck)(new Bundle {
-    val req = DecoupledIO(new MptReqBundle())
-    val resp = Flipped(ValidIO(new MptRespBundle()))
-  })
+  val mptCheck = Option.when(HasMptCheck)(new HPTWMptIO)
 }
 
-class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
+class HPTW(bankId: Int = 0)(implicit p: Parameters) extends XSModule with HasPtwConst {
+  require(bankId >= 0 && bankId < l2tlbParams.hptwSize)
+  private val memoryId = HptwMemReqBase + bankId
   val io = IO(new HPTWIO)
   val hgatp = io.csr.hgatp
   val mpbmte = io.csr.mPBMTE
@@ -1479,7 +1633,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   val resp_valid = !idle && mem_addr_update && ((w_mem_resp && find_pte) || (s_pmp_check && accessFault) ||
     (if (HasMptCheck) (mpt_af) else false.B))
-  val id = Reg(UInt(log2Up(l2tlbParams.llptwsize).W))
+  val id = Reg(UInt(HptwIdWidth.W))
   val source = RegEnable(io.req.bits.source, io.req.fire)
 
   io.req.ready := idle
@@ -1508,7 +1662,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.mptCheck.get.req.valid := s_mpt_check && !accessFault && s_pmp_check
     io.mptCheck.get.req.bits.mptOnly := DontCare//mpt during tw is never mpt only
     io.mptCheck.get.req.bits.reqPA := mem_addr(PAddrBits-1 ,offLen)//same as pmp but no offset
-    io.mptCheck.get.req.bits.id := HptwReqId.U(bMemID.W)
+    io.mptCheck.get.req.bits.id := memoryId.U
   }
 
 
@@ -1518,7 +1672,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     val cache_level = RegEnable(io.req.bits.bitmapCheck.get.SPlevel, io.req.fire)
     io.bitmap.get.req.valid := !s_bitmap_check
     io.bitmap.get.req.bits.bmppn := pte.ppn
-    io.bitmap.get.req.bits.id := HptwReqId.U(bMemID.W)
+    io.bitmap.get.req.bits.id := memoryId.U
     io.bitmap.get.req.bits.vpn := vpn
     io.bitmap.get.req.bits.level := Mux(jmp_bitmap_check, Mux(fromSP,cache_level,0.U), level)
     io.bitmap.get.req.bits.way_info := Mux(jmp_bitmap_check, cache_hitway, way_info)
@@ -1530,7 +1684,7 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   io.mem.req.valid := !s_mem_req && !io.mem.mask && !accessFault && s_pmp_check && (if (HasMptCheck) !mpt_af else true.B) // mptAf stop req mem
   io.mem.req.bits.addr := mem_addr
-  io.mem.req.bits.id := HptwReqId.U(bMemID.W)
+  io.mem.req.bits.id := memoryId.U
   io.mem.req.bits.hptw_bypassed := bypassed
 
   io.refill.req_info.vpn := vpn
@@ -1720,10 +1874,19 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   }
 
   XSPerfAccumulate("hptw_req_count", io.req.fire)
-  XSPerfAccumulate("hptw_req_blocked_cycle", io.req.valid && !io.req.ready)
   XSPerfAccumulate("hptw_busy_cycle", !idle)
   XSPerfAccumulate("hptw_resp_count", io.resp.fire)
   XSPerfAccumulate("hptw_mem_req_count", io.mem.req.fire)
   XSPerfAccumulate("hptw_mem_req_blocked_cycle", io.mem.req.valid && !io.mem.req.ready)
+  if (HasBitmapCheck) {
+    XSPerfAccumulate("hptw_bitmap_req_blocked_cycle",
+      io.bitmap.get.req.valid && !io.bitmap.get.req.ready && !flush)
+    XSPerfAccumulate("hptw_bitmap_wait_cycle", !idle && !w_bitmap_resp && !flush)
+  }
+  if (HasMptCheck) {
+    XSPerfAccumulate("hptw_mpt_req_blocked_cycle",
+      io.mptCheck.get.req.valid && !io.mptCheck.get.req.ready && !flush)
+    XSPerfAccumulate("hptw_mpt_wait_cycle", !idle && w_mpt_resp && !flush)
+  }
 
 }
