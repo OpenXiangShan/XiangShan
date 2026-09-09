@@ -21,14 +21,14 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `7f105d5d563e9306f35d37acb45ca85d8a45b558e0213c3854509aaca13d9c85`
+- Current rebuilt and frozen UT executable SHA-256: `ab6dc8a6dd41bcedb9d63c90d1763108d0adcf7de5a20f35a4d0616213ac40a5`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `1f9e1c54db04392bc585ad25fce1756ef578a37c75eccbcf0efb3fefca5815c7`
-- Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
+- Current rebuilt and frozen Verilated model SHA-256: `b573c08f09623c86f4254497c6af6e9c994abf758c79b6ef5a319df866228cb2`
+- Frozen xspcomm SHA-256: `eb21fb28815e2e725db6d7fe3931ddbf38d982874a4c187550936913b14d2f8b`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `145066c38a2f307a20fcfc48b81fd81b4cd179f4824456ba6f52365dc45494f1`
-- Frozen-runtime Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
-- Frozen-runtime xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
+- Frozen runtime manifest SHA-256: `6b8007df9628239cc6f56bb3ac00aae006f8b9842b52852f1fe1a861b52b31d1`
+- Frozen-runtime Picker commit: `5e9e38d7087006440ae1c533073b13e798a36927`
+- Frozen-runtime xcomm commit: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
 - Current bootstrap Picker pin: `5e9e38d7087006440ae1c533073b13e798a36927`
 - Current bootstrap xcomm pin: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
 
@@ -1611,7 +1611,17 @@ scenario and are retained as negative evidence, not claimed as reproduced.
 | `45318c5d` (2026-04-20), clear RF write enable on a load exception | `341dff7baa1442e4050c131cc4b2a9f864d1facbf584cdecdabfb81bb6c32ffb` | `exception-contracts` passed with exact page-fault and no RF write | Failed: exceptional scalar load requested a scalar RF write |
 | `856b821f` (2026-08-11), propagate vector VS-non-leaf-PTE metadata | `3abf90d701fdb3252ec68d1426707affe4d0606bb002a1b02d710be577baa5a7` | `vector-guest-fault` passed at cycle 152 with marker 1 and exact VA/GPA | Failed at cycle 152: marker was 0 while VA/GPA stayed correct |
 | `9ee7b335` (2026-08-10), misaligned vector-store progress | `9000f90adc416d1de6c7b4e8ce2b0129cf98564431ae835bcfc6d857f89e4df2` | `misaligned-stores` passed at cycle 879 | Mutant also passed; not reproduced |
-| `fbb1e349` (2026-07-21), cross-page vector-store `s_block` progress | `603720f0cb797e679097244a107ca2892f00bbfe0392327fdc935ee2093b2594` | `misaligned-stores` passed at cycle 879 with three vector replays | Mutant also passed; not reproduced |
+| `fbb1e349` (2026-07-21), cross-page vector-store `s_block` progress | `5bfe14db09a494c64415ee9a4d330ddbae9e704fbd18970d3b127ccde7d7b19` | Clean `misaligned-stores` passed at cycle 1544 with five vector replays and two additional cross-page progress stores | Mutant also passed; not reproduced |
+
+The `fbb1e349` mutant was regenerated from the actual pre-fix expression,
+which additionally allowed a vector store to advertise cross-page dequeue in
+the StoreMisalignBuffer `s_wb` state. Read-only Picker `mem_direct` tracing
+sampled only internal state for localization (`bufferState`, request identity,
+`crossPageWithHit`, vector writeback, and StoreQueue `doDeq_T`). The mutant did
+show `doDeq=1` during `s_wb` before the delayed top-level vector writeback, but
+the legal external commit/replay sequence still completed both stores and all
+byte-exact readbacks. This is useful timing evidence for future backend-timing
+profiles, not an internal-state oracle and not a confirmed CPU bug.
 
 The TLB-miss scenario first establishes a hit on an allocated SQ entry without
 sending store data or allowing dequeue. The SVA antecedent requires that entry

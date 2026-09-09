@@ -1369,6 +1369,111 @@ int run_misaligned_stores(int argc, char **argv)
         return 1;
     }
 
+    // Keep two cross-page vector stores in one otherwise idle environment.
+    // A store at the ROB head holds pendingst through all replays. If the first
+    // store releases its SQ entry before the misalign buffer consumes the
+    // dequeue, its own completion can look correct but the second independent
+    // store will not terminate.
+    memblock::Environment cross_page_progress(argc, argv);
+    constexpr std::uint64_t progress_virtual = 0x4a000000ULL;
+    constexpr std::uint64_t progress_physical = 0xac000000ULL;
+    constexpr std::uint64_t progress_root = 0x93020000ULL;
+    for (unsigned page = 0; page < 4; ++page) {
+        cross_page_progress.memory().fill_incrementing(
+            progress_physical + page * 0x1000, 0x1000,
+            static_cast<unsigned char>(0x41 + page * 0x29));
+    }
+    if (!cross_page_progress.reset() ||
+        !cross_page_progress.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                  << cross_page_progress.cycle()
+                  << " phase=cross-page-progress-reset reason="
+                  << cross_page_progress.error() << '\n';
+        return 1;
+    }
+    for (unsigned page = 0; page < 4; ++page) {
+        if (!cross_page_progress.map_sv39_4k(
+                progress_virtual + page * 0x1000,
+                progress_physical + page * 0x1000, progress_root)) {
+            std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                      << cross_page_progress.cycle()
+                      << " phase=cross-page-progress-map page=" << page
+                      << " reason=" << cross_page_progress.error() << '\n';
+            return 1;
+        }
+    }
+    if (!cross_page_progress.activate_sv39(progress_root)) {
+        std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                  << cross_page_progress.cycle()
+                  << " phase=cross-page-progress-activate reason="
+                  << cross_page_progress.error() << '\n';
+        return 1;
+    }
+
+    std::array<memblock::VectorMemoryTransaction, 2> progress_stores{};
+    for (unsigned index = 0; index < progress_stores.size(); ++index) {
+        auto &store = progress_stores[index];
+        store.store = true;
+        store.address = progress_virtual + index * 0x2000 + 0xffd;
+        store.stride = 8;
+        store.addressing = memblock::VectorAddressingMode::strided;
+        store.eew = 3;
+        store.vl = 2;
+        store.rob = static_cast<std::uint8_t>(index * 2);
+        store.lq = static_cast<std::uint8_t>(index * 2);
+        store.sq = static_cast<std::uint8_t>(index * 2);
+        store.lane = index % memblock::kVectorMemoryLanes;
+        store.flow_num = 2;
+        for (unsigned byte = 0; byte < store.data.size(); ++byte) {
+            store.data[byte] = static_cast<unsigned char>(
+                0x31 + index * 0x50 + byte * 7);
+        }
+        cross_page_progress.expect_vector(store);
+        if (!cross_page_progress.set_rob_head(store.rob, store.rob_flag) ||
+            !cross_page_progress.enqueue_vector(store) ||
+            !cross_page_progress.issue_vector(store, 512)) {
+            std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL transaction="
+                      << index << " cycle=" << cross_page_progress.cycle()
+                      << " phase=cross-page-progress-issue reason="
+                      << cross_page_progress.error() << '\n';
+            return 1;
+        }
+        if (!cross_page_progress.run_until_vector_complete_with_replays(
+                store, 16384, index == 0, true) ||
+            !cross_page_progress.commit_vector_store(store, 16384)) {
+            std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL transaction="
+                      << index << " cycle=" << cross_page_progress.cycle()
+                      << " phase=cross-page-progress-store reason="
+                      << cross_page_progress.error() << '\n';
+            return 1;
+        }
+    }
+    for (unsigned index = 0; index < progress_stores.size(); ++index) {
+        auto readback = progress_stores[index];
+        readback.store = false;
+        readback.rob = static_cast<std::uint8_t>(4 + index * 2);
+        readback.lq = static_cast<std::uint8_t>(index * 2);
+        readback.sq = 4;
+        readback.pdest = static_cast<std::uint8_t>(44 + index);
+        readback.lane = (index + 1) % memblock::kVectorMemoryLanes;
+        readback.data.fill(0);
+        cross_page_progress.expect_vector_data(
+            readback, progress_stores[index].data);
+        if (!cross_page_progress.set_rob_head(
+                readback.rob, readback.rob_flag) ||
+            !cross_page_progress.enqueue_vector(readback) ||
+            !cross_page_progress.issue_vector(readback, 512) ||
+            !cross_page_progress.run_until_vector_complete_with_replays(
+                readback, 16384) ||
+            !cross_page_progress.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL transaction="
+                      << index << " cycle=" << cross_page_progress.cycle()
+                      << " phase=cross-page-progress-readback reason="
+                      << cross_page_progress.error() << '\n';
+            return 1;
+        }
+    }
+
     // Reproduce the constrained-random corner where a scalar store first
     // misses in the DTLB and only enters StoreMisalignBuffer on a later replay.
     // pendingst must remain high while that store stays at the ROB head.
@@ -1449,18 +1554,24 @@ int run_misaligned_stores(int argc, char **argv)
     }
 
     std::cout << "MEMBLOCK_MISALIGNED_STORES_PASS"
-              << " cycle=" << environment.cycle() + translated_scalar.cycle()
+              << " cycle=" << environment.cycle() +
+                     cross_page_progress.cycle() + translated_scalar.cycle()
               << " scalar_store_writebacks=" << environment.store_writebacks()
                   + translated_scalar.store_writebacks()
               << " scalar_load_writebacks=" << environment.writebacks()
                   + translated_scalar.writebacks()
               << " vector_store_writebacks="
-              << environment.vector_store_writebacks()
+              << environment.vector_store_writebacks() +
+                     cross_page_progress.vector_store_writebacks()
               << " vector_load_writebacks="
-              << environment.vector_load_writebacks()
-              << " vector_replays=" << environment.vector_replay_feedbacks()
+              << environment.vector_load_writebacks() +
+                     cross_page_progress.vector_load_writebacks()
+              << " vector_replays=" << environment.vector_replay_feedbacks() +
+                     cross_page_progress.vector_replay_feedbacks()
               << " ptw_requests="
-              << environment.ptw_requests() + translated_scalar.ptw_requests()
+              << environment.ptw_requests() + cross_page_progress.ptw_requests() +
+                     translated_scalar.ptw_requests()
+              << " cross_page_progress_stores=" << progress_stores.size()
               << " translated_scalar_cross_page=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

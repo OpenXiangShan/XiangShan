@@ -3725,6 +3725,18 @@ public:
         return check_components();
     }
 
+    bool pulse_store_commit_keep_pending(
+        std::uint8_t value, bool flag = false)
+    {
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(flag);
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
+        dut_.io_ooo_to_mem_lsqio_scommit.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_ooo_to_mem_lsqio_scommit.ImmSet(std::uint64_t{0});
+        return check_components();
+    }
+
     bool wait_for_mmio_store_request(
         std::uint8_t value, bool flag = false, unsigned timeout = 2048)
     {
@@ -5102,8 +5114,22 @@ public:
     bool run_until_vector_complete_with_replays(
         const VectorMemoryTransaction &transaction,
         unsigned timeout,
-        bool pulse_store_commit_after_replay = false)
+        bool pulse_store_commit_after_replay = false,
+        bool hold_pending_store = false)
     {
+        // A store at the ROB head keeps pendingst asserted while a replaying
+        // misaligned operation is still incomplete. Preserve that level so a
+        // delayed replay sees the same architectural head throughout.
+        if (hold_pending_store) {
+            dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(transaction.rob);
+            dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(transaction.rob_flag);
+            dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
+        }
+        const auto clear_pending_store = [&]() {
+            if (hold_pending_store) {
+                dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
+            }
+        };
         const std::uint64_t deadline = cycle() + timeout;
         while (!vector_scoreboard_.done() && cycle() < deadline) {
             const auto replay_it = std::find_if(
@@ -5124,10 +5150,11 @@ public:
                     const unsigned distance =
                         (packed + 2 * entries - packed_base) % (2 * entries);
                     return distance < transaction.flow_num;
-                });
+            });
             if (replay_it == vector_replay_requests_.end()) {
                 tick();
                 if (!check_components()) {
+                    clear_pending_store();
                     return false;
                 }
                 continue;
@@ -5140,14 +5167,20 @@ public:
             replay.replay_mask = request.replay_mask;
             replay.replay_mb_index = request.replay_mb_index;
             if (!issue_vector(replay, 256)) {
+                clear_pending_store();
                 return false;
             }
             if (pulse_store_commit_after_replay && replay.store &&
                 (!run_cycles(32) ||
-                 !pulse_pending_store(replay.rob, replay.rob_flag))) {
+                 !(hold_pending_store
+                       ? pulse_store_commit_keep_pending(
+                             replay.rob, replay.rob_flag)
+                       : pulse_pending_store(replay.rob, replay.rob_flag)))) {
+                clear_pending_store();
                 return false;
             }
         }
+        clear_pending_store();
         if (!vector_scoreboard_.done()) {
             std::ostringstream message;
             message << "timed out waiting for vector memory writeback after replay"
@@ -5745,7 +5778,10 @@ private:
             "MEMBLOCK_MEM_DIRECT_TRACE_ALL_A");
         const char *path = std::getenv("MEMBLOCK_MEM_DIRECT_TRACE_FILE");
         if (path != nullptr && path[0] != '\0') {
-            debug_trace_.open(path, std::ios::out | std::ios::trunc);
+            const auto mode = debug_flag_from_env(
+                "MEMBLOCK_MEM_DIRECT_TRACE_APPEND")
+                ? std::ios::app : std::ios::trunc;
+            debug_trace_.open(path, std::ios::out | mode);
         }
         if (!debug_trace_.is_open()) {
             return;
@@ -5815,9 +5851,35 @@ private:
                     dut_, mshr_prefix + "forwardData_" + data_suffix);
             }
         }
+        debug_sms_req_valid_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_valid");
+        debug_sms_buffer_state_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.bufferState");
+        debug_sms_is_cross_page_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.isCrossPage");
+        debug_sms_req_isvec_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_isvec");
+        debug_sms_req_rob_value_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_uop_robIdx_value");
+        debug_sms_req_sq_value_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_uop_sqIdx_value");
+        debug_sms_req_sq_flag_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_uop_sqIdx_flag");
+        debug_sms_cross_page_with_hit_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock._inner_storeMisalignBuffer_io_sqControl_toStoreQueue_crossPageWithHit");
+        debug_sms_vec_wb_[0] = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.io_vecWriteBack_0_valid_0");
+        debug_sms_vec_wb_[1] = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.io_vecWriteBack_1_valid_0");
+        debug_sq_do_deq_ = debug_signal(
+            dut_, "MemBlock_top.MemBlock.inner_lsq.storeQueue._io_maControl_toStoreMisalignBuffer_doDeq_T");
         debug_trace_ << "picker_mem_direct_debug line=0x" << std::hex
                      << debug_line_ << std::dec
-                     << " trace_all_a=" << debug_trace_all_a_ << '\n';
+                     << " trace_all_a=" << debug_trace_all_a_
+                     << " sms_signals="
+                     << (debug_sms_buffer_state_ != nullptr)
+                     << (debug_sms_cross_page_with_hit_ != nullptr)
+                     << (debug_sq_do_deq_ != nullptr) << '\n';
         debug_trace_.flush();
     }
 
@@ -5933,6 +5995,38 @@ private:
                      << " mshr=" << debug_u(debug_s3_mshrid_[lane]);
                 emit(text.str());
             }
+        }
+        const auto sms_state = debug_u(debug_sms_buffer_state_);
+        const bool sms_active = debug_u(debug_sms_req_valid_) != 0;
+        const bool sms_observable = sms_active ||
+            debug_u(debug_sms_cross_page_with_hit_) != 0 ||
+            debug_u(debug_sq_do_deq_) != 0 ||
+            debug_u(debug_sms_vec_wb_[0]) != 0 ||
+            debug_u(debug_sms_vec_wb_[1]) != 0 ||
+            dut_.io_ooo_to_mem_lsqio_scommit.U() != 0;
+        if (sms_observable) {
+            std::ostringstream text;
+            text << "sms state=" << sms_state
+                 << " req=" << debug_u(debug_sms_req_valid_)
+                 << " vec=" << debug_u(debug_sms_req_isvec_)
+                 << " cross=" << debug_u(debug_sms_is_cross_page_)
+                 << " rob=" << debug_u(debug_sms_req_rob_value_)
+                 << " sq=" << debug_u(debug_sms_req_sq_value_) << ':'
+                 << debug_u(debug_sms_req_sq_flag_)
+                 << " with_hit=" << debug_u(debug_sms_cross_page_with_hit_)
+                 << " do_deq=" << debug_u(debug_sq_do_deq_)
+                 << " vec_wb=" << debug_u(debug_sms_vec_wb_[0]) << ','
+                 << debug_u(debug_sms_vec_wb_[1])
+                 << " top_vec_wb="
+                 << dut_.io_mem_to_ooo_writebackVldu_0_valid.U() << ','
+                 << dut_.io_mem_to_ooo_writebackVldu_1_valid.U()
+                 << " slow_fb="
+                 << dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid.U()
+                 << ','
+                 << dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid.U()
+                 << " pendingst=" << dut_.io_ooo_to_mem_lsqio_pendingst.U()
+                 << " scommit=" << dut_.io_ooo_to_mem_lsqio_scommit.U();
+            emit(text.str());
         }
         ++debug_cycle_;
     }
@@ -6804,6 +6898,16 @@ private:
     std::array<XData *, kScalarLoadLanes> debug_s3_input_data_{};
     std::array<XData *, kScalarLoadLanes> debug_s3_merged_data_{};
     std::array<XData *, kScalarLoadLanes> debug_s3_picked_data_{};
+    XData *debug_sms_req_valid_ = nullptr;
+    XData *debug_sms_buffer_state_ = nullptr;
+    XData *debug_sms_is_cross_page_ = nullptr;
+    XData *debug_sms_req_isvec_ = nullptr;
+    XData *debug_sms_req_rob_value_ = nullptr;
+    XData *debug_sms_req_sq_value_ = nullptr;
+    XData *debug_sms_req_sq_flag_ = nullptr;
+    XData *debug_sms_cross_page_with_hit_ = nullptr;
+    std::array<XData *, 2> debug_sms_vec_wb_{};
+    XData *debug_sq_do_deq_ = nullptr;
 #endif
     std::string error_;
 };

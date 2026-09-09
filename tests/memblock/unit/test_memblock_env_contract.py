@@ -1651,6 +1651,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "signal->U()",
         ):
             self.assertIn(read_contract, debug)
+        self.assertNotIn("crossPageCanDeq_0", debug)
+        self.assertIn("crossPageWithHit", debug)
+        self.assertIn("doDeq_T", debug)
         for forbidden_write_path in ("VPI", "ImmSet", "SetBytes", "->Set("):
             self.assertNotIn(forbidden_write_path, debug)
         export_rule = makefile[
@@ -3199,6 +3202,26 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "translated_scalar_cross_page=1",
         ):
             self.assertIn(contract, driver)
+
+    def test_cross_page_vector_stores_require_back_to_back_progress(self) -> None:
+        driver = read_cpp_source("memblock_main.cpp")
+        scenario = driver[
+            driver.index("int run_misaligned_stores"):
+            driver.index("int run_vector_issue_order")
+        ]
+        environment = read_cpp_source("memblock_env.hpp")
+
+        for contract in (
+            "cross_page_progress",
+            "std::array<memblock::VectorMemoryTransaction, 2> progress_stores",
+            "store, 16384, index == 0, true",
+            "phase=cross-page-progress-store",
+            "phase=cross-page-progress-readback",
+            "cross_page_progress_stores=",
+        ):
+            self.assertIn(contract, scenario)
+        self.assertIn("bool hold_pending_store = false", environment)
+        self.assertIn("pulse_store_commit_keep_pending", environment)
 
     def test_scalar_misaligned_keeps_rar_pressure_behind_pending_splits(
         self,

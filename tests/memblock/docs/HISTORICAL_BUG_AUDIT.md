@@ -50,7 +50,7 @@ table below.
 | 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Boundary gap | Requires a backend-generated `isVlsException` redirect synchronized to the faulting vector uop. |
 | 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `random-mixed` vector-store replay/readback phases. |
 | 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Boundary gap | HLV, HLVX, HSV and SPVP-specific PMP reference checks are not modeled. |
-| 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | Independent mutant hash `603720f0...`; the translated cross-page vector-store test still passed at cycle 879 with three vector replays and exact readback. |
+| 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | Rebuilt pre-fix mutant hash `5bfe14db...`; the expanded translated cross-page vector-store progress sequence still passed with exact writeback, dequeue, and readback. |
 | 2026-07-10 | `52262f30` | Blocking issue logic for misaligned vector stores | Boundary gap | Needs controlled overlap of scalar-store issue, vector-store dequeue, and misalign-buffer occupancy. |
 | 2026-07-10 | `9b926b6b` | Vector misaligned store must block in SMB | Covered, not mutated | Translated cross-page vector store checks writeback, commit, SQ drain, and exact readback. |
 | 2026-07-10 | `50bd7957` | Vector exception GPA width | Covered, not mutated | Scalar/vector guest-page-fault tests compare the complete reported GPA with an independent walk. |
@@ -107,7 +107,7 @@ table below.
 | `45318c5d` | Exceptional scalar loads never request an RF write | Reverted RTL asserts RF write enable | See `RESULTS.md` for the independently generated runtime record. |
 | `856b821f` | A G-stage fault while walking a VS non-leaf PTE reports the marker and exact VA/GPA | Marker is 0 at cycle 152; VA/GPA remain correct | `3abf90d701fdb3252ec68d1426707affe4d0606bb002a1b02d710be577baa5a7` |
 | `9ee7b335` | Misaligned vector stores eventually complete, dequeue, and read back exactly | Mutant passed the available legal sequence | `9000f90adc416d1de6c7b4e8ce2b0129cf98564431ae835bcfc6d857f89e4df2` |
-| `fbb1e349` | A translated cross-page vector store eventually completes, dequeues, and reads back exactly | Mutant passed at cycle 879 with three vector replays | `603720f0cb797e679097244a107ca2892f00bbfe0392327fdc935ee2093b2594` |
+| `fbb1e349` | A translated cross-page vector store eventually completes, dequeues, and reads back exactly | Rebuilt pre-fix mutant passed the expanded progress sequence | `5bfe14db09a494c64415ee9a4d330ddbae9e704fbd18970d3b127ccde7d7b19` |
 
 `vector-guest-fault-split` is intentionally not part of an all-green regression.
 On clean RTL, VA `0x60000188` produces GPA `0x94001808`; the independent page
