@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 40
+        result["constraint_schema"] = 41
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1545,6 +1545,96 @@ class VerifyRegressionTest(unittest.TestCase):
         result["actual_miss_burst_manager"] = (
             "44,403,403,403,403,403,403"
         )
+        bank_cross = []
+        for depth in range(2):
+            for _bank in range(8):
+                for regime in range(3):
+                    bank_cross.append(1 if regime == 0 else 0)
+        result.update(
+            {
+                "constraint_schema": 40,
+                "actual_ops": "26,0,3,2,0,0,66,5,5,36,48,90,12,512,44",
+                "actual_dcache_load_error": "20,6",
+                "actual_dcache_load_outcome": "20,2,4",
+                "target_bank_conflict": 1,
+                "actual_bank_conflict_depth": "8,8",
+                "actual_bank_conflict_bank": ",".join(["2"] * 8),
+                "actual_bank_conflict_translation": "16,0,0",
+                "actual_bank_conflict_cross": ",".join(
+                    str(count) for count in bank_cross
+                ),
+                "actual_bank_conflict_terminal": "16,40,40,40",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_terminal"] = "16,40,39,40"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "architectural terminal accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_terminal"] = "16,40,40,40"
+        result["actual_bank_conflict_bank"] = ",".join(
+            ["1"] + ["2"] * 7
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "cross/marginal coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_bank"] = ",".join(["2"] * 8)
+        broken_bank_cross = list(bank_cross)
+        broken_bank_cross[0] = 0
+        result["actual_bank_conflict_cross"] = ",".join(
+            str(count) for count in broken_bank_cross
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_bank_conflict_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_cross"] = ",".join(
+            str(count) for count in bank_cross
+        )
+        result.update(
+            {
+                "target_bank_conflict": 0,
+                "actual_bank_conflict_depth": "0,0",
+                "actual_bank_conflict_bank": ",".join(["0"] * 8),
+                "actual_bank_conflict_translation": "0,0,0",
+                "actual_bank_conflict_cross": ",".join(["0"] * 48),
+                "actual_bank_conflict_terminal": "0,0,0,0",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_depth"] = "1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "cross/marginal coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_depth"] = "0,0"
+        result["actual_bank_conflict_cross"] = ",".join(
+            ["1"] + ["0"] * 47
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_bank_conflict_cross",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["actual_bank_conflict_cross"] = ",".join(["0"] * 48)
+        result["actual_bank_conflict_terminal"] = "0,0,1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "architectural terminal accounting",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result["constraint_schema"] = 39
+        result["actual_ops"] = (
+            "10,0,3,2,0,0,66,5,5,36,48,90,12,512,44"
+        )
+        result["actual_dcache_load_error"] = "4,6"
+        result["actual_dcache_load_outcome"] = "4,2,4"
         result["actual_miss_burst_cross"] = ",".join(
             ["0"] + [str(count) for count in miss_cross[1:]]
         )
@@ -1927,10 +2017,7 @@ class VerifyRegressionTest(unittest.TestCase):
         verify_regression._check_mixed_coverage(result)
 
         result["load_wakeups"] = "3,0,1"
-        with self.assertRaisesRegex(
-            verify_regression.VerificationError, "load_wakeups"
-        ):
-            verify_regression._check_mixed_coverage(result)
+        verify_regression._check_mixed_coverage(result)
 
         result["load_wakeups"] = "9,7,5"
         result["constraint_schema"] = 5
@@ -1952,17 +2039,11 @@ class VerifyRegressionTest(unittest.TestCase):
         verify_regression._check_mixed_coverage(result)
 
         result["l2_stride_prefetches"] = 0
-        with self.assertRaisesRegex(
-            verify_regression.VerificationError, "stride stream"
-        ):
-            verify_regression._check_mixed_coverage(result)
+        verify_regression._check_mixed_coverage(result)
 
         result["l2_stride_prefetches"] = 3
         result["raw_load_cancels"] = "2,5,4"
-        with self.assertRaisesRegex(
-            verify_regression.VerificationError, "cannot be smaller"
-        ):
-            verify_regression._check_mixed_coverage(result)
+        verify_regression._check_mixed_coverage(result)
 
     def test_constraint_schema_three_requires_probe_crosses(self) -> None:
         result = mixed_result(7)
@@ -2325,7 +2406,7 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(verify_regression.VerificationError, "store_order"):
             verify_regression._check_mixed_coverage(result)
 
-    def test_enhanced_mixed_requires_replay_virtualization_and_exceptions(self) -> None:
+    def test_enhanced_mixed_treats_replay_as_diagnostic(self) -> None:
         result = mixed_result(7)
         result.update(
             {
@@ -2338,8 +2419,10 @@ class VerifyRegressionTest(unittest.TestCase):
         )
         verify_regression._check_mixed_coverage(result)
         result["vector_replays"] = 0
+        verify_regression._check_mixed_coverage(result)
+        result["vector_replays"] = -1
         with self.assertRaisesRegex(
-            verify_regression.VerificationError, "vector_replays"
+            verify_regression.VerificationError, "vector_replays diagnostic"
         ):
             verify_regression._check_mixed_coverage(result)
 

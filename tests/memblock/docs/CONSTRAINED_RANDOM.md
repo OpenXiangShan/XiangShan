@@ -84,7 +84,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independently allocated pressure sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected set |
 | `miss-burst-depth2` .. `miss-burst-depth16` | Relative weights for the number of distinct cold cache lines held outstanding in one ordinary-load burst; the ceiling is the generated DCache miss-entry count |
 | `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative weights for the same-cycle scalar-load issue width at the head of a burst; widths larger than the chosen depth are excluded |
-| `locality-hot` | Lines selected from a 32-line hot set |
+| `bank-conflict` | Per-mille share of clean scalar-load actions replaced by a two/three-way resident same-bank issue wave; the address bank, depth, translation regime, and line identity remain randomized |
+| `locality-hot` | Ordinary addresses selected from a 32-line hot set; each explicitly prewarmed `bank-conflict` target wave also contributes one resident/hot observation |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
 | `translation-bare`, `translation-stage1`, `translation-nested` | Relative Bare, host stage-1, and nested VS+G context weights |
@@ -142,7 +143,9 @@ also require Bare or host-stage-1 contexts. Fixed-PMA device traffic requires
 the PMA/PMA PBMT pair and an aligned class; a device-only mix cannot enable a
 non-PMA PBMT pair or misalignment.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
-weights because the prefetch oracle depends on real cold load misses.
+weights because the stride-shaped stimulus must begin with real cold load
+misses. Hardware-prefetch observations remain characterization data, not a
+correctness oracle.
 `random-mixed` requires at least 2304 actions so the mandatory architectural
 prefix, eight replacement windows, the 48 CMO/Probe bins, the 54 atomic/Probe
 bins, all enabled ordinary miss-burst depth/width/translation bins, and each
@@ -189,7 +192,8 @@ scenario implementations:
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback. Schema 34 walks the complete six-bit B-source namespace across sequences, rejects active-ID reuse, and exactly checks unique IDs, completed-ID reuse, and every 63-to-0 wrap. Schema 36 repeats all depths while CLEAN/FLUSH/INVAL is pending. Schema 37 queues zero through eight auxiliary Probes around successful atomic refills; B may backpressure while D is held, after which the complete burst is accepted under C backpressure | Compose Probe overlap with replacement traffic and malformed manager traffic |
 | Set replacement concurrency | Schema 38 uses direct `set-pressure-window1`..`set-pressure-window8` weights, crosses every class with clean/dirty, refill-overlap, C-backpressure, depth, width, and translation, and closes 1536 bins. Multi-window actions allocate distinct physical set indexes across repeated quartile order. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count. The eight-window ceiling is checked against the standard configuration's 16 DCache miss entries | Compose replacement with Probe/CMO/atomic traffic only after their legal scheduling and attribution contracts are explicit |
 | Ordinary cold-miss concurrency | Schema 39 adds `miss-burst`, depth 2..16, and initial same-cycle issue width 1..3. Every enabled depth x legal width x translation bin is forced and observed. Each action uses never-repeated cache lines, holds every complete address-qualified refill until the requested outstanding depth is externally visible, then requires one target A request, one scalar completion, one LQ dequeue, and one GrantAck per returned refill | Compose ordinary MLP with replacement/Probe/CMO/atomic traffic after cross-operation scheduling remains externally attributable |
-| Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
+| DCache bank conflict/replay | Schema 40 adds a `bank-conflict` dimension to clean scalar-load actions. Two- and three-way resident waves select all eight 8-byte banks and every enabled translation regime. Terminal data/writeback/LQ identity is checked independently; wakeup, `ld2Cancel`, arbitration, and manager-request counts are diagnostic observations only | Broader bank mapping crosses with vector/atomic traffic and malformed replay responses remain planned |
+| Hardware data prefetch | `stride-stream` composes fixed-PC stride-shaped traffic with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator. Source counts and addresses are reported for characterization; no seed must observe a particular source | Add SMS/stream causality and arbitration only as implementation/performance studies, plus a positive L3-enabled configuration if that integration is enabled |
 | Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
@@ -202,11 +206,11 @@ choice into the common interface and its coverage contract, not adding
 Operation columns are relative weights. Locality is `hot/warm/cold`; the
 remaining numeric direction columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe/overlap | Stride stream | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20/500 | 500 | compact |
-| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1/10 | 100 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100/750 | 750 | spec |
+| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | CMO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe/overlap | Stride stream | Bank conflict | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20/500 | 500 | 500 | compact |
+| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1/10 | 100 | 250 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100/750 | 750 | 750 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
@@ -276,7 +280,12 @@ misclassified as a dirty-line failure under the long-tail latency profile.
 Their stride-stream rates are `500`, `100`, and `750` per mille. The lower
 `spec` value keeps prefetch training present without turning ordinary load
 traffic into an artificial continuous stream; mandatory closing loads retain
-the per-seed output gate even at this low rate.
+the stride-shaped stimulus even at this low rate, while emitted prefetch
+traffic remains diagnostic.
+Their resident same-bank wave rates are `500`, `250`, and `750` per mille.
+This gives the high-frequency SPEC bank-conflict/replay class substantial
+steady-state representation while the 48-bin stimulus closure remains
+independent of the sampled rate.
 Set-pressure dirty shares are `500`, `50`, and `500` per mille. Thus `spec`
 keeps clean replacement dominant while preserving a nonzero dirty floor;
 coverage and corner balance both line states.
@@ -316,17 +325,22 @@ to `RandomConstraints`, then exercise it through `random-mixed`.
 
 ## Performance Calibration
 
-The `spec` preset was calibrated from the final measurement blocks of 4,206
-SPEC CPU checkpoint logs in these local datasets:
+The `spec` preset was initially calibrated from the final measurement blocks
+of 1,092 `cr260831-4f29a0951-KunminghuV2Config` checkpoints. The current
+priority calibration snapshot is the expanded
+`cr260902-5d3934132-KunminghuV2Config-simulator-logs` tree: the analyzer found
+7,900 logs and accepted 7,804 counter blocks that reached the generated PERF
+sequence's stable terminator. Of the 96 skipped logs, 73 contain only truncated
+PERF dumps and 23 contain no PERF record. The copy was still growing when this
+snapshot was taken, so future analyses must record their own
+discovered/accepted counts rather than treating 7,804 as a frozen corpus size.
 
-- `cr260831-4f29a0951-KunminghuV2Config` (1,092 checkpoints)
-- `cr260902-5d3934132-KunminghuV2Config` (3,114 checkpoints)
-
-Only the final counter block in each `simulator_err.txt` was counted, avoiding
-double counting periodic cumulative dumps. Relevant aggregates were:
-
-The checked-in analyzer makes that selection and aggregation reproducible;
-its JSON output stays in the untracked build directory:
+Only the latest timestamp that reaches the stable generated terminator
+`ctrlBlock.rob.rab: util_218_219` is counted. This avoids double counting
+periodic cumulative dumps and rejects a partially copied final dump even when
+it is the file's only PERF block. The checked-in analyzer makes that selection
+and aggregation reproducible; its JSON output stays in the untracked build
+directory:
 
 ```sh
 make analyze-spec-counters \
@@ -335,17 +349,54 @@ make analyze-spec-counters \
 ```
 
 The output is workload calibration evidence only. These implementation
-counters are never used as DUT correctness oracles.
+counters are never used as DUT correctness oracles. Relevant aggregates were:
 
-| Dataset | Loads | Stores | Load-unit first-issue TLB misses | DCache real misses | Miss allocations | Mean MSHR A-to-D |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `4f29a0951` | 5,449,853,667 | 2,335,870,195 | 89,439,821 | 572,769,182 | 483,469,995 | 30.28 cycles |
-| `5d3934132` | 15,297,507,427 | 6,294,915,699 | 475,042,094 | 1,491,848,202 | 1,039,068,487 | 32.16 cycles |
-| Combined | 20,747,361,094 | 8,630,785,894 | 564,481,915 | 2,064,617,384 | 1,522,538,482 | about 31.6 cycles |
+| Dataset | Parsed checkpoints | Loads | Stores | Load-unit first-issue TLB misses | DCache real misses | Miss allocations | Mean MSHR A-to-D |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `4f29a0951` baseline | 1,092 | 5,449,853,667 | 2,335,870,195 | 89,439,821 | 572,769,182 | 483,469,995 | 30.28 cycles |
+| expanded `5d3934132` snapshot | 7,804 / 7,900 discovered | 34,975,114,191 | 12,853,813,155 | 827,615,271 | 3,610,080,915 | 4,244,182,526 | 26.07 cycles |
 
 The TLB column is specifically the sum of the three load-unit
 `s1_tlb_miss_first_issue` counters. It is not a sum of every DTLB port's
 `first_miss` counter.
+
+The expanded snapshot also exposes the high-priority event classes that are
+easy to hide behind aggregate load/miss totals:
+
+| Expanded `5d3934132` event | Count |
+| --- | ---: |
+| Ordinary vector-memory issues | 8,947,798,091 |
+| Vector-segment issues | 8,943,445,957 |
+| Vector-memory enqueues | 13,319,415,204 |
+| DCache bank conflicts / conflict replays | 12,996,168,822 / 12,996,168,822 |
+| Multi-enqueue miss-queue events | 4,008,031,861 |
+| Merged loads / rejected loads | 2,758,026,489 / 3,099,393,045 |
+| Release lines | 4,194,937,385 |
+| Probes / Probe responses / Probe blocked by miss | 12,899,042 / 12,899,037 / 1,979,461 |
+
+The equality of conflict and replay counters is an implementation-accounting
+observation, not an oracle. Likewise, issue/enqueue and Release/Probe counters
+can count different granularities and overlap other events; they justify
+prioritizing vector, resident-bank replay, multi-miss, replacement, and
+coherence stress but are not converted directly into transaction
+probabilities.
+
+The corresponding constrained-random audit is:
+
+| Observed priority class | Canonical `random-mixed` coverage | Remaining limitation |
+| --- | --- | --- |
+| Ordinary and segment vector memory | Full legal addressing/EEW/SEW/LMUL/EMUL matrices, mask/tail policy, `vl`/`vstart`, NF, direction, translation, and exact per-element data oracle | Full vector shapes are not yet placed in every heterogeneous overlap slot |
+| DCache bank conflict/replay | Schema 40: resident 2/3-way x eight address banks x Bare/stage-1/nested as stimulus coverage, with only identity-matched terminal data/writeback/LQ conservation used as the oracle | Vector/atomic same-bank composition is still open |
+| Miss-queue multi-enqueue | Schema 39: distinct-line depth 2..16 x initial issue width 1..3 x translation, with held-response outstanding-depth oracle | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
+| Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema-40 resident same-bank traffic may incidentally create pressure, but replay/reject observations remain diagnostic | An externally attributable miss-queue-reject stimulus and oracle remain open, as do malformed replay responses |
+| Release traffic | Schema 38 clean/dirty replacement, one through eight set windows, refill overlap, C backpressure, width, depth, set quarter, and translation | Replacement composition with Probe/CMO/atomic remains open |
+| Probe traffic and Probe/miss blocking | Schema 33 depth/cap/data crosses plus schemas 36/37 CMO- and atomic-Probe composition | Direct replacement-Probe composition remains open |
+
+Thus the newly observed event families inform executable stimulus priorities,
+while correctness still comes from their applicable external transaction and
+protocol oracles. Explicit miss-queue-reject causality and the listed
+cross-family compositions remain gaps and must not be inferred from high
+standalone counts.
 
 The additional `cr260831-8f8494560-KunminghuV2Config` dataset contains 27 mcf
 checkpoints. Its final blocks report 196,764,856 loads, 54,612,731 stores,
@@ -354,13 +405,12 @@ checkpoints. Its final blocks report 196,764,856 loads, 54,612,731 stores,
 small, memory-bound subset is useful as a high-miss stress reference, but is
 not pooled at equal weight with the two broad SPEC datasets above.
 
-The combined ordinary memory mix is about 70.6% loads and 29.4% stores. Atomic
-miss allocations were only 19,008 and 225,708 in the two datasets; reported
-MMIO loads/stores were also only thousands, and the sampled NC counters were
-zero. Those events therefore receive small verification floors rather than
-being made artificially common in `spec`. CMO error injection is disabled in
-the `spec` preset and remains concentrated in focused contracts plus balanced
-or corner campaigns.
+The expanded snapshot's scalar-memory mix is about 73.1% loads and 26.9%
+stores. It reports 55,724 MMIO loads, 55,332 MMIO stores, and zero sampled NC
+loads/stores. Those events therefore retain small verification floors rather
+than being made artificially common in `spec`. CMO error injection is disabled
+in the `spec` preset and remains concentrated in focused contracts plus
+balanced or corner campaigns.
 
 The calibrated first-beat DCache/PTW/Uncache response latency distribution is
 approximately 74.1% below 20 cycles, 14.4% at 20-39, 5.1% at 40-99, and 6.4%
@@ -371,7 +421,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=39`, the resolved target weights,
+Every terminal line prints `constraint_schema=40`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -381,10 +431,11 @@ addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
 locality, translation regime/mode/pair and stage-1/nested leaf topology, fence
 kind/scope, cold-walk/reuse,
 TLB-flush, hit/miss, Probe sequence/cap/need-data/overlap and maximum outstanding
-depth plus B-source lifecycle, all three scalar-load
-wakeup/cancel lanes, IFU software instruction-prefetch observations, L2
-stride-prefetch observations, and per-manager latency counts. Each enabled
-class must be observed at least once. Every ordinary shape dimension conserves
+depth plus B-source lifecycle, all three scalar-load wakeup/cancel lanes, IFU
+software instruction-prefetch observations, L2 stride-prefetch observations,
+and per-manager latency counts. Microarchitectural feedback/prefetch fields are
+diagnostic; each enabled architectural or stimulus-coverage class must be
+observed at least once. Every ordinary shape dimension conserves
 against `actual_vector_shape_ops`; uops must remain in the architectural 1..8
 range and any enabled multi-uop shape must produce a multi-uop instruction.
 The five ordinary-vector binary policies report false/true instruction counts.
@@ -466,6 +517,18 @@ depth, then releases responses and checks one request/refill/GrantAck,
 writeback, and LQ dequeue per line. `actual_miss_burst_max_outstanding` is a
 sanity floor, while per-burst depth and line identity come from the held
 response/request oracle rather than internal MSHR state.
+Schema 40 adds `target_bank_conflict` and a stimulus-coverage 48-bin
+depth(2/3) x bank(0..7) x translation cross. A conflict action first warms
+fresh, independently addressed lines, then issues all selected loads in one
+wave. The architectural oracle requires exact per-identity data, one terminal
+scalar writeback and one LQ dequeue per member. Bank/replay classification,
+prefetch traffic, arbitration, and wakeup/`ld2Cancel` pulses are retained as
+diagnostic fields only; `actual_bank_conflict_terminal` conserves actions,
+accepted loads, writebacks, and LQ dequeues. The address pool is ordinary 2-MiB
+mapped traffic, so translation regime coverage cannot be confused with NAPOT
+placement. Only the target resident wave contributes one hit and one
+resident/hot locality observation; its setup fills are neither action misses
+nor warm/cold locality claims.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and
@@ -495,10 +558,10 @@ response with that ID is active. Schema 36 serializes
 `target_cmo_probe_depth`, `actual_cmo_probe_depth`, and the 48-field
 `actual_cmo_probe_cross`. The depth-weighted CMO marginal replaces the old
 one-Probe-per-success compatibility assumption in manager Probe conservation;
-schemas 13 through 35 retain their original interpretation. Every
-load lane must observe both backend wakeup and cancel events without constraining
-their count relationship: a split or replayed request can legally emit multiple
-cancels for one architectural load. Every seed must emit at least one `prefetch.i`
+schemas 13 through 35 retain their original interpretation. Backend load
+wakeup/cancel and vector-replay observations are diagnostic only: a split or
+replayed request can legally emit multiple feedback events without changing
+its architectural result. Every seed must emit at least one `prefetch.i`
 request toward the frontend. More than one
 enabled translation context also
 requires an observed switch, and any translated profile requires both a PTW
@@ -508,15 +571,12 @@ artifact verifier both enforce these obligations. They are minimum gates;
 distribution quality is evaluated over long multi-seed campaigns from the
 recorded counts.
 
-Hardware prefetch traffic shares load-pipeline cancel outputs but has no
-backend wakeup by design. When `stride-stream` is enabled, the architectural
-load replay gate therefore uses a counter snapshot taken immediately before
-the prefetcher is enabled. The terminal summary reports that gate window as
-`load_wakeups/load_cancels` and the full simulation as
-`raw_load_wakeups/raw_load_cancels`; schema 11 requires each raw count to be at
-least its corresponding snapshot count. L2 source-12 observation is checked
-separately, so this separation neither hides prefetch activity nor mistakes it
-for a failed backend load.
+Hardware prefetch traffic may share load-pipeline feedback pins, but those
+pulses are not an architectural load-completion oracle. The terminal summary
+reports both gated and raw feedback counters for diagnostics. Enabling
+`stride-stream` does not require a source-12 request: legal implementations may
+train, arbitrate, merge, suppress, or issue a different legal prefetch stream
+without changing the load/store data, queue, or protocol obligations.
 
 The mandatory prefix still closes architectural invariants that should never be
 left to chance, including width/lane legality, nested translation mode pairs,

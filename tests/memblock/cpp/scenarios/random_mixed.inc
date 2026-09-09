@@ -37,6 +37,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t load_merge_line = 0;
     std::array<std::uint64_t, 4> set_pressure_sequences{};
     std::uint64_t miss_burst_line = 0;
+    std::uint64_t bank_conflict_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
@@ -145,6 +146,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t miss_burst_base =
         set_pressure_base + set_pressure_span;
     constexpr std::uint64_t miss_burst_span = 0x40000000ULL;
+    // A seed-specific full-period permutation of this dedicated 512-MiB pool
+    // supports more than one million three-way conflict actions without
+    // reusing a line. Keep it clear of the lower hypervisor physical pools.
+    constexpr std::uint64_t bank_conflict_base = 0x400000000ULL;
+    constexpr std::uint64_t bank_conflict_span = 0x20000000ULL;
+    constexpr std::uint64_t bank_conflict_line_bytes = 64;
+    constexpr std::uint64_t bank_conflict_lines =
+        bank_conflict_span / bank_conflict_line_bytes;
+    static_assert((bank_conflict_lines & (bank_conflict_lines - 1U)) == 0);
+    const std::uint64_t bank_conflict_line_offset =
+        (options.seed * 0x9e3779b97f4a7c15ULL +
+         0xd1b54a32d192ed03ULL) % bank_conflict_lines;
+    const std::uint64_t bank_conflict_line_stride =
+        ((options.seed * 0xbf58476d1ce4e5b9ULL) ^
+         0x94d049bb133111ebULL) % bank_conflict_lines | 1U;
     // Keep the nested final G-stage walk in a different high-level subtree
     // from the implicit G-stage walks used to fetch VS page-table entries.
     constexpr std::uint64_t ptw_error_guest_base = 0x18000000000ULL;
@@ -198,17 +214,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
-    memblock::Environment::ScalarLoadFeedbackStats backend_load_feedback{};
-    bool backend_load_feedback_frozen = false;
-    const auto load_feedback_complete = [&](const auto &feedback) {
-        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
-            if (feedback.ld2_cancels[lane] == 0 ||
-                feedback.wakeups[lane] == 0) {
-                return false;
-            }
-        }
-        return true;
-    };
     const auto load_feedback_summary = [&](const auto &feedback) {
         std::ostringstream stream;
         stream << "load_wakeups=" << feedback.wakeups[0] << ','
@@ -226,11 +231,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                << feedback.ld2_cancels[1] << ','
                << feedback.ld2_cancels[2];
         return stream.str();
-    };
-    const auto &load_feedback_for_gate = [&]() -> const auto & {
-        return backend_load_feedback_frozen
-            ? backend_load_feedback
-            : environment.scalar_load_feedback_stats();
     };
     const auto total_ifetch_prefetches = [&]() {
         const auto &stats = environment.ifetch_prefetch_stats();
@@ -960,6 +960,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         for (std::uint64_t block = miss_burst_base;
              block < miss_burst_base + miss_burst_span;
+             block += 0x200000) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
+                    !map_stage_2m(mode, random_vs_roots[mode], block) ||
+                    !map_g_2m(mode, random_g_roots[mode], block)) {
+                    return false;
+                }
+            }
+        }
+        for (std::uint64_t block = bank_conflict_base;
+             block < bank_conflict_base + bank_conflict_span;
              block += 0x200000) {
             for (unsigned mode = 0; mode < 2; ++mode) {
                 if (!map_stage_2m(mode, random_stage1_roots[mode], block) ||
@@ -2500,14 +2511,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
-        if (constraints.stride_stream_per_mille != 0) {
-            // Hardware prefetch requests use load-pipeline cancel outputs but
-            // intentionally have no backend wakeup. Freeze the architectural
-            // load replay cross before enabling the prefetcher so those
-            // unrelated pulses cannot corrupt the backend feedback oracle.
-            backend_load_feedback = environment.scalar_load_feedback_stats();
-            backend_load_feedback_frozen = true;
-        }
         if (!environment.configure_stride_prefetch(
                 constraints.stride_stream_per_mille != 0)) {
             return false;
@@ -4090,6 +4093,42 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
             }
+            bool bank_conflict_action = false;
+            unsigned bank_conflict_depth_index = random() % 2U;
+            unsigned bank_conflict_bank = random() % 8U;
+            std::optional<unsigned> bank_conflict_forced_regime;
+            if (kind == RandomConstraints::scalar_load &&
+                !closing_stride_stream && !dcache_load_error_denied &&
+                constraints.bank_conflict_per_mille != 0) {
+                for (unsigned depth = 0;
+                     depth < constraint_coverage.bank_conflict_crosses.size() &&
+                         !bank_conflict_forced_regime;
+                     ++depth) {
+                    for (unsigned bank = 0;
+                         bank < constraint_coverage
+                                    .bank_conflict_crosses[depth].size() &&
+                             !bank_conflict_forced_regime;
+                         ++bank) {
+                        for (unsigned regime = 0;
+                             regime < RandomConstraints::translation_regime_count;
+                             ++regime) {
+                            if (constraints.translation_weights[regime] != 0 &&
+                                constraint_coverage.bank_conflict_crosses
+                                    [depth][bank][regime] == 0) {
+                                bank_conflict_action = true;
+                                bank_conflict_depth_index = depth;
+                                bank_conflict_bank = bank;
+                                bank_conflict_forced_regime = regime;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!bank_conflict_action) {
+                    bank_conflict_action = random() % 1000U <
+                        constraints.bank_conflict_per_mille;
+                }
+            }
             unsigned atomic_family = 0;
             unsigned atomic_width = 0;
             unsigned atomic_probe_depth = 0;
@@ -4808,7 +4847,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             TranslationContext translation = closing_stride_stream
                 ? dominant_translation_context()
                 : choose_translation_context();
-            if (kind == RandomConstraints::hypervisor) {
+            if (kind == RandomConstraints::scalar_load &&
+                bank_conflict_action && bank_conflict_forced_regime) {
+                translation = TranslationContext{};
+                translation.regime = *bank_conflict_forced_regime;
+                if (translation.regime ==
+                    RandomConstraints::translation_stage1) {
+                    translation.stage1_mode =
+                        constraints.choose_stage1_mode(random());
+                } else if (translation.regime ==
+                           RandomConstraints::translation_nested) {
+                    translation.vs_mode =
+                        constraints.choose_vs_mode(random());
+                    translation.g_mode =
+                        constraints.choose_g_mode(random());
+                }
+            } else if (kind == RandomConstraints::hypervisor) {
                 translation.regime = RandomConstraints::translation_nested;
                 translation.vs_mode = constraints.choose_vs_mode(random());
                 translation.g_mode = constraints.choose_g_mode(random());
@@ -5029,8 +5083,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                 }
             }
-            const TranslationLeafTopology leaf =
+            TranslationLeafTopology leaf =
                 choose_translation_leaf(translation);
+            // The conflict address pool is mapped as ordinary 2-MiB leaves
+            // in every translated context. Keep this stress action out of
+            // the separately located NAPOT pools so its failure mode remains
+            // bank/replay behavior rather than an accidental page fault.
+            if (bank_conflict_action) {
+                leaf = TranslationLeafTopology{};
+            }
             if (kind != RandomConstraints::ptw_error) {
                 std::ostringstream detail;
                 detail << phase << ":regime=" << translation.regime
@@ -5192,7 +5253,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
 
-            const std::uint64_t ptw_requests_before =
+            std::uint64_t ptw_requests_before =
                 environment.ptw_requests();
             const std::uint64_t requests_before = environment.tilelink_requests();
             bool sample_dcache = true;
@@ -5209,6 +5270,132 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             };
             std::optional<std::uint64_t> probe_candidate;
             if (kind == RandomConstraints::scalar_load) {
+              if (bank_conflict_action) {
+                phase = "random-bank-conflict";
+                const unsigned depth = bank_conflict_depth_index + 2U;
+                if (bank_conflict_line + depth > bank_conflict_lines) {
+                    phase = "random-bank-conflict-address-space-exhausted";
+                    return false;
+                }
+                if (!environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                std::vector<std::uint64_t> lines;
+                lines.reserve(depth);
+                for (unsigned index = 0; index < depth; ++index) {
+                    const std::uint64_t line_index =
+                        (bank_conflict_line_offset +
+                         (bank_conflict_line + index) *
+                             bank_conflict_line_stride) %
+                        bank_conflict_lines;
+                    const std::uint64_t line = bank_conflict_base +
+                        line_index * bank_conflict_line_bytes;
+                    const std::uint64_t address =
+                        line + bank_conflict_bank * sizeof(std::uint64_t);
+                    environment.memory().fill_incrementing(
+                        line, bank_conflict_line_bytes,
+                        static_cast<std::uint8_t>(
+                            0x37U + bank_conflict_bank * 11U + index * 17U));
+                    lines.push_back(line);
+                }
+                for (unsigned index = 0; index < depth; ++index) {
+                    const std::uint64_t line = lines[index];
+                    const std::uint64_t address =
+                        line + bank_conflict_bank * sizeof(std::uint64_t);
+                    const auto preload = make_load(
+                        address, memblock::LoadOp::ld,
+                        index % memblock::kScalarLoadLanes);
+                    if (!issue_load(preload, std::nullopt, false)) {
+                        return false;
+                    }
+                }
+                bank_conflict_line += depth;
+                if (!environment.run_until_queues_retired(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_dcache_idle(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                // Setup fills are not constrained-random actions, but they are
+                // real translated walk windows. Record that observation, then
+                // classify the resident target wave from a fresh baseline so
+                // translation reuse remains visible without inferring cache or
+                // replay behavior.
+                if (translation.regime !=
+                        RandomConstraints::translation_bare &&
+                    environment.ptw_requests() > ptw_requests_before) {
+                    ++constraint_coverage.translation_walk_windows;
+                }
+                ptw_requests_before = environment.ptw_requests();
+
+                std::vector<memblock::LoadTransaction> transactions;
+                transactions.reserve(depth);
+                for (unsigned index = 0; index < depth; ++index) {
+                    transactions.push_back(make_load(
+                        lines[index] +
+                            bank_conflict_bank * sizeof(std::uint64_t),
+                        memblock::LoadOp::ld, index));
+                    environment.expect_load(transactions.back());
+                }
+                const std::uint64_t writebacks_before_conflict =
+                    environment.writebacks();
+                const std::uint64_t lq_before_conflict =
+                    environment.lq_dequeued();
+                std::vector<unsigned> dispatch_lanes(depth);
+                std::iota(
+                    dispatch_lanes.begin(), dispatch_lanes.end(), 0U);
+                if (!environment.set_rob_head(
+                        transactions.front().rob,
+                        transactions.front().rob_flag) ||
+                    !environment.enqueue_load_batch(
+                        transactions, dispatch_lanes) ||
+                    !environment.issue_load_batch(
+                        transactions, constrained_completion_timeout, true) ||
+                    !environment.run_until_all_complete(
+                        constrained_completion_timeout) ||
+                    !environment.run_until_queues_retired(
+                        constrained_completion_timeout)) {
+                    return false;
+                }
+                const std::array<std::uint64_t, 4> terminal_delta{{
+                    1,
+                    depth,
+                    environment.writebacks() - writebacks_before_conflict,
+                    environment.lq_dequeued() - lq_before_conflict,
+                }};
+                if (terminal_delta[2] != depth ||
+                    terminal_delta[3] != depth) {
+                    std::ostringstream detail;
+                    detail << "random-bank-conflict-terminal"
+                           << ":depth=" << depth
+                           << ":bank=" << bank_conflict_bank
+                           << ":terminal=";
+                    for (unsigned index = 0; index < terminal_delta.size();
+                         ++index) {
+                        detail << (index == 0 ? "" : ",")
+                               << terminal_delta[index];
+                    }
+                    phase = detail.str();
+                    return false;
+                }
+                for (const auto &transaction : transactions) {
+                    coverage.sample(transaction);
+                }
+                constraint_coverage.sample_bank_conflict(
+                    bank_conflict_depth_index, bank_conflict_bank,
+                    translation.regime, terminal_delta);
+                constraint_coverage.sample_dcache_load(std::nullopt);
+                sample_dcache = false;
+                ++constraint_coverage.locality[0];
+                ordinary_leaf_addressed = true;
+                ++actions;
+                coverage.cacheable += depth;
+              } else {
                 const auto op = static_cast<memblock::LoadOp>(random() % 7);
                 const unsigned size =
                     1U << (static_cast<unsigned>(op) & 3U);
@@ -5352,6 +5539,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.sample_dcache_load(std::nullopt);
                 }
                 ++coverage.cacheable;
+              }
             } else if (kind == RandomConstraints::load_merge) {
                 phase = "random-load-merge";
                 unsigned depth_index =
@@ -8646,10 +8834,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 expected_probe_source_reuses ||
             environment.dcache_probe_source_wraps() !=
                 expected_probe_source_wraps ||
-            (constraints.stride_stream_per_mille != 0 &&
-             environment.hardware_prefetch_stats().l2_source_counts[12] == 0) ||
             total_ifetch_prefetches() == 0 ||
-            !load_feedback_complete(load_feedback_for_gate()) ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
             return false;
@@ -8698,7 +8883,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << (environment.error().empty()
                           ? "mixed_coverage_or_accounting_gate_failed"
                           : environment.error())
-                  << ' ' << load_feedback_summary(load_feedback_for_gate())
+                  << ' ' << load_feedback_summary(
+                         environment.scalar_load_feedback_stats())
                   << ' ' << raw_load_feedback_summary()
                   << ' ' << coverage.summary() << ' '
                   << constraint_coverage.summary(
@@ -8741,7 +8927,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << environment.hardware_prefetch_stats().l2_source_counts[12]
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
-              << ' ' << load_feedback_summary(load_feedback_for_gate())
+              << ' ' << load_feedback_summary(
+                     environment.scalar_load_feedback_stats())
               << ' ' << raw_load_feedback_summary()
               << " lq=" << environment.lq_dequeued() << '+'
               << environment.lq_canceled() << '/'

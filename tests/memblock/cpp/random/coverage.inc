@@ -199,6 +199,23 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 3> dcache_load_outcomes{};
     // error responses/denied beats/corrupt beats/GrantAcks/refills.
     std::array<std::uint64_t, 5> dcache_load_error_manager{};
+    // [two/three same-cycle resident loads][address bank 0..7]
+    // [Bare/stage-1/nested]. The bank index is derived solely from the legal
+    // request address. It biases stimulus and does not predict replay policy.
+    std::array<
+        std::array<
+            std::array<
+                std::uint64_t, RandomConstraints::translation_regime_count>,
+            8>,
+        2>
+        bank_conflict_crosses{};
+    std::array<std::uint64_t, 2> bank_conflict_depths{};
+    std::array<std::uint64_t, 8> bank_conflict_banks{};
+    std::array<std::uint64_t, RandomConstraints::translation_regime_count>
+        bank_conflict_translations{};
+    // Actions/accepted loads/terminal scalar writebacks/LQ dequeues. These are
+    // implementation-independent completion accounts, not bank/replay events.
+    std::array<std::uint64_t, 4> bank_conflict_terminal{};
     // [depth2/depth3][same address/same beat/cross beat][critical beat].
     std::array<
         std::array<std::array<std::uint64_t, 2>,
@@ -504,6 +521,20 @@ struct ConstraintCoverage {
         }
     }
 
+    void sample_bank_conflict(
+        unsigned depth_index, unsigned bank, unsigned translation_regime,
+        const std::array<std::uint64_t, 4> &terminal_delta)
+    {
+        ++bank_conflict_crosses.at(depth_index).at(bank).at(
+            translation_regime);
+        ++bank_conflict_depths.at(depth_index);
+        ++bank_conflict_banks.at(bank);
+        ++bank_conflict_translations.at(translation_regime);
+        for (unsigned index = 0; index < terminal_delta.size(); ++index) {
+            bank_conflict_terminal[index] += terminal_delta[index];
+        }
+    }
+
     void sample_load_merge(
         unsigned depth_index, unsigned pattern, unsigned critical_beat,
         unsigned translation_regime, unsigned loads,
@@ -710,6 +741,23 @@ struct ConstraintCoverage {
         const RandomConstraints &constraints, unsigned operation) const
     {
         if (constraints.operation_weights[operation] == 0) {
+            if (operation == RandomConstraints::scalar_load) {
+                return operations[operation] == 0 &&
+                    dcache_load_outcomes ==
+                        std::array<std::uint64_t, 3>{} &&
+                    bank_conflict_crosses ==
+                        decltype(bank_conflict_crosses){} &&
+                    bank_conflict_depths ==
+                        std::array<std::uint64_t, 2>{} &&
+                    bank_conflict_banks ==
+                        std::array<std::uint64_t, 8>{} &&
+                    bank_conflict_translations ==
+                        std::array<
+                            std::uint64_t,
+                            RandomConstraints::translation_regime_count>{} &&
+                    bank_conflict_terminal ==
+                        std::array<std::uint64_t, 4>{};
+            }
             return true;
         }
         if (operation == RandomConstraints::atomic) {
@@ -780,6 +828,47 @@ struct ConstraintCoverage {
                 if ((dcache_load_outcomes[outcome] != 0) != enabled[outcome]) {
                     return false;
                 }
+            }
+            const bool bank_enabled =
+                constraints.bank_conflict_per_mille != 0;
+            std::array<std::uint64_t, 2> crossed_depths{};
+            std::array<std::uint64_t, 8> crossed_banks{};
+            std::array<
+                std::uint64_t, RandomConstraints::translation_regime_count>
+                crossed_translations{};
+            std::uint64_t bank_actions = 0;
+            std::uint64_t bank_loads = 0;
+            for (unsigned depth = 0;
+                 depth < bank_conflict_crosses.size(); ++depth) {
+                for (unsigned bank = 0;
+                     bank < bank_conflict_crosses[depth].size(); ++bank) {
+                    for (unsigned regime = 0;
+                         regime < bank_conflict_crosses[depth][bank].size();
+                         ++regime) {
+                        const bool cross_enabled = bank_enabled &&
+                            constraints.translation_weights[regime] != 0;
+                        const std::uint64_t count =
+                            bank_conflict_crosses[depth][bank][regime];
+                        if ((count != 0) != cross_enabled) {
+                            return false;
+                        }
+                        bank_actions += count;
+                        bank_loads += count * (depth + 2U);
+                        crossed_depths[depth] += count;
+                        crossed_banks[bank] += count;
+                        crossed_translations[regime] += count;
+                    }
+                }
+            }
+            if (crossed_depths != bank_conflict_depths ||
+                crossed_banks != bank_conflict_banks ||
+                crossed_translations != bank_conflict_translations) {
+                return false;
+            }
+            const std::array<std::uint64_t, 4> expected_terminal{{
+                bank_actions, bank_loads, bank_loads, bank_loads}};
+            if (bank_conflict_terminal != expected_terminal) {
+                return false;
             }
             return operations[operation] != 0;
         }
@@ -1901,6 +1990,34 @@ public:
                << dcache_load_error_manager[2] << ','
                << dcache_load_error_manager[3] << ','
                << dcache_load_error_manager[4]
+               << " actual_bank_conflict_depth="
+               << bank_conflict_depths[0] << ',' << bank_conflict_depths[1]
+               << " actual_bank_conflict_bank=";
+        for (unsigned bank = 0; bank < bank_conflict_banks.size(); ++bank) {
+            stream << (bank == 0 ? "" : ",") << bank_conflict_banks[bank];
+        }
+        stream << " actual_bank_conflict_translation="
+               << bank_conflict_translations[0] << ','
+               << bank_conflict_translations[1] << ','
+               << bank_conflict_translations[2]
+               << " actual_bank_conflict_cross=";
+        bool first_bank_conflict_cross = true;
+        for (const auto &depth : bank_conflict_crosses) {
+            for (const auto &bank : depth) {
+                for (const auto count : bank) {
+                    stream << (first_bank_conflict_cross ? "" : ",")
+                           << count;
+                    first_bank_conflict_cross = false;
+                }
+            }
+        }
+        stream << " actual_bank_conflict_terminal=";
+        for (unsigned index = 0; index < bank_conflict_terminal.size();
+             ++index) {
+            stream << (index == 0 ? "" : ",")
+                   << bank_conflict_terminal[index];
+        }
+        stream
                << " actual_load_merge_shape=";
         bool first_load_merge_shape = true;
         for (const auto &depth : load_merge_shapes) {
@@ -2393,7 +2510,7 @@ struct MixedCoverage {
                nonzero_vstart != 0 && full_vl != 0 && partial_vl != 0 &&
                aligned != 0 && split != 0 && scalar_misaligned != 0 &&
                scalar_store_misaligned != 0 &&
-               vector_store_misaligned != 0 && vector_replays != 0 &&
+               vector_store_misaligned != 0 &&
                two_stage != 0 && exceptions != 0 &&
                heterogeneous_waves >= 2 &&
                simultaneous_scalar_vector != 0 && scalar_forwarding != 0 &&

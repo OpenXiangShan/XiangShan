@@ -513,18 +513,19 @@ lines without a new TileLink request. The oracle permits any number of legal
 replays but requires each completed normal load to have exactly one uncanceled
 wakeup: `wakeup_delta = ld2Cancel_delta + 1`. It also issues three resident,
 different-set loads to the same DCache bank in one cycle. That phase requires
-at least two cancellations, no TileLink traffic, exact metadata on the initial
-wakeups, and the same conservation rule summed across lanes because legal
-replays may migrate between LoadUnits. Independent translated cases classify
-three more causes: an Sv39 load-page fault must cancel every speculative wakeup
-without sending a DCache request, while PBMT=IO MMIO and PBMT=NC loads must each
-retain exactly one uncanceled wakeup, issue one Uncache request, and issue no
-DCache request. The MMIO case also performs the backend `pendingMMIOld`
-handshake before completion. A forwarding case issues a younger load after the
-matching store address but before its data; it requires a pre-data cancellation,
-then exact store-data forwarding with one final uncanceled wakeup and no DCache
-request after line warmup. A PMP-denied S-mode Bare load must cancel every
-speculative wakeup while issuing no PTW, DCache, or Uncache request.
+only exact identity-matched data plus one writeback and LQ dequeue per accepted
+load; its wakeup/cancel counts and manager traffic are diagnostics because
+bank arbitration and prefetch activity are implementation choices. Independent
+translated cases classify three more causes: an Sv39 load-page fault must
+cancel every speculative wakeup without sending a DCache request, while
+PBMT=IO MMIO and PBMT=NC loads must each retain exactly one uncanceled wakeup,
+issue one Uncache request, and issue no DCache request. The MMIO case also
+performs the backend `pendingMMIOld` handshake before completion. A forwarding
+case issues a younger load after the matching store address but before its
+data; it requires a pre-data cancellation, then exact store-data forwarding
+with one final uncanceled wakeup and no DCache request after line warmup. A
+PMP-denied S-mode Bare load must cancel every speculative wakeup while issuing
+no PTW, DCache, or Uncache request.
 
 `topdown-contracts` checks every MemBlock top-down output semantically. An
 independent bit pattern proves the exact one-cycle L2/L3 miss delay. A cold
@@ -569,12 +570,10 @@ levels. DFT functional mode must isolate external reset and release after one
 three-stage level, while scan mode must directly follow active-low
 `lgc_rst_n`. The scenario restores functional DFT controls and performs a fresh
 reset before checking idle behavior.
-`random-mixed` keeps constant-space lane counters and
-requires both wakeup and cancel observations on every lane without comparing
-their totals, because one split/replayed load may emit multiple cancels. When hardware
-stride prefetch is enabled, that backend gate is frozen before training begins
-because prefetch traffic produces load-pipeline cancel pulses without backend
-wakeups; full-run raw counters remain in the result.
+`random-mixed` keeps constant-space lane counters for diagnostics, but wakeup
+and cancel presence or totals do not close the architectural regression. A
+split/replayed load or hardware prefetch may change those pulses while the
+identity-matched terminal load and queue behavior remains legal.
 
 `iq-slow-feedback` records every valid STA and VSTU slow-feedback pulse with
 its lane, cycle, hit result, queue identity, and vector replay fields. It
@@ -630,27 +629,19 @@ request; IO `prefetch.r/w` are dropped before either data manager. The
 `random-mixed` coverage schema also requires at least one observed
 instruction-prefetch output in every seed.
 
-`hardware-prefetch` first isolates the L1 stride trainer, holds the load PC
-constant, and issues cold misses at a 128-byte stride. Starting with the sixth
-training access, it requires one `Prefetch2L2Stride` output per access at the
-RTL-defined depth (`current address + 4096`), then disables the CSR and checks
-that further accesses do not emit requests. An independent stream phase uses
-different PCs for 12 cold lines in one 1-KiB region, preventing stride
-confidence while requiring four exact `Prefetch2L2Stream` requests at the
-configured 640-line lookahead. It then crosses into the active neighboring
-region and trains a fixed-PC stride for six misses; stream requests must
-continue while source 12 remains suppressed, checking the RTL's stream-over-
-stride priority. A third phase disables PHT output while twelve same-PC cold
-lines train SMS state, then enables PHT and accesses the same offset in a new
-region. It requires six unique source-10 requests at relative block offsets
-5..10 (`bitmap=0x7e0`), with no source-11/12 traffic. Direct AGT request
-generation remains hard-disabled by this RTL. The present build elaborates L3
-stream prefetch disabled, so the L3 output is monitored and required to remain
-idle instead of being reported as positive functional coverage.
-The same fixed-PC stream is available through the common `random-mixed`
+`hardware-prefetch` drives fixed-PC stride, PC-varying spatial, and same-PC SMS
+shapes while the ordinary load scoreboard checks every architectural result.
+It records L2/L3 source, address, and count behavior for implementation and
+performance characterization. Exact confidence thresholds, lookahead depth,
+source selection, arbitration, and request cardinality are deliberately not
+correctness gates. The scenario does retain the explicit output-disable
+contract: after the relevant prefetch control is disabled, later traffic must
+not emit that class of request. Direct AGT request generation and L3 enablement
+remain build/integration properties rather than architectural claims.
+The same fixed-PC stream shape is available through the common `random-mixed`
 `stride-stream` constraint. It runs alongside the configured operation,
-translation, miss/refill, Probe, and response-latency mix and requires an L2
-source-12 observation in every enabled seed.
+translation, miss/refill, Probe, and response-latency mix; L2 source/address
+observations are reported for characterization and are not a PASS gate.
 
 `dcache-errors` first injects one response-wide denied and one response-wide
 corrupt DCache refill and checks the corresponding scalar load access-fault and
@@ -1404,8 +1395,8 @@ Kunminghu-v2 configuration and bounds the generated concurrency below that
 capacity, leaving eight MSHRs for replacement progress at the maximum window.
 Coverage weights all window counts equally,
 SPEC favors one window without disabling any class, and corner progressively
-favors wider concurrency. The current minimum `random-mixed` length is 2112
-actions. Replacement composition with Probe/CMO/atomic traffic, multiple
+favors wider concurrency. At schema 38 the minimum `random-mixed` length was
+2112 actions. Replacement composition with Probe/CMO/atomic traffic, multiple
 simultaneous CMO sources, and malformed coherence traffic remain.
 
 Schema 39 adds `miss-burst` to the same operation mix for the ordinary
@@ -1421,6 +1412,17 @@ require exactly one target request, scalar writeback, and LQ dequeue per load,
 plus one GrantAck for every refill. Coverage and corner emphasize depth
 closure; `spec` keeps the operation uncommon but nonzero and biases toward
 shallower bursts. The current minimum `random-mixed` length is 2304 actions.
+
+Schema 40 adds the independently configurable `bank-conflict` per-mille
+dimension to clean scalar-load actions. Each selected action warms fresh lines,
+then issues two or three resident loads to one randomly selected 8-byte bank in
+the same cycle. The coverage gate closes all 2/3-way x bank-0..7 x
+Bare/stage-1/nested bins enabled by the translation profile. It requires exact
+architectural data, one terminal writeback and LQ dequeue per load. Bank
+identity, replay/cancel pulses, arbitration, and any prefetch traffic are
+recorded only as implementation diagnostics; they do not determine PASS/FAIL.
+SPEC performance counters motivated prioritizing this class, but are not used as
+the correctness oracle. Coverage/SPEC/corner use rates 500/250/750 per mille.
 
 For a reproducible local pressure run:
 

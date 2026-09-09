@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Summarise the final performance-counter block of SPEC checkpoints.
+"""Summarise the latest complete PERF block of SPEC checkpoints.
 
 The simulator emits cumulative ``[PERF]`` blocks more than once per run.  The
-last block is the only one used here, so a checkpoint is counted once even
-when it contains periodic dumps.  The report deliberately contains only
-MemBlock/LSU and directly related producer counters; it is a workload
-calibration aid, not an RTL correctness oracle.
+latest block reaching the generated block's stable terminal counter is used
+here, so a checkpoint is counted once even when it contains periodic dumps and
+a truncated final dump.  The report deliberately contains only MemBlock/LSU
+and directly related producer counters; it is a workload calibration aid, not
+an RTL correctness oracle.
 """
 
 from __future__ import annotations
@@ -22,10 +23,19 @@ PERF_RE = re.compile(
     r"^\[PERF \]\[time=(?P<time>\d+)\] (?P<component>[^:]+): "
     r"(?P<metric>[^,]+), (?P<value>-?\d+)\s*$"
 )
+PERF_TERMINAL_COMPONENT_SUFFIX = ".ctrlBlock.rob.rab"
+PERF_TERMINAL_METRIC = "util_218_219"
 
 
 def final_perf_block(path: Path) -> tuple[int, dict[tuple[str, str], int]]:
-    """Return ``(timestamp, counters)`` for the last complete PERF block."""
+    """Return ``(timestamp, counters)`` for the last complete PERF block.
+
+    A generated binary emits the same static counter sequence at every dump,
+    ending at the ROB allocation-buffer ``util_218_219`` counter. A log can be
+    copied or terminated in the middle of its newest dump, so neither the
+    numerically greatest timestamp nor the largest in-file key set proves
+    completeness. Select the latest timestamp that reached this terminator.
+    """
 
     blocks: dict[int, dict[tuple[str, str], int]] = {}
     with path.open("r", encoding="utf-8", errors="replace") as stream:
@@ -38,7 +48,18 @@ def final_perf_block(path: Path) -> tuple[int, dict[tuple[str, str], int]]:
             blocks.setdefault(timestamp, {})[key] = int(match.group("value"))
     if not blocks:
         raise ValueError(f"no PERF counters found in {path}")
-    timestamp = max(blocks)
+    complete_timestamps = [
+        timestamp
+        for timestamp, counters in blocks.items()
+        if any(
+            component.endswith(PERF_TERMINAL_COMPONENT_SUFFIX)
+            and metric == PERF_TERMINAL_METRIC
+            for component, metric in counters
+        )
+    ]
+    if not complete_timestamps:
+        raise ValueError(f"no complete PERF counter block found in {path}")
+    timestamp = max(complete_timestamps)
     return timestamp, blocks[timestamp]
 
 

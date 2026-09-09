@@ -208,6 +208,10 @@ struct RandomConstraints {
     unsigned uncache_error_per_mille = 0;
     unsigned uncache_load_error_denied_per_mille = 0;
     unsigned stride_stream_per_mille = 0;
+    // Probability of using an explicit same-bank scalar-load wave. Bank and
+    // replay behavior are stimulus/coverage classifications only; correctness
+    // is decided by the ordinary architectural load/queue scoreboards.
+    unsigned bank_conflict_per_mille = 0;
     memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
@@ -297,6 +301,7 @@ struct RandomConstraints {
                 .uncache_error_per_mille = 100,
                 .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 500,
+                .bank_conflict_per_mille = 500,
                 .response_latency = {},
             };
         }
@@ -390,6 +395,7 @@ struct RandomConstraints {
                 .uncache_error_per_mille = 0,
                 .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 100,
+                .bank_conflict_per_mille = 250,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -481,6 +487,7 @@ struct RandomConstraints {
                 .uncache_error_per_mille = 500,
                 .uncache_load_error_denied_per_mille = 500,
                 .stride_stream_per_mille = 750,
+                .bank_conflict_per_mille = 750,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -977,6 +984,8 @@ struct RandomConstraints {
             uncache_load_error_denied_per_mille = parsed;
         } else if (key == "stride-stream") {
             stride_stream_per_mille = parsed;
+        } else if (key == "bank-conflict") {
+            bank_conflict_per_mille = parsed;
         } else {
             throw std::invalid_argument(
                 "unknown random constraint key: " + std::string(key));
@@ -1475,7 +1484,8 @@ struct RandomConstraints {
             mmio_stores_per_mille > 1000 ||
             uncache_error_per_mille > 1000 ||
             uncache_load_error_denied_per_mille > 1000 ||
-            stride_stream_per_mille > 1000) {
+            stride_stream_per_mille > 1000 ||
+            bank_conflict_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
         }
@@ -1555,6 +1565,16 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "dcache-load-error=1000 requires concurrent=0 because "
                 "faulting scalar loads redirect the mixed issue window");
+        }
+        if (bank_conflict_per_mille != 0 &&
+            operation_weights[scalar_load] == 0) {
+            throw std::invalid_argument(
+                "bank-conflict requires a nonzero scalar-load weight");
+        }
+        if (bank_conflict_per_mille != 0 &&
+            dcache_load_error_per_mille == 1000) {
+            throw std::invalid_argument(
+                "bank-conflict requires at least one clean scalar-load class");
         }
         if (uncache_error_per_mille != 0 && !uses_uncache()) {
             throw std::invalid_argument(
@@ -1979,6 +1999,14 @@ struct RandomConstraints {
                      dcache_load_error_denied_per_mille == 1000 ? 1U : 2U);
                 actions += error_kinds +
                     (dcache_load_error_per_mille == 1000 ? 0U : 1U);
+                if (bank_conflict_per_mille != 0) {
+                    const unsigned regimes = static_cast<unsigned>(
+                        std::count_if(
+                            translation_weights.begin(),
+                            translation_weights.end(),
+                            [](unsigned weight) { return weight != 0; }));
+                    actions += 2U * 8U * regimes;
+                }
             } else if (operation == hypervisor) {
                 const unsigned families = static_cast<unsigned>(std::count_if(
                     hypervisor_family_weights.begin(),
@@ -2241,7 +2269,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=39 constraints=" << name
+        stream << "constraint_schema=40 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2402,6 +2430,7 @@ struct RandomConstraints {
                << " target_uncache_load_error_denied="
                << uncache_load_error_denied_per_mille
                << " target_stride_stream=" << stride_stream_per_mille
+               << " target_bank_conflict=" << bank_conflict_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
                << latency_name(response_latency.uncache);

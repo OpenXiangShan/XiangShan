@@ -19,13 +19,42 @@ class AnalyzeSpecCountersTest(unittest.TestCase):
             path.write_text(
                 "[PERF ][time=10] SimTop.cpu.l_soc.core.memBlock.inner.LoadUnit_0: "
                 "s1_tlb_miss_first_issue, 3\n"
+                "[PERF ][time=10] SimTop.cpu.l_soc.core.ctrlBlock.rob.rab: "
+                "util_218_219, 0\n"
                 "[PERF ][time=20] SimTop.cpu.l_soc.core.memBlock.inner.LoadUnit_0: "
-                "s1_tlb_miss_first_issue, 7\n",
+                "s1_tlb_miss_first_issue, 7\n"
+                "[PERF ][time=20] SimTop.cpu.l_soc.core.ctrlBlock.rob.rab: "
+                "util_218_219, 0\n",
                 encoding="utf-8",
             )
             timestamp, counters = analyzer.final_perf_block(path)
             self.assertEqual(timestamp, 20)
             self.assertEqual(counters[next(iter(counters))], 7)
+
+    def test_final_block_ignores_truncated_latest_dump(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "simulator_err.txt"
+            path.write_text(
+                "[PERF ][time=10] core.rob: load_instr_cnt, 3\n"
+                "[PERF ][time=10] core.rob: store_instr_cnt, 2\n"
+                "[PERF ][time=10] core.ctrlBlock.rob.rab: util_218_219, 0\n"
+                "[PERF ][time=20] core.rob: load_instr_cnt, 7\n",
+                encoding="utf-8",
+            )
+            timestamp, counters = analyzer.final_perf_block(path)
+            self.assertEqual(timestamp, 10)
+            self.assertEqual(counters[("core.rob", "load_instr_cnt")], 3)
+            self.assertEqual(counters[("core.rob", "store_instr_cnt")], 2)
+
+    def test_final_block_rejects_lone_truncated_dump(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "simulator_err.txt"
+            path.write_text(
+                "[PERF ][time=20] core.rob: load_instr_cnt, 7\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "no complete PERF"):
+                analyzer.final_perf_block(path)
 
     def test_classifies_memblock_and_vector_events(self) -> None:
         counters = {
@@ -83,7 +112,9 @@ class AnalyzeSpecCountersTest(unittest.TestCase):
             root = Path(directory)
             (root / "good").mkdir()
             (root / "good" / "simulator_err.txt").write_text(
-                "[PERF ][time=4] SimTop.cpu.l_soc.core.ctrlBlock.rob: load_instr_cnt, 1\n",
+                "[PERF ][time=4] SimTop.cpu.l_soc.core.ctrlBlock.rob: load_instr_cnt, 1\n"
+                "[PERF ][time=4] SimTop.cpu.l_soc.core.ctrlBlock.rob.rab: "
+                "util_218_219, 0\n",
                 encoding="utf-8",
             )
             (root / "bad").mkdir()

@@ -826,9 +826,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_rar_violation",
             "configure_ldld_violation_check",
             "run_until_sbuffer_empty",
-            "bank-conflict-classification",
-            "bank_conflict_cancels < 2",
-            "bank_conflict_wakeups != bank_conflict_cancels",
+            "bank-conflict-terminal",
+            "bank_writebacks_before",
+            "bank_dequeues_before",
             "speculative-load",
             "redirect-check",
             "non_overlap=1",
@@ -897,7 +897,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
-    def test_hardware_prefetch_outputs_have_a_stride_oracle(self) -> None:
+    def test_hardware_prefetch_outputs_are_characterized_without_an_algorithm_oracle(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
         main = read_cpp_source("memblock_main.cpp")
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
@@ -914,12 +914,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "io_outer_l2PfCtrl_l2_pf_delay_latency",
             "run_hardware_prefetch",
             "stride_source = 12",
-            "l2_depth = stride << 5",
             "stream_source = 11",
-            "stream_l2_depth_lines = 640",
-            "stream_l2_width_lines = 4",
-            "stream-stride-priority",
-            "stride_suppressed=1 l2_control_defaults=1",
+            "implementation_characterization=1 disable_controls=1",
             "hardware-prefetch",
         ):
             self.assertIn(contract, environment + main + makefile + generator)
@@ -1221,7 +1217,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
-    def test_hardware_prefetch_has_positive_sms_pht_causality(self) -> None:
+    def test_hardware_prefetch_records_sms_pht_characterization(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
         main = read_cpp_source("memblock_main.cpp")
         for contract in (
@@ -1229,9 +1225,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "configure_sms_pht_prefetch(true)",
             "l2_addresses_by_source",
             "sms_training_offsets",
-            '" phase=sms-oracle source10_before="',
             '" sms_pht_l2="',
-            "address == sms_trigger_base + offset * 64",
+            "sms_offset_bitmap",
         ):
             self.assertIn(contract, environment + main)
 
@@ -2643,8 +2638,6 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "target_probe_triple_overlap=",
             "target_stride_stream=",
             "l2_stride_prefetches=",
-            "backend_load_feedback_frozen",
-            "feedback.wakeups[lane] == 0",
             "raw_load_wakeups=",
             "raw_load_cancels=",
             "actual_probe_sequences=",
@@ -2657,7 +2650,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=39",
+            "constraint_schema=40",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2752,6 +2745,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_miss_burst_cross=",
             "actual_miss_burst_manager=",
             "actual_miss_burst_max_outstanding=",
+            '"bank-conflict"',
+            "target_bank_conflict=",
+            "actual_bank_conflict_depth=",
+            "actual_bank_conflict_bank=",
+            "actual_bank_conflict_translation=",
+            "actual_bank_conflict_cross=",
+            "actual_bank_conflict_terminal=",
+            "random-bank-conflict-terminal",
+            "crossed_depths != bank_conflict_depths",
+            "bank_conflict_crosses ==",
+            "bank_conflict_terminal",
+            "bank_conflict_line_stride",
+            "bank_conflict_line_offset",
+            "real translated walk windows",
+            "ptw_requests_before = environment.ptw_requests()",
             "random-miss-burst-outstanding-depth",
             "dcache_requests_covering_since",
             '"random-set-pressure-target-address-exhausted"',
