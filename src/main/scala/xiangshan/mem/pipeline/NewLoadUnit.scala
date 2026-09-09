@@ -1213,7 +1213,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   // TODO: Currently, we don't train prefetcher on vector request, because vector instruction PC is incorrect.
   // TODO: `isFirstIssue` is Fake First Issue according to prefetcher !!!
-  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay &&
+  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !kill && !exception && !isUncache && !isUncacheReplay &&
     in.isFirstIssue() && !isVector
   io.prefetchTrain.bits.robIdx := uop.robIdx
   io.prefetchTrain.bits.pc := uop.pc
