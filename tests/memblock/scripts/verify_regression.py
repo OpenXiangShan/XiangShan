@@ -157,6 +157,87 @@ def _expected_probe_source_lifecycle(
     ]
 
 
+def _check_vector_shape_cross(
+    result: dict[str, Any],
+    target_operations: list[int],
+    vector_targets: dict[str, list[int]],
+    vector_actuals: dict[str, list[int]],
+    policy_targets: dict[str, int],
+    vector_directions: list[int],
+    vector_shape_operations: int,
+) -> None:
+    """Check direction x addressing x legal RVV shape and its marginals."""
+
+    vector_cross = _csv_counts(
+        result, "actual_vector_cross", 2 * 4 * 4 * 4 * 7
+    )
+    fixed_policies = sum(
+        policy_targets[name] == 1000
+        for name in ("masked", "partial_vl", "nonzero_vstart")
+    )
+    minimum_vlmax = 3 if fixed_policies == 3 else 2 if fixed_policies == 2 else 1
+    crossed_direction = [0, 0]
+    crossed = {
+        "addressing": [0] * 4,
+        "eew": [0] * 4,
+        "sew": [0] * 4,
+        "lmul": [0] * 7,
+        "emul": [0] * 7,
+    }
+    index = 0
+    for direction in range(2):
+        for addressing in range(4):
+            for eew in range(4):
+                for sew in range(4):
+                    for lmul in range(7):
+                        count = vector_cross[index]
+                        index += 1
+                        lmul_log2 = lmul - 3
+                        emul_log2 = eew - sew + lmul_log2
+                        vector_bytes = (
+                            16 >> -lmul_log2
+                            if lmul_log2 < 0
+                            else 16 << lmul_log2
+                        )
+                        legal = (
+                            lmul_log2 >= sew - 3
+                            and -3 <= emul_log2 <= 3
+                            and vector_bytes >> sew >= minimum_vlmax
+                        )
+                        enabled = (
+                            target_operations[2 + direction] != 0
+                            and vector_targets["addressing"][addressing] != 0
+                            and vector_targets["eew"][eew] != 0
+                            and vector_targets["sew"][sew] != 0
+                            and vector_targets["lmul"][lmul] != 0
+                            and legal
+                            and vector_targets["emul"][emul_log2 + 3] != 0
+                        )
+                        _require(
+                            (count > 0) == enabled,
+                            "actual_vector_cross does not match enabled legal "
+                            "shapes: "
+                            f"direction={direction} addressing={addressing} "
+                            f"eew={eew} sew={sew} lmul_log2={lmul_log2}",
+                        )
+                        crossed_direction[direction] += count
+                        crossed["addressing"][addressing] += count
+                        crossed["eew"][eew] += count
+                        crossed["sew"][sew] += count
+                        crossed["lmul"][lmul] += count
+                        if legal:
+                            crossed["emul"][emul_log2 + 3] += count
+    _require(
+        crossed_direction == vector_directions
+        and all(
+            crossed[dimension] == vector_actuals[dimension]
+            for dimension in crossed
+        )
+        and sum(vector_cross) == vector_shape_operations,
+        "ordinary vector cross/marginal coverage is not conserved",
+    )
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -165,7 +246,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40,
+            33, 34, 35, 36, 37, 38, 39, 40, 41,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -2873,6 +2954,29 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         _require(
             all(count <= vector_directions[0] for count in agnostic),
             "vector agnostic semantic counts exceed constrained vector loads",
+        )
+
+    if schema >= 41:
+        vector_actuals = {
+            dimension: _csv_counts(
+                result, f"actual_vector_{dimension}", fields
+            )
+            for dimension, fields in (
+                ("addressing", 4),
+                ("eew", 4),
+                ("sew", 4),
+                ("lmul", 7),
+                ("emul", 7),
+            )
+        }
+        _check_vector_shape_cross(
+            result,
+            target_operations,
+            vector_targets,
+            vector_actuals,
+            policy_targets,
+            vector_directions,
+            vector_shape_operations,
         )
 
 

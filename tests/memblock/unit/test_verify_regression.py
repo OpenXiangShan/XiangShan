@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 41
+        result["constraint_schema"] = 42
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1799,6 +1799,81 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError, "operations are disabled"
         ):
             verify_regression._check_mixed_coverage(result)
+
+    def test_schema_41_checks_every_legal_ordinary_vector_shape(self) -> None:
+        target_operations = [0, 0, 1, 1]
+        vector_targets = {
+            "addressing": [1] * 4,
+            "eew": [1] * 4,
+            "sew": [1] * 4,
+            "lmul": [1] * 7,
+            "emul": [1] * 7,
+        }
+        policy_targets = {
+            "masked": 500,
+            "partial_vl": 500,
+            "nonzero_vstart": 500,
+        }
+        vector_cross: list[int] = []
+        directions = [0, 0]
+        actuals = {
+            name: [0] * size
+            for name, size in (
+                ("addressing", 4),
+                ("eew", 4),
+                ("sew", 4),
+                ("lmul", 7),
+                ("emul", 7),
+            )
+        }
+        for direction in range(2):
+            for addressing in range(4):
+                for eew in range(4):
+                    for sew in range(4):
+                        for lmul in range(7):
+                            lmul_log2 = lmul - 3
+                            emul_log2 = eew - sew + lmul_log2
+                            legal = (
+                                lmul_log2 >= sew - 3
+                                and -3 <= emul_log2 <= 3
+                            )
+                            vector_cross.append(int(legal))
+                            if legal:
+                                directions[direction] += 1
+                                for name, field in (
+                                    ("addressing", addressing),
+                                    ("eew", eew),
+                                    ("sew", sew),
+                                    ("lmul", lmul),
+                                    ("emul", emul_log2 + 3),
+                                ):
+                                    actuals[name][field] += 1
+        result = {"actual_vector_cross": ",".join(map(str, vector_cross))}
+        verify_regression._check_vector_shape_cross(
+            result,
+            target_operations,
+            vector_targets,
+            actuals,
+            policy_targets,
+            directions,
+            sum(vector_cross),
+        )
+
+        broken = vector_cross.copy()
+        broken[broken.index(1)] = 0
+        result["actual_vector_cross"] = ",".join(map(str, broken))
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_vector_cross"
+        ):
+            verify_regression._check_vector_shape_cross(
+                result,
+                target_operations,
+                vector_targets,
+                actuals,
+                policy_targets,
+                directions,
+                sum(vector_cross),
+            )
 
     def test_constraint_schema_nine_checks_weighted_vector_segment_shapes(
         self,

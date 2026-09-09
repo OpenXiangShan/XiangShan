@@ -1411,7 +1411,8 @@ close every enabled depth x legal issue-width x Bare/stage-1/nested bin, then
 require exactly one target request, scalar writeback, and LQ dequeue per load,
 plus one GrantAck for every refill. Coverage and corner emphasize depth
 closure; `spec` keeps the operation uncommon but nonzero and biases toward
-shallower bursts. The current minimum `random-mixed` length is 2304 actions.
+shallower bursts. At schema 39 the minimum `random-mixed` length was 2304
+actions.
 
 Schema 40 adds the independently configurable `bank-conflict` per-mille
 dimension to clean scalar-load actions. Each selected action warms fresh lines,
@@ -1423,6 +1424,16 @@ identity, replay/cancel pulses, arbitration, and any prefetch traffic are
 recorded only as implementation diagnostics; they do not determine PASS/FAIL.
 SPEC performance counters motivated prioritizing this class, but are not used as
 the correctness oracle. Coverage/SPEC/corner use rates 500/250/750 per mille.
+
+Schema 41 adds a direction-specific ordinary-vector shape cross. For each
+enabled load/store direction it closes all four addressing modes against every
+legal EEW/SEW/LMUL combination, deriving EMUL from the RVV relation and
+rejecting illegal combinations. The existing independent per-element data and
+readback oracle remains the functional check; the cross only guarantees that
+the legal stimulus space is reached. The SPEC preset now uses ordinary-vector
+load/store weights `90/45` and vector-segment weight `20`, making the measured
+SPEC vector event classes materially present while keeping scalar memory
+traffic dominant. The minimum run is 3072 actions.
 
 For a reproducible local pressure run:
 
@@ -1592,7 +1603,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 2304
+  --test random-mixed --seed 17 --transactions 3072
 ```
 
 ## Complete Pin Audit

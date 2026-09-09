@@ -305,6 +305,13 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 4> vector_sews{};
     std::array<std::uint64_t, 7> vector_lmuls{};
     std::array<std::uint64_t, 7> vector_emuls{};
+    // [load/store][unit/strided/indexed-unordered/indexed-ordered]
+    // [EEW][SEW][LMUL]. EMUL is uniquely derived by the RVV relation;
+    // only legal relations are populated;
+    // this is a stimulus-coverage cross, while data/exception correctness is
+    // checked by the independent vector oracle.
+    static constexpr unsigned vector_shape_cross_count = 2U * 4U * 4U * 4U * 7U;
+    std::array<std::uint64_t, vector_shape_cross_count> vector_shape_crosses{};
     std::array<std::uint64_t, 2> vector_masked{};
     std::array<std::uint64_t, 2> vector_vma{};
     std::array<std::uint64_t, 2> vector_vta{};
@@ -473,6 +480,22 @@ struct ConstraintCoverage {
     {
         ++operations.at(operation);
         ++actions;
+    }
+
+    static constexpr unsigned vector_shape_cross_index(
+        unsigned direction, unsigned addressing, unsigned eew,
+        unsigned sew, int lmul_log2)
+    {
+        return ((((direction * 4U + addressing) * 4U + eew) * 4U + sew) *
+                    7U) + static_cast<unsigned>(lmul_log2 + 3);
+    }
+
+    void sample_vector_shape(
+        unsigned direction, unsigned addressing, unsigned eew,
+        unsigned sew, int lmul_log2)
+    {
+        ++vector_shape_crosses.at(vector_shape_cross_index(
+            direction, addressing, eew, sew, lmul_log2));
     }
 
     void sample_uncache(
@@ -757,6 +780,19 @@ struct ConstraintCoverage {
                             RandomConstraints::translation_regime_count>{} &&
                     bank_conflict_terminal ==
                         std::array<std::uint64_t, 4>{};
+            }
+            if (operation == RandomConstraints::vector_load ||
+                operation == RandomConstraints::vector_store) {
+                const unsigned direction =
+                    operation == RandomConstraints::vector_store ? 1U : 0U;
+                constexpr unsigned direction_stride =
+                    vector_shape_cross_count / 2U;
+                const auto begin = vector_shape_crosses.begin() +
+                    direction * direction_stride;
+                return vector_directions[direction] == 0 &&
+                    std::all_of(
+                        begin, begin + direction_stride,
+                        [](std::uint64_t count) { return count == 0; });
             }
             return true;
         }
@@ -1343,7 +1379,48 @@ struct ConstraintCoverage {
             };
             const unsigned direction =
                 operation == RandomConstraints::vector_store ? 1U : 0U;
-            return vector_directions[direction] != 0 &&
+            const auto shape_enabled = [&](unsigned addressing, unsigned eew,
+                                            unsigned sew, unsigned lmul) {
+                const int lmul_log2 = static_cast<int>(lmul) - 3;
+                const int emul_log2 = static_cast<int>(eew) -
+                    static_cast<int>(sew) + lmul_log2;
+                if (lmul_log2 < static_cast<int>(sew) - 3 ||
+                    emul_log2 < -3 || emul_log2 > 3) {
+                    return false;
+                }
+                const unsigned vector_bytes = lmul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-lmul_log2)
+                    : 16U << static_cast<unsigned>(lmul_log2);
+                return constraints.vector_addressing_weights[addressing] != 0 &&
+                    constraints.vector_eew_weights[eew] != 0 &&
+                    constraints.vector_sew_weights[sew] != 0 &&
+                    constraints.vector_lmul_weights[lmul] != 0 &&
+                    constraints.vector_emul_weights[emul_log2 + 3] != 0 &&
+                    (vector_bytes >> sew) >=
+                        constraints.vector_policy_minimum_vlmax();
+            };
+            bool cross_complete = true;
+            std::uint64_t cross_total = 0;
+            for (unsigned addressing = 0; addressing < 4; ++addressing) {
+                for (unsigned eew = 0; eew < 4; ++eew) {
+                    for (unsigned sew = 0; sew < 4; ++sew) {
+                        for (unsigned lmul = 0; lmul < 7; ++lmul) {
+                            const bool enabled = shape_enabled(
+                                addressing, eew, sew, lmul);
+                            const auto count = vector_shape_crosses.at(
+                                vector_shape_cross_index(
+                                    direction, addressing, eew, sew,
+                                    static_cast<int>(lmul) - 3));
+                            if ((count != 0) != enabled) {
+                                cross_complete = false;
+                            }
+                            cross_total += count;
+                        }
+                    }
+                }
+            }
+            return vector_directions[direction] != 0 && cross_complete &&
+                cross_total == vector_directions[direction] &&
                 target_complete(
                     constraints.vector_addressing_weights, vector_addressing) &&
                 target_complete(constraints.vector_eew_weights, vector_eews) &&
@@ -2190,6 +2267,11 @@ public:
                << vector_emuls[1] << ',' << vector_emuls[2] << ','
                << vector_emuls[3] << ',' << vector_emuls[4] << ','
                << vector_emuls[5] << ',' << vector_emuls[6]
+               << " actual_vector_cross=";
+        for (unsigned index = 0; index < vector_shape_crosses.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << vector_shape_crosses[index];
+        }
+        stream
                << " actual_vector_masked=" << vector_masked[0] << ','
                << vector_masked[1]
                << " actual_vector_vma=" << vector_vma[0] << ','

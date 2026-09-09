@@ -312,7 +312,7 @@ struct RandomConstraints {
             return RandomConstraints{
                 .name = "spec",
                 .operation_weights = {
-                    648, 270, 20, 10, 1, 35, 5, 5, 5, 1, 1, 0, 10, 2,
+                    648, 270, 90, 45, 20, 35, 5, 5, 5, 1, 1, 0, 10, 2,
                     15},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
@@ -1945,6 +1945,45 @@ struct RandomConstraints {
 
     unsigned minimum_serial_actions() const
     {
+        const auto enabled_vector_shape_classes = [&]() {
+            unsigned count = 0;
+            for (unsigned eew = 0; eew < vector_eew_weights.size(); ++eew) {
+                if (vector_eew_weights[eew] == 0) {
+                    continue;
+                }
+                for (unsigned sew = 0; sew < vector_sew_weights.size(); ++sew) {
+                    if (vector_sew_weights[sew] == 0) {
+                        continue;
+                    }
+                    for (unsigned lmul = 0; lmul < vector_lmul_weights.size();
+                         ++lmul) {
+                        if (vector_lmul_weights[lmul] == 0) {
+                            continue;
+                        }
+                        const int lmul_log2 = static_cast<int>(lmul) - 3;
+                        const int emul_log2 = static_cast<int>(eew) -
+                            static_cast<int>(sew) + lmul_log2;
+                        if (lmul_log2 < static_cast<int>(sew) - 3 ||
+                            emul_log2 < -3 || emul_log2 > 3 ||
+                            vector_emul_weights[emul_log2 + 3] == 0) {
+                            continue;
+                        }
+                        const unsigned vector_bytes = lmul_log2 < 0
+                            ? 16U >> static_cast<unsigned>(-lmul_log2)
+                            : 16U << static_cast<unsigned>(lmul_log2);
+                        if ((vector_bytes >> sew) < vector_policy_minimum_vlmax()) {
+                            continue;
+                        }
+                        ++count;
+                    }
+                }
+            }
+            return count * static_cast<unsigned>(
+                std::count_if(
+                    vector_addressing_weights.begin(),
+                    vector_addressing_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+        };
         const auto uncache_outcome_actions = [&](unsigned store_per_mille) {
             const bool loads_enabled = store_per_mille != 1000;
             const bool stores_enabled = store_per_mille != 0;
@@ -2123,7 +2162,7 @@ struct RandomConstraints {
                     }
                 }
             } else if (operation == vector_load || operation == vector_store) {
-                ++actions;
+                actions += enabled_vector_shape_classes();
                 if (operation == vector_load ||
                     operation_weights[vector_load] == 0) {
                     const auto enabled = [](const auto &weights) {
@@ -2269,7 +2308,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=40 constraints=" << name
+        stream << "constraint_schema=41 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];

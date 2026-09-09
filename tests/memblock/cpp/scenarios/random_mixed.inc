@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 2304;
+    constexpr unsigned minimum_actions = 3072;
     if (options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -3018,23 +3018,28 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
         }
-        const auto vector_shape_deficit = [&](const RandomVectorShape &shape) {
+        const auto vector_shape_deficit = [&](const RandomVectorShape &shape,
+                                              unsigned direction) {
             return static_cast<unsigned>(
+                (constraint_coverage.vector_shape_crosses.at(
+                     ConstraintCoverage::vector_shape_cross_index(
+                         direction, shape.addressing, shape.eew, shape.vsew,
+                         shape.lmul_log2)) == 0) +
                 (constraint_coverage.vector_addressing[shape.addressing] == 0) +
                 (constraint_coverage.vector_eews[shape.eew] == 0) +
                 (constraint_coverage.vector_sews[shape.vsew] == 0) +
                 (constraint_coverage.vector_lmuls[shape.lmul_log2 + 3] == 0) +
                 (constraint_coverage.vector_emuls[shape.emul_log2 + 3] == 0));
         };
-        auto choose_vector_shape = [&]() -> const RandomVectorShape & {
+        auto choose_vector_shape = [&](unsigned direction) -> const RandomVectorShape & {
             unsigned maximum_deficit = 0;
             for (const auto &shape : vector_shapes) {
                 maximum_deficit = std::max(
-                    maximum_deficit, vector_shape_deficit(shape));
+                    maximum_deficit, vector_shape_deficit(shape, direction));
             }
             long double total_weight = 0;
             for (const auto &shape : vector_shapes) {
-                if (vector_shape_deficit(shape) == maximum_deficit) {
+                if (vector_shape_deficit(shape, direction) == maximum_deficit) {
                     total_weight += shape.weight;
                 }
             }
@@ -3043,7 +3048,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             long double selection = unit * total_weight;
             const RandomVectorShape *fallback = nullptr;
             for (const auto &shape : vector_shapes) {
-                if (vector_shape_deficit(shape) != maximum_deficit) {
+                if (vector_shape_deficit(shape, direction) != maximum_deficit) {
                     continue;
                 }
                 fallback = &shape;
@@ -7060,7 +7065,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::vector_load ||
                        kind == RandomConstraints::vector_store) {
                 const bool store = kind == RandomConstraints::vector_store;
-                const auto &shape = choose_vector_shape();
+                const auto &shape = choose_vector_shape(store ? 1U : 0U);
                 const unsigned data_eew = shape.addressing >= 2
                     ? shape.vsew : shape.eew;
                 const bool vector_corner =
@@ -7077,6 +7082,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.vector_sews[shape.vsew];
                 ++constraint_coverage.vector_lmuls[shape.lmul_log2 + 3];
                 ++constraint_coverage.vector_emuls[shape.emul_log2 + 3];
+                constraint_coverage.sample_vector_shape(
+                    store ? 1U : 0U, shape.addressing, shape.eew, shape.vsew,
+                    shape.lmul_log2);
                 const auto &policy = uops.front();
                 const unsigned vector_bytes = shape.lmul_log2 < 0
                     ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
