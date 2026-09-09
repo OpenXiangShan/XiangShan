@@ -3443,3 +3443,20 @@ classified as a CPU RTL bug yet, and no `CPU_BUG_*` report is created. A
 no-backpressure replay was started to separate response scheduling from data
 or address attribution, then stopped before completion to avoid spending a
 long regression budget without additional evidence.
+
+A focused 8,192-action replay then enabled only ordinary `miss-burst` traffic
+while retaining every depth 2..16, legal issue width 1..3, and Bare/stage-1/
+nested translation choice. It passed at cycle 1,402,528 after 8,091
+`miss-burst` actions, 73,468 scalar writebacks, and a maximum externally
+observed outstanding depth of 16. DCache A requests, complete refills, and
+GrantAcks were each 73,492; LQ accounting was 73,528 completed plus one legal
+cancellation out of 73,529 allocations. Two shorter reductions also passed:
+256 actions with only Bare/depth-2/width-1, and 256 actions with all three
+translation choices and depths 2..5.
+
+These passing reductions rule out an isolated ordinary miss-burst path and
+simple repeated LQ/ROB wraparound as sufficient causes. The candidate now
+requires reduction across interactions with other `random-mixed` operation
+classes. Correctness remains decided by the external request/completion
+identity and independent sparse-memory model; bank conflict, prefetch, replay,
+and cache residency remain diagnostic observations only.
