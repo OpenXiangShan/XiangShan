@@ -1048,9 +1048,17 @@ def test_backend_redirect_blocks_held_icache_response(env):
         "witness": witness,
         "redirect_target": redirect_target,
     }
-    assert int(first_fire["entries"][0]["pc"]) == redirect_target, {
+    first_entry = first_fire["entries"][0]
+    first_s2_pc = 2 * _read_required(
+        recorder,
+        (f"{_IFU_PREFIX}s2_alignedInstrPcVec_{first_entry['slot']}_addr",),
+        label="first post-redirect s2 instruction PC",
+    )
+    assert first_s2_pc == redirect_target, {
         "reason": "first post-redirect IBuffer transfer did not start at target",
         "redirect_target": redirect_target,
+        "s2_pc": first_s2_pc,
         "first_fire": first_fire,
     }
+    assert int(first_entry["foldpc"]) == fold_pc(first_s2_pc)
     assert not env.monitor.get_errors()

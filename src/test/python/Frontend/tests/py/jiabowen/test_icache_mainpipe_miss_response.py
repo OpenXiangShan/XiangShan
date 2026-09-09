@@ -9,6 +9,7 @@ import pytest
 from env.agents.icache_agent import ICacheAgent
 from env.model import MemoryModel
 from env.runtime.pylib import frontend_offset_path
+from env.support.pc_utils import fold_pc
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -109,8 +110,8 @@ _BIN906_SIGNALS = {
     ),
     "s2_instr_count": _aliases("Frontend_top.Frontend.inner_ifu.s2_instrCount"),
     "to_ibuffer_valid": _aliases(
-        "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid"
-    ),
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid"
+    ) + _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid"),
     "to_ibuffer_ready": _aliases(
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_ready"
     ),
@@ -210,49 +211,31 @@ def _sample_bin906_pipeline(env) -> dict:
     return sample
 
 
-def _sample_bin906_slot(env, slot: int) -> dict:
+def _bin906_slot_signals(slot: int) -> dict[str, tuple[str, ...]]:
     prefix = "Frontend_top.Frontend"
     return {
-        "instr": _require_read(
-            env,
-            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_instrs_{slot}"),
+        "instr": _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_instrs_{slot}")
+        + _aliases(f"{prefix}.inner_ifu.__Vtogcov__io_toIBuffer_bits_instrs_{slot}"),
+        "foldpc": _aliases(
+            f"{prefix}.inner_ifu.__Vtogcov__io_toIBuffer_bits_foldpc_{slot}"
         ),
-        "pc": _require_read(
-            env,
-            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_pc_{slot}_addr"),
+        "ftq_flag": _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_flag"),
+        "ftq_value": _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_value"),
+        "end_offset": _aliases(
+            f"{prefix}._inner_ifu_io_toIBuffer_bits_instrEndOffset_{slot}_offset"
+        ) + _aliases(
+            f"{prefix}.inner_ifu.__Vtogcov__io_toIBuffer_bits_instrEndOffset_{slot}_offset"
         ),
-        "ftq_flag": _require_read(
-            env,
-            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_flag"),
-        ),
-        "ftq_value": _require_read(
-            env,
-            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_value"),
-        ),
-        "end_offset": _require_read(
-            env,
-            _aliases(
-                f"{prefix}._inner_ifu_io_toIBuffer_bits_instrEndOffset_{slot}_offset"
-            ),
-        ),
-        "s2_instr": _require_read(
-            env,
-            _aliases(
-                f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_data"
-            ),
-        ),
-        "s2_pc": _require_read(
-            env,
-            _aliases(
-                f"{prefix}.inner_ifu.s2_alignedInstrPcVec_{slot}_addr"
-            ),
-        ),
-        "s2_end_offset": _require_read(
-            env,
-            _aliases(
-                f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_endOffset"
-            ),
-        ),
+        "s2_instr": _aliases(f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_data"),
+        "s2_pc": _aliases(f"{prefix}.inner_ifu.s2_alignedInstrPcVec_{slot}_addr"),
+        "s2_end_offset": _aliases(f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_endOffset"),
+    }
+
+
+def _sample_bin906_slot(env, slot: int) -> dict:
+    return {
+        key: _require_read(env, aliases)
+        for key, aliases in _bin906_slot_signals(slot).items()
     }
 
 
@@ -417,7 +400,11 @@ def test_icache_miss_response_signal_contract_matches_dut_inventory() -> None:
     }
     missing = [
         list(aliases)
-        for aliases in _SIGNALS.values()
+        for aliases in (
+            *_SIGNALS.values(),
+            *_BIN906_SIGNALS.values(),
+            *(aliases for slot in range(35) for aliases in _bin906_slot_signals(slot).values()),
+        )
         if not any(alias in registered for alias in aliases)
     ]
     assert not missing, {"missing_internal_signals": missing}
@@ -903,7 +890,8 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
         slot_observation["ftq_value"],
     ) == stalled_identity
     assert slot_observation["instr"] == slot_observation["s2_instr"] == _NOP
-    assert slot_observation["pc"] == slot_observation["s2_pc"]
+    assert slot_observation["s2_pc"] << 1 == target
+    assert slot_observation["foldpc"] == fold_pc(target)
     assert slot_observation["end_offset"] == slot_observation["s2_end_offset"]
     assert delivery["wb_redirect_valid"] == 0
 

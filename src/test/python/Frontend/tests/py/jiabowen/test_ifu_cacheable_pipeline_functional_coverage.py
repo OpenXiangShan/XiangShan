@@ -12,6 +12,7 @@ from env.funcov.py.ifu.cacheable_pipeline_funcov import (
     _UPSTREAM_SIGNALS,
     _decode_branch_type,
     _expected_s1_semantic_slots,
+    _req_signal_names,
     sample_ifu_cacheable_pipeline_coverage,
 )
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
@@ -1607,6 +1608,17 @@ def test_cacheable_sampler_signals_match_generated_contract():
         for key, candidates in _SIGNALS.items()
         if key not in {"wb_redirect"}
     }
+    request_fields = (
+        "ftqIdx_flag", "ftqIdx_value", "startVAddr_addr",
+        "takenCfiOffset_valid", "takenCfiOffset_bits", "size",
+    )
+    missing_request_fields = [
+        _req_signal_names(index, field)
+        for index in range(2)
+        for field in (*request_fields, *(("valid",) if index else ()))
+        if not any(name in names for name in _req_signal_names(index, field))
+    ]
+    assert not missing_request_fields, {"missing_request_fields": missing_request_fields}
     required |= {
         _SIGNALS["wb_redirect"][0],
         f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_flag",
@@ -1650,7 +1662,7 @@ def test_cacheable_sampler_signals_match_generated_contract():
         _UPSTREAM_SIGNALS["second_itlb_exception"][1],
         _UPSTREAM_SIGNALS["first_ftq_flag"][1],
         _UPSTREAM_SIGNALS["first_ftq_value"][1],
-        _UPSTREAM_SIGNALS["real_two_fetch"][2],
+        _UPSTREAM_SIGNALS["real_two_fetch"][0],
         *(
             candidates[0]
             for candidates in _LATE_FAULT_SIGNALS.values()

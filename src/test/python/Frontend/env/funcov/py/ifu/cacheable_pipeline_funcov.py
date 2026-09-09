@@ -97,8 +97,11 @@ IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS = frozenset(
 
 
 _SIGNALS = {
-    "req_valid": (f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_valid",),
-    "req_ready": (f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_ready",),
+    "req_valid": (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_valid",
+    ),
+    "req_ready": (f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_ready",),
     "s0_fire": (f"{_IFU_PREFIX}s0_fire", f"{_IFU_PREFIX}__Vtogcov__s0_fire"),
     "s0_flush": (f"{_IFU_PREFIX}s0_flush", f"{_IFU_PREFIX}__Vtogcov__s0_flush"),
     "s0_flush_bpu": (
@@ -196,7 +199,10 @@ _LATE_FAULT_SIGNALS = {
     "s2_ftq_value": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_value",),
     "s2_exception": (f"{_IFU_PREFIX}s2_icacheMeta_0_exception_value",),
     "s2_instr_count": (f"{_IFU_PREFIX}s2_instrCount",),
-    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_valid": (
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
+    ),
     "to_ibuffer_ready": (
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
         "inner_ifu.io_toIBuffer_ready",
@@ -236,7 +242,10 @@ _BIN907_SIGNALS = {
         f"{_IFU_PREFIX}s2_instrCount",
         f"{_IFU_PREFIX}__Vtogcov__s2_instrCount",
     ),
-    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_valid": (
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
+    ),
     "to_ibuffer_ready": (
         f"{_IFU_PREFIX}io_toIBuffer_ready",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
@@ -790,8 +799,8 @@ def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
 
 def _req_signal_names(index: int, field: str) -> tuple[str, ...]:
     return (
-        f"Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_{index}_{field}",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_{index}_{field}",
+        f"Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_info_{index}_{field}",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_{index}_{field}",
     )
 
 
