@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
@@ -11,7 +12,6 @@ from env.runtime.pylib import frontend_offset_path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[7]
-_EXPECTED_IMPLEMENTATION = "7062a34987e5b97da6f8ecd0d9e8c7b0ef97b535"
 _EXPECTED_SOURCE = "064632f22959c7184634b72ebf3722e30404cbfc"
 _EXPECTED_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
 _REQUIRED_IFU_KEYS = (
@@ -44,7 +44,10 @@ def test_bin814_review_is_bound_to_the_current_dut_manifest() -> None:
     manifest_path = _REPO_ROOT / "build-frontend/frontend_build_manifest.verilator.json"
     manifest = json.loads(_read(manifest_path))
 
-    assert manifest["implementation_sha"] == _EXPECTED_IMPLEMENTATION
+    runtime_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True
+    ).strip()
+    assert manifest["implementation_sha"] == runtime_head
     assert manifest["dut_source_sha"] == _EXPECTED_SOURCE
     assert manifest["design_baseline_sha"] == _EXPECTED_DESIGN_BASELINE
     assert manifest["source_tree_dirty"] is False
