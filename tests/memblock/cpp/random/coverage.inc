@@ -1831,15 +1831,20 @@ public:
                << set_pressure_release_backpressures[0] << ','
                << set_pressure_release_backpressures[1]
                << " actual_set_pressure_dual_window="
-               << set_pressure_window_counts[0] +
-                       set_pressure_window_counts[2] +
-                       set_pressure_window_counts[3]
+               << std::accumulate(
+                      set_pressure_window_counts.begin(),
+                      set_pressure_window_counts.end(), std::uint64_t{0}) -
+                      set_pressure_window_counts[1]
                << ',' << set_pressure_window_counts[1]
                << " actual_set_pressure_window_count="
                << set_pressure_window_counts[0] << ','
                << set_pressure_window_counts[1] << ','
                << set_pressure_window_counts[2] << ','
-               << set_pressure_window_counts[3]
+               << set_pressure_window_counts[3] << ','
+               << set_pressure_window_counts[4] << ','
+               << set_pressure_window_counts[5] << ','
+               << set_pressure_window_counts[6] << ','
+               << set_pressure_window_counts[7]
                << " actual_set_pressure_cross=";
         bool first_set_pressure_cross = true;
         for (const auto &state : set_pressure_crosses) {

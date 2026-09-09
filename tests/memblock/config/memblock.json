@@ -63,6 +63,7 @@
     "tilelink.uncache_data_bits": "auto_inner_buffers_out_a_bits_data"
   },
   "fixed_dimensions": {
+    "queue.dcache_miss_entries": 16,
     "queue.dcache_probe_entries": 8,
     "queue.store_entries": 56
   },
@@ -95,6 +96,7 @@
     "tilelink.dcache_probe_source_bits": 6,
     "tilelink.ptw_data_bits": 256,
     "tilelink.uncache_data_bits": 64,
+    "queue.dcache_miss_entries": 16,
     "queue.dcache_probe_entries": 8,
     "queue.store_entries": 56
   }

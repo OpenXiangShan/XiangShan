@@ -448,8 +448,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         configured_probe_entries = re.search(
             r'"queue\.dcache_probe_entries"\s*:\s*(\d+)', config
         )
+        configured_miss_entries = re.search(
+            r'"queue\.dcache_miss_entries"\s*:\s*(\d+)', config
+        )
         scala_probe_entries = re.search(r"nProbeEntries\s*=\s*(\d+)", parameters)
+        scala_miss_entries = re.search(r"nMissEntries\s*=\s*(\d+)", parameters)
         cpp_probe_entries = re.search(r"kDcacheProbeEntries = (\d+)", environment)
+        cpp_miss_entries = re.search(r"kDcacheMissEntries = (\d+)", environment)
         configured_probe_source_bits = re.search(
             r'"tilelink\.dcache_probe_source_bits"\s*:\s*(\d+)', config
         )
@@ -457,8 +462,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             r"kDcacheProbeSourceBits = (\d+)", environment
         )
         self.assertIsNotNone(configured_probe_entries)
+        self.assertIsNotNone(configured_miss_entries)
         self.assertIsNotNone(scala_probe_entries)
+        self.assertIsNotNone(scala_miss_entries)
         self.assertIsNotNone(cpp_probe_entries)
+        self.assertIsNotNone(cpp_miss_entries)
         self.assertIsNotNone(configured_probe_source_bits)
         self.assertIsNotNone(cpp_probe_source_bits)
         self.assertEqual(
@@ -468,6 +476,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertEqual(
             int(cpp_probe_entries.group(1)),
             int(scala_probe_entries.group(1)),
+        )
+        self.assertEqual(
+            int(configured_miss_entries.group(1)),
+            int(scala_miss_entries.group(1)),
+        )
+        self.assertEqual(
+            int(cpp_miss_entries.group(1)),
+            int(scala_miss_entries.group(1)),
         )
         self.assertEqual(
             int(configured_probe_source_bits.group(1)),
@@ -2544,6 +2560,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "target_set_pressure_set=",
             "target_set_pressure_dirty=",
             "target_set_pressure_refill_overlap=",
+            "target_set_pressure_window=",
             "actual_set_pressure_line_state=",
             "actual_set_pressure_refill_overlap=",
             "actual_set_pressure_cross=",
@@ -2640,7 +2657,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=37",
+            "constraint_schema=38",
             "RandomVectorShape",
             "choose_vector_shape",
             "make_random_vector_uops",
@@ -2718,9 +2735,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"set-pressure-dirty"',
             '"set-pressure-refill-overlap"',
             '"set-pressure-release-backpressure"',
-            '"set-pressure-dual-window"',
-            '"set-pressure-triple-window"',
-            '"set-pressure-quad-window"',
+            '"set-pressure-window1"',
+            '"set-pressure-window4"',
+            '"set-pressure-window8"',
             "actual_set_pressure_window_count=",
             "dcache_requests_covering_since",
             '"random-set-pressure-target-address-exhausted"',

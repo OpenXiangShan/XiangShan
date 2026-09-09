@@ -108,8 +108,14 @@ struct RandomConstraints {
         set_pressure_dual_window,
         set_pressure_triple_window,
         set_pressure_quad_window,
+        set_pressure_five_window,
+        set_pressure_six_window,
+        set_pressure_seven_window,
+        set_pressure_eight_window,
         set_pressure_window_class_count,
     };
+    static_assert(
+        set_pressure_window_class_count < memblock::kDcacheMissEntries);
 
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
@@ -148,9 +154,8 @@ struct RandomConstraints {
     unsigned set_pressure_dirty_per_mille = 0;
     unsigned set_pressure_refill_overlap_per_mille = 0;
     unsigned set_pressure_release_backpressure_per_mille = 0;
-    unsigned set_pressure_dual_window_per_mille = 0;
-    unsigned set_pressure_triple_window_per_mille = 0;
-    unsigned set_pressure_quad_window_per_mille = 0;
+    std::array<unsigned, set_pressure_window_class_count>
+        set_pressure_window_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -237,9 +242,7 @@ struct RandomConstraints {
                 .set_pressure_dirty_per_mille = 500,
                 .set_pressure_refill_overlap_per_mille = 500,
                 .set_pressure_release_backpressure_per_mille = 500,
-                .set_pressure_dual_window_per_mille = 500,
-                .set_pressure_triple_window_per_mille = 333,
-                .set_pressure_quad_window_per_mille = 250,
+                .set_pressure_window_weights = {1, 1, 1, 1, 1, 1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -327,9 +330,7 @@ struct RandomConstraints {
                 .set_pressure_dirty_per_mille = 50,
                 .set_pressure_refill_overlap_per_mille = 10,
                 .set_pressure_release_backpressure_per_mille = 10,
-                .set_pressure_dual_window_per_mille = 10,
-                .set_pressure_triple_window_per_mille = 1,
-                .set_pressure_quad_window_per_mille = 1,
+                .set_pressure_window_weights = {1000, 10, 2, 1, 1, 1, 1, 1},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -417,9 +418,7 @@ struct RandomConstraints {
                 .set_pressure_dirty_per_mille = 500,
                 .set_pressure_refill_overlap_per_mille = 750,
                 .set_pressure_release_backpressure_per_mille = 750,
-                .set_pressure_dual_window_per_mille = 750,
-                .set_pressure_triple_window_per_mille = 500,
-                .set_pressure_quad_window_per_mille = 750,
+                .set_pressure_window_weights = {1, 1, 1, 2, 4, 8, 16, 32},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -698,11 +697,21 @@ struct RandomConstraints {
             "set-pressure-set-q0", "set-pressure-set-q1",
             "set-pressure-set-q2", "set-pressure-set-q3",
         }};
+        constexpr std::array<std::string_view,
+                             set_pressure_window_class_count>
+            set_pressure_window_keys{{
+                "set-pressure-window1", "set-pressure-window2",
+                "set-pressure-window3", "set-pressure-window4",
+                "set-pressure-window5", "set-pressure-window6",
+                "set-pressure-window7", "set-pressure-window8",
+            }};
         if (assign_weight(
                 set_pressure_depth_keys, set_pressure_depth_weights) ||
             assign_weight(
                 set_pressure_width_keys, set_pressure_width_weights) ||
-            assign_weight(set_pressure_set_keys, set_pressure_set_weights)) {
+            assign_weight(set_pressure_set_keys, set_pressure_set_weights) ||
+            assign_weight(
+                set_pressure_window_keys, set_pressure_window_weights)) {
             return;
         }
         constexpr std::array<std::string_view,
@@ -905,12 +914,6 @@ struct RandomConstraints {
             set_pressure_refill_overlap_per_mille = parsed;
         } else if (key == "set-pressure-release-backpressure") {
             set_pressure_release_backpressure_per_mille = parsed;
-        } else if (key == "set-pressure-dual-window") {
-            set_pressure_dual_window_per_mille = parsed;
-        } else if (key == "set-pressure-triple-window") {
-            set_pressure_triple_window_per_mille = parsed;
-        } else if (key == "set-pressure-quad-window") {
-            set_pressure_quad_window_per_mille = parsed;
         } else if (key == "probe") {
             probes_per_mille = parsed;
         } else if (key == "probe-to-b") {
@@ -1122,6 +1125,13 @@ struct RandomConstraints {
                 set_pressure_set_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "set-pressure set constraint weights cannot all be zero");
+        }
+        if (operation_weights[set_pressure] != 0 &&
+            std::accumulate(
+                set_pressure_window_weights.begin(),
+                set_pressure_window_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "set-pressure window constraint weights cannot all be zero");
         }
         if (operation_weights[ptw_error] != 0 &&
             ptw_error_site_weights[ptw_error_stage1] != 0 &&
@@ -1382,9 +1392,6 @@ struct RandomConstraints {
             set_pressure_dirty_per_mille > 1000 ||
             set_pressure_refill_overlap_per_mille > 1000 ||
             set_pressure_release_backpressure_per_mille > 1000 ||
-            set_pressure_dual_window_per_mille > 1000 ||
-            set_pressure_triple_window_per_mille > 1000 ||
-            set_pressure_quad_window_per_mille > 1000 ||
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             probe_overlap_per_mille > 1000 ||
@@ -1668,37 +1675,21 @@ struct RandomConstraints {
         return choose_weighted(set_pressure_set_weights, random);
     }
 
-    std::array<unsigned, set_pressure_window_class_count>
-    set_pressure_window_weights() const
-    {
-        const unsigned non_quad =
-            1000U - set_pressure_quad_window_per_mille;
-        const unsigned non_triple =
-            1000U - set_pressure_triple_window_per_mille;
-        return {{
-            non_quad * non_triple *
-                (1000U - set_pressure_dual_window_per_mille),
-            non_quad * non_triple * set_pressure_dual_window_per_mille,
-            non_quad * set_pressure_triple_window_per_mille * 1000U,
-            set_pressure_quad_window_per_mille * 1000000U,
-        }};
-    }
-
     unsigned choose_set_pressure_window(std::uint64_t random) const
     {
-        return choose_weighted(set_pressure_window_weights(), random);
+        return choose_weighted(set_pressure_window_weights, random);
     }
 
     bool set_pressure_window_enabled(unsigned window_class) const
     {
-        return set_pressure_window_weights().at(window_class) != 0;
+        return set_pressure_window_weights.at(window_class) != 0;
     }
 
     unsigned enabled_set_pressure_window_classes() const
     {
-        const auto weights = set_pressure_window_weights();
         return static_cast<unsigned>(std::count_if(
-            weights.begin(), weights.end(),
+            set_pressure_window_weights.begin(),
+            set_pressure_window_weights.end(),
             [](unsigned weight) { return weight != 0; }));
     }
 
@@ -2134,7 +2125,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=37 constraints=" << name
+        stream << "constraint_schema=38 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2218,13 +2209,9 @@ struct RandomConstraints {
                << set_pressure_refill_overlap_per_mille
                << " target_set_pressure_release_backpressure="
                << set_pressure_release_backpressure_per_mille
-               << " target_set_pressure_dual_window="
-               << set_pressure_dual_window_per_mille
-               << " target_set_pressure_triple_window="
-               << set_pressure_triple_window_per_mille
-               << " target_set_pressure_quad_window="
-               << set_pressure_quad_window_per_mille
-               << " target_translation=" << translation_weights[0] << ','
+               << " target_set_pressure_window=";
+        append_weights(stream, set_pressure_window_weights);
+        stream << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
                << stage1_mode_weights[1]

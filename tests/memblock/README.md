@@ -1285,10 +1285,11 @@ first attributed Release or ReleaseData to hold its complete payload for 16
 valid cycles. Selected actions require exactly one stalled target release, 16
 target stall cycles, and 16 independent payload-stability comparisons;
 unselected actions require zero for all three. Every action must close exactly
-one address-qualified window. For clean overlap, the held refill is established
-before the target set is filled, so replacement is causally concurrent with
-the pending refill. Coverage uses a 500-per-mille C-backpressure share, SPEC 10,
-and corner 750.
+one address-qualified window. For clean overlap, the eight baseline ways are
+filled first, then the held refill is established before overflow tags are
+issued, so replacement is causally concurrent with the pending refill without
+exceeding LQ capacity. Coverage uses a 500-per-mille C-backpressure share, SPEC
+10, and corner 750.
 
 Schema 30 adds `set-pressure-dual-window` and expands the cross to 384 bins.
 Selected actions allocate two independent pressure sets in opposite index
@@ -1388,9 +1389,24 @@ Probe may carry data, the atomic old-value/result is checked independently,
 and the 54 family x width x depth bins must all close when enabled. Atomic
 errors remain separate zero-Probe actions. Coverage weights all depths equally,
 SPEC strongly favors depth zero without disabling any burst depth, and corner
-progressively favors deep bursts. The current minimum `random-mixed` length is
-1344 actions. Replacement/Probe composition, five-or-more replacement windows,
-multiple simultaneous CMO sources, and malformed coherence traffic remain.
+progressively favors deep bursts. At schema 37 the minimum `random-mixed`
+length was 1344 actions.
+
+Schema 38 replaces the hierarchical single/dual/triple/quad replacement
+selector with direct relative `set-pressure-window1` through
+`set-pressure-window8` weights. It closes 1536 clean/dirty x refill-overlap x
+C-backpressure x window-count x depth x width x translation bins. An
+eight-window action uses eight distinct physical set indexes, may hold eight
+independently address-qualified D responses, and requires every selected set
+to satisfy its own replacement minimum before any response is released. The
+tracked `queue.dcache_miss_entries=16` value is checked against the standard
+Kunminghu-v2 configuration and bounds the generated concurrency below that
+capacity, leaving eight MSHRs for replacement progress at the maximum window.
+Coverage weights all window counts equally,
+SPEC favors one window without disabling any class, and corner progressively
+favors wider concurrency. The current minimum `random-mixed` length is 2112
+actions. Replacement composition with Probe/CMO/atomic traffic, multiple
+simultaneous CMO sources, and malformed coherence traffic remain.
 
 For a reproducible local pressure run:
 
@@ -1560,7 +1576,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 1344
+  --test random-mixed --seed 17 --transactions 2112
 ```
 
 ## Complete Pin Audit

@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 38
+        result["constraint_schema"] = 39
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -1464,6 +1464,48 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression._check_mixed_coverage(result)
         result.update(
             {
+                "constraint_schema": 38,
+                "actual_ops": "10,0,3,2,0,0,66,5,5,36,48,90,12,512",
+                "target_set_pressure_window": "1,1,1,1,1,1,1,1",
+                "actual_set_pressure_line_state": "256,256",
+                "actual_set_pressure_refill_overlap": "256,256",
+                "actual_set_pressure_release_backpressure": "256,256",
+                "actual_set_pressure_dual_window": "448,64",
+                "actual_set_pressure_window_count": (
+                    "64,64,64,64,64,64,64,64"
+                ),
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 512
+                ),
+                "actual_set_pressure_set": "128,128,128,128",
+                "actual_set_pressure_issue_order": "5472,5472",
+                "actual_set_pressure_manager": (
+                    "256,10944,10944,1728,1728,1728,10944,10944,1728"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "256,10944,10944,10944,1728,1728,0,1728,0,0,"
+                    "22464,22464"
+                ),
+                "actual_set_pressure_overlap_manager": (
+                    "1152,1152,1728,1152,1152"
+                ),
+                "actual_set_pressure_backpressure_manager": (
+                    "256,256,4096,4096,512"
+                ),
+                "probe_max_outstanding": 8,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_set_pressure_window_count"] = (
+            "64,64,64,64,64,64,65,63"
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "set-pressure window-count/operation coverage",
+        ):
+            verify_regression._check_mixed_coverage(result)
+        result.update(
+            {
                 "constraint_schema": 35,
                 "actual_ops": "10,0,3,2,0,0,18,5,5,36,6,90,12,256",
                 "actual_cmo_operation": "2,2,2",
@@ -1475,6 +1517,29 @@ class VerifyRegressionTest(unittest.TestCase):
                 "actual_atomic_error_manager": "12,12,24,12,12",
                 "actual_cmo_line_state": "3,3",
                 "actual_cmo_younger_overlap": "5,1",
+                "actual_set_pressure_line_state": "128,128",
+                "actual_set_pressure_refill_overlap": "128,128",
+                "actual_set_pressure_release_backpressure": "128,128",
+                "target_set_pressure_quad_window": 250,
+                "actual_set_pressure_dual_window": "192,64",
+                "actual_set_pressure_window_count": "64,64,64,64",
+                "actual_set_pressure_cross": ",".join(
+                    ["1,0,0"] * 256
+                ),
+                "actual_set_pressure_set": "64,64,64,64",
+                "actual_set_pressure_issue_order": "1520,1520",
+                "actual_set_pressure_manager": (
+                    "128,3040,3040,480,480,480,3040,3040,480"
+                ),
+                "actual_set_pressure_clean_manager": (
+                    "128,3040,3040,3040,480,480,0,480,0,0,6240,6240"
+                ),
+                "actual_set_pressure_overlap_manager": (
+                    "320,320,480,320,320"
+                ),
+                "actual_set_pressure_backpressure_manager": (
+                    "128,128,2048,2048,256"
+                ),
                 "target_cmo_error": 1000,
                 "actual_cmo_error": "0,6",
                 "actual_cmo_error_kind": "3,3",

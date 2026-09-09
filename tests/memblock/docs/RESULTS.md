@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `025c266cbab23194da3eb25a120d0644bcd37a649b8bae910c6b6ce9f011ee7f`
+- Current rebuilt and frozen UT executable SHA-256: `7f105d5d563e9306f35d37acb45ca85d8a45b558e0213c3854509aaca13d9c85`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `5f058e2538c4061e59ae35aeef0445b7c8ee0affb92f96db5bcc6f76070243c7`
+- Current rebuilt and frozen Verilated model SHA-256: `1f9e1c54db04392bc585ad25fce1756ef578a37c75eccbcf0efb3fefca5815c7`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `9f9df43b207122b57e64e0cfba7419846208140e5c206dc2cbb3872b7f98d339`
+- Frozen runtime manifest SHA-256: `145066c38a2f307a20fcfc48b81fd81b4cd179f4824456ba6f52365dc45494f1`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -3359,3 +3359,67 @@ No CPU RTL defect was observed. Multiple simultaneous CMO sources,
 five-or-more simultaneous replacement windows, replacement composition with
 Probe/CMO/atomic traffic, and malformed coherence traffic remain explicit
 DCache breadth gaps.
+
+## Schema 38 Eight-Window Replacement Closure
+
+Date: 2026-09-09
+
+Schema 38 extends the replacement-pressure oracle from one through four
+simultaneous eight-way sets to one through eight. The former hierarchical
+dual/triple/quad probabilities are replaced by eight direct relative weights,
+so each constraint profile describes the complete window-count distribution
+without dependent probability arithmetic. The target allocator repeats the
+four address quartiles with a distinct set sequence, while a compile-time and
+configuration/Scala/C++ contract confirms that eight held refills remain below
+the generated DCache's 16 miss entries.
+
+The online and independent offline gates close all 1,536 line-state x refill-
+overlap x target-C-backpressure x window-count x dirty-depth x issue-width x
+latency-regime bins. Schema-37 compatibility output remains available as an
+exact-two-window versus non-two-window projection, but the eight-entry window
+vector is now authoritative.
+
+| Direction | Seed | Final cycle | Set-pressure actions | 1/2/3/4/5/6/7/8-window actions |
+| --- | ---: | ---: | ---: | --- |
+| Eight-window-only endpoint | 38008 | 936,926 | 194 | 0/0/0/0/0/0/0/194 |
+| Coverage profile | 38005 | 3,004,385 | 1,539 | 193/192/192/192/194/192/192/192 |
+| Spec profile | 38006 | 6,750,548 | 1,536 | 192/192/192/192/192/192/192/192 |
+| Corner profile | 38007 | 7,024,803 | 1,538 | 192/192/192/192/192/193/192/193 |
+| Frozen coverage artifact | 1 | 2,997,152 | 1,537 | 192/192/192/193/192/192/192/192 |
+
+Every complete profile and the frozen seed hit every schema-38 cross bin. The
+frozen seed also balanced valid/invalid state (768/769), held-refill overlap
+(768/769), and target-C backpressure (768/769). The eight-window-only endpoint
+reached maximum accepted Probe depth eight while isolating the new capacity
+boundary. Existing atomic and CMO Probe-burst crosses remained closed in the
+complete profiles.
+
+The first complete replay exposed UT scheduling defects rather than RTL
+failures. Building every clean target set while an overlap refill was already
+held could self-block the 72-entry LQ, overlap sets selected as `target + 1`
+could alias another target beyond four windows, and a dirty eight-window
+baseline could exceed the 56-entry SQ before commit. The final sequence first
+retires clean baselines and then holds only overflow refills, chooses overlap
+sets disjoint from all targets, and commits dirty baselines in two four-way
+batches. These changes preserve the external causal checks without encoding
+an impossible queue schedule.
+
+All 187 Python unit tests, `check-rtl`, rebuilt smoke, `dcache-coherence`,
+`dcache-errors`, `cmo-contracts`, `atomic-contracts`,
+`atomic-dchannel-errors`, the eight-window endpoint, all three complete
+constraint profiles, the all-zero window-weight rejection endpoint, the
+2,111-action minimum rejection endpoint, and the independent frozen-artifact
+verifier passed. The frozen executable and runtime-manifest SHA-256 values are
+respectively
+`7f105d5d563e9306f35d37acb45ca85d8a45b558e0213c3854509aaca13d9c85`
+and `145066c38a2f307a20fcfc48b81fd81b4cd179f4824456ba6f52365dc45494f1`.
+The accepted artifact is
+`build/memblock/schema38-coverage-1x2112.json`:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=2112 elapsed_seconds=1256.170048 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=20fe0c6d42c8b269981cc116a86073eb4c5031df5fc64794cd551fd9f0724d2f
+```
+
+No CPU RTL defect was observed. Multiple simultaneous CMO sources,
+replacement composition with Probe/CMO/atomic traffic, and malformed
+coherence traffic remain explicit DCache breadth gaps.
