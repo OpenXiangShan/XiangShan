@@ -1466,6 +1466,174 @@ int run_misaligned_stores(int argc, char **argv)
     return 0;
 }
 
+int run_vector_issue_order(int argc, char **argv)
+{
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x5e000;
+    constexpr unsigned uop_count = 2;
+    constexpr unsigned flow_num = 16;
+
+    for (unsigned order = 0; order < 2; ++order) {
+        const bool reverse = order != 0;
+        memblock::Environment environment(argc, argv);
+        environment.memory().fill_incrementing(base, 0x1000, 0x39);
+        environment.configure_backpressure(
+            0x6a09e667f3bcc909ULL ^ order, false);
+        if (!environment.reset() ||
+            !environment.set_rob_head(20, false)) {
+            std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL order="
+                      << (reverse ? "reverse" : "forward")
+                      << " cycle=" << environment.cycle()
+                      << " phase=reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        std::array<memblock::VectorMemoryTransaction, uop_count> uops{};
+        for (unsigned uop = 0; uop < uop_count; ++uop) {
+            auto &transaction = uops[uop];
+            transaction.address = base + 0x100;
+            transaction.addressing =
+                memblock::VectorAddressingMode::indexed_unordered;
+            transaction.eew = 0;
+            transaction.vsew = 0;
+            transaction.vl = 32;
+            transaction.rob = 20;
+            transaction.lq = static_cast<std::uint8_t>(uop * flow_num);
+            transaction.pdest = static_cast<std::uint8_t>(80 + uop);
+            transaction.lane = uop;
+            transaction.flow_num = flow_num;
+            transaction.vlmul = 1;
+            transaction.vuop_idx = static_cast<std::uint8_t>(uop);
+            transaction.last_uop = uop + 1 == uop_count;
+            for (unsigned element = 0; element < flow_num; ++element) {
+                transaction.index[element] = static_cast<unsigned char>(
+                    2U * (uop * flow_num + element));
+            }
+            environment.expect_vector(transaction);
+            if (!environment.enqueue_vector(transaction)) {
+                std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL order="
+                          << (reverse ? "reverse" : "forward")
+                          << " uop=" << uop
+                          << " cycle=" << environment.cycle()
+                          << " phase=enqueue reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+        }
+
+        for (unsigned offset = 0; offset < uop_count; ++offset) {
+            const unsigned uop = reverse ? uop_count - offset - 1U : offset;
+            if (!environment.issue_vector(uops[uop], 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL order="
+                          << (reverse ? "reverse" : "forward")
+                          << " uop=" << uop
+                          << " cycle=" << environment.cycle()
+                          << " phase=issue reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+        }
+        const std::vector<memblock::VectorMemoryTransaction> transactions(
+            uops.begin(), uops.end());
+        if (!environment.run_until_vector_complete_with_replays(
+                transactions, 16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL order="
+                      << (reverse ? "reverse" : "forward")
+                      << " cycle=" << environment.cycle()
+                      << " phase=complete reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        environment.memory().fill_incrementing(base, 0x1000, 0x5b);
+        environment.configure_backpressure(
+            0xbb67ae8584caa73bULL, false);
+        if (!environment.reset() ||
+            !environment.set_rob_head(24, false)) {
+            std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL"
+                      << " case=masked-indexed-ordered"
+                      << " cycle=" << environment.cycle()
+                      << " phase=reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        constexpr unsigned ordered_uop_count = 8;
+        constexpr unsigned ordered_flow_num = 2;
+        std::array<memblock::VectorMemoryTransaction, ordered_uop_count> uops{};
+        for (unsigned uop = 0; uop < ordered_uop_count; ++uop) {
+            auto &transaction = uops[uop];
+            transaction.address = base + 0x300;
+            transaction.addressing =
+                memblock::VectorAddressingMode::indexed_ordered;
+            transaction.eew = 2;
+            transaction.vsew = 3;
+            transaction.vl = 16;
+            transaction.vm = false;
+            transaction.mask_bits = 0xc678;
+            transaction.vma = true;
+            transaction.rob = 24;
+            transaction.lq = static_cast<std::uint8_t>(
+                uop * ordered_flow_num);
+            transaction.pdest = static_cast<std::uint8_t>(96 + uop);
+            transaction.lane = uop % memblock::kVectorMemoryLanes;
+            transaction.flow_num = ordered_flow_num;
+            transaction.vlmul = 3;
+            transaction.vuop_idx = static_cast<std::uint8_t>(uop);
+            transaction.last_uop = uop + 1 == ordered_uop_count;
+            const unsigned index_register_base = (uop / 2U) * 4U;
+            for (unsigned element = 0; element < 4; ++element) {
+                const std::uint32_t index =
+                    16U * (index_register_base + element);
+                for (unsigned byte = 0; byte < 4; ++byte) {
+                    transaction.index[element * 4 + byte] =
+                        static_cast<unsigned char>(index >> (8U * byte));
+                }
+            }
+            environment.expect_vector(transaction);
+            if (!environment.enqueue_vector(transaction)) {
+                std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL"
+                          << " case=masked-indexed-ordered"
+                          << " uop=" << uop
+                          << " cycle=" << environment.cycle()
+                          << " phase=enqueue reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+        }
+        for (unsigned uop = 0; uop < ordered_uop_count; ++uop) {
+            if (!environment.issue_vector(uops[uop], 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL"
+                          << " case=masked-indexed-ordered"
+                          << " uop=" << uop
+                          << " cycle=" << environment.cycle()
+                          << " phase=issue reason=" << environment.error()
+                          << '\n';
+                return 1;
+            }
+        }
+        const std::vector<memblock::VectorMemoryTransaction> transactions(
+            uops.begin(), uops.end());
+        if (!environment.run_until_vector_complete_with_replays(
+                transactions, 16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_ISSUE_ORDER_FAIL"
+                      << " case=masked-indexed-ordered"
+                      << " cycle=" << environment.cycle()
+                      << " phase=complete reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_VECTOR_ISSUE_ORDER_PASS cases=3 uops=12"
+              << " addressing=indexed-unordered,indexed-ordered"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_vector_addressing(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);

@@ -55,6 +55,7 @@ SCENARIOS = (
     "vector-fof",
     "vector-segment",
     "vector-segment-fof",
+    "vector-issue-order",
     "vector-store-forwarding",
     "store-forwarding",
     "dcache-release",

@@ -40,6 +40,10 @@ def prepare(
 
     for header in picker_output.glob("*.hpp"):
         shutil.copy2(header, target / header.name)
+    copy_required(
+        picker_output / "MemBlock_offset.yaml",
+        target / "MemBlock_offset.yaml",
+    )
     copy_required(picker_output / "cpp/dut.cpp", target / "UT_MemBlock.cpp")
     copy_required(picker_output / "cpp/dut.hpp", target / "UT_MemBlock.hpp")
     copy_required(picker_output / "cpp/CMakeLists.txt", target / "CMakeLists.txt")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,23 @@ import bootstrap_picker  # noqa: E402
 
 
 class BootstrapPickerTest(unittest.TestCase):
+    def test_metadata_pin_match_controls_incremental_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            metadata = Path(temporary) / "picker.json"
+            self.assertFalse(bootstrap_picker.metadata_matches_pins(metadata))
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "commit": bootstrap_picker.PICKER_COMMIT,
+                        "xcomm_commit": bootstrap_picker.XCOMM_COMMIT,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(bootstrap_picker.metadata_matches_pins(metadata))
+            metadata.write_text("{}\n", encoding="utf-8")
+            self.assertFalse(bootstrap_picker.metadata_matches_pins(metadata))
+
     def test_existing_commit_can_be_pinned_without_fetch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             checkout = Path(temporary) / "checkout"

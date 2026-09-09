@@ -309,6 +309,9 @@ int main(int argc, char **argv)
         if (options.test == "vector-addressing") {
             return run_vector_addressing(argc, argv);
         }
+        if (options.test == "vector-issue-order") {
+            return run_vector_issue_order(argc, argv);
+        }
         if (options.test == "exception-contracts") {
             return run_exception_contracts(argc, argv);
         }

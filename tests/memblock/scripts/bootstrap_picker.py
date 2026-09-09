@@ -38,6 +38,17 @@ def commit_exists(root: Path, commit: str) -> bool:
     return result.returncode == 0
 
 
+def metadata_matches_pins(metadata: Path) -> bool:
+    try:
+        recorded = json.loads(metadata.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (
+        recorded.get("commit") == PICKER_COMMIT
+        and recorded.get("xcomm_commit") == XCOMM_COMMIT
+    )
+
+
 def checkout_pinned(root: Path, commit: str, label: str) -> None:
     if not (root / ".git").is_dir():
         raise BootstrapError(f"{label} destination is not a git checkout: {root}")
@@ -109,6 +120,7 @@ def main() -> int:
         if args.jobs < 1:
             raise BootstrapError("--jobs must be positive")
         root = args.root.resolve()
+        rebuild_tool = not metadata_matches_pins(args.metadata)
         ensure_checkout(root)
         environment = os.environ.copy()
         environment["BUILD_XSPCOMM_SWIG"] = ""
@@ -116,6 +128,8 @@ def main() -> int:
         run(["make", "init"], cwd=root, env=environment)
         xcomm = root / "dependence/xcomm"
         checkout_pinned(xcomm, XCOMM_COMMIT, "xcomm")
+        if rebuild_tool:
+            shutil.rmtree(root / "build", ignore_errors=True)
         run(
             [
                 "make",

@@ -29,6 +29,7 @@ class PreparePickerHarnessTest(unittest.TestCase):
                 (generated_cpp / name).write_text(name)
             (generated_cmake / "verilator.cmake").write_text("cmake")
             (picker / "generated.hpp").write_text("header")
+            (picker / "MemBlock_offset.yaml").write_text("signals: []\n")
 
             sources = root / "sources"
             sources.mkdir()
@@ -68,6 +69,9 @@ class PreparePickerHarnessTest(unittest.TestCase):
                 (target / "random/constraints.inc").read_text(), "constraints"
             )
             self.assertEqual((target / "generated.hpp").read_text(), "header")
+            self.assertEqual(
+                (target / "MemBlock_offset.yaml").read_text(), "signals: []\n"
+            )
 
 
 if __name__ == "__main__":
