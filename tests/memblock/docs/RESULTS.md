@@ -3423,3 +3423,23 @@ MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..1 results=1 transactions=2112 elapsed
 No CPU RTL defect was observed. Multiple simultaneous CMO sources,
 replacement composition with Probe/CMO/atomic traffic, and malformed
 coherence traffic remain explicit DCache breadth gaps.
+
+## Schema 41 Vector Closure Bring-Up
+
+Date: 2026-09-09
+
+The schema-41 harness rebuild passed the 193-test Python unit suite and the
+generated C++/RTL harness build. A first 3,072-action `random-mixed` run
+(`--test random-mixed --seed 1 --transactions 3072`) reached action 2,907 and
+then stopped in `random-miss-burst`. The scalar load writeback at
+`0x1c50012e8` returned `0x0`, while the independent sparse-memory oracle
+expected `0x908f8e8d8c8b8a89`; the expected bytes are the requested line's
+incrementing fill at the selected `+40` byte offset. The failure is therefore
+not a vector-cross or bank/replay/prefetch coverage gate.
+
+This is retained as an unconfirmed candidate pending a shorter deterministic
+miss-burst reproducer and request/response attribution review. It is not
+classified as a CPU RTL bug yet, and no `CPU_BUG_*` report is created. A
+no-backpressure replay was started to separate response scheduling from data
+or address attribution, then stopped before completion to avoid spending a
+long regression budget without additional evidence.
