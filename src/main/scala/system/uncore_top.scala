@@ -236,20 +236,29 @@ object AXI4WriteOnlyZeroReadAdapter {
     val readId = withClockAndReset(clock, reset) {
       RegInit(0.U(upstream.r.bits.id.getWidth.W))
     }
+    val readBeatsLeft = withClockAndReset(clock, reset) {
+      RegInit(0.U(upstream.ar.bits.len.getWidth.W))
+    }
 
     upstream.ar.ready := !readPending
     upstream.r.valid := readPending
     upstream.r.bits := 0.U.asTypeOf(upstream.r.bits)
     upstream.r.bits.id := readId
     upstream.r.bits.resp := AXI4Parameters.RESP_OKAY
-    upstream.r.bits.last := true.B
+    upstream.r.bits.last := readBeatsLeft === 0.U
 
     withClockAndReset(clock, reset) {
       when (upstream.ar.fire) {
         readPending := true.B
         readId := upstream.ar.bits.id
+        // AXI LEN encodes beats minus one, so zero marks the final response beat.
+        readBeatsLeft := upstream.ar.bits.len
       }.elsewhen(upstream.r.fire) {
-        readPending := false.B
+        when (readBeatsLeft === 0.U) {
+          readPending := false.B
+        }.otherwise {
+          readBeatsLeft := readBeatsLeft - 1.U
+        }
       }
     }
 
