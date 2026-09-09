@@ -205,10 +205,14 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
 51. [`2026-09-07 17:58:53 CST`] `不需要统计token了，可以忘掉这件事情`
 
-## Current Session: 2 Prompts
+## Current Session: 4 Prompts
 
 Session: `01a07f80-9241-7653-ade7-5b447e1cc8c6`.
 
 1. [`2026-09-08 13:32:59 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。`
 
 2. [`2026-09-08 13:38:34 CST`] `1. 记得在工作之前把PROMPTS给记录下来。 2. 现在的UT测试框架代码可能过于粗暴了，导致context一下子就占用很大，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化。3. 重构后再继续完成UT测试工作`
+
+3. [`2026-09-09 09:39:06 CST`] `能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些。因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来`
+
+4. [`2026-09-09 09:59:09 CST`] `speccpu也有很多向量负载的吧。我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs，里面有跑spec06_gcc15_rva23_lmul1_260723 rva23u64_lmul8  rva23_lmul2等的负载，应该是有很多向量指令的`
