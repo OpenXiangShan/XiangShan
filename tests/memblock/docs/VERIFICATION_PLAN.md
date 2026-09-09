@@ -200,7 +200,10 @@ correctness contract is external: exact per-identity data, one terminal
 writeback and LQ dequeue per member, and legal queue/protocol termination. Bank identity,
 replay/arbitration, wakeup/`ld2Cancel`, and prefetch traffic are diagnostic
 observations only; no internal counter or fixed historical address is used.
-Broader vector/atomic composition remains a planned gap.
+The first scalar/vector/AMO/miss-burst interaction reduction is executable
+with the same external identity/data/queue oracle; full ordinary-shape and
+heterogeneous-window composition, including bank waves with every vector and
+atomic class, remains a planned gap.
 Schema 36 composes every CLEAN/FLUSH/INVAL and clean/dirty target state with
 one through eight accepted manager Probes while CBOAck remains pending. It
 closes 48 operation x line-state x depth bins and independently conserves

@@ -3474,6 +3474,7 @@ short-mode online gates enabled:
 | load-merge + `miss-burst` (depth 2, same address) | 1,024 | 310 merge actions, 503 miss-burst | 39,919 | pass |
 | AMO.D + `miss-burst` (zero auxiliary Probe depth) | 1,024 | 436 AMO, 487 miss-burst | 85,062 | pass |
 | scalar DCache denied/corrupt loads + `miss-burst` | 1,024 | 157 denied, 171 corrupt, 595 miss-burst; 5,622 refills and GrantAcks | 123,769 | pass |
+| scalar + ordinary vector + AMO.D + `miss-burst` (one legal RVV shape) | 1,024 | 101/93 scalar/vector loads, 98 vector stores, 268 AMO, 363 miss-burst | 31,445 | pass |
 
 The profiles intentionally disable unrelated dimensions and pin one legal
 value for each retained cross, so they are reduction experiments rather than
