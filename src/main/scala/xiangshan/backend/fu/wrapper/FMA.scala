@@ -26,7 +26,7 @@ class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
                               fp_fmt === VSew.e16 && !src0.head(48).andR
   val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
                               fp_fmt === VSew.e16 && !src1.head(48).andR
-  val fp_cIsFpCanonicalNAN  = !FMacOpcode.useMUL(fuOpType) && (fp_fmt === VSew.e32 && !src2.head(32).andR ||
+  val fp_cIsFpCanonicalNAN  = !FMacOpcode.isFmul(fuOpType) && (fp_fmt === VSew.e32 && !src2.head(32).andR ||
                               fp_fmt === VSew.e16 && !src2.head(48).andR)
 
   fma.io.fire         := io.in.valid
