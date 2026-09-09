@@ -983,7 +983,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val wbPregsV0 = Vec(backendParams.numPregWb(V0Data()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val vlWriteBackInfo = new Bundle {
-      val vlFromIntIsZero  = Input(Bool())
       val vlFromIntIsVlmax = Input(Bool())
     }
     val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Input(UInt(maxIQSize.U.getWidth.W))))
