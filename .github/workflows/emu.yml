@@ -35,7 +35,7 @@ jobs:
   ### Misc Tests
   # NOTE: These tests may be built and ran both on 'builder' machines, this might be confusing.
   #       The reason is that we dont want a complex builder-runner workflow like EMU Performance Test,
-  #       and these tests may consume ~16 threads verlator, while 'runner' label is designed to be used with single-thread gsim,
+  #       and these tests uses 8-16 threads verlator, while 'runner' label is designed to be used with single-thread gsim,
   #       so we just run them on 'builder' to ensure enough resource.
 
   # GSIM functional test
@@ -184,10 +184,20 @@ jobs:
           mkdir -p ${WAVE_HOME} ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          # determine emulation threads, verilator 5.050+ has refactored multi-threading,
+          # with which 8-thread can achieve better performance then 16-thread in verilator 5.048
+          VERILATOR_VERSION=$(verilator --version | grep -oP 'Verilator \K\d+\.\d+')
+          if [ $(echo $VERILATOR_VERSION | sed 's/\.//') -ge 5050 ]; then
+            EMU_THREADS=8
+          else
+            EMU_THREADS=16
+          fi
+          echo "Using $EMU_THREADS threads for verilator $VERILATOR_VERSION"
+          echo "EMU_THREADS=$EMU_THREADS" >> $GITHUB_ENV
       - name: Build MC EMU
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator verilator --threads 16 \
+            --emulator verilator --threads ${EMU_THREADS} \
              --num-cores 2 --emu-optimize "" \
              --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
              --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
@@ -196,14 +206,14 @@ jobs:
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
-            --numa --threads 16 \
+            --numa --threads ${EMU_THREADS} \
             --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
             --ci mc-tests 2> /dev/zero
       - name: MC Test - SMP Linux
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
-            --numa --threads 16 \
+            --numa --threads ${EMU_THREADS} \
             --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
             --ci linux-hello-smp-new 2> /dev/null
 
