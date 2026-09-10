@@ -54,8 +54,11 @@ fault. A separate two-stage mapping targets the SoC's fixed `c=0` PMA device
 window: HLV and HSV must use Uncache with exact load/store data, while HLVX
 must report `LoadAccessFault` because that physical region is not executable.
 Vector FOF and unit-stride, strided, indexed-unordered, and
-indexed-ordered segment load/store takeover are covered by focused tests; the
-common constrained tail composes segment load/store direction with all four
+indexed-ordered segment load/store takeover are covered by focused tests.
+Schema 44 also composes ordinary unit-stride VFOF into `random-mixed`, closing
+first/later fault x Sv39/Sv48 x EEW with independent page-walk, data,
+exception/fault-VA, final-VL, identity, and queue oracles. The common
+constrained tail composes segment load/store direction with all four
 addressing modes, EEW/SEW 8/16/32/64, fractional/integer LMUL and derived EMUL,
 and NF 2..8. It enumerates the legal decoder space before weighted selection;
 unsupported shapes are not silently randomized as ordinary LSQ traffic.
@@ -1461,6 +1464,13 @@ LQ dequeues for the vector member, and external refill/GrantAck conservation.
 Extra requests/refills caused by legal hardware prefetch are allowed. A fixed
 request count, replay count, bank, MSHR state, prefetch decision, or completion
 cycle is not an oracle.
+
+Schema 44 adds low-rate ordinary VFOF through `vector-fof` and
+`vector-fof-first-fault`. Every enabled first/later fault x Sv39/Sv48 x
+EEW8/16/32/64 bin must execute. Expected translation, bytes, page-fault
+suppression/preservation, fault VA, final VL, unique completion, and LQ
+conservation come from independent models and external writebacks; internal
+VFOF-buffer state, replay count, and exact timing remain debug-only.
 
 For deterministic reduction of a failure, `--allow-short-mixed` permits a
 smaller `random-mixed` run after the constraint set has been narrowed. It does

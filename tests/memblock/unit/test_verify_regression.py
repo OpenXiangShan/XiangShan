@@ -228,11 +228,89 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 44
+        result["constraint_schema"] = 45
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
             verify_regression._check_mixed_coverage(result)
+
+    def test_schema_44_checks_vector_fof_accounting(self) -> None:
+        fields: dict[str, object] = {
+            "target_vector_fof": 100,
+            "target_vector_fof_first_fault": 500,
+            "actual_vector_fof": "7,16",
+            # later-element fault, first-element fault
+            "actual_vector_fof_fault": "8,8",
+            "actual_vector_fof_eew": "4,4,4,4",
+            "actual_vector_fof_stage1_mode": "8,8",
+            "actual_vector_fof_cross": ",".join(["1"] * 16),
+            "actual_vector_fof_fix_vl": 16,
+        }
+        target_operations = [0, 0, 1, 0]
+        actual_operations = [0, 0, 23, 0]
+        target_translation = [1, 1, 0]
+        target_stage1 = [1, 1]
+        target_vector_eew = [1, 1, 1, 1]
+        vector_directions = [7, 0]
+        verify_regression._check_vector_fof_coverage(
+            fields,
+            target_operations,
+            actual_operations,
+            target_translation,
+            target_stage1,
+            target_vector_eew,
+            vector_directions,
+        )
+
+        fields["actual_vector_fof_fix_vl"] = 15
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "fault-position/fix-VL accounting",
+        ):
+            verify_regression._check_vector_fof_coverage(
+                fields,
+                target_operations,
+                actual_operations,
+                target_translation,
+                target_stage1,
+                target_vector_eew,
+                vector_directions,
+            )
+
+        fields.update(
+            {
+                "target_vector_fof": 0,
+                "actual_vector_fof": "7,0",
+                "actual_vector_fof_fault": "0,0",
+                "actual_vector_fof_eew": "0,0,0,0",
+                "actual_vector_fof_stage1_mode": "0,0",
+                "actual_vector_fof_cross": ",".join(["0"] * 16),
+                "actual_vector_fof_fix_vl": 0,
+            }
+        )
+        actual_operations[2] = 7
+        verify_regression._check_vector_fof_coverage(
+            fields,
+            target_operations,
+            actual_operations,
+            target_translation,
+            target_stage1,
+            target_vector_eew,
+            vector_directions,
+        )
+        fields["actual_vector_fof_fault"] = "1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "disabled VFOF"
+        ):
+            verify_regression._check_vector_fof_coverage(
+                fields,
+                target_operations,
+                actual_operations,
+                target_translation,
+                target_stage1,
+                target_vector_eew,
+                vector_directions,
+            )
 
     def test_schema_42_checks_concurrent_full_vector_shapes(self) -> None:
         result = {

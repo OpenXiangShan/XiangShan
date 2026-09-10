@@ -328,6 +328,14 @@ struct ConstraintCoverage {
     std::uint64_t vector_shape_operations = 0;
     std::uint64_t vector_uops = 0;
     std::uint64_t vector_multi_uop = 0;
+    // ordinary/VFOF load instructions; later/first element fault positions.
+    std::array<std::uint64_t, 2> vector_fof_presence{};
+    std::array<std::uint64_t, 2> vector_fof_fault_positions{};
+    std::array<std::uint64_t, 4> vector_fof_eews{};
+    std::array<std::uint64_t, 2> vector_fof_stage1_modes{};
+    // [later/first fault][Sv39/Sv48][EEW8/16/32/64]
+    std::array<std::uint64_t, 2 * 2 * 4> vector_fof_crosses{};
+    std::uint64_t vector_fof_fix_vl = 0;
     // [load/store][unit/strided/indexed-unordered/indexed-ordered]
     // [single-uop/multi-uop]. These describe the two primary vector
     // instructions in heterogeneous issue windows, independent of replay or
@@ -908,7 +916,19 @@ struct ConstraintCoverage {
                 return vector_directions[direction] == 0 &&
                     std::all_of(
                         begin, begin + direction_stride,
-                        [](std::uint64_t count) { return count == 0; });
+                        [](std::uint64_t count) { return count == 0; }) &&
+                    (operation != RandomConstraints::vector_load ||
+                     (vector_fof_presence ==
+                          std::array<std::uint64_t, 2>{} &&
+                      vector_fof_fault_positions ==
+                          std::array<std::uint64_t, 2>{} &&
+                      vector_fof_eews ==
+                          std::array<std::uint64_t, 4>{} &&
+                      vector_fof_stage1_modes ==
+                          std::array<std::uint64_t, 2>{} &&
+                      vector_fof_crosses ==
+                          std::array<std::uint64_t, 2 * 2 * 4>{} &&
+                      vector_fof_fix_vl == 0));
             }
             return true;
         }
@@ -1542,6 +1562,63 @@ struct ConstraintCoverage {
                     }
                 }
             }
+            const std::uint64_t fof_faults =
+                vector_fof_fault_positions[0] +
+                vector_fof_fault_positions[1];
+            std::array<std::uint64_t, 2> crossed_fof_faults{};
+            std::array<std::uint64_t, 2> crossed_fof_modes{};
+            std::array<std::uint64_t, 4> crossed_fof_eews{};
+            std::uint64_t fof_cross_total = 0;
+            bool fof_cross_complete = true;
+            for (unsigned fault = 0; fault < 2; ++fault) {
+                const bool fault_enabled = fault != 0
+                    ? constraints.vector_fof_first_fault_per_mille != 0
+                    : constraints.vector_fof_first_fault_per_mille != 1000;
+                for (unsigned mode = 0; mode < 2; ++mode) {
+                    for (unsigned eew = 0; eew < 4; ++eew) {
+                        const unsigned index = (fault * 2 + mode) * 4 + eew;
+                        const auto count = vector_fof_crosses[index];
+                        const bool enabled =
+                            constraints.vector_fof_per_mille != 0 &&
+                            fault_enabled &&
+                            constraints.stage1_mode_weights[mode] != 0 &&
+                            constraints.vector_eew_weights[eew] != 0;
+                        fof_cross_complete &= (count != 0) == enabled;
+                        fof_cross_total += count;
+                        crossed_fof_faults[fault] += count;
+                        crossed_fof_modes[mode] += count;
+                        crossed_fof_eews[eew] += count;
+                    }
+                }
+            }
+            const bool fof_complete = direction != 0 ||
+                (binary_complete(
+                     constraints.vector_fof_per_mille,
+                     vector_fof_presence) &&
+                 vector_fof_presence[0] == vector_directions[0] &&
+                 vector_fof_presence[0] + vector_fof_presence[1] ==
+                     operations[RandomConstraints::vector_load] &&
+                 (constraints.vector_fof_per_mille == 0
+                      ? vector_fof_fault_positions ==
+                                std::array<std::uint64_t, 2>{} &&
+                            vector_fof_eews ==
+                                std::array<std::uint64_t, 4>{} &&
+                            vector_fof_stage1_modes ==
+                                std::array<std::uint64_t, 2>{} &&
+                            vector_fof_crosses ==
+                                std::array<std::uint64_t, 2 * 2 * 4>{} &&
+                            vector_fof_fix_vl == 0
+                      : binary_complete(
+                            constraints.vector_fof_first_fault_per_mille,
+                            vector_fof_fault_positions) &&
+                            fof_faults == vector_fof_presence[1] &&
+                            vector_fof_fix_vl == fof_faults &&
+                            fof_cross_complete &&
+                            fof_cross_total == vector_fof_presence[1] &&
+                            crossed_fof_faults ==
+                                vector_fof_fault_positions &&
+                            crossed_fof_modes == vector_fof_stage1_modes &&
+                            crossed_fof_eews == vector_fof_eews));
             return vector_directions[direction] != 0 && cross_complete &&
                 cross_total == vector_directions[direction] &&
                 target_complete(
@@ -1560,6 +1637,7 @@ struct ConstraintCoverage {
                 binary_complete(
                     constraints.vector_nonzero_vstart_per_mille,
                     vector_nonzero_vstart) &&
+                fof_complete &&
                 (constraints.operation_weights[RandomConstraints::vector_load] == 0 ||
                  constraints.vector_vma_per_mille == 0 ||
                  constraints.vector_masked_per_mille == 0 ||
@@ -2449,6 +2527,19 @@ public:
                << " actual_vector_shape_ops=" << vector_shape_operations
                << " actual_vector_uops=" << vector_uops
                << " actual_vector_multi_uop=" << vector_multi_uop
+               << " actual_vector_fof=" << vector_fof_presence[0] << ','
+               << vector_fof_presence[1]
+               << " actual_vector_fof_fault="
+               << vector_fof_fault_positions[0] << ','
+               << vector_fof_fault_positions[1]
+               << " actual_vector_fof_eew=";
+        append_counts(stream, vector_fof_eews);
+        stream << " actual_vector_fof_stage1_mode=";
+        append_counts(stream, vector_fof_stage1_modes);
+        stream << " actual_vector_fof_cross=";
+        append_counts(stream, vector_fof_crosses);
+        stream
+               << " actual_vector_fof_fix_vl=" << vector_fof_fix_vl
                << " actual_concurrent_vector_shape=";
         bool first_concurrent_vector_shape = true;
         for (const auto &direction : concurrent_vector_shapes) {
@@ -2565,6 +2656,15 @@ public:
     }
 
 private:
+    template <std::size_t N>
+    static void append_counts(
+        std::ostream &stream, const std::array<std::uint64_t, N> &counts)
+    {
+        for (unsigned index = 0; index < counts.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << counts[index];
+        }
+    }
+
     static bool binary_complete(
         unsigned true_per_mille,
         const std::array<std::uint64_t, 2> &counts)

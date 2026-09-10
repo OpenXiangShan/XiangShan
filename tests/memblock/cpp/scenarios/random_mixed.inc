@@ -113,6 +113,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t nested_vs_napot_base = cache0_base + 0xc0000;
     constexpr std::uint64_t nested_g_napot_base = cache0_base + 0xd0000;
     constexpr std::uint64_t nested_both_napot_base = cache0_base + 0xe0000;
+    constexpr std::uint64_t vector_fof_virtual_base = 0x58000000ULL;
+    constexpr std::uint64_t vector_fof_physical_base = cache0_base + 0x100000;
     constexpr std::uint64_t cmo_base = cache0_base + 0x200000;
     constexpr std::uint64_t cmo_span = 0x1000000;
     constexpr std::uint64_t probe_overlap_base = cmo_base + cmo_span;
@@ -209,6 +211,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
     environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
     environment.memory().fill_incrementing(stage1_napot_base, 0x40000, 0xe1);
+    environment.memory().fill_incrementing(
+        vector_fof_physical_base, 0x1000, 0x95);
     environment.memory().fill_incrementing(
         ptw_error_base, ptw_error_span, 0xf1);
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
@@ -899,6 +903,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     mode, random_g_roots[mode], nested_g_napot_base) ||
                 !map_g_napot(
                     mode, random_g_roots[mode], nested_both_napot_base)) {
+                return false;
+            }
+        }
+        // The following page is deliberately left unmapped.  VFOF actions
+        // derive first/later-fault expectations from this independent page
+        // table image rather than any DUT TLB or replay state.
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            if (!map_stage_page(
+                    mode, random_stage1_roots[mode], vector_fof_virtual_base,
+                    vector_fof_physical_base, false, false, true)) {
                 return false;
             }
         }
@@ -3524,6 +3538,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             ++constraint_coverage.vector_shape_operations;
             constraint_coverage.vector_uops += uops.size();
             constraint_coverage.vector_multi_uop += uops.size() > 1U;
+            if (!store) {
+                ++constraint_coverage.vector_fof_presence[
+                    policy.fault_only_first ? 1U : 0U];
+            }
         };
         auto issue_random_vector_instruction = [&] (
             const std::vector<memblock::VectorMemoryTransaction> &uops) {
@@ -4443,6 +4461,74 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     vector_segment_store = true;
                 }
             }
+            bool vector_fof_cross_missing = false;
+            if (kind == RandomConstraints::vector_load &&
+                constraints.vector_fof_per_mille != 0) {
+                for (unsigned fault = 0;
+                     fault < 2 && !vector_fof_cross_missing; ++fault) {
+                    const bool fault_enabled = fault != 0
+                        ? constraints.vector_fof_first_fault_per_mille != 0
+                        : constraints.vector_fof_first_fault_per_mille != 1000;
+                    for (unsigned mode = 0;
+                         mode < 2 && !vector_fof_cross_missing; ++mode) {
+                        for (unsigned eew = 0; eew < 4; ++eew) {
+                            const unsigned cross =
+                                (fault * 2 + mode) * 4 + eew;
+                            vector_fof_cross_missing = fault_enabled &&
+                                constraints.stage1_mode_weights[mode] != 0 &&
+                                constraints.vector_eew_weights[eew] != 0 &&
+                                constraint_coverage.vector_fof_crosses[cross] ==
+                                    0;
+                            if (vector_fof_cross_missing) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            const bool vector_fof = kind == RandomConstraints::vector_load &&
+                (vector_fof_cross_missing || choose_binary_class(
+                    constraints.vector_fof_per_mille,
+                    constraint_coverage.vector_fof_presence));
+            bool vector_fof_first_fault = false;
+            unsigned vector_fof_stage1_mode = 0;
+            unsigned vector_fof_eew = 0;
+            if (vector_fof) {
+                std::optional<unsigned> uncovered_cross;
+                for (unsigned fault = 0; fault < 2 && !uncovered_cross;
+                     ++fault) {
+                    const bool fault_enabled = fault != 0
+                        ? constraints.vector_fof_first_fault_per_mille != 0
+                        : constraints.vector_fof_first_fault_per_mille != 1000;
+                    for (unsigned mode = 0; mode < 2 && !uncovered_cross;
+                         ++mode) {
+                        for (unsigned eew = 0; eew < 4; ++eew) {
+                            const unsigned cross =
+                                (fault * 2 + mode) * 4 + eew;
+                            if (fault_enabled &&
+                                constraints.stage1_mode_weights[mode] != 0 &&
+                                constraints.vector_eew_weights[eew] != 0 &&
+                                constraint_coverage.vector_fof_crosses[cross] ==
+                                    0) {
+                                uncovered_cross = cross;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (uncovered_cross) {
+                    vector_fof_first_fault = *uncovered_cross / 8U != 0;
+                    vector_fof_stage1_mode = (*uncovered_cross / 4U) % 2U;
+                    vector_fof_eew = *uncovered_cross % 4U;
+                } else {
+                    vector_fof_first_fault = choose_binary_class(
+                        constraints.vector_fof_first_fault_per_mille,
+                        constraint_coverage.vector_fof_fault_positions);
+                    vector_fof_stage1_mode =
+                        constraints.choose_stage1_mode(random());
+                    vector_fof_eew = constraints.choose_vector_eew(random());
+                }
+            }
             unsigned cmo_operation = 0;
             bool cmo_dirty = false;
             bool cmo_younger_overlap = false;
@@ -5038,6 +5124,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     translation.g_mode =
                         constraints.choose_g_mode(random());
                 }
+            } else if (kind == RandomConstraints::vector_load && vector_fof) {
+                translation = TranslationContext{};
+                translation.regime = RandomConstraints::translation_stage1;
+                translation.stage1_mode = vector_fof_stage1_mode;
             } else if (kind == RandomConstraints::hypervisor) {
                 translation.regime = RandomConstraints::translation_nested;
                 translation.vs_mode = constraints.choose_vs_mode(random());
@@ -7294,19 +7384,153 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::vector_load ||
                        kind == RandomConstraints::vector_store) {
                 const bool store = kind == RandomConstraints::vector_store;
-                const auto &shape = choose_vector_shape(
-                    store ? 1U : 0U, std::nullopt, false);
-                const unsigned data_eew = shape.addressing >= 2
-                    ? shape.vsew : shape.eew;
-                const bool vector_corner =
-                    random() % 1000 < constraints.vector_corner_per_mille;
-                const auto uops = make_random_vector_uops(
-                    store, action_cacheable_address(1U << data_eew),
-                    shape, vector_corner);
-                if (!issue_random_vector_instruction(uops)) {
-                    return false;
+                if (vector_fof) {
+                    phase = vector_fof_first_fault
+                        ? "random-vector-fof-first-fault"
+                        : "random-vector-fof-later-fault";
+                    if (!environment.run_until_all_complete(8192) ||
+                        !environment.run_until_queues_retired(8192)) {
+                        return false;
+                    }
+                    const unsigned eew = vector_fof_eew;
+                    const unsigned element_bytes = 1U << eew;
+                    const std::uint64_t address = vector_fof_virtual_base +
+                        0x1000U - (vector_fof_first_fault ? 0U : element_bytes);
+                    const auto first_reference =
+                        memblock::reference_page_walk_permissions(
+                            environment.memory(),
+                            random_stage1_roots[translation.stage1_mode],
+                            address, page_mode(translation.stage1_mode));
+                    const auto next_reference =
+                        memblock::reference_page_walk_permissions(
+                            environment.memory(),
+                            random_stage1_roots[translation.stage1_mode],
+                            address + element_bytes,
+                            page_mode(translation.stage1_mode));
+                    const bool first_is_valid = first_reference.walk.translated &&
+                        first_reference.walk.physical_address ==
+                            vector_fof_physical_base + 0x1000U - element_bytes;
+                    if ((vector_fof_first_fault &&
+                         first_reference.walk.translated) ||
+                        (!vector_fof_first_fault &&
+                         (!first_is_valid || next_reference.walk.translated))) {
+                        phase += ":reference-page-layout";
+                        return false;
+                    }
+
+                    const std::uint64_t rob = rob_offset++;
+                    const std::uint64_t lq = lq_offset;
+                    lq_offset += 2U;
+                    memblock::VectorMemoryTransaction data_uop{
+                        .address = address,
+                        .oracle_address = vector_fof_first_fault
+                            ? std::nullopt
+                            : std::optional<std::uint64_t>{
+                                  first_reference.walk.physical_address},
+                        .eew = static_cast<std::uint8_t>(eew),
+                        .vl = 2,
+                        .rob = memblock::rob_pointer_value(rob),
+                        .rob_flag = memblock::rob_pointer_flag(rob),
+                        .lq = memblock::lq_pointer_value(lq),
+                        .lq_flag = memblock::lq_pointer_flag(lq),
+                        .sq = memblock::sq_pointer_value(sq_offset),
+                        .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                        .pdest = static_cast<std::uint8_t>(1U + random() % 254U),
+                        .lane = 0,
+                        .flow_num = 2,
+                        .expected_exception_mask = vector_fof_first_fault
+                            ? memblock::kExceptionLoadPageFault : 0,
+                        .expected_trigger = vector_fof_first_fault
+                            ? std::nullopt
+                            : std::optional<std::uint8_t>{
+                                  memblock::kVectorWritebackTriggerNone},
+                        .vuop_idx = 0,
+                        .last_uop = false,
+                        .fault_only_first = true,
+                        .is_vleff = true,
+                        .expected_debug_is_mmio = false,
+                        .expected_debug_is_ncio = false,
+                        .expected_debug_is_perf_cnt = false,
+                    };
+                    for (auto &byte : data_uop.data) {
+                        byte = static_cast<unsigned char>(random());
+                    }
+                    auto expected_data = data_uop.data;
+                    if (!vector_fof_first_fault) {
+                        for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                            expected_data[byte] = environment.memory().read_byte(
+                                first_reference.walk.physical_address + byte);
+                        }
+                    }
+                    const std::uint64_t lq_allocated_before =
+                        environment.lq_allocated();
+                    environment.expect_vector_data(data_uop, expected_data);
+                    if (!environment.set_rob_head(
+                            data_uop.rob, data_uop.rob_flag) ||
+                        !environment.enqueue_vector(data_uop) ||
+                        !environment.issue_vector(
+                            data_uop, constrained_completion_timeout) ||
+                        !environment.run_until_vector_complete_with_replays(
+                            data_uop, constrained_completion_timeout) ||
+                        !environment.run_until_lq_retired(8192) ||
+                        environment.lq_allocated() != lq_allocated_before + 2U ||
+                        (vector_fof_first_fault &&
+                         environment.exception_vaddr() != address)) {
+                        return false;
+                    }
+
+                    auto fix_vl_uop = data_uop;
+                    fix_vl_uop.pdest =
+                        static_cast<std::uint8_t>(data_uop.pdest + 1U);
+                    fix_vl_uop.expected_exception_mask = 0;
+                    fix_vl_uop.expected_vl = vector_fof_first_fault ? 2U : 1U;
+                    fix_vl_uop.vuop_idx = 1;
+                    fix_vl_uop.last_uop = true;
+                    fix_vl_uop.vl_wen = true;
+                    fix_vl_uop.expected_debug_is_mmio.reset();
+                    fix_vl_uop.expected_debug_is_ncio.reset();
+                    fix_vl_uop.expected_debug_is_perf_cnt.reset();
+                    const std::uint64_t fix_writebacks_before =
+                        environment.vector_fof_fix_writebacks();
+                    environment.expect_vector_data(fix_vl_uop, {});
+                    if (!environment.issue_vector(
+                            fix_vl_uop, constrained_completion_timeout) ||
+                        !environment.run_until_vector_complete(
+                            constrained_completion_timeout) ||
+                        environment.lq_allocated() != lq_allocated_before + 2U ||
+                        environment.vector_fof_fix_writebacks() !=
+                            fix_writebacks_before + 1U) {
+                        return false;
+                    }
+
+                    ++constraint_coverage.vector_fof_presence[1];
+                    ++constraint_coverage.vector_fof_fault_positions[
+                        vector_fof_first_fault ? 1U : 0U];
+                    ++constraint_coverage.vector_fof_eews[eew];
+                    ++constraint_coverage.vector_fof_stage1_modes[
+                        translation.stage1_mode];
+                    ++constraint_coverage.vector_fof_crosses[
+                        ((vector_fof_first_fault ? 1U : 0U) * 2U +
+                         translation.stage1_mode) * 4U + eew];
+                    ++constraint_coverage.vector_fof_fix_vl;
+                    coverage.sample(data_uop);
+                    ++actions;
+                    leaf_addressed = true;
+                } else {
+                    const auto &shape = choose_vector_shape(
+                        store ? 1U : 0U, std::nullopt, false);
+                    const unsigned data_eew = shape.addressing >= 2
+                        ? shape.vsew : shape.eew;
+                    const bool vector_corner =
+                        random() % 1000 < constraints.vector_corner_per_mille;
+                    const auto uops = make_random_vector_uops(
+                        store, action_cacheable_address(1U << data_eew),
+                        shape, vector_corner);
+                    if (!issue_random_vector_instruction(uops)) {
+                        return false;
+                    }
+                    sample_constrained_vector_instruction(store, shape, uops);
                 }
-                sample_constrained_vector_instruction(store, shape, uops);
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::vector_segment) {
                 if (!environment.run_until_all_complete(8192) ||

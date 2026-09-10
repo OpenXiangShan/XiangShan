@@ -187,6 +187,10 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
+    // VFOF is a low-rate ordinary vector-load subclass.  The fault-position
+    // split is architectural stimulus, not a pipeline/replay expectation.
+    unsigned vector_fof_per_mille = 0;
+    unsigned vector_fof_first_fault_per_mille = 0;
     unsigned vector_masked_per_mille = 0;
     unsigned vector_vma_per_mille = 0;
     unsigned vector_vta_per_mille = 0;
@@ -282,6 +286,8 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_fof_per_mille = 100,
+                .vector_fof_first_fault_per_mille = 500,
                 .vector_masked_per_mille = 500,
                 .vector_vma_per_mille = 500,
                 .vector_vta_per_mille = 500,
@@ -377,6 +383,8 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
+                .vector_fof_per_mille = 10,
+                .vector_fof_first_fault_per_mille = 100,
                 .vector_masked_per_mille = 100,
                 .vector_vma_per_mille = 500,
                 .vector_vta_per_mille = 500,
@@ -470,6 +478,8 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_fof_per_mille = 250,
+                .vector_fof_first_fault_per_mille = 500,
                 .vector_masked_per_mille = 500,
                 .vector_vma_per_mille = 500,
                 .vector_vta_per_mille = 500,
@@ -947,6 +957,10 @@ struct RandomConstraints {
             misaligned_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
+        } else if (key == "vector-fof") {
+            vector_fof_per_mille = parsed;
+        } else if (key == "vector-fof-first-fault") {
+            vector_fof_first_fault_per_mille = parsed;
         } else if (key == "vector-masked") {
             vector_masked_per_mille = parsed;
         } else if (key == "vector-vma") {
@@ -1273,6 +1287,20 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "nested PTW errors require a nonzero VS-stage mode weight");
         }
+        if (vector_fof_per_mille != 0 &&
+            operation_weights[vector_load] == 0) {
+            throw std::invalid_argument(
+                "vector-fof requires a nonzero vector-load weight");
+        }
+        if (vector_fof_per_mille == 1000) {
+            throw std::invalid_argument(
+                "vector-fof must leave a nonzero ordinary vector-load share");
+        }
+        if (vector_fof_per_mille != 0 &&
+            translation_weights[translation_stage1] == 0) {
+            throw std::invalid_argument(
+                "vector-fof requires stage-1 translation traffic");
+        }
         if (operation_weights[vector_load] != 0 ||
             operation_weights[vector_store] != 0) {
             const auto require_vector_weights = [](const auto &weights,
@@ -1518,7 +1546,10 @@ struct RandomConstraints {
             nested_vs_napot_per_mille > 1000 ||
             nested_g_napot_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
-            vector_corner_per_mille > 1000 || probes_per_mille > 1000 ||
+            vector_corner_per_mille > 1000 ||
+            vector_fof_per_mille > 1000 ||
+            vector_fof_first_fault_per_mille > 1000 ||
+            probes_per_mille > 1000 ||
             vector_masked_per_mille > 1000 || vector_vma_per_mille > 1000 ||
             vector_vta_per_mille > 1000 ||
             vector_partial_vl_per_mille > 1000 ||
@@ -1968,6 +1999,11 @@ struct RandomConstraints {
         return choose_weighted(stage1_mode_weights, random);
     }
 
+    unsigned choose_vector_eew(std::uint64_t random) const
+    {
+        return choose_weighted(vector_eew_weights, random);
+    }
+
     unsigned choose_vs_mode(std::uint64_t random) const
     {
         return choose_weighted(vs_mode_weights, random);
@@ -2408,7 +2444,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=43 constraints=" << name
+        stream << "constraint_schema=44 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2523,6 +2559,9 @@ struct RandomConstraints {
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
+               << " target_vector_fof=" << vector_fof_per_mille
+               << " target_vector_fof_first_fault="
+               << vector_fof_first_fault_per_mille
                << " target_vector_masked=" << vector_masked_per_mille
                << " target_vector_vma=" << vector_vma_per_mille
                << " target_vector_vta=" << vector_vta_per_mille

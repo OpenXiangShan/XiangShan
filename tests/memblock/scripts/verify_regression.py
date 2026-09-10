@@ -347,6 +347,129 @@ def _check_concurrent_vector_shapes(
     )
 
 
+def _check_vector_fof_coverage(
+    result: dict[str, Any],
+    target_operations: list[int],
+    actual_operations: list[int],
+    target_translation: list[int],
+    target_stage1: list[int],
+    target_vector_eew: list[int],
+    vector_directions: list[int],
+) -> None:
+    """Check architectural VFOF class selection and fix-VL conservation."""
+
+    target_fof = result.get("target_vector_fof")
+    target_first_fault = result.get("target_vector_fof_first_fault")
+    for name, value in (
+        ("target_vector_fof", target_fof),
+        ("target_vector_fof_first_fault", target_first_fault),
+    ):
+        _require(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and 0 <= value <= 1000,
+            f"{name} is not a per-mille integer: {value!r}",
+        )
+    presence = _csv_counts(result, "actual_vector_fof", 2)
+    fault_positions = _csv_counts(result, "actual_vector_fof_fault", 2)
+    fof_eews = _csv_counts(result, "actual_vector_fof_eew", 4)
+    fof_modes = _csv_counts(result, "actual_vector_fof_stage1_mode", 2)
+    fof_cross = _csv_counts(result, "actual_vector_fof_cross", 2 * 2 * 4)
+    fix_vl = result.get("actual_vector_fof_fix_vl")
+    _require(
+        isinstance(fix_vl, int)
+        and not isinstance(fix_vl, bool)
+        and fix_vl >= 0,
+        f"actual_vector_fof_fix_vl is not a nonnegative integer: {fix_vl!r}",
+    )
+
+    load_enabled = target_operations[2] != 0
+    if target_fof != 0:
+        _require(
+            load_enabled and target_translation[1] != 0,
+            "enabled VFOF requires vector-load and stage-1 translation traffic",
+        )
+    _require(
+        presence[0] == vector_directions[0]
+        and sum(presence) == actual_operations[2],
+        "ordinary/VFOF presence does not conserve vector-load operations",
+    )
+    if not load_enabled or target_fof == 0:
+        _require(
+            presence[1] == 0
+            and fault_positions == [0, 0]
+            and fof_eews == [0, 0, 0, 0]
+            and fof_modes == [0, 0]
+            and fof_cross == [0] * 16
+            and fix_vl == 0,
+            "disabled VFOF has fault or fix-VL observations",
+        )
+        return
+
+    _require(
+        (target_fof == 1000 and presence[0] == 0 and presence[1] > 0)
+        or (0 < target_fof < 1000 and presence[0] > 0 and presence[1] > 0),
+        "actual_vector_fof has an enabled but uncovered class: "
+        f"target={target_fof} actual={presence}",
+    )
+    _require(
+        (
+            target_first_fault == 0
+            and fault_positions[0] > 0
+            and fault_positions[1] == 0
+        )
+        or (
+            target_first_fault == 1000
+            and fault_positions[0] == 0
+            and fault_positions[1] > 0
+        )
+        or (
+            0 < target_first_fault < 1000
+            and fault_positions[0] > 0
+            and fault_positions[1] > 0
+        ),
+        "actual_vector_fof_fault has an enabled but uncovered class: "
+        f"target={target_first_fault} actual={fault_positions}",
+    )
+    crossed_faults = [0, 0]
+    crossed_modes = [0, 0]
+    crossed_eews = [0, 0, 0, 0]
+    cross_total = 0
+    index = 0
+    for fault in range(2):
+        fault_enabled = (
+            target_first_fault != 0
+            if fault != 0
+            else target_first_fault != 1000
+        )
+        for mode in range(2):
+            for eew in range(4):
+                count = fof_cross[index]
+                index += 1
+                enabled = (
+                    fault_enabled
+                    and target_stage1[mode] != 0
+                    and target_vector_eew[eew] != 0
+                )
+                _require(
+                    (count > 0) == enabled,
+                    "actual_vector_fof_cross does not match enabled classes: "
+                    f"fault={fault} mode={mode} eew={eew}",
+                )
+                cross_total += count
+                crossed_faults[fault] += count
+                crossed_modes[mode] += count
+                crossed_eews[eew] += count
+    _require(
+        cross_total == presence[1]
+        and crossed_faults == fault_positions
+        and crossed_modes == fof_modes
+        and crossed_eews == fof_eews
+        and fix_vl == presence[1],
+        "VFOF cross/fault-position/fix-VL accounting is not conserved",
+    )
+
+
 def _check_miss_burst_coverage(
     result: dict[str, Any],
     schema: int,
@@ -489,7 +612,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -3149,6 +3272,16 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if schema >= 42:
         _check_concurrent_vector_shapes(
             result, target_operations, vector_targets, policy_targets
+        )
+    if schema >= 44:
+        _check_vector_fof_coverage(
+            result,
+            target_operations,
+            actual_operations,
+            target_translation,
+            target_stage1,
+            vector_targets["eew"],
+            vector_directions,
         )
 
 

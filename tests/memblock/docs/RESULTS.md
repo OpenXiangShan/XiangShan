@@ -3678,3 +3678,29 @@ single terminal disposition, queue conservation, refill/GrantAck conservation,
 and externally visible outstanding depth. Bank identity, replay count, MSHR
 state, prefetch source/count, and completion cycles remain diagnostic only and
 are not correctness criteria.
+
+### Schema-44 VFOF Coverage Seed 4401
+
+On 2026-09-10, the current Picker `5e9e38d` / xcomm `29c290b` harness with
+Verilator 5.052 completed
+`random-mixed --seed 4401 --transactions 3072 --constraints coverage` with
+return code zero. The run reached cycle 3,148,101 on complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+Schema 44 VFOF coverage reached 315 ordinary vector loads and 48 VFOF loads.
+The VFOF fault-position counts were `20,28` (later-element, first-element),
+stage-1 modes were `28,20` (Sv39, Sv48), and EEW counts were `11,12,14,11`
+for 8/16/32/64-bit elements. All 16 fault-position x stage-1-mode x EEW
+bins were nonzero. Every VFOF action produced exactly one fix-VL writeback
+(`actual_vector_fof_fix_vl=48`); the independent page-table/data oracle also
+checked prefix data, page-fault suppression/preservation, fault VA, unique
+identity termination, and no additional LQ allocation for fix-VL.
+
+The broader coverage run produced 72,956 scalar-load, 33,058 scalar-store,
+1,141 vector-load, 980 vector-store, and 18 prefetch writebacks. DCache
+activity was 79,854 refills, one AcquirePerm, 79,855 GrantAcks, 611 Probes,
+and 33,236 ReleaseData transactions. Queue accounting closed at
+`77210+34/77244` and `37076+0/37076`, with zero unobserved cancellations.
+The external oracle remains identity/data/exception/fault-VA/final-VL/
+queue/protocol based; bank identity, replay count, prefetch source/count,
+MSHR state, and exact timing remain diagnostic only.
