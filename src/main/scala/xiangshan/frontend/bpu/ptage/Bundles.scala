@@ -16,9 +16,11 @@
 package xiangshan.frontend.bpu.ptage
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
@@ -64,6 +66,42 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
   val p1:      PtageBlock = new PtageBlock
   val p2:      PtageBlock = new PtageBlock
   val p2Valid: Bool       = Bool()
+}
+
+/** pTAGE's answer for one prediction cycle: one block, two on a 2-taken hit, or none at all. */
+class PtagePrediction(implicit p: Parameters) extends PtageBundle {
+  // each block already decoded into the shape every other predictor hands the top level
+  val blocks: Vec[Valid[Prediction]] = Vec(MaxPredictionNum, Valid(new Prediction))
+}
+
+/** What training needs to know about the lookup that produced a prediction.
+  *
+  * Carried down the predictor pipeline rather than recomputed, because pTAGE indexes on the *previous* group's start
+  * pc and history: re-deriving an index at training time would have to reproduce a context that has since moved on,
+  * and any drift would train a different entry than the one that predicted.
+  */
+class PtageMeta(implicit p: Parameters) extends PtageBundle {
+  val setIdx:  Vec[UInt] = Vec(NumTables, UInt(SetIdxWidth.W))
+  val tag:     Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
+  val bankIdx: UInt      = UInt(BankIdxWidth.W)
+  // the hit entries' useful bits, used to pick an allocation victim; may be stale, which costs allocation quality
+  // but never correctness
+  val usefulVec: Vec[Bool]   = Vec(NumTables, Bool())
+  val provider:  Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  // the provider entry as it was read, so training need not read the table again to know what it is correcting
+  val p1Counter:     SaturateCounter = PtageCounter()
+  val p2Counter:     SaturateCounter = PtageCounter()
+  val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val p1Attribute:   BranchAttribute = new BranchAttribute
+  val p2Valid:       Bool            = Bool()
+  // the stored second block, carried so a write that learns nothing new about it can put it back unchanged instead of
+  // dropping it
+  val p2CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val p2Attribute:   BranchAttribute = new BranchAttribute
+  val p2NextPcLow:   UInt            = UInt(NextPcLowWidth.W)
+  // The first group after a correction was indexed with the history as it stood before that correction landed, so it
+  // belongs to no entry and must not be trained. This is the warm-up that indexing a group ahead costs.
+  val noAnchor: Bool = Bool()
 }
 
 class BankReadReq(implicit p: Parameters) extends PtageBundle {
