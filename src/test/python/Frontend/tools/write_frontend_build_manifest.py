@@ -115,6 +115,34 @@ def _is_dut_input_path(path: str) -> bool:
     )
 
 
+def _resolve_design_baseline_sha(
+    repo_root: Path, source_sha: str, explicit_sha: str = ""
+) -> str:
+    override = (
+        str(explicit_sha).strip()
+        or os.environ.get("FRONTEND_DESIGN_BASELINE_SHA", "").strip()
+    )
+    if override:
+        return override
+
+    merge_log = _git(
+        repo_root,
+        "log",
+        "--first-parent",
+        "--merges",
+        "--format=%H%x00%P%x00%s",
+        source_sha,
+    )
+    for line in merge_log.splitlines():
+        fields = line.split("\0", 2)
+        if len(fields) != 3 or "kunminghu-v3" not in fields[2]:
+            continue
+        parents = fields[1].split()
+        if len(parents) >= 2:
+            return parents[1]
+    return source_sha
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Write a provenance manifest for a compiled Frontend DUT")
     parser.add_argument("--repo-root", type=Path, required=True)
@@ -131,7 +159,10 @@ def main() -> int:
     parser.add_argument(
         "--design-baseline-sha",
         default="",
-        help="Optional semantic design baseline SHA (defaults to --dut-source-sha)",
+        help=(
+            "Optional semantic design baseline SHA; defaults to "
+            "FRONTEND_DESIGN_BASELINE_SHA or the latest kunminghu-v3 merge parent"
+        ),
     )
     args = parser.parse_args()
 
@@ -142,7 +173,9 @@ def main() -> int:
         or os.environ.get("FRONTEND_DUT_SOURCE_SHA", "").strip()
         or implementation_sha
     )
-    baseline_sha = str(args.design_baseline_sha).strip() or source_sha
+    baseline_sha = _resolve_design_baseline_sha(
+        repo_root, source_sha, args.design_baseline_sha
+    )
     # Refuse an accidental typo or a non-commit override.  The build remains
     # tied to a real frozen revision even when observability-only files are
     # committed after that revision.
