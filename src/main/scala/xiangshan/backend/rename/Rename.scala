@@ -25,7 +25,7 @@ import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{CompressedSlotUopNumWidth, DecodeOutUop, NormalUopNumWidth, RenameOutUop, connectSamePort}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z}
 import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
@@ -365,11 +365,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uopDbg.pc := inDbg.pc
       uopDbg.debug_seqNum := inDbg.debug_seqNum
       uopDbg.instr := in.instr
-      uopDbg.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse))
       // Only assign performance counters in debugInfo
       uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
       uopDbg.perfDebugInfo.renameTime := GTimer()
-      uopDbg.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
+      uopDbg.debug_sim_trig := io.in(i).bits.instr === SIM_TRIG
     }
   }
   private val fuType       = uops.map(_.fuType)
@@ -409,7 +408,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   val isJmp = Wire(Vec(RenameWidth, Bool()))
   isJmp zip io.in.map(_.bits) foreach {
-    case (auij, in) => auij := Mux(in.exceptionVec.asUInt.orR, false.B, ALUOpType.isJmp(in.fuOpType) && (in.numWB === 2.U))
+    case (auij, in) => auij := Mux(in.exceptionVec.asUInt.orR, false.B, FuType.isJump(in.fuType) && (in.numWB === 2.U))
   }
 
   val isStore = Wire(Vec(RenameWidth, Bool()))
@@ -555,7 +554,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).fflagsWen := io.in(i).bits.fflagsWen
     uops(i).dirtyFs := io.in(i).bits.fpWen
     uops(i).dirtyVs := false.B // Todo: handle this in some DecodeField
-    val simTrigMask = Cat(io.in.map(in => in.bits.instr === XSDebugDecode.SIM_TRIG).reverse)
+    val simTrigMask = Cat(io.in.map(in => in.bits.instr === SIM_TRIG).reverse)
     uops(i).debug.foreach(_.debug_sim_trig := (slotMask & simTrigMask).orR)
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
@@ -679,8 +678,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       isXret,
       Itype.ExpIntReturn,
       Itype.jumpTypeGen(
-        inVec(i).fuType,
-        inVec(i).fuOpType,
+        inVec(i).isJ,
+        inVec(i).isJr,
+        FuType.isBrh(inVec(i).fuType),
         inVec(i).ldest.asTypeOf(new OpRegType),
         inVec(i).lsrc(0).asTypeOf(new OpRegType)
       )

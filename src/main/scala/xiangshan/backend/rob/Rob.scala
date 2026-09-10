@@ -149,7 +149,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
 
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
-  val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
@@ -2361,6 +2360,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           difftestLoadEvent.isVLoad  := isVLoad
       }
     }
+  }
   }
 
   if (env.EnableDifftest || env.AlwaysBasicDiff) {

@@ -210,7 +210,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.ftqOffset := robEnq.ftqOffset
     robEntry.slotHeadRvcMask := robEnq.slotHeadRvcMask
     robEntry.predTaken := robEnq.predTaken
-    robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
+    robEntry.needVTB := robEnq.isVset
     robEntry.vls := robEnq.vlsInstr
     robEntry.rfWen := robEnq.rfWen
     robEntry.interruptSafe := robEnq.interruptSafe

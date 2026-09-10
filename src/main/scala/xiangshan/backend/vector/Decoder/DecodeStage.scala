@@ -170,7 +170,7 @@ class DecodeStageImp(
           !FuType.isFence(bits.fuType) &&
           !FuType.isCsr(bits.fuType) &&
           !FuType.isVset(bits.fuType) &&
-          !FuType.isVArithMem(bits.fuType)
+          !FuType.isVArith(bits.fuType)
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
         bits.frm := uopInfo.frm
