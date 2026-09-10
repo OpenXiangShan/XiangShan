@@ -564,11 +564,12 @@ are planned work items, not silently accepted coverage:
   covered; translation-fence ordering for global/selective
   leaf updates, both supported stage modes, and all four fully nested VS/G
   pairs are covered);
-- all 78 legal ordinary unit-stride, strided, indexed-unordered, and
-  indexed-ordered configurations, all 338 legal segment
-  NF/EEW/SEW/LMUL/EMUL configurations per addressing mode, all legal
-  whole-register NF/EEW combinations, direct load/store/FOF redirect
-  cancellation, and both first- and later-element segment FOF faults are
+- low-rate VFOF first/later-fault and fix-VL composition in the common
+  constrained-random interface remains open; all 78 legal ordinary unit-
+  stride, strided, indexed-unordered, and indexed-ordered configurations, all
+  338 legal segment NF/EEW/SEW/LMUL/EMUL configurations per addressing mode,
+  all legal whole-register NF/EEW combinations, direct load/store/FOF redirect
+  cancellation, and focused first- and later-element segment FOF faults are
   covered;
 - broader fixed-PMA region/permission/edge crosses for HLV/HLVX/HSV beyond the
   covered `0x80000000` device-to-DDR transition,

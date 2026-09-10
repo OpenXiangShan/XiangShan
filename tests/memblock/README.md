@@ -1419,10 +1419,10 @@ address-qualified D response is held until the DCache manager exposes the
 requested number of outstanding A transactions. The online and offline gates
 close every enabled depth x legal issue-width x Bare/stage-1/nested bin, then
 require at least one target request plus exactly one scalar writeback and LQ
-dequeue per load, with one GrantAck for every refill. Coverage and corner emphasize depth
-closure; `spec` keeps the operation uncommon but nonzero and biases toward
-shallower bursts. At schema 39 the minimum `random-mixed` length was 2304
-actions.
+dequeue per load, with one GrantAck for every refill. Coverage and corner
+emphasize depth closure; `spec` keeps the operation uncommon but nonzero and
+biases toward shallower bursts. At schema 39 the minimum `random-mixed` length
+was 2304 actions.
 
 Schema 40 adds the independently configurable `bank-conflict` per-mille
 dimension to clean scalar-load actions. Each selected action warms fresh lines,

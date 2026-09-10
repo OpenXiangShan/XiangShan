@@ -3648,3 +3648,33 @@ snapshot remains diagnostic calibration: 7,804 of 7,900 checkpoints parsed,
 including billions of ordinary/segment vector issues, vector enqueues,
 bank-conflict/replay events, miss-queue multi-enqueues, merged/rejected loads,
 releases, and Probe traffic.
+
+### SPEC Profile Seed 31 (Schema 43)
+
+On 2026-09-10, the current frozen Verilator 5.052 binary completed
+`make random-mixed JOBS=16 SEED=31 TRANSACTIONS=3072 CONSTRAINTS=spec` with
+return code zero. The run reached cycle 7,101,304 on RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+The run produced 72,722 scalar writebacks, 1,137 vector-load writebacks, and
+936 vector-store writebacks; the complete operation mix was
+`196,93,334,316,12,31,54,2,4,72,48,0,12,1537,260`. DCache accounting
+included 79,676 refills, four AcquirePerms, and 79,680 GrantAcks, with maximum
+external outstanding depth 16. LQ/SQ accounting closed at `76882+2/76884`
+and `36951+0/36951`.
+
+Schema 43 miss-burst coverage reached both compositions (`132,128`), every
+depth 2..16 (`10,15,19,18,18,18,18,18,18,18,18,18,18,18,18`), all issue
+widths (`91,87,82`), and all three translation regimes (`86,86,88`). The
+ten manager observations were
+`260,2409,2281,128,2409,3236,3236,2281,128,2537` for actions, target lines,
+scalar loads, vector-load uops, target requests, refills, GrantAcks, scalar
+writebacks, vector writebacks, and LQ dequeues respectively. The vector
+member therefore exercised its two-flow LQ conservation in the realistic
+SPEC profile.
+
+The simulator oracle used independent memory image/data, transaction identity,
+single terminal disposition, queue conservation, refill/GrantAck conservation,
+and externally visible outstanding depth. Bank identity, replay count, MSHR
+state, prefetch source/count, and completion cycles remain diagnostic only and
+are not correctness criteria.
