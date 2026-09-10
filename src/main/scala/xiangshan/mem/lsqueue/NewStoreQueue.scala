@@ -594,7 +594,9 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       )
       val s2OutMask            = ParallelLookUp(s2ByteSelectOffset, s2SelectMask) & s2LoadMaskEnd
 
-      val s2FullOverlap        = s2SelectDataEntry.byteStart <= s2LoadStart && s2SelectDataEntry.byteEnd >= s2LoadEnd
+      // byteStart/byteEnd only bound the store's 16B span, not the bytes it actually holds, so a
+      // store that partially covers the load's bank looks fully overlapped. Check the real mask.
+      val s2FullOverlap        = s2OutMask === s2LoadMaskEnd
       // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
       // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
       val s2Cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR && s2ForwardValid
