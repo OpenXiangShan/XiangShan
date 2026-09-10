@@ -21,6 +21,7 @@ object NumWbField extends DecodeField[InstPattern, UInt] {
     val numWb = instP match {
       case int: IntInstPattern =>
         int match {
+          case _: CboInstPattern => 2
           case s: IntSTypePattern => s match {
             // SB, SH, SW, SD,
             case IntStoreInstPattern() => 2
