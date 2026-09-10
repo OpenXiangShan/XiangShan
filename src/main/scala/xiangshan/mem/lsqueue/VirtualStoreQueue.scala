@@ -178,7 +178,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     when(enqSet) {
       ctrlEntries(i).allocated := true.B
       ctrlEntries(i).isVec := enqBits.uop.isVec
-      ctrlEntries(i).vecMbCommit := enqBits.uop.vecMbCommit
+      ctrlEntries(i).vecMbCommit := false.B
     }.elsewhen(deqCancel || needCancel(i)) {
       ctrlEntries(i).allocated := false.B
       ctrlEntries(i).isVec := false.B

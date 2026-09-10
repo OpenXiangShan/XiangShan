@@ -102,7 +102,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     // must also keep the target ROB's existing firstUop/lastUop allocation
     // semantics instead of treating each emitted uop as an architectural slot.
     x.valid && (x.bits.waitForward || x.bits.blockBackward ||
-      FuType.isVset(x.bits.fuType) || FuType.isVArithMem(x.bits.fuType) ||
+      FuType.isVset(x.bits.fuType) || FuType.isVArith(x.bits.fuType) ||
       !x.bits.firstUop || !x.bits.lastUop)
   })
 
@@ -126,7 +126,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val isCboVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType) && LSUOpType.isCboAll(x.bits.fuOpType)))
   val rawNoCompressTypeVec = VecInit(io.in.zip(isCboVec).zip(cannotCompressVec).zip(slotNeedsFlushVec).map { case (((x, isCbo), cannotCompress), slotNeedsFlush) =>
     x.valid && (io.forceNoCompress ||
-      FuType.isVArithMem(x.bits.fuType) ||
+      FuType.isVArith(x.bits.fuType) ||
       FuType.isVset(x.bits.fuType) ||
       FuType.isCsr(x.bits.fuType) ||
       FuType.isFence(x.bits.fuType) ||
@@ -173,7 +173,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   // Each lane contributes a unary Boolean transform to the open-pair state:
   // identity for non-starts, reset for no-compress starts, and toggle otherwise.
   // Function composition is associative, so offsets 1/2/4 form a logarithmic prefix.
-  var pairStatePrefix = (0 until RenameWidth).map { i =>
+  var pairStatePrefix: Seq[(Bool, Bool)] = (0 until RenameWidth).map { i =>
     val isPairableStart = tokenStart(i) && !noCompressTypeVec(i)
     (!noCompressTypeVec(i), isPairableStart)
   }
