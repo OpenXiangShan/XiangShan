@@ -21,7 +21,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSfenceAction,
 )
-from env.core.transactions import CommitTarget, ProgramImage, RedirectTxn
+from env.core.transactions import BackendRedirectClass, CommitTarget, ProgramImage, RedirectTxn
 from env.support import PmpPmaConfig
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
@@ -1919,8 +1919,34 @@ def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
 
     assert _wait_for_observed_pc(env, pcs[0])
     for pc in pcs[1:]:
+        source = None
+        for _ in range(1000):
+            source = next(
+                (
+                    entry
+                    for entry in reversed(env.backend_model._cfvec_queue)
+                    if not bool(entry.exception_marked)
+                ),
+                None,
+            )
+            if source is not None:
+                break
+            env.step(1)
+        assert source is not None, {
+            "target_pc": hex(int(pc)),
+            "cfvec_queue": [hex(int(entry.pc)) for entry in env.backend_model._cfvec_queue],
+        }
         assert InjectRedirectSequence(
-            RedirectTxn(target_pc=pc, reason="non-crossing-rvi-offset", max_cycles=1000)
+            RedirectTxn(
+                target_pc=pc,
+                reason="non-crossing-rvi-offset",
+                max_cycles=1000,
+                source_pc=int(source.pc),
+                source_ftq_flag=int(source.ftq_flag),
+                source_ftq_value=int(source.ftq_value),
+                source_ftq_offset=int(source.ftq_offset),
+                redirect_class=BackendRedirectClass.OTHER,
+            )
         ).run(env)
         assert _wait_for_observed_pc(env, pc)
 

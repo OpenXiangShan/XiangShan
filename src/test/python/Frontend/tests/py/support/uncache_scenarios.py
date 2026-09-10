@@ -575,5 +575,32 @@ def _wait_for_uncache_a_valid_addr(env, addr: int, *, max_cycles: int = 2000) ->
 def _force_redirect_to(env, target_pc: int) -> None:
     env.backend_model.inject_redirect(int(target_pc), "ctrl_redirect", delay_cycles=0)
 
+
+def _replace_u32_after_redirect_flush(
+    env,
+    address: int,
+    value: int,
+    *,
+    redirect_target: int,
+    reason: str,
+) -> None:
+    env.backend_model.set_can_accept(0)
+    env.step(2)
+    assert not env.monitor.get_errors()
+
+    env.clock_reset.io_fencei.value = 1
+    env.backend_model.inject_redirect(
+        int(redirect_target),
+        str(reason),
+        delay_cycles=0,
+    )
+    env.step(3)
+    assert not env.monitor.get_errors()
+    env.memory.write_u32(int(address), int(value))
+    env.step(2)
+    env.clock_reset.io_fencei.value = 0
+    env.step(2)
+    env.backend_model.set_can_accept(1)
+
 def _pulse_sfence(env, *, addr: int = 0, rs1: int = 0, rs2: int = 0, cycles: int = 1) -> None:
     env.pulse_sfence(addr=addr, rs1=rs1, rs2=rs2, cycles=cycles)

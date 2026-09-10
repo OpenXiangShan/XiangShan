@@ -198,11 +198,6 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
         settle_cycles=4,
     )
     source_branch_pa = mapping.paddr_pages[0] + source_branch_offset
-    env.memory.write_u32(source_branch_pa, uncache._ADDI_X0_X0_0)
-    env.clock_reset.io_fencei.value = 1
-    env.step(1)
-    env.clock_reset.io_fencei.value = 0
-    env.step(2)
     uncache._pulse_sfence(env, addr=target_va, rs1=1, rs2=0)
     env.monitor.clear()
     env.monitor.set_expected_pc(source_va)
@@ -210,7 +205,15 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
     request_count_before_fault = int(
         env.uncache_agent.get_stats().get("req_count", 0)
     )
-    uncache._force_redirect_to(env, source_va)
+    uncache._replace_u32_after_redirect_flush(
+        env,
+        source_branch_pa,
+        uncache._ADDI_X0_X0_0,
+        redirect_target=source_va,
+        reason="mmio_predchecker_overlap",
+    )
+    snapshots.clear()
+    observations_after_replacement = len(env.monitor.observations)
 
     overlap = None
     for _ in range(12000):
@@ -238,11 +241,28 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
     assert overlap["uncache_state"] == uncache._IFU_UNCACHE_INVALID
     assert overlap["tl_a_valid"] == 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == request_count_before_fault
-    assert uncache._wait_for_observed_pc(env, source_branch_pc, max_cycles=12000)
+    for _ in range(12000):
+        if any(
+            int(item.pc) == source_branch_pc
+            for item in env.monitor.observations[observations_after_replacement:]
+        ):
+            break
+        env.step(1)
+    post_replacement_observations = env.monitor.observations[
+        observations_after_replacement:
+    ]
+    assert any(
+        int(item.pc) == source_branch_pc for item in post_replacement_observations
+    ), {
+        "source_branch_pc": hex(source_branch_pc),
+        "observed": [hex(int(item.pc)) for item in post_replacement_observations[-32:]],
+    }
     source_observation = next(
-        item for item in env.monitor.observations if int(item.pc) == source_branch_pc
+        item
+        for item in post_replacement_observations
+        if int(item.pc) == source_branch_pc
     )
     assert int(source_observation.instr) == uncache._ADDI_X0_X0_0
     assert not bool(source_observation.is_rvc)
-    assert not any(int(item.pc) == target_va for item in env.monitor.observations)
+    assert not any(int(item.pc) == target_va for item in post_replacement_observations)
     assert not env.monitor.get_errors()
