@@ -105,7 +105,6 @@ class DecodeStageImp(
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
         ctrl.ftqPtr           := inMopBits.ftqPtr
         ctrl.ftqOffset        := inMopBits.ftqOffset
-        ctrl.isLastInFtqEntry := inMopBits.isLastInFtqEntry
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
@@ -139,7 +138,6 @@ class DecodeStageImp(
         bits.crossPageIPFFix := mopInfo.crossPageIPFFix
         bits.ftqPtr := mopInfo.ftqPtr
         bits.ftqOffset := mopInfo.ftqOffset
-        bits.isLastInFtqEntry := mopInfo.isLastInFtqEntry
         bits.instr := mopInfo.rawInst
         bits.commitType := uopInfo.commitType
         bits.srcType :=

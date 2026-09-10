@@ -698,7 +698,6 @@ class CtrlBlockImp(
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
-    decode.io.debugOutValid.foreach{ validVec => validVec(i) := decodePipeRename(i).valid}
   }
 
   for (i <- 0 until RenameWidth - 1) {

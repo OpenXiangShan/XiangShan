@@ -2323,14 +2323,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
         if (fullBasicDiff) {
           difftest.otherwpdest := debug_VecOtherPdest(ptr).zipWithIndex.flatMap { case (pdest, idx) =>
-          val vecDest = if (idx == 0) {
-            Mux(difftest.v0wen, pdest, pdest + V0PhyRegs.U)
-          } else {
-            pdest + V0PhyRegs.U
+            val vecDest = if (idx == 0) {
+              Mux(difftest.v0wen, pdest, pdest + V0PhyRegs.U)
+            } else {
+              pdest + V0PhyRegs.U
+            }
+            val splitDest = (vecDest << 1).asUInt
+            Seq(splitDest, splitDest + 1.U)
           }
-          val splitDest = (vecDest << 1).asUInt
-          Seq(splitDest, splitDest + 1.U)
-        }
         }
         val halfInstrCnt = Mux(j.U === 0.U, formerInstrCntCommit(i), latterInstrCntCommit(i))
         difftest.nFused := Mux(halfInstrCnt > 0.U, halfInstrCnt - 1.U, 0.U)

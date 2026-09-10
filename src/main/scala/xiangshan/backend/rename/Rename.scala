@@ -350,7 +350,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   rat.io.snapshotEnds.foreach { snapshotEnds =>
     snapshotEnds.zipWithIndex.foreach { case (snapshotEnd, i) =>
       snapshotEnd.valid := canOut && io.validVec(i) && io.in(i).bits.lastUop &&
-        needRobFlags(i) && !io.redirect.valid
+        isEntryTailLane(i) && !io.redirect.valid
       snapshotEnd.bits := uops(i).robIdx
     }
     when(canOut && !io.redirect.valid) {
