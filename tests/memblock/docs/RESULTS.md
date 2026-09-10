@@ -21,12 +21,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
 - Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `ab6dc8a6dd41bcedb9d63c90d1763108d0adcf7de5a20f35a4d0616213ac40a5`
+- Current rebuilt and frozen UT executable SHA-256: `18ffd634e94039da15df16e372571c919fac4cc16b92221928408b290584b229`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `b573c08f09623c86f4254497c6af6e9c994abf758c79b6ef5a319df866228cb2`
 - Frozen xspcomm SHA-256: `eb21fb28815e2e725db6d7fe3931ddbf38d982874a4c187550936913b14d2f8b`
 - Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `6b8007df9628239cc6f56bb3ac00aae006f8b9842b52852f1fe1a861b52b31d1`
+- Frozen runtime manifest SHA-256: `156f141b74aa43cbe76164a76b235378bbdbb124f7a4e910e809df96951ef8d4`
 - Frozen-runtime Picker commit: `5e9e38d7087006440ae1c533073b13e798a36927`
 - Frozen-runtime xcomm commit: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
 - Current bootstrap Picker pin: `5e9e38d7087006440ae1c533073b13e798a36927`
@@ -3704,3 +3704,84 @@ and 33,236 ReleaseData transactions. Queue accounting closed at
 The external oracle remains identity/data/exception/fault-VA/final-VL/
 queue/protocol based; bank identity, replay count, prefetch source/count,
 MSHR state, and exact timing remain diagnostic only.
+
+### Schema-45 Capacity-Plus-One Miss Burst
+
+On 2026-09-10, the rebuilt Picker 5.052 runtime completed a focused schema-45
+run with seed 45 and 768 actions. The constrained tail enabled only Bare
+`miss-burst-depth17`, while retaining all three initial scalar issue widths and
+both scalar-only and scalar-plus-vector compositions. It passed at cycle
+206,672 on complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+The run completed 667 depth-17 actions. For every action, the three external
+saturation stages conserved exactly as `667,667,667`: 16 address-qualified
+responses were held, one fair response release was scheduled only after the
+overflow issue became eligible to be presented, and the seventeenth target
+request was observed. Maximum external DCache outstanding depth was 16. The
+manager tuple was
+`667,11339,10995,344,11339,11339,11339,10995,344,11683` for actions,
+target lines, scalar loads, vector-load uops, target requests, refills,
+GrantAcks, scalar writebacks, vector writebacks, and LQ dequeues. Thus every
+target request/refill/GrantAck and scalar/vector terminal disposition
+conserved exactly.
+
+The driver permits either legal initial `ready` value for the overflow issue
+and holds its valid/payload until acceptance if stalled. No internal MSHR,
+reject, replay, bank, prefetch, or exact-cycle observation decides PASS/FAIL.
+The same source revision passed all 219 Python unit tests, `check-rtl`, a fresh
+runtime build, and smoke at cycle 38.
+
+The normal mixed follow-up ran coverage seeds 4601..4604 with 3,072 actions
+per seed and four artifact workers while four SPEC workers ran alongside. All
+four seeds passed in 1,332.671 seconds of wall time at cycles 3,146,076,
+3,136,971, 3,126,608, and 3,145,150. Across 12,288 actions, all sixteen
+miss-burst depths were nonzero; depth 17 ran 72 times and its three saturation
+stages conserved exactly as `72,72,72`. The aggregate miss-burst manager tuple
+was `1118,10938,10389,549,10938,14711,14711,10389,549,11487`, and every seed
+reached maximum external outstanding depth 16. Global traffic included
+320,568 refills, 320,573 GrantAcks, 2,426 Probes, 132,956 ReleaseData
+transactions, 8,245 PTW requests, and 185 Uncache requests; every seed closed
+its LQ/SQ conservation and all manager-backpressure gates.
+
+The independent frozen-artifact verifier accepted
+`build/memblock/schema45-coverage-4x3072.json` as:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=4601..4604 results=4 transactions=12288 elapsed_seconds=1332.670728 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=1e4380823a9255f348da7c625fb1c8f7ee2b7a8f636eee6d7ec55725cc295304
+```
+
+The higher-priority SPEC profile completed seeds 4501..4504 with 3,072
+actions per seed. All four passed at cycles 7,114,222, 7,149,818, 7,132,738,
+and 7,170,331. Across 12,288 actions, every miss-burst depth was nonzero;
+depth 17 ran 72 times and the three saturation stages again conserved as
+`72,72,72`. The aggregate miss-burst manager tuple was
+`1110,10854,10314,540,10854,14085,14085,10314,540,11394`, and every seed
+reached maximum external outstanding depth 16. Global traffic included
+319,750 refills, 319,759 GrantAcks, 2,368 Probes, 132,318 ReleaseData
+transactions, 2,613 PTW requests, and 143 Uncache requests. The independent
+verifier accepted the frozen artifact as:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=4501..4504 results=4 transactions=12288 elapsed_seconds=3035.047025 rtl_sha256=27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057 artifact_sha256=2b6b61e8cd93a1c08744aa0f110c7ed5788a02a9fbda5cab24f80ae46b155bbf
+```
+
+The parallel benchmark runner was also exercised with four independent leaves:
+`single-load`, `vector-segment-fof`, `dcache-coherence`, and `mmio-contracts`.
+All four passed, the JSON retained that command-line order, and total wall time
+was 2.021 seconds, effectively the same as the slowest individual leaf at
+2.020 seconds rather than their 3.115-second sum. The artifact is
+`build/memblock/schema45-benchmark-parallel4.json`, SHA-256
+`a7978e7d95fbcea3dd9946b3ba9ca36f80788ded2d8c64744289707ca42814c6`.
+It is a schema-1 performance sample from before the benchmark runner gained
+post-run frozen-runtime and controller revalidation, so it is not final
+provenance evidence. A schema-2 rerun is required for acceptance.
+
+The schema-2 rerun used the same four leaves, seed 45, 3,072 requested actions,
+and four workers. It passed in 1.933 seconds; results remained in command-line
+order even though completion order differed. Every leaf reported complete RTL
+SHA-256 `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`,
+and frozen runtime, external dependencies, RTL metadata, runner, and all
+controller hashes were identical before and after the run. The artifact is
+`build/memblock/schema45-benchmark-parallel4-v2.json`, SHA-256
+`69191d1e2c2f553de8ae765b8c5ffe4ab34ecc4e19f0fa3d6291f2335caf9968`.

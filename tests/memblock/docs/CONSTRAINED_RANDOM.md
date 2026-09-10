@@ -82,7 +82,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `set-pressure-refill-overlap` | Per-mille share that holds one address-qualified cold refill response per selected pressure set while replacement produces an attributed Release or ReleaseData; zero/1000 are strict endpoints |
 | `set-pressure-release-backpressure` | Per-mille share that forces the first address-attributed target Release or ReleaseData to retain its full C payload for 16 valid cycles; zero/1000 are strict endpoints and unrelated C traffic does not consume the target stall budget |
 | `set-pressure-window1` .. `set-pressure-window8` | Relative weights for one through eight independently allocated pressure sets. A zero weight disables that exact window count; an overlap action holds one address-qualified cold refill per selected set |
-| `miss-burst-depth2` .. `miss-burst-depth16` | Relative weights for the number of distinct cold cache lines held outstanding in one ordinary-load burst; the ceiling is the generated DCache miss-entry count |
+| `miss-burst-depth2` .. `miss-burst-depth17` | Relative weights for distinct cold target lines in one ordinary-load burst. Depths 2..16 hold every response concurrently. Depth 17 is the generated 16-entry DCache capacity plus one: it first reaches 16 externally pending responses, releases one fair response, then requires every target request and architectural operation to finish |
 | `miss-burst-issue-width1` .. `miss-burst-issue-width3` | Relative weights for the same-cycle scalar-load issue width at the head of a burst; widths larger than the composition's scalar-load count are excluded |
 | `miss-burst-scalar-only`, `miss-burst-scalar-vector-load` | Relative composition weights. The mixed class replaces one scalar line with one legal two-flow unit-stride vector-load uop while preserving the selected total target-line depth |
 | `bank-conflict` | Per-mille share of clean scalar-load actions replaced by a two/three-way resident same-bank issue wave; the address bank, depth, translation regime, and line identity remain randomized |
@@ -203,7 +203,7 @@ scenario implementations:
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, `probe-need-data`, `probe-overlap`, `probe-triple-overlap`, and `probe-depth3`..`probe-depth8` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe. Schema 33 derives the eight-entry capacity from the standard DCache configuration, holds an unrelated cold refill, queues up to seven clean auxiliaries plus the dirty primary, and keeps C unready until every selected B request is accepted. All 32 depth x cap x need-data bins close with distinct active B sources, address-matched C responses, exact outstanding depth, and no early delayed-load writeback. Schema 34 walks the complete six-bit B-source namespace across sequences, rejects active-ID reuse, and exactly checks unique IDs, completed-ID reuse, and every 63-to-0 wrap. Schema 36 repeats all depths while CLEAN/FLUSH/INVAL is pending. Schema 37 queues zero through eight auxiliary Probes around successful atomic refills; B may backpressure while D is held, after which the complete burst is accepted under C backpressure | Compose Probe overlap with replacement traffic and malformed manager traffic |
 | Set replacement concurrency | Schema 38 uses direct `set-pressure-window1`..`set-pressure-window8` weights, crosses every class with clean/dirty, refill-overlap, C-backpressure, depth, width, and translation, and closes 1536 bins. Multi-window actions allocate distinct physical set indexes across repeated quartile order. Overlap actions keep one address-qualified D response per set pending and require every set to reach its own replacement minimum before any response is released; all request/writeback/dequeue accounting is weighted by window count. The eight-window ceiling is checked against the standard configuration's 16 DCache miss entries | Compose replacement with Probe/CMO/atomic traffic only after their legal scheduling and attribution contracts are explicit |
-| Ordinary cold-miss concurrency | Schema 43 extends `miss-burst` depth 2..16 and initial scalar issue width 1..3 with scalar-only and scalar+vector-load compositions. Every enabled depth x legal width x composition x translation bin is forced and observed. Each action skips any line already seen at the external manager, arms all address-qualified holds before advancing the DUT, and holds every target refill until the requested outstanding depth is externally visible. Exact identity/data/writeback and LQ-flow completion remain per generated operation; one or more target A requests and globally paired refills/GrantAcks tolerate legal hardware-prefetch traffic | Compose ordinary MLP with replacement/Probe/CMO/atomic traffic after cross-operation scheduling remains externally attributable |
+| Ordinary cold-miss concurrency | Schema 43 extends `miss-burst` depth 2..16 and initial scalar issue width 1..3 with scalar-only and scalar+vector-load compositions. Schema 45 adds depth 17, first proving 16 externally pending responses and then releasing one so the capacity-plus-one request can progress. Every enabled depth x legal width x composition x translation bin is forced and observed. Exact identity/data/writeback and LQ-flow completion remain per generated operation; one or more target A requests and globally paired refills/GrantAcks tolerate legal hardware-prefetch traffic | Compose ordinary MLP with replacement/Probe/CMO/atomic traffic after cross-operation scheduling remains externally attributable; internal reject/replay attribution remains diagnostic only |
 | DCache bank conflict/replay | Schema 40 adds a `bank-conflict` dimension to clean scalar-load actions. Two- and three-way resident waves select all eight 8-byte banks and every enabled translation regime. Terminal data/writeback/LQ identity is checked independently; wakeup, `ld2Cancel`, arbitration, and manager-request counts are diagnostic observations only | The first scalar/vector/AMO/miss-burst interaction reductions are executable with external identity/data/queue oracles; broader bank mapping crosses with every vector/atomic shape and malformed replay responses remain planned |
 | Hardware data prefetch | `stride-stream` composes fixed-PC stride-shaped traffic with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator. Source counts and addresses are reported for characterization; no seed must observe a particular source | Add SMS/stream causality and arbitration only as implementation/performance studies, plus a positive L3-enabled configuration if that integration is enabled |
 | Error injection | Schema 15 adds opcode-qualified CMO denied/corrupt injection. Schema 16 adds Uncache errors with exact response/D-beat accounting and the distinct NC versus MMIO store contracts. Schema 17 adds ordinary scalar-load refill errors with exact clean/corrupt/denied, D-beat, errored-refill, and sink-attributed GrantAck accounting under Bare or translated traffic. Schema 18 adds the same common control and manager conservation to AMO/LR/AMOCAS across W/D widths. Schema 19 adds address-qualified PTW denied/first-beat-corrupt/last-beat-corrupt injection at five host/G/nested walk sites across load/store, root/intermediate/leaf, and all Sv39/Sv48 and Sv39x4/Sv48x4 modes. All enabled outcomes close per seed | Malformed, duplicate, and unsolicited manager responses remain deferred |
@@ -401,16 +401,16 @@ The corresponding constrained-random audit is:
 | --- | --- | --- |
 | Ordinary and segment vector memory | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Schema 44 adds low-rate ordinary VFOF and closes first/later fault x stage-1 mode x EEW plus exact fix-VL conservation. Segment matrices, mask/tail policy, `vl`/`vstart`, NF, translation, and the exact per-element data oracle remain active | Segment FOF remains focused rather than common. The full 624-way ordinary-vector shape cross is closed globally, but is not separately crossed against every other producer in the heterogeneous window |
 | DCache bank conflict/replay | Schema 40: resident 2/3-way x eight address banks x Bare/stage-1/nested as stimulus coverage, with only identity-matched terminal data/writeback/LQ conservation used as the oracle | Vector/atomic same-bank composition is still open |
-| Miss-queue multi-enqueue | Schema 43: distinct-line depth 2..16 x initial scalar issue width 1..3 x scalar-only/scalar+vector-load composition x translation, with held-response outstanding-depth and terminal identity/data/queue oracles | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
-| Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema-40 resident same-bank traffic may incidentally create pressure, but replay/reject observations remain diagnostic | An externally attributable miss-queue-reject stimulus and oracle remain open, as do malformed replay responses |
+| Miss-queue multi-enqueue | Schemas 43/45: distinct-line depth 2..17 x initial scalar issue width 1..3 x scalar-only/scalar+vector-load composition x translation, including capacity-plus-one forward progress, held-response outstanding depth, and terminal identity/data/queue oracles | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
+| Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema 45 applies capacity-plus-one cold-miss pressure and requires external forward progress after one fair response is released. Internal replay/reject observations remain diagnostic | Exact causal attribution to an internal reject is intentionally not an oracle; malformed replay responses remain open |
 | Release traffic | Schema 38 clean/dirty replacement, one through eight set windows, refill overlap, C backpressure, width, depth, set quarter, and translation | Replacement composition with Probe/CMO/atomic remains open |
 | Probe traffic and Probe/miss blocking | Schema 33 depth/cap/data crosses plus schemas 36/37 CMO- and atomic-Probe composition | Direct replacement-Probe composition remains open |
 
 Thus the newly observed event families inform executable stimulus priorities,
 while correctness still comes from their applicable external transaction and
-protocol oracles. Explicit miss-queue-reject causality and the listed
-cross-family compositions remain gaps and must not be inferred from high
-standalone counts.
+protocol oracles. Schema 45 covers externally visible saturation recovery, but
+internal miss-queue-reject causality and the listed cross-family compositions
+remain unclaimed and must not be inferred from high standalone counts.
 
 The additional `cr260831-8f8494560-KunminghuV2Config` dataset contains 27 mcf
 checkpoints. Its final blocks report 196,764,856 loads, 54,612,731 stores,
@@ -435,7 +435,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=44`, the resolved target weights,
+Every terminal line prints `constraint_schema=45`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -479,6 +479,22 @@ produce exactly one fix-VL writeback. These are coverage/accounting gates.
 Expected data, page-fault suppression or preservation, fault VA, final VL,
 transaction identity, and LQ allocation/retirement remain the functional
 oracle and are computed without internal VFOF-buffer or replay state.
+Schema 45 extends the miss-burst depth vector from 15 to 16 fields and its
+depth x width x composition x translation cross from 270 to 288 fields. The
+new last field represents 17 cold target lines. The action must first observe
+at least the generated 16-entry capacity in address-held external responses,
+release one response, observe a request for every target line, and then obtain
+the exact scalar/vector completions and LQ dispositions. It neither samples
+nor requires an internal miss-queue reject or replay count.
+`actual_miss_burst_saturation=reached,release-scheduled,overflow-requested`
+must equal the number of depth-17 actions in all three fields, so every
+capacity-plus-one action—not merely one global maximum—proves the full
+external progress sequence. The selected depth and generated capacity are
+configuration-qualified stimulus-coverage gates, not architectural expected
+results. Functional correctness remains the independent data, identity,
+exactly-once completion, queue-conservation, and TileLink protocol oracle; a
+future capacity change requires a coverage-schema update rather than a new
+ISA-level expected value.
 The five ordinary-vector binary policies report false/true instruction counts.
 A target of zero permits only false, 1000 permits only true, and an intermediate
 target requires both; each pair also conserves against
@@ -601,6 +617,10 @@ first element and VL=1 without an exception, while first-element faults retain
 the load-page-fault and fault VA with VL=2. Both paths require one unique
 fix-VL writeback and no extra LQ allocation. Ordinary vector shape/policy
 counters remain separate, and no internal replay/FSM timing decides PASS.
+Schema 45 adds `miss-burst-depth17` as a capacity-plus-one saturation class.
+It preserves the schema-43 composition and translation cross while requiring
+the externally observed pending depth to reach 16 before fair release permits
+all 17 target requests and architectural completions to drain.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and
