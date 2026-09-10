@@ -70,12 +70,16 @@ On 2026-09-11, a source-level audit found that schema-1
 as ordinary and segment instruction counts. `IssueQueueVlduVstu` feeds VLSU1,
 which supports ordinary vector loads/stores only, but
 `IssueQueueVlduVstuVseglduVsegstu` feeds VLSU0, which supports both ordinary
-and segment operations. Moreover, RTL `issue_instr_count` increments per
-dequeued issue-queue entry, so its unit is a uop rather than an architectural
-instruction. The second queue therefore cannot provide a segment-only rate.
+and segment operations. Moreover, RTL `issue_instr_count` increments for each
+`deqDelay.valid` issue attempt. A resident uop can be counted again after a
+blocked response causes a reissue, so this is neither a distinct-uop count nor
+an architectural-instruction count. The second queue therefore cannot provide
+a segment-only rate.
 
-Analyzer schema 2 uses explicit queue-capability and uop names. The expanded
-snapshot contains 17,891,244,048 total vector-memory issue uops:
+Analyzer schema 3 uses explicit queue-capability and issue-attempt names. It
+supersedes the short-lived schema 2 wording that still called these counts
+uops. The expanded snapshot contains 17,891,244,048 total vector-memory issue
+attempts (including any reissues):
 8,947,798,091 in the ordinary-only queue and 8,943,445,957 in the mixed
 ordinary/segment-capable queue, plus 13,319,415,204 issue-queue enqueues. These
 numbers still establish high vector-memory pressure, but their near equality
@@ -3695,7 +3699,7 @@ request/response. The run therefore adds SPEC workload evidence without
 promoting bank identity, replay count, prefetch source, MSHR state, or any
 cycle-specific behavior to PASS/FAIL criteria. The separate SPEC counter
 snapshot remains diagnostic calibration: 7,804 of 7,900 checkpoints parsed,
-including billions of vector-memory issue-queue uops and enqueues,
+including billions of vector-memory issue attempts and issue-queue enqueues,
 bank-conflict/replay events, miss-queue multi-enqueues, merged/rejected loads,
 releases, and Probe traffic. The two VLSU queue counters do not distinguish
 ordinary from segment uops because the segment-capable queue accepts both.

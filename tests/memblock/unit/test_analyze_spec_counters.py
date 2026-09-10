@@ -87,6 +87,10 @@ class AnalyzeSpecCountersTest(unittest.TestCase):
                 "enq_fire_cnt",
             ): 13,
             (
+                "SimTop.cpu.l_soc.core_with_l2.core.memScheduler.IssueQueueVlduVstuVseglduVsegstu",
+                "enq_fire_cnt",
+            ): 17,
+            (
                 "SimTop.cpu.l_soc.core_with_l2.core.memBlock.inner.dcache.dcache.missQueue",
                 "miss_req_merge_load",
             ): 6,
@@ -104,16 +108,19 @@ class AnalyzeSpecCountersTest(unittest.TestCase):
         self.assertEqual(metrics["scalar_store_instructions"], 30)
         self.assertEqual(metrics["load_unit_tlb_miss_first_issue"], 4)
         self.assertEqual(metrics["load_unit_dcache_real_miss_first_issue"], 9)
-        self.assertEqual(metrics["vector_mem_issue_uops"], 18)
+        self.assertEqual(metrics["vector_mem_issue_attempts"], 18)
         self.assertEqual(
-            metrics["vector_mem_ordinary_only_queue_issue_uops"], 11
+            metrics["vector_mem_ordinary_only_queue_issue_attempts"], 11
         )
         self.assertEqual(
-            metrics["vector_mem_segment_capable_queue_issue_uops"], 7
+            metrics["vector_mem_segment_capable_queue_issue_attempts"], 7
         )
-        self.assertEqual(metrics["vector_mem_enqueue_uops"], 13)
+        self.assertEqual(metrics["vector_mem_enqueue_uops"], 30)
         self.assertNotIn("vector_mem_issue_instructions", metrics)
+        self.assertNotIn("vector_ordinary_issue_instructions", metrics)
         self.assertNotIn("vector_segment_issue_instructions", metrics)
+        self.assertNotIn("vector_mem_enqueue", metrics)
+        self.assertNotIn("vector_mem_issue_uops", metrics)
         self.assertEqual(metrics["dcache_merged_loads"], 6)
         self.assertEqual(metrics["dcache_bank_conflicts"], 12)
         self.assertEqual(metrics["uncache_mmio_stores"], 2)
@@ -133,7 +140,7 @@ class AnalyzeSpecCountersTest(unittest.TestCase):
             report = analyzer.aggregate(root)
             self.assertEqual(report["files_discovered"], 2)
             self.assertEqual(report["checkpoints"], 1)
-            self.assertEqual(report["schema"], 2)
+            self.assertEqual(report["schema"], 3)
             self.assertEqual(report["totals"]["scalar_load_instructions"], 1)
             self.assertEqual(len(report["skipped"]), 1)
 

@@ -114,21 +114,22 @@ def classify_checkpoint(counters: dict[tuple[str, str], int]) -> dict[str, int]:
             "s2_dcache_real_miss_first_issue",
             component_contains=memblock + "LoadUnit_",
         ),
-        # issue_instr_count counts dequeued queue entries (uops), not
-        # architectural vector instructions. VLSU0's queue accepts ordinary
-        # and segment uops, while VLSU1's accepts ordinary uops only; these
-        # queue-level counters cannot isolate segment traffic.
-        "vector_mem_issue_uops": _sum_metric(
+        # issue_instr_count counts deqDelay.valid issue attempts, including
+        # reissues of a resident uop after a blocked response. VLSU0's queue
+        # accepts ordinary and segment uops, while VLSU1's accepts ordinary
+        # uops only; these counters cannot isolate segment traffic or count
+        # distinct architectural instructions/uops.
+        "vector_mem_issue_attempts": _sum_metric(
             counters,
             "issue_instr_count",
             component_contains="IssueQueueVlduVstu",
         ),
-        "vector_mem_ordinary_only_queue_issue_uops": _sum_metric(
+        "vector_mem_ordinary_only_queue_issue_attempts": _sum_metric(
             counters,
             "issue_instr_count",
             component_endswith="IssueQueueVlduVstu",
         ),
-        "vector_mem_segment_capable_queue_issue_uops": _sum_metric(
+        "vector_mem_segment_capable_queue_issue_attempts": _sum_metric(
             counters,
             "issue_instr_count",
             component_endswith="IssueQueueVlduVstuVseglduVsegstu",
@@ -241,7 +242,7 @@ def aggregate(root: Path) -> dict[str, object]:
         totals.update(metrics)
         checkpoints.append({"path": str(path), "time": timestamp, "metrics": metrics})
     return {
-        "schema": 2,
+        "schema": 3,
         "root": str(root),
         "files_discovered": len(files),
         "checkpoints": len(checkpoints),

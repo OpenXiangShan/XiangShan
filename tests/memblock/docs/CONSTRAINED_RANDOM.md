@@ -381,9 +381,9 @@ easy to hide behind aggregate load/miss totals:
 
 | Expanded `5d3934132` event | Count |
 | --- | ---: |
-| All vector-memory issue-queue uops | 17,891,244,048 |
-| Ordinary-only VLSU1 queue issue uops | 8,947,798,091 |
-| Ordinary/segment-capable VLSU0 queue issue uops | 8,943,445,957 |
+| All vector-memory issue attempts | 17,891,244,048 |
+| Ordinary-only VLSU1 queue issue attempts | 8,947,798,091 |
+| Ordinary/segment-capable VLSU0 queue issue attempts | 8,943,445,957 |
 | Vector-memory issue-queue enqueues | 13,319,415,204 |
 | DCache bank conflicts / conflict replays | 12,996,168,822 / 12,996,168,822 |
 | Multi-enqueue miss-queue events | 4,008,031,861 |
@@ -392,15 +392,17 @@ easy to hide behind aggregate load/miss totals:
 | Probes / Probe responses / Probe blocked by miss | 12,899,042 / 12,899,037 / 1,979,461 |
 
 The two VLSU queue counts are not ordinary-versus-segment counts. VLSU0 accepts
-both ordinary and segment uops, VLSU1 accepts ordinary uops only, and the
-`issue_instr_count` implementation counts dequeued queue entries despite its
-name. Their near equality therefore says nothing about the architectural
-segment rate. The equality of conflict and replay counters is also an
-implementation-accounting observation, not an oracle. Issue/enqueue and
-Release/Probe counters can count different granularities and overlap other
-events; they justify prioritizing vector memory, resident-bank replay,
-multi-miss, replacement, and coherence stress but are not converted directly
-into transaction probabilities.
+both ordinary and segment uops, while VLSU1 accepts ordinary uops only.
+Moreover, `issue_instr_count` increments for each `deqDelay.valid` attempt;
+after a blocked response, the same resident uop can reissue and be counted
+again. These are therefore issue-attempt counts, not distinct uop or
+architectural-instruction counts, and their near equality says nothing about
+the architectural segment rate. The equality of conflict and replay counters
+is also an implementation-accounting observation, not an oracle. Issue,
+enqueue, Release, and Probe counters can count different granularities and
+overlap other events; they justify prioritizing vector memory, resident-bank
+replay, multi-miss, replacement, and coherence stress but are not converted
+directly into transaction probabilities.
 
 The corresponding constrained-random audit is:
 
