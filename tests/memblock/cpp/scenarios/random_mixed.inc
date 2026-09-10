@@ -7010,41 +7010,99 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 if (!environment.issue_load_batch(first_batch, 4096, true)) {
                     return false;
                 }
-                if (vector_transaction &&
+                const unsigned pressure_depth = std::min<unsigned>(
+                    depth, memblock::kDcacheMissEntries);
+                const bool capacity_plus_one = depth > pressure_depth;
+                std::array<std::uint64_t, 3> saturation_delta{};
+                if (vector_transaction && !capacity_plus_one &&
                     !environment.issue_vector(*vector_transaction, 4096)) {
                     return false;
                 }
-                for (unsigned index = issue_width; index < transactions.size();
-                     ++index) {
+                const unsigned scalar_issue_limit = capacity_plus_one
+                    ? pressure_depth
+                    : static_cast<unsigned>(transactions.size());
+                for (unsigned index = issue_width;
+                     index < scalar_issue_limit; ++index) {
                     if (!environment.issue_load(transactions[index], 4096)) {
                         return false;
                     }
                 }
-                const auto held_burst_responses = [&]() {
-                    for (unsigned index = 0; index < depth; ++index) {
-                        if (!environment.dcache_response_held_at(
-                                burst_lines[index])) {
-                            return false;
-                        }
-                    }
-                    return environment.dcache_held_response_count() == depth &&
-                        environment.dcache_outstanding_requests() >= depth;
+                const auto held_target_count = [&]() {
+                    return static_cast<unsigned>(std::count_if(
+                        burst_lines.begin(),
+                        burst_lines.begin() + pressure_depth,
+                        [&](std::uint64_t line) {
+                            return environment.dcache_response_held_at(line);
+                        }));
+                };
+                const auto burst_pressure_reached = [&]() {
+                    return held_target_count() >= pressure_depth &&
+                        environment.dcache_held_response_count() >=
+                            pressure_depth &&
+                        environment.dcache_outstanding_requests() >=
+                            pressure_depth;
                 };
                 for (unsigned cycle = 0;
                      cycle < constrained_completion_timeout &&
-                         !held_burst_responses(); ++cycle) {
+                         !burst_pressure_reached(); ++cycle) {
                     if (!environment.run_cycles(1)) {
                         return false;
                     }
                 }
-                if (!held_burst_responses()) {
+                if (!burst_pressure_reached()) {
                     phase = "random-miss-burst-outstanding-depth";
                     return false;
                 }
                 const std::uint64_t observed_outstanding =
                     environment.dcache_outstanding_requests();
+                if (capacity_plus_one) {
+                    saturation_delta[0] = 1;
+                    const auto pressure_end =
+                        burst_lines.begin() + pressure_depth;
+                    const auto held = std::find_if(
+                        burst_lines.begin(), pressure_end,
+                        [&](std::uint64_t line) {
+                            return environment.dcache_response_held_at(line);
+                        });
+                    if (held == pressure_end ||
+                        !environment.schedule_held_dcache_response_release_at(
+                            *held)) {
+                        phase = "random-miss-burst-saturation-release";
+                        return false;
+                    }
+                    saturation_delta[1] = 1;
+                    const bool overflow_issued = vector_transaction
+                        ? environment.issue_vector(*vector_transaction, 4096)
+                        : environment.issue_load(
+                              transactions.at(pressure_depth), 4096);
+                    if (!overflow_issued) {
+                        phase = "random-miss-burst-saturation-issue";
+                        return false;
+                    }
+                    const auto every_target_requested = [&]() {
+                        return std::all_of(
+                            burst_lines.begin(), burst_lines.end(),
+                            [&](std::uint64_t line) {
+                                return environment.dcache_requests_covering_since(
+                                           line, requests_before_burst) != 0;
+                            });
+                    };
+                    for (unsigned cycle = 0;
+                         cycle < constrained_completion_timeout &&
+                             !every_target_requested(); ++cycle) {
+                        if (!environment.run_cycles(1)) {
+                            return false;
+                        }
+                    }
+                    if (!every_target_requested()) {
+                        phase = "random-miss-burst-saturation-progress";
+                        return false;
+                    }
+                    saturation_delta[2] = 1;
+                }
                 for (const auto line : burst_lines) {
-                    if (!environment.release_held_dcache_response_at(line)) {
+                    if (environment.dcache_response_held_at(line) &&
+                        !environment.release_held_dcache_response_at(line)) {
                         return false;
                     }
                 }
@@ -7097,7 +7155,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 constraint_coverage.sample_miss_burst(
                     miss_burst_depth_index, miss_burst_issue_width_index,
                     miss_burst_composition, translation.regime,
-                    observed_outstanding, manager_delta);
+                    observed_outstanding, manager_delta, saturation_delta);
                 ordinary_leaf_addressed = true;
                 ++actions;
                 coverage.cacheable += depth;

@@ -117,8 +117,11 @@ struct RandomConstraints {
     };
     static_assert(
         set_pressure_window_class_count < memblock::kDcacheMissEntries);
+    // Depth classes cover two through one beyond the generated miss-entry
+    // count.  The final class creates externally visible saturation pressure;
+    // it does not require an internal reject or replay implementation.
     static constexpr unsigned miss_burst_depth_count =
-        memblock::kDcacheMissEntries - 1U;
+        memblock::kDcacheMissEntries;
     static constexpr unsigned miss_burst_issue_width_count =
         memblock::kScalarLoadLanes;
 
@@ -268,7 +271,7 @@ struct RandomConstraints {
                 .set_pressure_release_backpressure_per_mille = 500,
                 .set_pressure_window_weights = {1, 1, 1, 1, 1, 1, 1, 1},
                 .miss_burst_depth_weights = {
-                    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+                    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
                 .miss_burst_issue_width_weights = {1, 1, 1},
                 .miss_burst_composition_weights = {1, 1},
                 .translation_weights = {1, 1, 1},
@@ -365,7 +368,7 @@ struct RandomConstraints {
                 .set_pressure_window_weights = {1000, 10, 2, 1, 1, 1, 1, 1},
                 .miss_burst_depth_weights = {
                     1000, 200, 100, 50, 20, 10, 5, 2, 1, 1, 1, 1, 1, 1,
-                    1},
+                    1, 1},
                 .miss_burst_issue_width_weights = {100, 20, 1},
                 .miss_burst_composition_weights = {8, 1},
                 .translation_weights = {5, 990, 5},
@@ -460,7 +463,7 @@ struct RandomConstraints {
                 .set_pressure_release_backpressure_per_mille = 750,
                 .set_pressure_window_weights = {1, 1, 1, 2, 4, 8, 16, 32},
                 .miss_burst_depth_weights = {
-                    1, 1, 1, 1, 1, 1, 1, 2, 2, 4, 4, 8, 8, 16, 32},
+                    1, 1, 1, 1, 1, 1, 1, 2, 2, 4, 4, 8, 8, 16, 32, 64},
                 .miss_burst_issue_width_weights = {1, 2, 4},
                 .miss_burst_composition_weights = {1, 4},
                 .translation_weights = {1, 1, 1},
@@ -771,7 +774,7 @@ struct RandomConstraints {
                 "miss-burst-depth10", "miss-burst-depth11",
                 "miss-burst-depth12", "miss-burst-depth13",
                 "miss-burst-depth14", "miss-burst-depth15",
-                "miss-burst-depth16",
+                "miss-burst-depth16", "miss-burst-depth17",
             }};
         constexpr std::array<std::string_view, miss_burst_issue_width_count>
             miss_burst_issue_width_keys{{
@@ -2444,7 +2447,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=44 constraints=" << name
+        stream << "constraint_schema=45 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];

@@ -1623,7 +1623,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         for contract in (
             "dcache_requests_covering_since(line, 0) != 0",
             "dcache_requests_covering_since(\n                            candidate, 0) == 0",
-            "dcache_outstanding_requests() >= depth",
+            "dcache_outstanding_requests() >=\n                            pressure_depth",
             "manager_delta[1] < manager_delta[0]",
             "manager_delta[4] < depth",
             "manager_delta[5] < manager_delta[4]",
@@ -2779,7 +2779,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=44",
+            "constraint_schema=45",
             "RandomVectorShape",
             "choose_vector_shape",
             "actual_vector_cross=",
@@ -2867,6 +2867,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"miss-burst"',
             '"miss-burst-depth2"',
             '"miss-burst-depth16"',
+            '"miss-burst-depth17"',
             '"miss-burst-issue-width1"',
             '"miss-burst-issue-width3"',
             '"miss-burst-scalar-only"',
@@ -2880,6 +2881,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_miss_burst_composition=",
             "actual_miss_burst_cross=",
             "actual_miss_burst_manager=",
+            "actual_miss_burst_saturation=",
             "actual_miss_burst_max_outstanding=",
             '"bank-conflict"',
             "target_bank_conflict=",
@@ -2897,6 +2899,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "real translated walk windows",
             "ptw_requests_before = environment.ptw_requests()",
             "random-miss-burst-outstanding-depth",
+            "random-miss-burst-saturation-issue",
+            "random-miss-burst-saturation-progress",
             "dcache_requests_covering_since",
             '"random-set-pressure-target-address-exhausted"',
             "begin_dcache_release_observation",
@@ -2912,6 +2916,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "hold_dcache_response_at",
             "dcache_response_held",
             "release_held_dcache_response",
+            "schedule_held_dcache_response_release_at",
             "dcache_outstanding_requests",
             "pending_translation_fences",
             "pending_hfence_vvma",
@@ -2942,6 +2947,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "held_responses_",
             "response_held_at",
             "release_held_response_at",
+            "schedule_held_response_release_at",
+            "scheduled_held_response_release_",
             "accepted_grant_ack_index_",
             "begin_release_ready_window",
             "observed_release_stall_cycles_covering",
@@ -2975,6 +2982,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "miss-burst",
             "miss-burst-depth2",
             "miss-burst-depth16",
+            "miss-burst-depth17",
             "miss-burst-issue-width1",
             "miss-burst-issue-width3",
             "cmo-clean",
@@ -3112,6 +3120,80 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
         self.assertIn("constraint_profile", runner)
         self.assertIn("constraint_overrides", runner)
+
+    def test_miss_burst_capacity_plus_one_releases_after_issue_is_presented(
+        self,
+    ) -> None:
+        environment = read_cpp_source("memblock_env.hpp")
+        driver = (MEMBLOCK_ROOT / "cpp/scenarios/random_mixed.inc").read_text()
+        dcache_agent = (
+            MEMBLOCK_ROOT / "cpp/environment/dcache_agent.inc"
+        ).read_text()
+        miss_burst = driver[
+            driver.index('phase = "random-miss-burst"'):
+            driver.index("} else if (kind == RandomConstraints::scalar_store)")
+        ]
+
+        for contract in (
+            "vector_transaction && !capacity_plus_one",
+            "scalar_issue_limit = capacity_plus_one",
+            "burst_lines.begin() + pressure_depth",
+            "schedule_held_dcache_response_release_at",
+            "const bool overflow_issued = vector_transaction",
+            "transactions.at(pressure_depth)",
+            "saturation_delta[0] = 1",
+            "saturation_delta[1] = 1",
+            "saturation_delta[2] = 1",
+        ):
+            self.assertIn(contract, miss_burst)
+        self.assertLess(
+            miss_burst.index("schedule_held_dcache_response_release_at"),
+            miss_burst.index("const bool overflow_issued"),
+        )
+        for contract in (
+            "after_ticks == 0",
+            "a DCache held response release is already scheduled",
+            "no complete held DCache response to schedule for release",
+            "!scheduled_held_response_release_",
+        ):
+            self.assertIn(contract, dcache_agent)
+        update = dcache_agent[
+            dcache_agent.index("void update_after_tick()"):
+            dcache_agent.index("bool ok() const")
+        ]
+        self.assertLess(
+            update.index("captured_c_.reset();"),
+            update.index("if (scheduled_held_response_release_)"),
+        )
+        self.assertIn(
+            "memory_agent_.schedule_held_response_release_at(", environment
+        )
+        tick = environment[
+            environment.index("void tick(bool monitor = true)"):
+            environment.index("bool check_components()")
+        ]
+        self.assertLess(
+            tick.index("dut_.Step();"),
+            tick.index("memory_agent_.update_after_tick();"),
+        )
+        for issue_name, drive, clear in (
+            (
+                "bool issue_load(const LoadTransaction &transaction",
+                "generated::drive_scalar_load_issue",
+                "generated::clear_scalar_load_issue_valid",
+            ),
+            (
+                "bool issue_vector(\n        const VectorMemoryTransaction &transaction",
+                "generated::drive_vector_memory_issue",
+                "generated::clear_vector_memory_issue_valids",
+            ),
+        ):
+            issue = environment[
+                environment.index(issue_name):
+                environment.index("\n    bool ", environment.index(issue_name) + 10)
+            ]
+            self.assertLess(issue.index(drive), issue.index("tick();"))
+            self.assertLess(issue.index("if (ready)"), issue.index(clear))
 
     def test_random_mixed_preserves_atomic_serialization_contract(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")
@@ -3287,6 +3369,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("--transactions $(or $(TRANSACTIONS),16384)", makefile)
         self.assertIn(
             "--transactions $(or $(STRESS_TRANSACTIONS),16384)", makefile
+        )
+        benchmark_rule = makefile[
+            makefile.index("benchmark-tests:"):makefile.index("analyze-spec-counters:")
+        ]
+        self.assertIn("BENCHMARK_TIMEOUT_SECONDS ?= 7200", makefile)
+        self.assertIn(
+            "--timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS)", benchmark_rule
         )
         stress_rule = makefile[
             makefile.index("stress-regression:"):makefile.index("verify-stress-results:")

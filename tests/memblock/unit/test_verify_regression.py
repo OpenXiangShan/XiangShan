@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 45
+        result["constraint_schema"] = 46
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -450,6 +450,58 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression._check_miss_burst_coverage(
                 fields, 43, disabled_operations, disabled_operations, [1, 0, 0]
             )
+
+    def test_schema_45_checks_miss_burst_saturation_progress(self) -> None:
+        cross = [0] * (16 * 3 * 2 * 3)
+        for width in range(3):
+            for composition in range(2):
+                cross[((15 * 3 + width) * 2 + composition) * 3] = 1
+        fields: dict[str, object] = {
+            "target_miss_burst_depth": ",".join(["0"] * 15 + ["1"]),
+            "target_miss_burst_issue_width": "1,1,1",
+            "target_miss_burst_composition": "1,1",
+            "actual_miss_burst_depth": ",".join(["0"] * 15 + ["6"]),
+            "actual_miss_burst_issue_width": "2,2,2",
+            "actual_miss_burst_composition": "3,3",
+            "actual_miss_burst_translation": "6,0,0",
+            "actual_miss_burst_cross": ",".join(map(str, cross)),
+            "actual_miss_burst_manager": "6,102,99,3,102,102,102,99,3,105",
+            "actual_miss_burst_saturation": "6,6,6",
+            "actual_miss_burst_max_outstanding": 16,
+        }
+        target_operations = [0] * 14 + [1]
+        actual_operations = [0] * 14 + [6]
+        verify_regression._check_miss_burst_coverage(
+            fields, 45, target_operations, actual_operations, [1, 0, 0]
+        )
+
+        fields["actual_miss_burst_max_outstanding"] = 15
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "miss-burst manager accounting",
+        ):
+            verify_regression._check_miss_burst_coverage(
+                fields, 45, target_operations, actual_operations, [1, 0, 0]
+            )
+
+        fields["actual_miss_burst_max_outstanding"] = 16
+        for broken_stage in range(3):
+            saturation = [6, 6, 6]
+            saturation[broken_stage] = 5
+            fields["actual_miss_burst_saturation"] = ",".join(
+                map(str, saturation)
+            )
+            with self.assertRaisesRegex(
+                verify_regression.VerificationError,
+                "miss-burst manager accounting",
+            ):
+                verify_regression._check_miss_burst_coverage(
+                    fields,
+                    45,
+                    target_operations,
+                    actual_operations,
+                    [1, 0, 0],
+                )
 
     def test_constraint_schemas_ten_and_eleven_check_vector_shapes_and_policy(
         self,

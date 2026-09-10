@@ -479,6 +479,14 @@ public:
         return check_components();
     }
 
+    bool schedule_held_dcache_response_release_at(
+        std::uint64_t address, unsigned after_ticks = 1)
+    {
+        memory_agent_.schedule_held_response_release_at(
+            address, after_ticks);
+        return check_components();
+    }
+
     bool begin_dcache_release_ready_window(
         const std::vector<std::uint64_t> &target_lines,
         unsigned stall_valid_cycles)

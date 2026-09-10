@@ -477,11 +477,16 @@ def _check_miss_burst_coverage(
     actual_operations: list[int],
     target_translation: list[int],
 ) -> None:
-    target_miss_depth = _csv_counts(result, "target_miss_burst_depth", 15)
+    miss_depth_count = 16 if schema >= 45 else 15
+    target_miss_depth = _csv_counts(
+        result, "target_miss_burst_depth", miss_depth_count
+    )
     target_miss_width = _csv_counts(
         result, "target_miss_burst_issue_width", 3
     )
-    actual_miss_depth = _csv_counts(result, "actual_miss_burst_depth", 15)
+    actual_miss_depth = _csv_counts(
+        result, "actual_miss_burst_depth", miss_depth_count
+    )
     actual_miss_width = _csv_counts(
         result, "actual_miss_burst_issue_width", 3
     )
@@ -496,7 +501,9 @@ def _check_miss_burst_coverage(
             result, "actual_miss_burst_composition", 2
         )
         actual_miss_cross = _csv_counts(
-            result, "actual_miss_burst_cross", 15 * 3 * 2 * 3
+            result,
+            "actual_miss_burst_cross",
+            miss_depth_count * 3 * 2 * 3,
         )
         actual_miss_manager = _csv_counts(
             result, "actual_miss_burst_manager", 10
@@ -505,12 +512,19 @@ def _check_miss_burst_coverage(
         target_miss_composition = [1]
         actual_miss_composition = [sum(actual_miss_depth)]
         actual_miss_cross = _csv_counts(
-            result, "actual_miss_burst_cross", 15 * 3 * 3
+            result,
+            "actual_miss_burst_cross",
+            miss_depth_count * 3 * 3,
         )
         actual_miss_manager = _csv_counts(
             result, "actual_miss_burst_manager", 7
         )
     actual_miss_max = result.get("actual_miss_burst_max_outstanding")
+    actual_miss_saturation = (
+        _csv_counts(result, "actual_miss_burst_saturation", 3)
+        if schema >= 45
+        else [0, 0, 0]
+    )
     _require(
         isinstance(actual_miss_max, int)
         and not isinstance(actual_miss_max, bool)
@@ -523,11 +537,13 @@ def _check_miss_burst_coverage(
     derived_target_lines = 0
     derived_scalar_loads = 0
     derived_vector_loads = 0
-    crossed_depth = [0] * 15
+    crossed_depth = [0] * miss_depth_count
     crossed_width = [0] * 3
     crossed_translation = [0] * 3
     crossed_composition = [0] * len(target_miss_composition)
-    for depth in range(15):
+    required_outstanding = 0
+    saturation_actions = 0
+    for depth in range(miss_depth_count):
         for width in range(3):
             for composition in range(len(target_miss_composition)):
                 scalar_loads = depth + 2 - int(composition == 1)
@@ -546,6 +562,10 @@ def _check_miss_burst_coverage(
                         and width + 1 <= scalar_loads
                         and target_translation[regime] != 0
                     )
+                    if enabled:
+                        required_outstanding = max(
+                            required_outstanding, min(depth + 2, 16)
+                        )
                     _require(
                         (count > 0) == enabled,
                         "actual_miss_burst_cross does not match enabled "
@@ -556,6 +576,8 @@ def _check_miss_burst_coverage(
                     derived_target_lines += count * (depth + 2)
                     derived_scalar_loads += count * scalar_loads
                     derived_vector_loads += count * int(composition == 1)
+                    if depth + 2 > 16:
+                        saturation_actions += count
                     crossed_depth[depth] += count
                     crossed_width[width] += count
                     crossed_composition[composition] += count
@@ -571,6 +593,7 @@ def _check_miss_burst_coverage(
     if not miss_enabled:
         _require(
             actual_miss_manager == [0] * len(actual_miss_manager)
+            and actual_miss_saturation == [0, 0, 0]
             and actual_miss_max == 0,
             "disabled miss-burst has manager observations",
         )
@@ -587,7 +610,10 @@ def _check_miss_burst_coverage(
             and actual_miss_manager[8] == derived_vector_loads
             and actual_miss_manager[9]
             == derived_scalar_loads + 2 * derived_vector_loads
-            and actual_miss_max >= 2,
+            and actual_miss_saturation
+            == [saturation_actions] * len(actual_miss_saturation)
+            and actual_miss_max
+            >= (required_outstanding if schema >= 45 else 2),
             "miss-burst manager accounting is not conserved",
         )
     else:
@@ -612,7 +638,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )

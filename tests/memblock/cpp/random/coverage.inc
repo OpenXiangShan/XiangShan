@@ -264,7 +264,7 @@ struct ConstraintCoverage {
     // Backpressured actions/stalled target releases/target C stall cycles/
     // stable-payload checks/completed ready windows.
     std::array<std::uint64_t, 5> set_pressure_backpressure_manager{};
-    // [depth2..depth16][same-cycle scalar issue width1..3]
+    // [depth2..depth17][same-cycle scalar issue width1..3]
     // [scalar-only/scalar+vector-load][Bare/stage-1/nested].
     std::array<
         std::array<
@@ -288,6 +288,9 @@ struct ConstraintCoverage {
     // Actions/target lines/scalar loads/vector-load uops/target requests/
     // refills/GrantAcks/scalar writebacks/vector-load writebacks/LQ dequeues.
     std::array<std::uint64_t, 10> miss_burst_manager{};
+    // Capacity reached/fair response release scheduled/overflow target
+    // externally requested. Each stage is counted once per depth-17 action.
+    std::array<std::uint64_t, 3> miss_burst_saturation{};
     std::uint64_t miss_burst_max_outstanding = 0;
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
@@ -738,7 +741,8 @@ struct ConstraintCoverage {
         unsigned depth_index, unsigned issue_width_index,
         unsigned composition, unsigned translation_regime,
         std::uint64_t outstanding,
-        const std::array<std::uint64_t, 10> &manager_delta)
+        const std::array<std::uint64_t, 10> &manager_delta,
+        const std::array<std::uint64_t, 3> &saturation_delta)
     {
         ++miss_burst_crosses.at(depth_index)
               .at(issue_width_index)
@@ -752,6 +756,9 @@ struct ConstraintCoverage {
             miss_burst_max_outstanding, outstanding);
         for (unsigned index = 0; index < manager_delta.size(); ++index) {
             miss_burst_manager[index] += manager_delta[index];
+        }
+        for (unsigned index = 0; index < saturation_delta.size(); ++index) {
+            miss_burst_saturation[index] += saturation_delta[index];
         }
     }
 
@@ -1938,6 +1945,7 @@ struct ConstraintCoverage {
         std::uint64_t miss_burst_target_lines = 0;
         std::uint64_t miss_burst_scalar_loads = 0;
         std::uint64_t miss_burst_vector_loads = 0;
+        std::uint64_t miss_burst_saturation_actions = 0;
         std::array<std::uint64_t, RandomConstraints::miss_burst_depth_count>
             crossed_miss_burst_depths{};
         std::array<
@@ -1948,12 +1956,20 @@ struct ConstraintCoverage {
         std::array<
             std::uint64_t, RandomConstraints::miss_burst_composition_count>
             crossed_miss_burst_compositions{};
+        unsigned required_miss_burst_outstanding = 0;
         for (unsigned depth = 0; depth < miss_burst_crosses.size(); ++depth) {
             for (unsigned width = 0;
                  width < miss_burst_crosses[depth].size(); ++width) {
                 for (unsigned composition = 0;
                      composition < miss_burst_crosses[depth][width].size();
                      ++composition) {
+                    if (constraints.miss_burst_cross_enabled(
+                            depth, width, composition)) {
+                        required_miss_burst_outstanding = std::max(
+                            required_miss_burst_outstanding,
+                            std::min<unsigned>(
+                                depth + 2U, memblock::kDcacheMissEntries));
+                    }
                     for (unsigned regime = 0;
                          regime < miss_burst_crosses[depth][width]
                                       [composition].size();
@@ -1968,6 +1984,9 @@ struct ConstraintCoverage {
                         miss_burst_vector_loads += count *
                             (composition == RandomConstraints::
                                  miss_burst_scalar_vector_load);
+                        if (depth + 2U > memblock::kDcacheMissEntries) {
+                            miss_burst_saturation_actions += count;
+                        }
                         crossed_miss_burst_depths[depth] += count;
                         crossed_miss_burst_widths[width] += count;
                         crossed_miss_burst_compositions[composition] += count;
@@ -1992,8 +2011,14 @@ struct ConstraintCoverage {
             miss_burst_manager[8] != miss_burst_vector_loads ||
             miss_burst_manager[9] !=
                 miss_burst_scalar_loads + 2U * miss_burst_vector_loads ||
+            !std::all_of(
+                miss_burst_saturation.begin(),
+                miss_burst_saturation.end(),
+                [&](std::uint64_t count) {
+                    return count == miss_burst_saturation_actions;
+                }) ||
             (miss_burst_actions != 0 &&
-             miss_burst_max_outstanding < 2U)) {
+             miss_burst_max_outstanding < required_miss_burst_outstanding)) {
             return false;
         }
         if (constraints.samples_translation() &&
@@ -2455,6 +2480,12 @@ public:
         stream << " actual_miss_burst_manager=";
         for (unsigned index = 0; index < miss_burst_manager.size(); ++index) {
             stream << (index == 0 ? "" : ",") << miss_burst_manager[index];
+        }
+        stream << " actual_miss_burst_saturation=";
+        for (unsigned index = 0; index < miss_burst_saturation.size();
+             ++index) {
+            stream << (index == 0 ? "" : ",")
+                   << miss_burst_saturation[index];
         }
         stream << " actual_miss_burst_max_outstanding="
                << miss_burst_max_outstanding;

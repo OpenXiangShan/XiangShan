@@ -23,6 +23,7 @@ public:
         pending_held_response_addresses_.clear();
         hold_next_response_address_.reset();
         building_held_response_address_.reset();
+        scheduled_held_response_release_.reset();
         release_ready_window_active_ = false;
         release_ready_window_first_complete_ = false;
         release_ready_window_target_selected_ = false;
@@ -116,6 +117,11 @@ public:
     void release_held_response_at(std::uint64_t address)
     {
         const std::uint64_t line = address & ~(kLineBytes - 1U);
+        if (scheduled_held_response_release_ &&
+            scheduled_held_response_release_->first == line) {
+            error_ = "DCache held response already has a scheduled release";
+            return;
+        }
         const auto held = std::find_if(
             held_responses_.begin(), held_responses_.end(),
             [&](const HeldResponse &response) {
@@ -136,6 +142,31 @@ public:
             d_presenting_ = false;
             d_gap_ = d_beats_.front().delay_before;
         }
+    }
+
+    void schedule_held_response_release_at(
+        std::uint64_t address, unsigned after_ticks = 1)
+    {
+        const std::uint64_t line = address & ~(kLineBytes - 1U);
+        const auto held = std::find_if(
+            held_responses_.begin(), held_responses_.end(),
+            [&](const HeldResponse &response) {
+                return response.address == line;
+            });
+        if (after_ticks == 0) {
+            error_ = "scheduled DCache response release requires at least one tick";
+            return;
+        }
+        if (scheduled_held_response_release_) {
+            error_ = "a DCache held response release is already scheduled";
+            return;
+        }
+        if (held == held_responses_.end() || held->beats.empty() ||
+            building_held_response_address_ == line) {
+            error_ = "no complete held DCache response to schedule for release";
+            return;
+        }
+        scheduled_held_response_release_ = std::make_pair(line, after_ticks);
     }
 
     void begin_release_ready_window(
@@ -230,6 +261,7 @@ public:
         pending_held_response_addresses_.clear();
         hold_next_response_address_.reset();
         building_held_response_address_.reset();
+        scheduled_held_response_release_.reset();
         release_ready_window_active_ = false;
         release_ready_window_first_complete_ = false;
         release_ready_window_target_selected_ = false;
@@ -555,6 +587,16 @@ public:
         accepted_grant_ack_index_.reset();
         captured_a_.reset();
         captured_c_.reset();
+        if (scheduled_held_response_release_) {
+            auto &ticks_remaining = scheduled_held_response_release_->second;
+            --ticks_remaining;
+            if (ticks_remaining == 0) {
+                const std::uint64_t line =
+                    scheduled_held_response_release_->first;
+                scheduled_held_response_release_.reset();
+                release_held_response_at(line);
+            }
+        }
     }
 
     bool ok() const { return error_.empty(); }
@@ -782,6 +824,7 @@ public:
         return d_beats_.empty() && held_responses_.empty() &&
             pending_held_response_addresses_.empty() &&
             !hold_next_response_address_ && !building_held_response_address_ &&
+            !scheduled_held_response_release_ &&
             !release_data_ && outstanding_requests_ == 0;
     }
     void expect_release_line(
@@ -1399,6 +1442,8 @@ private:
     std::vector<std::uint64_t> pending_held_response_addresses_;
     std::optional<std::uint64_t> hold_next_response_address_;
     std::optional<std::uint64_t> building_held_response_address_;
+    std::optional<std::pair<std::uint64_t, unsigned>>
+        scheduled_held_response_release_;
     std::optional<std::uint64_t> hold_c_until_probe_requests_;
     bool release_ready_window_active_ = false;
     bool release_ready_window_first_complete_ = false;
