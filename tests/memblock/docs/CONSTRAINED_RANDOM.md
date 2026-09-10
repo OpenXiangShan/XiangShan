@@ -278,8 +278,10 @@ segment NF, while retaining a nonzero verification floor for every legal
 class. Per-seed closure temporarily prioritizes uncovered values; subsequent
 ordinary and segment choices follow the products of their configured dimension
 weights. The SPEC operation mix uses ordinary-vector load/store weights `90/45`
-and vector-segment weight `20`; this keeps scalar memory dominant while making
-the measured vector event classes materially present in long runs.
+and vector-segment weight `20`; this keeps scalar memory dominant while
+retaining a nonzero segment verification floor. The available workload
+counters report queue-level vector-memory uops, not a segment-only event, so
+these weights are not presented as a measured ordinary/segment ratio.
 NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
@@ -379,27 +381,32 @@ easy to hide behind aggregate load/miss totals:
 
 | Expanded `5d3934132` event | Count |
 | --- | ---: |
-| Ordinary vector-memory issues | 8,947,798,091 |
-| Vector-segment issues | 8,943,445,957 |
-| Vector-memory enqueues | 13,319,415,204 |
+| All vector-memory issue-queue uops | 17,891,244,048 |
+| Ordinary-only VLSU1 queue issue uops | 8,947,798,091 |
+| Ordinary/segment-capable VLSU0 queue issue uops | 8,943,445,957 |
+| Vector-memory issue-queue enqueues | 13,319,415,204 |
 | DCache bank conflicts / conflict replays | 12,996,168,822 / 12,996,168,822 |
 | Multi-enqueue miss-queue events | 4,008,031,861 |
 | Merged loads / rejected loads | 2,758,026,489 / 3,099,393,045 |
 | Release lines | 4,194,937,385 |
 | Probes / Probe responses / Probe blocked by miss | 12,899,042 / 12,899,037 / 1,979,461 |
 
-The equality of conflict and replay counters is an implementation-accounting
-observation, not an oracle. Likewise, issue/enqueue and Release/Probe counters
-can count different granularities and overlap other events; they justify
-prioritizing vector, resident-bank replay, multi-miss, replacement, and
-coherence stress but are not converted directly into transaction
-probabilities.
+The two VLSU queue counts are not ordinary-versus-segment counts. VLSU0 accepts
+both ordinary and segment uops, VLSU1 accepts ordinary uops only, and the
+`issue_instr_count` implementation counts dequeued queue entries despite its
+name. Their near equality therefore says nothing about the architectural
+segment rate. The equality of conflict and replay counters is also an
+implementation-accounting observation, not an oracle. Issue/enqueue and
+Release/Probe counters can count different granularities and overlap other
+events; they justify prioritizing vector memory, resident-bank replay,
+multi-miss, replacement, and coherence stress but are not converted directly
+into transaction probabilities.
 
 The corresponding constrained-random audit is:
 
 | Observed priority class | Canonical `random-mixed` coverage | Remaining limitation |
 | --- | --- | --- |
-| Ordinary and segment vector memory | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Schema 44 adds low-rate ordinary VFOF and closes first/later fault x stage-1 mode x EEW plus exact fix-VL conservation. Segment matrices, mask/tail policy, `vl`/`vstart`, NF, translation, and the exact per-element data oracle remain active | Segment FOF remains focused rather than common. The full 624-way ordinary-vector shape cross is closed globally, but is not separately crossed against every other producer in the heterogeneous window |
+| Vector memory and segment-capable issue traffic | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Schema 44 adds low-rate ordinary VFOF and closes first/later fault x stage-1 mode x EEW plus exact fix-VL conservation. Segment matrices, mask/tail policy, `vl`/`vstart`, NF, translation, and the exact per-element data oracle remain active | The workload logs establish high aggregate vector-memory issue pressure but do not expose a segment-only count. Segment FOF remains focused rather than common. The full 624-way ordinary-vector shape cross is closed globally, but is not separately crossed against every other producer in the heterogeneous window |
 | DCache bank conflict/replay | Schema 40: resident 2/3-way x eight address banks x Bare/stage-1/nested as stimulus coverage, with only identity-matched terminal data/writeback/LQ conservation used as the oracle | Vector/atomic same-bank composition is still open |
 | Miss-queue multi-enqueue | Schemas 43/45: distinct-line depth 2..17 x initial scalar issue width 1..3 x scalar-only/scalar+vector-load composition x translation, including capacity-plus-one forward progress, held-response outstanding depth, and terminal identity/data/queue oracles | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
 | Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema 45 applies capacity-plus-one cold-miss pressure and requires external forward progress after one fair response is released. Internal replay/reject observations remain diagnostic | Exact causal attribution to an internal reject is intentionally not an oracle; malformed replay responses remain open |

@@ -63,6 +63,25 @@ runtime, external dependencies, controller sources, and RTL identity remained
 unchanged across the run. Full root cause, CSR propagation, limitations, and
 reproduction commands are in `CPU_BUG_VLS_EXCEPTION_REDIRECT.md`.
 
+## SPEC Vector Counter Classification Correction
+
+On 2026-09-11, a source-level audit found that schema-1
+`analyze_spec_counters.py` mislabeled the two vector-memory issue-queue totals
+as ordinary and segment instruction counts. `IssueQueueVlduVstu` feeds VLSU1,
+which supports ordinary vector loads/stores only, but
+`IssueQueueVlduVstuVseglduVsegstu` feeds VLSU0, which supports both ordinary
+and segment operations. Moreover, RTL `issue_instr_count` increments per
+dequeued issue-queue entry, so its unit is a uop rather than an architectural
+instruction. The second queue therefore cannot provide a segment-only rate.
+
+Analyzer schema 2 uses explicit queue-capability and uop names. The expanded
+snapshot contains 17,891,244,048 total vector-memory issue uops:
+8,947,798,091 in the ordinary-only queue and 8,943,445,957 in the mixed
+ordinary/segment-capable queue, plus 13,319,415,204 issue-queue enqueues. These
+numbers still establish high vector-memory pressure, but their near equality
+is not evidence that segment and ordinary instructions occur at equal rates.
+No constrained-random weight is calibrated to that unsupported ratio.
+
 ## Scalar Address Immediates And Bus Error Model
 
 On 2026-09-07, the directed scalar address tests began driving the issue
@@ -3676,9 +3695,10 @@ request/response. The run therefore adds SPEC workload evidence without
 promoting bank identity, replay count, prefetch source, MSHR state, or any
 cycle-specific behavior to PASS/FAIL criteria. The separate SPEC counter
 snapshot remains diagnostic calibration: 7,804 of 7,900 checkpoints parsed,
-including billions of ordinary/segment vector issues, vector enqueues,
+including billions of vector-memory issue-queue uops and enqueues,
 bank-conflict/replay events, miss-queue multi-enqueues, merged/rejected loads,
-releases, and Probe traffic.
+releases, and Probe traffic. The two VLSU queue counters do not distinguish
+ordinary from segment uops because the segment-capable queue accepts both.
 
 ### SPEC Profile Seed 31 (Schema 43)
 
