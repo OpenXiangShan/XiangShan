@@ -34,6 +34,8 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
+import xiangshan.frontend.bpu.history.fastphr.FastPhr
+import xiangshan.frontend.bpu.history.fastphr.HasFastPhrParameters
 import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
@@ -46,7 +48,7 @@ import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
 
-class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with HasFastPhrParameters {
   class BpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -67,6 +69,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val sc          = Module(new Sc)
   private val ras         = Module(new Ras)
   private val phr         = Module(new Phr)
+  private val fastPhr     = Module(new FastPhr)
   private val commonHR    = Module(new CommonHR)
   private val uras        = Module(new MicroRas)
 
@@ -611,6 +614,36 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phrBits        := phr.io.phr.asUInt
 
   dontTouch(phrBits)
+
+  /* *** fast phr ***
+   * A short window of the same path history Phr maintains, giving the ahead predictors resident folded histories. It
+   * advances on exactly the events that move Phr, with the same tokens, so the two never diverge. Only taken blocks
+   * shift the path history, so a group of not-taken blocks advances neither.
+   */
+  private def numBlocksOH(numTaken: UInt): Vec[Bool] =
+    VecInit(Seq.tabulate(MaxPredictionNum + 1)(n => numTaken === n.U))
+
+  fastPhr.io.valid       := s1_fire
+  fastPhr.io.token       := phr.io.toFastPhr.s1Token
+  fastPhr.io.numBlocksOH := numBlocksOH(phr.io.toFastPhr.s1NumTaken)
+  fastPhr.io.s2Fire      := s2_fire
+
+  fastPhr.io.redirect.valid := redirect.valid
+  fastPhr.io.redirect.phr   := phr.io.toFastPhr.redirectPhr
+
+  // an override replaces the group with one corrected block, so the replay carries a single block's hash
+  fastPhr.io.overrideValid  := s2_override || s3_override
+  fastPhr.io.overrideFromS3 := s3_override
+  fastPhr.io.overrideToken :=
+    Mux(s3_override, phr.io.toFastPhr.s3PathHash, phr.io.toFastPhr.s2PathHash)
+  fastPhr.io.overrideNumBlocksOH :=
+    numBlocksOH(Mux(s3_override, s3_prediction.taken, s2_prediction.taken).asUInt)
+
+  // FastPhr caches what Phr already holds, so the two must agree bit for bit. Checking the window directly catches a
+  // divergence at its source, rather than waiting for it to surface as a mispredict through the folded histories.
+  private val fastPhrDiverged = phr.io.toFastPhr.debug_phr(WindowLength - 1, 0) =/= fastPhr.io.debug_phr
+  XSPerfAccumulate("fastPhrDivergedCycles", fastPhrDiverged)
+  XSError(fastPhrDiverged, "FastPhr window diverged from Phr\n")
 
   // ghr update
   private val s1_cfiPc = getCfiPcFromPosition(s1_startPc.get, s1_prediction.cfiPosition)
