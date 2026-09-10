@@ -61,7 +61,9 @@ class _Recorder:
         self.hit_evidence[(group, bin_name)] = dict(evidence)
 
     def set_key(self, key, value):
-        self.env.dut.set(_SIGNALS[key][0], value)
+        names = _SIGNALS[key]
+        assert names, f"no DUT signal mapping for {key}; drive the source transaction instead"
+        self.env.dut.set(names[0], value)
 
     def set_prefetch_key(self, key, value):
         self.env.dut.set(_PREFETCH_SIGNALS[key][0], value)
@@ -3467,6 +3469,30 @@ def test_single_request_entry_bin():
     assert not _hit(recorder, "icache_mainpipe_s0_entry", "dual_request_data_read")
 
 
+def test_dual_request_entry_uses_exported_real_two_fetch_valid():
+    for path in (
+        "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+    ):
+        for real_two_fetch in (0, 1):
+            recorder = _Recorder()
+            for key, value in {
+                "from_valid": 1,
+                "data_ready": 1,
+                "s1_ready": 1,
+                "s0_flush": 0,
+            }.items():
+                recorder.set_key(key, value)
+            recorder.env.dut.set(path, real_two_fetch)
+            sample_icache_mainpipe_coverage(recorder, recorder.env, 1)
+            assert _hit(
+                recorder, "icache_mainpipe_s0_entry", "dual_request_data_read"
+            ) == bool(real_two_fetch)
+            assert _hit(
+                recorder, "icache_mainpipe_s0_entry", "single_request_latched"
+            ) == (not real_two_fetch)
+
+
 def test_mainpipe_global_s0_flush_samples_condition_not_checkpoint():
     recorder = _Recorder()
     for key, value in {
@@ -3994,6 +4020,7 @@ def test_same_cycle_refill_flush_requires_global_flush_and_match():
 
 def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
     for key, value in {
+        "io_flush": 0,
         "s1_fire": 1,
         "req1_valid": 0,
         "cross0": 0,
@@ -4008,7 +4035,6 @@ def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     for key, value in {
         "s1_fire": 0,
-        "s2_valid": 1,
         "io_flush": 0,
     }.items():
         recorder.set_key(key, value)
@@ -4100,7 +4126,6 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     recorder.set_key("s1_fire", 0)
     recorder.set_key("io_flush", 0)
-    recorder.set_key("s2_valid", 1)
     _set_mainpipe_meta_source(
         recorder,
         line_index=0,
@@ -4116,14 +4141,13 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
 
     recorder = _Recorder()
     for key, value in {
-        "s1_fire": 1,
+        "s1_fire": 0,
         "req1_valid": 0,
     }.items():
         recorder.set_key(key, value)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     recorder.set_key("s1_fire", 0)
     recorder.set_key("io_flush", 0)
-    recorder.set_key("s2_valid", 0)
     _set_mainpipe_meta_source(
         recorder,
         line_index=0,
@@ -4136,6 +4160,32 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
         "icache_mainpipe_s2_ecc",
         "meta_code_mismatch_single_way",
     )
+
+
+def test_mainpipe_s2_ecc_does_not_sample_stale_context_without_new_handshake():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert recorder._icache_mainpipe_cov_state["s2_valid_shadow"] is True
+    _set_mainpipe_meta_source(recorder, line_index=0, hitnum=1, mismatch=True)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 42)
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way")
+
+
+def test_mainpipe_s2_ecc_corrupt_observation_uses_exported_aliases():
+    for path in (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_0_0",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_corrupt_0_0",
+    ):
+        recorder = _Recorder()
+        _prime_mainpipe_s2(recorder)
+        _set_mainpipe_meta_source(recorder, line_index=0, hitnum=1, mismatch=True)
+        recorder.env.dut.set(path, 1)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+        evidence = recorder.hit_evidence[
+            ("icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way")
+        ]
+        assert evidence["s2_corrupt"] == (1, None, None, None)
 
 
 def test_mainpipe_s2_ecc_rejects_global_flush_context():

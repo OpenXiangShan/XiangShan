@@ -24,6 +24,10 @@ _MULTI_BRANCH_BASE = 0x8000_0000
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 
+from env.funcov.py.icache.signal_contract import (
+    TO_IFU_MAP, TO_IFU_READY, TO_IFU_VALID, half_aligned_cross_line,
+)
+
 
 def _aliases(name: str) -> tuple[str, str]:
     return name, f"TOP.{name}"
@@ -44,9 +48,9 @@ _SIGNALS = {
     "s1_addr": _aliases(_MAIN + "s1_req_0_vAddr_0_addr"),
     "s1_ftq_flag": _aliases(_MAIN + "s1_req_0_ftqIdx_flag"),
     "s1_ftq_value": _aliases(_MAIN + "s1_req_0_ftqIdx_value"),
-    "fetch_finish": _aliases(_MAIN + "io_toIfu_req_valid"),
-    "to_ifu_valid": _aliases(_MAIN + "io_toIfu_req_valid"),
-    "to_ifu_ready": _aliases(_MAIN + "io_toIfu_req_ready"),
+    "fetch_finish": TO_IFU_VALID,
+    "to_ifu_valid": TO_IFU_VALID,
+    "to_ifu_ready": TO_IFU_READY,
     "miss_resp_valid": _aliases(_MAIN + "io_missResp_valid"),
 }
 
@@ -76,9 +80,7 @@ for _index in range(4):
 _SIGNALS["sram_valid_0"] = _aliases(_MAIN + "s1_sramRespValid")
 _SIGNALS["sram_valid_1"] = _aliases(_MAIN + "s1_sramValid_0_1")
 _SIGNALS["two_fetch_valid"] = _aliases(_MAIN + "s1_twoFetchValid")
-_SIGNALS["to_ifu_maybe_rvc_map"] = _aliases(
-    _MAIN + "io_toIfu_req_bits_maybeRvcMap"
-)
+_SIGNALS["to_ifu_maybe_rvc_map"] = TO_IFU_MAP
 for _index in range(4):
     _suffix = "" if _index == 0 else f"_{_index}"
     _comb_suffix = ("", "_3", "_6", "_9")[_index]
@@ -109,6 +111,9 @@ def _cycle_limit(name: str, default: int) -> int:
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
+    recorder = getattr(env, "functional_coverage", None)
+    if recorder is not None:
+        return recorder._read_first_dut_signal(env.dut, names)
     cache = getattr(env, "_ruierhan_internal_signal_cache", None)
     if cache is None:
         cache = {}
@@ -135,9 +140,15 @@ def _try_read(env, names: Sequence[str]) -> int | None:
     return None
 
 
-def _read(env, key: str, default: int = 0) -> int:
+def _read(env, key: str) -> int:
     value = _try_read(env, _SIGNALS[key])
-    return int(default) if value is None else int(value)
+    if value is None and key == "cross0":
+        value = half_aligned_cross_line(
+            _try_read(env, (_MAIN + "s1_req_0_vAddr_0_addr",)),
+            _try_read(env, (_MAIN + "s1_req_0_endPosition",)),
+        )
+    assert value is not None, {"missing_probe": key, "candidates": _SIGNALS[key]}
+    return int(value)
 
 
 def _snapshot(env) -> dict[str, int]:

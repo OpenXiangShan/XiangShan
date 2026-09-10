@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .signal_contract import ITLB_REQ_VALID, ITLB_RESP_MISS, PREFETCH_S1_FLUSH
+
 from .flush_from_bpu import BpuS3Flush, ftq_ptr_matches_or_before
 
 
@@ -108,11 +110,11 @@ _PREFETCH_SIGNALS = {
         _PREFETCH + "s1_realFire",
         _PREFETCH + "__Vtogcov__s1_realFire",
     ),
-    "s1_flush": (_PREFETCH + "io_itlbFlushPipe",),
+    "s1_flush": PREFETCH_S1_FLUSH,
     "s1_next_state": (_PREFETCH + "s1_nextState", _PREFETCH + "__Vtogcov__s1_nextState"),
-    "itlb_flush": (_PREFETCH + "io_itlbFlushPipe",),
-    "itlb_req_valid": (_PREFETCH + "io_itlb_req_valid",),
-    "itlb_resp_miss": (_PREFETCH + "io_itlb_resp_bits_miss",),
+    "itlb_flush": PREFETCH_S1_FLUSH,
+    "itlb_req_valid": ITLB_REQ_VALID,
+    "itlb_resp_miss": ITLB_RESP_MISS,
     "meta_req_valid": (
         _PREFETCH + "io_metaRead_req_valid",
         _PREFETCH + "__Vtogcov__io_metaRead_req_valid",

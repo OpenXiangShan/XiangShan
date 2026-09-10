@@ -530,14 +530,6 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
 
 @pytest.mark.funcov_bins("BIN-618")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.funcov_closure_pending
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the current top-level API cannot align BPU stage3's FTQ pointer with "
-        "the observed MainPipe s1 entry; retain as a reachability check"
-    ),
-)
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     return _run_tc_icache_mainpipe_s1_bpu_miss(env)
 

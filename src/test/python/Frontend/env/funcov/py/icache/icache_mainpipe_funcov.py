@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from .signal_contract import MAIN_PMP_INSTR, MAIN_PMP_MMIO, TO_IFU_MAP, half_aligned_cross_line
+
 from .flush_from_bpu import (
     BpuS3Flush,
     ftq_ptr_is_strictly_after_current,
@@ -23,6 +25,15 @@ _S1_HITS = tuple(
     (
         _MAIN + f"s1_hits_{req}_{line}",
         _MAIN + "s1_hits_r" + (f"_{req * 2 + line}" if req * 2 + line else ""),
+    )
+    for req in range(2)
+    for line in range(2)
+)
+_S2_CORRUPT = tuple(
+    (
+        f"Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_{req}_{line}",
+        _ICACHE + f"__Vtogcov__io_toIfu_corrupt_{req}_{line}",
+        _MAIN + f"io_toIfu_corrupt_{req}_{line}",
     )
     for req in range(2)
     for line in range(2)
@@ -119,7 +130,12 @@ _SIGNALS = {
         _ICACHE + "dataArray.io_read_req_valid",
         _ICACHE + "dataArray.__Vtogcov__io_read_req_valid",
     ),
-    "data_req1_valid": (_ICACHE + "dataArray.io_read_req_bits_1_valid",),
+    "data_req1_valid": (
+        _ICACHE + "dataArray.io_read_req_bits_1_valid",
+        # Both outputs are wired to MainPipe.s0_realTwoFetchValid in full RTL.
+        "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
+        _ICACHE + "__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+    ),
     "io_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
@@ -151,7 +167,7 @@ _SIGNALS = {
     "align_shift_right": (_MAIN + "s1_maybeRvcAlignInfo_shouldShiftRight",),
     "align_first_range": (_MAIN + "s1_maybeRvcAlignInfo_firstBlockRange",),
     "align_total_range": (_MAIN + "s1_maybeRvcAlignInfo_totalBlockRange",),
-    "toifu_maybe_rvc_map": (_MAIN + "io_toIfu_req_bits_maybeRvcMap",),
+    "toifu_maybe_rvc_map": TO_IFU_MAP,
     "toifu_first_range": (
         _ICACHE + "__Vtogcov__io_toIfu_req_bits_firstRange",
         _MAIN + "s1_maybeRvcAlignInfo_firstBlockRange",
@@ -201,11 +217,8 @@ _SIGNALS = {
         for req in range(2)
         for line in range(2)
     ),
-    "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
-    "pmp_mmio": (
-        _MAIN + "io_pmp_resp_mmio",
-        _ICACHE + "__Vtogcov__io_toIfu_req_bits_0_icacheMeta_pmpMmio",
-    ),
+    "pmp_instr": MAIN_PMP_INSTR,
+    "pmp_mmio": MAIN_PMP_MMIO,
     "itlb_exception": (
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
         _MAIN + "__Vtogcov__s1_exceptionInfo_0_itlbException_value",
@@ -657,14 +670,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                     for line in range(2)
                 ),
             ),
-            "s2_corrupt": _read_names(
-                recorder,
-                tuple(
-                    _MAIN + f"io_toIfu_corrupt_{req}_{line}"
-                    for req in range(2)
-                    for line in range(2)
-                ),
-            ),
+            "s2_corrupt": _read_candidates(recorder, _S2_CORRUPT),
             "s2_meta_hitnum": _read_names(
                 recorder,
                 tuple(
@@ -752,10 +758,8 @@ def _snapshot(recorder) -> dict[str, Any]:
     if scalar["cross0"] is None and _known(
         (scalar["start_vaddr"][0], scalar["req0_end_position"])
     ):
-        scalar["cross0"] = (
-            (int(scalar["start_vaddr"][0]) >> 4)
-            & (int(scalar["req0_end_position"]) >> 4)
-            & 1
+        scalar["cross0"] = half_aligned_cross_line(
+            scalar["start_vaddr"][0], scalar["req0_end_position"]
         )
     return scalar
 

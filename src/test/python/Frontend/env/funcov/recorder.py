@@ -123,6 +123,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ftq/ifu_delivery_funcov.py": root / "py" / "ftq" / "ifu_delivery_funcov.py",
         "funcov/py/ftq/checker_funcov.py": root / "py" / "ftq" / "checker_funcov.py",
         "funcov/py/icache/__init__.py": root / "py" / "icache" / "__init__.py",
+        "funcov/py/icache/signal_contract.py": root / "py" / "icache" / "signal_contract.py",
         "funcov/py/icache/icache_mainpipe_funcov.py": root / "py" / "icache" / "icache_mainpipe_funcov.py",
         "funcov/py/icache/icache_prefetchpipe_funcov.py": root / "py" / "icache" / "icache_prefetchpipe_funcov.py",
         "funcov/py/icache/icache_missunit_funcov.py": root / "py" / "icache" / "icache_missunit_funcov.py",

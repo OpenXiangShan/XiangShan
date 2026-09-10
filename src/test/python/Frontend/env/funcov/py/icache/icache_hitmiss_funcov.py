@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from .signal_contract import ICACHE_FENCEI, MAIN_PMP_INSTR, half_aligned_cross_line
+
 
 _TOP = "Frontend_top."
 _ICACHE = _TOP + "Frontend.inner_icache."
@@ -73,6 +75,7 @@ _SIGNALS = {
     "cross1": _S1_CROSS[1],
     "req1_valid": (_MAIN + "s1_req_1_valid",),
     "req0_start": (_MAIN + "s1_req_0_vAddr_0_addr",),
+    "req0_end_position": (_MAIN + "s1_req_0_endPosition",),
     "req1_start": (_MAIN + "s1_req_1_vAddr_0_addr",),
     "main_s1_ptag": (
         _MAIN + "s1_wayLookupEntry_0_pTag",
@@ -92,8 +95,8 @@ _SIGNALS = {
         _MAIN + "__Vtogcov__s1_req_0_ftqIdx_value",
     ),
     "main_s1_mmio": (_MAIN + "s1_isMmio", _MAIN + "__Vtogcov__s1_isMmio"),
-    "fencei": (_TOP + "io_fencei",),
-    "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
+    "fencei": ICACHE_FENCEI,
+    "pmp_instr": MAIN_PMP_INSTR,
     "itlb_exception": (
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
         _MAIN + "__Vtogcov__s1_exceptionInfo_0_itlbException_value",
@@ -314,6 +317,8 @@ def reset_icache_hitmiss_coverage_state(recorder) -> None:
 
 def _snapshot(recorder) -> dict[str, Any]:
     scalar = {key: _read(recorder, key) for key in _SIGNALS}
+    if scalar["cross0"] is None:
+        scalar["cross0"] = half_aligned_cross_line(scalar["req0_start"], scalar["req0_end_position"])
     scalar["hits"] = _read_candidates(recorder, _S1_HITS)
     scalar["waymask"] = _read_names(
         recorder,

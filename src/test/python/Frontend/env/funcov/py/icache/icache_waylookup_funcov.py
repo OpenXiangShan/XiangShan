@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from .signal_contract import ICACHE_FENCEI
+
 _WL = "Frontend_top.Frontend.inner_icache.wayLookup."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
@@ -200,7 +202,7 @@ _SIGNALS = {
     "flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
-    "fencei": (_TOP + "io_fencei", _TOP + "__Vtogcov__io_fencei"),
+    "fencei": ICACHE_FENCEI,
     "bpu_flush": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
 }
 

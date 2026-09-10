@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from env.funcov.py.icache.icache_mainpipe_funcov import _S2_CORRUPT
 from tests.py.ruierhan.test_icache_lowrisk_gap_closure_dut import (
     _wait_funcov_hit, _drive_soft_prefetch,
     _initialize_cacheable_stream,
@@ -24,13 +25,25 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
     env.backend_model.set_can_accept(0)
     agent = env.icache_ecc_agent
     error_samples = []
+
     def observe_error(cycle, active_env):
-        reader = active_env.functional_coverage._try_read_dut_signal
+        reader = active_env.functional_coverage._read_first_dut_signal
         main = agent.ROOT + "mainPipe."
-        if reader(active_env.dut, main + "io_error_valid") == 1:
-            error_samples.append({"cycle": cycle,
-                "corrupt": reader(active_env.dut, main + "io_toIfu_corrupt_0_0"),
-                "paddr": reader(active_env.dut, main + "io_error_bits_paddr")})
+        candidates = {
+            "error_valid": (main + "io_error_valid", main + "__Vtogcov__io_error_valid"),
+            "corrupt": _S2_CORRUPT[0],
+            "paddr": (main + "io_error_bits_paddr",),
+        }
+        values = {key: reader(active_env.dut, names) for key, names in candidates.items()}
+        missing = {key: candidates[key] for key, value in values.items() if value is None}
+        assert not missing, {"missing_ecc_observations": missing}
+        if values["error_valid"] == 1:
+            error_samples.append({
+                "cycle": cycle,
+                "corrupt": values["corrupt"],
+                "paddr": values["paddr"],
+            })
+
     env.register_cycle_observer(observe_error)
     try:
         # Fetch the target once so tag/valid/data are written by the real refill path.

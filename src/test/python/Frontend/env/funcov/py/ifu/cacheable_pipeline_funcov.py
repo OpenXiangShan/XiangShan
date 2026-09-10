@@ -196,7 +196,11 @@ _LATE_FAULT_SIGNALS = {
     "s2_ftq_value": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_value",),
     "s2_exception": (f"{_IFU_PREFIX}s2_icacheMeta_0_exception_value",),
     "s2_instr_count": (f"{_IFU_PREFIX}s2_instrCount",),
-    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_valid": (
+        f"{_IFU_PREFIX}io_toIBuffer_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+    ),
     "to_ibuffer_ready": (
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
         "inner_ifu.io_toIBuffer_ready",
@@ -236,7 +240,11 @@ _BIN907_SIGNALS = {
         f"{_IFU_PREFIX}s2_instrCount",
         f"{_IFU_PREFIX}__Vtogcov__s2_instrCount",
     ),
-    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_valid": (
+        f"{_IFU_PREFIX}io_toIBuffer_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+    ),
     "to_ibuffer_ready": (
         f"{_IFU_PREFIX}io_toIBuffer_ready",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",

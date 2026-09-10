@@ -728,6 +728,17 @@ def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
+    recorder = env.functional_coverage
+    assert recorder is not None, "two-fetch entry coverage requires functional coverage"
+    missing_domains = [
+        domain for domain in ("icache", "ifu", "ftq")
+        if not recorder.sampler_domain_enabled(domain)
+    ]
+    assert not missing_domains, {
+        "reason": "two-fetch warmup requires ICache, IFU and FTQ coverage sampling",
+        "missing_sampler_domains": missing_domains,
+        "required_configuration": "TB_FUNCOV_SAMPLER_DOMAINS=all",
+    }
     _load_two_fetch_loop(env)
     _warm_two_fetch_execution(env)
 

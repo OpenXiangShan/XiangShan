@@ -13,7 +13,8 @@ from collections.abc import Iterable
 import pytest
 
 from env.funcov.py.icache.icache_prefetchpipe_funcov import _read_prefetch
-from env.sequences import TranslationScenario, TranslationScenarioBuilder
+from env.sequences import TranslationScenario, TranslationScenarioBuilder, TranslationPmpPmaEntry
+from env.support import PmpPmaConfig
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss as _run_trained_refill,
 )
@@ -149,6 +150,21 @@ def _clear_soft_prefetch(env) -> None:
             address.value = 0
 
 
+def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, allow_fault: bool = False) -> None:
+    """Do not end a coverage test before the affected fetch reaches its checker."""
+    for _ in range(max_cycles):
+        assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
+        stats = env.monitor.get_stats()
+        oracle = env.translation_oracle.get_stats()
+        assert not oracle["errors"], oracle["errors"][:4]
+        if not allow_fault:
+            assert stats["exception_mark_count"] == 0, stats
+        if int(stats["slots_valid"]) >= min_slots:
+            return
+        env.step(1)
+    raise AssertionError({"reason": "no checked cfVec completion", "monitor": env.monitor.get_stats()})
+
+
 def _set_soft_prefetch(env, addresses: Iterable[int]) -> None:
     _clear_soft_prefetch(env)
     for slot, address in enumerate(tuple(addresses)[:3]):
@@ -190,6 +206,9 @@ def prefetchpipe_env(env):
 def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _prepare_nops(env, _SOFT_BASE, latency=48, seed=0x6657)
+    # Data-bank SRAMs sweep 256 sets after reset.  Do not let a soft refill
+    # install metadata before its data bank can accept the corresponding write.
+    env.step(300)
     targets = {
         ("icache_prefetchpipe_s0_entry", "soft_priority_over_ftq"),
         ("icache_prefetchpipe_s0_entry", "multi_soft_single_accept"),
@@ -214,19 +233,13 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
         env.step(2)
 
     _wait_bins(env, targets, max_cycles=2048)
+    # Include the first prefetched lines in actual instruction comparison.
+    _wait_checked_cfvec(env, min_slots=256)
     assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-654")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.funcov_closure_pending
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the current top-level API cannot align BPU stage3's FTQ pointer with "
-        "the hardware-prefetch s0 entry; retain as a reachability check"
-    ),
-)
 def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
@@ -305,14 +318,6 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
 
 @pytest.mark.funcov_bins("BIN-655")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.funcov_closure_pending
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "the current top-level API cannot deterministically align a soft-prefetch "
-        "capture with BPU stage3 valid; retain as a reachability check"
-    ),
-)
 def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
@@ -377,7 +382,13 @@ def _translation_state(
     pa: int,
     latency: int,
     page_fault: bool = False,
+    reset_entry: bool = False,
 ):
+    if reset_entry:
+        # Start with a virtual reset PC; a bare-mode PA boot followed by an
+        # unbound redirect can retain an unrelated FTQ context at recovery.
+        assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
+        env.initialize(reset_vector=int(va), bare_mode=False, reset_cycles=20)
     scenario = TranslationScenario(
         scenario_id=scenario_id,
         va=int(va),
@@ -389,6 +400,16 @@ def _translation_state(
         s1_pf=1 if page_fault else 0,
         expected_path="fault" if page_fault else "cacheable",
         expected_result="page_fault" if page_fault else "miss_refill",
+        # Sv39 executes in S mode.  A mapping alone does not grant PMP execute
+        # permission; without this entry a supposed cacheable test only faults.
+        pmp_entries=(TranslationPmpPmaEntry(
+            "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True),
+            int(pa) & ~0x3FFF, size=0x4000,
+        ),) if reset_entry else (),
+        pma_entries=(TranslationPmpPmaEntry(
+            "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
+            int(pa) & ~0x3FFF, size=0x4000,
+        ),) if reset_entry else (),
     )
     return TranslationScenarioBuilder(env).build(scenario)
 
@@ -400,36 +421,20 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     pa0 = 0x8040_0F00
     va0 = 0x4020_0F00
     _prepare_nops(env, pa0, latency=32, seed=0x6678)
-    first = _translation_state(
+    state = _translation_state(
         env,
-        scenario_id="prefetchpipe-itlb-resend",
+        scenario_id="prefetchpipe-itlb-flush-retry-page-fault",
         va=va0,
         pa=pa0,
-        latency=8,
+        latency=64,
+        # BIN-738/740 explicitly require an exception entry.  Declare the
+        # page fault instead of relying on speculative unmapped boot traffic.
+        page_fault=True,
+        reset_entry=True,
     )
     env.monitor.clear()
     env.monitor.set_expected_pc(va0)
-    env.arm_translation_scenario(first, page_indexes=(0, 1))
-    env.backend_model.inject_redirect(va0, "ctrl_redirect", delay_cycles=0)
-    _wait_bins(
-        env,
-        [("icache_prefetchpipe_s1_meta", "itlb_miss_resend_meta_retry")],
-        max_cycles=6000,
-    )
-
-    pa1 = 0x8042_0F00
-    va1 = 0x4022_0F00
-    second = _translation_state(
-        env,
-        scenario_id="prefetchpipe-itlb-wait-flush",
-        va=va1,
-        pa=pa1,
-        latency=64,
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va1)
-    env.arm_translation_scenario(second, page_indexes=(0, 1))
-    env.backend_model.inject_redirect(va1, "ctrl_redirect", delay_cycles=0)
+    env.arm_translation_scenario(state, page_indexes=(0,))
     for attempt in range(32):
         for _ in range(512):
             if _signal(env, "s1_valid") == 1 and _signal(
@@ -438,7 +443,7 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
                 break
             env.step(1)
         env.backend_model.inject_redirect(
-            va1 + ((attempt + 1) % 8) * 0x40,
+            va0,
             "ctrl_redirect",
             delay_cycles=0,
         )
@@ -449,11 +454,15 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
         env,
         [
             ("icache_prefetchpipe_s1_meta", "flush_cancels_itlb_wait"),
+            ("icache_prefetchpipe_s1_meta", "itlb_miss_resend_meta_retry"),
             ("icache_waylookup_exception", "exception_dequeue"),
             ("icache_waylookup_exception", "exception_waits_flush"),
         ],
-        max_cycles=512,
+        max_cycles=4096,
     )
+    _wait_checked_cfvec(env, min_slots=1, allow_fault=True)
+    assert env.translation_oracle.get_active()["fault_seen"]
+    env.assert_translation_scenario()
     assert not env.monitor.get_errors()
 
 
@@ -471,11 +480,11 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
         va=va,
         pa=pa,
         latency=32,
+        reset_entry=True,
     )
     env.monitor.clear()
     env.monitor.set_expected_pc(va)
     env.arm_translation_scenario(state, page_indexes=(0, 1))
-    env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
 
     for _ in range(4096):
         if _signal(env, "s1_valid") == 1 and _signal(env, "s1_wait_itlb") == 1:
@@ -515,6 +524,11 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
         [("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery")],
         max_cycles=32,
     )
+    _wait_checked_cfvec(env)
+    assert env.translation_oracle.get_active()["observed_normal_cfvec_count"] >= 32
+    assert any(int(record["address"]) == (pa & ~0x3F)
+               for record in env.icache_agent.get_stats()["request_records"])
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-661", "BIN-666", "BIN-700")

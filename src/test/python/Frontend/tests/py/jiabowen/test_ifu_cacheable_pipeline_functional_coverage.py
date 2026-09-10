@@ -399,6 +399,19 @@ def test_bin907_requires_same_transaction_exception_truncation(tmp_path):
     assert recorder._raw_dict()["errors"] == []
 
 
+@pytest.mark.parametrize("alias", _BIN907_SIGNALS["to_ibuffer_valid"][1:])
+def test_bin907_accepts_exported_ibuffer_valid_alias(tmp_path, alias):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+    _set_bin907_s2(dut)
+    delattr(dut, _BIN907_SIGNALS["to_ibuffer_valid"][0])
+    dut.set(alias, 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert recorder._raw_dict()["errors"] == []
+
+
 def test_bin907_missing_later_data_probe_is_visible_and_fail_closed(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     _set_bin907_s1(dut, expose_later_data=False)

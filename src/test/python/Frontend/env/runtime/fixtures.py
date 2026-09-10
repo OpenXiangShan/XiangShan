@@ -553,6 +553,10 @@ def env(dut, request):
     tb.functional_coverage = recorder
     if recorder is not None:
         recorder.attach(tb)
+        if recorder.sampler_domain_enabled("icache"):
+            from env.funcov.py.icache.signal_contract import validate_target_probes
+
+            validate_target_probes(recorder)
         dut.StepRis(lambda cycle: recorder.on_cycle(cycle, tb))
     tb.initialize(
         reset_vector=_read_int_env("TB_RESET_VECTOR", "0x80000000"),
