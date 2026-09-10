@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import os
 import re
@@ -25,6 +24,7 @@ class BenchmarkTestsTest(unittest.TestCase):
 
     def test_make_target_defaults_to_eight_leaf_workers(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertEqual(benchmark_tests.MAX_PARALLEL_LEAVES, 8)
         self.assertRegex(makefile, r"(?m)^JOBS \?= 8$")
         benchmark_rule = makefile[
             makefile.index("benchmark-tests:"):
@@ -167,7 +167,7 @@ class BenchmarkTestsTest(unittest.TestCase):
         self.assertIn("using up to 8 processes", markdown)
 
     def test_main_runs_scenarios_concurrently_and_preserves_order(self) -> None:
-        requested = ("smoke", "single-load", "load-feedback")
+        requested = benchmark_tests.SCENARIOS[:benchmark_tests.MAX_PARALLEL_LEAVES]
         rendezvous = threading.Barrier(len(requested), timeout=5.0)
         active = 0
         maximum_active = 0
@@ -245,89 +245,41 @@ class BenchmarkTestsTest(unittest.TestCase):
             list(requested),
         )
         self.assertEqual(document["configuration"]["jobs"], len(requested))
+        self.assertEqual(
+            document["configuration"]["effective_jobs"], len(requested)
+        )
         self.assertEqual(document["status"], "pass")
         self.assertTrue(document["runtime"]["unchanged"])
         self.assertTrue(document["controller"]["unchanged"])
         self.assertTrue(document["rtl_identity"]["consistent"])
 
-    def test_main_caps_parallel_leaves_at_eight(self) -> None:
-        requested = benchmark_tests.SCENARIOS[:9]
-        observed_worker_counts: list[int] = []
-        real_executor = benchmark_tests.concurrent.futures.ThreadPoolExecutor
-
-        def executor_factory(
-            *, max_workers: int, thread_name_prefix: str
-        ) -> concurrent.futures.ThreadPoolExecutor:
-            observed_worker_counts.append(max_workers)
-            return real_executor(
-                max_workers=max_workers,
-                thread_name_prefix=thread_name_prefix,
-            )
-
-        def fake_run_scenario(
-            binary: Path,
-            scenario: str,
-            seed: int,
-            transactions: int,
-            timeout_seconds: float,
-            environment: dict[str, str],
-            constraint_profile: str,
-            constraint_overrides: tuple[str, ...],
-            expected_rtl_sha256: str | None,
-            cancellation_event: threading.Event | None,
-        ) -> dict[str, object]:
-            return {
-                "scenario": scenario,
-                "status": "pass",
-                "elapsed_seconds": 0.01,
-                "rtl_sha256": expected_rtl_sha256,
-                "metrics": {},
-            }
-
+    def test_main_rejects_more_than_eight_leaf_workers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            output = root / "benchmark.json"
-            rtl_metadata, runtime = self.make_runtime(root)
             argv = [
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(root / "runtime.json"),
                 "--rtl-metadata",
-                str(rtl_metadata),
+                str(root / "rtl.json"),
                 "--output",
-                str(output),
-                "--scenarios",
-                ",".join(requested),
+                str(root / "benchmark.json"),
                 "--transactions",
                 "256",
                 "--jobs",
-                "32",
+                "9",
             ]
             with (
                 mock.patch.object(sys, "argv", argv),
                 mock.patch.object(
-                    benchmark_tests.run_regression,
-                    "verify_runtime_metadata",
-                    return_value=runtime,
-                ),
-                mock.patch.object(
                     benchmark_tests.concurrent.futures,
                     "ThreadPoolExecutor",
-                    side_effect=executor_factory,
-                ),
-                mock.patch.object(
-                    benchmark_tests,
-                    "run_scenario",
-                    side_effect=fake_run_scenario,
-                ),
+                ) as executor,
+                self.assertRaises(SystemExit) as context,
             ):
-                self.assertEqual(benchmark_tests.main(), 0)
-
-            document = json.loads(output.read_text(encoding="utf-8"))
-
-        self.assertEqual(observed_worker_counts, [8])
-        self.assertEqual(document["configuration"]["jobs"], 8)
-        self.assertEqual(document["configuration"]["requested_jobs"], 32)
+                benchmark_tests.main()
+        self.assertEqual(context.exception.code, 2)
+        executor.assert_not_called()
 
     def test_main_collects_worker_failure_and_completes_other_leaves(self) -> None:
         requested = ("smoke", "single-load", "load-feedback")
@@ -413,8 +365,16 @@ class BenchmarkTestsTest(unittest.TestCase):
         failed = document["results"][1]
         self.assertEqual(failed["status"], "error")
         self.assertEqual(
-            failed["error"], "benchmark worker failed: worker exploded"
+            failed["error"],
+            "benchmark worker failed: RuntimeError: worker exploded",
         )
+        self.assertEqual(failed["returncode"], None)
+        self.assertEqual(failed["output"], "")
+        self.assertEqual(failed["metrics"], {})
+        self.assertIn("--test", failed["command"])
+        self.assertIn("single-load", failed["command"])
+        self.assertIn("RuntimeError: worker exploded", failed["traceback"])
+        self.assertGreaterEqual(failed["elapsed_seconds"], 0.0)
 
     def test_main_rejects_runtime_change_during_benchmark(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -444,6 +404,8 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "smoke",
                 "--transactions",
                 "256",
+                "--jobs",
+                "8",
             ]
             passing_result = {
                 "scenario": "smoke",
@@ -469,6 +431,8 @@ class BenchmarkTestsTest(unittest.TestCase):
 
             document = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(document["status"], "fail")
+        self.assertEqual(document["configuration"]["jobs"], 8)
+        self.assertEqual(document["configuration"]["effective_jobs"], 1)
         self.assertFalse(document["runtime"]["unchanged"])
         self.assertEqual(
             document["runtime"]["error"],

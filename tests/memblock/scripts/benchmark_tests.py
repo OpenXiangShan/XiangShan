@@ -12,6 +12,7 @@ import re
 import sys
 import threading
 import time
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -246,18 +247,14 @@ def normalized_metrics(
     }
 
 
-def run_scenario(
+def scenario_command(
     binary: Path,
     scenario: str,
     seed: int,
     transactions: int,
-    timeout_seconds: float,
-    environment: dict[str, str],
     constraint_profile: str,
     constraint_overrides: tuple[str, ...],
-    expected_rtl_sha256: str | None = None,
-    cancellation_event: threading.Event | None = None,
-) -> dict[str, Any]:
+) -> tuple[list[str], int]:
     scenario_transactions = TRANSACTION_OVERRIDES.get(scenario, transactions)
     command = [
         str(binary),
@@ -272,6 +269,65 @@ def run_scenario(
         command.extend(("--constraints", constraint_profile))
         for override in constraint_overrides:
             command.extend(("--constraint", override))
+    return command, scenario_transactions
+
+
+def worker_error_result(
+    binary: Path,
+    scenario: str,
+    seed: int,
+    transactions: int,
+    constraint_profile: str,
+    constraint_overrides: tuple[str, ...],
+    elapsed_seconds: float,
+    error: Exception,
+) -> dict[str, Any]:
+    command, _ = scenario_command(
+        binary,
+        scenario,
+        seed,
+        transactions,
+        constraint_profile,
+        constraint_overrides,
+    )
+    return {
+        "scenario": scenario,
+        "status": "error",
+        "elapsed_seconds": round(elapsed_seconds, 6),
+        "returncode": None,
+        "command": command,
+        "error": (
+            "benchmark worker failed: "
+            f"{type(error).__name__}: {error}"
+        ),
+        "traceback": "".join(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        ),
+        "output": "",
+        "metrics": {},
+    }
+
+
+def run_scenario(
+    binary: Path,
+    scenario: str,
+    seed: int,
+    transactions: int,
+    timeout_seconds: float,
+    environment: dict[str, str],
+    constraint_profile: str,
+    constraint_overrides: tuple[str, ...],
+    expected_rtl_sha256: str | None = None,
+    cancellation_event: threading.Event | None = None,
+) -> dict[str, Any]:
+    command, scenario_transactions = scenario_command(
+        binary,
+        scenario,
+        seed,
+        transactions,
+        constraint_profile,
+        constraint_overrides,
+    )
     started = time.monotonic()
     returncode, output, timed_out = run_regression._run_process(
         command, timeout_seconds, environment, cancellation_event
@@ -314,6 +370,45 @@ def run_scenario(
         result["error"] = "simulator returned nonzero after a pass summary"
     result["metrics"] = normalized_metrics(result, scenario)
     return result
+
+
+def run_scenario_guarded(
+    binary: Path,
+    scenario: str,
+    seed: int,
+    transactions: int,
+    timeout_seconds: float,
+    environment: dict[str, str],
+    constraint_profile: str,
+    constraint_overrides: tuple[str, ...],
+    expected_rtl_sha256: str | None,
+    cancellation_event: threading.Event | None,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        return run_scenario(
+            binary,
+            scenario,
+            seed,
+            transactions,
+            timeout_seconds,
+            environment,
+            constraint_profile,
+            constraint_overrides,
+            expected_rtl_sha256,
+            cancellation_event,
+        )
+    except Exception as error:
+        return worker_error_result(
+            binary,
+            scenario,
+            seed,
+            transactions,
+            constraint_profile,
+            constraint_overrides,
+            time.monotonic() - started,
+            error,
+        )
 
 
 def render_markdown(document: dict[str, Any]) -> str:
@@ -395,7 +490,12 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--transactions", type=int, default=16384)
     parser.add_argument("--timeout-seconds", type=float, default=1800)
-    parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=f"concurrent leaf processes (maximum {MAX_PARALLEL_LEAVES})",
+    )
     parser.add_argument(
         "--constraints", choices=run_regression.CONSTRAINT_PROFILES, default="spec"
     )
@@ -410,9 +510,11 @@ def main() -> int:
         or args.transactions < 256
         or args.timeout_seconds <= 0
         or args.jobs <= 0
+        or args.jobs > MAX_PARALLEL_LEAVES
     ):
         parser.error(
-            "seed, transactions, timeout, and jobs are outside the supported range"
+            "seed, transactions, or timeout is outside the supported range, "
+            f"or jobs is not in 1..{MAX_PARALLEL_LEAVES}"
         )
 
     try:
@@ -431,7 +533,7 @@ def main() -> int:
     environment["LD_LIBRARY_PATH"] = str(runtime["root"])
     environment["LD_BIND_NOW"] = "1"
 
-    worker_count = min(args.jobs, MAX_PARALLEL_LEAVES, len(requested))
+    worker_count = min(args.jobs, len(requested))
     if worker_count > 1 and environment.get("MEMBLOCK_MEM_DIRECT_TRACE_FILE"):
         print(
             "benchmark_tests.py: error: a shared MEMBLOCK_MEM_DIRECT_TRACE_FILE "
@@ -478,10 +580,12 @@ def main() -> int:
         max_workers=worker_count, thread_name_prefix="memblock-benchmark"
     )
     futures: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+    future_started: dict[concurrent.futures.Future[dict[str, Any]], float] = {}
     try:
-        futures = {
-            executor.submit(
-                run_scenario,
+        for index, scenario in enumerate(requested):
+            submitted_at = time.monotonic()
+            future = executor.submit(
+                run_scenario_guarded,
                 runtime["binary"],
                 scenario,
                 args.seed,
@@ -492,21 +596,25 @@ def main() -> int:
                 tuple(args.constraint),
                 complete_rtl_sha256,
                 cancellation_event,
-            ): index
-            for index, scenario in enumerate(requested)
-        }
+            )
+            futures[future] = index
+            future_started[future] = submitted_at
         for future in concurrent.futures.as_completed(futures):
             index = futures[future]
             scenario = requested[index]
             try:
                 result = future.result()
-            except Exception as error:  # pragma: no cover - defensive worker boundary
-                result = {
-                    "scenario": scenario,
-                    "status": "error",
-                    "elapsed_seconds": 0.0,
-                    "error": f"benchmark worker failed: {error}",
-                }
+            except Exception as error:  # pragma: no cover - executor boundary
+                result = worker_error_result(
+                    runtime["binary"],
+                    scenario,
+                    args.seed,
+                    args.transactions,
+                    args.constraints,
+                    tuple(args.constraint),
+                    time.monotonic() - future_started[future],
+                    error,
+                )
             results_by_index[index] = result
             print(
                 f"MEMBLOCK_BENCHMARK scenario={scenario} status={result['status']} "
@@ -639,8 +747,8 @@ def main() -> int:
             "seed": args.seed,
             "transactions": args.transactions,
             "timeout_seconds": args.timeout_seconds,
-            "jobs": worker_count,
-            "requested_jobs": args.jobs,
+            "jobs": args.jobs,
+            "effective_jobs": worker_count,
             "constraint_profile": args.constraints,
             "constraint_overrides": args.constraint,
             "scenarios": list(requested),
