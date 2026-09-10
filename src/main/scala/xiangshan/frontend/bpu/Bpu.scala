@@ -32,6 +32,7 @@ import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtb
+import xiangshan.frontend.bpu.block2.Block2Predictor
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.fastphr.FastPhr
@@ -74,6 +75,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val commonHR    = Module(new CommonHR)
   private val uras        = Module(new MicroRas)
   private val ptage       = Module(new Ptage)
+  private val block2      = Module(new Block2Predictor)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -101,6 +103,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   utage.io.enable       := true.B
   uras.io.enable        := true.B
   ptage.io.enable       := true.B
+  block2.io.enable      := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
@@ -218,7 +221,35 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     p.io.fastTrain.foreach(_ := fastTrain)
   }
 
-  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _) && block2.io.trainReady
+
+  // Training is held back when a predictor's bank is busy serving a prediction read, and the duplicated arrays add a
+  // second chance of that happening. Ftq throttles Bpu once training has been held back long enough, so this is the
+  // one way the duplicate can cost prediction bandwidth rather than only area. Count who refused.
+  XSPerfSeqAccumulate(
+    "trainRefused",
+    io.fromFtq.train.valid,
+    Seq(
+      ("byMainPredictors", !predictors.map(_.io.trainReady).reduce(_ && _)),
+      ("byBlock2", !block2.io.trainReady),
+      ("byBlock2Only", predictors.map(_.io.trainReady).reduce(_ && _) && !block2.io.trainReady)
+    )
+  )
+
+  /* *** the second block's own lookup ***
+   * The duplicated btb and tage are read at the second block's start pc, which is the first block's target as pTAGE
+   * itself supplied it, before the return stack gets a say. That is deliberate: a block whose target comes from the
+   * return stack cannot carry a successor at all, so the two never differ where a second block exists, and taking
+   * pTAGE's own output keeps the address a short hop from its s1 registers rather than the end of the s1 select.
+   *
+   * They take the same training stream as the main copies, so they hold the same branches, and they read the path
+   * history as it stands between the two blocks.
+   */
+  block2.io.stageCtrl              := stageCtrl
+  block2.io.startPc                := ptage.io.prediction.blocks.head.bits.target
+  block2.io.foldedPathHist         := phr.io.s1_midFoldedPhr
+  block2.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  block2.io.train.fromBpuTrain(train)
 
   /* *** predictor specific inputs *** */
   // pTAGE reads its resident folded histories straight out of FastPhr; its own a0 stage is driven by the shared
@@ -282,7 +313,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_ready := s3_fire || !s3_valid
 
   private val sramResetDone = RegInit(false.B)
-  when(predictors.map(_.io.sramResetDone).reduce(_ && _)) {
+  when(predictors.map(_.io.sramResetDone).reduce(_ && _) && block2.io.sramResetDone) {
     sramResetDone := true.B
   }
   s0_fire := s1_ready && sramResetDone
@@ -558,39 +589,67 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     )
 
   /* *** second block verification ***
-   * The s2 and s3 predictors look up only where the group starts, so they say nothing about a second block. The micro
-   * btb does: it is written from s3's own verified predictions, so an entry is an account of what happened the last
-   * time control passed through, arrived at independently of whatever pTAGE stored.
+   * The s2 and s3 predictors look up only where the group starts, so they say nothing about a second block. Two
+   * independent sources do, and a block is kept when either confirms it.
    *
-   * A block it has no entry for cannot be checked, and an unchecked block is not worth keeping. Dropping one costs a
-   * block of width now and gets it back later: the next lookup meets that block as a first block, verifies it the
-   * ordinary way, and fills the micro btb in passing, so the same pair can be checked next time round.
+   * The duplicated btb and tage give the second block a lookup of the same kind and quality the first one gets: the
+   * same arrays, trained on the same stream, read at the second block's own pc with the path history as it stands
+   * between the blocks. That is the authority, and the reason it exists.
+   *
+   * The duplicate alone decides. The micro btb still answers alongside it, but only so the two can be compared: a
+   * lookup it confirms and the duplicate does not is a block the duplicate is missing, and the counters below say
+   * how often that happens. Letting it override the duplicate's refusal was measured as a loss -- it keeps blocks
+   * whose branches the s3 predictors never trained on, and those cost more in mispredicts than the extra width earns.
+   *
+   * A block the duplicate cannot account for is dropped. An entry is positive evidence of where a block leaves; its
+   * absence says only that nothing is on record, and keeping a block on that basis would let one through unchecked.
+   * Dropping costs a block of width now and gets it back later: the next lookup meets that block as a first block,
+   * verifies it the ordinary way, and fills both arrays in passing.
    */
   ubtb.io.verifyStartPc := s3_s1Prediction.target
 
-  private val s3_secondBlockExitDiffers =
-    ubtb.io.verify.bits.cfiPosition =/= s3_secondBlock.bits.cfiPosition ||
-      ubtb.io.verify.bits.attribute =/= s3_secondBlock.bits.attribute ||
-      ubtb.io.verify.bits.target =/= s3_secondBlock.bits.target ||
-      !s3_secondBlock.bits.taken
+  private val s3_ubtbConfirms =
+    ubtb.io.verify.valid &&
+      s3_secondBlock.bits.taken &&
+      ubtb.io.verify.bits.cfiPosition === s3_secondBlock.bits.cfiPosition &&
+      !(ubtb.io.verify.bits.attribute =/= s3_secondBlock.bits.attribute) &&
+      ubtb.io.verify.bits.target === s3_secondBlock.bits.target
 
-  // An entry is positive evidence of where a block leaves; its absence is not evidence that a block runs to the end,
-  // only that nothing is on record. Keeping a block on the strength of that would let one through unchecked, so a
-  // block the micro btb cannot account for is treated the same as one it contradicts.
+  private val s3_block2      = block2.io.prediction
+  private val s3_dupConfirms = s3_block2.confirms(s3_secondBlock.bits)
+
   private val s3_secondBlockUnverified =
-    s3_secondBlock.valid && (!ubtb.io.verify.valid || s3_secondBlockExitDiffers)
+    s3_secondBlock.valid && !s3_dupConfirms
 
-  XSPerfAccumulate("s3SecondBlockChecked", s3_valid && s3_secondBlock.valid)
-  XSPerfAccumulate("s3SecondBlockUnknown", s3_valid && s3_secondBlock.valid && !ubtb.io.verify.valid)
+  // The duplicated lookup is only meaningful if it is answering about the block being checked. Its address travels
+  // down its own shifted pipeline, so a mismatch here means the two pipelines have come apart.
+  s3_block2.debug_startPc.foreach { pc =>
+    XSError(
+      s3_valid && s3_secondBlock.valid && pc =/= s3_s1Prediction.target,
+      "the duplicated block 2 lookup does not belong to the block being verified\n"
+    )
+  }
+
+  private val s3_checking = s3_valid && s3_secondBlock.valid
+  XSPerfAccumulate("s3SecondBlockChecked", s3_checking)
+  XSPerfAccumulate("s3SecondBlockKept", s3_checking && !s3_secondBlockUnverified)
+  XSPerfAccumulate("s3SecondBlockDropped", s3_checking && s3_secondBlockUnverified)
+  // What each source would have contributed on its own, so the duplicate can be judged against the array it replaced.
+  // OnlyUbtbConfirms is the duplicate's blind spot: blocks the small recent-history array still catches.
+  XSPerfAccumulate("s3SecondBlockBothConfirm", s3_checking && s3_dupConfirms && s3_ubtbConfirms)
+  XSPerfAccumulate("s3SecondBlockOnlyDupConfirms", s3_checking && s3_dupConfirms && !s3_ubtbConfirms)
+  XSPerfAccumulate("s3SecondBlockOnlyUbtbConfirms", s3_checking && !s3_dupConfirms && s3_ubtbConfirms)
+  // Why the duplicate withheld confirmation, which is what says whether growing it would help.
+  XSPerfAccumulate("s3SecondBlockDupNoEntry", s3_checking && !s3_block2.hasEntry)
+  XSPerfAccumulate("s3SecondBlockDupNotTaken", s3_checking && s3_block2.hasEntry && !s3_block2.taken)
   XSPerfAccumulate(
-    "s3SecondBlockDisagrees",
-    s3_valid && s3_secondBlock.valid && ubtb.io.verify.valid && s3_secondBlockExitDiffers
+    "s3SecondBlockDupDisagrees",
+    s3_checking && s3_block2.hasEntry && s3_block2.taken && !s3_dupConfirms
   )
-  // a not-taken second block can never be confirmed, since only a taken exit leaves an entry behind
-  XSPerfAccumulate(
-    "s3SecondBlockNotTaken",
-    s3_valid && s3_secondBlock.valid && !s3_secondBlock.bits.taken
-  )
+  XSPerfAccumulate("s3SecondBlockDupDecidedByTage", s3_checking && s3_block2.debug_tageDecided)
+  XSPerfAccumulate("s3SecondBlockUbtbNoEntry", s3_checking && !ubtb.io.verify.valid)
+  // a not-taken second block can never be confirmed by the micro btb, since only a taken exit leaves an entry behind
+  XSPerfAccumulate("s3SecondBlockNotTaken", s3_checking && !s3_secondBlock.bits.taken)
 
   s3_override := {
     val takenDiff            = s3_taken =/= s3_s2Prediction.taken

@@ -204,7 +204,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   bpThrottledByTrain := bpTrainStallCnt >= BpTrainStallLimit.U
 
   io.fromBpu.prediction.ready := ftqHasRoom && bpNotRunTooFar
-  io.fromBpu.meta.ready       := true.B
+  io.fromBpu.meta.ready := true.B
 
   private val prediction       = io.fromBpu.prediction
   private val predictionBlocks = prediction.bits.blocks
