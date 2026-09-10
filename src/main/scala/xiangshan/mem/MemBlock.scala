@@ -398,9 +398,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
-  val redirectModifyLevel = WireInit(io.redirect)
-  redirectModifyLevel.bits.level := Mux(io.redirect.bits.isVlsException, RedirectLevel.flushAfter, io.redirect.bits.level)
-  val redirect = RegNextWithEnable(redirectModifyLevel)
+  // VLS exception redirect is flush in ROB. SQ recovery and StoreMisalignBuffer
+  // still need flushAfter so uncommitted vector-store side effects can drain.
+  // ExceptionBuffers and the rest of MemBlock must see the original flush, or
+  // the matching exception-address record survives and pollutes a later mtval.
+  val rawRedirect = RegNextWithEnable(io.redirect)
+  val flushAfterRedirect = WireInit(rawRedirect)
+  when (rawRedirect.bits.isVlsException) {
+    flushAfterRedirect.bits.level := RedirectLevel.flushAfter
+  }
+  val redirect = rawRedirect
 
   private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
@@ -1199,7 +1206,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   lsq.io.loadMisalignFull                       := loadMisalignBuffer.io.loadMisalignFull
 
-  storeMisalignBuffer.io.redirect               <> redirect
+  storeMisalignBuffer.io.redirect               <> flushAfterRedirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
   storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
   storeMisalignBuffer.io.rob.pendingMMIOld      := io.ooo_to_mem.lsqio.pendingMMIOld
@@ -1424,7 +1431,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
-  lsq.io.brqRedirect    <> redirect
+  lsq.io.brqRedirect         <> rawRedirect
+  lsq.io.flushAfterRedirect  <> flushAfterRedirect
 
   //  violation rollback
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
