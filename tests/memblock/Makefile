@@ -30,6 +30,8 @@ PICKER_ROOT := $(PREPARED_DIR)/tools/picker
 PICKER ?= $(PICKER_ROOT)/build/bin/picker
 PICKER_METADATA := $(PREPARED_DIR)/tools/picker.json
 PICKER_OUTPUT := $(PREPARED_DIR)/picker
+PICKER_BUILD_LOCK := $(PREPARED_DIR)/.picker-build.lock
+PICKER_LOCKED_MAKE = $(PYTHON) scripts/with_build_lock.py --lock $(PICKER_BUILD_LOCK) -- $(MAKE) --no-print-directory MEMBLOCK_PICKER_BUILD_LOCK_HELD=1
 PICKER_OFFSET := $(PICKER_OUTPUT)/MemBlock_offset.yaml
 CPP_DEFAULTS := cpp/generated_port_defaults.hpp
 PICKER_HARNESS := $(PICKER_OUTPUT)/UT_MemBlock
@@ -51,7 +53,7 @@ CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) $
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-issue-order vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model picker-harness freeze-runtime smoke l2-flush-contracts top-control-contracts trace-bridge-contracts dft-bridge-contracts pin-space frontend-bridge frontend-reset-recovery single-load load-feedback topdown-contracts memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths uncache-outstanding sbuffer-flush sbuffer-timeout mmio-contracts cbo-zero-contracts cmo-contracts wfi-safety reset-recovery reset-tree-contracts scalar-misaligned misaligned-stores exception-contracts pmp-contracts hypervisor-contracts pointer-masking-contracts mbmc-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-all translation-context translation-bare ptw-errors translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-fof vector-segment vector-addressing vector-issue-order vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve iq-slow-feedback dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests analyze-spec-counters verify-extended-results verify-final-results verify-long-results final-acceptance unit
 .PHONY: vector-segment-fof
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
@@ -81,7 +83,11 @@ check-rtl: check-ports
 bootstrap-picker:
 	$(PYTHON) scripts/bootstrap_picker.py --root $(PICKER_ROOT) --metadata $(PICKER_METADATA) --jobs $(JOBS)
 
-export-picker: $(PICKER_EXPORT_STAMP)
+ifeq ($(MEMBLOCK_PICKER_BUILD_LOCK_HELD),1)
+
+.PHONY: _export-picker _picker-model _picker-harness _freeze-runtime
+
+export-picker _export-picker: $(PICKER_EXPORT_STAMP)
 
 $(PICKER_EXPORT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) $(PORT_JSON) $(SVA) scripts/prepare_picker_export.py
 	@test -x $(PICKER) || { echo "Picker is missing: $(PICKER); run make bootstrap-picker or set PICKER" >&2; exit 1; }
@@ -91,7 +97,7 @@ $(PICKER_EXPORT_STAMP): $(PREPARED_FILELIST) $(PREPARED_METADATA) $(PORT_JSON) $
 	$(PYTHON) scripts/prepare_picker_export.py --picker-output $(PICKER_OUTPUT)
 	@touch $@
 
-picker-model: $(PICKER_MODEL_STAMP)
+picker-model _picker-model: $(PICKER_MODEL_STAMP)
 
 $(PICKER_MODEL_STAMP): $(PICKER_EXPORT_STAMP)
 	$(MAKE) -C $(PICKER_OUTPUT) compile NPROC=$(JOBS)
@@ -109,10 +115,30 @@ $(PICKER_TEST_BINARY): $(PICKER_HARNESS_STAMP)
 	CXXFLAGS=-I$(CURDIR)/cpp $(MAKE) -C $(PICKER_HARNESS) compile NPROC=$(JOBS)
 	@test -x $@
 
-freeze-runtime: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+picker-harness _picker-harness: $(PICKER_TEST_BINARY)
+
+freeze-runtime _freeze-runtime: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 
 $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA) &: $(PICKER_TEST_BINARY) $(PICKER_HARNESS)/libUTMemBlock.so $(XSPCOMM_LIBRARY) $(PREPARED_METADATA) scripts/freeze_runtime.py
 	$(PYTHON) scripts/freeze_runtime.py --binary $(PICKER_TEST_BINARY) --model $(PICKER_HARNESS)/libUTMemBlock.so --xspcomm $(XSPCOMM_LIBRARY) --rtl-metadata $(PREPARED_METADATA) --output $(RUNTIME_DIR)
+
+else
+
+.PHONY: $(PICKER_TEST_BINARY)
+
+export-picker:
+	+$(PICKER_LOCKED_MAKE) _export-picker
+
+picker-model:
+	+$(PICKER_LOCKED_MAKE) _picker-model
+
+picker-harness $(PICKER_TEST_BINARY):
+	+$(PICKER_LOCKED_MAKE) _picker-harness
+
+freeze-runtime:
+	+$(PICKER_LOCKED_MAKE) _freeze-runtime
+
+endif
 
 smoke: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test smoke
@@ -414,7 +440,7 @@ regression: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) $(CONSTRAINT_ARGS)
 
-stress-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+stress-regression: freeze-runtime
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(STRESS_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),3600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --progress-interval-seconds 60
 
@@ -422,19 +448,19 @@ verify-stress-results:
 	$(MAKE) check-rtl
 	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRESS_RESULT) --min-duration-seconds $(or $(MIN_DURATION_SECONDS),3600) --min-results $(or $(MIN_RESULTS),128) --scenario random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
-extended-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+extended-regression: freeze-runtime
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
-final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+final-regression: freeze-runtime
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
-long-final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+long-final-regression: freeze-runtime
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
-endurance-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+endurance-regression: freeze-runtime
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(ENDURANCE_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(ENDURANCE_SEEDS) --timeout-seconds $(ENDURANCE_TIMEOUT_SECONDS) --scenarios random-mixed --mixed-transactions $(ENDURANCE_TRANSACTIONS) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
@@ -442,7 +468,7 @@ verify-endurance-results:
 	$(MAKE) check-rtl
 	$(PYTHON) $(VERIFY_SCRIPT) --input $(ENDURANCE_RESULT) --min-duration-seconds 1 --min-results $(ENDURANCE_SEEDS) --scenario random-mixed --transactions 16384 --mixed-transactions $(ENDURANCE_TRANSACTIONS) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py --allow-finite
 
-benchmark-tests: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+benchmark-tests: freeze-runtime
 	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) $(if $(BENCHMARK_SCENARIOS),--scenarios $(BENCHMARK_SCENARIOS)) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS) --constraints $(or $(CONSTRAINTS),spec) --jobs $(or $(BENCHMARK_JOBS),$(JOBS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 analyze-spec-counters:

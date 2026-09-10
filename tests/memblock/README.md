@@ -264,11 +264,14 @@ bootstrap records the exact Picker/xcomm revisions and executable path in
 offset map to `build/memblock/picker/MemBlock_offset.yaml`. Picker's generic
 base may compile unused VPI methods, but this UT neither enables nor calls VPI.
 
-Run export, model compilation, and harness compilation through one top-level
-Make invocation. `JOBS=8` supplies internal build parallelism; two independent
-Make processes must not write `build/memblock/picker` concurrently. Once the
-simulator or frozen runtime exists, independent leaf scenarios and regression
-seeds are safe to run as separate processes with up to eight workers.
+The public export, model, harness, and frozen-runtime targets take the persistent
+`build/memblock/.picker-build.lock` before a recursive Make rechecks and updates
+the shared Picker tree. Independent top-level Make processes therefore wait
+rather than writing `build/memblock/picker` concurrently. The lock covers only
+the shared build; it is released before simulation begins. `JOBS=8` still
+supplies internal Picker, Verilator, and C++ build parallelism, and independent
+leaf scenarios or regression seeds can run as separate processes with up to
+eight workers once their shared build check completes.
 
 For an existing Picker binary, skip `bootstrap-picker` and pass it explicitly:
 
