@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
@@ -102,6 +103,28 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   // The first group after a correction was indexed with the history as it stood before that correction landed, so it
   // belongs to no entry and must not be trained. This is the warm-up that indexing a group ahead costs.
   val noAnchor: Bool = Bool()
+}
+
+/** A verified group, held back one training event so the group that follows it can become its second block.
+  *
+  * This is what lets a pair be learned without ever having been predicted as one, which matters because otherwise
+  * second blocks could only ever be learned where they already existed.
+  */
+class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
+  val meta:        PtageMeta       = new PtageMeta
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+  val nextPcLow:   UInt            = UInt(NextPcLowWidth.W)
+  val nextPc:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val taken:       Bool            = Bool()
+}
+
+/** A pending write to one table's bank, registered so the decision and the write land in different cycles. */
+class PtageTrainWrite(implicit p: Parameters) extends PtageBundle {
+  val table:  UInt       = UInt(log2Ceil(NumTables).W)
+  val bank:   UInt       = UInt(BankIdxWidth.W)
+  val setIdx: UInt       = UInt(SetIdxWidth.W)
+  val entry:  PtageEntry = new PtageEntry
 }
 
 class BankReadReq(implicit p: Parameters) extends PtageBundle {

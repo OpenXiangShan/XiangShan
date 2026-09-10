@@ -27,7 +27,9 @@ case class PtageParameters(
     // bits, so the fast loop never pays for an adder; a target reaching beyond this range cannot be a pTAGE entry.
     NextPcLowWidth:  Int = 11,
     CounterWidth:    Int = 2,
-    WriteBufferSize: Int = 4
+    WriteBufferSize: Int = 4,
+    // how many refused allocations it takes before one is allowed to evict an entry that is marked useful
+    AllocRefusalLimitWidth: Int = 5
 ) {
   require(isPow2(NumBanks), "pTAGE banks are selected by pc bits, so the count must be a power of two")
   require(isPow2(NumSets), "pTAGE sets are selected by a folded history XOR, so the count must be a power of two")
@@ -37,12 +39,13 @@ case class PtageParameters(
 trait HasPtageParameters extends HasFastPhrParameters {
   def ptageParameters: PtageParameters = bpuParameters.ptageParameters
 
-  def NumBanks:        Int = ptageParameters.NumBanks
-  def NumSets:         Int = ptageParameters.NumSets
-  def TagWidth:        Int = ptageParameters.TagWidth
-  def NextPcLowWidth:  Int = ptageParameters.NextPcLowWidth
-  def CounterWidth:    Int = ptageParameters.CounterWidth
-  def WriteBufferSize: Int = ptageParameters.WriteBufferSize
+  def NumBanks:               Int = ptageParameters.NumBanks
+  def NumSets:                Int = ptageParameters.NumSets
+  def TagWidth:               Int = ptageParameters.TagWidth
+  def NextPcLowWidth:         Int = ptageParameters.NextPcLowWidth
+  def CounterWidth:           Int = ptageParameters.CounterWidth
+  def WriteBufferSize:        Int = ptageParameters.WriteBufferSize
+  def AllocRefusalLimitWidth: Int = ptageParameters.AllocRefusalLimitWidth
 
   // One table per FastPhr history span: a table is indexed by the folded history of its own span, which is what makes
   // the geometric-history structure of TAGE. The two therefore have to be configured together.
