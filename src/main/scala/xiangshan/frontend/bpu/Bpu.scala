@@ -218,14 +218,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     p.io.fastTrain.foreach(_ := fastTrain)
   }
 
-  Seq(abtb.io, utage.io, ptage.io).foreach { io =>
-    io.redirect        := redirect.valid
-    io.bpuS2Override   := s2_override
-    io.bpuS3Override   := s3_override
-    io.newStartPc      := s1_prediction.target
-    io.overrideStartPc := Mux(s3_override, s3_prediction.target, s2_prediction.target)
-  }
-
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
@@ -406,6 +398,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s1_group(1).bits.attribute   := s1_secondBlock.bits.attribute
   s1_group(1).bits.target      := s1_secondBlock.bits.target
   s1_secondBlockIn             := s1_group(1)
+
+  // A group ends where its last valid block ends, so that is where the next one starts. Feeding back the first
+  // block's target instead would restart at a pc this group already covered, and the entry Ftq wrote for the second
+  // block would not be followed by one starting at that block's target, which is how Ftq encodes a target at all.
+  private val s1_groupTarget = Mux(s1_group(1).valid, s1_group(1).bits.target, s1_prediction.target)
+
+  // Where the ahead-indexed predictors pick up. They are keyed on the start of the group that follows this one, so
+  // they have to be told where the whole group ends, not where its first block jumped: a group that kept a second
+  // block covers past that target itself.
+  Seq(abtb.io, utage.io, ptage.io).foreach { predictorIo =>
+    predictorIo.redirect        := redirect.valid
+    predictorIo.bpuS2Override   := s2_override
+    predictorIo.bpuS3Override   := s3_override
+    predictorIo.newStartPc      := s1_groupTarget
+    predictorIo.overrideStartPc := Mux(s3_override, s3_prediction.target, s2_prediction.target)
+  }
 
   private val s1_taken         = s1_prediction.taken
   private val debug_s1UsePtage = s1_taken && usePtage
@@ -663,11 +671,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.toFtq.meta.bits.commitMeta   := s3_commitMeta
 
   /* *** s0_startPc selection *** */
-  // A group ends where its last valid block ends, so that is where the next one starts. Feeding back the first
-  // block's target instead would restart at a pc this group already covered, and the entry Ftq wrote for the second
-  // block would not be followed by one starting at that block's target, which is how Ftq encodes a target at all.
-  private val s1_groupTarget = Mux(s1_group(1).valid, s1_group(1).bits.target, s1_prediction.target)
-
   s0_startPc := MuxCase(
     s0_startPcReg.get,
     Seq(
