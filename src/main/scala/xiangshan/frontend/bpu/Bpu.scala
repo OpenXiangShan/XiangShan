@@ -335,6 +335,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
   )
 
+  // The group s1 hands on. Everything downstream that has to account for a whole group, the path history included,
+  // reads it from here, so there is one place the second block gets filled in.
+  private val s1_group = Wire(Vec(MaxPredictionNum, Valid(new Prediction)))
+  s1_group(0).valid := true.B
+  s1_group(0).bits  := s1_prediction
+  s1_group.tail.foreach { block =>
+    block.valid := false.B
+    block.bits  := 0.U.asTypeOf(block.bits)
+  }
+
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
   private val debug_s1UseUbtb      = s1_taken && !useAbtb
@@ -588,7 +598,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s3.startPc       := s3_startPc.get.unGuard
   phr.io.s1Train.valid          := s1_fire
   phr.io.s1Train.startPc        := s1_startPc.get.unGuard
-  phr.io.s1Train.prediction     := s1_prediction
+  phr.io.s1Train.blocks         := s1_group
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits.fromBpuTrain(train)
