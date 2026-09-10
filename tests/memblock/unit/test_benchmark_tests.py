@@ -31,6 +31,10 @@ class BenchmarkTestsTest(unittest.TestCase):
             makefile.index("analyze-spec-counters:")
         ]
         self.assertIn("--jobs $(or $(BENCHMARK_JOBS),$(JOBS))", benchmark_rule)
+        self.assertIn(
+            "$(if $(BENCHMARK_SCENARIOS),--scenarios $(BENCHMARK_SCENARIOS))",
+            benchmark_rule,
+        )
 
     def make_runtime(
         self,

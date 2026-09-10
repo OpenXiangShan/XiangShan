@@ -219,7 +219,7 @@ MemBlock model from `tests/memblock`.
 The environment used for the recorded results was Ubuntu 24.04 with JDK 17,
 Mill 0.12.3, Python 3.12, GNU Make 4.3, GCC/G++ 13.3, CMake 3.28, and Verilator
 5.048 or 5.052. A forced clean model build has qualified Picker
-`5e9e38d7087006440ae1c533073b13e798a36927` with Verilator 5.052. These are
+`794e2d9085cf7eae31638119d15a976558ba9490` with Verilator 5.052. These are
 known-working baselines, not all strict minimum versions.
 Picker requires SWIG 4.2 or newer; `bootstrap-picker` uses a system SWIG when
 available and otherwise attempts a local extraction with `apt-get download`
@@ -232,6 +232,7 @@ generate exactly the RTL configuration used by this environment:
 cd /path/to/XiangShan
 git submodule sync --recursive
 make init
+export NOOP_HOME=/path/to/XiangShan
 make verilog CONFIG=DefaultConfig NUM_CORES=1 ISSUE=E.b JVM_XMX=40G
 test -s build/rtl/MemBlock.sv
 test -s build/rtl/filelist.f
@@ -263,6 +264,12 @@ bootstrap records the exact Picker/xcomm revisions and executable path in
 offset map to `build/memblock/picker/MemBlock_offset.yaml`. Picker's generic
 base may compile unused VPI methods, but this UT neither enables nor calls VPI.
 
+Run export, model compilation, and harness compilation through one top-level
+Make invocation. `JOBS=8` supplies internal build parallelism; two independent
+Make processes must not write `build/memblock/picker` concurrently. Once the
+simulator or frozen runtime exists, independent leaf scenarios and regression
+seeds are safe to run as separate processes with up to eight workers.
+
 For an existing Picker binary, skip `bootstrap-picker` and pass it explicitly:
 
 ```sh
@@ -281,6 +288,9 @@ Common setup failures are:
 
 - `build/rtl/MemBlock.sv` or `build/rtl/filelist.f` missing: run the root-level
   `make verilog` command above, not only a target under `tests/memblock`.
+- `NOOP_HOME` missing or pointing at another checkout: export the absolute
+  XiangShan repository root before `make verilog`; the generated source and
+  file list are not trustworthy when elaboration resolves a different root.
 - Mill/Chisel import or missing-module errors: rerun `make init` and confirm the
   checkout has the branch's recorded submodule commits.
 - Java heap allocation or an OOM kill: free memory or move the RTL generation
@@ -1608,7 +1618,14 @@ unit, not a synonym for one load/store or one bus request.
 
 Scenarios run in up to `JOBS` independent processes (default `JOBS=8`), while
 the JSON/Markdown artifact preserves command-line scenario order. Set
-`BENCHMARK_JOBS=1` for a serial measurement. The Make target allows up to
+`BENCHMARK_JOBS=1` for a serial measurement. The benchmark controller accepts
+one through eight leaf processes and rejects larger requests; its JSON records
+both the requested limit and the effective count after considering the number
+of selected scenarios. Its terminal and JSON summaries report every failed
+leaf; each failed result retains the exact simulator command and the bounded
+output tail needed for deterministic replay and first-pass diagnosis. The Make
+target accepts a comma-separated `BENCHMARK_SCENARIOS` subset for focused
+parallel replay and allows up to
 `BENCHMARK_TIMEOUT_SECONDS=7200` per leaf by default because the complete
 SPEC-constrained mixed prefix can exceed the generic 1,800-second budget;
 override that variable only when measuring a known shorter or longer build.
