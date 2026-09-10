@@ -137,6 +137,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.singleStep := csrIn.exception.bits.singleStep
   csrMod.io.fromRob.trap.bits.crossPageIPFFix := csrIn.exception.bits.crossPageIPFFix
   csrMod.io.fromRob.trap.bits.isInterrupt := csrIn.exception.bits.isInterrupt
+  csrMod.io.fromRob.trap.bits.boundaryInterrupt := csrIn.exception.bits.boundaryInterrupt
   csrMod.io.fromRob.trap.bits.trigger := csrIn.exception.bits.trigger
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
@@ -348,6 +349,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrOut.trapTarget := csrMod.io.out.bits.targetPc
   csrOut.interrupt := csrMod.io.status.interrupt
+  csrOut.interruptEvaluation := csrMod.io.status.interruptEvaluation
   csrOut.wfi_event := csrMod.io.status.wfiEvent
 
   csrOut.tlb := tlb

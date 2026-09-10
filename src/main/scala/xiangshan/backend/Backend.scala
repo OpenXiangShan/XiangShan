@@ -306,6 +306,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromVfIsVlmax := vlFromVfIsVlmax
   ctrlBlock.io.csrCtrl <> intExuBlock.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intExuBlock.io.csrio.get.interrupt
+  ctrlBlock.io.robio.csr.intrEvaluation := intExuBlock.io.csrio.get.interruptEvaluation
   ctrlBlock.io.robio.csr.trapTarget := intExuBlock.io.csrio.get.trapTarget
   ctrlBlock.io.robio.csr.isXRet := intExuBlock.io.csrio.get.isXRet
   ctrlBlock.io.robio.csr.wfiEvent := intExuBlock.io.csrio.get.wfi_event
