@@ -33,6 +33,7 @@ import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.cache.CCHIType3DownPort
 import xiangshan.cache.CCHIType4Port
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
@@ -66,6 +67,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
     // Compact CHI Type 4 (ReadOnce + CompData)
     val cchi: CCHIType4Port = new CCHIType4Port
+    val ctrl_cchi: CCHIType3DownPort = Flipped(new CCHIType3DownPort)
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -108,11 +110,23 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
 
-  private val eccEnable = if (EnableCtrlUnit) outer.ctrlUnitOpt.get.module.io.eccEnable else true.B
+  private val chiCtrlUnit = Option.when(EnableCtrlUnit)(Module(new ICacheCCHICtrlUnit))
+  private val eccEnable = if (EnableCtrlUnit) chiCtrlUnit.get.io.eccEnable else true.B
+
+  if (EnableCtrlUnit) {
+    io.ctrl_cchi <> chiCtrlUnit.get.io.cchi
+  } else {
+    io.ctrl_cchi.req.ready := false.B
+    io.ctrl_cchi.updat.ready := false.B
+    io.ctrl_cchi.dnrsp.valid := false.B
+    io.ctrl_cchi.dnrsp.bits := DontCare
+    io.ctrl_cchi.dndat.valid := false.B
+    io.ctrl_cchi.dndat.bits := DontCare
+  }
 
   // dataArray io
   if (EnableCtrlUnit) {
-    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    val ctrlUnit = chiCtrlUnit.get
     when(ctrlUnit.io.injecting) {
       dataArray.io.write <> ctrlUnit.io.dataWrite
       missUnit.io.dataWrite.req.ready := false.B
@@ -129,7 +143,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaFlush
   if (EnableCtrlUnit) {
-    val ctrlUnit = outer.ctrlUnitOpt.get.module
+    val ctrlUnit = chiCtrlUnit.get
     when(ctrlUnit.io.injecting) {
       metaArray.io.write <> ctrlUnit.io.metaWrite
       metaArray.io.read <> ctrlUnit.io.metaRead

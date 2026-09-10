@@ -84,10 +84,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // mmio
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.frontendBridge.instr_uncache_node
-  if (icacheCtrlEnabled) {
-    memBlock.frontendBridge.icachectrl_node := l2top.inner.icachectrl_port_opt.get
-  }
-  // d_mmio_port TL disconnected in phase 2.3a (Uncache uses CHI d_mmio_cchi instead)
+  // d_mmio_port / icachectrl_port TL disconnected (Uncache/I$ Ctrl use CHI Type3Router)
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {

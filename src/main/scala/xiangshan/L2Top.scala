@@ -86,7 +86,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
-  val icachectrl_port_opt = Option.when(icacheCtrlEnabled)(TLTempNode())
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
@@ -151,9 +150,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   // d_mmio_port: no TL master in phase 2.3a (data-side Uncache uses CHI d_mmio_cchi)
   beu.node := TLBuffer.chainNode(1) := mmio_xbar
-  if (icacheCtrlEnabled) {
-    icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
-  }
   if (SeperateBus != top.SeperatedBusType.NONE) {
     sep_tl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }

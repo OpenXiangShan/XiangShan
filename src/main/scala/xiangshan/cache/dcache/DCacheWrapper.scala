@@ -889,6 +889,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
+  val ctrl_cchi = Flipped(new CCHIType3DownPort)
 }
 
 private object ArbiterCtrl {
@@ -975,8 +976,6 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
-
-  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new CtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
 }
@@ -1080,13 +1079,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
 
-  // l1 dcache controller
-  outer.cacheCtrlOpt.foreach {
-    case mod =>
-      mod.module.io_pseudoError.foreach {
-        case x => x.ready := false.B
-      }
-  }
+  // l1 dcache controller (Compact CHI Type 3)
   ldu.foreach {
     case mod =>
       mod.io.pseudo_error.valid := false.B
@@ -1097,22 +1090,30 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.pseudo_error.valid := false.B
   bankedDataArray.io.pseudo_error.bits  := DontCare
 
-  // pseudo tag ecc error
-  if (outer.cacheCtrlOpt.nonEmpty && EnableTagEcc) {
-    val ctrlUnit = outer.cacheCtrlOpt.head.module
-    ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
-    mainPipe.io.pseudo_error <> ctrlUnit.io_pseudoError(0)
-    ctrlUnit.io_pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
-                                        ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
-  }
+  if (cacheCtrlParamsOpt.nonEmpty) {
+    val ctrlUnit = Module(new DCacheCCHICtrlUnit(cacheCtrlParamsOpt.get))
+    io.ctrl_cchi <> ctrlUnit.io.cchi
 
-  // pseudo data ecc error
-  if (outer.cacheCtrlOpt.nonEmpty && EnableDataEcc) {
-    val ctrlUnit = outer.cacheCtrlOpt.head.module
-    bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)
-    ctrlUnit.io_pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
-                                        (mainPipe.io.pseudo_data_error_inj_done ||
-                                         ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
+    if (EnableTagEcc) {
+      ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io.pseudoError(0))
+      mainPipe.io.pseudo_error <> ctrlUnit.io.pseudoError(0)
+      ctrlUnit.io.pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
+                                          ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
+    }
+
+    if (EnableDataEcc) {
+      bankedDataArray.io.pseudo_error <> ctrlUnit.io.pseudoError(1)
+      ctrlUnit.io.pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
+                                          (mainPipe.io.pseudo_data_error_inj_done ||
+                                           ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
+    }
+  } else {
+    io.ctrl_cchi.req.ready := false.B
+    io.ctrl_cchi.updat.ready := false.B
+    io.ctrl_cchi.dnrsp.valid := false.B
+    io.ctrl_cchi.dnrsp.bits := DontCare
+    io.ctrl_cchi.dndat.valid := false.B
+    io.ctrl_cchi.dndat.bits := DontCare
   }
 
   val errors = Seq(mainPipe.io.error) ++ // store / misc error
@@ -1831,13 +1832,6 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val dcache = if (useDcache) LazyModule(new DCache()) else null
-  val uncacheNode = OptionWrapper(cacheCtrlParamsOpt.isDefined, TLIdentityNode())
-  require(
-    (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) ||
-    (!uncacheNode.isDefined && !dcache.cacheCtrlOpt.isDefined), "uncacheNode and ctrlUnitOpt are not connected!")
-  if (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) {
-    dcache.cacheCtrlOpt.get.node := uncacheNode.get
-  }
 
   class DCacheWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     val io = IO(new DCacheIO)

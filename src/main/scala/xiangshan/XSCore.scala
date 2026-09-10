@@ -69,9 +69,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val memBlock = LazyModule(new MemBlock)
 
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
-  if (icacheCtrlEnabled) {
-    frontend.inner.icache.ctrlUnitOpt.get.node := memBlock.inner.frontendBridge.icachectrl_node
-  }
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -201,6 +198,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
   // ICache Compact CHI Type 4: Frontend <-> MemBlock buffer <-> tile; RXDAT not wired to L2 in phase 2.1
   memBlock.io.inner_icache_cchi <> frontend.io.icache_cchi
+  // I$ Ctrl Compact CHI Type 3: MemBlock Type3Router <-> Frontend (not via L2)
+  if (icacheCtrlEnabled) {
+    frontend.io.icache_ctrl_cchi <> memBlock.io.inner_icache_ctrl_cchi
+  }
   io.icache_cchi.txreq <> memBlock.io.outer_icache_cchi.txreq
   io.icache_cchi.rxdat <> memBlock.io.outer_icache_cchi.rxdat
   io.icache_cchi.txreq.ready := true.B
