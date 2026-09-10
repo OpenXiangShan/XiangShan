@@ -1,12 +1,14 @@
+import hashlib
 import os
-import random
 import logging
+from random import Random
 from typing import Iterable
 
 import pytest
 
 from env.sequences import CheckPcSequence, LoadProgramSequence, RunUntilCommitSequence
 from env.core.transactions import CommitTarget, PcSequenceExpectation, ProgramImage
+from env.support import record_scenario, scenario_rng
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -73,7 +75,7 @@ def _program_image(instructions: Iterable[int], base_addr: int = BASE) -> Progra
     return ProgramImage(payload=_instructions_to_bytes(instructions), base_addr=base_addr)
 
 
-def _rand_resolve_delays(rng: random.Random, env) -> tuple:
+def _rand_resolve_delays(rng: Random, env) -> tuple:
     """Randomize backend resolve delays and return (min_d, max_d)."""
     min_d = rng.randint(1, 6)
     max_d = rng.randint(min_d + 1, min_d + 12)
@@ -122,9 +124,8 @@ def test_multi_branch_random_positions(env):
 
     Randomized: prog_size, stride, branch type at each slot, resolve delays.
     """
-    seed = random.randint(0, 0xFFFFFFFF)
-    rng = random.Random(seed)
-
+    scenario_key = "zhaoxinran/multi-branch/random-positions"
+    base_seed, seed, rng = scenario_rng(scenario_key)
     prog_size = rng.choice([64, 96, 128])
     stride = rng.randint(2, 5)
     min_d, max_d = _rand_resolve_delays(rng, env)
@@ -146,6 +147,22 @@ def test_multi_branch_random_positions(env):
 
     n_placed = n_jal + n_beq
     target_commits = max(n_placed * 3, 10)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "prog_size": prog_size,
+            "stride": stride,
+            "positions": positions,
+            "n_jal": n_jal,
+            "n_beq": n_beq,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
 
     logger.info(
         "seed=%d prog_size=%d stride=%d positions=%s n_jal=%d n_beq=%d "
@@ -186,8 +203,8 @@ def test_multi_cfi_per_ftq_entry(env):
       - At least one CFI target per block crosses a fetch-block boundary.
       - Each FTQ entry has a distinct start_addr (0x80000040, 0x80000080, ...).
     """
-    seed = random.randint(0, 0xFFFFFFFF)
-    rng = random.Random(seed)
+    scenario_key = "zhaoxinran/multi-branch/multi-cfi-per-ftq-entry"
+    base_seed, seed, rng = scenario_rng(scenario_key)
 
     BLOCK_SIZE = 16       # 16 × 4 B = 64-byte fetch block
     INNER_STRIDE = 2      # instruction distance between consecutive within-block BEQs
@@ -222,6 +239,20 @@ def test_multi_cfi_per_ftq_entry(env):
     prog[jal_pos] = _jal(0, (loop_target_pos - jal_pos) * 4)
 
     target_commits = max(n_beq * 3, 30)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "block_count": block_count,
+            "beqs_per_block": beqs_per_block,
+            "loop_target_block": loop_target_block,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
 
     logger.info(
         "seed=%d block_count=%d beqs_per_block=%d n_beq=%d loop_target_block=%d "
@@ -260,8 +291,8 @@ def test_multi_branch_dense_loop(env):
 
     Randomized: loop_size, beq_stride, target_commits, resolve delays.
     """
-    seed = random.randint(0, 0xFFFFFFFF)
-    rng = random.Random(seed)
+    scenario_key = "zhaoxinran/multi-branch/dense-loop"
+    base_seed, seed, rng = scenario_rng(scenario_key)
 
     loop_size = rng.randint(8, 16)
     beq_stride = rng.randint(2, 3)
@@ -279,6 +310,21 @@ def test_multi_branch_dense_loop(env):
         n_beq += 1
         beq_positions.append(pos)
         pos += beq_stride
+
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "loop_size": loop_size,
+            "beq_stride": beq_stride,
+            "beq_positions": beq_positions,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
 
     logger.info(
         "seed=%d loop_size=%d beq_stride=%d beq_positions=%s n_beq=%d "
@@ -315,8 +361,8 @@ def test_large_loop_multi_segment(env):
       - jump count >= N_SEG (each segment's JAL committed at least once)
       - branch count >= 1 if any BEQ/BNE was placed
     """
-    seed = random.randint(0, 0xFFFFFFFF)
-    rng  = random.Random(seed)
+    scenario_key = "zhaoxinran/multi-branch/large-loop-multi-segment"
+    base_seed, seed, rng = scenario_rng(scenario_key)
 
     prog_size = rng.choice([1024, 1280, 1536])
     N_SEG     = rng.randint(3, 6)
@@ -328,12 +374,20 @@ def test_large_loop_multi_segment(env):
 
     prog = [NOP] * prog_size
 
+    segment_parameters = []
     for i in range(N_SEG):
         seg_start = i * seg_len
         jal_pos   = seg_start + seg_len - 1
         skip        = rng.randint(1, 3)
         beq_density = rng.uniform(0.05, 0.15)
         bne_density = rng.uniform(0.05, 0.15)
+        segment_parameters.append(
+            {
+                "skip": skip,
+                "beq_density": beq_density,
+                "bne_density": bne_density,
+            }
+        )
 
         for s in range(seg_start, seg_start + seg_len - 1):
             pos_within_seg = s - seg_start
@@ -356,6 +410,23 @@ def test_large_loop_multi_segment(env):
     # loop even with maximum BEQ density (skip=3 → each segment commits ~seg_len//3
     # instructions on the execution path).
     target_commits = prog_size // 3 + N_SEG
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "prog_size": prog_size,
+            "segment_count": N_SEG,
+            "segment_length": seg_len,
+            "segments": segment_parameters,
+            "n_beq": n_beq_placed,
+            "n_bne": n_bne_placed,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
 
     logger.info(
         "seed=%d prog_size=%d N_SEG=%d seg_len=%d n_beq=%d n_bne=%d "

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import os
 
 import pytest
 from env.core.transactions import BackendRedirectClass, ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.sequences import LoadProgramSequence
+from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -60,6 +62,27 @@ def _load_mmio_payload(env, payload: bytes) -> None:
     ).run(env)
 
 
+def _payload_sha256(payload: bytes) -> str:
+    return hashlib.sha256(bytes(payload)).hexdigest()
+
+
+def _configure_random_mmio_latency(env, rng) -> int:
+    latency = rng.randint(1, 16)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    return latency
+
+
+def _random_cross_beat_rvi_stream(env, rng) -> tuple[int, int, int, bytes]:
+    beat_index = rng.randint(0, 14)
+    pc = uncache._MMIO_BASE + beat_index * uncache._UNCACHE_BEAT_BYTES + 6
+    payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 128)
+    offset = pc - uncache._MMIO_BASE
+    payload[offset : offset + 4] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
+    _load_mmio_payload(env, bytes(payload))
+    first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    return pc, first_beat, first_beat + uncache._UNCACHE_BEAT_BYTES, bytes(payload)
+
+
 def _rvi_rvc_payload(*, first: str) -> bytes:
     rvi = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     rvc = int(uncache._CNOP).to_bytes(2, "little")
@@ -67,13 +90,34 @@ def _rvi_rvc_payload(*, first: str) -> bytes:
     return (rvi + rvc + padding) if first == "rvi" else (rvc + rvi + padding)
 
 
-@pytest.mark.parametrize("offset", [0, 2, 4])
+@pytest.mark.parametrize("ordinal", range(3), ids=("sample-0", "sample-1", "sample-2"))
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env, offset: int):
+def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env, ordinal: int):
+    scenario_key = "zhaoxinran/mmio/rvi-non-tail"
+    base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
+    beat_index = rng.randint(0, 14)
+    offset = rng.choice((0, 2, 4))
     payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 64)
-    payload[offset : offset + 4] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
+    payload_offset = beat_index * uncache._UNCACHE_BEAT_BYTES + offset
+    payload[payload_offset : payload_offset + 4] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     _load_mmio_payload(env, bytes(payload))
-    pc = uncache._MMIO_BASE + int(offset)
+    latency = _configure_random_mmio_latency(env, rng)
+    pc = uncache._MMIO_BASE + payload_offset
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        ordinal=ordinal,
+        parameters={
+            "beat_index": beat_index,
+            "offset": offset,
+            "pc": pc,
+            "latency": latency,
+            "payload_sha256": _payload_sha256(payload),
+            "expected_path": "single_beat_normal",
+        },
+    )
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
     first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
@@ -92,18 +136,36 @@ def test_mmio_rvi_non_tail_8b_offsets_deliver_instruction(env, offset: int):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_rvc_at_8b_tail_advances_by_2b_without_second_beat(env):
+    scenario_key = "zhaoxinran/mmio/rvc-8b-tail"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    beat_index = rng.randint(0, 14)
     payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 64)
-    payload[6:8] = int(uncache._CNOP).to_bytes(2, "little")
+    payload_offset = beat_index * uncache._UNCACHE_BEAT_BYTES + 6
+    payload[payload_offset : payload_offset + 2] = int(uncache._CNOP).to_bytes(2, "little")
     _load_mmio_payload(env, bytes(payload))
-    pc = uncache._MMIO_BASE + 6
+    latency = _configure_random_mmio_latency(env, rng)
+    pc = uncache._MMIO_BASE + payload_offset
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "beat_index": beat_index,
+            "pc": pc,
+            "latency": latency,
+            "payload_sha256": _payload_sha256(payload),
+            "expected_path": "tail_rvc_no_resend",
+        },
+    )
     uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    first_beat = uncache._MMIO_BASE
+    first_beat = pc & ~(uncache._UNCACHE_BEAT_BYTES - 1)
     assert uncache._wait_for_request_addr(env, first_beat)
     assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
     stats_at_delivery = env.uncache_agent.get_stats()
     assert stats_at_delivery.get("request_addrs", []).count(first_beat) == 1
-    assert uncache._MMIO_BASE + 8 not in stats_at_delivery.get("request_addrs", [])
+    assert first_beat + 8 not in stats_at_delivery.get("request_addrs", [])
     assert uncache._wait_for_observed_pc(env, pc + 2, max_cycles=8000)
     observed = {
         int(item.pc): item
@@ -141,20 +203,37 @@ def test_mmio_adjacent_rvc_rvi_stream_preserves_pc_progress(env, first: str):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
-    uncache._prepare_cross_beat_rvi_stream(env)
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
+    scenario_key = "zhaoxinran/mmio/cross-8b-clean-rvi"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
+    latency = _configure_random_mmio_latency(env, rng)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": pc,
+            "first_beat": first_beat,
+            "second_beat": second_beat,
+            "latency": latency,
+            "payload_sha256": _payload_sha256(payload),
+            "expected_path": "second_beat_normal",
+        },
+    )
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE)
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE + 8)
-    assert uncache._wait_for_observed_pc(env, uncache._CROSS_BEAT_PC, max_cycles=8000)
+    assert uncache._wait_for_request_addr(env, first_beat)
+    assert uncache._wait_for_request_addr(env, second_beat)
+    assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
     observed = next(
-        item for item in env.monitor.observations if int(item.pc) == uncache._CROSS_BEAT_PC
+        item for item in env.monitor.observations if int(item.pc) == pc
     )
     assert int(observed.instr) == uncache._ADDI_X0_X0_0
     assert not bool(observed.is_rvc)
     stats = env.uncache_agent.get_stats()
-    assert stats.get("request_addrs", []).count(uncache._MMIO_BASE) == 1
-    assert stats.get("request_addrs", []).count(uncache._MMIO_BASE + 8) == 1
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert stats.get("request_addrs", []).count(second_beat) == 1
     assert not env.monitor.get_errors()
 
 
@@ -167,25 +246,45 @@ def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[str, int]):
-    uncache._prepare_cross_beat_rvi_stream(env)
+    scenario_key = "zhaoxinran/mmio/cross-8b-first-beat-fault"
+    ordinal = int(bool(fault.get("denied")))
+    base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
+    pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
+    latency = _configure_random_mmio_latency(env, rng)
     cfvec_records = _capture_cfvec_exceptions(env)
     env.uncache_agent.inject_response_fault_at(
-        uncache._MMIO_BASE,
+        first_beat,
         **fault,
     )
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        ordinal=ordinal,
+        parameters={
+            "pc": pc,
+            "first_beat": first_beat,
+            "second_beat": second_beat,
+            "fault": fault,
+            "latency": latency,
+            "payload_sha256": _payload_sha256(payload),
+            "expected_path": "first_beat_fault_no_resend",
+        },
+    )
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE)
+    assert uncache._wait_for_request_addr(env, first_beat)
     assert uncache._wait_for_uncache_resp(env)
     assert uncache._wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
     assert int(stats.get("corrupt_resp_count", 0)) == 1
     assert int(stats.get("denied_resp_count", 0)) == int(fault.get("denied", 0))
-    assert stats.get("request_addrs", []).count(uncache._MMIO_BASE) == 1
-    assert uncache._MMIO_BASE + 8 not in stats.get("request_addrs", [])
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert second_beat not in stats.get("request_addrs", [])
     _assert_target_exception(
         cfvec_records,
-        pc=uncache._CROSS_BEAT_PC,
+        pc=pc,
         expected_bit=(
             _INSTRUCTION_ACCESS_FAULT_BIT if fault.get("denied") else _HARDWARE_ERROR_BIT
         ),
@@ -197,23 +296,43 @@ def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[
 @pytest.mark.parametrize("fault", [None, "corrupt", "corrupt_and_denied"])
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
-    uncache._prepare_cross_beat_rvi_stream(env)
+    scenario_key = "zhaoxinran/mmio/cross-8b-second-beat-response"
+    ordinal = {None: 0, "corrupt": 1, "corrupt_and_denied": 2}[fault]
+    base_seed, seed, rng = scenario_rng(scenario_key, ordinal=ordinal)
+    pc, first_beat, second_beat, payload = _random_cross_beat_rvi_stream(env, rng)
+    latency = _configure_random_mmio_latency(env, rng)
     cfvec_records = _capture_cfvec_exceptions(env)
     if fault is not None:
         env.uncache_agent.inject_response_fault_at(
-            uncache._MMIO_BASE + 8,
+            second_beat,
             corrupt=1,
             denied=int(fault == "corrupt_and_denied"),
         )
-    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        ordinal=ordinal,
+        parameters={
+            "pc": pc,
+            "first_beat": first_beat,
+            "second_beat": second_beat,
+            "fault": fault or "none",
+            "latency": latency,
+            "payload_sha256": _payload_sha256(payload),
+            "expected_path": "second_beat_normal" if fault is None else "second_beat_fault",
+        },
+    )
+    uncache._initialize_mmio_fetch(env, reset_vector=pc)
 
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE)
-    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE + 8)
+    assert uncache._wait_for_request_addr(env, first_beat)
+    assert uncache._wait_for_request_addr(env, second_beat)
     assert uncache._wait_for_resp_count(env, 2)
     if fault is None:
-        assert uncache._wait_for_observed_pc(env, uncache._CROSS_BEAT_PC, max_cycles=8000)
+        assert uncache._wait_for_observed_pc(env, pc, max_cycles=8000)
         observed = next(
-            item for item in env.monitor.observations if int(item.pc) == uncache._CROSS_BEAT_PC
+            item for item in env.monitor.observations if int(item.pc) == pc
         )
         assert int(observed.instr) == uncache._ADDI_X0_X0_0
         assert not bool(observed.is_rvc)
@@ -222,11 +341,11 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
         assert uncache._wait_for_monitor_exception(env)
         assert env.monitor.exception_mark_count > 0
         stats = env.uncache_agent.get_stats()
-        assert stats.get("request_addrs", []).count(uncache._MMIO_BASE) == 1
-        assert stats.get("request_addrs", []).count(uncache._MMIO_BASE + 8) == 1
+        assert stats.get("request_addrs", []).count(first_beat) == 1
+        assert stats.get("request_addrs", []).count(second_beat) == 1
         _assert_target_exception(
             cfvec_records,
-            pc=uncache._CROSS_BEAT_PC,
+            pc=pc,
             expected_bit=(
                 _INSTRUCTION_ACCESS_FAULT_BIT
                 if fault == "corrupt_and_denied"

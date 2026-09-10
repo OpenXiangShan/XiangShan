@@ -186,6 +186,13 @@ class TranslationScenarioRandomizer:
         self.seed = int(seed)
         self._random = random.Random(self.seed)
 
+    @classmethod
+    def kind_for_ordinal(cls, ordinal: int) -> str:
+        index = int(ordinal)
+        if index < 0:
+            raise ValueError("translation random scenario ordinal must be non-negative")
+        return cls._TRANSLATION_KINDS[index % len(cls._TRANSLATION_KINDS)]
+
     def _pte(self, *, vmid: int = 0, allow_fault: bool = True) -> TranslationPte:
         fault = self._random.choice(("normal", "x", "a", "invalid_wr")) if allow_fault else "normal"
         return TranslationPte(
@@ -254,7 +261,7 @@ class TranslationScenarioRandomizer:
         index = int(ordinal)
         if index < 0:
             raise ValueError("translation random scenario ordinal must be non-negative")
-        kind = self._TRANSLATION_KINDS[index % len(self._TRANSLATION_KINDS)]
+        kind = self.kind_for_ordinal(index)
         mode = self._random.choice(("sv39", "sv48"))
         stage2_mode = self._random.choice(("sv39", "sv48"))
         page_count = 2 if self._random.randrange(4) == 0 else 1

@@ -20,6 +20,14 @@ def test_translation_randomizer_replays_the_same_seed() -> None:
     assert first == second
     assert [item.scenario.scenario_id for item in first] == [f"translation-random-s24301-n{index}" for index in range(24)]
     assert TranslationScenarioRandomizer(0x5EED).next(17) == first[17]
+    assert [TranslationScenarioRandomizer.kind_for_ordinal(index) for index in range(6)] == [
+        "bare",
+        "stage1",
+        "stage2",
+        "all_stage",
+        "sector",
+        "superpage",
+    ]
 
 
 def test_translation_randomizer_builds_a_constrained_stream_across_translation_kinds() -> None:

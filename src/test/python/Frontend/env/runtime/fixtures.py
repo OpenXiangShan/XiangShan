@@ -306,6 +306,9 @@ def _funcov_run_metadata(request, env) -> dict:
                 "icache": int(config.icache.seed),
                 "ptw": int(config.ptw.seed),
             },
+            "random_scenarios": list(
+                getattr(env, "random_scenario_records", [])
+            ),
         },
     }
 

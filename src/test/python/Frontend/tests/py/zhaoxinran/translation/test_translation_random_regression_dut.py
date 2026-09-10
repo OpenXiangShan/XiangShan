@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+from dataclasses import asdict
 
 import pytest
 
@@ -12,7 +14,7 @@ from env.sequences import (
     TranslationScenarioRandomizer,
     TranslationScenarioSequence,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, record_scenario
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -104,7 +106,47 @@ def test_translation_constrained_random_stream_dut(env) -> None:
 
     phase_results = []
     for ordinal in range(start_ordinal, start_ordinal + count):
-        scenario = TranslationScenarioRandomizer(seed).next(ordinal).scenario
+        generated = TranslationScenarioRandomizer(seed).next(ordinal)
+        scenario = generated.scenario
+        kind = TranslationScenarioRandomizer.kind_for_ordinal(ordinal)
+        scenario_parameters = {
+            "scenario_id": scenario.scenario_id,
+            "mode": scenario.mode,
+            "stage2_mode": scenario.stage2_mode,
+            "s2xlate": scenario.s2xlate,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "gpa": scenario.gpa,
+            "page_count": scenario.page_count,
+            "declared_expected_path": scenario.expected_path,
+            "declared_expected_result": scenario.expected_result,
+            "payload_sha256": hashlib.sha256(scenario.payload).hexdigest(),
+            "s1_pte": asdict(scenario.s1_pte),
+            "s2_pte": asdict(scenario.s2_pte),
+            "s1_sector_lanes": [asdict(lane) for lane in scenario.s1_sector_lanes],
+            "response_faults": {
+                "s1_pf": scenario.s1_pf,
+                "s1_af": scenario.s1_af,
+                "s2_gpf": scenario.s2_gpf,
+                "s2_gaf": scenario.s2_gaf,
+            },
+            "privilege": {
+                "imode": scenario.priv_imode,
+                "virt": scenario.priv_virt,
+            },
+            "pmp_entries": [asdict(entry) for entry in scenario.pmp_entries],
+            "pma_entries": [asdict(entry) for entry in scenario.pma_entries],
+            "permission_probes": [
+                asdict(probe) for probe in scenario.permission_probes
+            ],
+            "ptw_response_latency": scenario.ptw_response_latency,
+            "ptw_response_latency_max": scenario.ptw_response_latency_max,
+            "ptw_response_seed": scenario.ptw_response_seed,
+            "ptw_req_ready_strategy": scenario.ptw_req_ready_strategy,
+            "ptw_req_ready_probability": scenario.ptw_req_ready_probability,
+            "ptw_req_ready_high_cycles": scenario.ptw_req_ready_high_cycles,
+            "ptw_req_ready_low_cycles": scenario.ptw_req_ready_low_cycles,
+        }
         translation_enabled = str(scenario.mode).lower() != "bare" or int(scenario.s2xlate) != 0
         env.translation_oracle.disarm()
         env.initialize(reset_vector=scenario.va, bare_mode=not translation_enabled)
@@ -120,6 +162,20 @@ def test_translation_constrained_random_stream_dut(env) -> None:
 
         env.reset(before_release=arm_before_reset_release)
         state = prepared["state"]
+        scenario_parameters.update(
+            {
+                "oracle_expected_outcome": state.expected_outcome,
+                "oracle_expected_page_outcomes": list(state.expected_page_outcomes),
+            }
+        )
+        record_scenario(
+            env,
+            f"zhaoxinran/translation/{kind}",
+            base_seed=seed,
+            seed=seed,
+            ordinal=ordinal,
+            parameters=scenario_parameters,
+        )
         for _ in range(12000):
             if _translation_complete(env) or env.translation_oracle.get_stats()["errors"]:
                 break
