@@ -9,54 +9,70 @@ import oceanus.compactchi._
 /*
  * 1 upstream Type3 requester (Uncache) -> N downstream ports by address decode.
  * TXREQ/TXDAT: demux by Addr (txdatAddr from Uncache entry, same as txreq Addr).
- * RXRSP/RXDAT: RR arbiter when both downstream respond.
+ * RXRSP/RXDAT: RR arbiter when downstream respond.
+ * downCtrl(0) = D$ CtrlUnit, downCtrl(1) = I$ CtrlUnit.
  */
 class Type3Router(implicit val p: Parameters) extends Module with HasDCacheParameters {
   val io = IO(new Bundle {
     val up = Flipped(new CCHIType3Port)
     val txdatAddr = Input(UInt(48.W))
     val downL2 = new CCHIType3Port
-    val downCtrl = new CCHIType3Port
+    val downCtrl = Vec(2, new CCHIType3Port)
   })
 
-  private def isCtrlAddr(addr: UInt): Bool =
+  private def isDCacheCtrlAddr(addr: UInt): Bool =
     dcacheParameters.cacheCtrlAddressOpt.map(_.contains(addr)).getOrElse(false.B)
 
-  // TXREQ: route by address
-  val txreqToCtrl = io.up.txreq.valid && isCtrlAddr(io.up.txreq.bits.Addr)
+  private def isICacheCtrlAddr(addr: UInt): Bool =
+    Option.when(icacheCtrlEnabled)(icacheCtrlAddress.contains(addr)).getOrElse(false.B)
 
-  io.downCtrl.txreq.valid := txreqToCtrl
-  io.downCtrl.txreq.bits := io.up.txreq.bits
-  io.downL2.txreq.valid := io.up.txreq.valid && !txreqToCtrl
-  io.downL2.txreq.bits := io.up.txreq.bits
-  io.up.txreq.ready := Mux(txreqToCtrl, io.downCtrl.txreq.ready, io.downL2.txreq.ready)
+  private def isCtrlAddr(addr: UInt): Bool = isDCacheCtrlAddr(addr) || isICacheCtrlAddr(addr)
+  private def ctrlPortOH(addr: UInt): UInt = Cat(isICacheCtrlAddr(addr), isDCacheCtrlAddr(addr))
 
-  // TXDAT: route by address
-  val txdatToCtrl = io.up.txdat.valid && isCtrlAddr(io.txdatAddr)
+  private def demuxTxReq(up: DecoupledIO[FlitREQ], downCtrl: Seq[DecoupledIO[FlitREQ]], downL2: DecoupledIO[FlitREQ]): Unit = {
+    val isCtrl = up.valid && isCtrlAddr(up.bits.Addr)
+    val ctrlOH = ctrlPortOH(up.bits.Addr)
+    downCtrl.zipWithIndex.foreach { case (downctrl, i) =>
+      downctrl.valid := isCtrl && ctrlOH(i)
+      downctrl.bits := up.bits
+    }
+    downL2.valid := up.valid && !isCtrl
+    downL2.bits := up.bits
+    up.ready := Mux(isCtrl, Mux1H(ctrlOH, downCtrl.map(_.ready)), downL2.ready)
+  }
 
-  io.downCtrl.txdat.valid := txdatToCtrl
-  io.downCtrl.txdat.bits := io.up.txdat.bits
-  io.downL2.txdat.valid := io.up.txdat.valid && !txdatToCtrl
-  io.downL2.txdat.bits := io.up.txdat.bits
-  io.up.txdat.ready := Mux(txdatToCtrl, io.downCtrl.txdat.ready, io.downL2.txdat.ready)
+  private def demuxTxDat(up: DecoupledIO[FlitUpDAT64], addr: UInt, downCtrl: Seq[DecoupledIO[FlitUpDAT64]], downL2: DecoupledIO[FlitUpDAT64]): Unit = {
+    val isCtrl = up.valid && isCtrlAddr(addr)
+    val ctrlOH = ctrlPortOH(addr)
+    downCtrl.zipWithIndex.foreach { case (downctrl, i) =>
+      downctrl.valid := isCtrl && ctrlOH(i)
+      downctrl.bits := up.bits
+    }
+    downL2.valid := up.valid && !isCtrl
+    downL2.bits := up.bits
+    up.ready := Mux(isCtrl, Mux1H(ctrlOH, downCtrl.map(_.ready)), downL2.ready)
+  }
 
-  // RXRSP: RR arbiter (downL2 = in(0), downCtrl = in(1))
-  val rspArb = Module(new RRArbiter(new FlitDnRSP, 2))
-  rspArb.io.in(0).valid := io.downL2.rxrsp.valid
-  rspArb.io.in(0).bits := io.downL2.rxrsp.bits
-  rspArb.io.in(1).valid := io.downCtrl.rxrsp.valid
-  rspArb.io.in(1).bits := io.downCtrl.rxrsp.bits
-  io.up.rxrsp <> rspArb.io.out
-  io.downL2.rxrsp.ready := rspArb.io.in(0).ready
-  io.downCtrl.rxrsp.ready := rspArb.io.in(1).ready
+  demuxTxReq(io.up.txreq, io.downCtrl.map(_.txreq), io.downL2.txreq)
+  demuxTxDat(io.up.txdat, io.txdatAddr, io.downCtrl.map(_.txdat), io.downL2.txdat)
+  assert(PopCount(io.downCtrl.map(_.txreq.valid) :+ io.downL2.txreq.valid) <= 1.U, "Type3Router: at most one to-downstream txreq valid")
 
-  // RXDAT: RR arbiter (downL2 = in(0), downCtrl = in(1))
-  val datArb = Module(new RRArbiter(new FlitDnDAT64, 2))
-  datArb.io.in(0).valid := io.downL2.rxdat.valid
-  datArb.io.in(0).bits := io.downL2.rxdat.bits
-  datArb.io.in(1).valid := io.downCtrl.rxdat.valid
-  datArb.io.in(1).bits := io.downCtrl.rxdat.bits
-  io.up.rxdat <> datArb.io.out
-  io.downL2.rxdat.ready := datArb.io.in(0).ready
-  io.downCtrl.rxdat.ready := datArb.io.in(1).ready
+  // RXRSP/RXDAT: RR arbiter (downL2 = in(0), downCtrl(i) = in(i + 1))
+  private def arbDownRx[T <: Data](up: DecoupledIO[T], downL2: DecoupledIO[T], downCtrl: Seq[DecoupledIO[T]]): Unit = {
+    val arb = Module(new RRArbiter(chiselTypeOf(up.bits), 1 + downCtrl.length))
+    arb.io.in(0).valid := downL2.valid
+    arb.io.in(0).bits := downL2.bits
+    downCtrl.zipWithIndex.foreach { case (port, i) =>
+      arb.io.in(i + 1).valid := port.valid
+      arb.io.in(i + 1).bits := port.bits
+    }
+    up <> arb.io.out
+    downL2.ready := arb.io.in(0).ready
+    downCtrl.zipWithIndex.foreach { case (port, i) =>
+      port.ready := arb.io.in(i + 1).ready
+    }
+  }
+
+  arbDownRx(io.up.rxrsp, io.downL2.rxrsp, io.downCtrl.map(_.rxrsp))
+  arbDownRx(io.up.rxdat, io.downL2.rxdat, io.downCtrl.map(_.rxdat))
 }
