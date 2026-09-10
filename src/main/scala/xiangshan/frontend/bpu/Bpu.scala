@@ -651,12 +651,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // a not-taken second block can never be confirmed by the micro btb, since only a taken exit leaves an entry behind
   XSPerfAccumulate("s3SecondBlockNotTaken", s3_checking && !s3_secondBlock.bits.taken)
 
-  s3_override := {
+  private val s3_firstBlockWrong = {
     val takenDiff            = s3_taken =/= s3_s2Prediction.taken
     val firstTakenBranchDiff = !(s3_firstTakenBranchOH === s3_s2FirstTakenBranchOH)
 
-    s3_valid && (takenDiff || firstTakenBranchDiff || s3_targetDiff || s3_secondBlockUnverified)
+    s3_valid && (takenDiff || firstTakenBranchDiff || s3_targetDiff)
   }
+
+  // The first block was checked and it was right, so only what followed it has to be taken back. Its Ftq entry stands
+  // and the fetch already in flight for it survives; the correction starts at the second block's entry. What the
+  // group means afterwards is the same either way, one block ending where the first block ends, so the path history
+  // and the restart pc follow the ordinary override path unchanged.
+  private val s3_dropSecondOnly = s3_valid && s3_secondBlockUnverified && !s3_firstBlockWrong
+
+  s3_override := s3_firstBlockWrong || s3_dropSecondOnly
 
   // A second block that failed verification is dropped along with the group, so the entry that proposed it has not
   // been vindicated and pTAGE must not reinforce the pair.
@@ -699,7 +707,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.toFtq.prediction.valid := s1_valid && s2_ready || s2_override || s3_override
 
   private val firstBlock = io.toFtq.prediction.bits.blocks.head
-  firstBlock.valid := true.B
+  // An override that only takes back the second block writes no entry at all: the first block's is already right
+  firstBlock.valid := !s3_dropSecondOnly
   when(s3_override) {
     firstBlock.bits.fromStage(s3_startPc.get, s3_prediction)
   }.elsewhen(s2_override) {
@@ -722,7 +731,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.toFtq.s3FtqPtr := s3_ftqPtr
   // An override replaces the group with a single corrected block, so only a group that survives s3 keeps its width.
   // A group is its first block plus, where there was one, its second.
-  io.toFtq.s3NumBlocks := Mux(s3_override, 1.U, 1.U +& s3_secondBlock.valid.asUInt)
+  io.toFtq.s3NumBlocks          := Mux(s3_override, 1.U, 1.U +& s3_secondBlock.valid.asUInt)
+  io.toFtq.s3OverrideKeptBlocks := Mux(s3_dropSecondOnly, 1.U, 0.U)
 
   io.toFtq.meta.valid             := s3_valid
   io.toFtq.meta.bits.redirectMeta := s3_redirectMeta
