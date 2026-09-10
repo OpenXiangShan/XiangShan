@@ -3693,17 +3693,58 @@ stage-1 modes were `28,20` (Sv39, Sv48), and EEW counts were `11,12,14,11`
 for 8/16/32/64-bit elements. All 16 fault-position x stage-1-mode x EEW
 bins were nonzero. Every VFOF action produced exactly one fix-VL writeback
 (`actual_vector_fof_fix_vl=48`); the independent page-table/data oracle also
-checked prefix data, page-fault suppression/preservation, fault VA, unique
-identity termination, and no additional LQ allocation for fix-VL.
+checked prefix data, page-fault suppression/preservation, unique identity
+termination, and no additional LQ allocation for fix-VL. The earlier claim
+that this mixed run also checked exact fault VA is withdrawn: the exported
+address is an unqualified retained payload. Exact first-fault VA is instead
+checked in fresh focused ordinary and segmented FOF environments.
 
 The broader coverage run produced 72,956 scalar-load, 33,058 scalar-store,
 1,141 vector-load, 980 vector-store, and 18 prefetch writebacks. DCache
 activity was 79,854 refills, one AcquirePerm, 79,855 GrantAcks, 611 Probes,
 and 33,236 ReleaseData transactions. Queue accounting closed at
 `77210+34/77244` and `37076+0/37076`, with zero unobserved cancellations.
-The external oracle remains identity/data/exception/fault-VA/final-VL/
-queue/protocol based; bank identity, replay count, prefetch source/count,
-MSHR state, and exact timing remain diagnostic only.
+The mixed external oracle remains identity/data/exception/final-VL/queue/
+protocol based; bank identity, replay count, prefetch source/count, MSHR
+state, retained exception-address payload, and exact timing remain diagnostic
+only.
+
+### Schema-44 VFOF Exception-Payload Recheck
+
+On 2026-09-11, a diagnostic restoration of the raw first-element VFOF
+`lsqio.vaddr` comparison reproduced the archived seed-1 failure at action
+1,818 and cycle 201,176: the identified VFOF writeback expected virtual
+address `0x58001000`, while the unqualified top-level payload still held
+`0xa0000180`.
+
+Read-only Picker `mem_direct` tracing, with no VPI or internal writes, showed
+the earlier vector guest-page-fault candidate at cycle 2,215 and the
+`LqExceptionBuffer` retaining it at cycle 2,216 with no redirect. The target
+VFOF candidate then reached the same exception buffer at cycle 201,174 with
+ROB identity `70:1` and exact full VA `0x58001000`; the older retained entry
+legally remained selected. Queue and scoreboard drains did not clear it.
+
+This is a UT false positive, not a CPU RTL bug. The exported address has no
+valid bit or transaction identity, and RTL retains the oldest exception until
+architectural redirect. `random-mixed` therefore checks the VFOF through its
+ROB/uop/pdest-qualified exception writeback, exact data or suppression,
+fix-VL, termination, and LQ conservation, but does not attribute the raw
+payload. The focused `vector-fof` scenario now uses a fresh exception epoch
+for ordinary first-element VLEFF fault-VA checking; `vector-segment-fof`
+retains its separate fresh-environment check. Internal exception-buffer
+signals remain debug-only.
+
+The revised focused scenario passed at cycle 137. Its ordinary first-element
+case observed one exact page-fault writeback, one fix-VL writeback preserving
+VL=2, one or more PTW requests, no DCache data request, exact fault VA, and
+`2/2` LQ retirement. A narrowed schema-45 `random-mixed` run then passed 256
+actions at cycle 11,500 with 135 VFOF operations, including 84 first-element
+faults. All 16 first/later x Sv39/Sv48 x EEW bins were nonzero, all 135 fix-VL
+writebacks completed, and queue accounting closed at `522+1/523` LQ entries.
+The fixed guest/page-fault prefix and each precise first-element VFOF now use
+an explicit trap redirect after their architectural checks so subsequent
+mixed traffic begins a new exception epoch; that lifecycle is stimulus, not
+qualification for reading an untagged payload.
 
 ### Schema-45 Capacity-Plus-One Miss Burst
 

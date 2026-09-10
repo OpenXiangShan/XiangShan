@@ -5859,6 +5859,31 @@ private:
                     dut_, mshr_prefix + "forwardData_" + data_suffix);
             }
         }
+        const std::string lq_exception_prefix =
+            "MemBlock_top.MemBlock.inner_lsq.loadQueue.exceptionBuffer.";
+        debug_lq_exception_valid_ = debug_signal(
+            dut_, lq_exception_prefix + "req_valid");
+        debug_lq_exception_fullva_ = debug_signal(
+            dut_, lq_exception_prefix + "req_fullva");
+        debug_lq_exception_rob_value_ = debug_signal(
+            dut_, lq_exception_prefix + "req_uop_robIdx_value");
+        debug_lq_exception_rob_flag_ = debug_signal(
+            dut_, lq_exception_prefix + "req_uop_robIdx_flag");
+        for (unsigned port = 0; port < debug_lq_exception_s2_enqueue_.size();
+             ++port) {
+            const auto rtl_port = std::to_string(kScalarLoadLanes + port);
+            debug_lq_exception_s2_enqueue_[port] = debug_signal(
+                dut_, lq_exception_prefix + "s2_enqueue_" + rtl_port);
+            debug_lq_exception_s2_fullva_[port] = debug_signal(
+                dut_, lq_exception_prefix + "s2_req_" + rtl_port +
+                          "_fullva");
+            debug_lq_exception_s2_rob_value_[port] = debug_signal(
+                dut_, lq_exception_prefix + "s2_req_" + rtl_port +
+                          "_uop_robIdx_value");
+            debug_lq_exception_s2_rob_flag_[port] = debug_signal(
+                dut_, lq_exception_prefix + "s2_req_" + rtl_port +
+                          "_uop_robIdx_flag");
+        }
         debug_sms_req_valid_ = debug_signal(
             dut_, "MemBlock_top.MemBlock.inner_storeMisalignBuffer.req_valid");
         debug_sms_buffer_state_ = debug_signal(
@@ -5887,7 +5912,12 @@ private:
                      << " sms_signals="
                      << (debug_sms_buffer_state_ != nullptr)
                      << (debug_sms_cross_page_with_hit_ != nullptr)
-                     << (debug_sq_do_deq_ != nullptr) << '\n';
+                     << (debug_sq_do_deq_ != nullptr)
+                     << " lq_exception_signals="
+                     << (debug_lq_exception_valid_ != nullptr)
+                     << (debug_lq_exception_fullva_ != nullptr)
+                     << (debug_lq_exception_s2_enqueue_[0] != nullptr)
+                     << (debug_lq_exception_s2_enqueue_[1] != nullptr) << '\n';
         debug_trace_.flush();
     }
 
@@ -5900,6 +5930,46 @@ private:
             debug_trace_ << "cycle=" << debug_cycle_ << ' ' << line << '\n';
             debug_trace_.flush();
         };
+        const bool lq_exception_valid =
+            debug_u(debug_lq_exception_valid_) != 0;
+        const std::uint64_t lq_exception_fullva =
+            debug_u(debug_lq_exception_fullva_);
+        const unsigned lq_exception_rob_value = static_cast<unsigned>(
+            debug_u(debug_lq_exception_rob_value_));
+        const bool lq_exception_rob_flag =
+            debug_u(debug_lq_exception_rob_flag_) != 0;
+        if (lq_exception_valid != debug_lq_exception_previous_valid_ ||
+            (lq_exception_valid &&
+             (lq_exception_fullva != debug_lq_exception_previous_fullva_ ||
+              lq_exception_rob_value !=
+                  debug_lq_exception_previous_rob_value_ ||
+              lq_exception_rob_flag != debug_lq_exception_previous_rob_flag_))) {
+            std::ostringstream text;
+            text << "lq_exception retained=" << lq_exception_valid
+                 << " rob=" << lq_exception_rob_value << ':'
+                 << lq_exception_rob_flag << " fullva=0x" << std::hex
+                 << lq_exception_fullva << " top_vaddr=0x"
+                 << dut_.io_mem_to_ooo_lsqio_vaddr.U() << std::dec
+                 << " redirect=" << dut_.io_redirect_valid.B();
+            emit(text.str());
+        }
+        debug_lq_exception_previous_valid_ = lq_exception_valid;
+        debug_lq_exception_previous_fullva_ = lq_exception_fullva;
+        debug_lq_exception_previous_rob_value_ = lq_exception_rob_value;
+        debug_lq_exception_previous_rob_flag_ = lq_exception_rob_flag;
+        for (unsigned port = 0; port < debug_lq_exception_s2_enqueue_.size();
+             ++port) {
+            if (debug_u(debug_lq_exception_s2_enqueue_[port]) == 0) {
+                continue;
+            }
+            std::ostringstream text;
+            text << "lq_exception candidate_port=" << port << " rob="
+                 << debug_u(debug_lq_exception_s2_rob_value_[port]) << ':'
+                 << debug_u(debug_lq_exception_s2_rob_flag_[port])
+                 << " fullva=0x" << std::hex
+                 << debug_u(debug_lq_exception_s2_fullva_[port]) << std::dec;
+            emit(text.str());
+        }
         const bool a_valid = dut_.auto_inner_dcache_client_out_a_valid.B();
         const bool a_fire = a_valid &&
             dut_.auto_inner_dcache_client_out_a_ready.B();
@@ -6906,6 +6976,22 @@ private:
     std::array<XData *, kScalarLoadLanes> debug_s3_input_data_{};
     std::array<XData *, kScalarLoadLanes> debug_s3_merged_data_{};
     std::array<XData *, kScalarLoadLanes> debug_s3_picked_data_{};
+    XData *debug_lq_exception_valid_ = nullptr;
+    XData *debug_lq_exception_fullva_ = nullptr;
+    XData *debug_lq_exception_rob_value_ = nullptr;
+    XData *debug_lq_exception_rob_flag_ = nullptr;
+    std::array<XData *, kVectorMemoryLanes>
+        debug_lq_exception_s2_enqueue_{};
+    std::array<XData *, kVectorMemoryLanes>
+        debug_lq_exception_s2_fullva_{};
+    std::array<XData *, kVectorMemoryLanes>
+        debug_lq_exception_s2_rob_value_{};
+    std::array<XData *, kVectorMemoryLanes>
+        debug_lq_exception_s2_rob_flag_{};
+    bool debug_lq_exception_previous_valid_ = false;
+    std::uint64_t debug_lq_exception_previous_fullva_ = 0;
+    unsigned debug_lq_exception_previous_rob_value_ = 0;
+    bool debug_lq_exception_previous_rob_flag_ = false;
     XData *debug_sms_req_valid_ = nullptr;
     XData *debug_sms_buffer_state_ = nullptr;
     XData *debug_sms_is_cross_page_ = nullptr;

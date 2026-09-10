@@ -57,7 +57,9 @@ Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests.
 Schema 44 also composes ordinary unit-stride VFOF into `random-mixed`, closing
 first/later fault x Sv39/Sv48 x EEW with independent page-walk, data,
-exception/fault-VA, final-VL, identity, and queue oracles. The common
+exception, final-VL, identity, and queue oracles. Exact fault VA is checked in
+the isolated ordinary and segmented FOF scenarios, where the top-level
+payload can be attributed to the only live exception. The common
 constrained tail composes segment load/store direction with all four
 addressing modes, EEW/SEW 8/16/32/64, fractional/integer LMUL and derived EMUL,
 and NF 2..8. It enumerates the legal decoder space before weighted selection;
@@ -139,6 +141,14 @@ The Picker export enables read-only `mem_direct`, generates and copies
 `MemBlock_offset.yaml`, and does not enable VPI. `mem_direct` access is used
 only for optional RTL localization; architectural PASS/FAIL never depends on
 an internal signal.
+
+Set `MEMBLOCK_MEM_DIRECT_TRACE_FILE` when a focused replay needs the optional
+read-only event trace. `MEMBLOCK_MEM_DIRECT_DEBUG_LINE` selects a target cache
+line, `MEMBLOCK_MEM_DIRECT_TRACE_ALL_A=1` includes every DCache A request, and
+`MEMBLOCK_MEM_DIRECT_TRACE_APPEND=1` preserves an existing trace. The trace
+includes target load/refill events, StoreMisalignBuffer state, and load
+exception candidates/retained identity and address. Missing internal names
+disable only the corresponding diagnostic field and never change PASS/FAIL.
 
 The reusable environment components provide:
 
@@ -1468,9 +1478,12 @@ cycle is not an oracle.
 Schema 44 adds low-rate ordinary VFOF through `vector-fof` and
 `vector-fof-first-fault`. Every enabled first/later fault x Sv39/Sv48 x
 EEW8/16/32/64 bin must execute. Expected translation, bytes, page-fault
-suppression/preservation, fault VA, final VL, unique completion, and LQ
-conservation come from independent models and external writebacks; internal
-VFOF-buffer state, replay count, and exact timing remain debug-only.
+suppression/preservation, final VL, unique completion, and LQ conservation
+come from independent models and identified external writebacks. The raw
+exception-address payload has no valid bit or transaction identity, so the
+mixed oracle does not attribute it to a VFOF writeback. Exact fault VA remains
+covered by fresh-`Environment` focused scenarios; internal VFOF-buffer state,
+replay count, and exact timing remain debug-only.
 
 Schema 45 adds `miss-burst-depth17`, one target beyond the generated 16-entry
 DCache miss capacity. The action holds address-qualified external responses

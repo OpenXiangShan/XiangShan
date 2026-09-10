@@ -1872,15 +1872,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         if (!environment.set_rob_head(
                 guest_fault.rob, guest_fault.rob_flag) ||
             !issue_vector(guest_fault) ||
-            !environment.run_cycles(8) ||
-            !environment.exception_is_for_vs_nonleaf_pte() ||
+            !environment.run_cycles(8)) {
+            phase += ":completion";
+            return false;
+        }
+        if (!environment.exception_is_for_vs_nonleaf_pte() ||
             environment.exception_vaddr() != guest_fault.address ||
             environment.exception_gpaddr() !=
-                guest_fault_reference.faulting_guest_physical_address ||
-            !environment.run_until_lq_retired(2048)) {
+                guest_fault_reference.faulting_guest_physical_address) {
             if (environment.error().empty()) {
-                phase += "-metadata";
+                phase += ":metadata";
             }
+            return false;
+        }
+        if (!environment.redirect_after(
+                guest_fault.rob, guest_fault.rob_flag, true)) {
+            phase += ":trap-redirect";
+            return false;
+        }
+        if (!environment.run_until_lq_retired(2048)) {
+            phase += ":queue-retirement";
             return false;
         }
         ++coverage.two_stage;
@@ -1955,9 +1966,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     memblock::kExceptionLoadGuestPageFault;
                 if (!environment.set_rob_head(candidate.rob, candidate.rob_flag) ||
                     !issue_vector(candidate) ||
-                    !environment.run_cycles(8) ||
-                    !environment.run_until_lq_retired(2048) ||
-                    !environment.exception_is_for_vs_nonleaf_pte() ||
+                    !environment.run_cycles(8)) {
+                    return false;
+                }
+                if (!environment.exception_is_for_vs_nonleaf_pte() ||
                     environment.exception_vaddr() != expected_exception_vaddr ||
                     environment.exception_gpaddr() !=
                         reference.faulting_guest_physical_address) {
@@ -1975,6 +1987,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                   << " actual_gpaddr=0x" << environment.exception_gpaddr()
                                   << std::dec << "\n";
                     }
+                    return false;
+                }
+                if (!environment.redirect_after(
+                        candidate.rob, candidate.rob_flag, true) ||
+                    !environment.run_until_lq_retired(2048)) {
+                    phase += ":trap-recovery";
                     return false;
                 }
                 ++coverage.two_stage;
@@ -2053,7 +2071,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         auto page_fault = make_load(
             0x50003000ULL, memblock::LoadOp::ld, 0);
         page_fault.expected_exception_mask = memblock::kExceptionLoadPageFault;
-        if (!issue_load(page_fault)) {
+        if (!issue_load(page_fault) ||
+            !environment.redirect_after(
+                page_fault.rob, page_fault.rob_flag, true)) {
             return false;
         }
         const auto prefetch_fault = make_prefetch(
@@ -7446,8 +7466,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     phase = vector_fof_first_fault
                         ? "random-vector-fof-first-fault"
                         : "random-vector-fof-later-fault";
-                    if (!environment.run_until_all_complete(8192) ||
-                        !environment.run_until_queues_retired(8192)) {
+                    if (!environment.run_until_all_complete(8192)) {
+                        phase += ":initial-completion-drain";
+                        return false;
+                    }
+                    if (!environment.run_until_queues_retired(8192)) {
+                        phase += ":initial-queue-drain";
                         return false;
                     }
                     const unsigned eew = vector_fof_eew;
@@ -7570,12 +7594,38 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.vector_fof_fix_writebacks();
                     environment.expect_vector_data(fix_vl_uop, {});
                     if (!environment.issue_vector(
-                            fix_vl_uop, constrained_completion_timeout) ||
-                        !environment.run_until_vector_complete(
-                            constrained_completion_timeout) ||
-                        environment.lq_allocated() != lq_allocated_before + 2U ||
-                        environment.vector_fof_fix_writebacks() !=
-                            fix_writebacks_before + 1U) {
+                            fix_vl_uop, constrained_completion_timeout)) {
+                        phase += ":fix-vl-issue";
+                        return false;
+                    }
+                    if (!environment.run_until_vector_complete(
+                            constrained_completion_timeout)) {
+                        phase += ":fix-vl-completion";
+                        return false;
+                    }
+                    if (environment.lq_allocated() !=
+                        lq_allocated_before + 2U) {
+                        std::ostringstream detail;
+                        detail << phase << ":fix-vl-lq-allocation"
+                               << ":expected=" << lq_allocated_before + 2U
+                               << ":actual=" << environment.lq_allocated();
+                        phase = detail.str();
+                        return false;
+                    }
+                    if (environment.vector_fof_fix_writebacks() !=
+                        fix_writebacks_before + 1U) {
+                        std::ostringstream detail;
+                        detail << phase << ":fix-vl-writeback"
+                               << ":expected=" << fix_writebacks_before + 1U
+                               << ":actual="
+                               << environment.vector_fof_fix_writebacks();
+                        phase = detail.str();
+                        return false;
+                    }
+                    if (vector_fof_first_fault &&
+                        !environment.redirect_after(
+                            data_uop.rob, data_uop.rob_flag, true)) {
+                        phase += ":trap-redirect";
                         return false;
                     }
 

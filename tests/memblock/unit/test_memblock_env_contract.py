@@ -1651,6 +1651,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "GetInternalSignal(name)",
             "signal->GetBytes()",
             "signal->U()",
+            "loadQueue.exceptionBuffer.",
+            "lq_exception retained=",
+            "lq_exception candidate_port=",
         ):
             self.assertIn(read_contract, debug)
         self.assertNotIn("crossPageCanDeq_0", debug)
@@ -1984,11 +1987,76 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "vector_fof_fix_writebacks",
             "run_vector_fault_only_first",
             "original_vl=2 final_vl=1",
+            "first_element_faults=1",
+            "first_fault_fix_vl=2",
+            "first_fault.exception_vaddr() != first_fault_virtual",
             "vector-fof",
         ):
             self.assertIn(contract, environment + main + makefile + benchmark)
         self.assertIn("entries.hasException", vfof)
         self.assertIn("io.uopWriteback.bits.data             := entries.vl", vfof)
+
+    def test_random_mixed_vfof_avoids_unqualified_fault_vaddr_oracle(self) -> None:
+        main = read_cpp_source("memblock_main.cpp")
+        begin = main.index('phase = vector_fof_first_fault')
+        end = main.index(
+            "++constraint_coverage.vector_fof_presence[1]", begin
+        )
+        scenario = main[begin:end]
+
+        for contract in (
+            ':initial-completion-drain',
+            ':initial-queue-drain',
+            ':vector-completion',
+            "if (vector_fof_first_fault &&",
+            ':fix-vl-issue',
+            ':fix-vl-completion',
+            ':fix-vl-lq-allocation',
+            ':fix-vl-writeback',
+            ':trap-redirect',
+            "environment.redirect_after(\n"
+            "                            data_uop.rob, data_uop.rob_flag, true)",
+        ):
+            self.assertIn(contract, scenario)
+
+        self.assertNotIn("exception_vaddr()", scenario)
+        self.assertNotIn(":fault-vaddr", scenario)
+        self.assertLess(
+            scenario.index(":fix-vl-writeback"),
+            scenario.index(
+                "environment.redirect_after(\n"
+                "                            data_uop.rob, data_uop.rob_flag, true)"
+            ),
+        )
+
+    def test_random_mixed_precise_faults_have_explicit_trap_recovery(self) -> None:
+        main = read_cpp_source("memblock_main.cpp")
+        guest_begin = main.index('phase = "vector-guest-page-fault"')
+        guest_end = main.index('phase = "sv39-configuration"', guest_begin)
+        guest_scenario = main[guest_begin:guest_end]
+        self.assertIn(
+            "environment.redirect_after(\n"
+            "                guest_fault.rob, guest_fault.rob_flag, true)",
+            guest_scenario,
+        )
+        self.assertLess(
+            guest_scenario.index(
+                "environment.exception_vaddr() != guest_fault.address"
+            ),
+            guest_scenario.index(
+                "environment.redirect_after(\n"
+                "                guest_fault.rob, guest_fault.rob_flag, true)"
+            ),
+        )
+
+        exception_begin = main.index('phase = "exception-contracts"')
+        exception_end = main.index('phase = "pbmt-nc-store-load"', exception_begin)
+        exception_scenario = main[exception_begin:exception_end]
+        self.assertIn(
+            "environment.redirect_after(\n"
+            "                page_fault.rob, page_fault.rob_flag, true)",
+            exception_scenario,
+        )
 
     def test_vector_segment_contract_is_registered(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")

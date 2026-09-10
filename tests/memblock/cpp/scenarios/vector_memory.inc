@@ -234,6 +234,100 @@ int run_vector_fault_only_first(int argc, char **argv)
         return 1;
     }
 
+    // Check the first-element architectural fault in a fresh exception
+    // epoch. The top-level exception-address payload has no valid or
+    // transaction identity, so an isolated Environment is required before
+    // attributing it to this VLEFF writeback.
+    memblock::Environment first_fault(argc, argv);
+    constexpr std::uint64_t first_fault_virtual = 0x53000180ULL;
+    constexpr std::uint64_t first_fault_root = 0x97a00000ULL;
+    first_fault.configure_backpressure(0xbb67ae8584caa73bULL, true);
+    if (!first_fault.reset() ||
+        !first_fault.activate_sv39(first_fault_root, 38) ||
+        memblock::reference_sv39_walk(
+            first_fault.memory(), first_fault_root,
+            first_fault_virtual).translated) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-configuration reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction first_fault_data{
+        .address = first_fault_virtual,
+        .eew = 3,
+        .vl = 2,
+        .rob = 73,
+        .lq = 0,
+        .pdest = 120,
+        .lane = 0,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .vuop_idx = 0,
+        .last_uop = false,
+        .fault_only_first = true,
+        .is_vleff = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    for (unsigned byte = 0; byte < first_fault_data.data.size(); ++byte) {
+        first_fault_data.data[byte] = static_cast<unsigned char>(0xd0 + byte);
+    }
+    first_fault.expect_vector_data(first_fault_data, first_fault_data.data);
+    if (!first_fault.set_rob_head(
+            first_fault_data.rob, first_fault_data.rob_flag) ||
+        !first_fault.enqueue_vector(first_fault_data) ||
+        !first_fault.issue_vector(first_fault_data, 512) ||
+        !first_fault.run_until_vector_complete_with_replays(
+            first_fault_data, 16384) ||
+        !first_fault.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-data-uop reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t first_fault_lq_allocated =
+        first_fault.lq_allocated();
+    auto first_fault_fix = first_fault_data;
+    first_fault_fix.pdest = 121;
+    first_fault_fix.expected_exception_mask = 0;
+    first_fault_fix.expected_vl = 2;
+    first_fault_fix.vuop_idx = 1;
+    first_fault_fix.last_uop = true;
+    first_fault_fix.vl_wen = true;
+    first_fault_fix.expected_debug_is_mmio.reset();
+    first_fault_fix.expected_debug_is_ncio.reset();
+    first_fault_fix.expected_debug_is_perf_cnt.reset();
+    first_fault.expect_vector_data(first_fault_fix, {});
+    if (!first_fault.issue_vector(first_fault_fix, 512) ||
+        !first_fault.run_until_vector_complete(2048) ||
+        first_fault.vector_load_writebacks() != 1 ||
+        first_fault.vector_fof_fix_writebacks() != 1 ||
+        first_fault.ptw_requests() == 0 ||
+        first_fault.tilelink_requests() != 0 ||
+        first_fault.exception_vaddr() != first_fault_virtual ||
+        first_fault.lq_allocated() != first_fault_lq_allocated ||
+        first_fault.lq_dequeued() != first_fault.lq_allocated()) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-completion reason="
+                  << first_fault.error() << " data_writebacks="
+                  << first_fault.vector_load_writebacks()
+                  << " fix_writebacks="
+                  << first_fault.vector_fof_fix_writebacks()
+                  << " fault_vaddr=0x" << std::hex
+                  << first_fault.exception_vaddr() << std::dec
+                  << " ptw=" << first_fault.ptw_requests()
+                  << " dcache=" << first_fault.tilelink_requests()
+                  << " lq=" << first_fault.lq_dequeued() << '/'
+                  << first_fault.lq_allocated() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_VECTOR_FOF_PASS"
               << " cycle=" << environment.cycle()
               << " original_vl=2 final_vl=1"
@@ -246,6 +340,9 @@ int run_vector_fault_only_first(int argc, char **argv)
               << environment.vector_replay_feedbacks()
               << " lq_allocated=" << environment.lq_allocated()
               << " lq_dequeued=" << environment.lq_dequeued()
+              << " first_element_faults=1"
+              << " first_fault_fix_vl=2"
+              << " first_fault_ptw=" << first_fault.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
