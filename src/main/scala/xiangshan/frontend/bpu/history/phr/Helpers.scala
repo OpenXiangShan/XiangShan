@@ -23,9 +23,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.bpu.PhrHelper
+import xiangshan.frontend.bpu.history.FoldedHistoryMaintenance
 
-trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
+trait Helpers extends HasPhrParameters with HalfAlignHelper with FoldedHistoryMaintenance {
   // folded History
   def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
@@ -94,14 +94,9 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
     updateResult
   }
 
-  def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories = {
-    val foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-    AllFoldedHistoryInfo.foreach { info =>
-      foldedPhr.getHistWithInfo(info).foldedHist :=
-        computeFoldedHist(hist, info.FoldedLength)(info.HistoryLength)
-    }
-    foldedPhr
-  }
+  // the same shape the 1-arg PhrAllFoldedHistories constructor builds, which is what every caller assigns this to
+  def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories =
+    computeAllFoldedPhr(hist, AllFoldedHistoryInfo, MaxUpdateNum)
 
   def getNextFoldedPhr(
       data:          PhrUpdateData,
@@ -136,5 +131,35 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
       nextFoldedPhr := baseFoldedPhr.update(oldestBits, hashHigh, Shamt, shiftBits)
     }
     nextFoldedPhr
+  }
+
+  /** Advance every folded history by a whole group.
+    *
+    * Folding is linear over XOR, so the window's shift and the group's token fold apart and combine at the end. That
+    * separation is what lets one step carry several blocks: the blocks' path hashes sit at different offsets within
+    * the token, which a single hash-high argument could not express.
+    */
+  def foldGroup(
+      baseFoldedPhr: PhrAllFoldedHistories,
+      oldestBits:    PhrAllFoldedHistoryOldestBits,
+      token:         UInt,
+      insOH:         Seq[Bool]
+  ): PhrAllFoldedHistories = {
+    val res = WireInit(baseFoldedPhr)
+    for (i <- baseFoldedPhr.hist.indices) {
+      val h  = baseFoldedPhr.hist(i)
+      val ob = oldestBits.hist(i).bits
+      res.hist(i).foldedHist := Mux1H(
+        insOH,
+        Seq.tabulate(insOH.length) { n =>
+          if (n == 0) h.foldedHist
+          else {
+            val shifted = h.update(ob, n * Shamt, 0.U((n * Shamt).W), 0.U(PathHashHighWidth.W)).foldedHist
+            shifted ^ foldToken(token, h.info.FoldedLength, h.info.HistoryLength)
+          }
+        }
+      )
+    }
+    res
   }
 }
