@@ -30,7 +30,8 @@ class MainBtbInternalBank(
   class MainBtbInternalBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
-        val setIdx: UInt = UInt(SetIdxLen.W)
+        val setIdx:       UInt = UInt(SetIdxLen.W)
+        val isSameSetIdx: Bool = Bool()
       }
       class Resp extends Bundle {
         val entries:  Vec[MainBtbEntry]    = Vec(NumWay, new MainBtbEntry)
@@ -135,11 +136,13 @@ class MainBtbInternalBank(
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
 
   /* *** sram -> io *** */
-  // handle entry & counter together
-  (entrySrams :+ counterSram).foreach { sram =>
-    sram.io.r.req.valid       := read.req.valid
+  // skid-read (isSameSetIdx) only applies to entries; counters are always read
+  entrySrams.foreach { sram =>
+    sram.io.r.req.valid       := read.req.valid && !read.req.bits.isSameSetIdx
     sram.io.r.req.bits.setIdx := read.req.bits.setIdx
   }
+  counterSram.io.r.req.valid       := read.req.valid
+  counterSram.io.r.req.bits.setIdx := read.req.bits.setIdx
   // each entry sram template has 1 way, so here we only read data.head
   read.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
   read.resp.counters := counterSram.io.r.resp.data

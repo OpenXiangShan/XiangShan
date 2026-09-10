@@ -115,8 +115,9 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := !isSameSetIdx && s0_fire && s0_internalBankMask(i)
-    b.io.read.req.bits.setIdx := s0_setIdx
+    b.io.read.req.valid             := s0_fire && s0_internalBankMask(i)
+    b.io.read.req.bits.setIdx       := s0_setIdx
+    b.io.read.req.bits.isSameSetIdx := isSameSetIdx
   }
 
   /* *** s1 ***
