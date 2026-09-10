@@ -215,10 +215,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.bpuPtr := bpuPtr(0)
   private val bpuEnqueue = prediction.fire && !redirect.valid
 
+  // The first entry an s3 override takes back. A correction that only concerns a later block of the group leaves the
+  // earlier ones standing, so the override starts past them and their fetch is never flushed.
+  private val s3OverrideBase = io.fromBpu.s3FtqPtr + io.fromBpu.s3OverrideKeptBlocks
+
   private val predictionPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      prediction.bits.s3Override -> io.fromBpu.s3FtqPtr,
+      prediction.bits.s3Override -> s3OverrideBase,
       prediction.bits.s2Override -> io.fromBpu.s2FtqPtr
     )
   )
@@ -226,7 +230,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val predictionPtrVec = VecInit.tabulate(MaxPredictionNum)(i => predictionPtr + i.U)
 
   when(prediction.bits.s3Override) {
-    bpuPtr := io.fromBpu.s3FtqPtr + prediction.bits.numBlocks
+    bpuPtr := s3OverrideBase + prediction.bits.numBlocks
   }.elsewhen(prediction.bits.s2Override) {
     bpuPtr := io.fromBpu.s2FtqPtr + prediction.bits.numBlocks
   }.elsewhen(bpuEnqueue) {
@@ -243,7 +247,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     freeNum - Mux(bpuEnqueue, prediction.bits.numBlocks, 0.U) + commit,
     Seq(
       redirect.valid             -> freeNumAfterRewind(redirect.bits.newFtqIdx),
-      prediction.bits.s3Override -> freeNumAfterRewind(io.fromBpu.s3FtqPtr + prediction.bits.numBlocks),
+      prediction.bits.s3Override -> freeNumAfterRewind(s3OverrideBase + prediction.bits.numBlocks),
       prediction.bits.s2Override -> freeNumAfterRewind(io.fromBpu.s2FtqPtr + prediction.bits.numBlocks)
     )
   )
@@ -335,7 +339,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   for (stage <- 2 to 3) {
     val redirect = if (stage == 2) prediction.bits.s2Override else prediction.bits.s3Override
-    val ftqIdx   = if (stage == 2) io.fromBpu.s2FtqPtr else io.fromBpu.s3FtqPtr
+    val ftqIdx   = if (stage == 2) io.fromBpu.s2FtqPtr else s3OverrideBase
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
