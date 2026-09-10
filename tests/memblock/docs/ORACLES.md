@@ -170,6 +170,14 @@ rereads exactly the AF PTE. G-stage PPN overflow sets `gaf` and maps to the
 original load/store access fault, not a guest-page fault. Every case forbids
 DCache/Uncache requests.
 
+The exported exception VA/GPA fields are payload signals without a valid bit
+or transaction identity.  Compare them only in an isolated scenario where
+the expected fault is the oldest outstanding exception (as in the dedicated
+fault tests).  A mixed workload may legitimately retain an older exception
+payload while a newer vector writeback reports its own exception; attributing
+that payload to the newer request would make the oracle depend on exception
+buffer timing rather than an observable contract.
+
 During a fully nested VS walk, each valid VS PTE PPN is separately checked as
 a generated GPA: PPN bits above 28 are illegal with Sv39x4 (41-bit GPA), while
 bits above 37 are illegal with Sv48x4 (50-bit GPA). The independent model

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import json
 import os
@@ -239,6 +240,11 @@ def run_scenario(
             "command": command,
         }
     )
+    # Keep the bounded tail for parsed failures too.  It contains the
+    # scenario's phase/reason and is essential for reproducing a benchmark
+    # failure; _run_process already caps the captured size.
+    if result["status"] != "pass" or returncode != 0:
+        result["output"] = output
     if returncode != 0 and result["status"] == "pass":
         result["status"] = "error"
         result["error"] = "simulator returned nonzero after a pass summary"
@@ -264,7 +270,7 @@ def render_markdown(document: dict[str, Any]) -> str:
     lines = [
         "# MemBlock Test Scale",
         "",
-        f"Measured at `{document['created_at']}` using one process per scenario.",
+        f"Measured at `{document['created_at']}` using up to {document['configuration']['jobs']} processes.",
         "Wall time is host-load dependent; protocol counts and cycles are deterministic for the recorded seed and runtime.",
         "",
         "| Scenario | Status | Wall (s) | "
@@ -310,6 +316,7 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--transactions", type=int, default=16384)
     parser.add_argument("--timeout-seconds", type=float, default=1800)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
         "--constraints", choices=run_regression.CONSTRAINT_PROFILES, default="spec"
     )
@@ -319,8 +326,15 @@ def main() -> int:
     requested = tuple(item.strip() for item in args.scenarios.split(",") if item.strip())
     if not requested or len(set(requested)) != len(requested) or set(requested) - set(SCENARIOS):
         parser.error("--scenarios contains an unknown or duplicate scenario")
-    if args.seed < 0 or args.transactions < 256 or args.timeout_seconds <= 0:
-        parser.error("seed, transactions, and timeout are outside the supported range")
+    if (
+        args.seed < 0
+        or args.transactions < 256
+        or args.timeout_seconds <= 0
+        or args.jobs <= 0
+    ):
+        parser.error(
+            "seed, transactions, timeout, and jobs are outside the supported range"
+        )
 
     try:
         runtime = run_regression.verify_runtime_metadata(args.runtime_metadata)
@@ -331,27 +345,48 @@ def main() -> int:
     environment["LD_LIBRARY_PATH"] = str(runtime["root"])
     environment["LD_BIND_NOW"] = "1"
 
-    results = []
     started = time.monotonic()
-    for scenario in requested:
-        result = run_scenario(
-            runtime["binary"],
-            scenario,
-            args.seed,
-            args.transactions,
-            args.timeout_seconds,
-            environment,
-            args.constraints,
-            tuple(args.constraint),
-        )
-        results.append(result)
-        print(
-            f"MEMBLOCK_BENCHMARK scenario={scenario} status={result['status']} "
-            f"elapsed_seconds={result['elapsed_seconds']:.3f}",
-            flush=True,
-        )
-        if result["status"] != "pass":
-            break
+    worker_count = min(args.jobs, len(requested))
+    results_by_index: list[dict[str, Any] | None] = [None] * len(requested)
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=worker_count, thread_name_prefix="memblock-benchmark"
+    ) as executor:
+        futures = {
+            executor.submit(
+                run_scenario,
+                runtime["binary"],
+                scenario,
+                args.seed,
+                args.transactions,
+                args.timeout_seconds,
+                environment,
+                args.constraints,
+                tuple(args.constraint),
+            ): index
+            for index, scenario in enumerate(requested)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            index = futures[future]
+            scenario = requested[index]
+            try:
+                result = future.result()
+            except Exception as error:  # pragma: no cover - defensive worker boundary
+                result = {
+                    "scenario": scenario,
+                    "status": "error",
+                    "elapsed_seconds": 0.0,
+                    "error": f"benchmark worker failed: {error}",
+                }
+            results_by_index[index] = result
+            print(
+                f"MEMBLOCK_BENCHMARK scenario={scenario} status={result['status']} "
+                f"elapsed_seconds={result['elapsed_seconds']:.3f}",
+                flush=True,
+            )
+
+    # Completion order is nondeterministic; preserve command-line order in the
+    # artifact so repeated benchmark reports remain easy to diff.
+    results = [result for result in results_by_index if result is not None]
 
     document = {
         "schema_version": 1,
@@ -364,6 +399,7 @@ def main() -> int:
             "seed": args.seed,
             "transactions": args.transactions,
             "timeout_seconds": args.timeout_seconds,
+            "jobs": args.jobs,
             "constraint_profile": args.constraints,
             "constraint_overrides": args.constraint,
             "scenarios": list(requested),

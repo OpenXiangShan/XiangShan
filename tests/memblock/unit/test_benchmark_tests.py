@@ -6,6 +6,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 MEMBLOCK_ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,41 @@ class BenchmarkTestsTest(unittest.TestCase):
         self.assertEqual(metrics["vector_loads"], 7)
         self.assertEqual(metrics["vector_stores"], 4)
 
+    def test_markdown_reports_parallel_worker_limit(self) -> None:
+        document = {
+            "created_at": "2026-09-10T00:00:00+00:00",
+            "configuration": {"jobs": 8},
+            "results": [
+                {
+                    "scenario": "smoke",
+                    "status": "pass",
+                    "elapsed_seconds": 0.25,
+                    "metrics": {"cycles": 38},
+                }
+            ],
+        }
+        markdown = benchmark_tests.render_markdown(document)
+        self.assertIn("using up to 8 processes", markdown)
+
+    def test_parsed_failure_retains_bounded_output(self) -> None:
+        output = "MEMBLOCK_SMOKE_FAIL cycle=17 phase=contract reason=bad-data\n"
+        with mock.patch.object(
+            benchmark_tests.run_regression,
+            "_run_process",
+            return_value=(1, output, False),
+        ):
+            result = benchmark_tests.run_scenario(
+                Path("memblock_sim"),
+                "smoke",
+                1,
+                256,
+                1.0,
+                {},
+                "spec",
+                (),
+            )
+        self.assertEqual(result["status"], "fail")
+        self.assertEqual(result["output"], output)
 
 if __name__ == "__main__":
     unittest.main()

@@ -7466,19 +7466,37 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         environment.lq_allocated();
                     environment.expect_vector_data(data_uop, expected_data);
                     if (!environment.set_rob_head(
-                            data_uop.rob, data_uop.rob_flag) ||
-                        !environment.enqueue_vector(data_uop) ||
-                        !environment.issue_vector(
-                            data_uop, constrained_completion_timeout) ||
-                        !environment.run_until_vector_complete_with_replays(
-                            data_uop, constrained_completion_timeout) ||
-                        !environment.run_until_lq_retired(8192) ||
-                        environment.lq_allocated() != lq_allocated_before + 2U ||
-                        (vector_fof_first_fault &&
-                         environment.exception_vaddr() != address)) {
+                            data_uop.rob, data_uop.rob_flag)) {
+                        phase += ":set-rob-head";
                         return false;
                     }
-
+                    if (!environment.enqueue_vector(data_uop)) {
+                        phase += ":enqueue";
+                        return false;
+                    }
+                    if (!environment.issue_vector(
+                            data_uop, constrained_completion_timeout)) {
+                        phase += ":issue";
+                        return false;
+                    }
+                    if (!environment.run_until_vector_complete_with_replays(
+                            data_uop, constrained_completion_timeout)) {
+                        phase += ":vector-completion";
+                        return false;
+                    }
+                    if (!environment.run_until_lq_retired(8192)) {
+                        phase += ":lq-retirement";
+                        return false;
+                    }
+                    if (environment.lq_allocated() !=
+                        lq_allocated_before + 2U) {
+                        std::ostringstream detail;
+                        detail << phase << ":lq-allocation"
+                               << ":before=" << lq_allocated_before
+                               << ":after=" << environment.lq_allocated();
+                        phase = detail.str();
+                        return false;
+                    }
                     auto fix_vl_uop = data_uop;
                     fix_vl_uop.pdest =
                         static_cast<std::uint8_t>(data_uop.pdest + 1U);

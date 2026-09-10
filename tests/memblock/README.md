@@ -1583,6 +1583,10 @@ AcquireBlock refills, PTW and Uncache requests, Probe traffic, and ReleaseData
 when the scenario exposes each metric. An action is a generator scheduling
 unit, not a synonym for one load/store or one bus request.
 
+Scenarios run in up to `JOBS` independent processes (default `JOBS=8`), while
+the JSON/Markdown artifact preserves command-line scenario order. Set
+`BENCHMARK_JOBS=1` for a serial measurement.
+
 Before and after the campaign, the runner verifies the frozen artifacts,
 system libraries, runner source, RTL metadata, the runtime-freeze script, and
 the C++/SVA/config controller files listed in `CONTROLLER_FILES`. A hash change
