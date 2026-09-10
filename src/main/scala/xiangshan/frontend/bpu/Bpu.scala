@@ -721,6 +721,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val secondBlock = io.toFtq.prediction.bits.blocks(1)
   secondBlock.valid := s1_group(1).valid && !s2_override && !s3_override
   secondBlock.bits.fromStage(s1_prediction.target, s1_group(1).bits)
+  // Ftq holds back only the space this group needs, so tell it whether a second block is coming. Read from the group
+  // rather than from the outgoing block, which an override has already collapsed.
+  io.toFtq.predictionIsGroup          := s1_group(1).valid
   io.toFtq.prediction.bits.s2Override := s2_override
   io.toFtq.prediction.bits.s3Override := s3_override
 
