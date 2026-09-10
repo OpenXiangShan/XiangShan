@@ -116,6 +116,8 @@ TRANSACTION_OVERRIDES = {
     "random-boundary-hunt": 512,
 }
 
+MAX_PARALLEL_LEAVES = 8
+
 TERMINAL_RE = re.compile(r"^MEMBLOCK_[A-Z0-9_]+_(PASS|FAIL)(?:\s|$)")
 TERMINAL_MARKERS = {
     scenario: "MEMBLOCK_" + scenario.upper().replace("-", "_")
@@ -429,7 +431,7 @@ def main() -> int:
     environment["LD_LIBRARY_PATH"] = str(runtime["root"])
     environment["LD_BIND_NOW"] = "1"
 
-    worker_count = min(args.jobs, len(requested))
+    worker_count = min(args.jobs, MAX_PARALLEL_LEAVES, len(requested))
     if worker_count > 1 and environment.get("MEMBLOCK_MEM_DIRECT_TRACE_FILE"):
         print(
             "benchmark_tests.py: error: a shared MEMBLOCK_MEM_DIRECT_TRACE_FILE "
@@ -580,6 +582,11 @@ def main() -> int:
         and controller_unchanged
         and rtl_hash_consistent
     )
+    failed_scenarios = [
+        result["scenario"]
+        for result in results
+        if result["status"] != "pass"
+    ]
     document = {
         "schema_version": 2,
         "status": "pass" if passed else "fail",
@@ -632,10 +639,18 @@ def main() -> int:
             "seed": args.seed,
             "transactions": args.transactions,
             "timeout_seconds": args.timeout_seconds,
-            "jobs": args.jobs,
+            "jobs": worker_count,
+            "requested_jobs": args.jobs,
             "constraint_profile": args.constraints,
             "constraint_overrides": args.constraint,
             "scenarios": list(requested),
+        },
+        "summary": {
+            "requested": len(requested),
+            "completed": len(results),
+            "passed": sum(result["status"] == "pass" for result in results),
+            "failed": len(failed_scenarios),
+            "failed_scenarios": failed_scenarios,
         },
         "results": results,
     }
@@ -645,6 +660,8 @@ def main() -> int:
     print(
         f"MEMBLOCK_BENCHMARK_{'PASS' if passed else 'FAIL'} "
         f"scenarios={len(results)}/{len(requested)} "
+        f"leaf_failures={len(failed_scenarios)} "
+        f"failed_scenarios={','.join(failed_scenarios) or '-'} "
         f"elapsed_seconds={document['elapsed_seconds']:.3f} output={args.output}"
     )
     return 0 if passed else 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 import re
@@ -21,6 +22,15 @@ import benchmark_tests  # noqa: E402
 
 class BenchmarkTestsTest(unittest.TestCase):
     RTL_SHA256 = "a" * 64
+
+    def test_make_target_defaults_to_eight_leaf_workers(self) -> None:
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text(encoding="utf-8")
+        self.assertRegex(makefile, r"(?m)^JOBS \?= 8$")
+        benchmark_rule = makefile[
+            makefile.index("benchmark-tests:"):
+            makefile.index("analyze-spec-counters:")
+        ]
+        self.assertIn("--jobs $(or $(BENCHMARK_JOBS),$(JOBS))", benchmark_rule)
 
     def make_runtime(
         self,
@@ -239,6 +249,172 @@ class BenchmarkTestsTest(unittest.TestCase):
         self.assertTrue(document["runtime"]["unchanged"])
         self.assertTrue(document["controller"]["unchanged"])
         self.assertTrue(document["rtl_identity"]["consistent"])
+
+    def test_main_caps_parallel_leaves_at_eight(self) -> None:
+        requested = benchmark_tests.SCENARIOS[:9]
+        observed_worker_counts: list[int] = []
+        real_executor = benchmark_tests.concurrent.futures.ThreadPoolExecutor
+
+        def executor_factory(
+            *, max_workers: int, thread_name_prefix: str
+        ) -> concurrent.futures.ThreadPoolExecutor:
+            observed_worker_counts.append(max_workers)
+            return real_executor(
+                max_workers=max_workers,
+                thread_name_prefix=thread_name_prefix,
+            )
+
+        def fake_run_scenario(
+            binary: Path,
+            scenario: str,
+            seed: int,
+            transactions: int,
+            timeout_seconds: float,
+            environment: dict[str, str],
+            constraint_profile: str,
+            constraint_overrides: tuple[str, ...],
+            expected_rtl_sha256: str | None,
+            cancellation_event: threading.Event | None,
+        ) -> dict[str, object]:
+            return {
+                "scenario": scenario,
+                "status": "pass",
+                "elapsed_seconds": 0.01,
+                "rtl_sha256": expected_rtl_sha256,
+                "metrics": {},
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "benchmark.json"
+            rtl_metadata, runtime = self.make_runtime(root)
+            argv = [
+                "benchmark_tests.py",
+                "--runtime-metadata",
+                str(root / "runtime.json"),
+                "--rtl-metadata",
+                str(rtl_metadata),
+                "--output",
+                str(output),
+                "--scenarios",
+                ",".join(requested),
+                "--transactions",
+                "256",
+                "--jobs",
+                "32",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(
+                    benchmark_tests.run_regression,
+                    "verify_runtime_metadata",
+                    return_value=runtime,
+                ),
+                mock.patch.object(
+                    benchmark_tests.concurrent.futures,
+                    "ThreadPoolExecutor",
+                    side_effect=executor_factory,
+                ),
+                mock.patch.object(
+                    benchmark_tests,
+                    "run_scenario",
+                    side_effect=fake_run_scenario,
+                ),
+            ):
+                self.assertEqual(benchmark_tests.main(), 0)
+
+            document = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(observed_worker_counts, [8])
+        self.assertEqual(document["configuration"]["jobs"], 8)
+        self.assertEqual(document["configuration"]["requested_jobs"], 32)
+
+    def test_main_collects_worker_failure_and_completes_other_leaves(self) -> None:
+        requested = ("smoke", "single-load", "load-feedback")
+        completed: list[str] = []
+        completed_lock = threading.Lock()
+
+        def fake_run_scenario(
+            binary: Path,
+            scenario: str,
+            seed: int,
+            transactions: int,
+            timeout_seconds: float,
+            environment: dict[str, str],
+            constraint_profile: str,
+            constraint_overrides: tuple[str, ...],
+            expected_rtl_sha256: str | None,
+            cancellation_event: threading.Event | None,
+        ) -> dict[str, object]:
+            with completed_lock:
+                completed.append(scenario)
+            if scenario == "single-load":
+                raise RuntimeError("worker exploded")
+            return {
+                "scenario": scenario,
+                "status": "pass",
+                "elapsed_seconds": 0.01,
+                "rtl_sha256": expected_rtl_sha256,
+                "metrics": {},
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "benchmark.json"
+            rtl_metadata, runtime = self.make_runtime(root)
+            argv = [
+                "benchmark_tests.py",
+                "--runtime-metadata",
+                str(root / "runtime.json"),
+                "--rtl-metadata",
+                str(rtl_metadata),
+                "--output",
+                str(output),
+                "--scenarios",
+                ",".join(requested),
+                "--transactions",
+                "256",
+                "--jobs",
+                "3",
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(
+                    benchmark_tests.run_regression,
+                    "verify_runtime_metadata",
+                    return_value=runtime,
+                ),
+                mock.patch.object(
+                    benchmark_tests,
+                    "run_scenario",
+                    side_effect=fake_run_scenario,
+                ),
+            ):
+                self.assertEqual(benchmark_tests.main(), 1)
+
+            document = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertCountEqual(completed, requested)
+        self.assertEqual(
+            [result["scenario"] for result in document["results"]],
+            list(requested),
+        )
+        self.assertEqual(document["status"], "fail")
+        self.assertEqual(
+            document["summary"],
+            {
+                "requested": 3,
+                "completed": 3,
+                "passed": 2,
+                "failed": 1,
+                "failed_scenarios": ["single-load"],
+            },
+        )
+        failed = document["results"][1]
+        self.assertEqual(failed["status"], "error")
+        self.assertEqual(
+            failed["error"], "benchmark worker failed: worker exploded"
+        )
 
     def test_main_rejects_runtime_change_during_benchmark(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
