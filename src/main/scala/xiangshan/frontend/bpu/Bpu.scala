@@ -40,6 +40,7 @@ import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.ptage.Ptage
 import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
@@ -72,6 +73,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val fastPhr     = Module(new FastPhr)
   private val commonHR    = Module(new CommonHR)
   private val uras        = Module(new MicroRas)
+  private val ptage       = Module(new Ptage)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
@@ -79,6 +81,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     abtb,
     utage,
     uras,
+    ptage,
     mbtb,
     tage,
     sc,
@@ -97,6 +100,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B
   uras.io.enable        := true.B
+  ptage.io.enable       := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
@@ -197,7 +201,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     p.io.fastTrain.foreach(_ := fastTrain)
   }
 
-  Seq(abtb.io, utage.io).foreach { io =>
+  Seq(abtb.io, utage.io, ptage.io).foreach { io =>
     io.redirect        := redirect.valid
     io.bpuS2Override   := s2_override
     io.bpuS3Override   := s3_override
@@ -208,6 +212,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
+  // pTAGE reads its resident folded histories straight out of FastPhr; its own a0 stage is driven by the shared
+  // startPc, which for an ahead-indexed predictor is the key of the group after the one entering the pipeline.
+  // Nothing selects its prediction yet, so it only observes and reports how well it would have done.
+  ptage.io.foldedHist := fastPhr.io.foldedHist
+
   abtb.io.normalPathHist := phr.io.oldFoldedPhr
   abtb.io.debug_bpuS2StartPc.foreach(_ := s2_startPc.get)
   abtb.io.debug_bpuS3StartPc.foreach(_ := s3_startPc.get)
