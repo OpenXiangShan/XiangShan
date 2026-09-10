@@ -168,6 +168,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
   private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
 
+  // The second block, carried down so the later stages know how wide the group is. Where it starts needs no pipeline
+  // of its own: it is the first block's target, which already travels down as the s1 prediction.
+  private val s1_secondBlockIn = Wire(Valid(new Prediction))
+  private val s2_secondBlock   = RegEnable(s1_secondBlockIn, s1_fire)
+  // An override at s2 replaces the group with a single corrected block, so the second block s1 proposed dies with the
+  // rest of that group and must not reach s3 still looking valid.
+  private val s2_secondBlockOut = WireInit(s2_secondBlock)
+  when(s2_override)(s2_secondBlockOut.valid := false.B)
+  private val s3_secondBlock = RegEnable(s2_secondBlockOut, s2_fire)
+
   private val s1_utageMeta     = Wire(new MicroTageMeta)
   private val s2_utageMeta     = RegEnable(s1_utageMeta, s1_fire)
   private val s2_realUtageMeta = Wire(new MicroTageMeta)
@@ -191,6 +201,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fastTrain.bits.abtbMeta  := s3_abtbMeta
   fastTrain.bits.utageMeta := s3_utageMeta
   fastTrain.bits.ptageMeta := s3_ptageMeta
+  // a second block that the group did not keep was never its successor, so the entry that proposed it is not
+  // vindicated by it
+  fastTrain.bits.hasSecondBlock := s3_secondBlock.valid && !s3_override
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
@@ -371,18 +384,31 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     )
   )
 
-  // The group s1 hands on. Everything downstream that has to account for a whole group, the path history included,
-  // reads it from here, so there is one place the second block gets filled in.
+  // The group s1 hands on. Everything that has to account for a whole group, the path history included, reads it from
+  // here.
+  //
+  // A second block only exists when pTAGE supplied the first and that first block jumped somewhere the entry itself
+  // named. pTAGE marks a block that cannot say where its successor starts, a return in particular, as unable to carry
+  // one; and when the group came from a fallback instead, there is no second block to speak of.
+  private val usePtage       = s1_ptageBlock.valid && s1_ptageResult.taken
+  private val s1_secondBlock = ptage.io.prediction.blocks(1)
+  // A block that moves the return stack cannot carry a successor. Every entry of a group recovers from the one
+  // speculation state Ftq records for it, so a second block behind a call would read a return stack top its own
+  // predecessor has already pushed past, and a return inside that block would be redirected to a stale address.
+  private val s1_firstMovesRas = s1_prediction.attribute.hasPush || s1_prediction.attribute.hasPop
+  private val s1_emitSecond    = usePtage && s1_secondBlock.valid && !s1_firstMovesRas
+
   private val s1_group = Wire(Vec(MaxPredictionNum, Valid(new Prediction)))
-  s1_group(0).valid := true.B
-  s1_group(0).bits  := s1_prediction
-  s1_group.tail.foreach { block =>
-    block.valid := false.B
-    block.bits  := 0.U.asTypeOf(block.bits)
-  }
+  s1_group(0).valid            := true.B
+  s1_group(0).bits             := s1_prediction
+  s1_group(1).valid            := s1_emitSecond
+  s1_group(1).bits.taken       := s1_secondBlock.bits.taken
+  s1_group(1).bits.cfiPosition := s1_secondBlock.bits.cfiPosition
+  s1_group(1).bits.attribute   := s1_secondBlock.bits.attribute
+  s1_group(1).bits.target      := s1_secondBlock.bits.target
+  s1_secondBlockIn             := s1_group(1)
 
   private val s1_taken         = s1_prediction.taken
-  private val usePtage         = s1_ptageBlock.valid && s1_ptageResult.taken
   private val debug_s1UsePtage = s1_taken && usePtage
   private val debug_s1UseUbtb  = s1_taken && !usePtage
 
@@ -576,11 +602,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   }.otherwise {
     firstBlock.bits.fromStage(s1_startPc.get, s1_prediction)
   }
-  // 2-taken prediction is not implemented yet, so we predict a single block per cycle
-  io.toFtq.prediction.bits.blocks.tail.foreach { block =>
-    block.valid := false.B
-    block.bits  := 0.U.asTypeOf(block.bits)
-  }
+  // The second block starts where the first jumped to, which is what lets Ftq keep reading a block's target off its
+  // successor. An override replaces the group with a single corrected block, so none follows it.
+  private val secondBlock = io.toFtq.prediction.bits.blocks(1)
+  secondBlock.valid := s1_group(1).valid && !s2_override && !s3_override
+  secondBlock.bits.fromStage(s1_prediction.target, s1_group(1).bits)
   io.toFtq.prediction.bits.s2Override := s2_override
   io.toFtq.prediction.bits.s3Override := s3_override
 
@@ -590,7 +616,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.toFtq.s2FtqPtr := s2_ftqPtr
   io.toFtq.s3FtqPtr := s3_ftqPtr
   // An override replaces the group with a single corrected block, so only a group that survives s3 keeps its width.
-  io.toFtq.s3NumBlocks := 1.U
+  // A group is its first block plus, where there was one, its second.
+  io.toFtq.s3NumBlocks := Mux(s3_override, 1.U, 1.U +& s3_secondBlock.valid.asUInt)
 
   io.toFtq.meta.valid             := s3_valid
   io.toFtq.meta.bits.redirectMeta := s3_redirectMeta
@@ -598,14 +625,30 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.toFtq.meta.bits.commitMeta   := s3_commitMeta
 
   /* *** s0_startPc selection *** */
+  // A group ends where its last valid block ends, so that is where the next one starts. Feeding back the first
+  // block's target instead would restart at a pc this group already covered, and the entry Ftq wrote for the second
+  // block would not be followed by one starting at that block's target, which is how Ftq encodes a target at all.
+  private val s1_groupTarget = Mux(s1_group(1).valid, s1_group(1).bits.target, s1_prediction.target)
+
   s0_startPc := MuxCase(
     s0_startPcReg.get,
     Seq(
       redirect.valid -> redirect.bits.target,
       s3_override    -> s3_prediction.target,
       s2_override    -> s2_prediction.target,
-      s1_valid       -> s1_prediction.target
+      s1_valid       -> s1_groupTarget
     )
+  )
+
+  // Ftq reads a block's target off its successor's startPc, so consecutive groups have to abut exactly. A redirect or
+  // an override restarts the stream somewhere else, so the check resumes only once a group has been issued since.
+  private val debug_lastGroupTarget = RegEnable(s1_groupTarget, s1_fire)
+  private val debug_streamAbuts     = RegInit(false.B)
+  when(s1_fire)(debug_streamAbuts                                      := true.B)
+  when(redirect.valid || s2_override || s3_override)(debug_streamAbuts := false.B)
+  XSError(
+    s1_fire && debug_streamAbuts && s1_startPc.get =/= debug_lastGroupTarget,
+    "a prediction group does not start where the previous group ended\n"
   )
 
   private val phrBits        = WireInit(0.U(PhrHistoryLength.W))

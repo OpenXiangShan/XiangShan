@@ -117,6 +117,8 @@ class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
   val nextPcLow:   UInt            = UInt(NextPcLowWidth.W)
   val nextPc:      PrunedAddr      = PrunedAddr(VAddrBits)
   val taken:       Bool            = Bool()
+  // whether this group already carried its own second block, which decides if a successor can still be expected
+  val hasSecondBlock: Bool = Bool()
 }
 
 /** A pending write to one table's bank, registered so the decision and the write land in different cycles. */

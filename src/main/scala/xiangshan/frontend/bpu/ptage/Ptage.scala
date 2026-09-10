@@ -235,6 +235,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     pending.bits.nextPcLow   := getEntryNextPc(t0_nextPc)
     pending.bits.nextPc      := t0_nextPc
     pending.bits.taken       := t0_branch.taken
+
+    pending.bits.hasSecondBlock := t0_train.hasSecondBlock
   }
 
   /* *** t1: decide what to write, and build it *** */
@@ -305,14 +307,24 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     heldMeta.p1Counter.getUpdate(held.taken)
   )
 
-  entry.p2Valid        := t0_continuesPending
-  entry.p2.cfiPosition := t0_branch.cfiPosition
-  entry.p2.attribute   := t0_branch.attribute
-  entry.p2.nextPcLow   := getEntryNextPc(t0_nextPc)
+  // A group that kept a second block consumed its own successor, so the next training event is the group after it and
+  // no continuation can form. The entry's stored second block is what produced that block and s3 accepted it, so it is
+  // put back and reinforced instead of dropped. Clearing it here would erase a pair at the very moment it proved
+  // correct, leaving the entry to learn the same pair over and over and never hold one long enough to use it twice.
+  private val heldPairConfirmed = doStrengthen && held.hasSecondBlock && heldMeta.p2Valid
+
+  entry.p2Valid        := t0_continuesPending || heldPairConfirmed
+  entry.p2.cfiPosition := Mux(heldPairConfirmed, heldMeta.p2CfiPosition, t0_branch.cfiPosition)
+  entry.p2.attribute   := Mux(heldPairConfirmed, heldMeta.p2Attribute, t0_branch.attribute)
+  entry.p2.nextPcLow   := Mux(heldPairConfirmed, heldMeta.p2NextPcLow, getEntryNextPc(t0_nextPc))
   entry.p2.counter := Mux(
-    writeFresh || !heldMeta.p2Valid,
-    Mux(t0_branch.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
-    heldMeta.p2Counter.getUpdate(t0_branch.taken)
+    heldPairConfirmed,
+    heldMeta.p2Counter.getUpdate(true.B),
+    Mux(
+      writeFresh || !heldMeta.p2Valid,
+      Mux(t0_branch.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+      heldMeta.p2Counter.getUpdate(t0_branch.taken)
+    )
   )
 
   private val writeHappens = t0_valid && (doStrengthen || doCorrect || doAllocate)
@@ -340,6 +352,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainEvent", t0_valid)
   XSPerfAccumulate("trainNoAnchor", t0_valid && t0_meta.noAnchor)
   XSPerfAccumulate("trainPaired", t0_valid && t0_continuesPending)
+  XSPerfAccumulate("trainP2Kept", writeHappens && heldPairConfirmed)
   XSPerfAccumulate("trainP2Dropped", writeHappens && heldMeta.p2Valid && !entry.p2Valid)
   XSPerfAccumulate("trainStrengthen", t0_valid && doStrengthen)
   XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
