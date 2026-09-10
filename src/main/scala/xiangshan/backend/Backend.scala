@@ -373,6 +373,16 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.v0Wen := false.B
     sink.vlWen := false.B
   }
+  intRegion.io.fromVlWb.zip(vecRegion.out.vlWb).foreach { case (sink, source) =>
+    sink.wen := source.wen
+    sink.pdest := source.pdest
+    sink.data := source.data
+    sink.rfWen := false.B
+    sink.fpWen := false.B
+    sink.vecWen := false.B
+    sink.v0Wen := false.B
+    sink.vlWen := source.wen
+  }
   fpRegion.in.fromTop.hartId := io.fromTop.hartId
   fpRegion.in.flush := ctrlBlock.io.toIssueBlock.flush
   fpRegion.in.fromDispatch.uops.flatten
