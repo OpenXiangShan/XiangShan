@@ -207,11 +207,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   l3addr := MakeAddr(satp.ppn, getVpnn(vpn, 3))
   if (EnableSv48) {
-    when (mode === Sv48) {
-      l2addr := MakeAddr(Mux(l3Hit, ppn, pte.getPPN()), getVpnn(vpn, 2))
-    } .otherwise {
-      l2addr := MakeAddr(satp.ppn, getVpnn(vpn, 2))
-    }
+    l2addr := MakeAddr(Mux(l3Hit || !pte_valid, ppn, pte.getPPN()), getVpnn(vpn, 2))
   } else {
     l2addr := MakeAddr(satp.ppn, getVpnn(vpn, 2))
   }
