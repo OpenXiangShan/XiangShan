@@ -3785,3 +3785,23 @@ and frozen runtime, external dependencies, RTL metadata, runner, and all
 controller hashes were identical before and after the run. The artifact is
 `build/memblock/schema45-benchmark-parallel4-v2.json`, SHA-256
 `69191d1e2c2f553de8ae765b8c5ffe4ab34ecc4e19f0fa3d6291f2335caf9968`.
+
+The complete schema-2 benchmark then ran all 88 independent leaf scenarios
+with seed 1, 16,384 requested actions, the SPEC constraint profile, and eight
+workers. All 88 leaves passed in 3,540.552 seconds of wall time. Frozen runtime,
+external dependencies, RTL metadata, both runner sources, and every listed
+controller input remained byte-identical; every passing terminal summary also
+reported complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+The sum of individual leaf times was 4,640.109 seconds. The 3,515.887-second
+`random-mixed` leaf determined nearly all wall time after the other 87 leaves
+completed, so additional leaf workers cannot remove that single-scenario tail.
+
+The `random-mixed` leaf reached cycle 8,658,790 and completed 88,487 scalar
+loads, 36,201 scalar stores, 3,481 vector loads, 1,728 vector stores, 87,189
+DCache refills, 87,190 GrantAcks, 606 Probes, 33,645 ReleaseData transactions,
+10,405 PTW requests, and 154 Uncache requests. The final JSON is
+`build/memblock/test-scale.json`, SHA-256
+`117f100788d35beb3c54b84b324e7c01dbef5b99baa8c82b467bc594a6babf12`;
+the rendered Markdown has SHA-256
+`7f2b7ed134590526f3b4156d54f93b627beb4f3de32d6b09d89f5b29a6dacd02`.
