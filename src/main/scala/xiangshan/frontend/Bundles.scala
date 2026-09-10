@@ -61,6 +61,9 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   // block of the group has nothing to say about the ones before it, so those keep their entries and their fetch, and
   // the override takes back only what followed them.
   val s3OverrideKeptBlocks: UInt = Output(UInt(log2Ceil(MaxPredictionNum + 1).W))
+  // whether the group being offered this cycle carries a second block, so Ftq can hold back only the space that
+  // group actually needs rather than always reserving a whole group's worth
+  val predictionIsGroup: Bool = Output(Bool())
 
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)

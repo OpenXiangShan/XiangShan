@@ -187,8 +187,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // This is tracked as a counter, and the comparison is registered, so that prediction.ready is a register output
   // rather than a pointer subtraction feeding Bpu's fire path. It is not stale: freeNumNext already accounts for the
   // enqueue of this cycle, so registering the comparison yields exactly "freeNum of that cycle >= MaxPredictionNum".
-  private val freeNum    = RegInit(FtqSize.U(log2Ceil(FtqSize + 1).W))
-  private val ftqHasRoom = RegInit(true.B)
+  // Two levels, because a group that carries no second block does not need a second entry. Holding a whole group's
+  // worth back for every enqueue stalls Bpu on a queue that had room for what it was actually offering, and Bpu is
+  // the frontend's rate limiter, so that stall costs a prediction group outright.
+  private val freeNum          = RegInit(FtqSize.U(log2Ceil(FtqSize + 1).W))
+  private val ftqHasRoom       = RegInit(true.B)
+  private val ftqHasRoomForOne = RegInit(true.B)
 
   // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
   // BPU
@@ -203,7 +207,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val bpThrottledByTrain = RegInit(false.B)
   bpThrottledByTrain := bpTrainStallCnt >= BpTrainStallLimit.U
 
-  io.fromBpu.prediction.ready := ftqHasRoom && bpNotRunTooFar
+  // still a plain register select: which level applies is decided by Bpu, whose group width does not depend on ready
+  io.fromBpu.prediction.ready :=
+    Mux(io.fromBpu.predictionIsGroup, ftqHasRoom, ftqHasRoomForOne) && bpNotRunTooFar
   io.fromBpu.meta.ready := true.B
 
   private val prediction       = io.fromBpu.prediction
@@ -251,8 +257,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
       prediction.bits.s2Override -> freeNumAfterRewind(io.fromBpu.s2FtqPtr + prediction.bits.numBlocks)
     )
   )
-  freeNum    := freeNumNext
-  ftqHasRoom := freeNumNext >= MaxPredictionNum.U
+  freeNum          := freeNumNext
+  ftqHasRoom       := freeNumNext >= MaxPredictionNum.U
+  ftqHasRoomForOne := freeNumNext >= 1.U
 
   XSError(freeNumNext > FtqSize.U, "Ftq free entry count overflows\n")
 
@@ -623,7 +630,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // so without naming it here its cycle is lost to no cause
   io.toIfu.topdownInfo.backendRedirectOverride(io.backendRedirectTopdown)
 
-  when(!ftqHasRoom) {
+  when(!Mux(io.fromBpu.predictionIsGroup, ftqHasRoom, ftqHasRoomForOne)) {
     topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
   }.elsewhen(!bpNotRunTooFar) {
     when(bpThrottledByTrain) {
