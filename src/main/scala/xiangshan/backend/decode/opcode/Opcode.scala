@@ -474,61 +474,61 @@ object Opcode {
      * Since segment number and the opcode are orthogonal, segment number will be passed separatedly in some field of bundle.
      */
 
-    val vle8        = Value(US    , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp
-    val vle16       = Value(US    , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp
-    val vle32       = Value(US    , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp
-    val vle64       = Value(US    , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp
+    val vle8        = Value(US    , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle16       = Value(US    , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle32       = Value(US    , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle64       = Value(US    , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + VlRen
 
-    val vle8ff      = Value(US    , nonH, nonX, isFof , VB, uopLoad) + VpWen + Src1Gp
-    val vle16ff     = Value(US    , nonH, nonX, isFof , VH, uopLoad) + VpWen + Src1Gp
-    val vle32ff     = Value(US    , nonH, nonX, isFof , VW, uopLoad) + VpWen + Src1Gp
-    val vle64ff     = Value(US    , nonH, nonX, isFof , VD, uopLoad) + VpWen + Src1Gp
+    val vle8ff      = Value(US    , nonH, nonX, isFof , VB, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle16ff     = Value(US    , nonH, nonX, isFof , VH, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle32ff     = Value(US    , nonH, nonX, isFof , VW, uopLoad) + VpWen + Src1Gp + VlRen
+    val vle64ff     = Value(US    , nonH, nonX, isFof , VD, uopLoad) + VpWen + Src1Gp + VlRen
 
-    val vlse8       = Value(CS    , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Gp
-    val vlse16      = Value(CS    , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Gp
-    val vlse32      = Value(CS    , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Gp
-    val vlse64      = Value(CS    , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Gp
+    val vlse8       = Value(CS    , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Gp + VlRen
+    val vlse16      = Value(CS    , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Gp + VlRen
+    val vlse32      = Value(CS    , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Gp + VlRen
+    val vlse64      = Value(CS    , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Gp + VlRen
 
-    val vlm         = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + VmWen + Src1Gp
+    val vlm         = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + VmWen + Src1Gp + VlRen
 
-    val vlnre8      = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp
-    val vlnre16     = Value(MASK  , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp
-    val vlnre32     = Value(MASK  , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp
-    val vlnre64     = Value(MASK  , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp
+    val vlnre8      = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + VlRen
+    val vlnre16     = Value(MASK  , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + VlRen
+    val vlnre32     = Value(MASK  , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + VlRen
+    val vlnre64     = Value(MASK  , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + VlRen
 
-    val vluxei8e8   = Value(IUEI8 , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei8e16  = Value(IUEI8 , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei8e32  = Value(IUEI8 , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei8e64  = Value(IUEI8 , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei16e8  = Value(IUEI16, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei16e16 = Value(IUEI16, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei16e32 = Value(IUEI16, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei16e64 = Value(IUEI16, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei32e8  = Value(IUEI32, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei32e16 = Value(IUEI32, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei32e32 = Value(IUEI32, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei32e64 = Value(IUEI32, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei64e8  = Value(IUEI64, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei64e16 = Value(IUEI64, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei64e32 = Value(IUEI64, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vluxei64e64 = Value(IUEI64, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
+    val vluxei8e8   = Value(IUEI8 , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei8e16  = Value(IUEI8 , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei8e32  = Value(IUEI8 , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei8e64  = Value(IUEI8 , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei16e8  = Value(IUEI16, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei16e16 = Value(IUEI16, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei16e32 = Value(IUEI16, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei16e64 = Value(IUEI16, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei32e8  = Value(IUEI32, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei32e16 = Value(IUEI32, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei32e32 = Value(IUEI32, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei32e64 = Value(IUEI32, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei64e8  = Value(IUEI64, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei64e16 = Value(IUEI64, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei64e32 = Value(IUEI64, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vluxei64e64 = Value(IUEI64, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
 
-    val vloxei8e8   = Value(IOEI8 , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei8e16  = Value(IOEI8 , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei8e32  = Value(IOEI8 , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei8e64  = Value(IOEI8 , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei16e8  = Value(IOEI16, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei16e16 = Value(IOEI16, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei16e32 = Value(IOEI16, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei16e64 = Value(IOEI16, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei32e8  = Value(IOEI32, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei32e16 = Value(IOEI32, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei32e32 = Value(IOEI32, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei32e64 = Value(IOEI32, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei64e8  = Value(IOEI64, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei64e16 = Value(IOEI64, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei64e32 = Value(IOEI64, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
-    val vloxei64e64 = Value(IOEI64, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
+    val vloxei8e8   = Value(IOEI8 , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei8e16  = Value(IOEI8 , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei8e32  = Value(IOEI8 , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei8e64  = Value(IOEI8 , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei16e8  = Value(IOEI16, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei16e16 = Value(IOEI16, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei16e32 = Value(IOEI16, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei16e64 = Value(IOEI16, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei32e8  = Value(IOEI32, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei32e16 = Value(IOEI32, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei32e32 = Value(IOEI32, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei32e64 = Value(IOEI32, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei64e8  = Value(IOEI64, nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei64e16 = Value(IOEI64, nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei64e32 = Value(IOEI64, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
+    val vloxei64e64 = Value(IOEI64, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp + VlRen
 
     private val prefetchI = bb"0000"
     private val prefetchR = bb"0001"
