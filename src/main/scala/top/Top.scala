@@ -33,6 +33,7 @@ import xs.utils.perf.{DebugOptions => ZJDebugOptions, DebugOptionsKey => ZJDebug
 import xs.utils.perf.{LogUtilsOptions => ZJLogUtilsOptions, LogUtilsOptionsKey => ZJLogUtilsOptionsKey}
 import xs.utils.perf.{PerfCounterOptions => ZJPerfCounterOptions, PerfCounterOptionsKey => ZJPerfCounterOptionsKey, XSPerfLevel => ZJXSPerfLevel}
 import zhujiang.{HasCHIToZhuJiangBridge, HasZhuJiangAXI4Bridge, Zhujiang, ZJParametersKey}
+import zhujiang.perf.{XiangShanUtilityPerfBackend, ZJPerfBackendKey}
 import cc.xiangshan.openncb._
 import system._
 import device._
@@ -347,6 +348,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
     val zhujiangParams = p.alterPartial {
       case ZJParametersKey => ZhuJiangNoCTopology(NumCores, soc.ZhuJiangParams, L3OuterBusWidth)
+      case ZJPerfBackendKey => XiangShanUtilityPerfBackend
       case HardwareAssertionKey => HwaParams(enable = false)
       case ZJLogUtilsOptionsKey => ZJLogUtilsOptions(
         enableDebug = false,
