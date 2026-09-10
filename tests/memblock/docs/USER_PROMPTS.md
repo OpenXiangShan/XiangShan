@@ -280,3 +280,4 @@ Session: `01a08406-da41-7071-94a6-a310976264c3`.
 10. [Timestamp unavailable in the visible conversation] `我问了一下，你的picker使用不对，不需要vpi，mem direct才是对的，mem direct读；vpi能写，但你不需要写。`
 
 11. [`2026-09-09 22:45:57 CST`] `我看了一下，picker昨天还有更新，应该能支持你前面说的verilator的问题。`
+12. [`2026-09-10 13:51:00 CST`] `当前 benchmark-tests 是单进程叶场景清单也可以并行跑测试吧，这样就快一些`
