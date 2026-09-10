@@ -154,7 +154,7 @@ class BpuPredictionSource extends Bundle {
   val s3Override: Bool = Bool()
 
   def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
-  def s1Abtb:        Bool = s1Source === BpuPredictionSource.Stage1.Abtb
+  def s1Ptage:       Bool = s1Source === BpuPredictionSource.Stage1.Ptage
   def s1Fallthrough: Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
   def s3Ras:         Bool = s3Source === BpuPredictionSource.Stage3.Ras
   def s3ITTage:      Bool = s3Source === BpuPredictionSource.Stage3.ITTage
@@ -165,12 +165,10 @@ class BpuPredictionSource extends Bundle {
 }
 
 object BpuPredictionSource {
-  object Stage1 extends EnumUInt(5) {
+  object Stage1 extends EnumUInt(3) {
     def Ubtb:        UInt = 0.U(width.W)
-    def Abtb:        UInt = 1.U(width.W)
-    def UbtbUtage:   UInt = 2.U(width.W)
-    def AbtbUtage:   UInt = 3.U(width.W)
-    def Fallthrough: UInt = 4.U(width.W)
+    def Ptage:       UInt = 1.U(width.W)
+    def Fallthrough: UInt = 2.U(width.W)
   }
   object Stage3 extends EnumUInt(6) {
     def Ras:         UInt = 0.U(width.W)
