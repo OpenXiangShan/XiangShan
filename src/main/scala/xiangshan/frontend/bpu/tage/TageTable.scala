@@ -34,8 +34,9 @@ class TageTable(
 
     val writeReq: Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq))
 
-    val usefulResetStart:    Bool = Input(Bool())
-    val usefulResetInFlight: Bool = Output(Bool())
+    val usefulResetStart:       Bool = Input(Bool())
+    val usefulResetNumSetsLog2: UInt = Input(UInt(ActiveNumSetsLog2Width.W))
+    val usefulResetInFlight:    Bool = Output(Bool())
 
     val sramResetDone: Bool = Output(Bool())
   }
@@ -43,7 +44,10 @@ class TageTable(
   val io: TageTableIO = IO(new TageTableIO)
 
   println(f"TageTable[$tableIdx]:")
-  println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
+  println(f"  Physical size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${NumSets * NumBanks * NumWays}")
+  println(
+    f"  Default active size(set, bank, way): ${info.NumSets} * $NumBanks * ${info.NumWays} = ${info.NumSets * NumBanks * info.NumWays}"
+  )
   println(f"  History length: ${info.HistoryLength}")
   println(f"  Address fields:")
   addrFields.show(indent = 4)
@@ -82,6 +86,12 @@ class TageTable(
 
   private val usefulResetSetIdx       = RegInit(VecInit.fill(NumBanks)(0.U(SetIdxWidth.W)))
   private val usefulResetInFlightMask = RegInit(VecInit.fill(NumBanks)(false.B))
+  private val usefulResetNumSetsLog2  = RegInit(MinNumSetsLog2.U(ActiveNumSetsLog2Width.W))
+  private val usefulResetLastSetIdx   = (getActiveNumSets(usefulResetNumSetsLog2) - 1.U)(SetIdxWidth - 1, 0)
+
+  when(io.usefulResetStart) {
+    usefulResetNumSetsLog2 := getActiveNumSetsLog2(io.usefulResetNumSetsLog2)
+  }
 
   io.usefulResetInFlight := usefulResetInFlightMask.reduce(_ || _)
 
@@ -179,7 +189,7 @@ class TageTable(
       usefulResetInFlightMask(bankIdx) := true.B
       usefulResetSetIdx(bankIdx)       := 0.U
     }.elsewhen(usefulResetInFlightMask(bankIdx) && bank.head.io.w.req.fire) {
-      when(usefulResetSetIdx(bankIdx) === (NumSets - 1).U) {
+      when(usefulResetSetIdx(bankIdx) === usefulResetLastSetIdx) {
         usefulResetInFlightMask(bankIdx) := false.B
         usefulResetSetIdx(bankIdx)       := 0.U
       }.otherwise {

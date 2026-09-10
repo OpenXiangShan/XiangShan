@@ -19,24 +19,83 @@ import chisel3._
 import chisel3.util._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait TopHelper extends HasTageParameters {
-  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): Vec[TageFoldedHist] =
-    VecInit(TableInfos.map { implicit tableInfo =>
-      val tageFoldedHist = tableInfo.getTageFoldedHistoryInfo(NumBanks, TagWidth).map { histInfo =>
-        allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
+  def getFoldedHist(
+      allFoldedPathHist: PhrAllFoldedHistories,
+      config:            ConstantinConfig
+  ): Seq[TageFoldedHist] = {
+    require(config.tableConfigs.length == NumTables)
+    TableInfos.zip(config.tableConfigs).map { case (tableInfo, tableConfig) =>
+      val physicalTableInfo = new TageTableInfo(
+        MaxNumSetsLog2,
+        MaxNumWays,
+        tableInfo.HistoryLength
+      )
+      val candidates = for {
+        numSets  <- SupportedNumSets
+        tagWidth <- SupportedTagWidths
+      } yield {
+        val candidateInfo =
+          new TageTableInfo(log2Ceil(numSets), tableInfo.NumWays, tableInfo.HistoryLength)
+        val tageFoldedHist = candidateInfo.getTageFoldedHistoryInfo(tagWidth).map { histInfo =>
+          allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
+        }
+        val foldedHist = Wire(new TageFoldedHist()(p, physicalTableInfo))
+        foldedHist.forIdx    := tageFoldedHist.head
+        foldedHist.forTag(0) := tageFoldedHist(1)
+        foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
+        (tableConfig.numSetsLog2 === log2Ceil(numSets).U && config.tagWidth === tagWidth.U) -> foldedHist
       }
-      val foldedHist = Wire(new TageFoldedHist)
-      foldedHist.forIdx    := tageFoldedHist.head
-      foldedHist.forTag(0) := tageFoldedHist(1)
-      foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
-      foldedHist
-    })
+      MuxCase(candidates.head._2, candidates)
+    }
+  }
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
+
+  def getActiveTagWidth(requestedWidth: UInt): UInt =
+    Mux(
+      requestedWidth < tageParameters.MinTagWidth.U,
+      tageParameters.MinTagWidth.U,
+      Mux(
+        requestedWidth > tageParameters.MaxTagWidth.U,
+        tageParameters.MaxTagWidth.U,
+        requestedWidth
+      )
+    )
+
+  def getActiveUsefulCtrWidth(requestedWidth: UInt): UInt =
+    Mux(requestedWidth < 1.U, 1.U, Mux(requestedWidth > UsefulCtrWidth.U, UsefulCtrWidth.U, requestedWidth))
+
+  def getActiveUsefulCtrValue(counter: SaturateCounter, requestedWidth: UInt): UInt = {
+    val width = getActiveUsefulCtrWidth(requestedWidth)
+    counter.value & ((1.U((UsefulCtrWidth + 1).W) << width) - 1.U)(UsefulCtrWidth - 1, 0)
+  }
+
+  def normalizeUsefulCtr(counter: SaturateCounter, requestedWidth: UInt): SaturateCounter =
+    SaturateCounterInit(UsefulCtrWidth, getActiveUsefulCtrValue(counter, requestedWidth))
+
+  def usefulCtrIsSaturateNegative(counter: SaturateCounter, requestedWidth: UInt): Bool =
+    !getActiveUsefulCtrValue(counter, requestedWidth).orR
+
+  def usefulCtrIsSaturatePositive(counter: SaturateCounter, requestedWidth: UInt): Bool = {
+    val value = getActiveUsefulCtrValue(counter, requestedWidth)
+    val width = getActiveUsefulCtrWidth(requestedWidth)
+    value === ((1.U((UsefulCtrWidth + 1).W) << width) - 1.U)(UsefulCtrWidth - 1, 0)
+  }
+
+  def getUsefulCtrIncrease(counter: SaturateCounter, requestedWidth: UInt, en: Bool): SaturateCounter = {
+    val value = getActiveUsefulCtrValue(counter, requestedWidth)
+    SaturateCounterInit(
+      UsefulCtrWidth,
+      Mux(en && !usefulCtrIsSaturatePositive(counter, requestedWidth), value + 1.U, value)
+    )
+  }
 }
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
@@ -59,9 +118,36 @@ trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
     addrFields.extract("setIdx", pc) ^ hist
 
-  def getRawTag(pc: PrunedAddr, hist: Vec[UInt]): UInt =
-    addrFields.extract("tag", pc) ^ hist(0) ^ hist(1)
+  def getPcTag(pc: PrunedAddr, requestedNumSetsLog2: UInt): UInt = {
+    val activeSetIdxWidth = getActiveNumSetsLog2(requestedNumSetsLog2)
+    (pc.toUInt >> (instOffsetBits.U + BankIdxWidth.U + activeSetIdxWidth))(TagWidth - 1, 0)
+  }
 
-  def getTag(pc: PrunedAddr, hist: Vec[UInt], position: UInt): UInt =
-    addrFields.extract("tag", pc) ^ hist(0) ^ hist(1) ^ position
+  def getActiveNumSetsLog2(requestedNumSetsLog2: UInt): UInt =
+    Mux(
+      requestedNumSetsLog2 < MinNumSetsLog2.U,
+      MinNumSetsLog2.U,
+      Mux(requestedNumSetsLog2 > MaxNumSetsLog2.U, MaxNumSetsLog2.U, requestedNumSetsLog2)
+    )
+
+  def getActiveNumSets(requestedNumSetsLog2: UInt): UInt =
+    UIntToOH(getActiveNumSetsLog2(requestedNumSetsLog2), SetIdxWidth + 1)
+
+  def maskSetIndex(setIdx: UInt, requestedNumSetsLog2: UInt): UInt =
+    setIdx & (getActiveNumSets(requestedNumSetsLog2) - 1.U)(SetIdxWidth - 1, 0)
+
+  def getActiveNumWays(requestedNumWays: UInt): UInt =
+    Mux(requestedNumWays < MinNumWays.U, MinNumWays.U, Mux(requestedNumWays > NumWays.U, NumWays.U, requestedNumWays))
+
+  def getActiveWayMask(requestedNumWays: UInt): UInt =
+    ((1.U((NumWays + 1).W) << getActiveNumWays(requestedNumWays)) - 1.U)(NumWays - 1, 0)
+
+  def getActiveTagMask(requestedTagWidth: UInt): UInt =
+    ((1.U((TagWidth + 1).W) << getActiveTagWidth(requestedTagWidth)) - 1.U)(TagWidth - 1, 0)
+
+  def getRawTag(pc: PrunedAddr, hist: Vec[UInt], requestedNumSetsLog2: UInt): UInt =
+    getPcTag(pc, requestedNumSetsLog2) ^ hist(0) ^ hist(1)
+
+  def getTag(pc: PrunedAddr, hist: Vec[UInt], position: UInt, requestedNumSetsLog2: UInt): UInt =
+    getRawTag(pc, hist, requestedNumSetsLog2) ^ position
 }

@@ -26,6 +26,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
+import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -41,6 +42,7 @@ import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
+import xiangshan.frontend.bpu.tage.ConstantinConfig
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
@@ -230,11 +232,38 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
+  private val hartId               = p(XSCoreParamsKey).HartId
+  private val tageConstantinConfig = Wire(new ConstantinConfig)
+  bpuParameters.tageParameters.TableInfos.zip(tageConstantinConfig.tableConfigs).zipWithIndex.foreach {
+    case ((info, config), tableIdx) =>
+      config.numSetsLog2 := Constantin
+        .createRecord(
+          s"tageTableNumSetsLog2_${hartId}_${tableIdx}",
+          initValue = info.NumSetsLog2
+        )(config.numSetsLog2.getWidth - 1, 0)
+      config.numWays := Constantin
+        .createRecord(s"tageTableNumWays_${hartId}_${tableIdx}", initValue = info.NumWays)(
+          config.numWays.getWidth - 1,
+          0
+        )
+  }
+  tageConstantinConfig.tagWidth := Constantin
+    .createRecord(s"tageTagWidth_${hartId}", initValue = bpuParameters.tageParameters.TagWidth)(
+      tageConstantinConfig.tagWidth.getWidth - 1,
+      0
+    )
+  tageConstantinConfig.usefulCtrWidth := Constantin
+    .createRecord(s"tageUsefulCtrWidth_${hartId}", initValue = bpuParameters.tageParameters.UsefulCtrWidth)(
+      tageConstantinConfig.usefulCtrWidth.getWidth - 1,
+      0
+    )
+
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromMainBtb.baseConf           := VecInit(mbtb.io.meta.entries.flatten.map(_.counter.isSaturate))
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  tage.io.constantinConfig               := tageConstantinConfig
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
