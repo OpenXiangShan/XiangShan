@@ -15,6 +15,7 @@ class VsetTop(implicit p: Parameters) extends XSModule {
       val vtype = Input(VType())
       val func  = Input(FuOpType())
       val oldVl = Input(UInt(8.W))
+      val oldVt = Input(VType())
     }
 
     val out = Output(new XSBundle {
@@ -67,6 +68,11 @@ class VsetTop(implicit p: Parameters) extends XSModule {
   vsetRvfWvf.io.in.bits.ctrl.fuOpType := io.in.func
   vsetRvfWvf.io.in.bits.data.src(0) := vconfig.asUInt
   vsetRvfWvf.io.in.bits.data.src(1) := Mux(VSETOpType.isVsetvl(io.in.func), vtypeStruct.asUInt, vtypeStruct.asUInt(7, 0))
+  vsetRvfWvf.io.in.bits.ctrl.vpu.get.specVma := io.in.oldVt.vma
+  vsetRvfWvf.io.in.bits.ctrl.vpu.get.specVta := io.in.oldVt.vta
+  vsetRvfWvf.io.in.bits.ctrl.vpu.get.specVsew := io.in.oldVt.vsew
+  vsetRvfWvf.io.in.bits.ctrl.vpu.get.specVlmul := io.in.oldVt.vlmul
+  vsetRvfWvf.io.in.bits.ctrl.vpu.get.specVill := io.in.oldVt.illegal
 
   val selVsetIVL: Bool =  io.in.func === VSETOpType.uvsetrd_ii ||
                           io.in.func === VSETOpType.uvsetrd_xi ||
