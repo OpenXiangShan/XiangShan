@@ -312,6 +312,9 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
   val abtbMeta:  AheadBtbMeta  = new AheadBtbMeta
   val utageMeta: MicroTageMeta = new MicroTageMeta
   val ptageMeta: PtageMeta     = new PtageMeta
+  // the group kept a second block of its own, so its successor was consumed inside the group rather than arriving as
+  // the next training event
+  val hasSecondBlock: Bool = Bool()
 }
 
 // metadata for commit training (e.g. ras)
