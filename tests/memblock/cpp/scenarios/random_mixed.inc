@@ -1886,7 +1886,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return false;
         }
         if (!environment.redirect_after(
-                guest_fault.rob, guest_fault.rob_flag, true)) {
+                guest_fault.rob, guest_fault.rob_flag, true, true)) {
             phase += ":trap-redirect";
             return false;
         }
@@ -1990,7 +1990,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return false;
                 }
                 if (!environment.redirect_after(
-                        candidate.rob, candidate.rob_flag, true) ||
+                        candidate.rob, candidate.rob_flag, true, true) ||
                     !environment.run_until_lq_retired(2048)) {
                     phase += ":trap-recovery";
                     return false;
@@ -7624,7 +7624,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     if (vector_fof_first_fault &&
                         !environment.redirect_after(
-                            data_uop.rob, data_uop.rob_flag, true)) {
+                            data_uop.rob, data_uop.rob_flag, true, true)) {
                         phase += ":trap-redirect";
                         return false;
                     }
@@ -8162,6 +8162,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         phase += ":oracle";
                         return false;
                     }
+                    if (!environment.run_cycles(8) ||
+                        !environment.redirect_after(
+                            transaction.rob, transaction.rob_flag, true) ||
+                        !environment.run_cycles(16)) {
+                        phase += ":trap-recovery";
+                        return false;
+                    }
+                    --rob_offset;
                     // The design intentionally installs an errored refill as a
                     // poisoned line. AMO/CAS still update that private cache
                     // image, while the manager backing store stays unchanged
@@ -8591,7 +8599,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     const auto feedback_before =
                         environment.scalar_load_feedback_stats();
                     bool completed_load = false;
-                    if (physical_pmp_denied) {
+                    if (physical_pmp_denied || physical_pma_execute_denied) {
                         const std::uint64_t lq_dequeued_before =
                             environment.lq_dequeued();
                         const std::uint64_t sq_dequeued_before =
@@ -8608,9 +8616,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                 transaction.rob, transaction.rob_flag, false,
                                 lq_dequeued_before, sq_dequeued_before,
                                 lq_cancels_before, sq_cancels_before);
-                    } else if (physical_pma_execute_denied) {
-                        completed_load = issue_load(transaction) &&
-                            environment.run_until_queues_retired(8192);
                     } else if (final_io) {
                         environment.expect_load(transaction);
                         completed_load = environment.set_rob_head(

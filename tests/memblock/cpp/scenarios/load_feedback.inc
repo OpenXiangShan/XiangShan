@@ -3314,7 +3314,7 @@ int run_trigger_contracts(int argc, char **argv)
         vector_load_environment.tilelink_requests() !=
             vector_load_requests_before ||
         !vector_load_environment.redirect_after(
-            vector_load.rob, vector_load.rob_flag, true) ||
+            vector_load.rob, vector_load.rob_flag, true, true) ||
         !vector_load_environment.run_cycles(16)) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                   << vector_load_environment.cycle()
@@ -3389,7 +3389,7 @@ int run_trigger_contracts(int argc, char **argv)
         vector_store_environment.tilelink_requests() !=
             vector_store_requests_before ||
         !vector_store_environment.redirect_after(
-            vector_store.rob, vector_store.rob_flag, true) ||
+            vector_store.rob, vector_store.rob_flag, true, true) ||
         !vector_store_environment.run_cycles(16)) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                   << vector_store_environment.cycle()
@@ -3417,6 +3417,75 @@ int run_trigger_contracts(int argc, char **argv)
                   << " phase=vector-store-cancellation"
                   << " allocated=" << vector_store_environment.sq_allocated()
                   << " retired=" << vector_sq_retired << '\n';
+        return 1;
+    }
+
+    constexpr std::uint64_t scalar_store_fault_address =
+        vector_store_base + 0x180;
+    const memblock::StoreTransaction scalar_store_fault{
+        .address = scalar_store_fault_address,
+        .data = 0x7e6d5c4b3a291807ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 1,
+        .sq = 2,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_exception_mask = memblock::kExceptionBreakpoint,
+        .expected_trigger = memblock::kTriggerBreakpoint,
+    };
+    vector_store_environment.select_store_exception_address(true);
+    if (!vector_store_environment.configure_memory_trigger({
+            .index = 0,
+            .address = scalar_store_fault_address,
+            .load = false,
+            .store = true,
+        }) ||
+        !vector_store_environment.set_rob_head(
+            scalar_store_fault.rob, scalar_store_fault.rob_flag)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_store_environment.cycle()
+                  << " phase=post-vector-store-fault-configuration reason="
+                  << vector_store_environment.error() << '\n';
+        return 1;
+    }
+    vector_store_environment.expect_store(scalar_store_fault);
+    if (!vector_store_environment.enqueue_store(scalar_store_fault, 0) ||
+        !vector_store_environment.issue_store_address(
+            scalar_store_fault, 256) ||
+        !vector_store_environment.issue_store_data(scalar_store_fault, 256) ||
+        !vector_store_environment.run_until_store_complete(2048) ||
+        !vector_store_environment.run_cycles(8) ||
+        vector_store_environment.exception_vaddr() !=
+            scalar_store_fault_address) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_store_environment.cycle()
+                  << " phase=post-vector-store-fault-address expected_vaddr=0x"
+                  << std::hex << scalar_store_fault_address
+                  << " actual_vaddr=0x"
+                  << vector_store_environment.exception_vaddr() << std::dec
+                  << " reason=" << vector_store_environment.error() << '\n';
+        return 1;
+    }
+    if (!vector_store_environment.redirect_after(
+            scalar_store_fault.rob, scalar_store_fault.rob_flag, true) ||
+        !vector_store_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_store_environment.cycle()
+                  << " phase=post-vector-store-fault-recovery reason="
+                  << vector_store_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t scalar_sq_remaining =
+        vector_store_environment.sq_allocated() -
+        vector_store_environment.sq_dequeued() -
+        vector_store_environment.sq_canceled();
+    if (scalar_sq_remaining > 1 ||
+        (scalar_sq_remaining != 0 &&
+         !vector_store_environment.account_sq_cancellation(1))) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_store_environment.cycle()
+                  << " phase=post-vector-store-fault-cancellation reason="
+                  << vector_store_environment.error() << '\n';
         return 1;
     }
 
@@ -3539,7 +3608,7 @@ int run_trigger_contracts(int argc, char **argv)
             cross_environment.tilelink_requests() !=
                 requests_before + expected_request_delta ||
             !cross_environment.redirect_after(
-                transaction.rob, transaction.rob_flag, true) ||
+                transaction.rob, transaction.rob_flag, true, true) ||
             !cross_environment.run_cycles(16)) {
             std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                       << cross_environment.cycle() << " phase=" << phase

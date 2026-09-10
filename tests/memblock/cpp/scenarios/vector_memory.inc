@@ -240,13 +240,17 @@ int run_vector_fault_only_first(int argc, char **argv)
     // attributing it to this VLEFF writeback.
     memblock::Environment first_fault(argc, argv);
     constexpr std::uint64_t first_fault_virtual = 0x53000180ULL;
+    constexpr std::uint64_t second_fault_virtual = 0x53003000ULL;
     constexpr std::uint64_t first_fault_root = 0x97a00000ULL;
     first_fault.configure_backpressure(0xbb67ae8584caa73bULL, true);
     if (!first_fault.reset() ||
         !first_fault.activate_sv39(first_fault_root, 38) ||
         memblock::reference_sv39_walk(
             first_fault.memory(), first_fault_root,
-            first_fault_virtual).translated) {
+            first_fault_virtual).translated ||
+        memblock::reference_sv39_walk(
+            first_fault.memory(), first_fault_root,
+            second_fault_virtual).translated) {
         std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
                   << first_fault.cycle()
                   << " phase=first-fault-configuration reason="
@@ -327,6 +331,64 @@ int run_vector_fault_only_first(int argc, char **argv)
                   << first_fault.lq_allocated() << '\n';
         return 1;
     }
+    const std::uint64_t first_fault_lq_canceled = first_fault.lq_canceled();
+    if (!first_fault.redirect_after(
+            first_fault_data.rob, first_fault_data.rob_flag, true, true) ||
+        first_fault.exception_vaddr() != first_fault_virtual ||
+        !first_fault.run_cycles(8) ||
+        first_fault.exception_vaddr() != first_fault_virtual ||
+        first_fault.lq_canceled() != first_fault_lq_canceled) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-vls-redirect reason="
+                  << first_fault.error() << " fault_vaddr=0x" << std::hex
+                  << first_fault.exception_vaddr() << std::dec
+                  << " lq_canceled=" << first_fault.lq_canceled() << '\n';
+        return 1;
+    }
+
+    // The VLS redirect must preserve the first payload through the CSR-read
+    // window, then release its ownership so a later same-direction exception
+    // can replace it. Both observations are top-level interface behavior.
+    const memblock::LoadTransaction second_fault{
+        .address = second_fault_virtual,
+        .op = memblock::LoadOp::ld,
+        .rob = 74,
+        .lq = 2,
+        .sq = 0,
+        .pdest = 122,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    first_fault.expect_load(second_fault);
+    if (!first_fault.set_rob_head(
+            second_fault.rob, second_fault.rob_flag) ||
+        !first_fault.enqueue_load(second_fault) ||
+        !first_fault.issue_load(second_fault, 512) ||
+        !first_fault.run_until_complete(4096) ||
+        !first_fault.run_cycles(8) ||
+        first_fault.exception_vaddr() != second_fault_virtual) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=subsequent-scalar-fault-address reason="
+                  << first_fault.error() << " expected_vaddr=0x" << std::hex
+                  << second_fault_virtual << " actual_vaddr=0x"
+                  << first_fault.exception_vaddr() << std::dec << '\n';
+        return 1;
+    }
+    if (!first_fault.redirect_after(
+            second_fault.rob, second_fault.rob_flag, true) ||
+        !first_fault.run_cycles(96) ||
+        !first_fault.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=subsequent-scalar-fault-recovery reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
 
     std::cout << "MEMBLOCK_VECTOR_FOF_PASS"
               << " cycle=" << environment.cycle()
@@ -342,6 +404,8 @@ int run_vector_fault_only_first(int argc, char **argv)
               << " lq_dequeued=" << environment.lq_dequeued()
               << " first_element_faults=1"
               << " first_fault_fix_vl=2"
+              << " first_fault_vls_redirects=1"
+              << " subsequent_scalar_faults=1"
               << " first_fault_ptw=" << first_fault.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
@@ -1369,6 +1433,18 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
                   << " dcache=" << first_fault.tilelink_requests() << '\n';
         return 1;
     }
+    if (!first_fault.redirect_after(
+            first_fault_fix.rob, first_fault_fix.rob_flag, true, true) ||
+        first_fault.exception_vaddr() != first_fault_virtual ||
+        !first_fault.run_cycles(8) ||
+        first_fault.exception_vaddr() != first_fault_virtual) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-vls-redirect reason="
+                  << first_fault.error() << " fault_vaddr=0x" << std::hex
+                  << first_fault.exception_vaddr() << std::dec << '\n';
+        return 1;
+    }
 
     std::cout << "MEMBLOCK_VECTOR_SEGMENT_FOF_PASS"
               << " cycle=" << environment.cycle()
@@ -1380,6 +1456,7 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
               << " ptw_requests=" << environment.ptw_requests()
               << " first_element_faults=2"
               << " first_fault_fix_vl=2"
+              << " first_fault_vls_redirects=1"
               << " first_fault_ptw=" << first_fault.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

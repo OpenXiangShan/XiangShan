@@ -1273,6 +1273,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"misaligned-store-hit"',
             "phase=vector-load-hit",
             "phase=vector-store-hit",
+            "phase=post-vector-store-fault-address",
+            "scalar_store_fault_address",
+            "vector_store.rob, vector_store.rob_flag, true, true",
             '"vector-segment-indexed-load-breakpoint"',
             '"vector-segment-strided-store-breakpoint"',
             '"vector-unit-eew32-debug-action"',
@@ -1990,6 +1993,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "first_element_faults=1",
             "first_fault_fix_vl=2",
             "first_fault.exception_vaddr() != first_fault_virtual",
+            "phase=subsequent-scalar-fault-address",
+            "subsequent_scalar_faults=1",
+            "first_fault_data.rob, first_fault_data.rob_flag, true, true",
             "vector-fof",
         ):
             self.assertIn(contract, environment + main + makefile + benchmark)
@@ -2015,7 +2021,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             ':fix-vl-writeback',
             ':trap-redirect',
             "environment.redirect_after(\n"
-            "                            data_uop.rob, data_uop.rob_flag, true)",
+            "                            data_uop.rob, data_uop.rob_flag, true, true)",
         ):
             self.assertIn(contract, scenario)
 
@@ -2025,7 +2031,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             scenario.index(":fix-vl-writeback"),
             scenario.index(
                 "environment.redirect_after(\n"
-                "                            data_uop.rob, data_uop.rob_flag, true)"
+                "                            data_uop.rob, data_uop.rob_flag, true, true)"
             ),
         )
 
@@ -2036,7 +2042,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         guest_scenario = main[guest_begin:guest_end]
         self.assertIn(
             "environment.redirect_after(\n"
-            "                guest_fault.rob, guest_fault.rob_flag, true)",
+            "                guest_fault.rob, guest_fault.rob_flag, true, true)",
             guest_scenario,
         )
         self.assertLess(
@@ -2045,7 +2051,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             ),
             guest_scenario.index(
                 "environment.redirect_after(\n"
-                "                guest_fault.rob, guest_fault.rob_flag, true)"
+                "                guest_fault.rob, guest_fault.rob_flag, true, true)"
             ),
         )
 
@@ -2057,6 +2063,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "                page_fault.rob, page_fault.rob_flag, true)",
             exception_scenario,
         )
+
+    def test_redirect_helper_distinguishes_vls_exception_contract(self) -> None:
+        environment = read_cpp_source("memblock_env.hpp")
+        main = read_cpp_source("memblock_main.cpp")
+
+        for contract in (
+            "bool is_vls_exception = false",
+            "is_vls_exception && !flush_itself",
+            '"VLS exception redirect must enter as a flush redirect"',
+            "io_redirect_bits_isVlsException.ImmSet(is_vls_exception)",
+            "io_redirect_bits_isVlsException.ImmSet(std::uint64_t{0})",
+            "guest_fault.rob, guest_fault.rob_flag, true, true",
+            "candidate.rob, candidate.rob_flag, true, true",
+            "data_uop.rob, data_uop.rob_flag, true, true",
+            "vector_load.rob, vector_load.rob_flag, true, true",
+            "vector_store.rob, vector_store.rob_flag, true, true",
+            "transaction.rob, transaction.rob_flag, true, true",
+        ):
+            self.assertIn(contract, environment + main)
 
     def test_vector_segment_contract_is_registered(self) -> None:
         environment = read_cpp_source("memblock_env.hpp")
@@ -3277,6 +3302,40 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("uses_concurrent_special_operations", concurrent_tail)
         self.assertIn("RandomConstraints::noncacheable + index", concurrent_tail)
         self.assertNotIn("issue_atomic", concurrent_tail)
+
+    def test_random_mixed_recovers_hlvx_and_atomic_precise_errors(self) -> None:
+        driver = read_cpp_source("memblock_main.cpp")
+        hypervisor_load = driver[
+            driver.index("const bool physical_pma_execute_denied"):
+            driver.index("const std::uint64_t expected_uncache", driver.index(
+                "const bool physical_pma_execute_denied"
+            ))
+        ]
+        atomic_error = driver[
+            driver.index('phase = *atomic_error_denied'):
+            driver.index(
+                "} else if (atomic_family == RandomConstraints::atomic_amo)",
+                driver.index('phase = *atomic_error_denied'),
+            )
+        ]
+
+        self.assertIn(
+            "if (physical_pmp_denied || physical_pma_execute_denied)",
+            hypervisor_load,
+        )
+        self.assertIn("recover_random_precise_error(", hypervisor_load)
+        self.assertNotIn(
+            "physical_pma_execute_denied) {\n"
+            "                        completed_load = issue_load(transaction)",
+            hypervisor_load,
+        )
+        self.assertIn(
+            "environment.redirect_after(\n"
+            "                            transaction.rob, transaction.rob_flag, true)",
+            atomic_error,
+        )
+        self.assertIn(":trap-recovery", atomic_error)
+        self.assertIn("--rob_offset", atomic_error)
 
     def test_random_mixed_windows_use_full_shape_vector_instructions(self) -> None:
         driver = read_cpp_source("memblock_main.cpp")

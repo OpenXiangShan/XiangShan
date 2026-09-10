@@ -5683,15 +5683,21 @@ public:
         return true;
     }
 
-    bool redirect_after(std::uint8_t rob_value, bool rob_flag, bool flush_itself)
+    bool redirect_after(std::uint8_t rob_value, bool rob_flag, bool flush_itself,
+                        bool is_vls_exception = false)
     {
+        if (is_vls_exception && !flush_itself) {
+            error_ = "VLS exception redirect must enter as a flush redirect";
+            return false;
+        }
         dut_.io_redirect_bits_robIdx_flag.ImmSet(rob_flag);
         dut_.io_redirect_bits_robIdx_value.ImmSet(rob_value);
         dut_.io_redirect_bits_level.ImmSet(flush_itself);
-        dut_.io_redirect_bits_isVlsException.ImmSet(std::uint64_t{0});
+        dut_.io_redirect_bits_isVlsException.ImmSet(is_vls_exception);
         dut_.io_redirect_valid.ImmSet(std::uint64_t{1});
         tick();
         dut_.io_redirect_valid.ImmSet(std::uint64_t{0});
+        dut_.io_redirect_bits_isVlsException.ImmSet(std::uint64_t{0});
         // MemBlock registers redirect once; the queues publish their retained
         // redirectCancelCount values after two more clock edges. Sample once
         // per known redirect instead of treating the retained value as a pulse.
