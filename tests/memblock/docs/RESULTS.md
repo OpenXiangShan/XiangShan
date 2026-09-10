@@ -3613,3 +3613,38 @@ The final local verification passed all 202 Python unit tests, `check-rtl`,
 `git diff --check`, and the standard non-debug `smoke` at cycle 38 on complete
 RTL SHA-256
 `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`.
+
+### SPEC Profile Seed 123
+
+On 2026-09-10, the current frozen Verilator 5.052 binary completed
+`make random-mixed JOBS=16 SEED=123 TRANSACTIONS=3072 CONSTRAINTS=spec` with
+return code zero. The run reached cycle 7,041,490 and produced 71,751 scalar
+load, 33,073 scalar-store, 1,027 vector-load, 943 vector-store, and 49
+prefetch writebacks. DCache activity included 78,179 complete refills, two
+AcquirePerms, 78,181 GrantAcks, 592 Probes, 33,103 ReleaseData transactions,
+and external outstanding depth 16. Probe source lifecycle was
+`64,528,9` (unique, reused, wrapped IDs), with maximum accepted Probe depth
+8. PTW and Uncache request counts were 687 and 39.
+
+The SPEC-oriented constrained dimensions all reached their intended legal
+classes. Ordinary vector direction was `348/321` (load/store), with all four
+addressing modes (`200/156/156/157`) and all four EEWs nonzero. Segment vector
+direction was `9/3`, all four addressing modes were observed, all four EEWs
+and NF 1..7 bins were nonzero, and 42 heterogeneous windows included every
+one of the 16 direction x addressing x single/multi-uop classes. Bank-conflict
+waves reached both depth classes (`46/37`), all eight line-offset bank
+classes, all three translation classes, and terminal depths 1..4. Miss-burst
+depth 2..16 and issue widths 1..3 were all observed, with maximum external
+outstanding depth 16. Load-merge, set-pressure, CMO/atomic Probe overlap, and
+all three manager latency distributions also had nonzero samples.
+
+Architectural queue and protocol oracles closed at LQ `75702+3/75705` and SQ
+`36995+0/36995`, with zero unobserved cancellations. Backpressure buckets
+were nonzero for DCache request/response, PTW request/response, and Uncache
+request/response. The run therefore adds SPEC workload evidence without
+promoting bank identity, replay count, prefetch source, MSHR state, or any
+cycle-specific behavior to PASS/FAIL criteria. The separate SPEC counter
+snapshot remains diagnostic calibration: 7,804 of 7,900 checkpoints parsed,
+including billions of ordinary/segment vector issues, vector enqueues,
+bank-conflict/replay events, miss-queue multi-enqueues, merged/rejected loads,
+releases, and Probe traffic.
