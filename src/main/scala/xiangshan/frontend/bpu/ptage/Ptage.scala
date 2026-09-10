@@ -189,11 +189,163 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.meta.p2NextPcLow   := s1_providerEntry.p2.nextPcLow
   io.meta.noAnchor      := !s1_anchored
 
-  // nothing writes the tables yet
-  banks.flatten.foreach { bank =>
-    bank.io.writeReq.valid := false.B
-    bank.io.writeReq.bits  := 0.U.asTypeOf(bank.io.writeReq.bits)
+  /* *** training ***
+   * Driven by s3's verified result, so pTAGE learns what the high-level predictor concluded rather than waiting for
+   * the backend. The point is to track s3 closely and stop overriding it; final accuracy is s3's job, and the odd
+   * group that s3 itself got wrong is corrected by a later training event.
+   *
+   * Nothing is read back here. Every index, tag and counter the update needs travelled down the pipeline with the
+   * group, which is what keeps training from having to reconstruct a context that has since moved on, and leaves the
+   * tables with a write port that only ever writes.
+   */
+  private val t0_valid   = io.fastTrain.get.valid && io.enable
+  private val t0_train   = io.fastTrain.get.bits
+  private val t0_meta    = t0_train.ptageMeta
+  private val t0_branch  = t0_train.branch
+  private val t0_startPc = t0_train.startPc
+  private val t0_nextPc  = t0_branch.target
+
+  // An entry can only describe a group whose next pc it is able to rebuild. A taken exit that jumps beyond the stored
+  // low bits is not representable, so learning it would install a confidently wrong target; leaving it as a miss lets
+  // the fallback answer instead. A return is the exception: its target comes from the return stack, not from here.
+  private val t0_representable =
+    !t0_branch.taken || getTargetCarry(t0_startPc, t0_nextPc).isFit || t0_branch.attribute.isReturn
+
+  // Hold each verified group back by one training event. When the next one arrives we know whether it continues the
+  // held group, and can therefore write a pair rather than a lone block.
+  private val pending = RegInit(0.U.asTypeOf(Valid(new PtagePendingGroup)))
+
+  private val t0_continuesPending =
+    pending.valid && t0_valid &&
+      PtageBlock.hasStaticTarget(pending.bits.taken, pending.bits.attribute) &&
+      t0_startPc === pending.bits.nextPc &&
+      // only a conditional exit may end a group's second block: anything else has no target the entry can rebuild
+      t0_branch.attribute.isConditional && t0_representable
+
+  // The first group after a correction belongs to no entry, so it is neither written nor used as a second block.
+  private val t0_anchored = t0_valid && !t0_meta.noAnchor && t0_representable
+
+  when(io.redirect) {
+    pending.valid := false.B
+  }.elsewhen(t0_valid) {
+    pending.valid            := t0_anchored
+    pending.bits.meta        := t0_meta
+    pending.bits.cfiPosition := t0_branch.cfiPosition
+    pending.bits.attribute   := t0_branch.attribute
+    pending.bits.nextPcLow   := getEntryNextPc(t0_nextPc)
+    pending.bits.nextPc      := t0_nextPc
+    pending.bits.taken       := t0_branch.taken
   }
+
+  /* *** t1: decide what to write, and build it *** */
+  private val t1_write = RegInit(0.U.asTypeOf(Valid(new PtageTrainWrite)))
+
+  private val held     = pending.bits
+  private val heldMeta = held.meta
+  private val heldHit  = heldMeta.provider.valid
+  // the entry named this group's exit correctly, so only its direction was ever in question
+  private val heldCorrect = heldHit &&
+    heldMeta.p1CfiPosition === held.cfiPosition &&
+    heldMeta.p1Attribute.asUInt === held.attribute.asUInt
+
+  // Useful marks an entry that earned its place, and allocation passes those over. Nothing ever clears the mark, so
+  // an entry that stopped being consulted would hold its table indefinitely and allocation would find nowhere left to
+  // go. Sweeping the tables to clear marks is not open to a training path that only writes, so instead count how
+  // often allocation is turned away and, once it has been often enough, let the next one take a marked entry.
+  private val allocRefusals = RegInit(0.U(AllocRefusalLimitWidth.W))
+  private val allocMayEvict = allocRefusals.andR
+
+  // A wrong entry is handed to a longer history to tell the two contexts apart, so allocation looks above the
+  // provider; a miss may go anywhere.
+  private val allocMask = VecInit(Seq.tabulate(NumTables) { t =>
+    val longerThanProvider = if (t == 0) !heldHit else !heldHit || heldMeta.provider.bits < t.U
+    longerThanProvider && (!heldMeta.usefulVec(t) || allocMayEvict)
+  })
+  // an allocation looks for the shortest history that is free, so a new context is learned as cheaply as possible
+  private val allocSel = {
+    val sel = Wire(Valid(UInt(log2Ceil(NumTables).W)))
+    sel.valid := allocMask.reduce(_ || _)
+    sel.bits  := PriorityEncoder(allocMask)
+    sel
+  }
+
+  // There is one write to spend per event, so the outcomes are exclusive. An entry that was right is strengthened. A
+  // wrong one is normally given to a longer history, keeping both contexts represented, but an entry that was never
+  // confident, or one no table will take over from, is simply corrected where it stands.
+  private val correctInPlace = heldHit && (heldMeta.p1Counter.isWeak || !allocSel.valid)
+  private val doStrengthen   = pending.valid && heldCorrect
+  private val doCorrect      = pending.valid && !heldCorrect && correctInPlace
+  private val doAllocate     = pending.valid && !heldCorrect && !correctInPlace && allocSel.valid
+
+  // Count refusals until one eviction is allowed, then start counting again. Clearing the count on an allocation that
+  // succeeded normally would be wrong: successes and refusals interleave, so the count would never reach the limit
+  // and marked entries would never be reclaimed at all.
+  private val allocRefused = pending.valid && !heldCorrect && !allocSel.valid
+
+  when(t0_valid) {
+    when(doAllocate && allocMayEvict)(allocRefusals := 0.U)
+      .elsewhen(allocRefused)(allocRefusals := allocRefusals + 1.U)
+  }
+
+  private val writeTable = Mux(doAllocate, allocSel.bits, heldMeta.provider.bits)
+  // only a strengthened entry keeps its counter and its standing; the other two install the group afresh
+  private val writeFresh = !doStrengthen
+
+  private val entry = Wire(new PtageEntry)
+  entry.valid  := true.B
+  entry.tag    := heldMeta.tag(writeTable)
+  entry.useful := doStrengthen
+
+  entry.p1.cfiPosition := held.cfiPosition
+  entry.p1.attribute   := held.attribute
+  entry.p1.nextPcLow   := held.nextPcLow
+  entry.p1.counter := Mux(
+    writeFresh,
+    Mux(held.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+    heldMeta.p1Counter.getUpdate(held.taken)
+  )
+
+  entry.p2Valid        := t0_continuesPending
+  entry.p2.cfiPosition := t0_branch.cfiPosition
+  entry.p2.attribute   := t0_branch.attribute
+  entry.p2.nextPcLow   := getEntryNextPc(t0_nextPc)
+  entry.p2.counter := Mux(
+    writeFresh || !heldMeta.p2Valid,
+    Mux(t0_branch.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+    heldMeta.p2Counter.getUpdate(t0_branch.taken)
+  )
+
+  private val writeHappens = t0_valid && (doStrengthen || doCorrect || doAllocate)
+
+  t1_write.valid := writeHappens
+  when(t0_valid && pending.valid) {
+    t1_write.bits.table  := writeTable
+    t1_write.bits.bank   := heldMeta.bankIdx
+    t1_write.bits.setIdx := heldMeta.setIdx(writeTable)
+    t1_write.bits.entry  := entry
+  }
+
+  /* *** t2: hand the write to the banks ***
+   * The write buffer inside a bank is the drain stage: it takes the request now and lands it on a cycle whose bank is
+   * not busy serving a prediction.
+   */
+  banks.zipWithIndex.foreach { case (tableBanks, t) =>
+    tableBanks.zipWithIndex.foreach { case (bank, b) =>
+      bank.io.writeReq.valid       := t1_write.valid && t1_write.bits.table === t.U && t1_write.bits.bank === b.U
+      bank.io.writeReq.bits.setIdx := t1_write.bits.setIdx
+      bank.io.writeReq.bits.entry  := t1_write.bits.entry
+    }
+  }
+
+  XSPerfAccumulate("trainEvent", t0_valid)
+  XSPerfAccumulate("trainNoAnchor", t0_valid && t0_meta.noAnchor)
+  XSPerfAccumulate("trainPaired", t0_valid && t0_continuesPending)
+  XSPerfAccumulate("trainP2Dropped", writeHappens && heldMeta.p2Valid && !entry.p2Valid)
+  XSPerfAccumulate("trainStrengthen", t0_valid && doStrengthen)
+  XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
+  XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)
+  XSPerfAccumulate("trainNoTableFree", t0_valid && allocRefused)
+  XSPerfAccumulate("trainAllocateEvicted", t0_valid && doAllocate && allocMayEvict)
 
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   XSPerfAccumulate("predHit", s1_fire && s1_p1Usable)

@@ -164,6 +164,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
+  // pTAGE's lookup information rides the pipeline down to s3, where the verified group trains the entry it came from
+  private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
+  private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
+
   private val s1_utageMeta     = Wire(new MicroTageMeta)
   private val s2_utageMeta     = RegEnable(s1_utageMeta, s1_fire)
   private val s2_realUtageMeta = Wire(new MicroTageMeta)
@@ -186,6 +190,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
   fastTrain.bits.abtbMeta  := s3_abtbMeta
   fastTrain.bits.utageMeta := s3_utageMeta
+  fastTrain.bits.ptageMeta := s3_ptageMeta
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
