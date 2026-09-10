@@ -5,6 +5,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.fu.vector.Bundles.VLmul
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
@@ -34,8 +35,14 @@ class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg)
       mod.io.in.bits.mask := Fill(mod.io.in.bits.mask.getWidth, ex(0).bits.ctrl.vm.get) | ex(0).data.v0.get // Todo: use 16b mask instead
   }
 
+  // Floating scalar moves NaN-box instead of sign-extending the element.
+  private val fpResult = MuxLookup(VMoveOpcode.getElemWidth, vMove.io.out.bits.vd(63, 0))(Seq(
+    VSew.e16 -> FPU.box(vMove.io.out.bits.vd, FPU.f16),
+    VSew.e32 -> FPU.box(vMove.io.out.bits.vd, FPU.f32)
+  ))
+
   out.ex(0).data.int.foreach(_ := vMove.io.out.bits.vd)
-  out.ex(0).data.fp.foreach(_ := vMove.io.out.bits.vd)
+  out.ex(0).data.fp.foreach(_ := fpResult)
   out.ex(0).data.vec.foreach(_.normal := vMove.io.out.bits.vd)
   out.ex(0).data.vec.foreach(_.narrow := 0.U)
   out.ex(0).data.vec.foreach(_.maskE8 := 0.U)
