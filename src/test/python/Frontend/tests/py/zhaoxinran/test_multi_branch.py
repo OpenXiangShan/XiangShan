@@ -86,26 +86,61 @@ def _rand_resolve_delays(rng: Random, env) -> tuple:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_jal_forward_jump_observes_target_pc(env):
+    scenario_key = "zhaoxinran/multi-branch/jal-forward-target"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    target_index = rng.randint(2, 16)
     prog = _make_program(64)
-    prog[0] = _jal(0, 8)
+    prog[0] = _jal(0, target_index * 4)
+    payload = _instructions_to_bytes(prog)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "source_pc": BASE,
+            "target_pc": BASE + target_index * 4,
+            "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            "expected_path": "forward_jal_target_observed",
+        },
+    )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=BASE), step_cycles=1).run(env)
 
     assert CheckPcSequence(
-        expectation=PcSequenceExpectation(expected_pcs=(BASE, BASE + 8), max_cycles=600),
+        expectation=PcSequenceExpectation(
+            expected_pcs=(BASE, BASE + target_index * 4),
+            max_cycles=600,
+        ),
     ).run(env)
     assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_jal_resolve_drains_pending_queue(env):
-    env.backend_model.resolve_min_delay = 1
-    env.backend_model.resolve_max_delay = 3
+    scenario_key = "zhaoxinran/multi-branch/jal-resolve-drain"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    min_delay, max_delay = _rand_resolve_delays(rng, env)
 
     prog = _make_program(64)
     prog[8] = _jal(0, 8)
+    payload = _instructions_to_bytes(prog)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "jal_pc": BASE + 8 * 4,
+            "target_pc": BASE + 10 * 4,
+            "resolve_min_delay": min_delay,
+            "resolve_max_delay": max_delay,
+            "payload_sha256": hashlib.sha256(payload).hexdigest(),
+            "expected_path": "jal_resolve_queue_drains",
+        },
+    )
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=BASE), step_cycles=1).run(env)
     commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=3000)).run(env)
 
     assert commits >= 6

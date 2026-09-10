@@ -16,7 +16,7 @@ from env.sequences import (
     TranslationScenarioPhase,
     TranslationScenarioSequence,
 )
-from env.support import PmpPmaConfig, fold_pc
+from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -28,6 +28,38 @@ _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 64
 _CROSS_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 512
 _OBSERVED_EXCEPTION_BITS = (1, 2, 12, 19, 20)
+
+
+def _randomize_permission_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str | None,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/permission/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 8)
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "page_count": scenario.page_count,
+            "latency": latency,
+            "priv_imode": scenario.priv_imode,
+            "expected_path": scenario.expected_path,
+            "expected_fault": expected_fault,
+        },
+    )
+    return randomized
 
 
 def _entry(
@@ -522,6 +554,7 @@ def test_instruction_fetch_permission_boundary(
     scenario: TranslationScenario,
     expected_fault: str,
 ) -> None:
+    scenario = _randomize_permission_timing(env, scenario, expected_fault)
     sequence = TranslationScenarioSequence(
         actions=(TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),)
     )
@@ -778,6 +811,10 @@ _PMP_LOCK_MODE_CASES = (
 @pytest.mark.parametrize("scenario", _PMP_LOCK_MODE_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_pmp_lock_mode(env, scenario: TranslationScenario) -> None:
+    expected_fault = (
+        "instruction_access_fault" if scenario.expected_path == "fault" else None
+    )
+    scenario = _randomize_permission_timing(env, scenario, expected_fault)
     sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),))
     sequence.initialize_first_phase(env)
     phases = [record for record in sequence.run(env) if record["kind"] == "phase"]

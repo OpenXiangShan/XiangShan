@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from env.support import record_scenario, scenario_rng
 from tests.py.jiabowen import test_icache_mainpipe_miss_response as icache
 
 
@@ -133,12 +134,33 @@ def test_cacheable_cross64_refill_fault_delivery(
     fault: dict[str, int],
     expected_denied: int,
 ) -> None:
+    scenario_key = f"zhaoxinran/exception/cross64/{fault_line}/{expected_denied}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 20)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS64_PC,
+            "fault_line": fault_line,
+            "latency": latency,
+            "expected_denied": expected_denied,
+            "expected_path": "cross64_refill_fault",
+        },
+    )
     target_line = _CROSS64_FIRST_LINE if fault_line == "first" else _CROSS64_SECOND_LINE
     clean_line = _CROSS64_SECOND_LINE if fault_line == "first" else _CROSS64_FIRST_LINE
     samples = icache._register_mainpipe_observer(env)
     backend_records = _capture_backend_exception_state(env)
     env.icache_agent.inject_response_fault_at(target_line, **fault)
-    icache._initialize_cacheable_stream(env, _CROSS64_PC, latency=12, samples=samples)
+    icache._initialize_cacheable_stream(
+        env,
+        _CROSS64_PC,
+        latency=latency,
+        samples=samples,
+    )
 
     assert icache._run_until(
         env,
@@ -211,10 +233,29 @@ def test_cacheable_cross64_refill_fault_delivery(
 
 @pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
+    scenario_key = "zhaoxinran/exception/illegal-rvc-then-clean"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 20)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _ILLEGAL_RVC_PC,
+            "latency": latency,
+            "expected_path": "illegal_rvc_then_clean_delivery",
+        },
+    )
     payload = bytearray(_CNOP.to_bytes(2, "little") * 96)
     payload[0x3E:0x40] = b"\x00\x00"
     env.load_program(bytes(payload), _ILLEGAL_RVC_BASE)
-    env.icache_agent.configure(hit_latency=12, miss_latency=12, miss_rate=1.0, seed=0x1FED)
+    env.icache_agent.configure(
+        hit_latency=latency,
+        miss_latency=latency,
+        miss_rate=1.0,
+        seed=seed,
+    )
     cfvec_cycles = _capture_backend_cfvec_cycles(env)
     env.initialize(reset_vector=_ILLEGAL_RVC_BASE, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
@@ -287,8 +328,22 @@ def test_cacheable_illegal_rvc_is_followed_by_clean_legal_delivery(env) -> None:
 
 @pytest.mark.skipif(not icache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_execute_pc_trigger_is_delivered_to_cfvec(env) -> None:
+    scenario_key = "zhaoxinran/exception/execute-pc-trigger"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 20)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _TRIGGER_PC,
+            "latency": latency,
+            "expected_path": "execute_trigger_delivery",
+        },
+    )
     samples = _capture_backend_cfvec_cycles(env, include_trigger=True)
-    icache._initialize_cacheable_stream(env, _TRIGGER_PC, latency=12)
+    icache._initialize_cacheable_stream(env, _TRIGGER_PC, latency=latency)
     _configure_frontend_execute_trigger(env, _TRIGGER_PC)
     env.step(2)
     _require_dut_signal(

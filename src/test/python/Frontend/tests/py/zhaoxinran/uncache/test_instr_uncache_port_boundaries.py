@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import os
+from dataclasses import replace
 from typing import Sequence
 
 import pytest
@@ -22,7 +24,7 @@ from env.sequences import (
     TranslationSfenceAction,
 )
 from env.core.transactions import BackendRedirectClass, CommitTarget, ProgramImage, RedirectTxn
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
     _CNOP,
@@ -87,6 +89,71 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _INSTR_UNCACHE_INVALID = 0
 _INSTR_UNCACHE_REFILL_REQ = 1
 _INSTR_UNCACHE_SEND_RESP = 3
+
+
+def _randomize_translation_timing(
+    env,
+    scenario: TranslationScenario,
+    *,
+    latency_min: int = 1,
+    latency_max: int = 8,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/uncache/translation/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(int(latency_min), int(latency_max))
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "page_count": scenario.page_count,
+            "latency": latency,
+            "expected_path": scenario.expected_path,
+            "expected_result": scenario.expected_result,
+        },
+    )
+    return randomized
+
+
+def _configure_random_path_latencies(
+    env,
+    scenario_key: str,
+    *,
+    parameters: dict,
+) -> None:
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    uncache_latency = rng.randint(1, 16)
+    icache_latency = rng.randint(1, 16)
+    env.uncache_agent.configure(
+        latency=uncache_latency,
+        mmio_latency=uncache_latency,
+    )
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            **parameters,
+            "uncache_latency": uncache_latency,
+            "icache_latency": icache_latency,
+        },
+    )
 
 
 def _prepare_non_crossing_rvi_offsets(env) -> tuple[int, int, int]:
@@ -333,6 +400,22 @@ def _recent_mmio_pcs(env, *, window: int) -> list[int]:
 @pytest.mark.funcov_bins("BIN-1094")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_a_ready_backpressure_holds_request(env):
+    scenario_key = "zhaoxinran/uncache/a-ready-backpressure"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    stall_cycles = rng.randint(4, 20)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "stall_cycles": stall_cycles,
+            "expected_path": "a_ready_backpressure_holds_request",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
@@ -352,7 +435,7 @@ def test_uncache_a_ready_backpressure_holds_request(env):
     assert int(env.uncache_if.a_valid.value) == 1
     stalled_addr = int(env.uncache_if.a_bits_address.value)
 
-    env.step(8)
+    env.step(stall_cycles)
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == req_before
     assert int(env.uncache_if.a_valid.value) == 1
     assert int(env.uncache_if.a_bits_address.value) == stalled_addr
@@ -396,6 +479,22 @@ def test_uncache_response_fault_reports_dut_exception(
     expected_resp_type,
     expected_path_exception,
 ):
+    scenario_key = f"zhaoxinran/uncache/response-fault/{expected_resp_type}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "fault": expected_resp_type,
+            "expected_path": "dut_exception",
+            "expected_exception": expected_exception,
+        },
+    )
     _prepare_mmio_cnop_stream(env)
     env.uncache_agent.inject_next_response_fault(**fault_kwargs)
     _initialize_mmio_fetch(env)
@@ -419,13 +518,28 @@ def test_uncache_response_fault_reports_dut_exception(
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
+    scenario_key = "zhaoxinran/uncache/wfi-blocks-new-acquire"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(24, 48)
+    wfi_cycles = rng.randint(48, 80)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "wfi_cycles": wfi_cycles,
+            "expected_path": "wfi_blocks_acquire_then_releases",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=32)
     env.backend_model.set_wfi_req(1)
     _initialize_mmio_fetch(env)
 
     req_before = int(env.uncache_agent.get_stats().get("req_count", 0))
-    env.step(64)
+    env.step(wfi_cycles)
     req_during_wfi = int(env.uncache_agent.get_stats().get("req_count", 0))
 
     env.backend_model.set_wfi_req(0)
@@ -450,6 +564,22 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
 @pytest.mark.funcov_bins("BIN-1102")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env):
+    scenario_key = "zhaoxinran/uncache/wfi-during-a-ready-backpressure"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    wfi_cycles = rng.randint(8, 24)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "wfi_cycles": wfi_cycles,
+            "expected_path": "wfi_retracts_unaccepted_request",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
     _initialize_mmio_fetch(env)
 
@@ -468,7 +598,7 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
     stalled_addr = int(env.uncache_if.a_bits_address.value)
 
     env.backend_model.set_wfi_req(1)
-    env.step(16)
+    env.step(wfi_cycles)
     req_during_wfi = int(env.uncache_agent.get_stats().get("req_count", 0))
 
     assert req_during_wfi == req_before
@@ -492,16 +622,31 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
 @pytest.mark.funcov_bins("BIN-1103")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pending_response_flushed_by_redirect(env):
+    scenario_key = "zhaoxinran/uncache/pending-response-flushed-by-redirect"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(24, 48)
+    target_pc = _MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "redirect_target": target_pc,
+            "expected_path": "pending_response_flushed",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=32)
     _initialize_mmio_fetch(env)
 
     assert _wait_for_uncache_req(env)
     _assert_ifu_uncache_state(env, _IFU_UNCACHE_WAIT_RESP)
     _assert_instr_uncache_entry_state_in(env, {_INSTR_UNCACHE_REFILL_REQ, _INSTR_UNCACHE_REFILL_RESP})
     req_before_redirect = int(env.uncache_agent.get_stats().get("req_count", 0))
-    _force_redirect_to(env, _MMIO_BASE + 0x40)
-    assert _wait_for_observed_pc(env, _MMIO_BASE + 0x40)
+    _force_redirect_to(env, target_pc)
+    assert _wait_for_observed_pc(env, target_pc)
     assert _wait_for_uncache_resp(env, max_cycles=4000)
 
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
@@ -523,8 +668,24 @@ def test_uncache_pending_response_flushed_by_redirect(env):
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwargs, blocked_exception):
+    scenario_key = f"zhaoxinran/uncache/flushed-fault-response/{blocked_exception}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(24, 48)
+    target_pc = _MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "redirect_target": target_pc,
+            "fault": blocked_exception,
+            "expected_path": "flushed_fault_suppressed",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=32)
     env.uncache_agent.inject_response_fault_at(_MMIO_BASE, **fault_kwargs)
     _initialize_mmio_fetch(env)
 
@@ -535,8 +696,8 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
     ready_cycle = int(env.uncache_agent.pending[0].ready_cycle)
     while int(env.current_cycle) < ready_cycle - 2:
         env.step(1)
-    _force_redirect_to(env, _MMIO_BASE + 0x40)
-    assert _wait_for_observed_pc(env, _MMIO_BASE + 0x40)
+    _force_redirect_to(env, target_pc)
+    assert _wait_for_observed_pc(env, target_pc)
     assert _wait_for_uncache_resp(env, max_cycles=4000)
     env.step(32)
     stats = env.uncache_agent.get_stats()
@@ -549,16 +710,35 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
+    scenario_key = "zhaoxinran/uncache/consecutive-redirects-drop-older"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(40, 72)
+    first_target = _MMIO_BASE + rng.choice((0x40, 0x60))
+    second_target = _MMIO_BASE + rng.choice((0x80, 0xA0, 0xC0))
+    redirect_gap = rng.randint(2, 6)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "first_redirect_target": first_target,
+            "second_redirect_target": second_target,
+            "redirect_gap": redirect_gap,
+            "expected_path": "newest_redirect_wins",
+        },
+    )
     _prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=48)
     _initialize_mmio_fetch(env)
 
     assert _wait_for_uncache_req(env)
-    _force_redirect_to(env, _MMIO_BASE + 0x40)
-    env.step(4)
-    _force_redirect_to(env, _MMIO_BASE + 0x80)
+    _force_redirect_to(env, first_target)
+    env.step(redirect_gap)
+    _force_redirect_to(env, second_target)
 
-    assert _wait_for_observed_pc(env, _MMIO_BASE + 0x80, max_cycles=5000)
+    assert _wait_for_observed_pc(env, second_target, max_cycles=5000)
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert not env.monitor.get_errors()
@@ -567,8 +747,33 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
 @pytest.mark.funcov_bins("BIN-421")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
+    scenario_key = "zhaoxinran/uncache/redirect-to-mmio-with-icache-pending"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    icache_latency = rng.randint(48, 96)
+    uncache_latency = rng.randint(1, 16)
+    env.uncache_agent.configure(
+        latency=uncache_latency,
+        mmio_latency=uncache_latency,
+    )
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "icache_latency": icache_latency,
+            "uncache_latency": uncache_latency,
+            "redirect_target": _MMIO_BASE,
+            "expected_path": "pending_icache_flushed_for_mmio",
+        },
+    )
     _prepare_normal_and_mmio_cnop_stream(env)
-    env.icache_agent.configure(hit_latency=64, miss_latency=64, miss_rate=0.0, seed=1)
     _initialize_mmio_fetch(env, reset_vector=_NORMAL_BASE)
 
     assert _wait_for_icache_req(env)
@@ -589,9 +794,34 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
+    scenario_key = "zhaoxinran/uncache/mmio-and-icache-pending-redirects"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    uncache_latency = rng.randint(72, 112)
+    icache_latency = rng.randint(72, 112)
+    target_pc = _MMIO_BASE + rng.randrange(0x80, 0x100, 8)
+    env.uncache_agent.configure(
+        latency=uncache_latency,
+        mmio_latency=uncache_latency,
+    )
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "icache_latency": icache_latency,
+            "uncache_latency": uncache_latency,
+            "redirect_target": target_pc,
+            "expected_path": "newest_mmio_path_not_polluted",
+        },
+    )
     _prepare_normal_and_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=96)
-    env.icache_agent.configure(hit_latency=96, miss_latency=96, miss_rate=0.0, seed=2)
     _initialize_mmio_fetch(env)
 
     assert _wait_for_request_addr(env, _MMIO_BASE)
@@ -599,7 +829,6 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
     assert _wait_for_icache_req(env, max_cycles=5000)
     assert int(env.icache_agent.get_stats().get("pending", 0)) > 0
 
-    target_pc = _MMIO_BASE + 0x80
     _force_redirect_to(env, target_pc)
     assert _wait_for_observed_pc(env, target_pc, max_cycles=6000)
     assert _wait_for_request_addr(env, target_pc, max_cycles=6000)
@@ -615,6 +844,11 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
 @pytest.mark.funcov_bins("BIN-419")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
+    _configure_random_path_latencies(
+        env,
+        "zhaoxinran/uncache/pbmt-nc-non-mmio-path",
+        parameters={"expected_path": "pbmt_nc_uses_uncache"},
+    )
     return _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env)
 
 
@@ -670,11 +904,27 @@ def _run_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
 @pytest.mark.funcov_bins("BIN-422")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
+    scenario_key = "zhaoxinran/uncache/pbmt-io-waits-commit"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
         vaddr=_NORMAL_BASE,
         paddr=_NORMAL_PHYS_BASE,
         pbmt=_PBMT_IO,
+    )
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": mapping.vaddr,
+            "pa": mapping.paddr,
+            "latency": latency,
+            "expected_path": "pbmt_io_waits_commit",
+        },
     )
     expected_block_pcs = [pc for pc, _, _ in expected_block]
     _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
@@ -708,10 +958,28 @@ def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_lanes(env):
+    scenario_key = "zhaoxinran/uncache/pbmt-nc-multi-cfvec-lanes"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    blocked_cycles = rng.randint(24, 48)
     expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
         vaddr=_NORMAL_BASE,
         paddr=_NORMAL_PHYS_BASE,
+    )
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": mapping.vaddr,
+            "pa": mapping.paddr,
+            "latency": latency,
+            "blocked_cycles": blocked_cycles,
+            "expected_path": "ibuffer_backpressure_then_multi_lane_cfvec",
+        },
     )
     expected_by_pc = {pc: (instr, is_rvc) for pc, instr, is_rvc in expected_block}
     expected_block_pcs = list(expected_by_pc)
@@ -752,7 +1020,7 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
         "uncache": env.uncache_agent.get_stats(),
         "mapping": mapping,
     }
-    env.step(32)
+    env.step(blocked_cycles)
 
     env.backend_model.set_can_accept(1)
     cfvec_cycles = _collect_cfvec_cycles(env, max_cycles=512)
@@ -798,10 +1066,28 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
 @pytest.mark.funcov_bins("BIN-418")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
+    scenario_key = "zhaoxinran/uncache/pbmt-nc-mmio-pma-order"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    blocked_cycles = rng.randint(96, 160)
     _expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
         vaddr=_NORMAL_BASE,
         paddr=_NORMAL_PHYS_BASE,
+    )
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": mapping.vaddr,
+            "pa": mapping.paddr,
+            "latency": latency,
+            "blocked_cycles": blocked_cycles,
+            "expected_path": "mmio_pma_second_fetch_waits_commit",
+        },
     )
     env.backend_model.set_can_accept(0)
     _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
@@ -817,7 +1103,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
     req_before_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
     commit_count_before = int(env.backend_model.commit_count)
-    env.step(128)
+    env.step(blocked_cycles)
     req_without_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
 
     assert int(env.backend_ctrl_if.commit_valid.value) == 0
@@ -836,6 +1122,9 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_path):
+    scenario_key = "zhaoxinran/uncache/pbmt-nc-generated-sv39-mapping"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     bin_path = tmp_path / "pbmt_nc_real_payload.bin"
     payload = bytearray()
     for _ in range(8):
@@ -850,6 +1139,20 @@ def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_pat
         env,
         bin_path=bin_path,
         paddr_pages=(_NORMAL_PHYS_BASE,),
+    )
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": mapping.vaddr,
+            "pa": mapping.paddr,
+            "latency": latency,
+            "payload_sha256": hashlib.sha256(bytes(payload)).hexdigest(),
+            "expected_path": "generated_sv39_mapping_uses_uncache",
+        },
     )
     expected_block_pcs = [pc for pc, _, _ in expected_block]
     cfi_pc = mapping.vaddr + 0x10
@@ -879,10 +1182,31 @@ def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_pat
 @pytest.mark.funcov_bins("BIN-420")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_requests(env):
+    scenario_key = "zhaoxinran/uncache/pending-nc-to-cacheable"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    uncache_latency = rng.randint(20, 36)
+    icache_latency = rng.randint(8, 24)
     nc_expected, _cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
     nc_pcs = [pc for pc, _, _ in nc_expected]
-    env.uncache_agent.configure(latency=24, mmio_latency=24)
-    env.icache_agent.configure(hit_latency=16, miss_latency=16, miss_rate=0.0, seed=3)
+    env.uncache_agent.configure(latency=uncache_latency, mmio_latency=uncache_latency)
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "source_pc": _NORMAL_BASE,
+            "uncache_latency": uncache_latency,
+            "icache_latency": icache_latency,
+            "expected_path": "pending_nc_redirects_to_cacheable",
+        },
+    )
     env.backend_model.set_can_accept(0)
     _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
     _configure_exec_attrs_16k(env, base_addr=0x80000000)
@@ -933,14 +1257,50 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
 @pytest.mark.funcov_bins("BIN-423")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
-    return _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env)
+    scenario_key = "zhaoxinran/uncache/pending-cacheable-to-nc"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    uncache_latency = rng.randint(8, 24)
+    icache_latency = rng.randint(48, 80)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "source_pc": _NORMAL_ALT_BASE,
+            "target_pc": _NORMAL_BASE,
+            "uncache_latency": uncache_latency,
+            "icache_latency": icache_latency,
+            "expected_path": "pending_cacheable_redirects_to_nc",
+        },
+    )
+    return _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
+        env,
+        uncache_latency=uncache_latency,
+        icache_latency=icache_latency,
+        agent_seed=seed,
+    )
 
 
-def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
+def _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(
+    env,
+    *,
+    uncache_latency: int = 16,
+    icache_latency: int = 64,
+    agent_seed: int = 4,
+):
     nc_expected, cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
     nc_pcs = [pc for pc, _, _ in nc_expected]
-    env.uncache_agent.configure(latency=16, mmio_latency=16)
-    env.icache_agent.configure(hit_latency=64, miss_latency=64, miss_rate=0.0, seed=4)
+    env.uncache_agent.configure(
+        latency=uncache_latency,
+        mmio_latency=uncache_latency,
+    )
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=agent_seed,
+    )
     _initialize_sv39_fetch(env, reset_vector=_NORMAL_ALT_BASE)
     _configure_exec_attrs_16k(env, base_addr=0x80000000)
     _force_redirect_to(env, _NORMAL_ALT_BASE)
@@ -1003,6 +1363,15 @@ def _configure_translation_attribute(env, *, attr: str, paddr: int) -> int:
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    _configure_random_path_latencies(
+        env,
+        f"zhaoxinran/uncache/sfence-attribute/{old_attr}-to-{new_attr}",
+        parameters={
+            "old_attribute": old_attr,
+            "new_attribute": new_attr,
+            "expected_path": "sfence_retranslates_changed_attribute",
+        },
+    )
     old_pbmt = _PBMT_NC if old_attr == "nc" else _PBMT_PMA
     expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
@@ -1067,6 +1436,15 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    _configure_random_path_latencies(
+        env,
+        f"zhaoxinran/uncache/redirect-attribute/{old_attr}-to-{new_attr}",
+        parameters={
+            "old_attribute": old_attr,
+            "new_attribute": new_attr,
+            "expected_path": "redirect_transitions_to_changed_attribute",
+        },
+    )
     old_pbmt = _PBMT_NC if old_attr == "nc" else _PBMT_PMA
     new_pbmt = _PBMT_NC if new_attr == "nc" else _PBMT_PMA
     _, old_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -1152,6 +1530,7 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -1205,6 +1584,7 @@ def test_uncache_sv39_revisit_uses_existing_translation_refill(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -1276,6 +1656,7 @@ def _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     result = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),
@@ -1344,6 +1725,7 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     result = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),
@@ -1416,6 +1798,7 @@ def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     result = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),
@@ -1482,6 +1865,7 @@ def test_uncache_sv39_sector_lane_missing_pte_reports_dut_exception(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     result = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),
@@ -1556,6 +1940,13 @@ def test_uncache_translation_sequence_refills_after_sfence(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(
+        env,
+        scenario,
+        latency_min=48,
+        latency_max=80,
+    )
+    refilled_scenario = _randomize_translation_timing(env, refilled_scenario)
     result = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(
@@ -1611,6 +2002,7 @@ def test_uncache_sv39_all_stage_response_fault_priority(env, scenario_id, s1_pf,
         s2_gaf=s2_gaf,
         expected_path="fault",
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -1643,6 +2035,7 @@ def test_uncache_sv39_execute_denied_reports_instruction_page_fault(env):
         expected_path="fault",
         expected_result="page_fault",
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -1696,6 +2089,7 @@ def _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(scenario.va)
@@ -1769,6 +2163,7 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
             ),
         ),
     )
+    scenario = _randomize_translation_timing(env, scenario)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(cross_page_va)
@@ -1804,13 +2199,18 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 @pytest.mark.funcov_tps("ATP-035")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
+    scenario_key = "zhaoxinran/uncache/csr-change-discards-stale-translation"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    old_latency = rng.randint(48, 80)
+    new_latency = rng.randint(48, 80)
     _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
     old_scenario = TranslationScenario(
         scenario_id="atp-035-old-context",
         va=_NORMAL_BASE,
         pa=_NORMAL_PHYS_BASE,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
-        ptw_response_latency=64,
+        ptw_response_latency=old_latency,
+        ptw_response_seed=seed,
         satp_asid=1,
         s1_pte=TranslationPte(asid=1),
         expected_path="cacheable",
@@ -1839,7 +2239,8 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
         va=_NORMAL_BASE,
         pa=_NORMAL_ALT_PHYS_BASE,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
-        ptw_response_latency=64,
+        ptw_response_latency=new_latency,
+        ptw_response_seed=seed,
         satp_asid=2,
         s1_pte=TranslationPte(asid=2),
         expected_path="cacheable",
@@ -1862,6 +2263,20 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
                 size=0x1000,
             ),
         ),
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": _NORMAL_BASE,
+            "old_pa": _NORMAL_PHYS_BASE,
+            "new_pa": _NORMAL_ALT_PHYS_BASE,
+            "old_latency": old_latency,
+            "new_latency": new_latency,
+            "expected_path": "stale_ptw_response_discarded",
+        },
     )
     steps = TranslationScenarioSequence(
         actions=(
@@ -1890,10 +2305,26 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
 @pytest.mark.funcov_bins("BIN-1108")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
+    scenario_key = "zhaoxinran/uncache/resend/first-beat-corrupt"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     _prepare_cross_beat_rvi_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
         _MMIO_BASE,
         corrupt=1,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_BEAT_PC,
+            "latency": latency,
+            "fault": "corrupt",
+            "expected_path": "first_beat_fault_suppresses_resend",
+        },
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
@@ -1914,7 +2345,22 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
 @pytest.mark.funcov_bins("BIN-1106")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
+    scenario_key = "zhaoxinran/uncache/resend/non-crossing-rvi-offsets"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     pcs = _prepare_non_crossing_rvi_offsets(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pcs": list(pcs),
+            "latency": latency,
+            "expected_path": "non_crossing_rvi_no_resend",
+        },
+    )
     _initialize_mmio_fetch(env, reset_vector=pcs[0])
 
     assert _wait_for_observed_pc(env, pcs[0])
@@ -1959,11 +2405,27 @@ def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
 @pytest.mark.funcov_bins("BIN-1109")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
+    scenario_key = "zhaoxinran/uncache/resend/first-beat-combined-fault"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     _prepare_cross_beat_rvi_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
         _MMIO_BASE,
         corrupt=1,
         denied=1,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_BEAT_PC,
+            "latency": latency,
+            "fault": "corrupt_and_denied",
+            "expected_path": "first_beat_fault_suppresses_resend",
+        },
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
@@ -1984,10 +2446,26 @@ def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_first_beat_denied_allows_resend(env):
+    scenario_key = "zhaoxinran/uncache/resend/first-beat-denied"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     _prepare_cross_beat_rvi_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
         _MMIO_BASE,
         denied=1,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_BEAT_PC,
+            "latency": latency,
+            "fault": "denied",
+            "expected_path": "first_beat_denied_allows_resend",
+        },
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
@@ -2026,11 +2504,28 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exception):
+    scenario_key = f"zhaoxinran/uncache/resend/second-beat-{fault}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     _prepare_cross_beat_rvi_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     env.uncache_agent.inject_response_fault_at(
         _MMIO_BASE + 8,
         corrupt=1 if fault in {"corrupt", "combined"} else 0,
         denied=1 if fault in {"denied", "combined"} else 0,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_BEAT_PC,
+            "latency": latency,
+            "fault": fault,
+            "expected_exception": exception,
+            "expected_path": "second_beat_fault_reports_exception",
+        },
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
@@ -2062,14 +2557,39 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
-    return _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(env)
+    scenario_key = "zhaoxinran/uncache/page-tail/rvi-resend-recheck"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    second_latency = rng.randint(12, 24)
+    redirect_target = _MMIO_BASE + rng.choice((0x40, 0x60, 0x80, 0xA0))
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_PAGE_PC,
+            "second_latency": second_latency,
+            "redirect_target": redirect_target,
+            "expected_path": "rvi_resend_rechecks_next_page",
+        },
+    )
+    return _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
+        env,
+        second_latency=second_latency,
+        redirect_target=redirect_target,
+    )
 
 
-def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
+def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
+    env,
+    *,
+    second_latency: int = 16,
+    redirect_target: int = _MMIO_BASE + 0x40,
+):
     _prepare_cross_page_rvi_stream(env)
     # Keep the second-page response outstanding long enough to observe the
     # retimed half-RVI state, rather than proving only the final cfVec result.
-    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    env.uncache_agent.configure(latency=2, mmio_latency=second_latency)
     prev_half_samples = _register_prev_half_rvi_observer(env)
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
@@ -2160,7 +2680,6 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     # half cannot leak into the redirected path.
     observations_before_redirect = len(env.monitor.observations)
     redirect_queued_cycle = int(env.current_cycle)
-    redirect_target = _MMIO_BASE + 0x40
     _force_redirect_to(env, redirect_target)
     assert _wait_for_observed_pc(env, redirect_target, max_cycles=5000)
     redirect_samples = [
@@ -2221,13 +2740,29 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
 @pytest.mark.funcov_bins("BIN-1118")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
+    scenario_key = f"zhaoxinran/uncache/page-tail/fault-no-half/{denied}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
     _prepare_cross_page_rvi_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
     first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
     prev_half_samples = _register_prev_half_rvi_observer(env)
     env.uncache_agent.inject_response_fault_at(
         first_beat,
         corrupt=1,
         denied=denied,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_PAGE_PC,
+            "latency": latency,
+            "denied": denied,
+            "expected_path": "fault_does_not_create_half_state",
+        },
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
@@ -2260,14 +2795,31 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
 @pytest.mark.funcov_bins("BIN-1122")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(env):
+    scenario_key = "zhaoxinran/uncache/page-tail/pending-half-flushed"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    first_latency = rng.randint(1, 3)
+    second_latency = rng.randint(48, 80)
+    redirect_target = _MMIO_BASE + rng.choice((0x40, 0x60, 0x80, 0xA0))
     _prepare_cross_page_rvi_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=64)
+    env.uncache_agent.configure(latency=first_latency, mmio_latency=second_latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_PAGE_PC,
+            "first_latency": first_latency,
+            "second_latency": second_latency,
+            "redirect_target": redirect_target,
+            "expected_path": "pending_half_flushed_by_redirect",
+        },
+    )
     prev_half_samples = _register_prev_half_rvi_observer(env)
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
     first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
     next_page = _MMIO_BASE + _SV39_PAGE_SIZE
-    redirect_target = _MMIO_BASE + 0x40
     assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
     assert _wait_for_request_addr(env, next_page, max_cycles=5000)
 
@@ -2342,8 +2894,22 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
 @pytest.mark.funcov_bins("BIN-416", "BIN-1107", "BIN-1117")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
+    scenario_key = "zhaoxinran/uncache/page-tail/rvc-no-next-page"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(12, 24)
     _prepare_cross_page_rvc_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    env.uncache_agent.configure(latency=2, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "pc": _CROSS_PAGE_PC,
+            "latency": latency,
+            "expected_path": "rvc_delivers_without_next_page_fetch",
+        },
+    )
     prev_half_samples = _register_prev_half_rvi_observer(env)
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
@@ -2398,14 +2964,30 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_mmio_commit_order_waits_last_commit(env):
+    scenario_key = "zhaoxinran/uncache/mmio-commit-order"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    blocked_cycles = rng.randint(48, 80)
     _prepare_mmio_cnop_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "blocked_cycles": blocked_cycles,
+            "expected_path": "wait_last_commit_before_next_request",
+        },
+    )
     env.backend_model.set_can_accept(0)
     _initialize_mmio_fetch(env)
 
     assert _wait_for_uncache_req(env)
     assert _wait_for_uncache_resp(env)
     req_before_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
-    env.step(64)
+    env.step(blocked_cycles)
     req_without_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(1)
     req_after_commit = _wait_for_uncache_req(env)
@@ -2417,7 +2999,25 @@ def test_uncache_mmio_commit_order_waits_last_commit(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
+    scenario_key = "zhaoxinran/uncache/wfi-during-mmio-commit-gate"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    wfi_cycles = rng.randint(48, 80)
+    post_wfi_cycles = rng.randint(8, 24)
     _prepare_mmio_cnop_stream(env)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "wfi_cycles": wfi_cycles,
+            "post_wfi_cycles": post_wfi_cycles,
+            "expected_path": "wfi_and_commit_gate_block_next_request",
+        },
+    )
     _initialize_mmio_fetch(env)
 
     assert _wait_for_uncache_req(env)
@@ -2425,11 +3025,11 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
     env.backend_model.set_can_accept(0)
     env.backend_model.set_wfi_req(1)
     req_before = int(env.uncache_agent.get_stats().get("req_count", 0))
-    env.step(64)
+    env.step(wfi_cycles)
     req_during_gate_and_wfi = int(env.uncache_agent.get_stats().get("req_count", 0))
 
     env.backend_model.set_wfi_req(0)
-    env.step(16)
+    env.step(post_wfi_cycles)
     req_still_commit_gated = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(1)
     req_after_commit = _wait_for_uncache_req(env)

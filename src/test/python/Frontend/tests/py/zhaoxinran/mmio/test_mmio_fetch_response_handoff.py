@@ -7,7 +7,7 @@ import pytest
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.zhaoxinran.uncache import test_nc_fetch_paths as nc_paths
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, record_scenario, scenario_rng
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
@@ -26,8 +26,21 @@ def _register_snapshot_observer(env) -> list[dict[str, int | None]]:
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
+    scenario_key = "zhaoxinran/mmio/handoff/reserved-ibuffer-slot"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 24)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "reserved_ibuffer_slot_under_pressure",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=16)
     env.backend_model.set_can_accept(0)
     snapshots = _register_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
@@ -61,8 +74,23 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_over_uncache_response(env):
+    scenario_key = "zhaoxinran/mmio/handoff/backend-redirect-wins"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(24, 48)
+    target_pc = uncache._MMIO_BASE + rng.randrange(0x40, 0x100, 8)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "redirect_target": target_pc,
+            "expected_path": "backend_redirect_wins_response",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=32)
     snapshots = _register_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
@@ -74,7 +102,6 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
         env.step(1)
     assert snapshots[-1]["tl_d_valid"] == 1, {"snapshots": snapshots[-32:]}
 
-    target_pc = uncache._MMIO_BASE + 0x40
     uncache._force_redirect_to(env, target_pc)
     for _ in range(256):
         if any(

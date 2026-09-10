@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -11,7 +12,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, record_scenario, scenario_rng
 from tests.py.support.translation_faults import (
     _CROSS_PAGE_FAULT_CASES,
     _assert_fault_ftq_identity,
@@ -35,6 +36,37 @@ _CACHEABLE_CROSS_PAGE_PAYLOAD = (
     + b"\x13\x00\x00\x00"
     + b"\x01\x00" * 32
 )
+
+
+def _randomize_fault_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/fault/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 8)
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "page_count": scenario.page_count,
+            "latency": latency,
+            "expected_path": "fault",
+            "expected_fault": expected_fault,
+        },
+    )
+    return randomized
 
 
 def _scenario(scenario_id: str, **kwargs) -> TranslationScenario:
@@ -216,6 +248,7 @@ _FAULT_CASES = (
 @pytest.mark.parametrize("scenario,expected_fault", _FAULT_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_address_translation_fault(env, scenario: TranslationScenario, expected_fault: str) -> None:
+    scenario = _randomize_fault_timing(env, scenario, expected_fault)
     env.initialize(reset_vector=scenario.va, bare_mode=False)
     gpaddr_writes = _capture_gpaddr_writes(env)
     cfvec_deliveries = _capture_cfvec_deliveries(env)
@@ -354,6 +387,7 @@ def test_cacheable_cross_page_second_page_translation_fault(
         response_field=response_field,
         expected_result=expected_result,
     )
+    scenario = _randomize_fault_timing(env, scenario, expected_fault)
     state = TranslationScenarioBuilder(env).build(scenario)
     gpaddr_writes = _capture_gpaddr_writes(env)
     cfvec_deliveries = _capture_cfvec_deliveries(env)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -12,7 +13,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig, fold_pc
+from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -21,6 +22,56 @@ _GPA = 0x8060_0F00
 _PA = 0x8040_0F00
 _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 512
+
+
+def _randomize_ptw_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str | None,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/ptw-timing/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 4)
+    latency_max = (
+        rng.randint(latency, 8)
+        if scenario.ptw_response_latency_max is not None
+        else None
+    )
+    ready_high_cycles = int(scenario.ptw_req_ready_high_cycles)
+    ready_low_cycles = int(scenario.ptw_req_ready_low_cycles)
+    if scenario.ptw_req_ready_strategy == "periodic":
+        ready_high_cycles = rng.randint(1, 2)
+        ready_low_cycles = rng.randint(1, 4)
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_latency_max=latency_max,
+        ptw_response_seed=seed,
+        ptw_req_ready_high_cycles=ready_high_cycles,
+        ptw_req_ready_low_cycles=ready_low_cycles,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "translation_mode": scenario.mode,
+            "stage2_mode": scenario.stage2_mode,
+            "s2xlate": scenario.s2xlate,
+            "latency": latency,
+            "latency_max": latency_max,
+            "ready_strategy": scenario.ptw_req_ready_strategy,
+            "ready_high_cycles": ready_high_cycles,
+            "ready_low_cycles": ready_low_cycles,
+            "expected_path": scenario.expected_path,
+            "expected_fault": expected_fault,
+        },
+    )
+    return randomized
 
 
 def _physical_permissions(
@@ -231,6 +282,7 @@ def test_ptw_timing_by_translation_stage(
     scenario: TranslationScenario,
     expected_fault: str | None,
 ) -> None:
+    scenario = _randomize_ptw_timing(env, scenario, expected_fault)
     sequence = TranslationScenarioSequence(
         actions=(
             TranslationScenarioPhase(

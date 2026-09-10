@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -10,6 +11,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
+from env.support import record_scenario, scenario_rng
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -17,6 +19,39 @@ _VA = 0x8020_0F00
 _GPA = 0x8060_0F00
 _PA = 0x8040_0F00
 _PAYLOAD = b"\x13\x00\x00\x00" * 512
+
+
+def _randomize_provenance_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str,
+    expect_gpaddr_write: bool,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/gstage/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 8)
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "gpa": scenario.gpa,
+            "pa": scenario.pa,
+            "latency": latency,
+            "expected_path": "fault",
+            "expected_fault": expected_fault,
+            "expect_gpaddr_write": expect_gpaddr_write,
+        },
+    )
+    return randomized
 
 
 def _scenario(
@@ -123,6 +158,12 @@ def test_address_translation_gstage_provenance(
     expected_fault: str,
     expect_gpaddr_write: bool,
 ) -> None:
+    scenario = _randomize_provenance_timing(
+        env,
+        scenario,
+        expected_fault,
+        expect_gpaddr_write,
+    )
     env.initialize(reset_vector=scenario.va, bare_mode=False)
     state = TranslationScenarioBuilder(env).build(scenario)
     gpaddr_writes = []

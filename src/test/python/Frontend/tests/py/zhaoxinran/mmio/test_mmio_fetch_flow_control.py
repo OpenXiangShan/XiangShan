@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -11,6 +12,19 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 _WAIT_LAST_COMMIT = 1
 _SEND_REQ = 2
+
+
+def _configure_random_latency(
+    env,
+    scenario_key: str,
+    *,
+    minimum: int = 1,
+    maximum: int = 16,
+):
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(int(minimum), int(maximum))
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    return base_seed, seed, rng, latency
 
 
 def _read_dut_signal(env, name: str) -> int:
@@ -74,6 +88,18 @@ def _register_flow_snapshot_observer(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
+    scenario_key = "zhaoxinran/mmio/flow/wait-last-commit-ibuffer-nonempty"
+    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "wait_last_commit_holds_request",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
     snapshots: list[dict[str, int]] = []
@@ -131,6 +157,18 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_empty(env):
     """Construct WAIT_LAST_COMMIT with backend work visible but an empty IBuffer."""
+    scenario_key = "zhaoxinran/mmio/flow/backend-nonempty-ibuffer-empty"
+    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "backend_nonempty_keeps_wait_last_commit",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
     env.backend_model.backend_empty_for_dut = lambda: 0
@@ -161,6 +199,18 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_empty_release_enters_send_req_before_tl_a(env):
     """Release WAIT_LAST_COMMIT with both queues empty before TL-A starts."""
+    scenario_key = "zhaoxinran/mmio/flow/empty-release-send-req-before-tl-a"
+    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "send_req_precedes_tl_a",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
     env.backend_model.backend_empty_for_dut = lambda: 1
@@ -205,6 +255,18 @@ def test_mmio_empty_release_enters_send_req_before_tl_a(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
     """Raise backend acceptance only after a pending MMIO has produced cfVec."""
+    scenario_key = "zhaoxinran/mmio/flow/backend-accept-rise-with-cfvec"
+    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "backend_accept_rise_with_cfvec",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
     snapshots = _register_flow_snapshot_observer(env)
@@ -243,8 +305,24 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
     """Drop backend acceptance while a pending MMIO has no visible cfVec."""
+    scenario_key = "zhaoxinran/mmio/flow/backend-accept-fall-without-cfvec"
+    base_seed, seed, _, latency = _configure_random_latency(
+        env,
+        scenario_key,
+        minimum=24,
+        maximum=48,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "backend_accept_fall_without_cfvec",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=32)
     env.backend_model.set_can_accept(1)
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
@@ -287,11 +365,25 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_ibuffer_stall_suppresses_tl_a(env):
     """Use a legal PBMT.NC request to hold SEND_REQ under IBuffer stall."""
+    scenario_key = "zhaoxinran/mmio/flow/send-req-ibuffer-stall"
+    base_seed, seed, _, latency = _configure_random_latency(env, scenario_key)
     expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
         vaddr=uncache._NORMAL_BASE,
         paddr=uncache._NORMAL_PHYS_BASE,
         instr_count=4096,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": mapping.vaddr,
+            "pa": mapping.paddr,
+            "latency": latency,
+            "expected_path": "send_req_stall_suppresses_tl_a",
+        },
     )
     snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)

@@ -5,6 +5,7 @@ import os
 import pytest
 
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
+from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -12,6 +13,20 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
+    scenario_key = "zhaoxinran/mmio/state-edge/a-fire-enters-wait-resp"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "a_fire_enters_wait_resp_once",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     env.uncache_agent.set_a_ready(0)
     snapshots: list[dict[str, int | None]] = []
@@ -61,6 +76,20 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
+    scenario_key = "zhaoxinran/mmio/state-edge/ibuffer-ready-drives-tl-a"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(1, 16)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "expected_path": "ibuffer_ready_drives_tl_a",
+        },
+    )
     uncache._prepare_mmio_cnop_stream(env)
     snapshots: list[dict[str, int | None]] = []
 

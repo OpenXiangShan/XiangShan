@@ -812,6 +812,9 @@ def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_r
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env, tmp_path):
     """Reject a denied first-page tail response without an illegal resend."""
+    scenario_key = "zhaoxinran/nc/page-tail-denied-exact-iaf"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 24)
     payload = bytearray(
         int(uncache._CNOP).to_bytes(2, "little")
         * (uncache._SV39_PAGE_SIZE // 2 + 128)
@@ -838,6 +841,22 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     first_beat = tail_paddr & ~(uncache._UNCACHE_BEAT_BYTES - 1)
     next_page = mapping.paddr_pages[1]
 
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    _record_nc_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        mapping=mapping,
+        payload=payload,
+        parameters={
+            "tail_vaddr": tail_vaddr,
+            "tail_paddr": tail_paddr,
+            "latency": latency,
+            "fault": "corrupt_and_denied",
+            "expected_path": "page_tail_exact_instruction_access_fault",
+        },
+    )
     uncache._initialize_sv39_fetch(env, reset_vector=tail_vaddr)
     _configure_exec_attrs_for_pages(env, mapping.paddr_pages)
     env.uncache_agent.inject_response_fault_at(first_beat, corrupt=1, denied=1)
@@ -884,12 +903,32 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(
     expected_fault: str,
 ):
     """Require a PBMT.NC cross-page fault to retain its original virtual PC."""
+    scenario_key = (
+        f"zhaoxinran/nc/cross-page-fault/{s2xlate}/{response_field}/{expected_fault}"
+    )
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 24)
     scenario, cross_page_va, cross_page_pa = _nc_cross_page_fault_scenario(
         s2xlate=s2xlate,
         response_field=response_field,
         expected_result=expected_result,
     )
-    env.uncache_agent.configure(latency=16, mmio_latency=16)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "cross_page_va": cross_page_va,
+            "cross_page_pa": cross_page_pa,
+            "s2xlate": s2xlate,
+            "response_field": response_field,
+            "latency": latency,
+            "expected_fault": expected_fault,
+            "expected_path": "second_page_translation_fault_exact_pc",
+        },
+    )
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
@@ -1115,6 +1154,9 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
     """Reject a PBMT.NC fetch before issuing TL-A when PMP denies execute."""
+    scenario_key = "zhaoxinran/nc/pmp-execute-denied-exact-iaf"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    ptw_latency = rng.randint(1, 8)
     scenario = TranslationScenario(
         scenario_id="nc-pbmt-nc-pmp-execute-denied",
         va=uncache._NORMAL_BASE,
@@ -1123,6 +1165,7 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
         s1_pte=TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
         expected_result="access_fault",
+        ptw_response_latency=ptw_latency,
         pmp_entries=(
             TranslationPmpPmaEntry(
                 kind="pmp",
@@ -1150,6 +1193,19 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
                 size=uncache._SV39_PAGE_SIZE,
             ),
         ),
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "ptw_latency": ptw_latency,
+            "expected_fault": "instruction_access_fault",
+            "expected_path": "pmp_execute_denied_before_tl_a",
+        },
     )
     uncache._initialize_sv39_fetch(env, reset_vector=scenario.va)
     state = TranslationScenarioBuilder(env).build(scenario)
@@ -1188,6 +1244,10 @@ def test_nc_pmp_execute_denied_reports_exact_instruction_access_fault(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     """Exercise an NC pending response across a backend canAccept fall/rise."""
+    scenario_key = "zhaoxinran/nc/backend-can-accept-hold-release"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(24, 48)
+    hold_cycles = rng.randint(latency + 4, latency + 24)
     _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
         vaddr=uncache._NORMAL_BASE,
@@ -1195,7 +1255,19 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
         pbmt=uncache._PBMT_NC,
         instr_count=64,
     )
-    env.uncache_agent.configure(latency=32, mmio_latency=32)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    _record_nc_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        mapping=mapping,
+        parameters={
+            "latency": latency,
+            "hold_cycles": hold_cycles,
+            "expected_path": "pending_response_held_then_released",
+        },
+    )
     uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
     uncache._configure_exec_attrs_for_mapping(env, mapping)
     uncache._force_redirect_to(env, mapping.vaddr)
@@ -1208,7 +1280,7 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
     observations_before_fall = len(env.monitor.observations)
     commits_before_fall = int(env.backend_model.commit_count)
     env.backend_model.set_can_accept(0)
-    env.step(40)
+    env.step(hold_cycles)
     held_observations = env.monitor.observations[observations_before_fall:]
     assert held_observations
     assert {
@@ -1241,12 +1313,34 @@ def test_nc_pending_backend_can_accept_fall_holds_then_releases_response(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     """Flush an outstanding NC response and recover through a cacheable page."""
+    scenario_key = "zhaoxinran/nc/response-redirect-same-cycle"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    uncache_latency = rng.randint(40, 64)
+    icache_latency = rng.randint(4, 12)
     nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
     cacheable_target = int(cacheable_pcs[0])
     expected_instr = int(nc_expected[0][1])
     expected_is_rvc = bool(nc_expected[0][2])
-    env.uncache_agent.configure(latency=48, mmio_latency=48)
-    env.icache_agent.configure(hit_latency=8, miss_latency=8, miss_rate=0.0, seed=7)
+    env.uncache_agent.configure(latency=uncache_latency, mmio_latency=uncache_latency)
+    env.icache_agent.configure(
+        hit_latency=icache_latency,
+        miss_latency=icache_latency,
+        miss_rate=0.0,
+        seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "source_pc": uncache._NORMAL_BASE,
+            "target_pc": cacheable_target,
+            "uncache_latency": uncache_latency,
+            "icache_latency": icache_latency,
+            "expected_path": "coincident_response_redirect_to_cacheable",
+        },
+    )
     uncache._initialize_sv39_fetch(env, reset_vector=uncache._NORMAL_BASE)
     uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
     timing_samples = _register_nc_timing_observer(env)
