@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -116,13 +117,41 @@ TRANSACTION_OVERRIDES = {
 }
 
 TERMINAL_RE = re.compile(r"^MEMBLOCK_[A-Z0-9_]+_(PASS|FAIL)(?:\s|$)")
+TERMINAL_MARKERS = {
+    scenario: "MEMBLOCK_" + scenario.upper().replace("-", "_")
+    for scenario in SCENARIOS
+}
+TERMINAL_MARKERS.update(
+    {
+        "random-loads": "MEMBLOCK_RANDOM",
+        "random-forwarding": "MEMBLOCK_RANDOM_FORWARD",
+        "random-vector-loads": "MEMBLOCK_RANDOM_VECTOR",
+        "random-vector-forwarding": "MEMBLOCK_RANDOM_VECTOR_FORWARD",
+        "store-forwarding": "MEMBLOCK_STORE_FORWARD",
+        "two-stage-translation": "MEMBLOCK_TWO_STAGE",
+        "vector-guest-fault-split": "MEMBLOCK_VECTOR_GUEST_FAULT",
+        "vector-store-forwarding": "MEMBLOCK_VECTOR_STORE_FORWARD",
+    }
+)
+for _scenario in SCENARIOS:
+    if _scenario.startswith("translation-fence"):
+        TERMINAL_MARKERS[_scenario] = "MEMBLOCK_TRANSLATION_FENCE"
+    elif _scenario.startswith("translation-inflight-context"):
+        TERMINAL_MARKERS[_scenario] = "MEMBLOCK_TRANSLATION_INFLIGHT_CONTEXT"
 
 
 class BenchmarkError(RuntimeError):
     pass
 
 
-def parse_terminal(output: str) -> dict[str, Any]:
+def parse_terminal(
+    output: str,
+    *,
+    expected_scenario: str | None = None,
+    expected_seed: int | None = None,
+    expected_transactions: int | None = None,
+    expected_rtl_sha256: str | None = None,
+) -> dict[str, Any]:
     lines = [line.strip() for line in output.splitlines() if TERMINAL_RE.match(line)]
     if len(lines) != 1:
         raise BenchmarkError(
@@ -133,6 +162,14 @@ def parse_terminal(output: str) -> dict[str, Any]:
         "summary": lines[0],
         "status": "pass" if words[0].endswith("_PASS") else "fail",
     }
+    if expected_scenario is not None:
+        marker = TERMINAL_MARKERS.get(expected_scenario)
+        if marker is None:
+            raise BenchmarkError(f"unsupported expected scenario: {expected_scenario}")
+        if words[0] not in (marker + "_PASS", marker + "_FAIL"):
+            raise BenchmarkError(
+                f"terminal summary {words[0]} does not match {expected_scenario}"
+            )
     for word in words[1:]:
         if "=" not in word:
             continue
@@ -141,6 +178,23 @@ def parse_terminal(output: str) -> dict[str, Any]:
             fields[key] = int(value, 0)
         except ValueError:
             fields[key] = value
+    for name, expected in (
+        ("seed", expected_seed),
+        ("transactions", expected_transactions),
+    ):
+        if expected is not None and name in fields and fields[name] != expected:
+            raise BenchmarkError(
+                f"terminal summary {name} is {fields[name]!r}, expected {expected}"
+            )
+    if (
+        fields["status"] == "pass"
+        and expected_rtl_sha256 is not None
+        and fields.get("rtl_sha256") != expected_rtl_sha256
+    ):
+        raise BenchmarkError(
+            "terminal summary rtl_sha256 is "
+            f"{fields.get('rtl_sha256')!r}, expected {expected_rtl_sha256}"
+        )
     return fields
 
 
@@ -199,6 +253,8 @@ def run_scenario(
     environment: dict[str, str],
     constraint_profile: str,
     constraint_overrides: tuple[str, ...],
+    expected_rtl_sha256: str | None = None,
+    cancellation_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     scenario_transactions = TRANSACTION_OVERRIDES.get(scenario, transactions)
     command = [
@@ -216,7 +272,7 @@ def run_scenario(
             command.extend(("--constraint", override))
     started = time.monotonic()
     returncode, output, timed_out = run_regression._run_process(
-        command, timeout_seconds, environment
+        command, timeout_seconds, environment, cancellation_event
     )
     elapsed = round(time.monotonic() - started, 6)
     if timed_out:
@@ -229,7 +285,13 @@ def run_scenario(
             "output": output,
         }
     try:
-        result = parse_terminal(output)
+        result = parse_terminal(
+            output,
+            expected_scenario=scenario,
+            expected_seed=seed,
+            expected_transactions=scenario_transactions,
+            expected_rtl_sha256=expected_rtl_sha256,
+        )
     except BenchmarkError as error:
         result = {"status": "error", "error": str(error), "output": output}
     result.update(
@@ -269,6 +331,13 @@ def render_markdown(document: dict[str, Any]) -> str:
     )
     lines = [
         "# MemBlock Test Scale",
+        "",
+        f"Overall status: **{document['status'].upper()}**.",
+        "Frozen runtime: **{}**; controller inputs: **{}**; RTL identity: **{}**.".format(
+            "PASS" if document["runtime"]["unchanged"] else "FAIL",
+            "PASS" if document["controller"]["unchanged"] else "FAIL",
+            "PASS" if document["rtl_identity"]["consistent"] else "FAIL",
+        ),
         "",
         f"Measured at `{document['created_at']}` using up to {document['configuration']['jobs']} processes.",
         "Wall time is host-load dependent; protocol counts and cycles are deterministic for the recorded seed and runtime.",
@@ -310,6 +379,14 @@ def write_text_atomic(path: Path, contents: str) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--runtime-metadata", type=Path, required=True)
+    parser.add_argument("--rtl-metadata", type=Path, required=True)
+    parser.add_argument(
+        "--controller-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="additional harness/config source to hash before and after the run",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--markdown", type=Path)
     parser.add_argument("--scenarios", default=",".join(SCENARIOS))
@@ -338,6 +415,13 @@ def main() -> int:
 
     try:
         runtime = run_regression.verify_runtime_metadata(args.runtime_metadata)
+        rtl_metadata = args.rtl_metadata.resolve()
+        rtl_metadata_sha256 = run_regression.sha256(rtl_metadata)
+        if rtl_metadata_sha256 != runtime["artifact_hashes"]["rtl_metadata"]:
+            raise run_regression.RegressionError(
+                "--rtl-metadata does not match the frozen runtime artifact"
+            )
+        complete_rtl_sha256 = run_regression.read_complete_rtl_sha256(rtl_metadata)
     except (OSError, json.JSONDecodeError, run_regression.RegressionError) as error:
         print(f"benchmark_tests.py: error: {error}", file=sys.stderr)
         return 2
@@ -345,12 +429,54 @@ def main() -> int:
     environment["LD_LIBRARY_PATH"] = str(runtime["root"])
     environment["LD_BIND_NOW"] = "1"
 
-    started = time.monotonic()
     worker_count = min(args.jobs, len(requested))
+    if worker_count > 1 and environment.get("MEMBLOCK_MEM_DIRECT_TRACE_FILE"):
+        print(
+            "benchmark_tests.py: error: a shared MEMBLOCK_MEM_DIRECT_TRACE_FILE "
+            "is unsafe with parallel leaves; use --jobs 1 for debug tracing",
+            file=sys.stderr,
+        )
+        return 2
+
+    controller_paths = {
+        "benchmark_runner": Path(__file__).resolve(),
+        "process_runner": Path(run_regression.__file__).resolve(),
+    }
+    controller_paths["rtl_metadata"] = rtl_metadata
+    seen_controller_paths = set(controller_paths.values())
+    for index, path in enumerate(args.controller_file):
+        resolved = path.resolve()
+        if not resolved.is_file():
+            print(
+                f"benchmark_tests.py: error: controller file is not a file: {resolved}",
+                file=sys.stderr,
+            )
+            return 2
+        if resolved in seen_controller_paths:
+            print(
+                f"benchmark_tests.py: error: duplicate controller file: {resolved}",
+                file=sys.stderr,
+            )
+            return 2
+        seen_controller_paths.add(resolved)
+        controller_paths[f"controller_file_{index}"] = resolved
+    try:
+        controller_hashes_before = {
+            role: run_regression.sha256(path)
+            for role, path in controller_paths.items()
+        }
+    except OSError as error:
+        print(f"benchmark_tests.py: error: {error}", file=sys.stderr)
+        return 2
+
+    started = time.monotonic()
     results_by_index: list[dict[str, Any] | None] = [None] * len(requested)
-    with concurrent.futures.ThreadPoolExecutor(
+    cancellation_event = threading.Event()
+    executor = concurrent.futures.ThreadPoolExecutor(
         max_workers=worker_count, thread_name_prefix="memblock-benchmark"
-    ) as executor:
+    )
+    futures: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+    try:
         futures = {
             executor.submit(
                 run_scenario,
@@ -362,6 +488,8 @@ def main() -> int:
                 environment,
                 args.constraints,
                 tuple(args.constraint),
+                complete_rtl_sha256,
+                cancellation_event,
             ): index
             for index, scenario in enumerate(requested)
         }
@@ -383,18 +511,123 @@ def main() -> int:
                 f"elapsed_seconds={result['elapsed_seconds']:.3f}",
                 flush=True,
             )
+    except KeyboardInterrupt:
+        cancellation_event.set()
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        print("MEMBLOCK_BENCHMARK_INTERRUPTED", file=sys.stderr, flush=True)
+        return 130
+    else:
+        executor.shutdown(wait=True)
 
     # Completion order is nondeterministic; preserve command-line order in the
     # artifact so repeated benchmark reports remain easy to diff.
     results = [result for result in results_by_index if result is not None]
 
+    runtime_after: dict[str, Any] | None = None
+    runtime_unchanged = True
+    runtime_error: str | None = None
+    try:
+        runtime_after = run_regression.verify_runtime_metadata(runtime["metadata"])
+        runtime_unchanged = all(
+            runtime[key] == runtime_after[key]
+            for key in (
+                "metadata_sha256",
+                "artifact_hashes",
+                "external_dependency_hashes",
+            )
+        )
+        if not runtime_unchanged:
+            runtime_error = "runtime hashes changed during the benchmark"
+    except (OSError, json.JSONDecodeError, run_regression.RegressionError) as error:
+        runtime_unchanged = False
+        runtime_error = str(error)
+    try:
+        controller_hashes_after = {
+            role: run_regression.sha256(path)
+            for role, path in controller_paths.items()
+        }
+        controller_unchanged = controller_hashes_before == controller_hashes_after
+        controller_error = (
+            None
+            if controller_unchanged
+            else "controller inputs changed during the benchmark"
+        )
+    except OSError as error:
+        controller_hashes_after = None
+        controller_unchanged = False
+        controller_error = str(error)
+
+    observed_rtl_hashes = sorted(
+        {
+            str(result["rtl_sha256"])
+            for result in results
+            if "rtl_sha256" in result
+        }
+    )
+    rtl_hash_consistent = (
+        len(results) == len(requested)
+        and all(
+            result.get("rtl_sha256") == complete_rtl_sha256
+            for result in results
+        )
+    )
+    passed = (
+        len(results) == len(requested)
+        and all(result["status"] == "pass" for result in results)
+        and runtime_unchanged
+        and controller_unchanged
+        and rtl_hash_consistent
+    )
     document = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "status": "pass" if passed else "fail",
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "elapsed_seconds": round(time.monotonic() - started, 6),
         "runtime_metadata": str(runtime["metadata"]),
         "runtime_metadata_sha256": runtime["metadata_sha256"],
         "binary_sha256": runtime["artifact_hashes"]["binary"],
+        "complete_rtl_sha256": complete_rtl_sha256,
+        "rtl_identity": {
+            "metadata": str(rtl_metadata),
+            "metadata_sha256": rtl_metadata_sha256,
+            "observed_sha256": observed_rtl_hashes,
+            "consistent": rtl_hash_consistent,
+        },
+        "runtime": {
+            "metadata_sha256_before": runtime["metadata_sha256"],
+            "metadata_sha256_after": (
+                None
+                if runtime_after is None
+                else runtime_after["metadata_sha256"]
+            ),
+            "artifact_hashes_before": runtime["artifact_hashes"],
+            "artifact_hashes_after": (
+                None
+                if runtime_after is None
+                else runtime_after["artifact_hashes"]
+            ),
+            "external_dependency_hashes_before": runtime[
+                "external_dependency_hashes"
+            ],
+            "external_dependency_hashes_after": (
+                None
+                if runtime_after is None
+                else runtime_after["external_dependency_hashes"]
+            ),
+            "unchanged": runtime_unchanged,
+            "error": runtime_error,
+        },
+        "controller": {
+            "paths": {
+                role: str(path) for role, path in controller_paths.items()
+            },
+            "hashes_before": controller_hashes_before,
+            "hashes_after": controller_hashes_after,
+            "unchanged": controller_unchanged,
+            "error": controller_error,
+        },
         "configuration": {
             "seed": args.seed,
             "transactions": args.transactions,
@@ -409,9 +642,6 @@ def main() -> int:
     write_text_atomic(args.output, json.dumps(document, indent=2, sort_keys=True) + "\n")
     if args.markdown is not None:
         write_text_atomic(args.markdown, render_markdown(document))
-    passed = len(results) == len(requested) and all(
-        result["status"] == "pass" for result in results
-    )
     print(
         f"MEMBLOCK_BENCHMARK_{'PASS' if passed else 'FAIL'} "
         f"scenarios={len(results)}/{len(requested)} "

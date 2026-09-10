@@ -3377,6 +3377,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(
             "--timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS)", benchmark_rule
         )
+        self.assertIn("--rtl-metadata $(FROZEN_RTL_METADATA)", benchmark_rule)
+        self.assertIn("$(CONTROLLER_FILES)", benchmark_rule)
         stress_rule = makefile[
             makefile.index("stress-regression:"):makefile.index("verify-stress-results:")
         ]

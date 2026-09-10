@@ -255,7 +255,7 @@ Session: `01a08401-c258-74a1-8d9a-2db16dba0b6f`.
 
 2. [`2026-09-09 10:36:46 CST`] `/goal 请你审阅当前验证计划，基于对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架，确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块在不同场景和约束下的功能正确性。工作的过程中，请你从软件架构的角度梳理一下现有UT测试框架的代码，并做一些重构和优化；其次，能否优先看一下speccpu会出现的那些事件，是否都有被足够constrained random，他们的优先级会更高一些，因为现在我们已知这个CPU在跑多核speccpu的时候会出错，但不知道是哪里的问题，一直想通过UT验证验出来，我正在拷贝更多的speccpu性能计数器到cr260902-5d3934132-KunminghuV2Config-simulator-logs。记得在工作之前把PROMPTS给记录下来。`
 
-## Current Goal Session: 11 Prompts
+## Current Goal Session: 13 Prompts
 
 Session: `01a08406-da41-7071-94a6-a310976264c3`.
 
@@ -280,4 +280,6 @@ Session: `01a08406-da41-7071-94a6-a310976264c3`.
 10. [Timestamp unavailable in the visible conversation] `我问了一下，你的picker使用不对，不需要vpi，mem direct才是对的，mem direct读；vpi能写，但你不需要写。`
 
 11. [`2026-09-09 22:45:57 CST`] `我看了一下，picker昨天还有更新，应该能支持你前面说的verilator的问题。`
-12. [`2026-09-10 13:51:00 CST`] `当前 benchmark-tests 是单进程叶场景清单也可以并行跑测试吧，这样就快一些`
+12. [Timestamp unavailable in the visible conversation] `现在这个CPU有8个大核，你可以同时跑8个并行，这样资源都能用满。`
+
+13. [`2026-09-10 13:51:00 CST`] `当前 benchmark-tests 是单进程叶场景清单也可以并行跑测试吧，这样就快一些`

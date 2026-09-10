@@ -6,6 +6,9 @@ import json
 import os
 import sys
 import tempfile
+import textwrap
+import threading
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -18,6 +21,89 @@ import run_regression  # noqa: E402
 
 
 class RunRegressionTest(unittest.TestCase):
+    def test_cancellation_stops_long_running_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_path = Path(temporary) / "child.pid"
+            cancellation_event = threading.Event()
+            process_pids: list[int] = []
+
+            def cancel_after_child_starts() -> None:
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    try:
+                        pids = [
+                            int(value)
+                            for value in pid_path.read_text(
+                                encoding="utf-8"
+                            ).split()
+                        ]
+                        if len(pids) != 2:
+                            raise ValueError("expected leader and descendant PIDs")
+                    except (FileNotFoundError, ValueError):
+                        time.sleep(0.01)
+                    else:
+                        process_pids.extend(pids)
+                        cancellation_event.set()
+                        return
+
+            canceller = threading.Thread(target=cancel_after_child_starts)
+            canceller.start()
+            started = time.monotonic()
+            try:
+                returncode, output, timed_out = run_regression._run_process(
+                    [
+                        sys.executable,
+                        "-c",
+                        textwrap.dedent(
+                            """
+                            import os
+                            import pathlib
+                            import signal
+                            import subprocess
+                            import sys
+                            import time
+
+                            descendant = subprocess.Popen(
+                                [sys.executable, "-c", "import time; time.sleep(30)"]
+                            )
+
+                            def terminate(signum, frame):
+                                descendant.wait(timeout=5)
+                                signal.signal(signal.SIGTERM, signal.SIG_DFL)
+                                os.kill(os.getpid(), signal.SIGTERM)
+
+                            signal.signal(signal.SIGTERM, terminate)
+                            marker = pathlib.Path(sys.argv[1])
+                            pending = marker.with_suffix(".pending")
+                            pending.write_text(
+                                f"{os.getpid()} {descendant.pid}", encoding="utf-8"
+                            )
+                            pending.replace(marker)
+                            time.sleep(30)
+                            """
+                        ),
+                        str(pid_path),
+                    ],
+                    10.0,
+                    None,
+                    cancellation_event,
+                )
+            finally:
+                canceller.join()
+
+            elapsed = time.monotonic() - started
+            self.assertTrue(cancellation_event.is_set())
+            self.assertFalse(timed_out)
+            self.assertIsNotNone(returncode)
+            self.assertNotEqual(returncode, 0)
+            self.assertLess(elapsed, 3.0)
+            self.assertEqual(output, "")
+
+            self.assertEqual(len(process_pids), 2)
+            for process_pid in process_pids:
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(process_pid, 0)
+
     def test_timeout_bytes_are_recorded_without_type_error(self) -> None:
         with mock.patch.object(
             run_regression,

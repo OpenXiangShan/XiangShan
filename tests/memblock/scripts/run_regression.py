@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -242,8 +243,34 @@ def verify_runtime_metadata(path: Path) -> dict[str, Any]:
     }
 
 
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + 5.0
+    while True:
+        process.poll()
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            break
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            break
+        time.sleep(min(remaining, 0.05))
+    process.wait()
+
+
 def _run_process(
-    command: list[str], timeout_seconds: float, environment: dict[str, str] | None
+    command: list[str],
+    timeout_seconds: float,
+    environment: dict[str, str] | None,
+    cancellation_event: threading.Event | None = None,
 ) -> tuple[int | None, str, bool]:
     with tempfile.TemporaryFile(mode="w+b") as output_file:
         process = subprocess.Popen(
@@ -255,21 +282,21 @@ def _run_process(
         )
         timed_out = False
         try:
-            process.wait(timeout=timeout_seconds)
+            if cancellation_event is None:
+                process.wait(timeout=timeout_seconds)
+            else:
+                deadline = time.monotonic() + timeout_seconds
+                while process.poll() is None:
+                    if cancellation_event.is_set():
+                        _terminate_process_group(process)
+                        break
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(command, timeout_seconds)
+                    cancellation_event.wait(timeout=min(remaining, 0.05))
         except subprocess.TimeoutExpired:
             timed_out = True
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                process.wait()
+            _terminate_process_group(process)
         output_file.flush()
         size = output_file.seek(0, os.SEEK_END)
         output_file.seek(max(0, size - MAX_CAPTURED_OUTPUT_BYTES))

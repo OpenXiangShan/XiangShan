@@ -1472,6 +1472,16 @@ suppression/preservation, fault VA, final VL, unique completion, and LQ
 conservation come from independent models and external writebacks; internal
 VFOF-buffer state, replay count, and exact timing remain debug-only.
 
+Schema 45 adds `miss-burst-depth17`, one target beyond the generated 16-entry
+DCache miss capacity. The action holds address-qualified external responses
+until 16 requests are pending, releases one fair response, and then requires
+all 17 target lines to be requested and every scalar/vector identity to return
+the exact data and retire exactly once. The terminal three-stage saturation
+counter requires every depth-17 action to reach 16 held responses, schedule
+one fair release, and expose the overflow target request. Internal
+reject/replay signals and counts remain diagnostic and never determine
+PASS/FAIL.
+
 For deterministic reduction of a failure, `--allow-short-mixed` permits a
 smaller `random-mixed` run after the constraint set has been narrowed. It does
 not disable any online oracle or coverage gate, and normal regression commands
@@ -1585,12 +1595,23 @@ unit, not a synonym for one load/store or one bus request.
 
 Scenarios run in up to `JOBS` independent processes (default `JOBS=8`), while
 the JSON/Markdown artifact preserves command-line scenario order. Set
-`BENCHMARK_JOBS=1` for a serial measurement.
+`BENCHMARK_JOBS=1` for a serial measurement. The Make target allows up to
+`BENCHMARK_TIMEOUT_SECONDS=7200` per leaf by default because the complete
+SPEC-constrained mixed prefix can exceed the generic 1,800-second budget;
+override that variable only when measuring a known shorter or longer build.
+An interrupt cancels queued leaves and terminates every active simulator
+process group. A single `MEMBLOCK_MEM_DIRECT_TRACE_FILE` is rejected when more
+than one leaf can run concurrently because the simulator opens that path for
+truncate or append; use `BENCHMARK_JOBS=1` for a focused mem-direct trace.
 
 Before and after the campaign, the runner verifies the frozen artifacts,
 system libraries, runner source, RTL metadata, the runtime-freeze script, and
 the C++/SVA/config controller files listed in `CONTROLLER_FILES`. A hash change
-in any of them makes the result fail. The verifier also requires the recorded
+in any of them makes the result fail. Every passing leaf must report the
+terminal marker for the requested scenario, agree with any reported seed and
+transaction count, and carry the complete RTL hash from the frozen metadata.
+The JSON and Markdown both expose the overall result plus runtime, controller,
+and RTL-identity status. The verifier also requires the recorded
 worker count to be eight, at least 128 complete seeds, finite timestamps, and a
 result completion after the duration deadline. It rejects conflicting terminal
 summaries and scenario/seed/count mismatches. The runtime may also

@@ -441,8 +441,8 @@ verify-endurance-results:
 	$(MAKE) check-rtl
 	$(PYTHON) $(VERIFY_SCRIPT) --input $(ENDURANCE_RESULT) --min-duration-seconds 1 --min-results $(ENDURANCE_SEEDS) --scenario random-mixed --transactions 16384 --mixed-transactions $(ENDURANCE_TRANSACTIONS) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py --allow-finite
 
-benchmark-tests: $(RUNTIME_METADATA)
-	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS) --constraints $(or $(CONSTRAINTS),spec) --jobs $(or $(BENCHMARK_JOBS),$(JOBS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
+benchmark-tests: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
+	$(PYTHON) scripts/benchmark_tests.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(BENCHMARK_RESULT) --markdown $(BENCHMARK_MARKDOWN) --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --timeout-seconds $(BENCHMARK_TIMEOUT_SECONDS) --constraints $(or $(CONSTRAINTS),spec) --jobs $(or $(BENCHMARK_JOBS),$(JOBS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 analyze-spec-counters:
 	@test -n "$(SPEC_COUNTER_ROOT)" || (echo "set SPEC_COUNTER_ROOT to a checkpoint directory or simulator_err.txt" >&2; exit 2)
