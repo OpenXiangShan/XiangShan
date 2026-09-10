@@ -347,6 +347,140 @@ def _check_concurrent_vector_shapes(
     )
 
 
+def _check_miss_burst_coverage(
+    result: dict[str, Any],
+    schema: int,
+    target_operations: list[int],
+    actual_operations: list[int],
+    target_translation: list[int],
+) -> None:
+    target_miss_depth = _csv_counts(result, "target_miss_burst_depth", 15)
+    target_miss_width = _csv_counts(
+        result, "target_miss_burst_issue_width", 3
+    )
+    actual_miss_depth = _csv_counts(result, "actual_miss_burst_depth", 15)
+    actual_miss_width = _csv_counts(
+        result, "actual_miss_burst_issue_width", 3
+    )
+    actual_miss_translation = _csv_counts(
+        result, "actual_miss_burst_translation", 3
+    )
+    if schema >= 43:
+        target_miss_composition = _csv_counts(
+            result, "target_miss_burst_composition", 2
+        )
+        actual_miss_composition = _csv_counts(
+            result, "actual_miss_burst_composition", 2
+        )
+        actual_miss_cross = _csv_counts(
+            result, "actual_miss_burst_cross", 15 * 3 * 2 * 3
+        )
+        actual_miss_manager = _csv_counts(
+            result, "actual_miss_burst_manager", 10
+        )
+    else:
+        target_miss_composition = [1]
+        actual_miss_composition = [sum(actual_miss_depth)]
+        actual_miss_cross = _csv_counts(
+            result, "actual_miss_burst_cross", 15 * 3 * 3
+        )
+        actual_miss_manager = _csv_counts(
+            result, "actual_miss_burst_manager", 7
+        )
+    actual_miss_max = result.get("actual_miss_burst_max_outstanding")
+    _require(
+        isinstance(actual_miss_max, int)
+        and not isinstance(actual_miss_max, bool)
+        and actual_miss_max >= 0,
+        "actual_miss_burst_max_outstanding is invalid: "
+        f"{actual_miss_max!r}",
+    )
+    miss_enabled = target_operations[14] != 0
+    cross_total = 0
+    derived_target_lines = 0
+    derived_scalar_loads = 0
+    derived_vector_loads = 0
+    crossed_depth = [0] * 15
+    crossed_width = [0] * 3
+    crossed_translation = [0] * 3
+    crossed_composition = [0] * len(target_miss_composition)
+    for depth in range(15):
+        for width in range(3):
+            for composition in range(len(target_miss_composition)):
+                scalar_loads = depth + 2 - int(composition == 1)
+                for regime in range(3):
+                    index = (
+                        ((depth * 3 + width)
+                         * len(target_miss_composition) + composition)
+                        * 3 + regime
+                    )
+                    count = actual_miss_cross[index]
+                    enabled = (
+                        miss_enabled
+                        and target_miss_depth[depth] != 0
+                        and target_miss_width[width] != 0
+                        and target_miss_composition[composition] != 0
+                        and width + 1 <= scalar_loads
+                        and target_translation[regime] != 0
+                    )
+                    _require(
+                        (count > 0) == enabled,
+                        "actual_miss_burst_cross does not match enabled "
+                        f"classes: depth={depth} width={width} "
+                        f"composition={composition} regime={regime}",
+                    )
+                    cross_total += count
+                    derived_target_lines += count * (depth + 2)
+                    derived_scalar_loads += count * scalar_loads
+                    derived_vector_loads += count * int(composition == 1)
+                    crossed_depth[depth] += count
+                    crossed_width[width] += count
+                    crossed_composition[composition] += count
+                    crossed_translation[regime] += count
+    _require(
+        cross_total == actual_operations[14]
+        and crossed_depth == actual_miss_depth
+        and crossed_width == actual_miss_width
+        and crossed_composition == actual_miss_composition
+        and crossed_translation == actual_miss_translation,
+        "miss-burst cross/operation coverage is not conserved",
+    )
+    if not miss_enabled:
+        _require(
+            actual_miss_manager == [0] * len(actual_miss_manager)
+            and actual_miss_max == 0,
+            "disabled miss-burst has manager observations",
+        )
+    elif schema >= 43:
+        _require(
+            actual_miss_manager[0] == actual_operations[14]
+            and actual_miss_manager[1] == derived_target_lines
+            and actual_miss_manager[2] == derived_scalar_loads
+            and actual_miss_manager[3] == derived_vector_loads
+            and actual_miss_manager[4] >= derived_target_lines
+            and actual_miss_manager[5] >= actual_miss_manager[4]
+            and actual_miss_manager[6] == actual_miss_manager[5]
+            and actual_miss_manager[7] == derived_scalar_loads
+            and actual_miss_manager[8] == derived_vector_loads
+            and actual_miss_manager[9]
+            == derived_scalar_loads + 2 * derived_vector_loads
+            and actual_miss_max >= 2,
+            "miss-burst manager accounting is not conserved",
+        )
+    else:
+        _require(
+            actual_miss_manager[0] == actual_operations[14]
+            and actual_miss_manager[1] == derived_target_lines
+            and actual_miss_manager[2] >= derived_target_lines
+            and actual_miss_manager[3] >= actual_miss_manager[2]
+            and actual_miss_manager[4] == actual_miss_manager[3]
+            and actual_miss_manager[5] == derived_target_lines
+            and actual_miss_manager[6] == derived_target_lines
+            and actual_miss_max >= 2,
+            "miss-burst manager accounting is not conserved",
+        )
+
+
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
@@ -355,7 +489,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -2720,88 +2854,13 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 )
 
         if schema >= 39:
-            target_miss_depth = _csv_counts(
-                result, "target_miss_burst_depth", 15
+            _check_miss_burst_coverage(
+                result,
+                schema,
+                target_operations,
+                actual_operations,
+                target_translation,
             )
-            target_miss_width = _csv_counts(
-                result, "target_miss_burst_issue_width", 3
-            )
-            actual_miss_depth = _csv_counts(
-                result, "actual_miss_burst_depth", 15
-            )
-            actual_miss_width = _csv_counts(
-                result, "actual_miss_burst_issue_width", 3
-            )
-            actual_miss_translation = _csv_counts(
-                result, "actual_miss_burst_translation", 3
-            )
-            actual_miss_cross = _csv_counts(
-                result, "actual_miss_burst_cross", 15 * 3 * 3
-            )
-            actual_miss_manager = _csv_counts(
-                result, "actual_miss_burst_manager", 7
-            )
-            actual_miss_max = result.get("actual_miss_burst_max_outstanding")
-            _require(
-                isinstance(actual_miss_max, int)
-                and not isinstance(actual_miss_max, bool)
-                and actual_miss_max >= 0,
-                "actual_miss_burst_max_outstanding is invalid: "
-                f"{actual_miss_max!r}",
-            )
-            miss_enabled = target_operations[14] != 0
-            cross_total = 0
-            derived_loads = 0
-            crossed_depth = [0] * 15
-            crossed_width = [0] * 3
-            crossed_translation = [0] * 3
-            for depth in range(15):
-                for width in range(3):
-                    for regime in range(3):
-                        index = depth * 9 + width * 3 + regime
-                        count = actual_miss_cross[index]
-                        enabled = (
-                            miss_enabled
-                            and target_miss_depth[depth] != 0
-                            and target_miss_width[width] != 0
-                            and width + 1 <= depth + 2
-                            and target_translation[regime] != 0
-                        )
-                        _require(
-                            (count > 0) == enabled,
-                            "actual_miss_burst_cross does not match enabled "
-                            f"classes: depth={depth} width={width} "
-                            f"regime={regime}",
-                        )
-                        cross_total += count
-                        derived_loads += count * (depth + 2)
-                        crossed_depth[depth] += count
-                        crossed_width[width] += count
-                        crossed_translation[regime] += count
-            _require(
-                cross_total == actual_operations[14]
-                and crossed_depth == actual_miss_depth
-                and crossed_width == actual_miss_width
-                and crossed_translation == actual_miss_translation,
-                "miss-burst cross/operation coverage is not conserved",
-            )
-            if not miss_enabled:
-                _require(
-                    actual_miss_manager == [0] * 7 and actual_miss_max == 0,
-                    "disabled miss-burst has manager observations",
-                )
-            else:
-                _require(
-                    actual_miss_manager[0] == actual_operations[14]
-                    and actual_miss_manager[1] == derived_loads
-                    and actual_miss_manager[2] >= derived_loads
-                    and actual_miss_manager[3] >= actual_miss_manager[2]
-                    and actual_miss_manager[4] == actual_miss_manager[3]
-                    and actual_miss_manager[5] == derived_loads
-                    and actual_miss_manager[6] == derived_loads
-                    and actual_miss_max >= 2,
-                    "miss-burst manager accounting is not conserved",
-                )
 
     if schema >= 8:
         target_segment_store = result.get("target_vector_segment_store")

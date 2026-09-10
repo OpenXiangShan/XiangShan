@@ -4779,6 +4779,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 RandomConstraints::set_pressure_single_window;
             unsigned miss_burst_depth_index = 0;
             unsigned miss_burst_issue_width_index = 0;
+            unsigned miss_burst_composition =
+                RandomConstraints::miss_burst_scalar_only;
             if (kind == RandomConstraints::set_pressure) {
                 set_pressure_depth_index =
                     constraints.choose_set_pressure_depth(random());
@@ -4808,9 +4810,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (kind == RandomConstraints::miss_burst) {
                 miss_burst_depth_index =
                     constraints.choose_miss_burst_depth(random());
+                miss_burst_composition =
+                    constraints.choose_miss_burst_composition(random());
                 miss_burst_issue_width_index =
                     constraints.choose_miss_burst_issue_width(
-                        miss_burst_depth_index, random());
+                        miss_burst_depth_index, miss_burst_composition,
+                        random());
             }
             if (kind == RandomConstraints::ptw_error) {
                 ptw_error_site = constraints.choose_ptw_error_site(random());
@@ -5221,35 +5226,44 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                      .miss_burst_crosses[depth].size() &&
                              !forced_cross;
                          ++width) {
-                        if (!constraints.miss_burst_cross_enabled(
-                                depth, width)) {
-                            continue;
-                        }
-                        for (unsigned regime = 0;
-                             regime < RandomConstraints::translation_regime_count;
-                             ++regime) {
-                            if (constraints.translation_weights[regime] == 0 ||
-                                constraint_coverage.miss_burst_crosses
-                                    [depth][width][regime] != 0) {
+                        for (unsigned composition = 0;
+                             composition < constraint_coverage
+                                               .miss_burst_crosses[depth][width]
+                                               .size() &&
+                                 !forced_cross;
+                             ++composition) {
+                            if (!constraints.miss_burst_cross_enabled(
+                                    depth, width, composition)) {
                                 continue;
                             }
-                            miss_burst_depth_index = depth;
-                            miss_burst_issue_width_index = width;
-                            translation = TranslationContext{};
-                            translation.regime = regime;
-                            if (regime ==
-                                RandomConstraints::translation_stage1) {
-                                translation.stage1_mode = first_enabled_mode(
-                                    constraints.stage1_mode_weights);
-                            } else if (regime ==
-                                       RandomConstraints::translation_nested) {
-                                translation.vs_mode = first_enabled_mode(
-                                    constraints.vs_mode_weights);
-                                translation.g_mode = first_enabled_mode(
-                                    constraints.g_mode_weights);
+                            for (unsigned regime = 0;
+                                 regime <
+                                     RandomConstraints::translation_regime_count;
+                                 ++regime) {
+                                if (constraints.translation_weights[regime] == 0 ||
+                                    constraint_coverage.miss_burst_crosses
+                                        [depth][width][composition][regime] != 0) {
+                                    continue;
+                                }
+                                miss_burst_depth_index = depth;
+                                miss_burst_issue_width_index = width;
+                                miss_burst_composition = composition;
+                                translation = TranslationContext{};
+                                translation.regime = regime;
+                                if (regime ==
+                                    RandomConstraints::translation_stage1) {
+                                    translation.stage1_mode = first_enabled_mode(
+                                        constraints.stage1_mode_weights);
+                                } else if (regime ==
+                                           RandomConstraints::translation_nested) {
+                                    translation.vs_mode = first_enabled_mode(
+                                        constraints.vs_mode_weights);
+                                    translation.g_mode = first_enabled_mode(
+                                        constraints.g_mode_weights);
+                                }
+                                forced_cross = true;
+                                break;
                             }
-                            forced_cross = true;
-                            break;
                         }
                     }
                 }
@@ -6804,6 +6818,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const unsigned depth = miss_burst_depth_index + 2U;
                 const unsigned issue_width =
                     miss_burst_issue_width_index + 1U;
+                const unsigned scalar_load_count =
+                    RandomConstraints::miss_burst_scalar_load_count(
+                        miss_burst_depth_index, miss_burst_composition);
+                const bool include_vector_load =
+                    miss_burst_composition == RandomConstraints::
+                        miss_burst_scalar_vector_load;
                 constexpr std::uint64_t line_bytes = 64;
                 constexpr std::uint64_t lines = miss_burst_span / line_bytes;
                 if (!environment.run_until_all_complete(
@@ -6815,10 +6835,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     return false;
                 }
                 std::vector<memblock::LoadTransaction> transactions;
+                std::optional<memblock::VectorMemoryTransaction>
+                    vector_transaction;
                 std::vector<std::uint64_t> burst_lines;
-                transactions.reserve(depth);
+                transactions.reserve(scalar_load_count);
                 burst_lines.reserve(depth);
-                while (transactions.size() < depth) {
+                while (burst_lines.size() < depth) {
                     if (miss_burst_line >= lines) {
                         phase = "random-miss-burst-address-space-exhausted";
                         return false;
@@ -6834,16 +6856,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         continue;
                     }
                     const unsigned index =
-                        static_cast<unsigned>(transactions.size());
+                        static_cast<unsigned>(burst_lines.size());
                     const std::uint64_t address = line +
                         ((index & 1U) != 0 ? 8U : 40U);
-                    const auto op = static_cast<memblock::LoadOp>(
-                        (index + random()) % 4U);
-                    transactions.push_back(make_load(
-                        address, op, index % memblock::kScalarLoadLanes));
                     burst_lines.push_back(line);
-                    environment.expect_load(transactions.back());
+                    if (transactions.size() < scalar_load_count) {
+                        const auto op = static_cast<memblock::LoadOp>(
+                            (index + random()) % 4U);
+                        transactions.push_back(make_load(
+                            address, op,
+                            index % memblock::kScalarLoadLanes));
+                        environment.expect_load(transactions.back());
+                    } else {
+                        vector_transaction = make_vector(
+                            false, line + 16U, random() % 4U,
+                            random() % memblock::kVectorMemoryLanes);
+                        vector_transaction->vm = true;
+                        environment.expect_vector(*vector_transaction);
+                    }
                     environment.hold_dcache_response_at(line);
+                }
+                if (include_vector_load != vector_transaction.has_value()) {
+                    phase = "random-miss-burst-composition";
+                    return false;
                 }
                 const std::uint64_t requests_before_burst =
                     environment.tilelink_requests();
@@ -6853,6 +6888,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     environment.dcache_grant_acks();
                 const std::uint64_t writebacks_before_burst =
                     environment.writebacks();
+                const std::uint64_t vector_writebacks_before_burst =
+                    environment.vector_load_writebacks();
                 const std::uint64_t lq_before_burst =
                     environment.lq_dequeued();
                 if (!environment.set_rob_head(
@@ -6874,9 +6911,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         return false;
                     }
                 }
+                if (vector_transaction &&
+                    !environment.enqueue_vector(*vector_transaction)) {
+                    return false;
+                }
                 std::vector<memblock::LoadTransaction> first_batch(
                     transactions.begin(), transactions.begin() + issue_width);
                 if (!environment.issue_load_batch(first_batch, 4096, true)) {
+                    return false;
+                }
+                if (vector_transaction &&
+                    !environment.issue_vector(*vector_transaction, 4096)) {
                     return false;
                 }
                 for (unsigned index = issue_width; index < transactions.size();
@@ -6913,7 +6958,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         return false;
                     }
                 }
-                if (!environment.run_until_all_complete(
+                if ((vector_transaction &&
+                     !environment.run_until_vector_complete_with_replays(
+                         *vector_transaction,
+                         constrained_completion_timeout)) ||
+                    !environment.run_until_all_complete(
                         constrained_completion_timeout) ||
                     !environment.run_until_queues_retired(
                         constrained_completion_timeout) ||
@@ -6932,26 +6981,33 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     target_requests += line_requests;
                 }
-                const std::array<std::uint64_t, 7> manager_delta{{
+                const std::array<std::uint64_t, 10> manager_delta{{
                     1,
                     depth,
+                    scalar_load_count,
+                    include_vector_load ? 1U : 0U,
                     target_requests,
                     environment.dcache_refills() - refills_before_burst,
                     environment.dcache_grant_acks() - acks_before_burst,
                     environment.writebacks() - writebacks_before_burst,
+                    environment.vector_load_writebacks() -
+                        vector_writebacks_before_burst,
                     environment.lq_dequeued() - lq_before_burst,
                 }};
-                if (manager_delta[2] < depth ||
-                    manager_delta[3] < manager_delta[2] ||
-                    manager_delta[4] != manager_delta[3] ||
-                    manager_delta[5] != depth ||
-                    manager_delta[6] != depth) {
+                if (manager_delta[4] < depth ||
+                    manager_delta[5] < manager_delta[4] ||
+                    manager_delta[6] != manager_delta[5] ||
+                    manager_delta[7] != scalar_load_count ||
+                    manager_delta[8] != (include_vector_load ? 1U : 0U) ||
+                    manager_delta[9] != scalar_load_count +
+                        (vector_transaction ? vector_transaction->flow_num : 0U)) {
                     phase = "random-miss-burst-manager-accounting";
                     return false;
                 }
                 constraint_coverage.sample_miss_burst(
                     miss_burst_depth_index, miss_burst_issue_width_index,
-                    translation.regime, observed_outstanding, manager_delta);
+                    miss_burst_composition, translation.regime,
+                    observed_outstanding, manager_delta);
                 ordinary_leaf_addressed = true;
                 ++actions;
                 coverage.cacheable += depth;

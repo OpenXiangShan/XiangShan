@@ -1418,8 +1418,8 @@ loads must issue together in the first cycle. Every selected line's complete
 address-qualified D response is held until the DCache manager exposes the
 requested number of outstanding A transactions. The online and offline gates
 close every enabled depth x legal issue-width x Bare/stage-1/nested bin, then
-require exactly one target request, scalar writeback, and LQ dequeue per load,
-plus one GrantAck for every refill. Coverage and corner emphasize depth
+require at least one target request plus exactly one scalar writeback and LQ
+dequeue per load, with one GrantAck for every refill. Coverage and corner emphasize depth
 closure; `spec` keeps the operation uncommon but nonzero and biases toward
 shallower bursts. At schema 39 the minimum `random-mixed` length was 2304
 actions.
@@ -1444,6 +1444,23 @@ the legal stimulus space is reached. The SPEC preset now uses ordinary-vector
 load/store weights `90/45` and vector-segment weight `20`, making the measured
 SPEC vector event classes materially present while keeping scalar memory
 traffic dominant. The minimum run is 3072 actions.
+
+Schema 42 puts complete legal 1..8-uop ordinary vector load and store
+instructions into heterogeneous overlap windows and closes every reachable
+direction x addressing x single/multi-uop class. Schema 43 then extends the
+SPEC-relevant ordinary cold-miss burst with two compositions:
+`miss-burst-scalar-only` and `miss-burst-scalar-vector-load`. The latter
+replaces one scalar line with one legal two-flow unit-stride vector-load uop;
+the selected total target-line depth remains 2..16, and initial scalar issue
+width remains 1..3 when legal for that composition. Coverage closes depth x
+width x composition x translation. The ten manager counters conserve actions,
+target lines, scalar loads, vector uops, target requests, refills, GrantAcks,
+scalar writebacks, vector writebacks, and LQ dequeues. Correctness is still
+determined by exact per-identity data/writeback, one terminal disposition, two
+LQ dequeues for the vector member, and external refill/GrantAck conservation.
+Extra requests/refills caused by legal hardware prefetch are allowed. A fixed
+request count, replay count, bank, MSHR state, prefetch decision, or completion
+cycle is not an oracle.
 
 For deterministic reduction of a failure, `--allow-short-mixed` permits a
 smaller `random-mixed` run after the constraint set has been narrowed. It does

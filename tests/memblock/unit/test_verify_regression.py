@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 43
+        result["constraint_schema"] = 44
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -289,6 +289,89 @@ class VerifyRegressionTest(unittest.TestCase):
         verify_regression._check_concurrent_vector_shapes(
             result, target_operations, vector_targets, policy_targets
         )
+
+    def test_schema_43_checks_mixed_miss_burst_accounting(self) -> None:
+        # depth2/width1/scalar, depth2/width1/vector, and
+        # depth2/width2/scalar are the only enabled Bare crosses.
+        cross = [0] * 270
+        cross[0] = 1
+        cross[3] = 1
+        cross[6] = 1
+        fields: dict[str, object] = {
+            "target_miss_burst_depth": "1," + ",".join(["0"] * 14),
+            "target_miss_burst_issue_width": "1,1,1",
+            "target_miss_burst_composition": "1,1",
+            "actual_miss_burst_depth": "3," + ",".join(["0"] * 14),
+            "actual_miss_burst_issue_width": "2,1,0",
+            "actual_miss_burst_composition": "2,1",
+            "actual_miss_burst_translation": "3,0,0",
+            "actual_miss_burst_cross": ",".join(map(str, cross)),
+            "actual_miss_burst_manager": "3,6,5,1,6,6,6,5,1,7",
+            "actual_miss_burst_max_outstanding": 2,
+        }
+        target_operations = [0] * 14 + [1]
+        actual_operations = [0] * 14 + [3]
+        verify_regression._check_miss_burst_coverage(
+            fields, 43, target_operations, actual_operations, [1, 0, 0]
+        )
+
+        broken_cross = cross.copy()
+        broken_cross[3] = 0
+        broken_cross[9] = 1
+        fields["actual_miss_burst_cross"] = ",".join(map(str, broken_cross))
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_miss_burst_cross",
+        ):
+            verify_regression._check_miss_burst_coverage(
+                fields, 43, target_operations, actual_operations, [1, 0, 0]
+            )
+
+        fields["actual_miss_burst_cross"] = ",".join(map(str, cross))
+        manager = [3, 6, 5, 1, 6, 6, 6, 5, 0, 7]
+        fields["actual_miss_burst_manager"] = ",".join(map(str, manager))
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "miss-burst manager accounting",
+        ):
+            verify_regression._check_miss_burst_coverage(
+                fields, 43, target_operations, actual_operations, [1, 0, 0]
+            )
+
+        manager[8] = 1
+        manager[9] -= 1
+        fields["actual_miss_burst_manager"] = ",".join(map(str, manager))
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "miss-burst manager accounting",
+        ):
+            verify_regression._check_miss_burst_coverage(
+                fields, 43, target_operations, actual_operations, [1, 0, 0]
+            )
+
+        fields.update(
+            {
+                "actual_miss_burst_depth": ",".join(["0"] * 15),
+                "actual_miss_burst_issue_width": "0,0,0",
+                "actual_miss_burst_composition": "0,0",
+                "actual_miss_burst_translation": "0,0,0",
+                "actual_miss_burst_cross": ",".join(["0"] * 270),
+                "actual_miss_burst_manager": "0,0,0,0,0,0,0,0,0,0",
+                "actual_miss_burst_max_outstanding": 0,
+            }
+        )
+        disabled_operations = [0] * 15
+        verify_regression._check_miss_burst_coverage(
+            fields, 43, disabled_operations, disabled_operations, [1, 0, 0]
+        )
+        fields["actual_miss_burst_manager"] = "0,0,0,0,1,1,1,0,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "disabled miss-burst",
+        ):
+            verify_regression._check_miss_burst_coverage(
+                fields, 43, disabled_operations, disabled_operations, [1, 0, 0]
+            )
 
     def test_constraint_schemas_ten_and_eleven_check_vector_shapes_and_policy(
         self,

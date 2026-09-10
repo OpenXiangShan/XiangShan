@@ -122,6 +122,12 @@ struct RandomConstraints {
     static constexpr unsigned miss_burst_issue_width_count =
         memblock::kScalarLoadLanes;
 
+    enum MissBurstComposition : unsigned {
+        miss_burst_scalar_only,
+        miss_burst_scalar_vector_load,
+        miss_burst_composition_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
@@ -164,6 +170,8 @@ struct RandomConstraints {
     std::array<unsigned, miss_burst_depth_count> miss_burst_depth_weights{};
     std::array<unsigned, miss_burst_issue_width_count>
         miss_burst_issue_width_weights{};
+    std::array<unsigned, miss_burst_composition_count>
+        miss_burst_composition_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -258,6 +266,7 @@ struct RandomConstraints {
                 .miss_burst_depth_weights = {
                     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
                 .miss_burst_issue_width_weights = {1, 1, 1},
+                .miss_burst_composition_weights = {1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -352,6 +361,7 @@ struct RandomConstraints {
                     1000, 200, 100, 50, 20, 10, 5, 2, 1, 1, 1, 1, 1, 1,
                     1},
                 .miss_burst_issue_width_weights = {100, 20, 1},
+                .miss_burst_composition_weights = {8, 1},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -444,6 +454,7 @@ struct RandomConstraints {
                 .miss_burst_depth_weights = {
                     1, 1, 1, 1, 1, 1, 1, 2, 2, 4, 4, 8, 8, 16, 32},
                 .miss_burst_issue_width_weights = {1, 2, 4},
+                .miss_burst_composition_weights = {1, 4},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -757,11 +768,19 @@ struct RandomConstraints {
                 "miss-burst-issue-width1", "miss-burst-issue-width2",
                 "miss-burst-issue-width3",
             }};
+        constexpr std::array<std::string_view, miss_burst_composition_count>
+            miss_burst_composition_keys{{
+                "miss-burst-scalar-only",
+                "miss-burst-scalar-vector-load",
+            }};
         if (assign_weight(
                 miss_burst_depth_keys, miss_burst_depth_weights) ||
             assign_weight(
                 miss_burst_issue_width_keys,
-                miss_burst_issue_width_weights)) {
+                miss_burst_issue_width_weights) ||
+            assign_weight(
+                miss_burst_composition_keys,
+                miss_burst_composition_weights)) {
             return;
         }
         constexpr std::array<std::string_view,
@@ -1199,22 +1218,31 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "miss-burst issue-width constraint weights cannot all be zero");
         }
+        if (operation_weights[miss_burst] != 0 &&
+            std::accumulate(
+                miss_burst_composition_weights.begin(),
+                miss_burst_composition_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "miss-burst composition constraint weights cannot all be zero");
+        }
         if (operation_weights[miss_burst] != 0) {
             bool compatible = false;
             for (unsigned depth = 0;
                  depth < miss_burst_depth_weights.size(); ++depth) {
                 for (unsigned width = 0;
                      width < miss_burst_issue_width_weights.size(); ++width) {
-                    compatible = compatible ||
-                        (miss_burst_depth_weights[depth] != 0 &&
-                         miss_burst_issue_width_weights[width] != 0 &&
-                         width + 1U <= depth + 2U);
+                    for (unsigned composition = 0;
+                         composition < miss_burst_composition_weights.size();
+                         ++composition) {
+                        compatible = compatible || miss_burst_cross_enabled(
+                            depth, width, composition);
+                    }
                 }
             }
             if (!compatible) {
                 throw std::invalid_argument(
-                    "miss-burst depth and issue-width constraints have no "
-                    "legal combination");
+                    "miss-burst depth, issue-width, and composition "
+                    "constraints have no legal combination");
             }
         }
         if (operation_weights[ptw_error] != 0 &&
@@ -1828,12 +1856,28 @@ struct RandomConstraints {
         return choose_weighted(miss_burst_depth_weights, random);
     }
 
+    unsigned choose_miss_burst_composition(std::uint64_t random) const
+    {
+        return choose_weighted(miss_burst_composition_weights, random);
+    }
+
+    static unsigned miss_burst_scalar_load_count(
+        unsigned depth_index, unsigned composition)
+    {
+        const unsigned depth = depth_index + 2U;
+        return composition == miss_burst_scalar_vector_load
+            ? depth - 1U : depth;
+    }
+
     unsigned choose_miss_burst_issue_width(
-        unsigned depth_index, std::uint64_t random) const
+        unsigned depth_index, unsigned composition,
+        std::uint64_t random) const
     {
         auto compatible = miss_burst_issue_width_weights;
+        const unsigned scalar_loads =
+            miss_burst_scalar_load_count(depth_index, composition);
         for (unsigned width = 0; width < compatible.size(); ++width) {
-            if (width + 1U > depth_index + 2U) {
+            if (width + 1U > scalar_loads) {
                 compatible[width] = 0;
             }
         }
@@ -1841,11 +1885,14 @@ struct RandomConstraints {
     }
 
     bool miss_burst_cross_enabled(
-        unsigned depth_index, unsigned width_index) const
+        unsigned depth_index, unsigned width_index,
+        unsigned composition) const
     {
         return miss_burst_depth_weights.at(depth_index) != 0 &&
             miss_burst_issue_width_weights.at(width_index) != 0 &&
-            width_index + 1U <= depth_index + 2U;
+            miss_burst_composition_weights.at(composition) != 0 &&
+            width_index + 1U <=
+                miss_burst_scalar_load_count(depth_index, composition);
     }
 
     bool set_pressure_window_enabled(unsigned window_class) const
@@ -2204,8 +2251,13 @@ struct RandomConstraints {
                     for (unsigned width = 0;
                          width < miss_burst_issue_width_weights.size();
                          ++width) {
-                        if (miss_burst_cross_enabled(depth, width)) {
-                            actions += regimes;
+                        for (unsigned composition = 0;
+                             composition < miss_burst_composition_weights.size();
+                             ++composition) {
+                            if (miss_burst_cross_enabled(
+                                    depth, width, composition)) {
+                                actions += regimes;
+                            }
                         }
                     }
                 }
@@ -2356,7 +2408,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=42 constraints=" << name
+        stream << "constraint_schema=43 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2446,6 +2498,8 @@ struct RandomConstraints {
         append_weights(stream, miss_burst_depth_weights);
         stream << " target_miss_burst_issue_width=";
         append_weights(stream, miss_burst_issue_width_weights);
+        stream << " target_miss_burst_composition=";
+        append_weights(stream, miss_burst_composition_weights);
         stream << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','

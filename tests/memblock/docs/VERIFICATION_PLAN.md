@@ -186,13 +186,14 @@ translation and the same
 manager latency. Multi-window overlap actions keep one address-qualified D
 response per set pending and require every target set to satisfy its own
 replacement minimum before any response is released.
-Schema 39 adds an independent ordinary cold-miss burst dimension selected by
-depth 2..16 and initial same-cycle scalar issue width 1..3. It closes every
-enabled depth x legal width x Bare/stage-1/nested bin, skips lines already seen
-at the external manager, then arms and holds each address-qualified refill
-until externally observed request depth reaches the target. Exact scalar
-writeback and LQ-dequeue conservation remain mandatory; target-request and
-global refill/GrantAck counts allow legal duplicate/background traffic. SPEC
+Schema 43 extends the ordinary cold-miss burst dimension with scalar-only and
+scalar+vector-load compositions at depth 2..16 and initial same-cycle scalar
+issue width 1..3. It closes every enabled depth x legal width x composition x
+Bare/stage-1/nested bin, skips lines already seen at the external manager, then
+arms and holds each address-qualified refill until externally observed request
+depth reaches the target. Exact scalar/vector writeback and LQ-flow
+conservation remain mandatory; target-request and global refill/GrantAck counts
+allow legal duplicate/background traffic. SPEC
 performance counters motivate the profile weights but are not used as a
 correctness oracle. Schema 40 adds an
 explicit `bank-conflict` dimension for the SPEC-observed same-bank/replay
@@ -203,9 +204,10 @@ writeback and LQ dequeue per member, and legal queue/protocol termination. Bank 
 replay/arbitration, wakeup/`ld2Cancel`, and prefetch traffic are diagnostic
 observations only; no internal counter or fixed historical address is used.
 The first scalar/vector/AMO/miss-burst interaction reduction is executable
-with the same external identity/data/queue oracle; full ordinary-shape and
-heterogeneous-window composition, including bank waves with every vector and
-atomic class, remains a planned gap.
+with the same external identity/data/queue oracle. The miss burst itself now
+contains a legal two-flow vector load in its mixed composition; full ordinary-
+shape and heterogeneous-window composition, including bank waves with every
+vector and atomic class, remains a planned gap.
 Schema 36 composes every CLEAN/FLUSH/INVAL and clean/dirty target state with
 one through eight accepted manager Probes while CBOAck remains pending. It
 closes 48 operation x line-state x depth bins and independently conserves
@@ -362,7 +364,7 @@ cacheable tests pass.
 | Point family | Values and crosses to generate | Current status |
 | --- | --- | --- |
 | Frontend pass-through | ICache line reads, instruction-Uncache reads, ICache-control Get/PutFull/PutPartial, source/size/mask/data, simultaneous paths, A/D backpressure | Implemented at the MemBlock top boundary by `frontend-bridge`; downstream ICache/device semantics remain integration responsibilities |
-| DCache lookup | warm hit, cold miss, same-line merge, bank conflict, distinct-line MLP, set pressure beyond associativity, synonym/alias | Partial; cold/warm and bank conflict are executable. Schema-20 `random-mixed` promotes same-line merging into the common constraint interface: fresh cold lines cross 2/3 same-cycle load lanes, exact-address/same-beat/cross-beat patterns, both critical beats, Bare/stage-1/nested translation, and the selected manager latency. Schema 38 drives 9/10 distinct clean-load or dirty-store tags through one to eight independent eight-way sets in every set quarter, access width, translation regime, no-overlap/held-refill class, and target Release backpressure class. Target windows containing any line covered by an earlier DCache request are skipped before backing memory is initialized. Clean lines are revisited in reverse with exact data and attributed replacement misses; dirty lines retain exact request, writeback, dequeue, and ReleaseData attribution. Schema 39 adds ordinary never-repeated cold-line bursts, crosses depth 2..16 with legal initial issue width 1..3 and translation, observes the requested manager-outstanding depth while all target responses are held, and conserves each request/refill/GrantAck/writeback/LQ dequeue without inspecting internal MSHRs. Broader physical synonym/alias crosses remain |
+| DCache lookup | warm hit, cold miss, same-line merge, bank conflict, distinct-line MLP, set pressure beyond associativity, synonym/alias | Partial; cold/warm and bank conflict are executable. Schema-20 `random-mixed` promotes same-line merging into the common constraint interface: fresh cold lines cross 2/3 same-cycle load lanes, exact-address/same-beat/cross-beat patterns, both critical beats, Bare/stage-1/nested translation, and the selected manager latency. Schema 38 drives 9/10 distinct clean-load or dirty-store tags through one to eight independent eight-way sets in every set quarter, access width, translation regime, no-overlap/held-refill class, and target Release backpressure class. Target windows containing any line covered by an earlier DCache request are skipped before backing memory is initialized. Clean lines are revisited in reverse with exact data and attributed replacement misses; dirty lines retain exact request, writeback, dequeue, and ReleaseData attribution. Schema 43 drives ordinary never-repeated cold-line bursts, crosses depth 2..16 with legal initial scalar issue width 1..3, scalar-only/scalar+vector-load composition, and translation, observes the requested manager-outstanding depth while all target responses are held, and conserves target lines, scalar/vector terminal effects, LQ flows, refills, and GrantAcks without inspecting internal MSHRs. Broader physical synonym/alias crosses remain |
 | Refill/replay | delayed A/D responses, critical-beat-first ordering, partial refill, killed request, replay after miss | Partial; `single-load` forces both `isKeyword` polarities and corresponding two-beat GrantData orders, checks exact data, merges two same-line loads into one delayed refill, and proves a keyword load writes back from its critical beat while the noncritical beat is held for 128 cycles without a later duplicate. `dcache-errors` crosses both orders with fixed denied and first/last-only corrupt, holds the second beat for 256 cycles, merges an opposite-half load, and accepts an unrelated healthy cold MSHR before that beat arrives. Schema-17 `random-mixed` adds response-wide corrupt/denied scalar-load cold refills under the common translation/latency/operation constraints, exact exception and redirect recovery, and sink-attributed GrantAck accounting even when a clean hardware prefetch is concurrent. Schema 18 applies the same address-qualified two-beat and GrantAck/refill conservation to atomic misses across family and width. Schema 20 varies clean merge depth, address placement, critical beat, translation, and calibrated response delay while allowing matched background prefetch refill/GrantAck pairs. Delayed and killed refills are exercised elsewhere; malformed/reordered response crosses remain |
 | Eviction | clean release, dirty ReleaseData, partial byte masks, replacement under pressure, release backpressure | Partial; immutable whole-line snapshots are checked by the dedicated dirty-pressure phase and schema-21 random pressure. Schema 27 adds clean pressure; schema 28 adds held-refill overlap; schema 29 adds target C backpressure; schema 38 closes 1536 clean/dirty x no-overlap/held-refill-overlap x no-C-stall/C-stall x one-through-eight-window x 9/10-line x B/H/W/D x translation bins plus four set quarters. Clean actions require exact initial/revisit data, address-attributed target Release counts, zero target ReleaseData, and load/LQ conservation. Dirty actions retain exact target request/store-WB/SQ-dequeue counts and separate byte checks for target and background ReleaseData. Each multi-window overlap action holds one independent refill per set and requires every target set to reach its release minimum before any refill may complete. Each selected backpressure action stalls exactly one target Release for 16 valid cycles, compares the complete C payload on all 16 held transitions, and prevents unrelated C traffic from satisfying the target oracle. Replacement composition with Probe/CMO/atomic traffic remains |
 | TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Partial; `dcache-coherence` executes three manager Probes spanning clean no-data, clean requested-data, and dirty mandatory-data responses, checks byte-exact C beats, forces E backpressure, and matches every GrantAck sink. It separately accepts two distinct Probe sources before an unrelated cold miss completes and checks outstanding depth and response addresses. `cmo-contracts` checks custom A opcode 12/13/14, fixed source 17, CBOAck opcode 8, all clean/dirty permission reports, Probe-before-Ack ordering, exact dirty C beats, a concurrent younger MSHR plus cancellation, and denied/corrupt propagation. Schema 33 `random-mixed` adds constrained dirty toB/toN Probes with requested/mandatory data, checked toB cleanup, and hierarchical one-through-eight-source bursts while a delayed refill remains outstanding; schema 15 retains translated CMO operation/state/younger-MSHR/error crosses. Schema 36 repeats all eight accepted depths while every successful CMO operation/state class is pending and closes 48 composition bins. Schema 37 repeats zero through eight auxiliary Probes for each successful atomic family/width. It permits legal B backpressure while the target D response is held, then holds C until the full burst is accepted after D release. CMO and atomic errors are excluded exactly from Probe conservation. The Probe oracle matches every C response by active B source and address. Schema 34 walks all 64 B-source IDs across accepted traffic, rejects active-ID reuse, and independently checks completed reuse plus wrap counts. `dcache-errors` rejects A-source reuse until final D completion, reaches two simultaneous AcquireBlock lifetimes, and checks exact D-beat/GrantAck drain. Load and atomic denied/corrupt D responses are also injected and checked; malformed responses and replacement cross-operation bursts remain planned |
@@ -494,9 +496,10 @@ Schema-2 queue-conservation gate. Schema 38 now crosses real same-set clean/dirt
 replacement with one through eight independent held refills and address-qualified
 C-channel backpressure, proves each target set releases while all selected
 refills remain pending, and checks every target payload transition during a
-forced stall. Schema 39 separately reaches two through sixteen outstanding
-ordinary cold-line misses with one- through three-lane initial issue and exact
-external manager/architectural/queue conservation. The next DCache breadth
+forced stall. Schema 43 separately reaches two through sixteen outstanding
+ordinary cold-line misses with one- through three-lane initial scalar issue,
+scalar-only/scalar+vector-load composition, and exact external manager/
+architectural/queue conservation. The next DCache breadth
 closure is replacement composition with Probe/CMO/atomic traffic.
 Malformed manager responses
 remain an explicit agent/SVA negative-protocol qualification task rather than

@@ -264,11 +264,15 @@ struct ConstraintCoverage {
     // Backpressured actions/stalled target releases/target C stall cycles/
     // stable-payload checks/completed ready windows.
     std::array<std::uint64_t, 5> set_pressure_backpressure_manager{};
-    // [depth2..depth16][same-cycle issue width1..3][Bare/stage-1/nested].
+    // [depth2..depth16][same-cycle scalar issue width1..3]
+    // [scalar-only/scalar+vector-load][Bare/stage-1/nested].
     std::array<
         std::array<
             std::array<
-                std::uint64_t, RandomConstraints::translation_regime_count>,
+                std::array<
+                    std::uint64_t,
+                    RandomConstraints::translation_regime_count>,
+                RandomConstraints::miss_burst_composition_count>,
             RandomConstraints::miss_burst_issue_width_count>,
         RandomConstraints::miss_burst_depth_count>
         miss_burst_crosses{};
@@ -279,9 +283,11 @@ struct ConstraintCoverage {
         miss_burst_issue_widths{};
     std::array<std::uint64_t, RandomConstraints::translation_regime_count>
         miss_burst_translations{};
-    // Actions/loads/target requests/refills/GrantAcks/scalar writebacks/
-    // LQ dequeues.
-    std::array<std::uint64_t, 7> miss_burst_manager{};
+    std::array<std::uint64_t, RandomConstraints::miss_burst_composition_count>
+        miss_burst_compositions{};
+    // Actions/target lines/scalar loads/vector-load uops/target requests/
+    // refills/GrantAcks/scalar writebacks/vector-load writebacks/LQ dequeues.
+    std::array<std::uint64_t, 10> miss_burst_manager{};
     std::uint64_t miss_burst_max_outstanding = 0;
     // [site][load/store][root/intermediate/leaf][denied/corrupt-first/
     // corrupt-last].
@@ -722,14 +728,17 @@ struct ConstraintCoverage {
 
     void sample_miss_burst(
         unsigned depth_index, unsigned issue_width_index,
-        unsigned translation_regime, std::uint64_t outstanding,
-        const std::array<std::uint64_t, 7> &manager_delta)
+        unsigned composition, unsigned translation_regime,
+        std::uint64_t outstanding,
+        const std::array<std::uint64_t, 10> &manager_delta)
     {
         ++miss_burst_crosses.at(depth_index)
               .at(issue_width_index)
+              .at(composition)
               .at(translation_regime);
         ++miss_burst_depths.at(depth_index);
         ++miss_burst_issue_widths.at(issue_width_index);
+        ++miss_burst_compositions.at(composition);
         ++miss_burst_translations.at(translation_regime);
         miss_burst_max_outstanding = std::max(
             miss_burst_max_outstanding, outstanding);
@@ -1163,15 +1172,22 @@ struct ConstraintCoverage {
                  ++depth) {
                 for (unsigned width = 0;
                      width < miss_burst_crosses[depth].size(); ++width) {
-                    for (unsigned regime = 0;
-                         regime < miss_burst_crosses[depth][width].size();
-                         ++regime) {
-                        const bool enabled =
-                            constraints.miss_burst_cross_enabled(depth, width) &&
-                            constraints.translation_weights[regime] != 0;
-                        if ((miss_burst_crosses[depth][width][regime] != 0) !=
-                            enabled) {
-                            return false;
+                    for (unsigned composition = 0;
+                         composition <
+                             miss_burst_crosses[depth][width].size();
+                         ++composition) {
+                        for (unsigned regime = 0;
+                             regime < miss_burst_crosses[depth][width]
+                                          [composition].size();
+                             ++regime) {
+                            const bool enabled =
+                                constraints.miss_burst_cross_enabled(
+                                    depth, width, composition) &&
+                                constraints.translation_weights[regime] != 0;
+                            if ((miss_burst_crosses[depth][width][composition]
+                                     [regime] != 0) != enabled) {
+                                return false;
+                            }
                         }
                     }
                 }
@@ -1841,7 +1857,9 @@ struct ConstraintCoverage {
         const std::uint64_t miss_burst_actions =
             operations[RandomConstraints::miss_burst];
         std::uint64_t miss_burst_cross_total = 0;
-        std::uint64_t miss_burst_loads = 0;
+        std::uint64_t miss_burst_target_lines = 0;
+        std::uint64_t miss_burst_scalar_loads = 0;
+        std::uint64_t miss_burst_vector_loads = 0;
         std::array<std::uint64_t, RandomConstraints::miss_burst_depth_count>
             crossed_miss_burst_depths{};
         std::array<
@@ -1849,33 +1867,53 @@ struct ConstraintCoverage {
             crossed_miss_burst_widths{};
         std::array<std::uint64_t, RandomConstraints::translation_regime_count>
             crossed_miss_burst_translations{};
+        std::array<
+            std::uint64_t, RandomConstraints::miss_burst_composition_count>
+            crossed_miss_burst_compositions{};
         for (unsigned depth = 0; depth < miss_burst_crosses.size(); ++depth) {
             for (unsigned width = 0;
                  width < miss_burst_crosses[depth].size(); ++width) {
-                for (unsigned regime = 0;
-                     regime < miss_burst_crosses[depth][width].size();
-                     ++regime) {
-                    const std::uint64_t count =
-                        miss_burst_crosses[depth][width][regime];
-                    miss_burst_cross_total += count;
-                    miss_burst_loads += count * (depth + 2U);
-                    crossed_miss_burst_depths[depth] += count;
-                    crossed_miss_burst_widths[width] += count;
-                    crossed_miss_burst_translations[regime] += count;
+                for (unsigned composition = 0;
+                     composition < miss_burst_crosses[depth][width].size();
+                     ++composition) {
+                    for (unsigned regime = 0;
+                         regime < miss_burst_crosses[depth][width]
+                                      [composition].size();
+                         ++regime) {
+                        const std::uint64_t count =
+                            miss_burst_crosses[depth][width][composition][regime];
+                        miss_burst_cross_total += count;
+                        miss_burst_target_lines += count * (depth + 2U);
+                        miss_burst_scalar_loads += count *
+                            RandomConstraints::miss_burst_scalar_load_count(
+                                depth, composition);
+                        miss_burst_vector_loads += count *
+                            (composition == RandomConstraints::
+                                 miss_burst_scalar_vector_load);
+                        crossed_miss_burst_depths[depth] += count;
+                        crossed_miss_burst_widths[width] += count;
+                        crossed_miss_burst_compositions[composition] += count;
+                        crossed_miss_burst_translations[regime] += count;
+                    }
                 }
             }
         }
         if (miss_burst_cross_total != miss_burst_actions ||
             crossed_miss_burst_depths != miss_burst_depths ||
             crossed_miss_burst_widths != miss_burst_issue_widths ||
+            crossed_miss_burst_compositions != miss_burst_compositions ||
             crossed_miss_burst_translations != miss_burst_translations ||
             miss_burst_manager[0] != miss_burst_actions ||
-            miss_burst_manager[1] != miss_burst_loads ||
-            miss_burst_manager[2] < miss_burst_loads ||
-            miss_burst_manager[3] < miss_burst_manager[2] ||
-            miss_burst_manager[4] != miss_burst_manager[3] ||
-            miss_burst_manager[5] != miss_burst_loads ||
-            miss_burst_manager[6] != miss_burst_loads ||
+            miss_burst_manager[1] != miss_burst_target_lines ||
+            miss_burst_manager[2] != miss_burst_scalar_loads ||
+            miss_burst_manager[3] != miss_burst_vector_loads ||
+            miss_burst_manager[4] < miss_burst_target_lines ||
+            miss_burst_manager[5] < miss_burst_manager[4] ||
+            miss_burst_manager[6] != miss_burst_manager[5] ||
+            miss_burst_manager[7] != miss_burst_scalar_loads ||
+            miss_burst_manager[8] != miss_burst_vector_loads ||
+            miss_burst_manager[9] !=
+                miss_burst_scalar_loads + 2U * miss_burst_vector_loads ||
             (miss_burst_actions != 0 &&
              miss_burst_max_outstanding < 2U)) {
             return false;
@@ -2318,13 +2356,21 @@ public:
             stream << (regime == 0 ? "" : ",")
                    << miss_burst_translations[regime];
         }
+        stream << " actual_miss_burst_composition=";
+        for (unsigned composition = 0;
+             composition < miss_burst_compositions.size(); ++composition) {
+            stream << (composition == 0 ? "" : ",")
+                   << miss_burst_compositions[composition];
+        }
         stream << " actual_miss_burst_cross=";
         bool first_miss_burst_cross = true;
         for (const auto &depth : miss_burst_crosses) {
             for (const auto &width : depth) {
-                for (const auto count : width) {
-                    stream << (first_miss_burst_cross ? "" : ",") << count;
-                    first_miss_burst_cross = false;
+                for (const auto &composition : width) {
+                    for (const auto count : composition) {
+                        stream << (first_miss_burst_cross ? "" : ",") << count;
+                        first_miss_burst_cross = false;
+                    }
                 }
             }
         }
