@@ -3901,3 +3901,36 @@ DCache refills, 87,190 GrantAcks, 606 Probes, 33,645 ReleaseData transactions,
 `117f100788d35beb3c54b84b324e7c01dbef5b99baa8c82b467bc594a6babf12`;
 the rendered Markdown has SHA-256
 `7f2b7ed134590526f3b4156d54f93b627beb4f3de32d6b09d89f5b29a6dacd02`.
+
+### Schema-45 Eight-Way SPEC Follow-Up
+
+On 2026-09-11, the frozen schema-45 runtime completed SPEC-profile
+`random-mixed` seeds 1..8 with 4,096 actions per seed and eight parallel
+workers. All eight seeds passed, for 32,768 actions in 3,121.178 seconds of
+wall time; individual seeds took 3,086.378..3,121.139 seconds and reached
+cycles 7,219,067..7,288,994. The complete generated-RTL SHA-256 was
+`356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`.
+
+Across the campaign, externally observed traffic included 593,172 scalar,
+10,482 vector-load, 8,057 vector-store, and 734 prefetch writebacks; 643,711
+DCache refills, 19 AcquirePerms, 643,730 GrantAcks, 4,748 Probes, 264,764
+ReleaseData transactions, 11,574 PTW requests, and 364 Uncache requests. Every
+seed closed its LQ/SQ accounting with zero unobserved cancellation. The
+pass/fail oracles remained transaction identity, independent data and
+exception expectations, exact terminal disposition, architectural state, and
+external protocol conservation; internal bank, replay, prefetch-policy, MSHR,
+and cycle behavior remained diagnostic only.
+
+The frozen binary, runtime metadata, external libraries, RTL metadata, runner,
+and every listed controller input were byte-identical before and after the
+campaign. The independent artifact verifier accepted the result as:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=1..8 results=8 transactions=32768 elapsed_seconds=3121.178012 rtl_sha256=356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3 artifact_sha256=1cd7f5a5acdcf36f60a177a4a6aae72efb80af6f663d7eae260577320ffa1e1e
+```
+
+The artifact is `build/memblock/vls-postfix-spec8x4096.json`; the frozen
+binary SHA-256 is
+`f2b2d160bb5a4820ca81cea0babac10d775739ec2bf2dc1c4eb0132b7804f330`
+and the runtime-metadata SHA-256 is
+`8be056188bf70ae20106be6aa9b5428a4d25da9b2a8a2cad2a38d3b141ce60cb`.
