@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sys
+import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -86,6 +89,87 @@ class BenchmarkTestsTest(unittest.TestCase):
         }
         markdown = benchmark_tests.render_markdown(document)
         self.assertIn("using up to 8 processes", markdown)
+
+    def test_main_runs_scenarios_concurrently_and_preserves_order(self) -> None:
+        requested = ("smoke", "single-load", "load-feedback")
+        rendezvous = threading.Barrier(len(requested), timeout=5.0)
+        active = 0
+        maximum_active = 0
+        active_lock = threading.Lock()
+
+        def fake_run_scenario(
+            binary: Path,
+            scenario: str,
+            seed: int,
+            transactions: int,
+            timeout_seconds: float,
+            environment: dict[str, str],
+            constraint_profile: str,
+            constraint_overrides: tuple[str, ...],
+        ) -> dict[str, object]:
+            nonlocal active, maximum_active
+            with active_lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            try:
+                # A serial implementation cannot bring all workers here and
+                # will fail the barrier instead of silently passing this test.
+                rendezvous.wait()
+                return {
+                    "scenario": scenario,
+                    "status": "pass",
+                    "elapsed_seconds": 0.01,
+                    "metrics": {},
+                }
+            finally:
+                with active_lock:
+                    active -= 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            metadata = root / "runtime.json"
+            output = root / "benchmark.json"
+            runtime = {
+                "root": root,
+                "binary": root / "memblock_sim",
+                "metadata": metadata,
+                "metadata_sha256": "metadata-hash",
+                "artifact_hashes": {"binary": "binary-hash"},
+            }
+            argv = [
+                "benchmark_tests.py",
+                "--runtime-metadata",
+                str(metadata),
+                "--output",
+                str(output),
+                "--scenarios",
+                ",".join(requested),
+                "--transactions",
+                "256",
+                "--jobs",
+                str(len(requested)),
+            ]
+            with (
+                mock.patch.object(sys, "argv", argv),
+                mock.patch.object(
+                    benchmark_tests.run_regression,
+                    "verify_runtime_metadata",
+                    return_value=runtime,
+                ),
+                mock.patch.object(
+                    benchmark_tests, "run_scenario", side_effect=fake_run_scenario
+                ),
+            ):
+                self.assertEqual(benchmark_tests.main(), 0)
+
+            document = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(maximum_active, len(requested))
+        self.assertEqual(
+            [result["scenario"] for result in document["results"]],
+            list(requested),
+        )
+        self.assertEqual(document["configuration"]["jobs"], len(requested))
 
     def test_parsed_failure_retains_bounded_output(self) -> None:
         output = "MEMBLOCK_SMOKE_FAIL cycle=17 phase=contract reason=bad-data\n"
