@@ -21,14 +21,22 @@ class PreparePickerExportTest(unittest.TestCase):
             makefile = picker / "Makefile"
             makefile.write_text(
                 "RW_TYPE := MEM_DIRECT\n"
+                "ifeq ($(wildcard ${MEM_DIRECT_TARGET_FILE}),)\n"
                 "\t@picker export root.h \\\n\t\t--source_dir template/mem_direct \\\n"
-                "\t\t--source_module_name MemBlock --sim verilator\n",
+                "\t\t--source_module_name MemBlock --sim verilator\n"
+                "endif\n",
                 encoding="utf-8",
             )
 
             prepare_picker_export.prepare(picker)
             prepared = makefile.read_text(encoding="utf-8")
             self.assertIn("--language $(TLANG)", prepared)
+            self.assertIn(
+                "ifeq ($(wildcard mem_direct/Makefile),)", prepared
+            )
+            self.assertNotIn(
+                "ifeq ($(wildcard ${MEM_DIRECT_TARGET_FILE}),)", prepared
+            )
             prepare_picker_export.prepare(picker)
             self.assertEqual(makefile.read_text(encoding="utf-8"), prepared)
 

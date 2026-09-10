@@ -21,6 +21,15 @@ def prepare(picker_output: Path) -> Path:
     if "RW_TYPE := MEM_DIRECT" not in contents:
         raise PickerExportError("Picker export is not configured for MEM_DIRECT")
 
+    header_guard = "ifeq ($(wildcard ${MEM_DIRECT_TARGET_FILE}),)"
+    artifact_guard = "ifeq ($(wildcard mem_direct/Makefile),)"
+    guard_count = contents.count(header_guard) + contents.count(artifact_guard)
+    if guard_count != 1:
+        raise PickerExportError(
+            "expected exactly one nested mem-direct export guard"
+        )
+    contents = contents.replace(header_guard, artifact_guard)
+
     lines = contents.splitlines(keepends=True)
     commands = [
         index
@@ -39,7 +48,9 @@ def prepare(picker_output: Path) -> Path:
         lines[command_index] = (
             command.removesuffix("\n") + " --language $(TLANG)" + newline
         )
-        makefile.write_text("".join(lines), encoding="utf-8")
+    prepared = "".join(lines)
+    if prepared != makefile.read_text(encoding="utf-8"):
+        makefile.write_text(prepared, encoding="utf-8")
     return makefile
 
 
