@@ -20,6 +20,7 @@ import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRParameters
+import xiangshan.frontend.bpu.history.fastphr.FastPhrParameters
 import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
@@ -41,6 +42,7 @@ case class BpuParameters(
     // history
     phrParameters:      PhrParameters = PhrParameters(),
     commonHRParameters: CommonHRParameters = CommonHRParameters(),
+    fastPhrParameters:  FastPhrParameters = FastPhrParameters(),
     // sub predictors
     ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
     abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
