@@ -55,11 +55,11 @@ class CCHIType3Port extends Bundle {
  * Compact CHI Type 3 downstream (Completer) port.
  * Used by in-core MMIO slaves such as D$ CtrlUnit.
  */
-class CCHIType3SlavePort extends Bundle {
-  val rxreq = Flipped(DecoupledIO(new FlitREQ))
-  val rxdat = Flipped(DecoupledIO(new FlitUpDAT64))
-  val txrsp = DecoupledIO(new FlitDnRSP)
-  val txdat = DecoupledIO(new FlitDnDAT64)
+class CCHIType3DownPort extends Bundle {
+  val req = Flipped(DecoupledIO(new FlitREQ))
+  val updat = Flipped(DecoupledIO(new FlitUpDAT64))
+  val dnrsp = DecoupledIO(new FlitDnRSP)
+  val dndat = DecoupledIO(new FlitDnDAT64)
 }
 
 /*
@@ -350,5 +350,52 @@ object UncacheCCHI {
   object Rx {
     def denied(respErr: UInt): Bool = DCacheCCHI.Rx.denied(respErr)
     def corrupt(respErr: UInt): Bool = DCacheCCHI.Rx.corrupt(respErr)
+  }
+}
+
+/*
+ * D$ / I$ CtrlUnit Compact CHI Type 3 Completer helpers.
+ */
+object CtrlUnitCCHI {
+  object Params {
+    // Completer SrcID in dnrsp/dndat. Not used.
+    val srcId: UInt = 0.U
+  }
+
+  object Tx {
+    def compDbidResp(rsp: FlitDnRSP, txnId: UInt, tgtId: UInt): Unit = {
+      rsp.TxnID := txnId
+      rsp.SrcID := Params.srcId
+      rsp.TgtID := tgtId
+      rsp.DBID := txnId
+      rsp.Opcode := CCHIOpcode.CompDBIDResp.U
+      rsp.RespErr := 0.U(2.W)
+      rsp.Resp := 0.U(3.W)
+      rsp.CBusy := 0.U(3.W)
+      rsp.WayValid := false.B
+      rsp.Way := 0.U
+      rsp.TraceTag := 0.U(1.W)
+    }
+
+    def compData(dat: FlitDnDAT64, txnId: UInt, tgtId: UInt, beatData: UInt): Unit = {
+      dat.TxnID := txnId
+      dat.SrcID := Params.srcId
+      dat.TgtID := tgtId
+      dat.DBID := 0.U
+      dat.Opcode := CCHIOpcode.CompData.U
+      dat.RespErr := 0.U(2.W)
+      dat.Resp := 0.U(3.W)
+      dat.DataID := 0.U(2.W)
+      dat.DataSource := 0.U(5.W)
+      dat.CBusy := 0.U(3.W)
+      dat.WayValid := false.B
+      dat.Way := 0.U
+      dat.TraceTag := 0.U(1.W)
+      dat.Data := beatData
+    }
+  }
+
+  object Rx {
+    def isWrData(opcode: UInt): Bool = CCHIOpcode.NonCopyBackWrData.is(opcode)
   }
 }
