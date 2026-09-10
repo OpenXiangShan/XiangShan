@@ -87,7 +87,7 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
 // the middle of an RVI inst
 class LastHalfInfo(implicit p: Parameters) extends XSBundle {
   val valid    = Bool()
-  val middlePC = UInt(VAddrBits.W)
+  val middlePC = UInt((VAddrBits + 1).W)
   def matchThisBlock(startAddr: UInt) = valid && middlePC === startAddr
 }
 
@@ -100,11 +100,11 @@ class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
 class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val ftqOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
   val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
-  val target     = UInt(VAddrBits.W)
+  val target     = UInt((VAddrBits + 1).W)
   val instrRange = Vec(PredictWidth, Bool())
   val instrValid = Vec(PredictWidth, Bool())
   val pds        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc         = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc         = Vec(PredictWidth, UInt((VAddrBits + 1).W))
   val fire_in    = Bool()
 }
 
@@ -303,7 +303,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     .elsewhen(f0_fire && !f0_flush)(f1_valid := true.B)
     .elsewhen(f1_fire)(f1_valid := false.B)
 
-  val f1_pc_high       = f1_ftq_req.startAddr(VAddrBits - 1, PcCutPoint)
+  val f1_pc_high       = f1_ftq_req.startAddr(VAddrBits, PcCutPoint)
   val f1_pc_high_plus1 = f1_pc_high + 1.U
 
   /**
@@ -365,8 +365,9 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // TODO: addr compare may be timing critical
   val f2_icache_all_resp_wire =
     fromICache.valid &&
-      fromICache.bits.vaddr(0) === f2_ftq_req.startAddr &&
-      (fromICache.bits.doubleline && fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart || !f2_doubleLine)
+      fromICache.bits.vaddr(0) === f2_ftq_req.startAddr(VAddrBits - 1, 0) &&
+      (fromICache.bits.doubleline &&
+        fromICache.bits.vaddr(1) === f2_ftq_req.nextlineStart(VAddrBits - 1, 0) || !f2_doubleLine)
   val f2_icache_all_resp_reg = RegInit(false.B)
 
   icacheRespAllValid := f2_icache_all_resp_reg || f2_icache_all_resp_wire
@@ -600,7 +601,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
     ***********************************************************************
     */
-  val f3_half_snpc = Wire(Vec(PredictWidth, UInt(VAddrBits.W)))
+  val f3_half_snpc = Wire(Vec(PredictWidth, UInt((VAddrBits + 1).W)))
   for (i <- 0 until PredictWidth) {
     if (i == (PredictWidth - 2)) {
       f3_half_snpc(i) := CatPC(f3_pc_last_lower_result_plus2, f3_pc_high, f3_pc_high_plus1)
@@ -872,13 +873,13 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.iTLBInter.req.valid                   := (mmio_state === m_sendTLB) && f3_req_is_mmio
   io.iTLBInter.req.bits.size               := 3.U
   io.iTLBInter.req.bits.vaddr              := f3_resend_vaddr
-  io.iTLBInter.req.bits.debug.pc           := f3_resend_vaddr
+  io.iTLBInter.req.bits.debug.pc           := SignExt(f3_resend_vaddr, XLEN)
   io.iTLBInter.req.bits.cmd                := TlbCmd.exec
   io.iTLBInter.req.bits.isPrefetch         := false.B
   io.iTLBInter.req.bits.kill               := false.B // IFU use itlb for mmio, doesn't need sync, set it to false
   io.iTLBInter.req.bits.no_translate       := false.B
-  io.iTLBInter.req.bits.fullva             := 0.U
-  io.iTLBInter.req.bits.checkfullva        := false.B
+  io.iTLBInter.req.bits.fullva             := SignExt(f3_resend_vaddr, XLEN)
+  io.iTLBInter.req.bits.checkfullva        := true.B
   io.iTLBInter.req.bits.hyperinst          := DontCare
   io.iTLBInter.req.bits.hlvx               := DontCare
   io.iTLBInter.req.bits.memidx             := DontCare
@@ -1103,8 +1104,8 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val wb_instr_range         = RegEnable(io.toIbuffer.bits.enqEnable, wb_enable)
 
   val wb_pc_lower_result = RegEnable(f3_pc_lower_result, wb_enable)
-  val wb_pc_high         = RegEnable(f3_pc_high, wb_enable)
-  val wb_pc_high_plus1   = RegEnable(f3_pc_high_plus1, wb_enable)
+  val wb_pc_high         = RegEnable(f3_pc_high(VAddrBits - PcCutPoint - 1, 0), wb_enable)
+  val wb_pc_high_plus1   = RegEnable(f3_pc_high_plus1(VAddrBits - PcCutPoint - 1, 0), wb_enable)
   val wb_pc              = CatPC(wb_pc_lower_result, wb_pc_high, wb_pc_high_plus1)
 
   // val wb_pc             = RegEnable(f3_pc, wb_enable)
