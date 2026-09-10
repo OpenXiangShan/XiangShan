@@ -27,18 +27,20 @@ import xiangshan.frontend.bpu.Train
 // PHR: Predicted History Register
 class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
   class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-    val s0_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s1_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s2_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s3_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val phr:            UInt                  = Output(UInt(PhrHistoryLength.W))
-    val phrMeta:        PhrMeta               = Output(new PhrMeta)
-    val train:          PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
-    val s1Train:        S1Train               = Input(new S1Train)
-    val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
-    val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val toFastPhr:      PhrToFastPhr          = Output(new PhrToFastPhr)
+    val s0_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s1_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    // the s1 group's history advanced by its first block only, for a lookup of the group's second block
+    val s1_midFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s2_foldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s3_foldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val phr:             UInt                  = Output(UInt(PhrHistoryLength.W))
+    val phrMeta:         PhrMeta               = Output(new PhrMeta)
+    val train:           PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
+    val s1Train:         S1Train               = Input(new S1Train)
+    val commit:          Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
+    val oldFoldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val trainFoldedPhr:  PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val toFastPhr:       PhrToFastPhr          = Output(new PhrToFastPhr)
   }
   val io: PhrIO = IO(new PhrIO)
 
@@ -260,6 +262,15 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s1_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
   s1_oldestBits.read(VecInit(pendingPhrValue.asBools), s1_phrPtr)
   s1S0FoldedPhr := foldGroup(s1_foldedPhrReg, s1_oldestBits, s1_token, s1_insOH)
+
+  // The history as it stands *between* the blocks of the group in s1: the same fold, stopped after the first block.
+  // A predictor looking up the second block needs this rather than the group's own start history, which is the
+  // context of the first block, not of what follows it.
+  private val s1_midInsOH = Seq.tabulate(MaxPredictionNum + 1) { n =>
+    if (n == 0) !s1_blockTaken.head else if (n == 1) s1_blockTaken.head else false.B
+  }
+  private val s1_midToken = Mux(s1_blockTaken.head, s1_blockHash.head, 0.U)
+  io.s1_midFoldedPhr := foldGroup(s1_foldedPhrReg, s1_oldestBits, s1_midToken, s1_midInsOH)
 
   // Every update is the same shape: shift the history by one Shamt per taken block and XOR the group's token over
   // the newest bits. A correction that lands on a not-taken block shifts nothing and simply restores the low bits its
