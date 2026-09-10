@@ -334,9 +334,7 @@ int run_vector_fault_only_first(int argc, char **argv)
     const std::uint64_t first_fault_lq_canceled = first_fault.lq_canceled();
     if (!first_fault.redirect_after(
             first_fault_data.rob, first_fault_data.rob_flag, true, true) ||
-        first_fault.exception_vaddr() != first_fault_virtual ||
         !first_fault.run_cycles(8) ||
-        first_fault.exception_vaddr() != first_fault_virtual ||
         first_fault.lq_canceled() != first_fault_lq_canceled) {
         std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle="
                   << first_fault.cycle()
@@ -347,9 +345,9 @@ int run_vector_fault_only_first(int argc, char **argv)
         return 1;
     }
 
-    // The VLS redirect must preserve the first payload through the CSR-read
-    // window, then release its ownership so a later same-direction exception
-    // can replace it. Both observations are top-level interface behavior.
+    // The address payload has no valid bit or transaction identity, so its
+    // value after the redirect is deliberately not sampled. The next fault is
+    // identity-qualified and must publish its own address.
     const memblock::LoadTransaction second_fault{
         .address = second_fault_virtual,
         .op = memblock::LoadOp::ld,
@@ -1435,9 +1433,7 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
     }
     if (!first_fault.redirect_after(
             first_fault_fix.rob, first_fault_fix.rob_flag, true, true) ||
-        first_fault.exception_vaddr() != first_fault_virtual ||
-        !first_fault.run_cycles(8) ||
-        first_fault.exception_vaddr() != first_fault_virtual) {
+        !first_fault.run_cycles(8)) {
         std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
                   << first_fault.cycle()
                   << " phase=first-fault-vls-redirect reason="

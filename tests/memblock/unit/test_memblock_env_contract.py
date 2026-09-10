@@ -2001,6 +2001,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + benchmark)
         self.assertIn("entries.hasException", vfof)
         self.assertIn("io.uopWriteback.bits.data             := entries.vl", vfof)
+        self.assertIn(
+            "value after the redirect is deliberately not sampled", main
+        )
+        self.assertNotIn(
+            "first_fault.exception_vaddr() != first_fault_virtual ||\n"
+            "        !first_fault.run_cycles(8) ||\n"
+            "        first_fault.exception_vaddr() != first_fault_virtual",
+            main,
+        )
 
     def test_random_mixed_vfof_avoids_unqualified_fault_vaddr_oracle(self) -> None:
         main = read_cpp_source("memblock_main.cpp")

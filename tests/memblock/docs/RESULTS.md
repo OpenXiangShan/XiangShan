@@ -10,6 +10,8 @@
   `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
   address selection), `39a7b9629` (PTW D-channel error propagation), and
   `42152f6ba` (CMO D-channel error propagation).
+- VLS exception redirect repair: `4b976f156` (raw redirect for exception
+  buffers; `flushAfter` retained only for vector-store drain consumers).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
 - Retracted segment redirect changes: `9feb8279e` and `73096f6b9` treated an
@@ -19,18 +21,47 @@
   were reverted by `d34dca150` and `af35d347c`, respectively.
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
-- MemBlock top-file SHA-256: `2ff545f27393bb045d7470e4f13de24e872cf804cdfdd47bb2a366328ed3c646`
-- Complete ordered RTL SHA-256: `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
-- Current rebuilt and frozen UT executable SHA-256: `18ffd634e94039da15df16e372571c919fac4cc16b92221928408b290584b229`
+- MemBlock top-file SHA-256: `3d3887e75a1ba121b8fd2e3f525d117d31a0b1bba86f50a690c898c3e4bb7aba`
+- Complete ordered RTL SHA-256: `356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`
+- Current rebuilt and frozen UT executable SHA-256: `f2b2d160bb5a4820ca81cea0babac10d775739ec2bf2dc1c4eb0132b7804f330`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `b573c08f09623c86f4254497c6af6e9c994abf758c79b6ef5a319df866228cb2`
-- Frozen xspcomm SHA-256: `eb21fb28815e2e725db6d7fe3931ddbf38d982874a4c187550936913b14d2f8b`
-- Frozen RTL metadata SHA-256: `29aa19365fd7d772f9ec7889175360fbc2aa87c35ad4880a11e4357257025e69`
-- Frozen runtime manifest SHA-256: `156f141b74aa43cbe76164a76b235378bbdbb124f7a4e910e809df96951ef8d4`
-- Frozen-runtime Picker commit: `5e9e38d7087006440ae1c533073b13e798a36927`
+- Current rebuilt and frozen Verilated model SHA-256: `101de148c6912a0138b6471d51e3329afbed0c7306ebc12c6df35619f4a1b02d`
+- Frozen xspcomm SHA-256: `1ed4e5013658fa557c6c055afa6242d272377d2a3564b18a0a31bf4147ae6f52`
+- Frozen RTL metadata SHA-256: `951b029217eb42248214ba235a9d883618349c123749d7b0f87c102ffe6a0914`
+- Frozen runtime manifest SHA-256: `8be056188bf70ae20106be6aa9b5428a4d25da9b2a8a2cad2a38d3b141ce60cb`
+- Frozen-runtime Picker commit: `794e2d9085cf7eae31638119d15a976558ba9490`
 - Frozen-runtime xcomm commit: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
-- Current bootstrap Picker pin: `5e9e38d7087006440ae1c533073b13e798a36927`
+- Current bootstrap Picker pin: `794e2d9085cf7eae31638119d15a976558ba9490`
 - Current bootstrap xcomm pin: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
+
+## VLS Exception Redirect Address Lifetime
+
+The initial focused reproducers on complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
+showed that a VLS exception redirect retained the matching load/store
+ExceptionBuffer record. A later identified load page fault returned the first
+VLEFF VA (`0x53000180`) instead of `0x53003000`; the independent store path
+returned the vector-store breakpoint VA (`0x80630020`) instead of the later
+scalar-store VA `0x80630180`.
+
+The oracle was then narrowed to the stable external contract. The top-level
+address payload is sampled only while associated with an exact ROB/writeback
+fault identity. It is not sampled after redirect until the next identified
+fault, so no internal buffer lifetime or fixed pipeline timing decides PASS.
+Read-only Picker `mem_direct` observations were used only to localize the stale
+entry.
+
+Repair `4b976f156` gives ExceptionBuffers the raw `flush` redirect while SQ
+recovery and StoreMisalignBuffer retain the `flushAfter` view needed for vector
+store drain. A clean RTL generation and Picker rebuild produced complete RTL
+SHA-256 `356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`.
+The frozen schema-2 focused run passed `vector-fof` at cycle 137,
+`vector-segment-fof` at cycle 304, and `trigger-contracts` at cycle 1521. Its
+artifact is `build/memblock/vls-postfix.json`, SHA-256
+`e2a84f4422adfe8ff77da91dc418902a5662d9bec1370d4dd9d1c0333dc52c69`;
+runtime, external dependencies, controller sources, and RTL identity remained
+unchanged across the run. Full root cause, CSR propagation, limitations, and
+reproduction commands are in `CPU_BUG_VLS_EXCEPTION_REDIRECT.md`.
 
 ## Scalar Address Immediates And Bus Error Model
 

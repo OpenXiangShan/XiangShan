@@ -35,6 +35,13 @@ reproducer, pre-fix output, root-cause analysis, and repaired evidence are in
 confirmed/fixed current-worktree evidence rather than added to the 58-commit
 table below.
 
+The current branch also fixes a regression introduced by applying the
+historical `222f993ed` VLS `flushAfter` policy to every MemBlock consumer. Load
+and store ExceptionBuffers then retained stale exception-address records across
+the VLS redirect. The focused external-interface reproducers, architectural
+propagation, and post-fix evidence are in
+[`CPU_BUG_VLS_EXCEPTION_REDIRECT.md`](CPU_BUG_VLS_EXCEPTION_REDIRECT.md).
+
 ## Audit
 
 | Date | Commit | Fix | Status | Evidence or missing contract |
@@ -47,7 +54,7 @@ table below.
 | 2026-08-10 | `e541289b` | Preserve SQ address-valid state on TLB miss | **Reproduced** | `store-tlb-miss-preserve`: mutant violates the all-entry identity-preserving SVA one cycle after a miss. |
 | 2026-08-04 | `2cac7a0d` | Strict ordering of misaligned vector elements | Boundary gap | Current tests generate vector misaligned replays, but the distinguishing reverse-order sequence is not legal/stable with the current dispatch contract. |
 | 2026-07-30 | `7754c3a8` | Memory-stall top-down attribution | Non-functional/outside MemBlock UT | Performance-counter attribution, not an architectural memory result. |
-| 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Boundary gap | Requires a backend-generated `isVlsException` redirect synchronized to the faulting vector uop. |
+| 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Producer implemented; mutation gap | `vector-fof`, `vector-segment-fof`, and `trigger-contracts` now drive a `flush` redirect with `isVlsException=1` for the identified vector uop. They reproduce the distinct stale-address regression documented in [`CPU_BUG_VLS_EXCEPTION_REDIRECT.md`](CPU_BUG_VLS_EXCEPTION_REDIRECT.md), caused by applying `flushAfter` globally. They do not yet prove that reverting `222f993e` loses required residual vector-store side effects; that original SQ-drain behavior still needs a distinguishing legal mutation experiment. |
 | 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `random-mixed` vector-store replay/readback phases. |
 | 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Boundary gap | HLV, HLVX, HSV and SPVP-specific PMP reference checks are not modeled. |
 | 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | Rebuilt pre-fix mutant hash `5bfe14db...`; the expanded translated cross-page vector-store progress sequence still passed with exact writeback, dequeue, and readback. |
