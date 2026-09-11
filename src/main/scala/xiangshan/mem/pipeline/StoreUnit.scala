@@ -218,7 +218,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.tlb.req.bits.checkfullva        := s0_use_flow_rs || s0_use_flow_vec
   io.tlb.req.bits.cmd                := Mux(s0_isCbo_noZero, TlbCmd.read, TlbCmd.write)
   io.tlb.req.bits.isPrefetch         := s0_use_flow_prf
-  io.tlb.req.bits.size               := s0_size
+  io.tlb.req.bits.size               := Mux(s0_use_flow_vec, s0_vecstin.alignedType(2,0), s0_size)
   io.tlb.req.bits.kill               := false.B
   io.tlb.req.bits.memidx.is_ld       := false.B
   io.tlb.req.bits.memidx.is_st       := true.B
