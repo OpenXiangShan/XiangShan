@@ -15,6 +15,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile._
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.fu.FuType
 
 import scala.beans.BeanProperty
 
@@ -231,7 +232,7 @@ class ExuParam(
     Option.when(cond(this))(gen)
   }
 
-  def genRfRdAddrBundle(pregParams: PregParams): MixedVec[RfReadAddrBundle] = MixedVec(
+  def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
            FpPregParams(_, _, _, _) |
@@ -305,7 +306,7 @@ class ExuParam(
   @BeanProperty
   var exeUnitParams: ExeUnitParams = _
 
-  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.fuType == FuType.vidiv)
+  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(x => x.fuType == FuType.vidiv || x.fuType == FuType.fDivSqrt)
 
   def numNonFixedLatFu: Int = nonFixedLatFuConfigs.size
 

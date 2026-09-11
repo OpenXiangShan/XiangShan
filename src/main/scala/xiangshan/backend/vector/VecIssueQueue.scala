@@ -900,6 +900,7 @@ object VecIssueQueue {
     val srcStateVl = SrcState()
 
     val sqIdx     = new SqPtr
+    val srcLoadDependency = Option.when(!param.inVecRegion)(Vec(numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
 
     val debug     = Option.when(backendParams.debugEn)(new IssueQueueInDebug)
 
@@ -942,6 +943,7 @@ object VecIssueQueue {
       this.srcStateVl := source.srcStateVl
 
       this.sqIdx := source.sqIdx
+      this.srcLoadDependency.foreach(_ := source.srcLoadDependency)
 
       this.debug.foreach(_ := source.debug.get)
     }
@@ -1035,6 +1037,8 @@ object VecIssueQueue {
     val vtype        = Option.when(exuParam.readVType)(VType())
     val oldVType     = Option.when(exuParam.readOldVType)(VType())
 
+    val loadDependency = Option.when(!exuParam.isVecExeUnit)(Vec(exuParam.numRegSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
+
     val debug        = Option.when(backendParams.debugEn)(new VecRegionModule.DebugBundle)
 
     def fromEntry(entry: Entry): Unit = {
@@ -1079,6 +1083,7 @@ object VecIssueQueue {
       this.frm.foreach(_ := entry.payload.frm.get)
       this.vtype.foreach(_ := entry.payload.vtype.get)
       this.oldVType.foreach(_ := entry.payload.oldVType.get)
+      this.loadDependency.foreach(_ := entry.status.srcStatus.map(_.loadDependency.get))
 
       this.debug.foreach { case debug =>
         debug.debug := 0.U.asTypeOf(debug.debug)
@@ -1140,6 +1145,22 @@ object VecIssueQueue {
         s.srcState := enq.srcState(srcIdx)
         s.bypassDelay := BypassDelay.delay3
         s.bypassSource.idx := 0.U
+        s.loadDependency.foreach(_ := enq.srcLoadDependency.get(srcIdx))
+        // gen idx and bypassDelay from srcLoadDependency
+        if (s.loadDependency.nonEmpty) {
+          val rawLoadDependency = enq.srcLoadDependency.get(srcIdx).reduce(_ | _)
+          s.bypassDelay := Mux(
+            rawLoadDependency.orR,
+            rawLoadDependency,
+            BypassDelay.delay3
+          )
+          val loadWBPorts = backendParams.allIssueParams.filter(_.isLdAddrIQ).map(_.exuBlockParams).flatten.map(_.getFpWBPort.get.port)
+          val condSeq = enq.srcLoadDependency.get(srcIdx).map(_.orR)
+          val dataSeq = (0 until LoadPipelineWidth).map(x => loadWBPorts(x).U)
+          for (i <- 0 until LoadPipelineWidth) {
+            s.bypassSource.idx := Mux1H(condSeq, dataSeq)
+          }
+        }
       }
       this.srcStatusV0.foreach { case s =>
         s.ren := enq.v0Ren
@@ -1227,6 +1248,7 @@ object VecIssueQueue {
     val srcState     = SrcState()
     val bypassDelay  = BypassDelay()
     val bypassSource = new BypassSource()
+    val loadDependency = Option.when(!param.inVecRegion)(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   }
 
   class VlSrcStatus(implicit p: Parameters, param: IssueParam) extends XSBundle {

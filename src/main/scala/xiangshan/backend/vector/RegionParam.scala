@@ -77,7 +77,7 @@ class RegionParam(
     MixedVec(issueParams.map(_.genExuBundle(cond, gen)))
   }
 
-  def genRfRdAddrBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] = {
+  def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] = {
     MixedVec(this.issueParams.map(_.genRfRdAddrBundle(pregParams)))
   }
 

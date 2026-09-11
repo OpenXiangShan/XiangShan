@@ -1350,8 +1350,13 @@ object Bundles {
     val I2FDataOut   = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
     val I2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
     val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
-    val F2IDataOut   = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
-    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(new Bundle {
+      val valid = Bool()
+      val pdest = UInt(FpPhyRegIdxWidth.W)
+      val data = UInt(XLEN.W)
+    }))
+    val busyTableF2I = Option.when(params.isIntSchd)(Input(UInt(3.W)))
+    val busyTableI2F = Option.when(params.isIntSchd)(Output(UInt(3.W)))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput

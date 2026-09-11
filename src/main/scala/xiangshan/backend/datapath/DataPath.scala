@@ -591,7 +591,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val og0_cancel_no_load = VecInit(og0FailedVec2.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu).map(_._1).toSeq)
   val exuParamsNoLoad = fromIQ.flatten.zip(params.allExuParams).filter(!_._2.hasLoadFu)
   val is_0latency = Wire(Vec(og0_cancel_no_load.size, Bool()))
-  is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.fuType))
+  is_0latency := exuParamsNoLoad.map(x => is0latency(x._1.bits.fuType) || x._2.issueBlockParam.inFpSchd.B)
   val og0_cancel_delay = RegNext(VecInit(og0_cancel_no_load.zip(is_0latency).map(x => x._1 && x._2)))
   val flushReg = RegNextWithEnable(io.flush)
   for (i <- fromIQ.indices) {
@@ -642,13 +642,16 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
 
   private val fromIQFire = fromIQ.map(_.map(_.fire))
   private val toExuFire = toExu.map(_.map(_.fire))
+  private val allIssueParams = backendParams.allIssueParams
+  private val intIssueParamsNum = backendParams.intSchdParams.get.issueBlockParams.size
   toIQs.zipWithIndex.foreach {
     case(toIQ, iqIdx) =>
       toIQ.zipWithIndex.foreach {
         case (toIU, iuIdx) =>
           // IU: issue unit
           val og0resp = toIU.og0resp
-          og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && !fromIQ(iqIdx)(iuIdx).ready
+          if (allIssueParams(iqIdx).inFpSchd) og0FailedVec2(iqIdx)(iuIdx) := io.og0CancelForStdFromFltRegion(iqIdx - intIssueParamsNum)
+          else  og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && !fromIQ(iqIdx)(iuIdx).ready
           og0resp.failed              := og0FailedVec2(iqIdx)(iuIdx)
           og0resp.finalSuccess        := false.B
           og0resp.lqIdx.foreach(_     := 0.U.asTypeOf(new LqPtr))
@@ -678,7 +681,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   }
 
   io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) =>
-                    if (params.isIQWakeUpSource && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
+                    if (params.isIQWakeUpSource && params.wakeUpFuLatancySet.contains(0) || params.issueBlockParam.inFpSchd) cancel else false.B
                   }.toSeq
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
 
@@ -858,6 +861,8 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val fpRfRdataOut = Option.when(param.isFpSchd)(Output(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
 
   val og0Cancel = Output(ExuVec())
+
+  val og0CancelForStdFromFltRegion = Input((Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())))
 
   val og1Cancel = Output(ExuVec())
 

@@ -12,6 +12,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.PregParams
+import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.RespBundle
 import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.mem.StoreQueueDataWrite
@@ -90,30 +91,35 @@ class IssuePipe(
     case (readBundle, srcIdx) =>
       readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
       readBundle.addr := is0Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is0Next.bits.robIdx
   }
 
   out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
       readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx)
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VpRdAddrNext.zip(is1VpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
       readBundle.ren := is1Next.valid && is1Next.bits.vpRen(srcIdx)
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1V0RdAddrNext.zip(is1Next.bits.psrcV0).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VlRdAddrNext.zip(is1Next.bits.psrcVl).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
@@ -363,9 +369,10 @@ object IssuePipe {
     val rdConfig  : RdConfig,
     val srcIdx    : Int,
     val pregParams: PregParams,
-  ) extends Bundle {
+  )(implicit p: Parameters) extends Bundle {
     val ren = Bool()
     val addr = UInt(pregParams.addrWidth.W)
+    val robIdx = new RobPtr
   }
 
   class RfReadDataBundle(
