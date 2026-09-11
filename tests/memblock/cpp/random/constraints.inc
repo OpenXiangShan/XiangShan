@@ -211,10 +211,9 @@ struct RandomConstraints {
     std::array<unsigned, 7> vector_segment_emul_weights{};
     std::array<unsigned, 7> vector_segment_nf_weights{};
     unsigned vector_segment_stores_per_mille = 0;
-    // Segment FOF is a low-rate subclass of segment loads. The initial
-    // constrained-random shape is the architectural unit-stride m1 subset;
-    // fault position, translation mode, EEW, and NF remain independently
-    // selectable.
+    // Segment FOF is a low-rate unit-stride subclass of segment loads. Fault
+    // position and every decoder-legal EEW/SEW/LMUL/EMUL/NF shape remain
+    // independently selectable.
     unsigned vector_segment_fof_per_mille = 0;
     unsigned vector_segment_fof_first_fault_per_mille = 0;
     unsigned probes_per_mille = 0;
@@ -1557,11 +1556,10 @@ struct RandomConstraints {
                 vector_segment_nf_weights, reachable_nf, "NF");
             if (vector_segment_fof_per_mille != 0 &&
                 (vector_segment_addressing_weights[0] == 0 ||
-                 vector_segment_lmul_weights[3] == 0 ||
-                 vector_segment_emul_weights[3] == 0 ||
                  enabled_vector_segment_fof_crosses() == 0)) {
                 throw std::invalid_argument(
-                    "vector-segment-fof requires a legal unit-stride m1 EEW/SEW/NF shape");
+                    "vector-segment-fof requires a legal unit-stride "
+                    "EEW/SEW/LMUL/EMUL/NF shape");
             }
         }
         if (std::accumulate(
@@ -2052,26 +2050,31 @@ struct RandomConstraints {
         return choose_weighted(vector_eew_weights, random);
     }
 
-    unsigned choose_vector_segment_fof_eew(std::uint64_t random) const
+    static constexpr bool vector_segment_fof_shape_legal(
+        unsigned eew, unsigned sew, int lmul_log2, unsigned nf_index)
     {
-        auto compatible = vector_segment_eew_weights;
-        for (unsigned eew = 0; eew < compatible.size(); ++eew) {
-            if (vector_segment_sew_weights[eew] == 0) {
-                compatible[eew] = 0;
-            }
+        const int emul_log2 = static_cast<int>(eew) -
+            static_cast<int>(sew) + lmul_log2;
+        if (eew >= 4 || sew >= 4 || lmul_log2 < -3 || lmul_log2 > 3 ||
+            nf_index >= 7 || lmul_log2 < static_cast<int>(sew) - 3 ||
+            emul_log2 < -3 || emul_log2 > 3) {
+            return false;
         }
-        return choose_weighted(compatible, random);
-    }
-
-    unsigned choose_vector_segment_fof_nf(std::uint64_t random) const
-    {
-        return choose_weighted(vector_segment_nf_weights, random);
+        const unsigned uops_per_field =
+            1U << static_cast<unsigned>(std::max(emul_log2, 0));
+        return uops_per_field * (nf_index + 2U) <= 8U;
     }
 
     bool vector_segment_fof_cross_enabled(
-        unsigned fault, unsigned mode, unsigned eew,
-        unsigned nf_index) const
+        unsigned fault, unsigned mode, unsigned eew, unsigned sew,
+        int lmul_log2, unsigned nf_index) const
     {
+        if (!vector_segment_fof_shape_legal(
+                eew, sew, lmul_log2, nf_index)) {
+            return false;
+        }
+        const int emul_log2 = static_cast<int>(eew) -
+            static_cast<int>(sew) + lmul_log2;
         const bool fault_enabled = fault != 0
             ? vector_segment_fof_first_fault_per_mille != 0
             : vector_segment_fof_first_fault_per_mille != 1000;
@@ -2082,9 +2085,9 @@ struct RandomConstraints {
             stage1_mode_weights.at(mode) != 0 &&
             vector_segment_addressing_weights[0] != 0 &&
             vector_segment_eew_weights.at(eew) != 0 &&
-            vector_segment_sew_weights.at(eew) != 0 &&
-            vector_segment_lmul_weights[3] != 0 &&
-            vector_segment_emul_weights[3] != 0 &&
+            vector_segment_sew_weights.at(sew) != 0 &&
+            vector_segment_lmul_weights.at(lmul_log2 + 3) != 0 &&
+            vector_segment_emul_weights.at(emul_log2 + 3) != 0 &&
             vector_segment_nf_weights.at(nf_index) != 0;
     }
 
@@ -2094,9 +2097,13 @@ struct RandomConstraints {
         for (unsigned fault = 0; fault < 2; ++fault) {
             for (unsigned mode = 0; mode < 2; ++mode) {
                 for (unsigned eew = 0; eew < 4; ++eew) {
-                    for (unsigned nf = 0; nf < 7; ++nf) {
-                        count += vector_segment_fof_cross_enabled(
-                            fault, mode, eew, nf);
+                    for (unsigned sew = 0; sew < 4; ++sew) {
+                        for (int lmul = -3; lmul <= 3; ++lmul) {
+                            for (unsigned nf = 0; nf < 7; ++nf) {
+                                count += vector_segment_fof_cross_enabled(
+                                    fault, mode, eew, sew, lmul, nf);
+                            }
+                        }
                     }
                 }
             }
@@ -2545,7 +2552,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=46 constraints=" << name
+        stream << "constraint_schema=47 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];

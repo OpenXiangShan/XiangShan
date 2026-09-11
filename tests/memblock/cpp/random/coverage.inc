@@ -358,9 +358,13 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 2> vector_segment_fof_fault_positions{};
     std::array<std::uint64_t, 2> vector_segment_fof_stage1_modes{};
     std::array<std::uint64_t, 4> vector_segment_fof_eews{};
+    std::array<std::uint64_t, 4> vector_segment_fof_sews{};
+    std::array<std::uint64_t, 7> vector_segment_fof_lmuls{};
+    std::array<std::uint64_t, 7> vector_segment_fof_emuls{};
     std::array<std::uint64_t, 7> vector_segment_fof_nfs{};
-    // [later/first fault][Sv39/Sv48][EEW8/16/32/64][NF2..NF8]
-    std::array<std::uint64_t, 2 * 2 * 4 * 7>
+    // [later/first fault][Sv39/Sv48][338 legal unit-stride shapes]
+    static constexpr unsigned vector_segment_fof_shape_count = 338;
+    std::array<std::uint64_t, 2 * 2 * vector_segment_fof_shape_count>
         vector_segment_fof_crosses{};
     std::uint64_t vector_segment_fof_data_uops = 0;
     std::uint64_t vector_segment_fof_fix_vl = 0;
@@ -517,23 +521,60 @@ struct ConstraintCoverage {
         ++actions;
     }
 
-    static constexpr unsigned vector_segment_fof_cross_index(
-        unsigned fault, unsigned mode, unsigned eew, unsigned nf_index)
+    static unsigned vector_segment_fof_shape_index(
+        unsigned eew, unsigned sew, int lmul_log2, unsigned nf_index)
     {
-        return (((fault * 2U + mode) * 4U + eew) * 7U) + nf_index;
+        unsigned index = 0;
+        for (unsigned candidate_eew = 0; candidate_eew < 4; ++candidate_eew) {
+            for (unsigned candidate_sew = 0; candidate_sew < 4;
+                 ++candidate_sew) {
+                for (int candidate_lmul = -3; candidate_lmul <= 3;
+                     ++candidate_lmul) {
+                    for (unsigned candidate_nf = 0; candidate_nf < 7;
+                         ++candidate_nf) {
+                        if (!RandomConstraints::vector_segment_fof_shape_legal(
+                                candidate_eew, candidate_sew, candidate_lmul,
+                                candidate_nf)) {
+                            continue;
+                        }
+                        if (candidate_eew == eew && candidate_sew == sew &&
+                            candidate_lmul == lmul_log2 &&
+                            candidate_nf == nf_index) {
+                            return index;
+                        }
+                        ++index;
+                    }
+                }
+            }
+        }
+        throw std::out_of_range("illegal vector segment FOF shape");
+    }
+
+    static unsigned vector_segment_fof_cross_index(
+        unsigned fault, unsigned mode, unsigned eew, unsigned sew,
+        int lmul_log2, unsigned nf_index)
+    {
+        return (fault * 2U + mode) * vector_segment_fof_shape_count +
+            vector_segment_fof_shape_index(
+                eew, sew, lmul_log2, nf_index);
     }
 
     void sample_vector_segment_fof(
-        bool first_fault, unsigned mode, unsigned eew, unsigned nf_index,
-        unsigned data_uops)
+        bool first_fault, unsigned mode, unsigned eew, unsigned sew,
+        int lmul_log2, unsigned nf_index, unsigned data_uops)
     {
+        const int emul_log2 = static_cast<int>(eew) -
+            static_cast<int>(sew) + lmul_log2;
         ++vector_segment_fof_presence[1];
         ++vector_segment_fof_fault_positions[first_fault ? 1U : 0U];
         ++vector_segment_fof_stage1_modes.at(mode);
         ++vector_segment_fof_eews.at(eew);
+        ++vector_segment_fof_sews.at(sew);
+        ++vector_segment_fof_lmuls.at(lmul_log2 + 3);
+        ++vector_segment_fof_emuls.at(emul_log2 + 3);
         ++vector_segment_fof_nfs.at(nf_index);
         ++vector_segment_fof_crosses.at(vector_segment_fof_cross_index(
-            first_fault ? 1U : 0U, mode, eew, nf_index));
+            first_fault ? 1U : 0U, mode, eew, sew, lmul_log2, nf_index));
         vector_segment_fof_data_uops += data_uops;
         ++vector_segment_fof_fix_vl;
     }
@@ -988,10 +1029,16 @@ struct ConstraintCoverage {
                         std::array<std::uint64_t, 2>{} &&
                     vector_segment_fof_eews ==
                         std::array<std::uint64_t, 4>{} &&
+                    vector_segment_fof_sews ==
+                        std::array<std::uint64_t, 4>{} &&
+                    vector_segment_fof_lmuls ==
+                        std::array<std::uint64_t, 7>{} &&
+                    vector_segment_fof_emuls ==
+                        std::array<std::uint64_t, 7>{} &&
                     vector_segment_fof_nfs ==
                         std::array<std::uint64_t, 7>{} &&
                     vector_segment_fof_crosses ==
-                        std::array<std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                        decltype(vector_segment_fof_crosses){} &&
                     vector_segment_fof_data_uops == 0 &&
                     vector_segment_fof_fix_vl == 0;
             }
@@ -1733,6 +1780,9 @@ struct ConstraintCoverage {
             std::array<std::uint64_t, 2> crossed_faults{};
             std::array<std::uint64_t, 2> crossed_modes{};
             std::array<std::uint64_t, 4> crossed_eews{};
+            std::array<std::uint64_t, 4> crossed_sews{};
+            std::array<std::uint64_t, 7> crossed_lmuls{};
+            std::array<std::uint64_t, 7> crossed_emuls{};
             std::array<std::uint64_t, 7> crossed_nfs{};
             std::uint64_t cross_total = 0;
             std::uint64_t expected_data_uops = 0;
@@ -1740,20 +1790,39 @@ struct ConstraintCoverage {
             for (unsigned fault = 0; fault < 2; ++fault) {
                 for (unsigned mode = 0; mode < 2; ++mode) {
                     for (unsigned eew = 0; eew < 4; ++eew) {
-                        for (unsigned nf = 0; nf < 7; ++nf) {
-                            const auto count = vector_segment_fof_crosses.at(
-                                vector_segment_fof_cross_index(
-                                    fault, mode, eew, nf));
-                            const bool enabled =
-                                constraints.vector_segment_fof_cross_enabled(
-                                    fault, mode, eew, nf);
-                            cross_complete &= (count != 0) == enabled;
-                            cross_total += count;
-                            crossed_faults[fault] += count;
-                            crossed_modes[mode] += count;
-                            crossed_eews[eew] += count;
-                            crossed_nfs[nf] += count;
-                            expected_data_uops += count * (nf + 2U);
+                        for (unsigned sew = 0; sew < 4; ++sew) {
+                            for (int lmul = -3; lmul <= 3; ++lmul) {
+                                for (unsigned nf = 0; nf < 7; ++nf) {
+                                    if (!RandomConstraints::
+                                            vector_segment_fof_shape_legal(
+                                                eew, sew, lmul, nf)) {
+                                        continue;
+                                    }
+                                    const int emul = static_cast<int>(eew) -
+                                        static_cast<int>(sew) + lmul;
+                                    const auto count =
+                                        vector_segment_fof_crosses.at(
+                                            vector_segment_fof_cross_index(
+                                                fault, mode, eew, sew, lmul,
+                                                nf));
+                                    const bool enabled = constraints.
+                                        vector_segment_fof_cross_enabled(
+                                            fault, mode, eew, sew, lmul, nf);
+                                    cross_complete &=
+                                        (count != 0) == enabled;
+                                    cross_total += count;
+                                    crossed_faults[fault] += count;
+                                    crossed_modes[mode] += count;
+                                    crossed_eews[eew] += count;
+                                    crossed_sews[sew] += count;
+                                    crossed_lmuls[lmul + 3] += count;
+                                    crossed_emuls[emul + 3] += count;
+                                    crossed_nfs[nf] += count;
+                                    expected_data_uops += count * (nf + 2U) *
+                                        (1U << static_cast<unsigned>(
+                                            std::max(emul, 0)));
+                                }
+                            }
                         }
                     }
                 }
@@ -1767,10 +1836,16 @@ struct ConstraintCoverage {
                           std::array<std::uint64_t, 2>{} &&
                       vector_segment_fof_eews ==
                           std::array<std::uint64_t, 4>{} &&
+                      vector_segment_fof_sews ==
+                          std::array<std::uint64_t, 4>{} &&
+                      vector_segment_fof_lmuls ==
+                          std::array<std::uint64_t, 7>{} &&
+                      vector_segment_fof_emuls ==
+                          std::array<std::uint64_t, 7>{} &&
                       vector_segment_fof_nfs ==
                           std::array<std::uint64_t, 7>{} &&
                       vector_segment_fof_crosses ==
-                          std::array<std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                          decltype(vector_segment_fof_crosses){} &&
                       vector_segment_fof_data_uops == 0 &&
                       vector_segment_fof_fix_vl == 0
                 : binary_complete(
@@ -1785,11 +1860,16 @@ struct ConstraintCoverage {
                                      std::array<std::uint64_t, 2>{} &&
                                  vector_segment_fof_eews ==
                                      std::array<std::uint64_t, 4>{} &&
+                                 vector_segment_fof_sews ==
+                                     std::array<std::uint64_t, 4>{} &&
+                                 vector_segment_fof_lmuls ==
+                                     std::array<std::uint64_t, 7>{} &&
+                                 vector_segment_fof_emuls ==
+                                     std::array<std::uint64_t, 7>{} &&
                                  vector_segment_fof_nfs ==
                                      std::array<std::uint64_t, 7>{} &&
                                  vector_segment_fof_crosses ==
-                                     std::array<
-                                         std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                                     decltype(vector_segment_fof_crosses){} &&
                                  vector_segment_fof_data_uops == 0 &&
                                  vector_segment_fof_fix_vl == 0
                            : cross_complete && cross_total == fof_actions &&
@@ -1798,6 +1878,9 @@ struct ConstraintCoverage {
                                  crossed_modes ==
                                      vector_segment_fof_stage1_modes &&
                                  crossed_eews == vector_segment_fof_eews &&
+                                 crossed_sews == vector_segment_fof_sews &&
+                                 crossed_lmuls == vector_segment_fof_lmuls &&
+                                 crossed_emuls == vector_segment_fof_emuls &&
                                  crossed_nfs == vector_segment_fof_nfs &&
                                  vector_segment_fof_data_uops ==
                                      expected_data_uops &&
@@ -2787,6 +2870,12 @@ public:
         append_counts(stream, vector_segment_fof_stage1_modes);
         stream << " actual_vector_segment_fof_eew=";
         append_counts(stream, vector_segment_fof_eews);
+        stream << " actual_vector_segment_fof_sew=";
+        append_counts(stream, vector_segment_fof_sews);
+        stream << " actual_vector_segment_fof_lmul=";
+        append_counts(stream, vector_segment_fof_lmuls);
+        stream << " actual_vector_segment_fof_emul=";
+        append_counts(stream, vector_segment_fof_emuls);
         stream << " actual_vector_segment_fof_nf=";
         append_counts(stream, vector_segment_fof_nfs);
         stream << " actual_vector_segment_fof_cross=";

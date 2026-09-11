@@ -57,9 +57,10 @@ Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests.
 Schema 44 also composes ordinary unit-stride VFOF into `random-mixed`, closing
 first/later fault x Sv39/Sv48 x EEW with independent page-walk, data,
-exception, final-VL, identity, and queue oracles. Schema 46 adds a common
-unit-stride M1 segment-FOF subclass and closes first/later fault x Sv39/Sv48 x
-EEW x NF. Exact fault VA is checked in the isolated ordinary and segmented FOF
+exception, final-VL, identity, and queue oracles. Schema 47 generalizes the
+common unit-stride segment-FOF subclass across all 338 decoder-legal
+EEW/SEW/LMUL/EMUL/NF shapes and closes 1,352 first/later fault x Sv39/Sv48 x
+shape bins. Exact fault VA is checked in the isolated ordinary and segmented FOF
 scenarios, where the top-level payload can be attributed to the only live
 exception. In the common tail, segment-field exception choice and
 faulting/remainder destination elements are left unspecified where the vector
@@ -1515,18 +1516,21 @@ reject/replay signals and counts remain diagnostic and never determine
 PASS/FAIL.
 
 Schema 46 adds low-rate segment FOF through `vector-segment-fof` and
-`vector-segment-fof-first-fault`. The common generator intentionally selects
-only unit-stride M1 (`EEW=SEW`, `LMUL=EMUL=1`) segment loads while its
-multi-uop cancellation and partial-completion contract is being generalized.
-It closes every enabled later/first-fault x Sv39/Sv48 x EEW x NF2..8 class
-before returning to the configured probability. Later faults require exact
-mapped-prefix bytes, suppress the page-fault writeback, and trim VL; a
-first-element fault preserves VL and requires at least one identified
-page-fault writeback. Data/mask bits for faulting or post-trim elements and
-the field carrying the exception are not fixed expected values. They are
-checked only through the architectural FOF contract and identity-matched
-exactly-once terminal accounting. Segment traffic's lack of `enqLsq` is a
-top-level stimulus contract, not a DUT correctness oracle.
+`vector-segment-fof-first-fault` for the initial unit-stride M1 subset. Schema
+47 enumerates all 338 decoder-legal unit-stride
+EEW/SEW/LMUL/derived-EMUL/NF shapes, including fractional EMUL and one through
+eight data uops, and closes 1,352 later/first-fault x Sv39/Sv48 x shape bins
+before returning to the configured probability. The RTL decoder exposes FOF
+only through `VLE{8,16,32,64}FF`; `NF>0` routes that encoding through VSegment,
+so indexed or strided Segment FOF is not a legal missing instruction class.
+Later faults require exact mapped-prefix bytes, suppress the page-fault
+writeback, and trim VL; a first-element fault preserves VL and requires at
+least one identified page-fault writeback. Data/mask bits for faulting or
+post-trim elements and the field carrying the exception are not fixed expected
+values. Every data uop and the single fix-VL uop must terminate exactly once.
+Segment traffic's lack of `enqLsq` is a top-level stimulus contract, not a DUT
+correctness oracle. Schema 47 raises the normal `random-mixed` minimum to 6,144
+actions so full shape closure leaves a meaningful mixed tail.
 
 For deterministic reduction of a failure, `--allow-short-mixed` permits a
 smaller `random-mixed` run after the constraint set has been narrowed. It does

@@ -3967,3 +3967,52 @@ a clean frozen-artifact regression. A closure-quality schema-46 campaign must
 record the runtime/RTL hashes, artifact path, all enabled cross bins, and
 reproducible per-seed summaries before the result is promoted to a final
 acceptance claim.
+
+## Schema-47 Segment FOF Shape Closure
+
+On 2026-09-11, schema 47 generalized the common `random-mixed` Segment FOF
+subclass from the M1 subset to all 338 decoder-legal unit-stride
+EEW/SEW/LMUL/derived-EMUL/NF shapes. Three 128-action focused coverage runs
+passed first on complete RTL SHA-256
+`356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`:
+seed 101 used EEW8/SEW32/LMUL=MF2/EMUL=MF8/NF8, seed 102 used
+EEW64/SEW32/LMUL=M1/EMUL=M2/NF4, and seed 103 used
+EEW64/SEW16/LMUL=M1/EMUL=M4/NF2. Each run covered both fault positions and
+both stage-1 modes with 26 FOF actions, 208 data uops, and 26 fix-VL
+writebacks.
+
+The full coverage-profile run then passed from the primary worktree on seed 47
+with 6,144 actions at cycle 3,399,224. It closed all 1,352
+later/first-fault x Sv39/Sv48 x legal-shape bins exactly once. The fault and
+stage-1 marginals were both `676,676`; the shape-derived total was 7,096 data
+uops, and all 1,352 FOF actions produced exactly one fix-VL writeback. The
+ordinary mixed tail remained active, including 930 ordinary vector shapes,
+1,371 concurrent-vector uops, all 16 miss-burst depths, 863 Probes, 3,381 PTW
+requests, and 204 Uncache requests. LQ/SQ accounting closed with zero
+unobserved cancellations.
+
+The independent verifier recomputed all legal shapes and accepted the
+43,377-byte artifact as:
+
+```text
+MEMBLOCK_REGRESSION_ARTIFACT_PASS seeds=47..47 results=1 transactions=6144 elapsed_seconds=1377.966242 rtl_sha256=356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3 artifact_sha256=84dbfa574a33d4432ac713cc9678cf396badefd59d7207b7f70a43ffe173bfd9
+```
+
+The online artifact is `/tmp/memblock-schema47-current.json`; the tested
+binary SHA-256 is
+`e8243d17f0e727a5373c82ff62b0b805e026d8ab9e018245dac3d43d55b5e12d`.
+This is finite online coverage evidence, not a frozen-runtime final acceptance
+campaign. An earlier identical seed-47 leaf PASS is deliberately excluded:
+that campaign began from an auxiliary worktree, and moving the changes into
+the primary worktree while it was active changed the runner path's contents.
+The campaign provenance guard correctly rejected that artifact because its
+controller hashes differed before and after the run.
+
+The Segment FOF oracle uses only the issued transaction, an independent
+page-table walk and memory image, identity-matched external writebacks,
+architectural exception/suppression and final-VL behavior, and exactly-once
+terminal accounting. Segment-field selection and faulting or post-trim active
+destination elements remain unconstrained where the vector specification
+leaves them unspecified. Internal FOF-buffer state, replay count, bank
+selection, prefetch behavior, and cycle timing do not participate in PASS or
+FAIL.

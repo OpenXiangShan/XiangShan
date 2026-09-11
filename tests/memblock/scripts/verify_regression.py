@@ -470,7 +470,7 @@ def _check_vector_fof_coverage(
     )
 
 
-def _check_vector_segment_fof_coverage(
+def _check_vector_segment_fof_coverage_schema46(
     result: dict[str, Any],
     target_operations: list[int],
     actual_operations: list[int],
@@ -625,6 +625,188 @@ def _check_vector_segment_fof_coverage(
         and data_uops == expected_data_uops
         and fix_vl == presence[1],
         "segment FOF cross/data-uop/fix-VL accounting is not conserved",
+    )
+    return presence[1]
+
+
+def _check_vector_segment_fof_coverage_schema47(
+    result: dict[str, Any],
+    target_operations: list[int],
+    actual_operations: list[int],
+    target_translation: list[int],
+    target_stage1: list[int],
+    target_segment_store: int,
+    segment_directions: list[int],
+) -> int:
+    """Check every legal unit-stride segment FOF shape and its accounting."""
+
+    target_fof = result.get("target_vector_segment_fof")
+    target_first_fault = result.get("target_vector_segment_fof_first_fault")
+    _require(
+        type(target_fof) is int and 0 <= target_fof < 1000,
+        "target_vector_segment_fof must be an integer in 0..999",
+    )
+    _require(
+        type(target_first_fault) is int and 0 <= target_first_fault <= 1000,
+        "target_vector_segment_fof_first_fault must be an integer in 0..1000",
+    )
+    presence = _csv_counts(result, "actual_vector_segment_fof", 2)
+    fault_positions = _csv_counts(
+        result, "actual_vector_segment_fof_fault", 2
+    )
+    modes = _csv_counts(result, "actual_vector_segment_fof_stage1_mode", 2)
+    eews = _csv_counts(result, "actual_vector_segment_fof_eew", 4)
+    sews = _csv_counts(result, "actual_vector_segment_fof_sew", 4)
+    lmuls = _csv_counts(result, "actual_vector_segment_fof_lmul", 7)
+    emuls = _csv_counts(result, "actual_vector_segment_fof_emul", 7)
+    nfs = _csv_counts(result, "actual_vector_segment_fof_nf", 7)
+    crosses = _csv_counts(result, "actual_vector_segment_fof_cross", 1352)
+    data_uops = result.get("actual_vector_segment_fof_data_uops")
+    fix_vl = result.get("actual_vector_segment_fof_fix_vl")
+    for name, value in (
+        ("actual_vector_segment_fof_data_uops", data_uops),
+        ("actual_vector_segment_fof_fix_vl", fix_vl),
+    ):
+        _require(
+            type(value) is int and value >= 0,
+            f"{name} is not a nonnegative integer: {value!r}",
+        )
+
+    target_addressing = _csv_counts(
+        result, "target_vector_segment_addressing", 4
+    )
+    target_eew = _csv_counts(result, "target_vector_segment_eew", 4)
+    target_sew = _csv_counts(result, "target_vector_segment_sew", 4)
+    target_lmul = _csv_counts(result, "target_vector_segment_lmul", 7)
+    target_emul = _csv_counts(result, "target_vector_segment_emul", 7)
+    target_nf = _csv_counts(result, "target_vector_segment_nf", 7)
+    segment_enabled = target_operations[4] != 0
+    loads_enabled = segment_enabled and target_segment_store != 1000
+    _require(
+        presence[0] == segment_directions[0]
+        and presence[0] + segment_directions[1] + presence[1]
+        == actual_operations[4],
+        "ordinary load/store and segment FOF accounting is not conserved",
+    )
+
+    shapes: list[tuple[int, int, int, int, int, int]] = []
+    for eew in range(4):
+        for sew in range(4):
+            for lmul in range(-3, 4):
+                emul = eew - sew + lmul
+                if lmul < sew - 3 or emul < -3 or emul > 3:
+                    continue
+                uops_per_field = 1 << max(emul, 0)
+                for nf in range(7):
+                    fields = nf + 2
+                    if uops_per_field * fields <= 8:
+                        shapes.append(
+                            (eew, sew, lmul, emul, nf, uops_per_field * fields)
+                        )
+    _require(len(shapes) == 338, "segment FOF legal-shape model is incomplete")
+
+    def shape_enabled(shape: tuple[int, int, int, int, int, int]) -> bool:
+        eew, sew, lmul, emul, nf, _ = shape
+        return (
+            target_addressing[0] != 0
+            and target_eew[eew] != 0
+            and target_sew[sew] != 0
+            and target_lmul[lmul + 3] != 0
+            and target_emul[emul + 3] != 0
+            and target_nf[nf] != 0
+        )
+
+    if target_fof != 0:
+        _require(
+            loads_enabled
+            and target_translation[1] != 0
+            and any(shape_enabled(shape) for shape in shapes),
+            "enabled segment FOF lacks a legal stage-1 unit-stride shape",
+        )
+
+    observations_zero = (
+        fault_positions == [0, 0]
+        and modes == [0, 0]
+        and eews == [0] * 4
+        and sews == [0] * 4
+        and lmuls == [0] * 7
+        and emuls == [0] * 7
+        and nfs == [0] * 7
+        and crosses == [0] * 1352
+        and data_uops == 0
+        and fix_vl == 0
+    )
+    if not loads_enabled:
+        _require(
+            target_fof == 0 and presence == [0, 0] and observations_zero,
+            "disabled segment FOF has observations",
+        )
+        return 0
+    if target_fof == 0:
+        _require(
+            presence[0] > 0 and presence[1] == 0 and observations_zero,
+            "disabled segment FOF has fault or fix-VL observations",
+        )
+        return 0
+
+    _require(
+        presence[0] > 0 and presence[1] > 0,
+        "ordinary/FOF segment-load selection has an uncovered class",
+    )
+    crossed_faults = [0, 0]
+    crossed_modes = [0, 0]
+    crossed_eews = [0] * 4
+    crossed_sews = [0] * 4
+    crossed_lmuls = [0] * 7
+    crossed_emuls = [0] * 7
+    crossed_nfs = [0] * 7
+    cross_total = 0
+    expected_data_uops = 0
+    index = 0
+    for fault in range(2):
+        fault_enabled = (
+            target_first_fault != 0
+            if fault != 0
+            else target_first_fault != 1000
+        )
+        for mode in range(2):
+            for shape in shapes:
+                eew, sew, lmul, emul, nf, shape_data_uops = shape
+                count = crosses[index]
+                index += 1
+                enabled = (
+                    fault_enabled
+                    and target_translation[1] != 0
+                    and target_stage1[mode] != 0
+                    and shape_enabled(shape)
+                )
+                _require(
+                    (count > 0) == enabled,
+                    "actual_vector_segment_fof_cross does not match enabled "
+                    f"classes: fault={fault} mode={mode} eew={eew} sew={sew} "
+                    f"lmul={lmul} emul={emul} nf={nf}",
+                )
+                cross_total += count
+                crossed_faults[fault] += count
+                crossed_modes[mode] += count
+                crossed_eews[eew] += count
+                crossed_sews[sew] += count
+                crossed_lmuls[lmul + 3] += count
+                crossed_emuls[emul + 3] += count
+                crossed_nfs[nf] += count
+                expected_data_uops += count * shape_data_uops
+    _require(
+        cross_total == presence[1]
+        and crossed_faults == fault_positions
+        and crossed_modes == modes
+        and crossed_eews == eews
+        and crossed_sews == sews
+        and crossed_lmuls == lmuls
+        and crossed_emuls == emuls
+        and crossed_nfs == nfs
+        and data_uops == expected_data_uops
+        and fix_vl == presence[1],
+        "segment FOF shape-cross/data-uop/fix-VL accounting is not conserved",
     )
     return presence[1]
 
@@ -797,7 +979,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         schema in (
             2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
             19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+            33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ),
         f"unsupported constraint_schema: {schema!r}",
     )
@@ -3183,8 +3365,18 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_segment_direction = _csv_counts(
             result, "actual_vector_segment_direction", 2
         )
-        if schema >= 46:
-            segment_fof_actions = _check_vector_segment_fof_coverage(
+        if schema >= 47:
+            segment_fof_actions = _check_vector_segment_fof_coverage_schema47(
+                result,
+                target_operations,
+                actual_operations,
+                target_translation,
+                target_stage1,
+                target_segment_store,
+                actual_segment_direction,
+            )
+        elif schema >= 46:
+            segment_fof_actions = _check_vector_segment_fof_coverage_schema46(
                 result,
                 target_operations,
                 actual_operations,

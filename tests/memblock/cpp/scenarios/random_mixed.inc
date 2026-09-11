@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 4096;
+    constexpr unsigned minimum_actions = 6144;
     if (!options.allow_short_mixed && options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -3341,6 +3341,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             return *fallback;
         };
+        auto choose_vector_segment_fof_shape = [&]()
+            -> const RandomVectorSegmentShape & {
+            long double total_weight = 0;
+            for (const auto &shape : vector_segment_shapes) {
+                if (shape.addressing == 0) {
+                    total_weight += shape.weight;
+                }
+            }
+            const long double unit = static_cast<long double>(random() >> 11) /
+                static_cast<long double>(std::uint64_t{1} << 53);
+            long double selection = unit * total_weight;
+            const RandomVectorSegmentShape *fallback = nullptr;
+            for (const auto &shape : vector_segment_shapes) {
+                if (shape.addressing != 0) {
+                    continue;
+                }
+                fallback = &shape;
+                if (selection < shape.weight) {
+                    return shape;
+                }
+                selection -= shape.weight;
+            }
+            if (fallback == nullptr) {
+                throw std::logic_error(
+                    "no enabled unit-stride vector segment FOF shape");
+            }
+            return *fallback;
+        };
         const auto choose_binary_class = [&] (
             unsigned true_per_mille,
             const std::array<std::uint64_t, 2> &counts) {
@@ -3710,15 +3738,26 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return true;
         };
         const auto issue_random_vector_segment_fof = [&] (
-            bool first_fault, unsigned stage1_mode, unsigned eew,
-            unsigned nf_index) {
+            bool first_fault, unsigned stage1_mode,
+            const RandomVectorSegmentShape &shape) {
+            const unsigned eew = shape.eew;
+            const unsigned sew = shape.vsew;
+            const int lmul_log2 = shape.lmul_log2;
+            const int emul_log2 = shape.emul_log2;
+            const unsigned nf_index = shape.nf_index;
             const unsigned fields = nf_index + 2U;
             const unsigned element_bytes = 1U << eew;
-            // The top-level flowNum is the number of memory flows represented
-            // by one M1 Vd, while VL=2 selects only the first two elements for
-            // this FOF reproducer.  Keep the two architectural quantities
-            // distinct across EEW=8..64.
-            const unsigned flow_num = 16U >> eew;
+            const unsigned uops_per_field =
+                1U << static_cast<unsigned>(std::max(emul_log2, 0));
+            const unsigned data_uops_count = fields * uops_per_field;
+            const unsigned bytes_per_data_uop = emul_log2 < 0
+                ? 16U >> static_cast<unsigned>(-emul_log2)
+                : 16U;
+            const unsigned flow_num = bytes_per_data_uop >> eew;
+            const unsigned elements_per_vreg = 16U >> eew;
+            const unsigned fault_element = first_fault ? 0U : 1U;
+            const std::uint8_t vlmul = static_cast<std::uint8_t>(
+                lmul_log2 < 0 ? lmul_log2 + 8 : lmul_log2);
             const std::uint64_t address = vector_fof_virtual_base + 0x1000U -
                 (first_fault ? 0U : fields * element_bytes);
             const std::uint64_t physical_address =
@@ -3729,7 +3768,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                ? "random-vector-segment-fof-first-fault"
                                : "random-vector-segment-fof-later-fault")
                        << ":mode=" << stage1_mode << ":eew=" << eew
-                       << ":nf=" << fields;
+                       << ":sew=" << sew << ":lmul=" << lmul_log2
+                       << ":emul=" << emul_log2 << ":nf=" << fields;
                 phase = detail.str();
             }
             if (!environment.run_until_all_complete(8192) ||
@@ -3781,10 +3821,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.vector_page_fault_writebacks();
             const std::uint64_t rob = rob_offset++;
             const std::uint8_t first_pdest = static_cast<std::uint8_t>(
-                1U + random() % (256U - fields - 1U));
+                1U + random() % (256U - data_uops_count - 1U));
             std::vector<memblock::VectorMemoryTransaction> data_uops;
-            data_uops.reserve(fields);
-            for (unsigned field = 0; field < fields; ++field) {
+            data_uops.reserve(data_uops_count);
+            for (unsigned uop = 0; uop < data_uops_count; ++uop) {
+                const unsigned field = uop / uops_per_field;
+                const unsigned vd_index = uop % uops_per_field;
+                std::uint16_t unspecified_elements = 0;
+                for (unsigned element = 0; element < elements_per_vreg;
+                     ++element) {
+                    const unsigned global_element =
+                        vd_index * elements_per_vreg + element;
+                    if (global_element >= fault_element &&
+                        global_element < 2U) {
+                        unspecified_elements |= static_cast<std::uint16_t>(
+                            1U << element);
+                    }
+                }
                 data_uops.push_back(memblock::VectorMemoryTransaction{
                     .segment = true,
                     .address = address,
@@ -3792,7 +3845,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         ? std::nullopt
                         : std::optional<std::uint64_t>{physical_address},
                     .eew = static_cast<std::uint8_t>(eew),
-                    .vsew = static_cast<std::uint8_t>(eew),
+                    .vsew = static_cast<std::uint8_t>(sew),
                     .vl = 2,
                     .rob = memblock::rob_pointer_value(rob),
                     .rob_flag = memblock::rob_pointer_flag(rob),
@@ -3800,7 +3853,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     .lq_flag = memblock::lq_pointer_flag(lq_offset),
                     .sq = memblock::sq_pointer_value(sq_offset),
                     .sq_flag = memblock::sq_pointer_flag(sq_offset),
-                    .pdest = static_cast<std::uint8_t>(first_pdest + field),
+                    .pdest = static_cast<std::uint8_t>(first_pdest + uop),
                     .lane = 0,
                     .flow_num = static_cast<std::uint8_t>(flow_num),
                     .expected_exception_mask = 0,
@@ -3810,24 +3863,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         ? std::nullopt
                         : std::optional<std::uint8_t>{
                               memblock::kVectorWritebackTriggerNone},
-                    .vuop_idx = static_cast<std::uint8_t>(field),
+                    .vlmul = vlmul,
+                    .vuop_idx = static_cast<std::uint8_t>(uop),
                     .last_uop = false,
                     .nf = static_cast<std::uint8_t>(fields - 1U),
                     .fault_only_first = true,
                     .is_vleff = false,
                     .vec_wen = true,
-                    .fof_unspecified_elements = static_cast<std::uint16_t>(
-                        first_fault ? 0x3U : 1U << 1),
+                    .fof_unspecified_elements = unspecified_elements,
                 });
                 auto &data_uop = data_uops.back();
                 for (auto &byte : data_uop.data) {
                     byte = static_cast<unsigned char>(random());
                 }
                 auto expected_data = data_uop.data;
-                if (!first_fault) {
+                for (unsigned element = 0; element < elements_per_vreg;
+                     ++element) {
+                    const unsigned global_element =
+                        vd_index * elements_per_vreg + element;
+                    if (global_element >= fault_element ||
+                        global_element >= 2U) {
+                        continue;
+                    }
+                    const std::uint64_t expected_address =
+                        memblock::vector_element_address(data_uop, element);
                     for (unsigned byte = 0; byte < element_bytes; ++byte) {
-                        expected_data[byte] = environment.memory().read_byte(
-                            physical_address + field * element_bytes + byte);
+                        expected_data[element * element_bytes + byte] =
+                            environment.memory().read_byte(
+                                expected_address + byte);
                     }
                 }
                 environment.expect_vector_data(data_uop, expected_data);
@@ -3840,13 +3903,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
             auto fix_vl_uop = data_uops.front();
             fix_vl_uop.pdest =
-                static_cast<std::uint8_t>(first_pdest + fields);
+                static_cast<std::uint8_t>(first_pdest + data_uops_count);
             fix_vl_uop.expected_exception_mask = 0;
             fix_vl_uop.allowed_additional_exception_mask = 0;
             fix_vl_uop.expected_trigger =
                 memblock::kVectorWritebackTriggerNone;
             fix_vl_uop.expected_vl = first_fault ? 2U : 1U;
-            fix_vl_uop.vuop_idx = static_cast<std::uint8_t>(fields);
+            fix_vl_uop.vuop_idx =
+                static_cast<std::uint8_t>(data_uops_count);
             fix_vl_uop.last_uop = true;
             fix_vl_uop.vl_wen = true;
             fix_vl_uop.vec_wen = false;
@@ -3861,14 +3925,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             const std::uint64_t data_uops_observed =
                 environment.vector_load_writebacks() - data_writebacks_before;
-            if (data_uops_observed != fields ||
+            if (data_uops_observed != data_uops_count ||
                 environment.vector_fof_fix_writebacks() !=
                     fix_writebacks_before + 1U ||
                 (first_fault && environment.vector_page_fault_writebacks() ==
                     page_fault_writebacks_before)) {
                 std::ostringstream detail;
                 detail << phase << ":terminal-accounting"
-                       << ":data=" << data_uops_observed << '/' << fields
+                       << ":data=" << data_uops_observed << '/'
+                       << data_uops_count
                        << ":fix="
                        << environment.vector_fof_fix_writebacks() -
                               fix_writebacks_before;
@@ -3885,7 +3950,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 coverage.sample(data_uop);
             }
             constraint_coverage.sample_vector_segment_fof(
-                first_fault, stage1_mode, eew, nf_index,
+                first_fault, stage1_mode, eew, sew, lmul_log2, nf_index,
                 static_cast<unsigned>(data_uops_observed));
             ++actions;
             return true;
@@ -4663,27 +4728,35 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
             bool vector_segment_fof_cross_missing = false;
+            bool missing_vector_segment_fof_first_fault = false;
+            unsigned missing_vector_segment_fof_mode = 0;
+            const RandomVectorSegmentShape *missing_vector_segment_fof_shape =
+                nullptr;
             if (kind == RandomConstraints::vector_segment &&
                 constraints.vector_segment_fof_per_mille != 0) {
                 for (unsigned fault = 0;
                      fault < 2 && !vector_segment_fof_cross_missing; ++fault) {
                     for (unsigned mode = 0;
                          mode < 2 && !vector_segment_fof_cross_missing; ++mode) {
-                        for (unsigned eew = 0;
-                             eew < 4 && !vector_segment_fof_cross_missing;
-                             ++eew) {
-                            for (unsigned nf = 0; nf < 7; ++nf) {
-                                const unsigned cross = ConstraintCoverage::
-                                    vector_segment_fof_cross_index(
-                                        fault, mode, eew, nf);
-                                if (constraints.vector_segment_fof_cross_enabled(
-                                        fault, mode, eew, nf) &&
-                                    constraint_coverage
-                                            .vector_segment_fof_crosses[cross] ==
-                                        0) {
-                                    vector_segment_fof_cross_missing = true;
-                                    break;
-                                }
+                        for (const auto &shape : vector_segment_shapes) {
+                            if (shape.addressing != 0 ||
+                                !constraints.vector_segment_fof_cross_enabled(
+                                    fault, mode, shape.eew, shape.vsew,
+                                    shape.lmul_log2, shape.nf_index)) {
+                                continue;
+                            }
+                            const unsigned cross = ConstraintCoverage::
+                                vector_segment_fof_cross_index(
+                                    fault, mode, shape.eew, shape.vsew,
+                                    shape.lmul_log2, shape.nf_index);
+                            if (constraint_coverage
+                                    .vector_segment_fof_crosses[cross] == 0) {
+                                vector_segment_fof_cross_missing = true;
+                                missing_vector_segment_fof_first_fault =
+                                    fault != 0;
+                                missing_vector_segment_fof_mode = mode;
+                                missing_vector_segment_fof_shape = &shape;
+                                break;
                             }
                         }
                     }
@@ -4701,49 +4774,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     constraint_coverage.vector_segment_fof_presence));
             bool vector_segment_fof_first_fault = false;
             unsigned vector_segment_fof_stage1_mode = 0;
-            unsigned vector_segment_fof_eew = 0;
-            unsigned vector_segment_fof_nf = 0;
+            const RandomVectorSegmentShape *vector_segment_fof_shape = nullptr;
             if (vector_segment_fof) {
-                std::optional<unsigned> uncovered_cross;
-                for (unsigned fault = 0; fault < 2 && !uncovered_cross;
-                     ++fault) {
-                    for (unsigned mode = 0; mode < 2 && !uncovered_cross;
-                         ++mode) {
-                        for (unsigned eew = 0; eew < 4 && !uncovered_cross;
-                             ++eew) {
-                            for (unsigned nf = 0; nf < 7; ++nf) {
-                                const unsigned cross = ConstraintCoverage::
-                                    vector_segment_fof_cross_index(
-                                        fault, mode, eew, nf);
-                                if (constraints.vector_segment_fof_cross_enabled(
-                                        fault, mode, eew, nf) &&
-                                    constraint_coverage
-                                            .vector_segment_fof_crosses[cross] ==
-                                        0) {
-                                    uncovered_cross = cross;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                if (uncovered_cross) {
+                if (vector_segment_fof_cross_missing) {
                     vector_segment_fof_first_fault =
-                        *uncovered_cross / (2U * 4U * 7U) != 0;
+                        missing_vector_segment_fof_first_fault;
                     vector_segment_fof_stage1_mode =
-                        (*uncovered_cross / (4U * 7U)) % 2U;
-                    vector_segment_fof_eew = (*uncovered_cross / 7U) % 4U;
-                    vector_segment_fof_nf = *uncovered_cross % 7U;
+                        missing_vector_segment_fof_mode;
+                    vector_segment_fof_shape =
+                        missing_vector_segment_fof_shape;
                 } else {
                     vector_segment_fof_first_fault = choose_binary_class(
                         constraints.vector_segment_fof_first_fault_per_mille,
                         constraint_coverage.vector_segment_fof_fault_positions);
                     vector_segment_fof_stage1_mode =
                         constraints.choose_stage1_mode(random());
-                    vector_segment_fof_eew =
-                        constraints.choose_vector_segment_fof_eew(random());
-                    vector_segment_fof_nf =
-                        constraints.choose_vector_segment_fof_nf(random());
+                    vector_segment_fof_shape =
+                        &choose_vector_segment_fof_shape();
                 }
             }
             bool vector_fof_cross_missing = false;
@@ -7935,8 +7982,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 if (vector_segment_fof) {
                     if (!issue_random_vector_segment_fof(
                             vector_segment_fof_first_fault,
-                            vector_segment_fof_stage1_mode, vector_segment_fof_eew,
-                            vector_segment_fof_nf)) {
+                            vector_segment_fof_stage1_mode,
+                            *vector_segment_fof_shape)) {
                         return false;
                     }
                     leaf_addressed = true;

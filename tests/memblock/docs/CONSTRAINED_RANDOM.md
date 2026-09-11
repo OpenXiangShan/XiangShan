@@ -117,7 +117,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `vector-segment-eew8` .. `vector-segment-eew64`, `vector-segment-sew8` .. `vector-segment-sew64` | Relative segment index/memory EEW and data SEW weights |
 | `vector-segment-lmul-mf8` .. `vector-segment-lmul-m8`, `vector-segment-emul-mf8` .. `vector-segment-emul-m8` | Relative fractional/integer LMUL and derived EMUL weights. A shape is enabled only when `EMUL = EEW - SEW + LMUL` and both selected weights are nonzero |
 | `vector-segment-nf2` .. `vector-segment-nf8` | Relative segment field-count weights |
-| `vector-segment-fof` | Per-mille share of vector-segment load actions replaced by unit-stride fault-only-first loads. The common generator currently uses the legal M1 subset (`EEW=SEW`, `LMUL=EMUL=1`) so the FOF path can be independently page-faulted without coupling to segment-store or indexed scheduling |
+| `vector-segment-fof` | Per-mille share of vector-segment load actions replaced by unit-stride fault-only-first loads. Schema 47 enumerates all 338 decoder-legal EEW/SEW/LMUL/derived-EMUL/NF shapes; the decoder has no indexed or strided Segment FOF encoding |
 | `vector-segment-fof-first-fault` | Conditional per-mille share of segment FOF actions whose first element faults. The other class maps the first element and leaves the next element page unmapped, so the fault is detected after a complete segment element |
 | `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
 | `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
@@ -155,17 +155,17 @@ An enabled `vector-fof` requires nonzero vector-load and stage-1 translation
 weights. It retains a nonzero ordinary vector-load share and closes every
 enabled later/first-fault x Sv39/Sv48 x EEW8/16/32/64 class before returning
 to its profile probability.
-An enabled `vector-segment-fof` requires nonzero segment-load, stage-1, and
-unit-stride M1 shape weights. It retains a nonzero ordinary segment-load share
-and closes every enabled later/first-fault x Sv39/Sv48 x EEW8/16/32/64 x NF2..8
-class before returning to its profile probability. Segment FOF actions are
-loads only; stores, indexed/strided addressing, and non-M1 shapes remain in
-the ordinary segment class until their independent cancellation and partial-
-completion contracts are modeled.
-`random-mixed` requires at least 4096 actions so the mandatory architectural
+An enabled `vector-segment-fof` requires nonzero segment-load, stage-1, and at
+least one legal unit-stride shape. It retains a nonzero ordinary segment-load
+share and closes every enabled later/first-fault x Sv39/Sv48 x legal
+EEW/SEW/LMUL/derived-EMUL/NF class before returning to its profile probability.
+Segment FOF actions are loads only. Indexed/strided addressing remains part of
+ordinary segment traffic because `VLE{8,16,32,64}FF` is the only FOF decode and
+`NF>0` routes it through VSegment.
+`random-mixed` requires at least 6144 actions so the mandatory architectural
 prefix, eight replacement windows, the 48 CMO/Probe bins, the 54 atomic/Probe
 bins, all enabled ordinary miss-burst depth/width/composition/translation bins,
-the 112 Segment FOF bins, and each enabled constrained class can coexist with
+the 1,352 Segment FOF bins, and each enabled constrained class can coexist with
 nonzero overlap-oriented vector traffic.
 `--allow-short-mixed` relaxes only this conservative global minimum for a
 focused, explicitly narrowed constraint set. The normal online coverage and
@@ -207,7 +207,7 @@ scenario implementations:
 | Cache maintenance | `cmo`, `cmo-clean`, `cmo-flush`, `cmo-inval`, `cmo-dirty`, `cmo-younger-overlap`, `cmo-error`, and `cmo-error-denied` select CMO actions in the active Bare/stage-1/nested context. Success derives exact clean/dirty Probe reports and data; error responses require the exact exception, no Probe, unchanged backing memory, and redirect cleanup, with optional younger-miss cancellation in both paths. Schema 36 adds `cmo-probe-depth1`..`cmo-probe-depth8`, holds C until every B request is accepted while CBOAck remains pending, and closes 48 operation x line-state x depth bins with exact source/address/data and manager conservation | Add multiple simultaneous CMO sources and composition with replacement/atomic traffic |
 | Ordinary vector shape | Schema 42 retains the schema-41 legal direction x addressing x EEW/SEW/LMUL cross and derived EMUL, expands every instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and retains the independent per-element data/readback oracle. Heterogeneous windows now contain complete legal vector load/store instructions and close the 16 reachable direction x addressing x single/multi-uop classes | Cross all 624 exact ordinary shapes against the other four concurrent producer classes only if that extra Cartesian coverage proves useful; current windows deliberately close the coarser composition classes while global shape closure remains exact |
 | Vector fault-only-first | Schema 44 adds low-rate unit-stride VLEFF to the same vector-load operation class. Coverage closes later/first-element fault x Sv39/Sv48 x EEW8/16/32/64, and conserves VFOF actions, fault positions, and fix-VL writebacks separately from ordinary vector shape/policy counts | Segment redirect composition and broader ordinary VFOF shape interactions remain open |
-| Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension. Schema 46 adds a low-rate unit-stride M1 segment-FOF subclass and closes later/first fault x stage-1 mode x EEW x NF with data-uop and fix-VL accounting | Segment FOF beyond unit-stride M1, redirect composition, and overlapping indexed/ordered side effects remain open |
+| Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension. Schema 47 extends the low-rate unit-stride segment-FOF subclass across all 338 legal shapes and closes all 1,352 later/first fault x stage-1 mode x shape bins with data-uop and fix-VL accounting | Active-segment redirect remains a full-core serialization assumption; overlapping indexed/ordered side effects remain open |
 | NC/MMIO direction and errors | `nc-store` and `mmio-store` steer load/store direction. Schema 16 adds `uncache-error` and `uncache-load-error-denied`; all enabled NC/MMIO x load/store x legal clean/corrupt/denied outcomes close per seed. Loads require exact HardwareError/LoadAccessFault, MMIO denied stores require final StoreAccessFault, and committed NC denied stores require only an external error report, unchanged memory, normal SQ dequeue, and no redirect | Concurrent special stores and malformed/duplicate/early/late responses remain deferred |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; host NAPOT and independent nested VS/G NAPOT placement select distinct real page-table regions; switches occur only at drained boundaries; every enabled leaf topology, cold walk/reuse, and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
@@ -424,7 +424,7 @@ The corresponding constrained-random audit is:
 
 | Observed priority class | Canonical `random-mixed` coverage | Remaining limitation |
 | --- | --- | --- |
-| Vector memory and segment-capable issue traffic | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Schema 44 adds low-rate ordinary VFOF and closes first/later fault x stage-1 mode x EEW plus exact fix-VL conservation. Schema 46 adds low-rate unit-stride M1 segment FOF and closes first/later fault x stage-1 mode x EEW x NF, while ordinary segment matrices, mask/tail policy, `vl`/`vstart`, translation, and the exact per-element data oracle remain active | The workload logs establish high aggregate vector-memory issue pressure but do not expose a segment-only count. Segment FOF outside unit-stride M1, redirect composition, and the full 624-way ordinary-vector cross against every heterogeneous producer remain open |
+| Vector memory and segment-capable issue traffic | Schema 42 retains the schema-41 ordinary direction x addressing x legal EEW/SEW/LMUL (derived EMUL) crosses and places complete legal 1..8-uop ordinary vector load/store instructions in every heterogeneous window. Schema 44 adds low-rate ordinary VFOF and closes first/later fault x stage-1 mode x EEW plus exact fix-VL conservation. Schema 47 extends low-rate unit-stride segment FOF across all 338 legal shapes and closes all 1,352 first/later fault x stage-1 mode x shape bins, while ordinary segment matrices, mask/tail policy, `vl`/`vstart`, translation, and the exact per-element data oracle remain active | The workload logs establish high aggregate vector-memory issue pressure but do not expose a segment-only count. Active-segment redirect remains a full-core serialization assumption, and the full 624-way ordinary-vector cross against every heterogeneous producer remains open |
 | DCache bank conflict/replay | Schema 40: resident 2/3-way x eight address banks x Bare/stage-1/nested as stimulus coverage, with only identity-matched terminal data/writeback/LQ conservation used as the oracle | Vector/atomic same-bank composition is still open |
 | Miss-queue multi-enqueue | Schemas 43/45: distinct-line depth 2..17 x initial scalar issue width 1..3 x scalar-only/scalar+vector-load composition x translation, including capacity-plus-one forward progress, held-response outstanding depth, and terminal identity/data/queue oracles | Cross-operation MLP with replacement/Probe/CMO/atomic remains open |
 | Merge/reject pressure | Schema 20 deliberately covers same-line merge shapes; schema 45 applies capacity-plus-one cold-miss pressure and requires external forward progress after one fair response is released. Internal replay/reject observations remain diagnostic | Exact causal attribution to an internal reject is intentionally not an oracle; malformed replay responses remain open |
@@ -521,15 +521,16 @@ results. Functional correctness remains the independent data, identity,
 exactly-once completion, queue-conservation, and TileLink protocol oracle; a
 future capacity change requires a coverage-schema update rather than a new
 ISA-level expected value.
-Schema 46 additionally reports the ordinary/segment-FOF split, the
-later/first-fault position, stage-1 mode, EEW, and NF marginals, and the
-112-slot fault-position x stage-1-mode x EEW x NF cross. Each enabled cross
-must be nonzero; the cross marginals must reconstruct the FOF action count and
-the data-uop total must equal the sum of `NF` fields for those actions. Every
-segment FOF action also requires exactly one fix-VL writeback. The ordinary
-segment dimensions are conserved against the segment operation count after
-subtracting FOF actions. These are stimulus/accounting gates. Functional
-correctness remains the independent page-table walk, exact mapped-element data,
+Schema 47 reports the ordinary/segment-FOF split; later/first-fault position;
+stage-1 mode; EEW, SEW, LMUL, derived-EMUL, and NF marginals; and the 1,352-slot
+fault-position x stage-1-mode x legal-shape cross. Each enabled cross must be
+nonzero; the cross marginals must reconstruct the FOF action count and the
+data-uop total must equal the shape-derived one-through-eight uops for those
+actions. Every segment FOF action also requires exactly one fix-VL writeback.
+The ordinary segment dimensions are conserved against the segment operation
+count after subtracting FOF actions. These are stimulus/accounting gates.
+Functional correctness remains the independent page-table walk, exact
+mapped-element data,
 legal FOF exception/suppression, final-VL, identity, queue, and TileLink
 oracle; field selection, internal FOF-buffer state, replay count, and cycle
 timing are not used.
@@ -661,15 +662,18 @@ the externally observed pending depth to reach 16 before fair release permits
 all 17 target requests and architectural completions to drain.
 Schema 46 adds `vector-segment-fof` and conditional
 `vector-segment-fof-first-fault` weights. Before probability-driven selection
-resumes, the generator closes every enabled later/first-fault x Sv39/Sv48 x
-EEW=SEW x M1 x NF2..8 class. A mapped first element followed by an unmapped
-page is checked by the independent page-table image. Later faults require the
-mapped element's exact bytes, suppress the page-fault writeback, and trim VL;
-first-element faults preserve the original VL and require at least one
-identified page-fault writeback, while segment-field exception choice and
-faulting/remainder destination elements remain architecturally unspecified.
-The focused subset intentionally does not claim indexed/strided FOF or active
-segment redirect coverage.
+resumes, it initially closes the M1 shape subset. Schema 47 generalizes that
+selection to all 338 decoder-legal unit-stride EEW/SEW/LMUL/derived-EMUL/NF
+shapes and closes all 1,352 later/first-fault x Sv39/Sv48 x shape bins. A mapped
+first element followed by an unmapped page is checked by the independent
+page-table image. Later faults require the mapped element's exact bytes,
+suppress the page-fault writeback, and trim VL; first-element faults preserve
+the original VL and require at least one identified page-fault writeback,
+while segment-field exception choice and faulting/remainder destination
+elements remain architecturally unspecified. Every shape produces its exact
+one-through-eight data-uop count and exactly one fix-VL writeback. There is no
+indexed/strided Segment FOF decode to claim; active-segment redirect remains a
+full-core serialization assumption.
 PTW errors report 90 site x direction x level-class x outcome bins, 20
 site-specific mode bins, 20 target-level bins, and a manager tuple of error
 responses/denied beats/corrupt beats. Every enabled bin must be nonzero and

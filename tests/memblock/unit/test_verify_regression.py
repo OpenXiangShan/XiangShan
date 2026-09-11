@@ -228,7 +228,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 47
+        result["constraint_schema"] = 48
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -372,7 +372,7 @@ class VerifyRegressionTest(unittest.TestCase):
         segment_directions = [1, 1]
         fields = make_fields(500)
         actual_operations = [0, 0, 0, 0, 114]
-        verify_regression._check_vector_segment_fof_coverage(
+        verify_regression._check_vector_segment_fof_coverage_schema46(
             fields,
             target_operations,
             actual_operations,
@@ -387,7 +387,7 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError,
             "cross/data-uop/fix-VL accounting",
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 actual_operations,
@@ -411,7 +411,7 @@ class VerifyRegressionTest(unittest.TestCase):
                 "actual_vector_segment_fof_fix_vl": 0,
             }
         )
-        verify_regression._check_vector_segment_fof_coverage(
+        verify_regression._check_vector_segment_fof_coverage_schema46(
             disabled_fields,
             [0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0],
@@ -424,7 +424,7 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "disabled segment FOF"
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 disabled_fields,
                 [0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 1],
@@ -440,7 +440,7 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError,
             "cross/data-uop/fix-VL accounting",
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 actual_operations,
@@ -456,7 +456,7 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError,
             "does not match enabled classes",
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 actual_operations,
@@ -471,7 +471,7 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "expected 112"
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 actual_operations,
@@ -484,7 +484,7 @@ class VerifyRegressionTest(unittest.TestCase):
         for first_fault in (0, 1000):
             fields = make_fields(first_fault)
             actual_fof = 56
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 [0, 0, 0, 0, actual_fof + 2],
@@ -507,7 +507,7 @@ class VerifyRegressionTest(unittest.TestCase):
                 "actual_vector_segment_fof_fix_vl": 0,
             }
         )
-        verify_regression._check_vector_segment_fof_coverage(
+        verify_regression._check_vector_segment_fof_coverage_schema46(
             fields,
             target_operations,
             [0, 0, 0, 0, 2],
@@ -521,7 +521,7 @@ class VerifyRegressionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "disabled segment FOF"
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 [0, 0, 0, 0, 2],
@@ -537,7 +537,7 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError,
             "ordinary load/store and segment FOF accounting",
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 target_operations,
                 [0, 0, 0, 0, 2],
@@ -552,7 +552,7 @@ class VerifyRegressionTest(unittest.TestCase):
             verify_regression.VerificationError,
             "ordinary load/store and segment FOF accounting",
         ):
-            verify_regression._check_vector_segment_fof_coverage(
+            verify_regression._check_vector_segment_fof_coverage_schema46(
                 fields,
                 [0, 0, 0, 0, 0],
                 [0, 0, 0, 0, 0],
@@ -560,6 +560,119 @@ class VerifyRegressionTest(unittest.TestCase):
                 [0, 0],
                 500,
                 [0, 0],
+            )
+
+    def test_schema_47_checks_all_legal_vector_segment_fof_shapes(self) -> None:
+        crosses: list[int] = []
+        fault_positions = [0, 0]
+        modes = [0, 0]
+        eews = [0] * 4
+        sews = [0] * 4
+        lmuls = [0] * 7
+        emuls = [0] * 7
+        nfs = [0] * 7
+        data_uops = 0
+        shape_count = 0
+        shapes: list[tuple[int, int, int, int, int, int]] = []
+        for eew in range(4):
+            for sew in range(4):
+                for lmul in range(-3, 4):
+                    emul = eew - sew + lmul
+                    if lmul < sew - 3 or emul < -3 or emul > 3:
+                        continue
+                    uops_per_field = 1 << max(emul, 0)
+                    for nf in range(7):
+                        shape_uops = uops_per_field * (nf + 2)
+                        if shape_uops <= 8:
+                            shapes.append(
+                                (eew, sew, lmul, emul, nf, shape_uops)
+                            )
+        self.assertEqual(len(shapes), 338)
+        for fault in range(2):
+            for mode in range(2):
+                for eew, sew, lmul, emul, nf, shape_uops in shapes:
+                    crosses.append(1)
+                    fault_positions[fault] += 1
+                    modes[mode] += 1
+                    eews[eew] += 1
+                    sews[sew] += 1
+                    lmuls[lmul + 3] += 1
+                    emuls[emul + 3] += 1
+                    nfs[nf] += 1
+                    data_uops += shape_uops
+                    shape_count += 1
+        self.assertEqual(shape_count, 1352)
+        fields: dict[str, object] = {
+            "target_vector_segment_fof": 100,
+            "target_vector_segment_fof_first_fault": 500,
+            "target_vector_segment_addressing": "1,1,1,1",
+            "target_vector_segment_eew": "1,1,1,1",
+            "target_vector_segment_sew": "1,1,1,1",
+            "target_vector_segment_lmul": "1,1,1,1,1,1,1",
+            "target_vector_segment_emul": "1,1,1,1,1,1,1",
+            "target_vector_segment_nf": "1,1,1,1,1,1,1",
+            "actual_vector_segment_fof": f"1,{shape_count}",
+            "actual_vector_segment_fof_fault": ",".join(
+                str(value) for value in fault_positions
+            ),
+            "actual_vector_segment_fof_stage1_mode": ",".join(
+                str(value) for value in modes
+            ),
+            "actual_vector_segment_fof_eew": ",".join(
+                str(value) for value in eews
+            ),
+            "actual_vector_segment_fof_sew": ",".join(
+                str(value) for value in sews
+            ),
+            "actual_vector_segment_fof_lmul": ",".join(
+                str(value) for value in lmuls
+            ),
+            "actual_vector_segment_fof_emul": ",".join(
+                str(value) for value in emuls
+            ),
+            "actual_vector_segment_fof_nf": ",".join(
+                str(value) for value in nfs
+            ),
+            "actual_vector_segment_fof_cross": ",".join(
+                str(value) for value in crosses
+            ),
+            "actual_vector_segment_fof_data_uops": data_uops,
+            "actual_vector_segment_fof_fix_vl": shape_count,
+        }
+        args = (
+            fields,
+            [0, 0, 0, 0, 1],
+            [0, 0, 0, 0, shape_count + 2],
+            [0, 1, 0],
+            [1, 1],
+            500,
+            [1, 1],
+        )
+        self.assertEqual(
+            verify_regression._check_vector_segment_fof_coverage_schema47(
+                *args
+            ),
+            shape_count,
+        )
+
+        fields["actual_vector_segment_fof_data_uops"] = data_uops - 1
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "shape-cross/data-uop/fix-VL accounting",
+        ):
+            verify_regression._check_vector_segment_fof_coverage_schema47(
+                *args
+            )
+        fields["actual_vector_segment_fof_data_uops"] = data_uops
+        fields["actual_vector_segment_fof_cross"] = ",".join(
+            ["1"] * 1351 + ["0"]
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "does not match enabled classes",
+        ):
+            verify_regression._check_vector_segment_fof_coverage_schema47(
+                *args
             )
 
     def test_schema_42_checks_concurrent_full_vector_shapes(self) -> None:
