@@ -99,7 +99,6 @@ trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   val addrFields = AddrField(
     Seq(
       ("instOffset", instOffsetBits),
-      ("bankIdx", BankIdxWidth),
       ("setIdx", SetIdxWidth),
       ("tag", TagWidth)
     ),
@@ -107,7 +106,7 @@ trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   )
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    addrFields.extract("bankIdx", pc)
+    pc(2, 1) ^ pc(7, 6) ^ pc(13, 12) ^ pc(20, 19)
 
   def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
     addrFields.extract("setIdx", pc) ^ hist
