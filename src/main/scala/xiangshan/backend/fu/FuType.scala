@@ -46,7 +46,7 @@ object FuType extends ChiselOHEnum {
   val vidiv = addType(name = "vidiv")
 
   val vfalu = addType(name = "vfalu")
-  val vfma = addType(name = "vfma")
+  val vfmul = addType(name = "vfmul")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
 
@@ -111,7 +111,7 @@ object FuType extends ChiselOHEnum {
   val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vialu, vimac, vidiv)
-  val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val vecOPF = Seq(vfalu, vfmul, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
@@ -169,7 +169,7 @@ object FuType extends ChiselOHEnum {
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
-  def isVecOPFFma(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
+  def isVecOPFFmul(fuType: UInt): Bool = FuTypeOrR(fuType, vfmul)
 
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
@@ -198,7 +198,7 @@ object FuType extends ChiselOHEnum {
     vidiv -> "vidiv",
     vfalu -> "vfalu",
     vmove -> "vmove",
-    vfma -> "vfma",
+    vfmul -> "vfmul",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
   )

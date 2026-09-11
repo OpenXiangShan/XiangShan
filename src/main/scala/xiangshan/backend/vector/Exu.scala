@@ -10,8 +10,10 @@ import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
+import xiangshan.backend.decode.opcode.Opcode.VFMacOpcodes
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
+import xiangshan.backend.fu.wrapper.{VFAluWrapper, VFMulWrapper}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm, _}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
@@ -33,12 +35,17 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   val byteElemWidth = log2Ceil(vlenb)
   private val numOfMgu = if (param.hasVStd) 0 else latencyMax + 1
   private val numOfEx = latencyMax + 1
+  private val hasVfmacPipe = param.fuConfigs.exists(_.name == "vfalu") && param.fuConfigs.exists(_.name == "vfmul")
+  private val mul2aluLatency = if (hasVfmacPipe) 1 else 0
 
   val in = IO(Input(new Exu.In(param)))
   val out = IO(Output(new Exu.Out(param)))
 
   val bypass: BypassNetwork = Module(new BypassNetwork()(param, p))
   val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
+  private val vfaluWrappers = fus.collect { case fu: VFAluWrapper => fu }
+  private val vfmulWrappers = fus.collect { case fu: VFMulWrapper => fu }
+  require(vfaluWrappers.size <= 1 && vfmulWrappers.size <= 1, s"${param.name} supports one VFALU/VFMUL pair")
   private val nonFixedLatFus: Seq[VecNonFixedLatFunc] = fus.collect { case fu: VecNonFixedLatFunc => fu }
   val mgus: Seq[MergeUnit] = Seq.fill(numOfMgu)(Module(new MergeUnit()))
 
@@ -104,6 +111,101 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
   }
 
+  // Select every VectorFALU S0 input before the VFALU input register. OP2 is
+  // selected from inEx while OP3 is selected from VFMUL S1 and its matching
+  // EX1 context. The registered result reaches VFALU together with ex(0) for
+  // OP2, or one cycle after VFMUL S1 for OP3.
+  require(vfmulWrappers.isEmpty || vfaluWrappers.nonEmpty, s"${param.name} has VFMUL but no VFALU for OP3 forwarding")
+  vfaluWrappers.headOption.foreach { vfalu =>
+    val vfaluIdx = fus.indexOf(vfalu)
+    require(vfaluIdx >= 0)
+
+    val op2Input = Wire(Valid(new VFAluWrapper.VFAluInput(vfalu.cfg)))
+    val op2Frm = inEx.bits.ctrl.frm.map(instFrm =>
+      Mux(instFrm === VecFrm.DYN, in.frm.get, instFrm)
+    ).getOrElse(0.U)
+    op2Input.valid := inEx.valid && inEx.bits.fuSel(vfaluIdx) &&
+                      !inEx.bits.ctrl.robIdx.needFlush(in.flush)
+    op2Input.bits := 0.U.asTypeOf(op2Input.bits)
+    op2Input.bits.isOP3 := false.B
+    for (i <- op2Input.bits.lanes.indices) {
+      val high = 64 * (i + 1) - 1
+      val low = 64 * i
+      op2Input.bits.lanes(i).opcode := inEx.bits.ctrl.opcode
+      op2Input.bits.lanes(i).fpA := inEx.bits.data.src(1)(high, low)
+      op2Input.bits.lanes(i).fpB := inEx.bits.data.src(0)(high, low)
+      op2Input.bits.lanes(i).fpAAppend := 0.U
+      op2Input.bits.lanes(i).roundMode := op2Frm
+      op2Input.bits.lanes(i).inCtrlFromVFMul := 0.U.asTypeOf(op2Input.bits.lanes(i).inCtrlFromVFMul)
+      op2Input.bits.lanes(i).isSubFromVFMul := false.B
+    }
+
+    val op3Input = Wire(Valid(new VFAluWrapper.VFAluInput(vfalu.cfg)))
+    op3Input.valid := false.B
+    op3Input.bits := 0.U.asTypeOf(op3Input.bits)
+    vfmulWrappers.headOption.foreach { vfmul =>
+      val source = ex(mul2aluLatency)
+      val op = source.bits.ctrl.opcode
+      val addendIsVs2 = VFMacOpcodes.isFmadd(op) || VFMacOpcodes.isFnmadd(op) ||
+        VFMacOpcodes.isFmsub(op) || VFMacOpcodes.isFnmsub(op)
+      val isSub = VFMacOpcodes.isFnmadd(op) || VFMacOpcodes.isFmsub(op) ||
+        VFMacOpcodes.isFnmacc(op) || VFMacOpcodes.isFmsac(op)
+      val sourceFrm = source.bits.ctrl.frm.map(instFrm =>
+        Mux(instFrm === VecFrm.DYN, in.frm.get, instFrm)
+      ).getOrElse(0.U)
+      val addend = Mux(addendIsVs2, source.bits.data.src(1), source.bits.data.src(2))
+
+      op3Input.valid := vfmul.toVfalu.valid && source.valid && VFMacOpcodes.isOP3(op) &&
+                        !source.bits.ctrl.robIdx.needFlush(in.flush)
+      op3Input.bits.isOP3 := true.B
+      for (i <- op3Input.bits.lanes.indices) {
+        val high = 64 * (i + 1) - 1
+        val low = 64 * i
+        op3Input.bits.lanes(i).opcode := VFMacOpcodes.getCtrlOpcode(op)
+        op3Input.bits.lanes(i).fpA := vfmul.toVfalu.bits(i).fpA
+        op3Input.bits.lanes(i).fpB := addend(high, low)
+        op3Input.bits.lanes(i).fpAAppend := vfmul.toVfalu.bits(i).fpAAppend
+        op3Input.bits.lanes(i).roundMode := sourceFrm
+        op3Input.bits.lanes(i).inCtrlFromVFMul := vfmul.toVfalu.bits(i).FMULToFADDCtrl
+        op3Input.bits.lanes(i).isSubFromVFMul := isSub
+      }
+      op3Input.bits.op3Context.ctrl.robIdx  := source.bits.ctrl.robIdx
+      op3Input.bits.op3Context.ctrl.uopIdx  := source.bits.ctrl.uopIdx
+      op3Input.bits.op3Context.ctrl.opcode  := source.bits.ctrl.opcode
+      op3Input.bits.op3Context.ctrl.latency := source.bits.ctrl.latency
+      op3Input.bits.op3Context.ctrl.pdest   := source.bits.ctrl.pdest
+      op3Input.bits.op3Context.ctrl.sqIdx.zip(source.bits.ctrl.sqIdx).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.rfWen.zip(source.bits.ctrl.gpWen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.fpWen.zip(source.bits.ctrl.fpWen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.vecWen.zip(source.bits.ctrl.vpWen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.v0Wen.zip(source.bits.ctrl.v0Wen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.vlWen.zip(source.bits.ctrl.vlWen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.pdestV0.zip(source.bits.ctrl.pdestV0).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.pdestVl.zip(source.bits.ctrl.pdestVl).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.fflagsWen.zip(source.bits.ctrl.fflagsWen).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.flushPipe.zip(source.bits.ctrl.flushPipe).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.vm.zip(source.bits.ctrl.vm).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.vtype.zip(source.bits.ctrl.vtype).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.ctrl.oldVType.zip(source.bits.ctrl.oldVType).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.data.src := source.bits.data.src
+      op3Input.bits.op3Context.data.v0.zip(source.bits.data.v0).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.data.vl.zip(source.bits.data.vl).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.data.imm := source.bits.data.imm.getOrElse(0.U)
+      op3Input.bits.op3Context.data.pc.zip(source.bits.data.pc).foreach { case (sink, src) => sink := src }
+      op3Input.bits.op3Context.debug.foreach(debug => source.bits.debug.foreach(src => debug := src))
+    }
+
+    assert(!(op2Input.valid && op3Input.valid), "VFALU received OP2 and OP3 work for the same S0")
+    val selectedInput = Wire(Valid(new VFAluWrapper.VFAluInput(vfalu.cfg)))
+    selectedInput.valid := op2Input.valid || op3Input.valid
+    selectedInput.bits := Mux(op3Input.valid, op3Input.bits, op2Input.bits)
+
+    val selectedInputValidReg = RegNext(selectedInput.valid, false.B)
+    val selectedInputReg = RegEnable(selectedInput.bits, selectedInput.valid)
+    vfalu.in.vfaluInput.get.valid := selectedInputValidReg
+    vfalu.in.vfaluInput.get.bits := selectedInputReg
+  }
+
   private val isWidenEx = mgus.indices.map {
     case i =>
       Mux1H(fus.flatMap(_.out.ex.lift(i)).map(fuOut =>
@@ -121,22 +223,63 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       )
   }
 
+  // The VFMUL S1 product is not a register-file result. When VectorFALU finishes
+  // the fused OP3 work one cycle later, its result must be written back with the
+  // original VFMUL uop's context instead of the VFALU one.
+  val resultContexts = ex.indices.map { i =>
+    val context = Wire(chiselTypeOf(ex(i).bits))
+    context := ex(i).bits
+    if (i == 1) {
+      vfaluWrappers.headOption.foreach { vfalu =>
+        val op3 = vfalu.out.op3OutContext.get
+        val op3Ctrl = op3.bits.ctrl
+        when (op3.valid) {
+          context.ctrl.robIdx      := op3Ctrl.robIdx
+          context.ctrl.uopIdx      := op3Ctrl.uopIdx
+          context.ctrl.fuType      := FuType.vfalu.U
+          context.ctrl.opcode      := op3Ctrl.opcode
+          context.ctrl.latency     := op3Ctrl.latency
+          context.ctrl.gpWen.zip(op3Ctrl.rfWen).foreach { case (sink, source) => sink := source }
+          context.ctrl.fpWen.zip(op3Ctrl.fpWen).foreach { case (sink, source) => sink := source }
+          context.ctrl.vpWen.zip(op3Ctrl.vecWen).foreach { case (sink, source) => sink := source }
+          context.ctrl.v0Wen.zip(op3Ctrl.v0Wen).foreach { case (sink, source) => sink := source }
+          context.ctrl.pdest       := op3Ctrl.pdest
+          context.ctrl.vlWen.zip(op3Ctrl.vlWen).foreach { case (sink, source) => sink := source }
+          context.ctrl.pdestV0.zip(op3Ctrl.pdestV0).foreach { case (sink, source) => sink := source }
+          context.ctrl.pdestVl.zip(op3Ctrl.pdestVl).foreach { case (sink, source) => sink := source }
+          context.ctrl.fflagsWen.zip(op3Ctrl.fflagsWen).foreach { case (sink, source) => sink := source }
+          context.ctrl.flushPipe.zip(op3Ctrl.flushPipe).foreach { case (sink, source) => sink := source }
+          context.ctrl.vm.zip(op3Ctrl.vm).foreach { case (sink, source) => sink := source }
+          context.ctrl.vtype.zip(op3Ctrl.vtype).foreach { case (sink, source) => sink := source }
+          context.ctrl.oldVType.zip(op3Ctrl.oldVType).foreach { case (sink, source) => sink := source }
+          context.data.src := op3.bits.data.src
+          context.data.v0.zip(op3.bits.data.v0).foreach { case (sink, source) => sink := source }
+          context.data.vl.zip(op3.bits.data.vl).foreach { case (sink, source) => sink := source }
+          context.data.imm.foreach(_ := op3.bits.data.imm)
+          context.data.pc.zip(op3.bits.data.pc).foreach { case (sink, source) => sink := source }
+        }
+      }
+    }
+    context
+  }
+
   mgus.zipWithIndex.foreach {
     case (mgu, i) =>
-      val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
-      val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
+      val context = resultContexts(i)
+      val vl = context.data.vl.get.suggestName(s"ex${i}_vl")
+      val vdIdx = context.ctrl.uopIdx // Todo: may by wrong for some kind of uops
       val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOHEx(i))(3, 0) // 4 bits 0~8
       val end = elemIdxMapElemE8Idx(vl, eewOHEx(i))
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
-      val isWholeVMove = FuType.FuTypeOrR(ex(i).bits.ctrl.fuType, Seq(FuType.vmove)) &&
-        Opcode.VMoveOpcodes.isNR(ex(i).bits.ctrl.opcode)
+      val isWholeVMove = FuType.FuTypeOrR(context.ctrl.fuType, Seq(FuType.vmove)) &&
+        Opcode.VMoveOpcodes.isNR(context.ctrl.opcode)
 
       mgu.in.valid := ex(i).valid
-      mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
-      mgu.in.ctrl.vta := ex(i).bits.ctrl.vtype.get.vta
-      mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
+      mgu.in.ctrl.vma := context.ctrl.vtype.get.vma
+      mgu.in.ctrl.vta := context.ctrl.vtype.get.vta
+      mgu.in.data.mask := Fill(vlenb, context.ctrl.vm.get) | context.data.v0.get // Todo: use vlenb v0
       // since vstart is always 0 for vector arith instruction, begin is always 0
       mgu.in.data.begin := 0.U
       mgu.in.data.end := Mux(
@@ -148,7 +291,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
           (vdIdx < vlMapVdIdx) -> vlenb.U,
         )),
       )
-      mgu.in.data.oldVd := ex(i).bits.data.src(2).toByteVec
+      mgu.in.data.oldVd := context.data.src(2).toByteVec
       mgu.in.data.vd := vd.toByteVec
   }
 
@@ -285,7 +428,6 @@ object Exu {
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)
       sink.imm                         := this.data.imm.getOrElse(0.U)
-      sink.vfma       .foreach(x => x := this.data.vfma.get)
     }
 
     def <#=:(sink: Func.InUop) : Unit = {
@@ -422,7 +564,6 @@ object Exu {
     val vl  = Option.when(param.readVlRf)(Vl())
     val imm = Option.when(param.needImm)(UInt(param.immWidth.W))
     val pc  = Option.when(param.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma = Option.when(param.fuConfigs.exists(_.fuType == FuType.vfma))(new Func.VFMacInfo)
   }
 
   class InBypassCtrl(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
