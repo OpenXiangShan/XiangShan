@@ -1925,7 +1925,6 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
     val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
-    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
 
     // !isLastRequest && cross16Byte means it is first request of cross 16B unalign  --> save paddr
     //  isLastRequest && cross16Byte means it is second request of cross 16B unalign --> not save paddr
@@ -1937,7 +1936,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
       dataEntries(stWbIdx).byteMask  := Mux(
         isVecMemContinousOp,
-        byteMaskFromSize,
+        storeAddrIn.bits.mask,
         UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
       )
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
