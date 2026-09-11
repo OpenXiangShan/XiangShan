@@ -158,7 +158,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   s0_req(1).valid := s0_realTwoFetchValid
 
-  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
+  s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx, s0_valid) ||
+    io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
 
   private val s0_canAccept = toData.ready && s1_ready
   io.fromFtq.ready       := s0_canAccept && io.fromWayLookup.valid && !s0_flush

@@ -15,7 +15,6 @@
 
 package xiangshan.frontend.bpu.tage
 
-import chisel3._
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
@@ -70,13 +69,13 @@ trait HasTageParameters extends HasBpuParameters {
   def MaxSetIdxWidth: Int = log2Ceil(MaxNumSets)
 
   def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
-  def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
+  def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays).max(1)
 
   // per table parameters
   def NumSets(implicit info:     TageTableInfo): Int = info.getNumSets(NumBanks)
   def SetIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumSets)
   def NumWays(implicit info:     TageTableInfo): Int = info.NumWays
-  def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays)
+  def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays).max(1)
 
   def NumUsefulCtrSramFolds: Int = tageParameters.NumUsefulCtrSramFolds
 
