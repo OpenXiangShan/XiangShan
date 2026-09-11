@@ -24,6 +24,7 @@ class NewFLManager(
   private val bankCount = renameWidth / 2
   private val phyRegIdxWidth = log2Up(numPhyRegs)
   private val bankPtrWidth = math.max(1, log2Ceil(bankCount))
+  private val bankCountWidth = math.max(1, log2Ceil(numPhyRegs + 1))
   private val s1PtrWidth = math.max(1, log2Ceil(s1QueueSize))
   private val s1CountWidth = log2Ceil(s1QueueSize + 1)
 
@@ -55,6 +56,7 @@ class NewFLManager(
   val s0BankStartPtr = RegInit(0.U(bankPtrWidth.W))
   val s0BankCandidates = Wire(Vec(bankCount, Vec(2, UInt(phyRegIdxWidth.W))))
   val s0BankCandidateValid = Wire(Vec(bankCount, Vec(2, Bool())))
+  val s0BankFreeCount = Wire(Vec(bankCount, UInt(bankCountWidth.W)))
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
   val s0CandidateBank = Wire(Vec(renameWidth, UInt(bankPtrWidth.W)))
@@ -74,18 +76,55 @@ class NewFLManager(
     val lastCandidate = reverseBankPRegIndices(lastFromBankEnd)
     val bankHasCandidate = firstInBank < bankWidth.U
 
+    s0BankFreeCount(bankIndex) := PopCount(bankBitmap)
     s0BankCandidates(bankIndex)(0) := firstCandidate
     s0BankCandidates(bankIndex)(1) := lastCandidate
     s0BankCandidateValid(bankIndex)(0) := bankHasCandidate
     s0BankCandidateValid(bankIndex)(1) := bankHasCandidate && firstCandidate =/= lastCandidate
   }
 
-  // Visit banks from a rotating start point. The first round takes one
-  // candidate from every bank, then the second round takes the other one.
-  // This keeps partial refills from repeatedly favoring low-numbered banks.
+  // Rank banks by the number of currently available registers.  Equal counts
+  // retain the rotating order, so the tie case is also balanced over time.
+  // The stable selection network is small because bankCount is only
+  // renameWidth / 2 (four banks for the normal eight-wide Rename).
+  val initialBankOrder = Wire(Vec(bankCount, UInt(bankPtrWidth.W)))
+  val initialBankCounts = Wire(Vec(bankCount, UInt(bankCountWidth.W)))
+  for (rank <- 0 until bankCount) {
+    initialBankOrder(rank) := addBankPtr(s0BankStartPtr, rank.U)
+    initialBankCounts(rank) := s0BankFreeCount(initialBankOrder(rank))
+  }
+
+  val rankedBankOrder = Wire(Vec(bankCount, UInt(bankPtrWidth.W)))
+  var selectedBanks: Seq[Bool] = Seq.fill(bankCount)(false.B)
+  for (rank <- 0 until bankCount) {
+    // Select the first maximum in the rotating order.  Strict `>` keeps the
+    // tie break stable; the next rank then removes the selected bank.
+    var bestBank: UInt = 0.U(bankPtrWidth.W)
+    var bestCount: UInt = 0.U(bankCountWidth.W)
+    var bestValid: Bool = false.B
+    for (bankIndex <- 0 until bankCount) {
+      val available = !selectedBanks(bankIndex)
+      val choose = available && (!bestValid || initialBankCounts(bankIndex) > bestCount)
+      bestBank = Mux(choose, initialBankOrder(bankIndex), bestBank)
+      bestCount = Mux(choose, initialBankCounts(bankIndex), bestCount)
+      bestValid = bestValid || available
+    }
+    rankedBankOrder(rank) := bestBank
+
+    val selectedBanksNext = Wire(Vec(bankCount, Bool()))
+    for (bankIndex <- 0 until bankCount) {
+      selectedBanksNext(bankIndex) := selectedBanks(bankIndex) ||
+        (bestValid && initialBankOrder(bankIndex) === bestBank)
+    }
+    selectedBanks = selectedBanksNext
+  }
+
+  // Emit both candidates from each bank before moving to the next bank.  If
+  // the s1 queue has only a few free slots, the fuller banks are therefore
+  // selected first and the refill moves the bank occupancies toward balance.
   for (candidateIdx <- 0 until renameWidth) {
-    val candidateBank = addBankPtr(s0BankStartPtr, (candidateIdx % bankCount).U)
-    val candidateInBank = candidateIdx / bankCount
+    val candidateBank = rankedBankOrder(candidateIdx / 2)
+    val candidateInBank = candidateIdx % 2
     s0CandidateBank(candidateIdx) := candidateBank
     s0Candidates(candidateIdx) := s0BankCandidates(candidateBank)(candidateInBank)
     s0CandidateValid(candidateIdx) := s0BankCandidateValid(candidateBank)(candidateInBank)
