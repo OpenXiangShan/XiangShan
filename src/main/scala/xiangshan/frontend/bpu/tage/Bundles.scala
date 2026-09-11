@@ -122,6 +122,7 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
+  val bankIdx: UInt               = UInt(BankIdxWidth.W)
   val entries: Vec[TageMetaEntry] = Vec(NumBtbResultEntries, new TageMetaEntry)
 }
 

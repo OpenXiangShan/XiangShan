@@ -70,8 +70,34 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   })
 
   // currently all tables share the same bank index
-  private val s0_bankIdx  = tables.head.getBankIndex(s0_startPc)
+  private val s0_rawBankIdx = tables.head.getBankIndex(s0_startPc)
+  // Enter alternating-bank mode only after the same start PC is observed three times in a row.
+  private val lastValid            = RegInit(false.B)
+  private val lastStartPcLowerBits = RegInit(0.U(10.W))
+  private val lastRawBankIdx       = RegInit(0.U(BankIdxWidth.W))
+  private val lastBankIdx          = RegInit(0.U(BankIdxWidth.W))
+
+  private val sameStartPc = lastValid && s0_startPc(10, 1) === lastStartPcLowerBits && s0_rawBankIdx === lastRawBankIdx
+  private val sameStartPcCount = RegInit(0.U(2.W))
+  private val s0_bankIdx = Mux(
+    sameStartPc && sameStartPcCount === 3.U,
+    lastBankIdx ^ 1.U(BankIdxWidth.W),
+    s0_rawBankIdx
+  )
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
+
+  when(s0_fire) {
+    lastValid            := true.B
+    lastStartPcLowerBits := s0_startPc(10, 1)
+    lastRawBankIdx       := s0_rawBankIdx
+    lastBankIdx          := s0_bankIdx
+
+    sameStartPcCount := Mux(
+      sameStartPc,
+      Mux(sameStartPcCount === 3.U, 3.U, sameStartPcCount + 1.U),
+      1.U
+    )
+  }
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.readReq(0).valid         := s0_fire
@@ -88,6 +114,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_fire       = io.stageCtrl.s1_fire
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
+  private val s1_bankIdx    = RegEnable(s0_bankIdx, s0_fire)
 
   // Vec[NumBtbResultEntries][NumTables]
   private val s1_tag = VecInit(io.fromMainBtb.s1_positions.map { position =>
@@ -108,6 +135,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
   private val s2_tag      = RegEnable(s1_tag, s1_fire)
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
+  private val s2_bankIdx  = RegEnable(s1_bankIdx, s1_fire)
+
+  io.meta.bankIdx := s2_bankIdx
 
   private val s2_branches = io.fromMainBtb.result
 
@@ -181,7 +211,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_branches = io.train.branches
 
   // currently all tables share the same bank index
-  private val t0_bankIdx  = tables.head.getBankIndex(t0_startPc)
+  private val t0_bankIdx  = io.train.meta.tage.bankIdx
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
