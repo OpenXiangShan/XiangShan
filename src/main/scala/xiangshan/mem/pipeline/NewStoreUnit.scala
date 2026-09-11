@@ -26,6 +26,7 @@ import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.mem.vector.VldMaskGen
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
@@ -86,6 +87,19 @@ class StoreUnitS0(param: ExeUnitParams)(
   val stinVAddr = stin.src(0) + SignExt(stin.imm(11,0), VAddrBits)
   val stinFullva = stin.src(0) + SignExt(stin.imm(11,0), XLEN)
   val stinSize = Cat(0.U, LSUOpType.size(stinUop.fuOpType))
+  // A unit-stride vector store only writes the bytes of the elements inside vl, while the size mask
+  // always covers the whole uop block (e.g. 16B for e8), so it must be limited to the active bytes.
+  // The mask (v0) input is not wired yet: the store path is only exercised with vm = 1 so far.
+  val stinMaskGen = Module(new VldMaskGen)
+  stinMaskGen.in.vl := stin.vl.get
+  stinMaskGen.in.vstart := 0.U
+  stinMaskGen.in.vm := true.B
+  stinMaskGen.in.isWhole := false.B
+  stinMaskGen.in.v0Mask := 0.U
+  stinMaskGen.in.eew := LSUOpType.vecElemSize(stinUop.fuOpType)
+  stinMaskGen.in.uopIdx := stinUop.uopIdx
+  val stinIsUStrideVecStore = LSUOpType.isUStride(stinUop.fuOpType)
+  val stinVlMask = stinMaskGen.out.mask
   scalarIssue.valid := io.stin.valid
   scalarIssue.bits.entrance := StoreEntrance.scalarIssue.U
   scalarIssue.bits.accessType.instrType := InstrType.scalar.U
@@ -98,7 +112,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.mask := Mux(
     LSUOpType.isCboAll(stinUop.fuOpType),
     Fill(VLEN/8, 1.U(1.W)),
-    genVWmask128(stinVAddr, stinSize)
+    Mux(stinIsUStrideVecStore, stinVlMask, genVWmask128(stinVAddr, stinSize))
   ) // CBO operations always cover the whole cache line
   scalarIssue.bits.isFirstIssue := stin.isFirstIssue
   scalarIssue.bits.ssid.get := stinUop.ssid

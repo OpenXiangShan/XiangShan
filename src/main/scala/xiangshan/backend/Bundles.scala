@@ -934,7 +934,7 @@ object Bundles {
     val imm            = Option.when(exuParams.needImm)(UInt(exuParams.deqImmTypesMaxLen.W))
     val frm            = Option.when(exuParams.needSrcFrm)(Frm())
     val vm       = Option.when(iqParams.inVfSchd || exuParams.needVPUCtrl)(Bool())
-    val uopIdx   = Option.when(iqParams.inVfSchd || exuParams.needVPUCtrl)(UopIdx())
+    val uopIdx   = Option.when(iqParams.inVfSchd || exuParams.needVPUCtrl || exuParams.hasMemAddrFu)(UopIdx())
     val lastUop  = Option.when(iqParams.inVfSchd || exuParams.needVPUCtrl)(Bool())
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
@@ -1148,7 +1148,8 @@ object Bundles {
     val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
     val vm            = if (params.needVPUCtrl)   Some(Bool())                        else None
-    val uopIdx        = if (params.needVPUCtrl)   Some(UopIdx())                      else None
+    // Memory address EXUs need the uop index too: a vector memory uop selects its own element block with it.
+    val uopIdx        = if (params.needVPUCtrl || params.hasMemAddrFu) Some(UopIdx())  else None
     val lastUop       = if (params.needVPUCtrl)   Some(Bool())                        else None
     val frm           = if (params.needSrcFrm)    Some(Frm())                         else None
     val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
@@ -1273,7 +1274,8 @@ object Bundles {
     val vlWen          = Option.when(params.needVlWen)(Bool())
     val fflagsWen      = Option.when(params.writeFflags)(Bool())
     val vm             = Option.when(params.needVPUCtrl)(Bool())
-    val uopIdx         = Option.when(params.needVPUCtrl)(UopIdx())
+    // Kept in step with ExuInput.uopIdx: memory address EXUs select their element block with it.
+    val uopIdx         = Option.when(params.needVPUCtrl || params.hasMemAddrFu)(UopIdx())
     val lastUop        = Option.when(params.needVPUCtrl)(Bool())
     val frm            = Option.when(params.needSrcFrm)(Frm())
     val oldVType       = Option.when(params.writeVType)(VType())
