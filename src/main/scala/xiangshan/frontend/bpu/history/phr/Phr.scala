@@ -274,11 +274,20 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s1_midToken = Mux(s1_blockTaken.head, s1_blockHash.head, 0.U)
   io.s1_midFoldedPhr := foldGroup(s1_foldedPhrReg, s1_oldestBits, s1_midToken, s1_midInsOH)
 
-  // The pointer and low bits that go with it, moved on by the first block exactly as an update would move them.
-  private val s1_midHashHigh = s1_blockHash.head(PathHashWidth - 1, Shamt)
-  io.s1_midPhrMeta.phrPtr := Mux(s1_blockTaken.head, s1_phrPtr - Shamt.U, s1_phrPtr)
-  io.s1_midPhrMeta.phrLowBits :=
-    Mux(s1_blockTaken.head, s1_midHashHigh ^ s1_phrLowBits, s1_phrLowBits)
+  // The pointer and low bits that go with it, moved on by the first block exactly as an update would move them: the
+  // same rule as the group's own update, stopped after the first block. Reconstructing a history from a meta shifts
+  // the low bits by one Shamt per taken block and lays the token over them, so a meta built any other way describes
+  // a history the lookup never saw.
+  io.s1_midPhrMeta.phrPtr := Mux1H(
+    s1_midInsOH,
+    Seq.tabulate(MaxPredictionNum + 1)(n => s1_phrPtr - (n * Shamt).U)
+  )
+  io.s1_midPhrMeta.phrLowBits := Mux1H(
+    s1_midInsOH,
+    Seq.tabulate(MaxPredictionNum + 1) { n =>
+      ((s1_phrLowBits << (n * Shamt)).asUInt ^ s1_midToken)(PathHashHighWidth - 1, 0)
+    }
+  )
   io.s1_midPhrMeta.predFoldedHist.foreach(_ := io.s1_midFoldedPhr)
 
   // Every update is the same shape: shift the history by one Shamt per taken block and XOR the group's token over
