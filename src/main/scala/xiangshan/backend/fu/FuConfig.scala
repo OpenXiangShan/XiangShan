@@ -40,6 +40,8 @@ import xiangshan.mem.Std
   * @param immType the immediate type of this $fu
   * @param vconfigWakeUp
   * @param maskWakeUp
+  * @param writeVType if the $fu need write vtype
+  * @param readOldVtype if the $fu need read old vtype
   *
   * @define fu function unit
   */
@@ -75,6 +77,7 @@ case class FuConfig (
   // vector
   vconfigWakeUp : Boolean = false,
   maskWakeUp    : Boolean = false,
+  readOldVtype  : Boolean = false,
 ) {
   def needIntWen: Boolean = writeIntRf || writeFakeIntRf
   def needFpWen:  Boolean = writeFpRf
@@ -161,7 +164,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vfpu, vppu, vfalu, vfma, vfdiv, vfcvt, vldu, vstu, vsetfwf).contains(fuType)
   }
 
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
@@ -383,6 +386,7 @@ object FuConfig {
     writeIntRf = true,
     latency = CertainLatency(0),
     immType = Set(SelImm.IMM_VSETVLI, SelImm.IMM_VSETIVLI),
+    readOldVtype = true,
   )
 
   val VSetRiWvfCfg: FuConfig = FuConfig(
