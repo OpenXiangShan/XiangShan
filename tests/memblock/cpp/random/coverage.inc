@@ -353,6 +353,17 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, 7> vector_segment_lmuls{};
     std::array<std::uint64_t, 7> vector_segment_emuls{};
     std::array<std::uint64_t, 7> vector_segment_nfs{};
+    // Ordinary/FOF segment loads; later/first-segment fault positions.
+    std::array<std::uint64_t, 2> vector_segment_fof_presence{};
+    std::array<std::uint64_t, 2> vector_segment_fof_fault_positions{};
+    std::array<std::uint64_t, 2> vector_segment_fof_stage1_modes{};
+    std::array<std::uint64_t, 4> vector_segment_fof_eews{};
+    std::array<std::uint64_t, 7> vector_segment_fof_nfs{};
+    // [later/first fault][Sv39/Sv48][EEW8/16/32/64][NF2..NF8]
+    std::array<std::uint64_t, 2 * 2 * 4 * 7>
+        vector_segment_fof_crosses{};
+    std::uint64_t vector_segment_fof_data_uops = 0;
+    std::uint64_t vector_segment_fof_fix_vl = 0;
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
     std::array<std::uint64_t, 2> uncache_errors{};
@@ -504,6 +515,27 @@ struct ConstraintCoverage {
     {
         ++operations.at(operation);
         ++actions;
+    }
+
+    static constexpr unsigned vector_segment_fof_cross_index(
+        unsigned fault, unsigned mode, unsigned eew, unsigned nf_index)
+    {
+        return (((fault * 2U + mode) * 4U + eew) * 7U) + nf_index;
+    }
+
+    void sample_vector_segment_fof(
+        bool first_fault, unsigned mode, unsigned eew, unsigned nf_index,
+        unsigned data_uops)
+    {
+        ++vector_segment_fof_presence[1];
+        ++vector_segment_fof_fault_positions[first_fault ? 1U : 0U];
+        ++vector_segment_fof_stage1_modes.at(mode);
+        ++vector_segment_fof_eews.at(eew);
+        ++vector_segment_fof_nfs.at(nf_index);
+        ++vector_segment_fof_crosses.at(vector_segment_fof_cross_index(
+            first_fault ? 1U : 0U, mode, eew, nf_index));
+        vector_segment_fof_data_uops += data_uops;
+        ++vector_segment_fof_fix_vl;
     }
 
     static constexpr unsigned vector_shape_cross_index(
@@ -936,6 +968,32 @@ struct ConstraintCoverage {
                       vector_fof_crosses ==
                           std::array<std::uint64_t, 2 * 2 * 4>{} &&
                       vector_fof_fix_vl == 0));
+            }
+            if (operation == RandomConstraints::vector_segment) {
+                return operations[operation] == 0 &&
+                    vector_segment_directions ==
+                        std::array<std::uint64_t, 2>{} &&
+                    vector_segment_addressing ==
+                        std::array<std::uint64_t, 4>{} &&
+                    vector_segment_eews == std::array<std::uint64_t, 4>{} &&
+                    vector_segment_sews == std::array<std::uint64_t, 4>{} &&
+                    vector_segment_lmuls == std::array<std::uint64_t, 7>{} &&
+                    vector_segment_emuls == std::array<std::uint64_t, 7>{} &&
+                    vector_segment_nfs == std::array<std::uint64_t, 7>{} &&
+                    vector_segment_fof_presence ==
+                        std::array<std::uint64_t, 2>{} &&
+                    vector_segment_fof_fault_positions ==
+                        std::array<std::uint64_t, 2>{} &&
+                    vector_segment_fof_stage1_modes ==
+                        std::array<std::uint64_t, 2>{} &&
+                    vector_segment_fof_eews ==
+                        std::array<std::uint64_t, 4>{} &&
+                    vector_segment_fof_nfs ==
+                        std::array<std::uint64_t, 7>{} &&
+                    vector_segment_fof_crosses ==
+                        std::array<std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                    vector_segment_fof_data_uops == 0 &&
+                    vector_segment_fof_fix_vl == 0;
             }
             return true;
         }
@@ -1660,13 +1718,97 @@ struct ConstraintCoverage {
                 return std::equal(
                     weights.begin(), weights.end(), counts.begin(),
                     [](unsigned weight, std::uint64_t count) {
-                        return weight == 0 || count != 0;
+                        return (weight == 0) == (count == 0);
                     });
             };
+            const bool loads_enabled =
+                constraints.vector_segment_stores_per_mille != 1000;
+            const std::uint64_t fof_actions =
+                vector_segment_fof_presence[1];
+            if (operations[operation] < fof_actions) {
+                return false;
+            }
+            const std::uint64_t ordinary_actions =
+                operations[operation] - fof_actions;
+            std::array<std::uint64_t, 2> crossed_faults{};
+            std::array<std::uint64_t, 2> crossed_modes{};
+            std::array<std::uint64_t, 4> crossed_eews{};
+            std::array<std::uint64_t, 7> crossed_nfs{};
+            std::uint64_t cross_total = 0;
+            std::uint64_t expected_data_uops = 0;
+            bool cross_complete = true;
+            for (unsigned fault = 0; fault < 2; ++fault) {
+                for (unsigned mode = 0; mode < 2; ++mode) {
+                    for (unsigned eew = 0; eew < 4; ++eew) {
+                        for (unsigned nf = 0; nf < 7; ++nf) {
+                            const auto count = vector_segment_fof_crosses.at(
+                                vector_segment_fof_cross_index(
+                                    fault, mode, eew, nf));
+                            const bool enabled =
+                                constraints.vector_segment_fof_cross_enabled(
+                                    fault, mode, eew, nf);
+                            cross_complete &= (count != 0) == enabled;
+                            cross_total += count;
+                            crossed_faults[fault] += count;
+                            crossed_modes[mode] += count;
+                            crossed_eews[eew] += count;
+                            crossed_nfs[nf] += count;
+                            expected_data_uops += count * (nf + 2U);
+                        }
+                    }
+                }
+            }
+            const bool fof_complete = !loads_enabled
+                ? vector_segment_fof_presence ==
+                      std::array<std::uint64_t, 2>{} &&
+                      vector_segment_fof_fault_positions ==
+                          std::array<std::uint64_t, 2>{} &&
+                      vector_segment_fof_stage1_modes ==
+                          std::array<std::uint64_t, 2>{} &&
+                      vector_segment_fof_eews ==
+                          std::array<std::uint64_t, 4>{} &&
+                      vector_segment_fof_nfs ==
+                          std::array<std::uint64_t, 7>{} &&
+                      vector_segment_fof_crosses ==
+                          std::array<std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                      vector_segment_fof_data_uops == 0 &&
+                      vector_segment_fof_fix_vl == 0
+                : binary_complete(
+                      constraints.vector_segment_fof_per_mille,
+                      vector_segment_fof_presence) &&
+                      vector_segment_fof_presence[0] ==
+                          vector_segment_directions[0] &&
+                      (constraints.vector_segment_fof_per_mille == 0
+                           ? vector_segment_fof_fault_positions ==
+                                 std::array<std::uint64_t, 2>{} &&
+                                 vector_segment_fof_stage1_modes ==
+                                     std::array<std::uint64_t, 2>{} &&
+                                 vector_segment_fof_eews ==
+                                     std::array<std::uint64_t, 4>{} &&
+                                 vector_segment_fof_nfs ==
+                                     std::array<std::uint64_t, 7>{} &&
+                                 vector_segment_fof_crosses ==
+                                     std::array<
+                                         std::uint64_t, 2 * 2 * 4 * 7>{} &&
+                                 vector_segment_fof_data_uops == 0 &&
+                                 vector_segment_fof_fix_vl == 0
+                           : cross_complete && cross_total == fof_actions &&
+                                 crossed_faults ==
+                                     vector_segment_fof_fault_positions &&
+                                 crossed_modes ==
+                                     vector_segment_fof_stage1_modes &&
+                                 crossed_eews == vector_segment_fof_eews &&
+                                 crossed_nfs == vector_segment_fof_nfs &&
+                                 vector_segment_fof_data_uops ==
+                                     expected_data_uops &&
+                                 vector_segment_fof_fix_vl == fof_actions);
             return operations[operation] != 0 &&
                 direction_complete(
                     constraints.vector_segment_stores_per_mille,
                     vector_segment_directions) &&
+                vector_segment_directions[0] +
+                        vector_segment_directions[1] ==
+                    ordinary_actions &&
                 enabled_complete(
                     constraints.vector_segment_addressing_weights,
                     vector_segment_addressing) &&
@@ -1684,7 +1826,27 @@ struct ConstraintCoverage {
                     vector_segment_emuls) &&
                 enabled_complete(
                     constraints.vector_segment_nf_weights,
-                    vector_segment_nfs);
+                    vector_segment_nfs) &&
+                std::accumulate(
+                    vector_segment_addressing.begin(),
+                    vector_segment_addressing.end(), std::uint64_t{0}) ==
+                    ordinary_actions &&
+                std::accumulate(
+                    vector_segment_eews.begin(), vector_segment_eews.end(),
+                    std::uint64_t{0}) == ordinary_actions &&
+                std::accumulate(
+                    vector_segment_sews.begin(), vector_segment_sews.end(),
+                    std::uint64_t{0}) == ordinary_actions &&
+                std::accumulate(
+                    vector_segment_lmuls.begin(), vector_segment_lmuls.end(),
+                    std::uint64_t{0}) == ordinary_actions &&
+                std::accumulate(
+                    vector_segment_emuls.begin(), vector_segment_emuls.end(),
+                    std::uint64_t{0}) == ordinary_actions &&
+                std::accumulate(
+                    vector_segment_nfs.begin(), vector_segment_nfs.end(),
+                    std::uint64_t{0}) == ordinary_actions &&
+                fof_complete;
         }
         if (operation == RandomConstraints::noncacheable) {
             return uncache_operation_complete(
@@ -2615,6 +2777,24 @@ public:
                << ',' << vector_segment_nfs[1] << ',' << vector_segment_nfs[2]
                << ',' << vector_segment_nfs[3] << ',' << vector_segment_nfs[4]
                << ',' << vector_segment_nfs[5] << ',' << vector_segment_nfs[6]
+               << " actual_vector_segment_fof="
+               << vector_segment_fof_presence[0] << ','
+               << vector_segment_fof_presence[1]
+               << " actual_vector_segment_fof_fault="
+               << vector_segment_fof_fault_positions[0] << ','
+               << vector_segment_fof_fault_positions[1]
+               << " actual_vector_segment_fof_stage1_mode=";
+        append_counts(stream, vector_segment_fof_stage1_modes);
+        stream << " actual_vector_segment_fof_eew=";
+        append_counts(stream, vector_segment_fof_eews);
+        stream << " actual_vector_segment_fof_nf=";
+        append_counts(stream, vector_segment_fof_nfs);
+        stream << " actual_vector_segment_fof_cross=";
+        append_counts(stream, vector_segment_fof_crosses);
+        stream << " actual_vector_segment_fof_data_uops="
+               << vector_segment_fof_data_uops
+               << " actual_vector_segment_fof_fix_vl="
+               << vector_segment_fof_fix_vl
                << " actual_nc_direction=" << nc_directions[0] << ','
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','

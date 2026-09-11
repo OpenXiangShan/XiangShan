@@ -555,6 +555,7 @@ public:
         bool sq_flag;
         std::uint8_t flow_num;
         std::uint32_t exception_mask;
+        std::uint32_t allowed_additional_exception_mask;
         std::optional<std::uint8_t> trigger;
         std::optional<std::uint8_t> expected_writeback_vstart;
         bool check_data;
@@ -574,6 +575,7 @@ public:
         std::array<unsigned char, 16> index;
         std::uint16_t tail_elements;
         std::uint16_t mask_inactive_elements;
+        std::uint16_t fof_unspecified_elements;
     };
 
     void expect(
@@ -584,6 +586,24 @@ public:
             transaction.expected_trigger != kTriggerDebugMode) {
             if (error_.empty()) {
                 error_ = "vector data checking may only be disabled for DebugMode trigger";
+            }
+            return;
+        }
+        if (transaction.fof_unspecified_elements != 0 &&
+            (transaction.store || !transaction.fault_only_first ||
+             (transaction.fof_unspecified_elements &
+              ~active_vector_elements(transaction)) != 0)) {
+            if (error_.empty()) {
+                error_ = "FOF unspecified elements must be active load elements";
+            }
+            return;
+        }
+        if (transaction.allowed_additional_exception_mask != 0 &&
+            (transaction.store || !transaction.fault_only_first ||
+             (transaction.allowed_additional_exception_mask &
+              ~kExceptionLoadPageFault) != 0)) {
+            if (error_.empty()) {
+                error_ = "optional vector exceptions are restricted to FOF load page faults";
             }
             return;
         }
@@ -628,6 +648,7 @@ public:
                 transaction.sq_flag,
                 transaction.flow_num,
                 transaction.expected_exception_mask,
+                transaction.allowed_additional_exception_mask,
                 transaction.expected_trigger,
                 transaction.expected_writeback_vstart,
                 transaction.check_data,
@@ -648,6 +669,7 @@ public:
                 transaction.index,
                 vector_tail_elements(output_transaction),
                 vector_mask_inactive_elements(output_transaction),
+                transaction.fof_unspecified_elements,
             });
     }
 
@@ -668,8 +690,7 @@ public:
             return;
         }
         const Expected &expected = it->second;
-        const bool normal_progress = expected.exception_mask == 0;
-        const bool exception_progress = expected.exception_mask != 0;
+        const bool exception_progress = writeback.exception_mask != 0;
         const bool debug_mismatch =
             (expected.debug_is_mmio.has_value() &&
              writeback.debug_is_mmio != *expected.debug_is_mmio) ||
@@ -684,7 +705,10 @@ public:
             ? writeback.vstart != *expected.expected_writeback_vstart
             : (!exception_progress && writeback.vstart != 0);
         if ((expected.segment && lane != 0) ||
-            writeback.exception_mask != expected.exception_mask || writeback.replay ||
+            (writeback.exception_mask &
+             ~expected.allowed_additional_exception_mask) !=
+                expected.exception_mask ||
+            writeback.replay ||
             writeback.flush_pipe != expected.flush_pipe ||
             trigger_mismatch ||
             writeback.vec_wen != expected.vec_wen ||
@@ -704,7 +728,7 @@ public:
             fail("mismatched vector memory metadata", lane, writeback, &expected);
             return;
         }
-        if (expected.vl_wen && expected.exception_mask == 0) {
+        if (expected.vl_wen && !exception_progress) {
             const bool vl_data_matches =
                 writeback.data.size() == 16 &&
                 writeback.data[0] == expected.vl &&
@@ -725,23 +749,27 @@ public:
                 return;
             }
             ++fof_fix_observed_;
-        } else if (!expected.store && expected.exception_mask == 0 &&
+        } else if (!expected.store && !exception_progress &&
                    expected.vec_wen) {
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
                 (expected.check_data &&
                  !matches_load_data(writeback.data, expected)) ||
-                !matches_active_mask(writeback.vmask, expected.active_elements)) {
+                !matches_active_mask(
+                    writeback.vmask, expected.active_elements,
+                    expected.fof_unspecified_elements)) {
                 fail("mismatched vector load data", lane, writeback, &expected);
                 return;
             }
             ++load_observed_;
-        } else if (!expected.store && expected.exception_mask == 0) {
+        } else if (!expected.store && !exception_progress) {
             ++load_observed_;
         } else if (expected.store) {
             ++store_observed_;
         } else {
             ++load_observed_;
         }
+        page_fault_observed_ +=
+            (writeback.exception_mask & kExceptionLoadPageFault) != 0;
         expected_.erase(it);
     }
 
@@ -763,6 +791,7 @@ public:
     std::uint64_t load_observed() const { return load_observed_; }
     std::uint64_t store_observed() const { return store_observed_; }
     std::uint64_t fof_fix_observed() const { return fof_fix_observed_; }
+    std::uint64_t page_fault_observed() const { return page_fault_observed_; }
     const std::string &error() const { return error_; }
 
     std::string pending_summary() const
@@ -810,6 +839,9 @@ private:
                 : expected.eew);
         const unsigned elements = expected.data.size() / element_bytes;
         for (unsigned element = 0; element < elements; ++element) {
+            if (((expected.fof_unspecified_elements >> element) & 1U) != 0) {
+                continue;
+            }
             bool preserved = true;
             bool all_ones = true;
             for (unsigned byte = 0; byte < element_bytes; ++byte) {
@@ -836,14 +868,15 @@ private:
     }
 
     static bool matches_active_mask(
-        const std::vector<unsigned char> &actual, std::uint16_t expected)
+        const std::vector<unsigned char> &actual, std::uint16_t expected,
+        std::uint16_t arbitrary)
     {
         if (actual.size() < 2) {
             return false;
         }
         const std::uint16_t value = static_cast<std::uint16_t>(actual[0]) |
                                     (static_cast<std::uint16_t>(actual[1]) << 8);
-        if (value != expected) {
+        if ((value & ~arbitrary) != (expected & ~arbitrary)) {
             return false;
         }
         for (std::size_t index = 2; index < actual.size(); ++index) {
@@ -882,6 +915,8 @@ private:
         if (expected != nullptr) {
             message << " expected_op=0x" << std::hex << expected->fu_op_type
                     << " expected_exception=0x" << expected->exception_mask
+                    << " allowed_exception=0x"
+                    << expected->allowed_additional_exception_mask
                     << " expected_trigger="
                     << static_cast<unsigned>(expected->trigger.value_or(kVectorWritebackTriggerNone))
                     << " check_data=" << std::dec << expected->check_data
@@ -895,6 +930,8 @@ private:
             message
                     << " expected_active=0x" << std::hex
                     << expected->active_elements
+                    << " fof_unspecified=0x"
+                    << expected->fof_unspecified_elements
                     << " address=0x" << expected->address << std::dec
                     << " expected_sew/eew/lmul="
                     << static_cast<unsigned>(expected->vsew) << '/'
@@ -934,5 +971,6 @@ private:
     std::uint64_t load_observed_ = 0;
     std::uint64_t store_observed_ = 0;
     std::uint64_t fof_fix_observed_ = 0;
+    std::uint64_t page_fault_observed_ = 0;
     std::string error_;
 };

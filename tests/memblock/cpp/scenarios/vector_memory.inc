@@ -186,6 +186,7 @@ int run_vector_fault_only_first(int argc, char **argv)
         .expected_debug_is_mmio = false,
         .expected_debug_is_ncio = false,
         .expected_debug_is_perf_cnt = false,
+        .fof_unspecified_elements = 1U << 1,
     };
     for (unsigned byte = 0; byte < data_uop.data.size(); ++byte) {
         data_uop.data[byte] = static_cast<unsigned char>(0xb0 + byte);
@@ -216,6 +217,7 @@ int run_vector_fault_only_first(int argc, char **argv)
     fix_vl_uop.vuop_idx = 1;
     fix_vl_uop.last_uop = true;
     fix_vl_uop.vl_wen = true;
+    fix_vl_uop.fof_unspecified_elements = 0;
     fix_vl_uop.expected_debug_is_mmio.reset();
     fix_vl_uop.expected_debug_is_ncio.reset();
     fix_vl_uop.expected_debug_is_perf_cnt.reset();
@@ -1315,6 +1317,7 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
             // DecodeUnit keeps this sideband low when NF is non-zero. The
             // segment unit recognizes FOF from fuOpType instead.
             .is_vleff = false,
+            .fof_unspecified_elements = 1U << 1,
         };
         for (unsigned byte = 0; byte < fields[field].data.size(); ++byte) {
             fields[field].data[byte] = static_cast<unsigned char>(
@@ -1340,6 +1343,7 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
     fix_vl_uop.vuop_idx = 2;
     fix_vl_uop.last_uop = true;
     fix_vl_uop.vl_wen = true;
+    fix_vl_uop.fof_unspecified_elements = 0;
     environment.expect_vector_data(fix_vl_uop, {});
     if (!environment.issue_vector(fix_vl_uop, 512) ||
         !environment.run_until_vector_complete(32768) ||
@@ -1374,6 +1378,8 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
         return 1;
     }
     std::array<memblock::VectorMemoryTransaction, 2> faulting_fields{};
+    const std::uint64_t first_fault_writebacks_before =
+        first_fault.vector_page_fault_writebacks();
     for (unsigned field = 0; field < faulting_fields.size(); ++field) {
         faulting_fields[field] = memblock::VectorMemoryTransaction{
             .segment = true,
@@ -1384,13 +1390,16 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
             .pdest = static_cast<std::uint8_t>(120 + field),
             .lane = 0,
             .flow_num = 2,
-            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            .expected_exception_mask = 0,
+            .allowed_additional_exception_mask =
+                memblock::kExceptionLoadPageFault,
             .expected_trigger = memblock::kVectorWritebackTriggerNone,
             .vuop_idx = static_cast<std::uint8_t>(field),
             .last_uop = false,
             .nf = 1,
             .fault_only_first = true,
             .is_vleff = false,
+            .fof_unspecified_elements = 0x3,
         };
         first_fault.expect_vector_data(
             faulting_fields[field], faulting_fields[field].data);
@@ -1405,18 +1414,23 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
     auto first_fault_fix = faulting_fields[0];
     first_fault_fix.pdest = 122;
     first_fault_fix.expected_exception_mask = 0;
+    first_fault_fix.allowed_additional_exception_mask = 0;
     first_fault_fix.expected_vl = 2;
     first_fault_fix.vuop_idx = 2;
     first_fault_fix.last_uop = true;
     first_fault_fix.vl_wen = true;
+    first_fault_fix.fof_unspecified_elements = 0;
     first_fault.expect_vector_data(first_fault_fix, {});
     if (!first_fault.issue_vector(first_fault_fix, 512) ||
         !first_fault.run_until_vector_complete(32768) ||
         first_fault.vector_load_writebacks() != 2 ||
         first_fault.vector_fof_fix_writebacks() != 1 ||
+        first_fault.vector_page_fault_writebacks() ==
+            first_fault_writebacks_before ||
         first_fault.ptw_requests() == 0 ||
         first_fault.tilelink_requests() != 0 ||
-        first_fault.exception_vaddr() != first_fault_virtual ||
+        (first_fault.exception_vaddr() != first_fault_virtual &&
+         first_fault.exception_vaddr() != first_fault_virtual + 8U) ||
         first_fault.lq_allocated() != 0 || first_fault.sq_allocated() != 0) {
         std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
                   << first_fault.cycle()
@@ -1450,7 +1464,9 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
               << environment.vector_fof_fix_writebacks()
               << " segment_lsq_allocations=0"
               << " ptw_requests=" << environment.ptw_requests()
-              << " first_element_faults=2"
+              << " first_element_faults="
+              << first_fault.vector_page_fault_writebacks() -
+                     first_fault_writebacks_before
               << " first_fault_fix_vl=2"
               << " first_fault_vls_redirects=1"
               << " first_fault_ptw=" << first_fault.ptw_requests()

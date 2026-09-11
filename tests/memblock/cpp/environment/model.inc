@@ -440,6 +440,7 @@ struct VectorMemoryTransaction {
     std::uint16_t replay_mask = 0;
     std::uint8_t replay_mb_index = 0;
     std::uint32_t expected_exception_mask = 0;
+    std::uint32_t allowed_additional_exception_mask = 0;
     std::uint32_t input_exception_mask = 0;
     std::uint8_t input_trigger = kTriggerNone;
     bool input_flush_pipe = false;
@@ -464,6 +465,10 @@ struct VectorMemoryTransaction {
     std::optional<bool> expected_debug_is_mmio;
     std::optional<bool> expected_debug_is_ncio;
     std::optional<bool> expected_debug_is_perf_cnt;
+    // Architecturally arbitrary destination elements, such as the faulting
+    // element and the remainder below the original VL after FOF truncation.
+    // These bits qualify both returned data and the corresponding write mask.
+    std::uint16_t fof_unspecified_elements = 0;
 };
 
 inline std::uint8_t vector_vsew(

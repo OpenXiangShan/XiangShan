@@ -211,6 +211,12 @@ struct RandomConstraints {
     std::array<unsigned, 7> vector_segment_emul_weights{};
     std::array<unsigned, 7> vector_segment_nf_weights{};
     unsigned vector_segment_stores_per_mille = 0;
+    // Segment FOF is a low-rate subclass of segment loads. The initial
+    // constrained-random shape is the architectural unit-stride m1 subset;
+    // fault position, translation mode, EEW, and NF remain independently
+    // selectable.
+    unsigned vector_segment_fof_per_mille = 0;
+    unsigned vector_segment_fof_first_fault_per_mille = 0;
     unsigned probes_per_mille = 0;
     unsigned probe_to_b_per_mille = 0;
     unsigned probe_need_data_per_mille = 0;
@@ -308,6 +314,8 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
+                .vector_segment_fof_per_mille = 100,
+                .vector_segment_fof_first_fault_per_mille = 500,
                 .probes_per_mille = 20,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -405,6 +413,8 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 2, 16, 8, 2, 1},
                 .vector_segment_nf_weights = {32, 16, 8, 4, 2, 1, 1},
                 .vector_segment_stores_per_mille = 300,
+                .vector_segment_fof_per_mille = 10,
+                .vector_segment_fof_first_fault_per_mille = 100,
                 .probes_per_mille = 1,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -500,6 +510,8 @@ struct RandomConstraints {
                 .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
+                .vector_segment_fof_per_mille = 250,
+                .vector_segment_fof_first_fault_per_mille = 500,
                 .probes_per_mille = 100,
                 .probe_to_b_per_mille = 500,
                 .probe_need_data_per_mille = 500,
@@ -976,6 +988,10 @@ struct RandomConstraints {
             vector_nonzero_vstart_per_mille = parsed;
         } else if (key == "vector-segment-store") {
             vector_segment_stores_per_mille = parsed;
+        } else if (key == "vector-segment-fof") {
+            vector_segment_fof_per_mille = parsed;
+        } else if (key == "vector-segment-fof-first-fault") {
+            vector_segment_fof_first_fault_per_mille = parsed;
         } else if (key == "cmo-dirty") {
             cmo_dirty_per_mille = parsed;
         } else if (key == "cmo-younger-overlap") {
@@ -1304,6 +1320,25 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "vector-fof requires stage-1 translation traffic");
         }
+        if (vector_segment_fof_per_mille != 0 &&
+            operation_weights[vector_segment] == 0) {
+            throw std::invalid_argument(
+                "vector-segment-fof requires a nonzero vector-segment weight");
+        }
+        if (vector_segment_fof_per_mille == 1000) {
+            throw std::invalid_argument(
+                "vector-segment-fof must leave a nonzero ordinary segment-load share");
+        }
+        if (vector_segment_fof_per_mille != 0 &&
+            vector_segment_stores_per_mille == 1000) {
+            throw std::invalid_argument(
+                "vector-segment-fof requires a nonzero segment-load share");
+        }
+        if (vector_segment_fof_per_mille != 0 &&
+            translation_weights[translation_stage1] == 0) {
+            throw std::invalid_argument(
+                "vector-segment-fof requires stage-1 translation traffic");
+        }
         if (operation_weights[vector_load] != 0 ||
             operation_weights[vector_store] != 0) {
             const auto require_vector_weights = [](const auto &weights,
@@ -1520,6 +1555,14 @@ struct RandomConstraints {
                 vector_segment_emul_weights, reachable_emul, "EMUL");
             require_reachable(
                 vector_segment_nf_weights, reachable_nf, "NF");
+            if (vector_segment_fof_per_mille != 0 &&
+                (vector_segment_addressing_weights[0] == 0 ||
+                 vector_segment_lmul_weights[3] == 0 ||
+                 vector_segment_emul_weights[3] == 0 ||
+                 enabled_vector_segment_fof_crosses() == 0)) {
+                throw std::invalid_argument(
+                    "vector-segment-fof requires a legal unit-stride m1 EEW/SEW/NF shape");
+            }
         }
         if (std::accumulate(
                 translation_weights.begin(), translation_weights.end(),
@@ -1552,6 +1595,8 @@ struct RandomConstraints {
             vector_corner_per_mille > 1000 ||
             vector_fof_per_mille > 1000 ||
             vector_fof_first_fault_per_mille > 1000 ||
+            vector_segment_fof_per_mille > 1000 ||
+            vector_segment_fof_first_fault_per_mille > 1000 ||
             probes_per_mille > 1000 ||
             vector_masked_per_mille > 1000 || vector_vma_per_mille > 1000 ||
             vector_vta_per_mille > 1000 ||
@@ -2007,6 +2052,58 @@ struct RandomConstraints {
         return choose_weighted(vector_eew_weights, random);
     }
 
+    unsigned choose_vector_segment_fof_eew(std::uint64_t random) const
+    {
+        auto compatible = vector_segment_eew_weights;
+        for (unsigned eew = 0; eew < compatible.size(); ++eew) {
+            if (vector_segment_sew_weights[eew] == 0) {
+                compatible[eew] = 0;
+            }
+        }
+        return choose_weighted(compatible, random);
+    }
+
+    unsigned choose_vector_segment_fof_nf(std::uint64_t random) const
+    {
+        return choose_weighted(vector_segment_nf_weights, random);
+    }
+
+    bool vector_segment_fof_cross_enabled(
+        unsigned fault, unsigned mode, unsigned eew,
+        unsigned nf_index) const
+    {
+        const bool fault_enabled = fault != 0
+            ? vector_segment_fof_first_fault_per_mille != 0
+            : vector_segment_fof_first_fault_per_mille != 1000;
+        return operation_weights[vector_segment] != 0 &&
+            vector_segment_fof_per_mille != 0 &&
+            vector_segment_stores_per_mille != 1000 && fault_enabled &&
+            translation_weights[translation_stage1] != 0 &&
+            stage1_mode_weights.at(mode) != 0 &&
+            vector_segment_addressing_weights[0] != 0 &&
+            vector_segment_eew_weights.at(eew) != 0 &&
+            vector_segment_sew_weights.at(eew) != 0 &&
+            vector_segment_lmul_weights[3] != 0 &&
+            vector_segment_emul_weights[3] != 0 &&
+            vector_segment_nf_weights.at(nf_index) != 0;
+    }
+
+    unsigned enabled_vector_segment_fof_crosses() const
+    {
+        unsigned count = 0;
+        for (unsigned fault = 0; fault < 2; ++fault) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                for (unsigned eew = 0; eew < 4; ++eew) {
+                    for (unsigned nf = 0; nf < 7; ++nf) {
+                        count += vector_segment_fof_cross_enabled(
+                            fault, mode, eew, nf);
+                    }
+                }
+            }
+        }
+        return count;
+    }
+
     unsigned choose_vs_mode(std::uint64_t random) const
     {
         return choose_weighted(vs_mode_weights, random);
@@ -2334,6 +2431,7 @@ struct RandomConstraints {
                 actions += enabled(vector_segment_lmul_weights);
                 actions += enabled(vector_segment_emul_weights);
                 actions += enabled(vector_segment_nf_weights);
+                actions += enabled_vector_segment_fof_crosses();
             } else {
                 ++actions;
             }
@@ -2447,7 +2545,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=45 constraints=" << name
+        stream << "constraint_schema=46 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2584,6 +2682,10 @@ struct RandomConstraints {
         stream
                << " target_vector_segment_store="
                << vector_segment_stores_per_mille
+               << " target_vector_segment_fof="
+               << vector_segment_fof_per_mille
+               << " target_vector_segment_fof_first_fault="
+               << vector_segment_fof_first_fault_per_mille
                << " target_vector_segment_addressing=";
         append_weights(stream, vector_segment_addressing_weights);
         stream << " target_vector_segment_eew=";

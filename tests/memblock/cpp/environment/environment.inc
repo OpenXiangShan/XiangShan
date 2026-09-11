@@ -1316,6 +1316,10 @@ public:
     {
         return vector_scoreboard_.fof_fix_observed();
     }
+    std::uint64_t vector_page_fault_writebacks() const
+    {
+        return vector_scoreboard_.page_fault_observed();
+    }
     std::size_t pending_scalar_loads() const { return scoreboard_.pending_load(); }
     bool scalar_load_pending(const LoadTransaction &transaction) const
     {

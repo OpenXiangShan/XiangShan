@@ -1970,6 +1970,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "tail_agnostic",
             "mask_agnostic",
             "!preserved && !all_ones",
+            "fof_unspecified_elements",
+            "FOF unspecified elements must be active load elements",
+            "expected.fof_unspecified_elements >> element",
+            "writeback.vmask, expected.active_elements,",
         ):
             self.assertIn(contract, environment)
 
@@ -2271,11 +2275,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "vector-segment-fof",
             ".fault_only_first = true",
             ".is_vleff = false",
-            "first_element_faults=2",
+            ".allowed_additional_exception_mask =",
+            "vector_page_fault_writebacks()",
+            "first_element_faults=",
             "first_fault_fix_vl=2",
             "first_fault.exception_vaddr() != first_fault_virtual",
+            "first_fault.exception_vaddr() != first_fault_virtual + 8U",
         ):
             self.assertIn(contract, environment + main + makefile + benchmark)
+        self.assertNotIn("first_element_faults=2", main)
         self.assertIn("fofBufferValid", segment)
         self.assertIn("instMicroOp.exceptionVl.bits := segmentIdx", segment)
 
@@ -2693,6 +2701,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "vector_segment_emul_weights",
             "vector_segment_nf_weights",
             "vector_segment_stores_per_mille",
+            "vector_segment_fof_per_mille",
+            "vector_segment_fof_first_fault_per_mille",
             "cmo_error_per_mille",
             "cmo_error_denied_per_mille",
             "atomic_error_per_mille",
@@ -2826,6 +2836,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_concurrent_vector_shape=",
             "actual_concurrent_vector_uops=",
             "actual_vector_segment_direction=",
+            "target_vector_segment_fof=",
+            "target_vector_segment_fof_first_fault=",
+            "actual_vector_segment_fof=",
+            "actual_vector_segment_fof_fault=",
+            "actual_vector_segment_fof_stage1_mode=",
+            "actual_vector_segment_fof_eew=",
+            "actual_vector_segment_fof_nf=",
+            "actual_vector_segment_fof_cross=",
+            "actual_vector_segment_fof_data_uops=",
+            "actual_vector_segment_fof_fix_vl=",
             "target_vector_segment_addressing=",
             "actual_vector_segment_addressing=",
             "target_vector_segment_eew=",
@@ -2881,7 +2901,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "probe_max_outstanding=",
             "probe_source_space=",
             "probe_source_lifecycle=",
-            "constraint_schema=45",
+            "constraint_schema=46",
             "RandomVectorShape",
             "choose_vector_shape",
             "actual_vector_cross=",

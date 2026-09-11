@@ -57,13 +57,17 @@ Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests.
 Schema 44 also composes ordinary unit-stride VFOF into `random-mixed`, closing
 first/later fault x Sv39/Sv48 x EEW with independent page-walk, data,
-exception, final-VL, identity, and queue oracles. Exact fault VA is checked in
-the isolated ordinary and segmented FOF scenarios, where the top-level
-payload can be attributed to the only live exception. The common
-constrained tail composes segment load/store direction with all four
-addressing modes, EEW/SEW 8/16/32/64, fractional/integer LMUL and derived EMUL,
-and NF 2..8. It enumerates the legal decoder space before weighted selection;
-unsupported shapes are not silently randomized as ordinary LSQ traffic.
+exception, final-VL, identity, and queue oracles. Schema 46 adds a common
+unit-stride M1 segment-FOF subclass and closes first/later fault x Sv39/Sv48 x
+EEW x NF. Exact fault VA is checked in the isolated ordinary and segmented FOF
+scenarios, where the top-level payload can be attributed to the only live
+exception. In the common tail, segment-field exception choice and
+faulting/remainder destination elements are left unspecified where the vector
+specification permits them. The common constrained tail composes segment
+load/store direction with all four addressing modes, EEW/SEW 8/16/32/64,
+fractional/integer LMUL and derived EMUL, and NF 2..8. It enumerates the legal
+decoder space before weighted selection; unsupported shapes are not silently
+randomized as ordinary LSQ traffic.
 
 The directed segment matrix exhausts all legal NF 2..8 crosses with the 78
 ELEN=64 EEW/SEW/LMUL/EMUL bases for all four addressing modes. Unit-stride and
@@ -1469,7 +1473,9 @@ readback oracle remains the functional check; the cross only guarantees that
 the legal stimulus space is reached. The SPEC preset now uses ordinary-vector
 load/store weights `90/45` and vector-segment weight `20`, making the measured
 SPEC vector event classes materially present while keeping scalar memory
-traffic dominant. The minimum run is 3072 actions.
+traffic dominant. Schema 46 raises the minimum run to 4096 actions so the
+Segment FOF cross and the existing overlap-oriented mandatory phases can close
+in the same run.
 
 Schema 42 puts complete legal 1..8-uop ordinary vector load and store
 instructions into heterogeneous overlap windows and closes every reachable
@@ -1507,6 +1513,20 @@ counter requires every depth-17 action to reach 16 held responses, schedule
 one fair release, and expose the overflow target request. Internal
 reject/replay signals and counts remain diagnostic and never determine
 PASS/FAIL.
+
+Schema 46 adds low-rate segment FOF through `vector-segment-fof` and
+`vector-segment-fof-first-fault`. The common generator intentionally selects
+only unit-stride M1 (`EEW=SEW`, `LMUL=EMUL=1`) segment loads while its
+multi-uop cancellation and partial-completion contract is being generalized.
+It closes every enabled later/first-fault x Sv39/Sv48 x EEW x NF2..8 class
+before returning to the configured probability. Later faults require exact
+mapped-prefix bytes, suppress the page-fault writeback, and trim VL; a
+first-element fault preserves VL and requires at least one identified
+page-fault writeback. Data/mask bits for faulting or post-trim elements and
+the field carrying the exception are not fixed expected values. They are
+checked only through the architectural FOF contract and identity-matched
+exactly-once terminal accounting. Segment traffic's lack of `enqLsq` is a
+top-level stimulus contract, not a DUT correctness oracle.
 
 For deterministic reduction of a failure, `--allow-short-mixed` permits a
 smaller `random-mixed` run after the constraint set has been narrowed. It does
@@ -1703,7 +1723,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 3072
+  --test random-mixed --seed 17 --transactions 4096
 ```
 
 ## Complete Pin Audit

@@ -3934,3 +3934,33 @@ binary SHA-256 is
 `f2b2d160bb5a4820ca81cea0babac10d775739ec2bf2dc1c4eb0132b7804f330`
 and the runtime-metadata SHA-256 is
 `8be056188bf70ae20106be6aa9b5428a4d25da9b2a8a2cad2a38d3b141ce60cb`.
+
+## Schema-46 Segment FOF Bring-Up
+
+On 2026-09-11, the Segment FOF extension was checked in an isolated worktree
+against the current Picker/Verilator harness. The focused
+`vector-segment-fof` scenario passed at cycle 304 with two segment-field data
+writebacks, one fix-VL writeback, no driver-side segment `enqLsq`, and two
+first-element page-fault writebacks. The no-`enqLsq` observation qualifies the
+top-level stimulus and is not a DUT correctness oracle. The focused oracle
+accepts either field's page-fault report and leaves faulting/remainder
+destination elements unspecified, as required by the vector segment FOF
+architectural contract.
+
+Two bounded schema-46 `random-mixed` checks also passed: an EEW8/NF2/Sv39
+configuration exercised ordinary and segment FOF actions with both later- and
+first-element faults, and an EEW64/NF8/Sv48 configuration exercised the
+first-element-fault path. A full online coverage-profile run then passed with
+seed 1 and 4,096 actions at cycle 3,312,456 on complete RTL SHA-256
+`356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`.
+It covered all 112 Segment FOF cross bins exactly once, with 56 later-element
+and 56 first-element faults, 560 data uops, and 112 fix-VL writebacks. The same
+run retained nonzero concurrent-vector coverage and reached every miss-burst
+depth from 1 through 16. Schema 46 therefore raises the formal mixed minimum
+from 3,072 to 4,096 actions.
+
+These runs are bring-up and online coverage evidence only; they do not replace
+a clean frozen-artifact regression. A closure-quality schema-46 campaign must
+record the runtime/RTL hashes, artifact path, all enabled cross bins, and
+reproducible per-seed summaries before the result is promoted to a final
+acceptance claim.

@@ -6,7 +6,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
-    constexpr unsigned minimum_actions = 3072;
+    constexpr unsigned minimum_actions = 4096;
     if (!options.allow_short_mixed && options.transactions < minimum_actions) {
         std::cerr << "MEMBLOCK_RANDOM_MIXED_FAIL seed=" << options.seed
                   << " transactions=0 cycle=0"
@@ -3709,6 +3709,187 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             ++actions;
             return true;
         };
+        const auto issue_random_vector_segment_fof = [&] (
+            bool first_fault, unsigned stage1_mode, unsigned eew,
+            unsigned nf_index) {
+            const unsigned fields = nf_index + 2U;
+            const unsigned element_bytes = 1U << eew;
+            // The top-level flowNum is the number of memory flows represented
+            // by one M1 Vd, while VL=2 selects only the first two elements for
+            // this FOF reproducer.  Keep the two architectural quantities
+            // distinct across EEW=8..64.
+            const unsigned flow_num = 16U >> eew;
+            const std::uint64_t address = vector_fof_virtual_base + 0x1000U -
+                (first_fault ? 0U : fields * element_bytes);
+            const std::uint64_t physical_address =
+                vector_fof_physical_base + 0x1000U - fields * element_bytes;
+            {
+                std::ostringstream detail;
+                detail << (first_fault
+                               ? "random-vector-segment-fof-first-fault"
+                               : "random-vector-segment-fof-later-fault")
+                       << ":mode=" << stage1_mode << ":eew=" << eew
+                       << ":nf=" << fields;
+                phase = detail.str();
+            }
+            if (!environment.run_until_all_complete(8192) ||
+                !environment.run_until_queues_retired(8192)) {
+                phase += ":initial-drain";
+                return false;
+            }
+
+            for (unsigned field = 0; field < fields; ++field) {
+                const std::uint64_t first_address =
+                    address + field * element_bytes;
+                const auto first_reference =
+                    memblock::reference_page_walk_permissions(
+                        environment.memory(), random_stage1_roots[stage1_mode],
+                        first_address, page_mode(stage1_mode));
+                if (first_fault) {
+                    if (first_reference.walk.translated) {
+                        phase += ":reference-first-segment";
+                        return false;
+                    }
+                    continue;
+                }
+                const std::uint64_t expected_physical =
+                    physical_address + field * element_bytes;
+                const bool permitted = !first_reference.leaf_permissions ||
+                    memblock::reference_memory_access_permitted(
+                        memblock::ReferenceMemoryAccess::load,
+                        *first_reference.leaf_permissions,
+                        memblock::ReferencePrivilegeMode::supervisor,
+                        false, false);
+                const auto next_reference =
+                    memblock::reference_page_walk_permissions(
+                        environment.memory(), random_stage1_roots[stage1_mode],
+                        first_address + fields * element_bytes,
+                        page_mode(stage1_mode));
+                if (!first_reference.walk.translated || !permitted ||
+                    first_reference.walk.physical_address != expected_physical ||
+                    next_reference.walk.translated) {
+                    phase += ":reference-segment-boundary";
+                    return false;
+                }
+            }
+
+            const std::uint64_t data_writebacks_before =
+                environment.vector_load_writebacks();
+            const std::uint64_t fix_writebacks_before =
+                environment.vector_fof_fix_writebacks();
+            const std::uint64_t page_fault_writebacks_before =
+                environment.vector_page_fault_writebacks();
+            const std::uint64_t rob = rob_offset++;
+            const std::uint8_t first_pdest = static_cast<std::uint8_t>(
+                1U + random() % (256U - fields - 1U));
+            std::vector<memblock::VectorMemoryTransaction> data_uops;
+            data_uops.reserve(fields);
+            for (unsigned field = 0; field < fields; ++field) {
+                data_uops.push_back(memblock::VectorMemoryTransaction{
+                    .segment = true,
+                    .address = address,
+                    .oracle_address = first_fault
+                        ? std::nullopt
+                        : std::optional<std::uint64_t>{physical_address},
+                    .eew = static_cast<std::uint8_t>(eew),
+                    .vsew = static_cast<std::uint8_t>(eew),
+                    .vl = 2,
+                    .rob = memblock::rob_pointer_value(rob),
+                    .rob_flag = memblock::rob_pointer_flag(rob),
+                    .lq = memblock::lq_pointer_value(lq_offset),
+                    .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                    .sq = memblock::sq_pointer_value(sq_offset),
+                    .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                    .pdest = static_cast<std::uint8_t>(first_pdest + field),
+                    .lane = 0,
+                    .flow_num = static_cast<std::uint8_t>(flow_num),
+                    .expected_exception_mask = 0,
+                    .allowed_additional_exception_mask = first_fault
+                        ? memblock::kExceptionLoadPageFault : 0,
+                    .expected_trigger = first_fault
+                        ? std::nullopt
+                        : std::optional<std::uint8_t>{
+                              memblock::kVectorWritebackTriggerNone},
+                    .vuop_idx = static_cast<std::uint8_t>(field),
+                    .last_uop = false,
+                    .nf = static_cast<std::uint8_t>(fields - 1U),
+                    .fault_only_first = true,
+                    .is_vleff = false,
+                    .vec_wen = true,
+                    .fof_unspecified_elements = static_cast<std::uint16_t>(
+                        first_fault ? 0x3U : 1U << 1),
+                });
+                auto &data_uop = data_uops.back();
+                for (auto &byte : data_uop.data) {
+                    byte = static_cast<unsigned char>(random());
+                }
+                auto expected_data = data_uop.data;
+                if (!first_fault) {
+                    for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                        expected_data[byte] = environment.memory().read_byte(
+                            physical_address + field * element_bytes + byte);
+                    }
+                }
+                environment.expect_vector_data(data_uop, expected_data);
+                if (!environment.issue_vector(
+                        data_uop, constrained_completion_timeout)) {
+                    phase += ":data-issue";
+                    return false;
+                }
+            }
+
+            auto fix_vl_uop = data_uops.front();
+            fix_vl_uop.pdest =
+                static_cast<std::uint8_t>(first_pdest + fields);
+            fix_vl_uop.expected_exception_mask = 0;
+            fix_vl_uop.allowed_additional_exception_mask = 0;
+            fix_vl_uop.expected_trigger =
+                memblock::kVectorWritebackTriggerNone;
+            fix_vl_uop.expected_vl = first_fault ? 2U : 1U;
+            fix_vl_uop.vuop_idx = static_cast<std::uint8_t>(fields);
+            fix_vl_uop.last_uop = true;
+            fix_vl_uop.vl_wen = true;
+            fix_vl_uop.vec_wen = false;
+            fix_vl_uop.fof_unspecified_elements = 0;
+            environment.expect_vector_data(fix_vl_uop, {});
+            if (!environment.issue_vector(
+                    fix_vl_uop, constrained_completion_timeout) ||
+                !environment.run_until_vector_complete(
+                    constrained_completion_timeout)) {
+                phase += ":completion";
+                return false;
+            }
+            const std::uint64_t data_uops_observed =
+                environment.vector_load_writebacks() - data_writebacks_before;
+            if (data_uops_observed != fields ||
+                environment.vector_fof_fix_writebacks() !=
+                    fix_writebacks_before + 1U ||
+                (first_fault && environment.vector_page_fault_writebacks() ==
+                    page_fault_writebacks_before)) {
+                std::ostringstream detail;
+                detail << phase << ":terminal-accounting"
+                       << ":data=" << data_uops_observed << '/' << fields
+                       << ":fix="
+                       << environment.vector_fof_fix_writebacks() -
+                              fix_writebacks_before;
+                phase = detail.str();
+                return false;
+            }
+            if (first_fault && !environment.redirect_after(
+                                   fix_vl_uop.rob, fix_vl_uop.rob_flag,
+                                   true, true)) {
+                phase += ":trap-redirect";
+                return false;
+            }
+            for (const auto &data_uop : data_uops) {
+                coverage.sample(data_uop);
+            }
+            constraint_coverage.sample_vector_segment_fof(
+                first_fault, stage1_mode, eew, nf_index,
+                static_cast<unsigned>(data_uops_observed));
+            ++actions;
+            return true;
+        };
         if (!run_concurrent_windows(
                 choose_vector_shape, make_random_vector_uops,
                 sample_constrained_vector_instruction,
@@ -4481,6 +4662,90 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     vector_segment_store = true;
                 }
             }
+            bool vector_segment_fof_cross_missing = false;
+            if (kind == RandomConstraints::vector_segment &&
+                constraints.vector_segment_fof_per_mille != 0) {
+                for (unsigned fault = 0;
+                     fault < 2 && !vector_segment_fof_cross_missing; ++fault) {
+                    for (unsigned mode = 0;
+                         mode < 2 && !vector_segment_fof_cross_missing; ++mode) {
+                        for (unsigned eew = 0;
+                             eew < 4 && !vector_segment_fof_cross_missing;
+                             ++eew) {
+                            for (unsigned nf = 0; nf < 7; ++nf) {
+                                const unsigned cross = ConstraintCoverage::
+                                    vector_segment_fof_cross_index(
+                                        fault, mode, eew, nf);
+                                if (constraints.vector_segment_fof_cross_enabled(
+                                        fault, mode, eew, nf) &&
+                                    constraint_coverage
+                                            .vector_segment_fof_crosses[cross] ==
+                                        0) {
+                                    vector_segment_fof_cross_missing = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (kind == RandomConstraints::vector_segment) {
+                vector_segment_store =
+                    !vector_segment_fof_cross_missing && vector_segment_store;
+            }
+            const bool vector_segment_fof =
+                kind == RandomConstraints::vector_segment &&
+                !vector_segment_store &&
+                (vector_segment_fof_cross_missing || choose_binary_class(
+                    constraints.vector_segment_fof_per_mille,
+                    constraint_coverage.vector_segment_fof_presence));
+            bool vector_segment_fof_first_fault = false;
+            unsigned vector_segment_fof_stage1_mode = 0;
+            unsigned vector_segment_fof_eew = 0;
+            unsigned vector_segment_fof_nf = 0;
+            if (vector_segment_fof) {
+                std::optional<unsigned> uncovered_cross;
+                for (unsigned fault = 0; fault < 2 && !uncovered_cross;
+                     ++fault) {
+                    for (unsigned mode = 0; mode < 2 && !uncovered_cross;
+                         ++mode) {
+                        for (unsigned eew = 0; eew < 4 && !uncovered_cross;
+                             ++eew) {
+                            for (unsigned nf = 0; nf < 7; ++nf) {
+                                const unsigned cross = ConstraintCoverage::
+                                    vector_segment_fof_cross_index(
+                                        fault, mode, eew, nf);
+                                if (constraints.vector_segment_fof_cross_enabled(
+                                        fault, mode, eew, nf) &&
+                                    constraint_coverage
+                                            .vector_segment_fof_crosses[cross] ==
+                                        0) {
+                                    uncovered_cross = cross;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (uncovered_cross) {
+                    vector_segment_fof_first_fault =
+                        *uncovered_cross / (2U * 4U * 7U) != 0;
+                    vector_segment_fof_stage1_mode =
+                        (*uncovered_cross / (4U * 7U)) % 2U;
+                    vector_segment_fof_eew = (*uncovered_cross / 7U) % 4U;
+                    vector_segment_fof_nf = *uncovered_cross % 7U;
+                } else {
+                    vector_segment_fof_first_fault = choose_binary_class(
+                        constraints.vector_segment_fof_first_fault_per_mille,
+                        constraint_coverage.vector_segment_fof_fault_positions);
+                    vector_segment_fof_stage1_mode =
+                        constraints.choose_stage1_mode(random());
+                    vector_segment_fof_eew =
+                        constraints.choose_vector_segment_fof_eew(random());
+                    vector_segment_fof_nf =
+                        constraints.choose_vector_segment_fof_nf(random());
+                }
+            }
             bool vector_fof_cross_missing = false;
             if (kind == RandomConstraints::vector_load &&
                 constraints.vector_fof_per_mille != 0) {
@@ -5148,6 +5413,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 translation = TranslationContext{};
                 translation.regime = RandomConstraints::translation_stage1;
                 translation.stage1_mode = vector_fof_stage1_mode;
+            } else if (kind == RandomConstraints::vector_segment &&
+                       vector_segment_fof) {
+                translation = TranslationContext{};
+                translation.regime = RandomConstraints::translation_stage1;
+                translation.stage1_mode = vector_segment_fof_stage1_mode;
             } else if (kind == RandomConstraints::hypervisor) {
                 translation.regime = RandomConstraints::translation_nested;
                 translation.vs_mode = constraints.choose_vs_mode(random());
@@ -5384,7 +5654,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             // in every translated context. Keep this stress action out of
             // the separately located NAPOT pools so its failure mode remains
             // bank/replay behavior rather than an accidental page fault.
-            if (bank_conflict_action) {
+            if (bank_conflict_action || vector_fof || vector_segment_fof) {
                 leaf = TranslationLeafTopology{};
             }
             if (kind != RandomConstraints::ptw_error) {
@@ -7533,6 +7803,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         .expected_debug_is_mmio = false,
                         .expected_debug_is_ncio = false,
                         .expected_debug_is_perf_cnt = false,
+                        .fof_unspecified_elements = static_cast<std::uint16_t>(
+                            vector_fof_first_fault ? 0U : 1U << 1),
                     };
                     for (auto &byte : data_uop.data) {
                         byte = static_cast<unsigned char>(random());
@@ -7587,6 +7859,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     fix_vl_uop.vuop_idx = 1;
                     fix_vl_uop.last_uop = true;
                     fix_vl_uop.vl_wen = true;
+                    fix_vl_uop.fof_unspecified_elements = 0;
                     fix_vl_uop.expected_debug_is_mmio.reset();
                     fix_vl_uop.expected_debug_is_ncio.reset();
                     fix_vl_uop.expected_debug_is_perf_cnt.reset();
@@ -7659,6 +7932,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::vector_segment) {
+                if (vector_segment_fof) {
+                    if (!issue_random_vector_segment_fof(
+                            vector_segment_fof_first_fault,
+                            vector_segment_fof_stage1_mode, vector_segment_fof_eew,
+                            vector_segment_fof_nf)) {
+                        return false;
+                    }
+                    leaf_addressed = true;
+                } else {
                 if (!environment.run_until_all_complete(8192) ||
                     !environment.run_until_queues_retired(8192)) {
                     return false;
@@ -7813,6 +8095,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++actions;
                 ++constraint_coverage.vector_segment_directions[
                     vector_segment_store ? 1 : 0];
+                if (!vector_segment_store) {
+                    ++constraint_coverage.vector_segment_fof_presence[0];
+                }
                 ++constraint_coverage.vector_segment_addressing[
                     shape.addressing];
                 ++constraint_coverage.vector_segment_eews[shape.eew];
@@ -7822,6 +8107,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.vector_segment_emuls[
                     shape.emul_log2 + 3];
                 ++constraint_coverage.vector_segment_nfs[shape.nf_index];
+                }
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::prefetch) {
                 const auto transaction = make_prefetch(
