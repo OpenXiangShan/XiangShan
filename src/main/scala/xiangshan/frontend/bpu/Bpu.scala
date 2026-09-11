@@ -397,22 +397,30 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     s1_ptageBlock.bits.target
   )
 
-  s1_prediction := MuxCase(
-    fallThrough.io.prediction,
-    Seq(
-      (s1_ptageBlock.valid && s1_ptageResult.taken) -> s1_ptageResult,
-      s1_ptageBlock.valid                           -> fallThrough.io.prediction,
-      s1_ubtbPrediction.taken                       -> s1_ubtbPrediction
-    )
+  // The first block goes to whichever predictor is better at it, and that is the ahead btb with the micro tage behind
+  // it, not pTAGE. pTAGE is keyed a group ahead and answers with a whole pair, which is what buys the second block,
+  // but for the first block alone it is the weaker predictor: measured on CoreMark it left s2 correcting s1 57% more
+  // often, and each of those corrections restarts the pipeline. pTAGE is kept for the width it adds, below.
+  s1_prediction := Mux(
+    s1_abtbValid,
+    Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
+    Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
   )
 
   // The group s1 hands on. Everything that has to account for a whole group, the path history included, reads it from
   // here.
   //
-  // A second block only exists when pTAGE supplied the first and that first block jumped somewhere the entry itself
-  // named. pTAGE marks a block that cannot say where its successor starts, a return in particular, as unable to carry
-  // one; and when the group came from a fallback instead, there is no second block to speak of.
-  private val usePtage       = s1_ptageBlock.valid && s1_ptageResult.taken
+  // A second block starts where the first one ends, so pTAGE may only supply one for a group whose first block it
+  // agrees about. Its entry stored the pair as one thing: if the block the group actually takes is not the block
+  // pTAGE paired from, the successor it offers begins at a pc this group never reaches.
+  //
+  // pTAGE also marks a block that cannot say where its successor starts, a return in particular, as unable to carry
+  // one; and a group that fell through has no second block to speak of.
+  private val s1_ptageAgrees =
+    s1_ptageBlock.valid && s1_ptageResult.taken && s1_prediction.taken &&
+      s1_ptageResult.cfiPosition === s1_prediction.cfiPosition &&
+      s1_ptageResult.target === s1_prediction.target
+  private val usePtage       = s1_ptageAgrees
   private val s1_secondBlock = ptage.io.prediction.blocks(1)
   // A block that moves the return stack cannot carry a successor. Every entry of a group recovers from the one
   // speculation state Ftq records for it, so a second block behind a call would read a return stack top its own
@@ -446,17 +454,19 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     predictorIo.overrideStartPc := Mux(s3_override, s3_prediction.target, s2_prediction.target)
   }
 
-  private val s1_taken         = s1_prediction.taken
-  private val debug_s1UsePtage = s1_taken && usePtage
-  private val debug_s1UseUbtb  = s1_taken && !usePtage
+  private val s1_taken        = s1_prediction.taken
+  private val debug_s1UseAbtb = s1_taken && s1_abtbValid && s1_abtbResult.taken
+  private val debug_s1UseUbtb = s1_taken && !(s1_abtbValid && s1_abtbResult.taken)
 
-  // What the ahead btb would have answered, so the two ahead predictors can be compared without either driving the
-  // other's result. useAbtb is the condition that used to select it here.
-  private val useAbtb = s1_abtbValid && s1_abtbResult.taken
+  // How the two ahead predictors line up. pTAGE only contributes width, and only for a block the selected prediction
+  // agrees about, so its disagreement rate is what bounds how often a second block is available at all.
+  private val useAbtb        = s1_abtbValid && s1_abtbResult.taken
+  private val ptageWouldTake = s1_ptageBlock.valid && s1_ptageResult.taken
   XSPerfAccumulate("abtbWouldTake", useAbtb)
-  XSPerfAccumulate("abtbAgreesWithPtage", useAbtb && usePtage && s1_abtbResult.asUInt === s1_ptageResult.asUInt)
-  XSPerfAccumulate("abtbTakesWherePtageMisses", useAbtb && !usePtage)
-  XSPerfAccumulate("ptageTakesWhereAbtbMisses", usePtage && !useAbtb)
+  XSPerfAccumulate("ptageWouldTake", ptageWouldTake)
+  XSPerfAccumulate("ptageAgreesWithSelected", s1_ptageAgrees)
+  XSPerfAccumulate("ptageDisagreesWithSelected", ptageWouldTake && !s1_ptageAgrees)
+  XSPerfAccumulate("ptageHasPairButDisagrees", ptageWouldTake && !s1_ptageAgrees && s1_secondBlock.valid)
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -892,8 +902,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     MuxCase(
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
-        debug_s1UsePtage -> BpuPredictionSource.Stage1.Ptage,
-        debug_s1UseUbtb  -> BpuPredictionSource.Stage1.Ubtb
+        debug_s1UseAbtb -> BpuPredictionSource.Stage1.Abtb,
+        debug_s1UseUbtb -> BpuPredictionSource.Stage1.Ubtb
       )
     )
   private val s3_predictionSource = PriorityEncoder(Seq(
@@ -985,7 +995,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     "s1_use",
     io.toFtq.prediction.fire && !s2_override && !s3_override,
     Seq(
-      ("ptage", debug_s1UsePtage),
+      ("abtb", debug_s1UseAbtb),
       ("ubtb", debug_s1UseUbtb),
       ("fallThrough", !s1_taken)
     )
