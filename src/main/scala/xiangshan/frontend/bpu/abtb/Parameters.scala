@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
-    NumEntries:        Int = 1024,
+    NumEntries:        Int = 2048,
     NumBanks:          Int = 4,
     NumWays:           Int = 4,
     TagWidth:          Int = 24,
