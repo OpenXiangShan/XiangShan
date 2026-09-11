@@ -29,6 +29,7 @@ class NewFLManager(
   /** Stage 1: a configurable circular queue of physical-register candidates. */
   val s1Queue = RegInit(VecInit(Seq.fill(s1QueueSize)(0.U(phyRegIdxWidth.W))))
   val s1HeadPtr = RegInit(0.U(s1PtrWidth.W))
+  val s1HeadPtrOH = RegInit(1.U(s1QueueSize.W))
   val s1TailPtr = RegInit(0.U(s1PtrWidth.W))
   val s1ValidCount = RegInit(0.U(s1CountWidth.W))
 
@@ -86,15 +87,33 @@ class NewFLManager(
   }.reduce(_ | _)
 
   // Allocation lanes consume compacted requests from the head of s1.
+  // Keep a statically rotated view of the queue, as StdFreeList does, so the
+  // output path only selects one already-formed RenameWidth-wide window. The
+  // previous dynamic index formed an add/compare/mux chain for every lane.
+  val s1QueueVec = Wire(Vec(s1QueueSize, Vec(renameWidth, UInt(phyRegIdxWidth.W))))
+  for (queueStart <- 0 until s1QueueSize) {
+    for (offset <- 0 until renameWidth) {
+      val queueIndex = (queueStart + offset) % s1QueueSize
+      s1QueueVec(queueStart)(offset) := s1Queue(queueIndex)
+    }
+  }
+  val s1HeadCandidates = Mux1H(s1HeadPtrOH, s1QueueVec)
   val allocateCount = PopCount(in.allocateReq)
   for (laneIdx <- 0 until renameWidth) {
     val candidateOffset = PopCount(in.allocateReq.take(laneIdx))
-    out.allocatePhyReg(laneIdx) := s1Queue(addS1Ptr(s1HeadPtr, candidateOffset))
+    out.allocatePhyReg(laneIdx) := s1HeadCandidates(candidateOffset)
   }
-  val canAllocate = s1ValidCount >= allocateCount && !in.flush
-  out.canAllocate := canAllocate
-  val s1DoDequeue = canAllocate && in.doAllocate && !in.flush
+  // Match StdFreeList timing: canAllocate is registered from the number of
+  // candidates left after this cycle's dequeue/refill.
+  val s1CanAllocateReg = RegInit(false.B)
+  out.canAllocate := s1CanAllocateReg && !in.flush
+  val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
   val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
+  val s1ValidCountNext = s1ValidCount - s1DequeueCount +& s0EnqueueCount
+  val s1CanAllocateNext = !in.flush && (s1ValidCountNext >= renameWidth.U)
+  s1CanAllocateReg := s1CanAllocateNext
+  val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
+  val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
 
   val selectedBitmap = (0 until renameWidth).map { laneIdx =>
     Mux(
@@ -108,12 +127,14 @@ class NewFLManager(
 
   when(in.flush) {
     s1HeadPtr := 0.U
+    s1HeadPtrOH := 1.U
     s1TailPtr := 0.U
     s1ValidCount := 0.U
   }.otherwise {
-    s1HeadPtr := addS1Ptr(s1HeadPtr, s1DequeueCount)
+    s1HeadPtr := s1HeadPtrNext
+    s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
     s1TailPtr := addS1Ptr(s1TailPtr, s0EnqueueCount)
-    s1ValidCount := s1ValidCount - s1DequeueCount +& s0EnqueueCount
+    s1ValidCount := s1ValidCountNext
     for (candidateIdx <- 0 until renameWidth) {
       when(s0EnqueueValid(candidateIdx)) {
         val writePtr = addS1Ptr(s1TailPtr, s0EnqueueOffset(candidateIdx))
@@ -132,6 +153,7 @@ class NewFLManager(
     assert(s1ValidCount <= s1QueueSize.U)
     assert(s1DequeueCount <= s1ValidCount)
     assert(s0EnqueueCount <= s1FreeCount)
+    assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
     assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
     for (candidateIdx <- 0 until renameWidth) {
       when(s0EnqueueValid(candidateIdx)) {
