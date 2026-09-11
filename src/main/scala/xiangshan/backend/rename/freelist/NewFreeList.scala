@@ -124,17 +124,20 @@ class NewFreeList(
   XSPerfAccumulate("allocation_blocked_cycle", !io.canAllocate)
   
   val freeListSize = numPhyRegs - numLogicRegs
-  val freeRegCnt = PopCount(specfreeListReg.asUInt)
-  io.debug_UnusedRegCount.foreach(_ := freeRegCnt)
-  val freeRegCntReg = RegNext(freeRegCnt)
-  val perfEvents = Seq(
-    ("std_freelist_1_4_valid", freeRegCntReg <  (freeListSize / 4).U                                            ),
-    ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U    ),
-    ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U),
-    ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U                                        )
-  )
-
-  QueuePerf(size = freeListSize, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+  val freeRegCnt = Option.when(!env.FPGAPlatform || backendParams.debugEn)(PopCount(specfreeListReg.asUInt))
+  io.debug_UnusedRegCount.foreach(_ := freeRegCnt.get)
+  val perfEvents = if (!env.FPGAPlatform) {
+    val freeRegCntReg = RegNext(freeRegCnt.get)
+    QueuePerf(size = freeListSize, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
+    Seq(
+      ("std_freelist_1_4_valid", freeRegCntReg <  (freeListSize / 4).U                                            ),
+      ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U    ),
+      ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U),
+      ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U                                        )
+    )
+  } else {
+    Seq.empty
+  }
 
   generatePerfEvent()
 }
