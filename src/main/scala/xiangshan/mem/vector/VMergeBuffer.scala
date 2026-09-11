@@ -285,7 +285,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val firstUnmask            = genVFirstUnmask(selPort(0).mask).asUInt
     val addrOffset             = Mux(entryIsUS, firstUnmask, 0.U)
     val vaddr                  = selVaddr + addrOffset
-    val gpaddr                 = selPort(0).gpaddr + addrOffset
+    val gpaddr                 = Mux(selPort(0).isForVSnonLeafPTE, selPort(0).gpaddr, selPort(0).gpaddr + addrOffset)
     val vstart                 = Mux(entryIsUS, selPort(0).vstart, selElemInfield)
 
     // select oldest port to raise exception
