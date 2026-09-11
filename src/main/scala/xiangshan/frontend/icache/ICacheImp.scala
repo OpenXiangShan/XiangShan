@@ -110,7 +110,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
 
-  private val chiCtrlUnit = Option.when(EnableCtrlUnit)(Module(new ICacheCCHICtrlUnit))
+  private val chiCtrlUnit = if (EnableCtrlUnit) Some(outer.ctrlUnitOpt.get.module) else None
   private val eccEnable = if (EnableCtrlUnit) chiCtrlUnit.get.io.eccEnable else true.B
 
   if (EnableCtrlUnit) {

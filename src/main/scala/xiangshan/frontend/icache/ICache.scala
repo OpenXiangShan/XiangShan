@@ -35,5 +35,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
     s"L2 cache supports only 2bits alias tag, ICache with ${nSets}sets * ${blockBytes}B need ${AliasTagBits.get}bits"
   )
 
+  val ctrlUnitOpt: Option[ICacheCCHICtrlUnit] = Option.when(EnableCtrlUnit)(LazyModule(new ICacheCCHICtrlUnit))
+
   lazy val module: ICacheImp = new ICacheImp(this)
 }

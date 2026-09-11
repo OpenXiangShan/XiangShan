@@ -19,6 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy._
 import xiangshan._
 import xiangshan.backend.datapath.NewPipelineConnect
 import oceanus.compactchi._
@@ -28,7 +29,20 @@ import oceanus.compactchi._
  * Write: CompDBIDResp then NonCopyBackWrData.
  * Read: CompData on dndat.
  */
-class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit val p: Parameters) extends Module with HasDCacheParameters {
+class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyModule
+  with HasDCacheParameters
+{
+  val device: SimpleDevice = new SimpleDevice("L1DCacheCtrl", Seq("xiangshan,l1dcache_ctrl"))
+
+  ResourceBinding {
+    Resource(device, "reg").bind(
+      ResourceAddress(Seq(params.address), ResourcePermissions(r = true, w = true, x = false, c = false, a = false))
+    )
+  }
+
+  lazy val module = new DCacheCCHICtrlUnitImp
+
+  class DCacheCCHICtrlUnitImp extends LazyModuleImp(this) with HasDCacheParameters {
   val io = IO(new Bundle {
     val cchi = Flipped(new CCHIType3DownPort)
     val pseudoError = Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
@@ -208,5 +222,6 @@ class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit val p: Parameters) 
         state := sIdle
       }
     }
+  }
   }
 }
