@@ -28,7 +28,8 @@ import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
 class MainBtbAlignBank(
-    alignIdx: Int
+    alignIdx:     Int,
+    hasTrainRead: Boolean
 )(implicit p: Parameters) extends MainBtbModule with Helpers {
   class MainBtbAlignBankIO extends Bundle {
     class Read extends Bundle {
@@ -80,6 +81,13 @@ class MainBtbAlignBank(
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
+
+    // A group's later block was never looked up here, so training it needs a look-up of its own. It is issued at t0
+    // and lands at t1, where the meta is used, and it yields to the prediction read: a conflict is reported and the
+    // event refused, rather than the prediction being held up for it.
+    val t0_needRead:      Bool = Input(Bool())
+    val t0_posHigherBits: UInt = Input(UInt(AlignBankIdxLen.W))
+    val t0_readConflict:  Bool = Output(Bool())
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -89,7 +97,7 @@ class MainBtbAlignBank(
   private val w = io.write
 
   private val internalBanks = Seq.tabulate(NumInternalBanks) { bankIdx =>
-    Module(new MainBtbInternalBank(alignIdx, bankIdx))
+    Module(new MainBtbInternalBank(alignIdx, bankIdx, hasTrainRead))
   }
 
   private val replacer = Module(new MainBtbReplacer)
@@ -107,14 +115,30 @@ class MainBtbAlignBank(
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startPc)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx, NumInternalBanks)
   private val s0_alignBankIdx     = getAlignBankIndex(s0_startPc)
+  private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
 
   // mainBtb top is responsible for sending the correct startPc to alignBanks,
   // so here we should always see getAlignBankIndex(s0_startPc) == physical alignIdx.
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
+  // The training look-up's address. The training pc is an input, so it is available as early as the prediction pc is.
+  // The look-up reads the shadow copy of the storage, so it never competes with a prediction; it yields only to the
+  // write that keeps that copy in step. A copy that was not given a shadow cannot look anything up at all.
+  private val t0_readSetIdx         = getSetIndex(io.t0_startPc)
+  private val t0_readInternalBankOH = UIntToOH(getInternalBankIndex(io.t0_startPc), NumInternalBanks)
+  io.t0_readConflict := io.t0_needRead && (
+    if (hasTrainRead) Mux1H(t0_readInternalBankOH, internalBanks.map(_.io.trainReadBusy.get))
+    else true.B
+  )
+  private val t0_readFires = io.t0_needRead && !io.t0_readConflict
+
   internalBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
     b.io.read.req.bits.setIdx := s0_setIdx
+    b.io.trainRead.foreach { tr =>
+      tr.req.valid       := t0_readFires && t0_readInternalBankOH(i)
+      tr.req.bits.setIdx := t0_readSetIdx
+    }
   }
 
   /* *** s1 ***
@@ -123,11 +147,9 @@ class MainBtbAlignBank(
    * check entries hit
    * filter-out unneeded entries
    */
-  private val s1_fire             = io.stageCtrl.s1_fire
-  private val s1_startPc          = RegEnable(s0_startPc, s0_fire)
-  private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
-  private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
-  private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
+  private val s1_startPc       = RegEnable(s0_startPc, s0_fire)
+  private val s1_posHigherBits = RegEnable(s0_posHigherBits, s0_fire)
+  private val s1_crossPage     = RegEnable(s0_crossPage, s0_fire)
 
   private val s1_rawEntries = Mux1H(
     s1_internalBankMask,
@@ -170,6 +192,7 @@ class MainBtbAlignBank(
    * generate metadata for training
    */
   private val s2_fire             = io.stageCtrl.s2_fire
+  private val s1_fire             = io.stageCtrl.s1_fire
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
@@ -217,13 +240,41 @@ class MainBtbAlignBank(
   private val t1_needWrite        = w.req.bits.needWrite
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
-  private val t1_meta             = w.req.bits.meta
+  private val t1_useReadMeta      = RegEnable(t0_readFires, false.B, t0_fire)
+  private val t1_readBankOH       = RegEnable(t0_readInternalBankOH, t0_fire)
+  private val t1_readPosHigher    = RegEnable(io.t0_posHigherBits, t0_fire)
   private val t1_mispredictInfo   = w.req.bits.mispredictInfo
   private val t1_setIdx           = getSetIndex(t1_startPc)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
   private val t1_victimMask       = RegEnable(t0_victimMask, t0_fire)
+
+  // What the t0 look-up found, in the shape the training path expects a meta to arrive in. A later block has no meta
+  // from prediction time, so this is where its own stands in.
+  private val t1_readTag = getTag(t1_startPc)
+  private val t1_readMeta = VecInit(
+    (Mux1H(
+      t1_readBankOH,
+      internalBanks.map(_.io.trainRead.map(_.resp.entries).getOrElse(
+        0.U.asTypeOf(Vec(NumWay, new MainBtbEntry))
+      ))
+    ) zip
+      Mux1H(
+        t1_readBankOH,
+        internalBanks.map(_.io.trainRead.map(_.resp.counters).getOrElse(
+          0.U.asTypeOf(Vec(NumWay, TakenCounter()))
+        ))
+      )).map { case (e, c) =>
+      val meta = Wire(new MainBtbMetaEntry)
+      meta.rawHit    := e.valid && e.tag === t1_readTag
+      meta.position  := Cat(t1_readPosHigher, e.position)
+      meta.attribute := e.attribute
+      meta.counter   := c
+      meta
+    }
+  )
+  private val t1_meta = Mux(t1_useReadMeta, t1_readMeta, w.req.bits.meta)
 
   /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH

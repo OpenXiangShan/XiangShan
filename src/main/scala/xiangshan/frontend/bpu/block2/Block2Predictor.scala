@@ -70,7 +70,8 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
 
   val io: Block2PredictorIO = IO(new Block2PredictorIO)
 
-  private val mbtb = Module(new MainBtb)
+  // No shadow storage here: this copy predicts, it is never the one asked to look a block up for training.
+  private val mbtb = Module(new MainBtb(hasTrainReadPort = false))
   private val tage = Module(new Tage)
 
   io.sramResetDone := mbtb.io.sramResetDone && tage.io.sramResetDone
@@ -100,6 +101,8 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
   // the group even had a second block, and this copy is read on every group whether or not one exists, so the touch
   // would mostly record lookups at an address nothing ever asked about.
   mbtb.io.s3_takenMask := VecInit.fill(NumBtbResultEntries)(false.B)
+  // this copy verifies; it never supplies a meta to train the original, so it needs no look-up of its own
+  mbtb.io.trainValid := false.B
 
   tage.io.fromMainBtb.result       := mbtb.io.result
   tage.io.fromMainBtb.s1_positions := mbtb.io.s1_positions

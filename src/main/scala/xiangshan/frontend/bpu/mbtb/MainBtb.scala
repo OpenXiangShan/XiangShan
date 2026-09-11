@@ -26,7 +26,8 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.Prediction
 
-class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters with Helpers {
+class MainBtb(hasTrainReadPort: Boolean = true)(implicit p: Parameters) extends BasePredictor with HasMainBtbParameters
+    with Helpers {
   class MainBtbIO(implicit p: Parameters) extends BasePredictorIO {
     // prediction specific bundle
     val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
@@ -37,6 +38,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
+
+    // whether a training event is being offered at all, which decides only whether this array needs a look-up of its
+    // own for it. Taken from valid rather than fire so that trainReady does not depend on itself.
+    val trainValid: Bool = Input(Bool())
   }
 
   val io: MainBtbIO = IO(new MainBtbIO)
@@ -48,10 +53,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   addrFields.show(indent = 4)
 
   /* *** submodules *** */
-  private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
+  private val alignBanks =
+    Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx, hasTrainReadPort)))
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
 
+  // A group's later block carries no meta from prediction time, so this array looks it up itself at t0. That read
+  // yields to the prediction read, and where it cannot go this array simply skips the update -- it does not refuse
+  // the event. Refusing was measured as a loss: it feeds Ftq's training-stall limit, which throttles Bpu, and it
+  // holds the queue for a cycle so the next event is late too. Both cost more than the update is worth, and the
+  // block is trained the ordinary way the next time it is fetched as a group's first block.
+  private val t0_needRead    = io.trainValid && io.train.meta.isLaterBlock && io.enable
+  private val t0_readBlocked = alignBanks.map(_.io.t0_readConflict).reduce(_ || _)
   io.trainReady := true.B
 
   private val s0_fire, s1_fire, s2_fire, s3_fire, t0_fire = Wire(Bool())
@@ -133,18 +146,24 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t0_rotator    = VecRotate(getAlignBankIndex(t0_startPc))
   private val t0_startPcVec = t0_rotator.rotate(t0_train.startPcVec.get)
 
+  private val t0_posHigherBitsVec = t0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
+
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.t0_startPc := t0_startPcVec(i)
+    b.io.t0_startPc       := t0_startPcVec(i)
+    b.io.t0_needRead      := t0_needRead
+    b.io.t0_posHigherBits := t0_posHigherBitsVec(i)
   }
 
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  // A group's later block carries no btb meta: the two copies of the array allocate from their own replacers, so the
-  // way a lookup in one reports is not the way this one holds. Its branches train the predictors that did look it up.
-  private val t1_fire =
-    RegNext(t0_fire && !io.train.meta.isLaterBlock, init = false.B) && io.enable
-  private val t1_train = RegEnable(t0_train, t0_fire)
+  // A later block is trained only by the array that looked it up. For this one that is the t0 read above, and where
+  // it could not go there is no meta to write from. For a copy that was not asked to look the block up there is no
+  // meta at all -- the bundle carries only what the block's own look-up produced, and the btb fields in it are empty,
+  // so a write from one would be a write from nothing.
+  private val t1_trainsThisEvent = !io.train.meta.isLaterBlock || (t0_needRead && !t0_readBlocked)
+  private val t1_fire            = RegNext(t0_fire && t1_trainsThisEvent, init = false.B) && io.enable
+  private val t1_train           = RegEnable(t0_train, t0_fire)
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
   private val t1_startPcVec = RegEnable(t0_startPcVec, t0_fire)
@@ -193,6 +212,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
 
   XSPerfAccumulate("total_train", t1_fire)
+  XSPerfAccumulate("train_read_needed", t0_fire && t0_needRead)
+  XSPerfAccumulate("train_read_blocked", t0_fire && t0_needRead && t0_readBlocked)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
   XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
   XSPerfAccumulate("train_has_mispredict", t1_fire && t1_mispredictInfo.valid)

@@ -24,8 +24,9 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtbInternalBank(
-    alignIdx: Int,
-    bankIdx:  Int
+    alignIdx:     Int,
+    bankIdx:      Int,
+    hasTrainRead: Boolean
 )(implicit p: Parameters) extends MainBtbModule with Helpers {
   class MainBtbInternalBankIO extends Bundle {
     class Read extends Bundle {
@@ -77,6 +78,13 @@ class MainBtbInternalBank(
     val writeEntry:   WriteEntry   = new WriteEntry
     val writeCounter: WriteCounter = new WriteCounter
     val flush:        Flush        = new Flush
+
+    // A second read port, for looking an entry up on behalf of training. It is served by a shadow of the storage
+    // rather than by the arrays above, so a look-up never has to wait for a prediction. trainReadBusy reports the one
+    // cycle it can still be turned away: the shadow only stays in step with the predictor's copy if it never misses a
+    // write, so a write always wins the port.
+    val trainRead:     Option[Read] = Option.when(hasTrainRead)(new Read)
+    val trainReadBusy: Option[Bool] = Option.when(hasTrainRead)(Output(Bool()))
   }
 
   val io: MainBtbInternalBankIO = IO(new MainBtbInternalBankIO)
@@ -118,6 +126,39 @@ class MainBtbInternalBank(
     suffix = Option("bpu_mbtb_counter")
   )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
 
+  // The shadow. Same geometry, same reset, same writes on the same cycles as the two arrays above -- the only thing
+  // it does not share is the read port, which is what training uses it for. There is one write path, one replacer and
+  // one write buffer in this bank, so there is nothing here that could decide differently and let the copies drift.
+  private val shadowEntrySrams = Option.when(hasTrainRead)(Seq.tabulate(NumWay) { wayIdx =>
+    Module(
+      new SRAMTemplate(
+        new MainBtbEntry,
+        set = NumSets,
+        way = 1,
+        singlePort = true,
+        shouldReset = true,
+        holdRead = true,
+        withClockGate = true,
+        hasMbist = hasMbist,
+        hasSramCtl = hasSramCtl,
+        suffix = Option("bpu_mbtb_entry")
+      )
+    ).suggestName(s"mbtb_sram_entry_shadow_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
+  })
+
+  private val shadowCounterSram = Option.when(hasTrainRead)(Module(new SRAMTemplate(
+    TakenCounter(),
+    set = NumSets,
+    way = NumWay,
+    singlePort = true,
+    shouldReset = true,
+    holdRead = true,
+    withClockGate = true,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl,
+    suffix = Option("bpu_mbtb_counter")
+  )).suggestName(s"mbtb_sram_counter_shadow_align${alignIdx}_bank${bankIdx}"))
+
   private val entryWriteBuffer = Module(new WriteBuffer(
     new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
@@ -132,7 +173,10 @@ class MainBtbInternalBank(
     flow = true
   ))
 
-  io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
+  private val shadowResetDone =
+    shadowEntrySrams.map(_.map(_.io.resetDone).reduce(_ && _)).getOrElse(true.B) &&
+      shadowCounterSram.map(_.io.resetDone).getOrElse(true.B)
+  io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone && shadowResetDone
 
   /* *** sram -> io *** */
   // handle entry & counter together
@@ -158,6 +202,65 @@ class MainBtbInternalBank(
   counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
   counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
   counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
+
+  /* *** writeBuffer -> shadow sram, and the train read *** */
+  // The shadow takes every write the array it copies takes, in the same order, but it is allowed to take them late.
+  // A look-up that had to wait would nearly always be waiting on the write the previous training event had just
+  // produced, so holding writes back a cycle or two is what keeps look-ups moving. The queues are sized so that a
+  // look-up yields only when one is nearly full, which bounds how far behind the copy can fall.
+  private val ShadowWriteQueueSize = 4
+  private val shadowEntryQueues = Option.when(hasTrainRead)(Seq.fill(NumWay)(Module(new Queue(
+    new MainBtbEntrySramWriteReq,
+    ShadowWriteQueueSize
+  ))))
+  private val shadowCounterQueue = Option.when(hasTrainRead)(Module(new Queue(
+    new MainBtbCounterSramWriteReq,
+    ShadowWriteQueueSize
+  )))
+
+  shadowEntryQueues.foreach { queues =>
+    (queues zip (entrySrams zip entryWriteBuffer.io.read)).foreach { case (q, (way, bufRead)) =>
+      q.io.enq.valid := bufRead.valid && !way.io.r.req.valid
+      q.io.enq.bits  := bufRead.bits
+      assert(!q.io.enq.valid || q.io.enq.ready, "MainBtb shadow entry write queue overflowed")
+    }
+  }
+  shadowCounterQueue.foreach { q =>
+    q.io.enq.valid := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
+    q.io.enq.bits  := counterWriteBuffer.io.deq.bits
+    assert(!q.io.enq.valid || q.io.enq.ready, "MainBtb shadow counter write queue overflowed")
+  }
+
+  // A look-up yields only to a queue that has no room left to absorb this cycle's write.
+  io.trainReadBusy.foreach { busy =>
+    val nearlyFull = ShadowWriteQueueSize - 1
+    busy := (shadowEntryQueues.get.map(_.io.count) :+ shadowCounterQueue.get.io.count)
+      .map(_ >= nearlyFull.U).reduce(_ || _)
+  }
+
+  io.trainRead.foreach { tr =>
+    val fires = tr.req.valid && !io.trainReadBusy.get
+    (shadowEntrySrams.get :+ shadowCounterSram.get).foreach { sram =>
+      sram.io.r.req.valid       := fires
+      sram.io.r.req.bits.setIdx := tr.req.bits.setIdx
+    }
+    tr.resp.entries  := VecInit(shadowEntrySrams.get.map(_.io.r.resp.data.head))
+    tr.resp.counters := shadowCounterSram.get.io.r.resp.data
+
+    (shadowEntrySrams.get zip shadowEntryQueues.get).foreach { case (shadow, q) =>
+      shadow.io.w.req.valid        := q.io.deq.valid && !fires
+      shadow.io.w.req.bits.data(0) := q.io.deq.bits.entry
+      shadow.io.w.req.bits.setIdx  := q.io.deq.bits.setIdx
+      q.io.deq.ready               := shadow.io.w.req.ready && !fires
+    }
+    val counterShadow = shadowCounterSram.get
+    val counterQueue  = shadowCounterQueue.get
+    counterShadow.io.w.req.valid            := counterQueue.io.deq.valid && !fires
+    counterShadow.io.w.req.bits.data        := counterQueue.io.deq.bits.counters
+    counterShadow.io.w.req.bits.setIdx      := counterQueue.io.deq.bits.setIdx
+    counterShadow.io.w.req.bits.waymask.get := counterQueue.io.deq.bits.wayMask
+    counterQueue.io.deq.ready               := counterShadow.io.w.req.ready && !fires
+  }
 
   /* *** io -> writeBuffer *** */
   // entry
