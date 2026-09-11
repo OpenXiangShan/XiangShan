@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 Beijing Institute of Open Source Chip
+
+pkg-y += iommu_atd_cache_pkg.sv
+
+rtl-y += iommu_atd_inv.sv \
+	 iommu_atd_ddtc_wrap.sv \
+	 iommu_atd_pdtc_wrap.sv \
+	 iommu_atd_s1ptc_wrap.sv \
+	 iommu_atd_s2ptc_wrap.sv \
+	 iommu_atd_ptc_multiupdate.sv
+
+rtl-y += iommu_atd_cache_ram_generic.sv
+
+rtl-y += atd_cache/iommu_atd_dtc_main_tlb.sv \
+	 atd_cache/iommu_atd_dtc_micro_tlb_entry_update.sv \
+	 atd_cache/iommu_atd_dtc_micro_tlb_inv_hit.sv \
+	 atd_cache/iommu_atd_dtc_micro_tlb.sv \
+	 atd_cache/iommu_atd_dtc_micro_tlb_tag_hit.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_bank.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_idx.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_inv_cabin_wrap.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_lkp_cabin_wrap.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_ram_wrap.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_tag_hit.sv \
+	 atd_cache/iommu_atd_dtc_mtlb_upd_cabin_wrap.sv \
+	 atd_cache/iommu_atd_dtc_top.sv \
+	 atd_cache/iommu_atd_ptc_main_tlb.sv \
+	 atd_cache/iommu_atd_ptc_micro_tlb_entry_update.sv \
+	 atd_cache/iommu_atd_ptc_micro_tlb_inv_hit.sv \
+	 atd_cache/iommu_atd_ptc_micro_tlb.sv \
+	 atd_cache/iommu_atd_ptc_micro_tlb_tag_hit.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_bank.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_idx.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_inv_cabin_wrap.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_lkp_cabin_wrap.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_ram_wrap.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_tag_hit.sv \
+	 atd_cache/iommu_atd_ptc_mtlb_upd_cabin_wrap.sv \
+	 atd_cache/iommu_atd_ptc_top.sv
+
+# set `pkg-y` as global dependency
+rtl-y += $(pkg-y)
+$(patsubst %,$(obj)/%.o,$(filter-out $(pkg-y),$(rtl-y))): \
+$(obj)/%.o: $(patsubst %,$(obj)/%.o,$(pkg-y))
