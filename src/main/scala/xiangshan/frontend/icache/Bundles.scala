@@ -197,11 +197,11 @@ class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** Replacer ***** */
 // ICacheMainPipe <-> ICacheReplacer
 class ReplacerTouchBundle(implicit p: Parameters) extends ICacheBundle {
-  class ReplacerTouchReqBundle(implicit p: Parameters) extends ICacheBundle {
+  class Req extends Bundle {
     val vSetIdx: UInt = UInt(idxBits.W)
     val way:     UInt = UInt(wayBits.W)
   }
-  val req: Vec[Valid[ReplacerTouchReqBundle]] = Vec(PortNumber, ValidIO(new ReplacerTouchReqBundle))
+  val req: Vec[Vec[Valid[Req]]] = Vec(MaxFetchReqNum, Vec(PortNumber, Valid(new Req)))
 }
 
 // ICacheMissUnit <-> ICacheReplacer
