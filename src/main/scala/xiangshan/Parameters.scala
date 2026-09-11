@@ -486,7 +486,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VimacCfg, VmoveCfg, VfcvtCfg, VfmaCfg),
+          Seq(VialuCfg, VimacCfg, VmoveCfg, VfcvtCfg,  VfaluCfg, VfmulCfg),
           Seq(VfWB(port = 3, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0))),
           vlRD = VlRD(0, 0),
@@ -497,7 +497,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
-          Seq(VialuCfg, VfmaCfg, VfdivCfg, VidivCfg),
+          Seq(VialuCfg, VidivCfg, VfaluCfg, VfmulCfg, VfdivCfg),
           Seq(VfWB(port = 4, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0))),
           vlRD = VlRD(1, 0),
@@ -508,7 +508,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX2",
-          Seq(VialuCfg, VfmaCfg),
+          Seq(VialuCfg),
           Seq(VfWB(port = 5, 0)),
           Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0))),
           vlRD = VlRD(2, 0),
@@ -519,7 +519,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX3",
-          Seq(VialuCfg, VfmaCfg),
+          Seq(VialuCfg),
           Seq(VfWB(port = 6, 0)),
           Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0))),
           vlRD = VlRD(3, 0),

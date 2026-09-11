@@ -170,7 +170,7 @@ case class FuConfig (
       vidiv,
       vfalu,
       vmove,
-      vfma,
+      vfmul,
       vfdiv,
       vfcvt,
       vsha256ms,
@@ -204,7 +204,7 @@ case class FuConfig (
     FuType.vialu,
     FuType.vimac,
     FuType.vfalu,
-    FuType.vfma,
+    FuType.vfmul,
     FuType.vfdiv,
     FuType.vfcvt,
     FuType.vidiv,
@@ -683,7 +683,6 @@ object FuConfig {
     piped = true,
     writeVecRf = true,
     writeV0Rf = true,
-    writeFpRf = true,
     writeFflags = true,
     latency = CertainLatency(1),
     vlWakeUp = true,
@@ -696,9 +695,9 @@ object FuConfig {
     readVType = true,
   )
 
-  val VfmaCfg = FuConfig (
-    name = "vfma",
-    fuType = FuType.vfma,
+  val VfmulCfg = FuConfig (
+    name = "vfmul",
+    fuType = FuType.vfmul,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
@@ -707,7 +706,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     writeFflags = true,
-    latency = CertainLatency(3),
+    latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
@@ -882,7 +881,7 @@ object FuConfig {
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VialuCfg, VimacCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, HyldaCfg, HystaCfg
+    VfaluCfg, VfmulCfg, VmoveCfg, HyldaCfg, HystaCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(

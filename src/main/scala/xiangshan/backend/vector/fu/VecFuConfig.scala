@@ -183,7 +183,7 @@ case class VecFuConfig (
     FuType.vialu,
     FuType.vimac,
     FuType.vfalu,
-    FuType.vfma,
+    FuType.vfmul,
     FuType.vfdiv,
     FuType.vfcvt,
     FuType.vidiv,
@@ -192,11 +192,16 @@ case class VecFuConfig (
     FuType.vsha256c,
   )
 
+  def isVfmul: Boolean = fuType == FuType.vfmul
+
+  def isVfalu: Boolean = fuType == FuType.vfalu
+
   def needWidenOut: Boolean = FuType.FuTypeOrR(
     this.fuType,
     FuType.vialu,
+    FuType.vfalu,
     FuType.vfcvt,
-    FuType.vfma,
+    FuType.vfmul,
   )
 
   def needNarrowOut: Boolean = FuType.FuTypeOrR(
@@ -295,8 +300,8 @@ object VecFuConfig {
   val VimacCfg = VecFuConfig.fromFuConfig(FuConfig.VimacCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")))
   val VidivCfg = VecFuConfig.fromFuConfig(FuConfig.VidivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")))
   val VmoveCfg = VecFuConfig.fromFuConfig(FuConfig.VmoveCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")))
-  val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
-  val VfmaCfg  = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg,  (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfma")))
+  val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFAluWrapper(cfg)(p).suggestName("Vfalu")))
+  val VfmulCfg = VecFuConfig.fromFuConfig(FuConfig.VfmulCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFMulWrapper(cfg)(p).suggestName("Vfmul")))
   val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFDivWrapper(cfg)(p).suggestName("Vfdiv")))
   val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
@@ -338,7 +343,7 @@ object VecFuConfig {
     VidivCfg,
     VmoveCfg,
     VfaluCfg,
-    VfmaCfg,
+    VfmulCfg,
     VfdivCfg,
     VfcvtCfg,
     VSha256msCfg,

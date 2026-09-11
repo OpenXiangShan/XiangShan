@@ -73,7 +73,13 @@ object Opcode {
   val FMacOpcodes       = Opcodes.FMacOpcode
   val VFMiscOpcodes     = Opcodes.VFMiscOpcode
   val VFCvtOpcodes      = Opcodes.VFCvtOpcode
-  val VFMacOpcodes      = Opcodes.VFMacOpcode
+  object VFMacOpcodes extends Opcodes.FMacOpcode {
+    override def getLat(opcode: Opcode): Int = {
+      require(this.all.contains(opcode))
+      // FMacOpcode.getOpNum is bit 5; OP3 is encoded as one.
+      if (opcode.encode(5).rawString == "1") 3 else 2
+    }
+  }
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -977,6 +983,13 @@ object Opcode {
   object FAluOpcodes extends Opcodes.FMacOpcode
   object VFRedOpcodes extends Opcodes.VFRedOpcode
   object VFDivOpcodes extends Opcodes.VFDivOpcode
+
+  object VFAluOpcodes extends Opcodes.FMacOpcode {
+    override def getLat(opcode: Opcode): Int = {
+      require(this.all.contains(opcode))
+      1
+    }
+  }
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm
