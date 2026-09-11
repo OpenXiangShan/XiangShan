@@ -977,6 +977,8 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
+  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new DCacheCCHICtrlUnit(params)))
+
   lazy val module = new DCacheImp(this)
 }
 
@@ -1091,7 +1093,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.pseudo_error.bits  := DontCare
 
   if (cacheCtrlParamsOpt.nonEmpty) {
-    val ctrlUnit = Module(new DCacheCCHICtrlUnit(cacheCtrlParamsOpt.get))
+    val ctrlUnit = outer.cacheCtrlOpt.get.module
     io.ctrl_cchi <> ctrlUnit.io.cchi
 
     if (EnableTagEcc) {
