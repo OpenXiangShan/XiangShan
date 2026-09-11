@@ -275,6 +275,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
+  // Frontend bandwidth at the two interfaces Ftq sits between: fetch blocks accepted from Bpu, and fetch blocks
+  // handed on to ICache. A 2-taken group raises the first directly; the second is what that is worth.
+  XSPerfAccumulate("bandwidth_blocksEnqueued", Mux(entryEnqueue, prediction.bits.numBlocks, 0.U))
+  XSPerfAccumulate("bandwidth_groupsEnqueued", entryEnqueue)
+  XSPerfAccumulate("bandwidth_enqueueStalledCycles", prediction.valid && !prediction.ready)
+
   // Enqueue contract: blocks are enqueued atomically into consecutive entries with no holes, a block only exists
   // because its predecessor jumped, and it starts where its predecessor jumped to. The last property is what lets
   // consumers keep reading a block's target from its successor's startPc.
@@ -343,6 +349,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(io.toICache.toMainPipe.fire) {
     fetchPtr := Mux(io.fromICache.fromMainPipe.realTwoFetchValid, fetchPtr + 2.U, fetchPtr + 1.U)
   }
+  XSPerfAccumulate(
+    "bandwidth_blocksFetched",
+    Mux(io.toICache.toMainPipe.fire, Mux(io.fromICache.fromMainPipe.realTwoFetchValid, 2.U, 1.U), 0.U)
+  )
 
   for (stage <- 2 to 3) {
     val redirect = if (stage == 2) prediction.bits.s2Override else prediction.bits.s3Override

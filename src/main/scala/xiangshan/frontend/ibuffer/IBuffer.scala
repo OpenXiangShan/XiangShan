@@ -595,6 +595,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   QueuePerf(Size, numValid, !allowEnq)
   XSPerfAccumulate("flush", io.flush)
   XSPerfAccumulate("hungry", perf_instrHungry)
+  // Frontend bandwidth as the backend sees it: instructions handed over per cycle, and the cycles that handed over
+  // none. Everything upstream is only a means to this number.
+  XSPerfAccumulate("bandwidth_instrEnqueued", numEnq)
+  XSPerfAccumulate("bandwidth_enqueueCycles", io.in.fire)
+  XSPerfAccumulate("bandwidth_noEnqueueCycles", !io.in.fire)
 
   // FIXME: this name is bad
   private val perf_ibufferIDWidthHvButNotFull =
