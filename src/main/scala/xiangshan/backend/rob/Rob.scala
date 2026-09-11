@@ -207,7 +207,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
-      connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
+      val firstUop = Mux1H(enqOH, io.enq.req.map(_.bits))
+      val amocasWbOH = VecInit(io.enq.req.map(req =>
+        req.valid && req.bits.robIdx.value === i.U && req.bits.isAMOCAS && req.bits.uopIdx === 1.U
+      ))
+      connectEnq(robEntries(i), firstUop)
+      when(amocasWbOH.asUInt.orR) {
+        val amocasWbUop = Mux1H(amocasWbOH, io.enq.req.map(_.bits))
+        robEntries(i).rfWen := amocasWbUop.rfWen
+        robEntries(i).basicDebug.foreach { basicDebug =>
+          basicDebug.ldest := amocasWbUop.ldest
+          basicDebug.pdest := amocasWbUop.pdest
+        }
+        robEntries(i).debug_rfWen.foreach { debugRfWen =>
+          debugRfWen := amocasWbUop.rfWen
+        }
+      }
     }
   }
   // robBanks0 include robidx : 0 8 16 24 32 ...
