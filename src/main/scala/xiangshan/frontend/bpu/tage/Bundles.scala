@@ -59,6 +59,8 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
 
 class TagePrediction(implicit p: Parameters) extends TageBundle {
   val takenVec: Vec[Valid[Bool]] = Vec(NumBtbResultEntries, Valid(Bool()))
+  // Fast s2 path: raw provider result, without alt/base selection.
+  val fastTakenVec: Vec[Valid[Bool]] = Vec(NumBtbResultEntries, Valid(Bool()))
 }
 
 class PhrToTageIO(implicit p: Parameters) extends TageBundle {

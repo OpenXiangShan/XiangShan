@@ -31,17 +31,21 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
 
   val predStartPc: Option[Pc] = Some(Pc()) // for debug
 }
-class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
-  val taken:              Bool                 = Bool()
-  val s3Override:         Bool                 = Bool()
-  val condHitMask:        Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
-  val position:           Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val attributes:         Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
-  val targets:            Vec[Pc]              = Vec(NumBtbResultEntries, Pc())
-  val firstTakenBranchOH: Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
-  val firstTakenBranch:   Valid[Prediction]    = Valid(new Prediction)
-  val startPc:            Pc                   = Pc()
-  val target:             Pc                   = Pc()
+
+class Update(implicit p: Parameters) extends CommonHRBundle {
+  val isOverride: Bool       = Bool()
+  val startPc:    Pc         = Pc()
+  val prediction: Prediction = new Prediction()
+}
+
+class S2Update(implicit p: Parameters) extends Update {
+  val condHitMask: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+  val positions:   Vec[UInt] = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val targets:     Vec[Pc]   = Vec(NumBtbResultEntries, Pc())
+}
+
+class S3Update(implicit p: Parameters) extends Update {
+  val firstTakenBranchOH: Vec[Bool] = Vec(NumBtbResultEntries, Bool())
 }
 
 class CommonHRResolveMeta(implicit p: Parameters) extends CommonHRBundle {

@@ -72,11 +72,13 @@ class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends Ftq
 }
 
 class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQueuePtrHelper {
+  val s2 = Valid(new FtqPtr)
   val s3 = Valid(new FtqPtr)
 
   def stage(idx: Int): Valid[FtqPtr] = {
-    require(idx >= 3 && idx <= 3)
+    require(idx >= 2 && idx <= 3)
     idx match {
+      case 2 => s2
       case 3 => s3
     }
   }
@@ -84,6 +86,7 @@ class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQue
   private def shouldFlushBy(src: Valid[FtqPtr], idxToFlush: FtqPtr, valid: Bool): Bool =
     valid && src.valid && !isAfter(src.bits, idxToFlush)
 
+  def shouldFlushByStage2(idx: FtqPtr, valid: Bool): Bool = shouldFlushBy(s2, idx, valid)
   def shouldFlushByStage3(idx: FtqPtr, valid: Bool): Bool = shouldFlushBy(s3, idx, valid)
 }
 
