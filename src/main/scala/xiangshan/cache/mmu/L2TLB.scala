@@ -1188,8 +1188,12 @@ object PTWDelayN {
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)
   val flush = VecInit(Seq.fill(PtwWidth)(false.B))
-  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, itlbParams.fenceDelay)
-  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, ldtlbParams.fenceDelay)
+  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed ||
+    io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.tlb.mmpt.changed else false.B), itlbParams.fenceDelay)
+  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed ||
+    io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.tlb.mmpt.changed else false.B), ldtlbParams.fenceDelay)
   for (i <- 0 until PtwWidth) {
     val helper = Module(new PTEHelper())
     helper.clock := clock
