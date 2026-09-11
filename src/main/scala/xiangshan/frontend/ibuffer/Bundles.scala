@@ -48,15 +48,15 @@ class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
     ) {}
 
 class IBufEntry(implicit p: Parameters) extends IBufferBundle {
-  val inst:           UInt       = UInt(32.W)
-  val pc:             Pc         = Pc()
-  val foldpc:         UInt       = UInt(MemPredPCWidth.W)
-  val isRvc:          Bool       = Bool()
-  val predTaken:      Bool       = Bool()
-  val fixedTaken:     Bool       = Bool()
-  val ftqPtr:         FtqPtr     = new FtqPtr
-  val instrEndOffset: UInt       = UInt(FetchBlockInstOffsetWidth.W)
-  val triggered:      UInt       = TriggerAction()
+  val inst:           UInt   = UInt(32.W)
+  val pc:             Pc     = Pc()
+  val foldpc:         UInt   = UInt(MemPredPCWidth.W)
+  val isRvc:          Bool   = Bool()
+  val predTaken:      Bool   = Bool()
+  val fixedTaken:     Bool   = Bool()
+  val ftqPtr:         FtqPtr = new FtqPtr
+  val instrEndOffset: UInt   = UInt(FetchBlockInstOffsetWidth.W)
+  val triggered:      UInt   = TriggerAction()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
