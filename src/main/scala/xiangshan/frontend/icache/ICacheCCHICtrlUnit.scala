@@ -18,6 +18,7 @@ package xiangshan.frontend.icache
 import annotation.unused
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.diplomacy._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.cache._
@@ -28,9 +29,22 @@ import oceanus.compactchi._
  * ECC enable + software-triggered parity/ECC inject into meta or data array.
  * Mirrors ICacheCtrlUnit register semantics.
  */
-class ICacheCCHICtrlUnit(implicit val p: Parameters) extends Module
+class ICacheCCHICtrlUnit(implicit p: Parameters) extends LazyModule
   with HasICacheCtrlUnitParameters
-  with ICacheMetaHelper {
+{
+  val device: SimpleDevice = new SimpleDevice("L1ICacheCtrl", Seq("xiangshan,l1icache_ctrl"))
+
+  ResourceBinding {
+    Resource(device, "reg").bind(
+      ResourceAddress(Seq(Address), ResourcePermissions(r = true, w = true, x = false, c = false, a = false))
+    )
+  }
+
+  lazy val module = new ICacheCCHICtrlUnitImp
+
+  class ICacheCCHICtrlUnitImp extends LazyModuleImp(this)
+    with HasICacheCtrlUnitParameters
+    with ICacheMetaHelper {
 
   val io = IO(new Bundle {
     val cchi = Flipped(new CCHIType3DownPort)
@@ -337,5 +351,6 @@ class ICacheCCHICtrlUnit(implicit val p: Parameters) extends Module
       next.iError := EccCtrlInjError.NotEnabled
     }
     eccCtrl := next.asUInt
+  }
   }
 }
