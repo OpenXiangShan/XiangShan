@@ -137,8 +137,12 @@ class MainBtbInternalBank(
 
   /* *** sram -> io *** */
   // skid-read (isSameSetIdx) only applies to entries; counters are always read
+  private val prevSetIdx    = RegNext(read.req.bits.setIdx, init = 0.U)
+  private val prevReadValid = RegNext(read.req.valid, init = false.B)
+  private val tryHold       = RegInit(false.B)
+  tryHold := ~tryHold
   entrySrams.foreach { sram =>
-    sram.io.r.req.valid       := read.req.valid && !read.req.bits.isSameSetIdx
+    sram.io.r.req.valid       := read.req.valid && !(prevReadValid && (prevSetIdx === read.req.bits.setIdx) && tryHold)
     sram.io.r.req.bits.setIdx := read.req.bits.setIdx
   }
   counterSram.io.r.req.valid       := read.req.valid
@@ -155,6 +159,7 @@ class MainBtbInternalBank(
     way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
+
   // counter
   counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
   counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
