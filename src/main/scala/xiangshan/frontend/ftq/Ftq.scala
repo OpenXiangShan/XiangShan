@@ -313,7 +313,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
     metaQueueResolve(s3BpuPtr)      := io.fromBpu.meta.bits.resolveMeta
     metaQueueResolveValid(s3BpuPtr) := true.B
-    metaQueueCommit(s3BpuPtr)       := io.fromBpu.meta.bits.commitMeta
+    // The group's later block carries its own, so its branches train rather than being dropped for want of a meta.
+    when(io.fromBpu.s3LaterResolveMeta.valid) {
+      val laterPtr = (io.fromBpu.s3FtqPtr + 1.U).value
+      metaQueueResolve(laterPtr)      := io.fromBpu.s3LaterResolveMeta.bits
+      metaQueueResolveValid(laterPtr) := true.B
+    }
+    metaQueueCommit(s3BpuPtr) := io.fromBpu.meta.bits.commitMeta
 
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
@@ -539,10 +545,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
     trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
+  }.elsewhen(trainCache.valid && trainCache.bits.meta.isLaterBlock) {
+    // A later block's training is opportunistic. There is one train port, and a predictor refuses it whenever the
+    // bank it needs is busy serving a prediction read; holding the port for a later block stalls the queue behind it
+    // and, past Ftq's stall limit, throttles Bpu outright. That costs more prediction bandwidth than the update is
+    // worth, so a later block takes an idle slot if there is one and is dropped if there is not. The block is trained
+    // the ordinary way the next time it is fetched as a group's first block.
+    trainCache.valid := false.B
   }
 
   io.toBpu.train.valid := trainCache.valid && !flushTrainCache
-  io.toBpu.train.bits  := trainCache.bits
+  XSPerfAccumulate(
+    "trainLaterBlockDropped",
+    trainCache.valid && trainCache.bits.meta.isLaterBlock && !io.toBpu.train.ready
+  )
+  XSPerfAccumulate("trainLaterBlockAccepted", io.toBpu.train.fire && trainCache.bits.meta.isLaterBlock)
+  io.toBpu.train.bits := trainCache.bits
 
   // default next state receives s3 prediction meta
   perfQueue := s3PerfQueue
@@ -751,7 +769,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // A group's later blocks are enqueued without Bpu meta of their own, so their perf meta describes whichever block
   // last held the index. Attributing a mispredict from one would blame a prediction that was never made.
   private val perf_commitHasMispredict =
-    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value)
+    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value) &&
+      !metaQueueResolve(commitPtr(0).value).isLaterBlock
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 

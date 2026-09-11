@@ -140,7 +140,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
+  // A group's later block carries no btb meta: the two copies of the array allocate from their own replacers, so the
+  // way a lookup in one reports is not the way this one holds. Its branches train the predictors that did look it up.
+  private val t1_fire =
+    RegNext(t0_fire && !io.train.meta.isLaterBlock, init = false.B) && io.enable
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)

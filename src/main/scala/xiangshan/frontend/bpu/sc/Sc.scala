@@ -471,8 +471,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val t1_writeTakenVec    = RegEnable(t0_writeTakenVec, t0_fire)
   private val t1_writeValidVecReg = RegEnable(t0_writeValidVec, t0_fire)
-  private val t1_writeValidVec    = VecInit(t1_writeValidVecReg.map(_ && t1_fire))
-  private val t1_writeValid       = t1_writeValidVec.reduce(_ || _)
+  // a group's later block was never looked up here, so its meta names no entry to correct
+  private val t1_isLaterBlock  = RegEnable(io.train.meta.isLaterBlock, t0_fire)
+  private val t1_writeValidVec = VecInit(t1_writeValidVecReg.map(_ && t1_fire && !t1_isLaterBlock))
+  private val t1_writeValid    = t1_writeValidVec.reduce(_ || _)
 
   require(
     t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumWays),

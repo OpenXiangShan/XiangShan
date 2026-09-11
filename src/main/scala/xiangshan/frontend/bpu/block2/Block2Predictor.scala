@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.Train
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.tage.Tage
+import xiangshan.frontend.bpu.tage.TageMeta
 
 /** A duplicated main btb and tage, looked up at a prediction group's *second* block.
   *
@@ -62,6 +63,9 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
 
     // the second block as this predictor sees it, valid at Bpu s3
     val prediction: Block2Prediction = Output(new Block2Prediction)
+    // what the duplicated tage read, so the second block's branches can train the real tage. The copies are written
+    // only by training, and by the same training, so they hold the same entries in the same ways.
+    val tageMeta: TageMeta = Output(new TageMeta)
   }
 
   val io: Block2PredictorIO = IO(new Block2PredictorIO)
@@ -125,6 +129,8 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
   private val firstTakenBranch  = Mux1H(compareMatrix.getLeastElementOH(takenMask), result)
   private val anyEntry          = result.map(_.valid).reduce(_ || _)
   private val tageDecidedItTrue = Mux1H(compareMatrix.getLeastElementOH(takenMask), tagePred).valid
+
+  io.tageMeta := tage.io.meta
 
   io.prediction.hasEntry          := anyEntry
   io.prediction.taken             := taken

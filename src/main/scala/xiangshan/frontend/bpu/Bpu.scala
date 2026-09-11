@@ -683,6 +683,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
+  // the history meta belonging to the second block, which starts one block into the group
+  private val s2_midPhrMeta = RegEnable(phr.io.s1_midPhrMeta, s1_fire)
+  private val s3_midPhrMeta = RegEnable(s2_midPhrMeta, s2_fire)
+
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
   s3_commonHRMeta.ghr       := commonHR.io.s3ResolveMeta.ghr
   s3_commonHRMeta.bw        := commonHR.io.s3ResolveMeta.bw
@@ -705,6 +709,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_resolveMeta.phr      := s3_phrMeta
   // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
   s3_resolveMeta.utage := s3_utageMeta
+
+  s3_resolveMeta.isLaterBlock := false.B
+
+  /* *** the second block's resolve meta ***
+   * Its branches commit like any others, so without a meta of their own the whole training event is dropped and the
+   * predictors never see them. The duplicated lookup is what a meta is: it read the same arrays at that block's pc,
+   * with the history as it stood there. Only the fields that lookup actually produced are filled; the rest describe
+   * the first block, and the predictors that would read them are told to sit this event out.
+   */
+  private val s3_laterResolveMeta = WireInit(0.U.asTypeOf(new BpuResolveMeta))
+  s3_laterResolveMeta.tage         := block2.io.tageMeta
+  s3_laterResolveMeta.phr          := s3_midPhrMeta
+  s3_laterResolveMeta.isLaterBlock := true.B
+
+  io.toFtq.s3LaterResolveMeta.valid := s3_secondBlock.valid && !s3_override
+  io.toFtq.s3LaterResolveMeta.bits  := s3_laterResolveMeta
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
   s3_commitMeta.ras := ras.io.commitMeta

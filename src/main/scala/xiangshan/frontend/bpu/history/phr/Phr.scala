@@ -31,16 +31,18 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val s1_foldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     // the s1 group's history advanced by its first block only, for a lookup of the group's second block
     val s1_midFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s2_foldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val s3_foldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val phr:             UInt                  = Output(UInt(PhrHistoryLength.W))
-    val phrMeta:         PhrMeta               = Output(new PhrMeta)
-    val train:           PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
-    val s1Train:         S1Train               = Input(new S1Train)
-    val commit:          Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
-    val oldFoldedPhr:    PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val trainFoldedPhr:  PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val toFastPhr:       PhrToFastPhr          = Output(new PhrToFastPhr)
+    // the meta a lookup of the s1 group's second block would have carried, so that block can be trained later
+    val s1_midPhrMeta:  PhrMeta               = Output(new PhrMeta)
+    val s2_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val s3_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val phr:            UInt                  = Output(UInt(PhrHistoryLength.W))
+    val phrMeta:        PhrMeta               = Output(new PhrMeta)
+    val train:          PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
+    val s1Train:        S1Train               = Input(new S1Train)
+    val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
+    val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val toFastPhr:      PhrToFastPhr          = Output(new PhrToFastPhr)
   }
   val io: PhrIO = IO(new PhrIO)
 
@@ -271,6 +273,13 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
   private val s1_midToken = Mux(s1_blockTaken.head, s1_blockHash.head, 0.U)
   io.s1_midFoldedPhr := foldGroup(s1_foldedPhrReg, s1_oldestBits, s1_midToken, s1_midInsOH)
+
+  // The pointer and low bits that go with it, moved on by the first block exactly as an update would move them.
+  private val s1_midHashHigh = s1_blockHash.head(PathHashWidth - 1, Shamt)
+  io.s1_midPhrMeta.phrPtr := Mux(s1_blockTaken.head, s1_phrPtr - Shamt.U, s1_phrPtr)
+  io.s1_midPhrMeta.phrLowBits :=
+    Mux(s1_blockTaken.head, s1_midHashHigh ^ s1_phrLowBits, s1_phrLowBits)
+  io.s1_midPhrMeta.predFoldedHist.foreach(_ := io.s1_midFoldedPhr)
 
   // Every update is the same shape: shift the history by one Shamt per taken block and XOR the group's token over
   // the newest bits. A correction that lands on a not-taken block shifts nothing and simply restores the low bits its
