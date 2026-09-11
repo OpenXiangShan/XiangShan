@@ -224,6 +224,8 @@ class ExuParam(
 
   def hasVStd: Boolean = fuConfigs.exists(Seq(VecFuConfig.VStdCfg).contains)
 
+  def hasVfalu: Boolean = fuConfigs.contains(VecFuConfig.VfaluCfg)
+
   def genBundle[T <: Bundle](
     cond: ExuParam => Boolean,
     gen: => T,
