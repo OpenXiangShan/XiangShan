@@ -357,18 +357,18 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("nack_rollabck", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
 
   // perf cnt
-  val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEvents) ++
+  val perfEvents = Seq(virtualLoadQueue, loadQueueRAR, loadQueueRAW, loadQueueReplay).flatMap(_.getPerfEventInfos) ++
   Seq(
-    ("full_mask_000", full_mask === 0.U),
-    ("full_mask_001", full_mask === 1.U),
-    ("full_mask_010", full_mask === 2.U),
-    ("full_mask_011", full_mask === 3.U),
-    ("full_mask_100", full_mask === 4.U),
-    ("full_mask_101", full_mask === 5.U),
-    ("full_mask_110", full_mask === 6.U),
-    ("full_mask_111", full_mask === 7.U),
-    ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
-    ("nack_rollback", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
+    ("full_mask_000", full_mask === 0.U).withDescription("Cycles with RAR, RAW, and replay queue-full flags all clear."),
+    ("full_mask_001", full_mask === 1.U).withDescription("Cycles with only the replay queue-full flag set."),
+    ("full_mask_010", full_mask === 2.U).withDescription("Cycles with only the RAW queue-full flag set."),
+    ("full_mask_011", full_mask === 3.U).withDescription("Cycles with the RAW and replay queue-full flags set."),
+    ("full_mask_100", full_mask === 4.U).withDescription("Cycles with only the RAR queue-full flag set."),
+    ("full_mask_101", full_mask === 5.U).withDescription("Cycles with the RAR and replay queue-full flags set."),
+    ("full_mask_110", full_mask === 6.U).withDescription("Cycles with the RAR and RAW queue-full flags set."),
+    ("full_mask_111", full_mask === 7.U).withDescription("Cycles with the RAR, RAW, and replay queue-full flags all set."),
+    ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt).withDescription("Cycles with a load-queue nuke rollback request."),
+    ("nack_rollback", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt).withDescription("Cycles with an uncache-buffer nack rollback request.")
   )
   generatePerfEvent()
   // end

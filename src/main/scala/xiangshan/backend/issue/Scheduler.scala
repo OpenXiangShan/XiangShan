@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
-import utility.HasPerfEvents
+import utility._
 import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles._
@@ -312,11 +312,15 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // perfEvent
   val lastCycleIqEnqFireVec    = RegNext(VecInit(issueQueues.map(_.io.enq.map(_.fire)).flatten))
-  val lastCycleIqFullVec       = RegNext(VecInit(issueQueues.map(_.io.enq.head.ready)))
+  val lastCycleIqFullVec       = RegNext(VecInit(issueQueues.map(iq => !iq.io.enq.head.ready)))
 
-  val issueQueueFullVecPerf = issueQueues.zip(lastCycleIqFullVec)map{ case (iq, full) => (iq.params.getIQName + s"_full", full) }
+  val issueQueueFullVecPerf = issueQueues.zip(lastCycleIqFullVec).map { case (iq, full) =>
+    (iq.params.getIQName + "_full", full)
+      .withDescription(s"Cycles in which ${iq.params.getIQName}'s enqueue port was not ready in the previous cycle.")
+  }
   val basePerfEvents = Seq(
-    ("issueQueue_enq_fire_cnt",  PopCount(lastCycleIqEnqFireVec)                    )
+    ("issueQueue_enq_fire_cnt", PopCount(lastCycleIqEnqFireVec))
+      .withDescription("Instructions accepted by this scheduler's issue queues.")
   )  ++ issueQueueFullVecPerf
 
   println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")

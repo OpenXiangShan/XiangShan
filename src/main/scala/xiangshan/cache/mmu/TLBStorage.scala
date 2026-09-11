@@ -287,8 +287,10 @@ class TLBFA(
   }
 
   val perfEvents = Seq(
-    ("tlbstore_access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _)                            ),
-    ("tlbstore_hit   ", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt)),
+    ("tlbstore_access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _))
+      .withDescription("Completed lookup ports in this TLB storage."),
+    ("tlbstore_hit"   , io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt))
+      .withDescription("Lookup ports that hit in this TLB storage."),
   )
   generatePerfEvent()
 

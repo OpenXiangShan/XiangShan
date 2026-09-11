@@ -557,6 +557,7 @@ case class DebugOptions
 (
   FPGAPlatform: Boolean = false,
   DumpCSR: Boolean = false,
+  DumpHPM: Boolean = false,
   ResetGen: Boolean = false,
   EnableDifftest: Boolean = false,
   AlwaysBasicDiff: Boolean = true,

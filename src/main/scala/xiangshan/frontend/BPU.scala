@@ -210,7 +210,7 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
   io.out.s2.pc := s2_pc_dup.map(_.getAddr())
   io.out.s3.pc := s3_pc_dup.map(_.getAddr())
 
-  val perfEvents: Seq[(String, UInt)] = Seq()
+  val perfEvents: Seq[PerfEventInfo] = Seq()
 
   def getFoldedHistoryInfo: Option[Set[FoldedHistoryInfo]] = None
 }
@@ -1221,6 +1221,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   XSPerfAccumulate("s3_redirect", s3_redirect_dup(0))
   XSPerfAccumulate("s1_not_valid", !s1_valid_dup(0))
 
-  val perfEvents = predictors.asInstanceOf[Composer].getPerfEvents
+  val perfEvents = predictors.asInstanceOf[Composer].getPerfEventInfos
   generatePerfEvent()
 }

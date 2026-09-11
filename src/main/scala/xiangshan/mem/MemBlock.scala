@@ -678,7 +678,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.wfi.wfiSafe := dcache.io.wfi.wfiSafe && uncache.io.wfi.wfiSafe && lsq.io.wfi.wfiSafe && ptw.io.wfi.wfiSafe
 
   val perfEventsPTW = if (!coreParams.softPTW) {
-    ptw.getPerfEvents
+    ptw.getPerfEventInfos
   } else {
     Seq()
   }
@@ -698,8 +698,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
 
-  val perfEventsDTLBld = dtlb_ld_tlb_ld.getPerfEvents.map { case (str, idx) => ("dtlb_ld_" + str, idx) }
-  val perfEventsDTLBst = dtlb_st_tlb_st.getPerfEvents.map { case (str, idx) => ("dtlb_st_" + str, idx) }
+  val perfEventsDTLBld = dtlb_ld_tlb_ld.getPerfEventInfos.map(event => event.withName("dtlb_ld_" + event.name))
+  val perfEventsDTLBst = dtlb_st_tlb_st.getPerfEventInfos.map(event => event.withName("dtlb_st_" + event.name))
 
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
@@ -2174,22 +2174,35 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.slice(16,24)
 
-  val perfFromUnits = (loadUnits ++ Seq(sbuffer, lsq, dcache)).flatMap(_.getPerfEvents)
+  val perfFromLoadUnits = loadUnits.zipWithIndex.flatMap { case (unit, unitIndex) =>
+    unit.getPerfEventInfos.map(event =>
+      event.copy(description = s"LoadUnit $unitIndex: ${event.description}")
+    )
+  }
+  val perfFromUnits = perfFromLoadUnits ++ Seq(sbuffer, lsq, dcache).flatMap(_.getPerfEventInfos)
   val perfFromTLB = perfEventsDTLBld ++ perfEventsDTLBst
-  val perfFromPTW = perfEventsPTW.map(x => ("PTW_" + x._1, x._2))
-  val perfBlock     = Seq(("ldDeqCount", ldDeqCount),
-                          ("stDeqCount", stDeqCount))
+  val perfFromPTW = perfEventsPTW.map(event => event.withName("PTW_" + event.name))
+  val perfBlock = Seq(
+    ("ldDeqCount", ldDeqCount).withDescription("Load operations dequeued from the memory issue queues."),
+    ("stDeqCount", stDeqCount).withDescription("Store operations dequeued from the memory issue queues."),
+  )
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromTLB ++ perfFromPTW ++ perfBlock
+  val allPerfEvents = Seq(
+    ("noEvent", 0.U).withDescription("No event; always contributes zero."),
+  ) ++ perfFromUnits ++ perfFromTLB ++ perfFromPTW ++ perfBlock
+
+  if (p(DebugOptionsKey).DumpHPM) {
+    HPMDocDump.register("MemBlock perfEvents Set", "mhpmcounter19-mhpmcounter26", allPerfEvents)
+  }
 
   if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("MemBlock perfEvents Set", name, inc, i)
+    for ((event, i) <- allPerfEvents.zipWithIndex) {
+      println("MemBlock perfEvents Set", event.name, event.value, i)
     }
   }
 
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  val allPerfInc = allPerfEvents.map(_.value.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEventInfos
   generatePerfEvent()
 
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeMemBlk", hasMbist)
