@@ -35,12 +35,94 @@ reproducer, pre-fix output, root-cause analysis, and repaired evidence are in
 confirmed/fixed current-worktree evidence rather than added to the 58-commit
 table below.
 
-The current branch also fixes a regression introduced by applying the
-historical `222f993ed` VLS `flushAfter` policy to every MemBlock consumer. Load
-and store ExceptionBuffers then retained stale exception-address records across
-the VLS redirect. The focused external-interface reproducers, architectural
-propagation, and post-fix evidence are in
-[`CPU_BUG_VLS_EXCEPTION_REDIRECT.md`](CPU_BUG_VLS_EXCEPTION_REDIRECT.md).
+The current branch also replays upstream PR
+[#6548](https://github.com/OpenXiangShan/XiangShan/pull/6548), which fixes a
+regression introduced by applying the historical `222f993ed` VLS
+`flushAfter` policy to every MemBlock consumer. This is an upstream-guided
+historical reproduction, not a new bug independently discovered by this UT.
+The retained reproducer and evidence are consolidated below.
+
+## Upstream PR #6548: VLS Exception-Buffer Redirect
+
+### Classification and provenance
+
+The sequence is unambiguous: commit `a2b4c3a35` first isolated an unrelated
+exception-address oracle false positive at 02:11:39 CST; upstream PR #6548 was
+then fetched as `origin/pr-6548` at `f67f9e78f` at 02:21:52; the focused VLS
+reproducer was committed as `3abfd81e6` at 02:32:09; and the
+upstream-equivalent fix was cherry-picked as `4b976f156` at 02:32:40. The test
+therefore demonstrates that the UT can reproduce this historical bug class,
+but it is not evidence of independent discovery.
+
+The pre-fix generated MemBlock has complete RTL SHA-256
+`27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`;
+the post-fix RTL has
+`356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3`.
+PR #6548 also references upstream issues #6399, #6482, and #6540; this audit
+does not infer untested symptoms from those links.
+
+### Reproducer and external oracle
+
+The load and store directions are reproduced with:
+
+```sh
+make -C tests/memblock vector-fof JOBS=8
+make -C tests/memblock trigger-contracts JOBS=8
+```
+
+Both drive a top-level ROB redirect with `level=flush`,
+`isVlsException=1`, and the identified faulting vector uop. The load sequence
+then issues a differently addressed, identity-qualified scalar page fault; the
+store sequence does the same with a scalar-store breakpoint. Pre-fix RTL
+returned stale vector addresses:
+
+```text
+MEMBLOCK_VECTOR_FOF_FAIL cycle=134
+phase=subsequent-scalar-fault-address
+expected_vaddr=0x53003000 actual_vaddr=0x53000180
+
+MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle=100
+phase=post-vector-store-fault-address
+expected_vaddr=0x80630180 actual_vaddr=0x80630020
+```
+
+The exported exception-address payload has no valid bit or transaction
+identity, so the oracle deliberately ignores it between exception epochs. It
+samples the address only when an exact ROB/writeback identity establishes the
+fault consumed by Backend, then requires the later same-direction fault to
+publish its own VA. No fixed cycle, ExceptionBuffer state, replay behavior, or
+other internal implementation signal decides PASS/FAIL. Read-only Picker
+`mem_direct` observations may localize a retained entry but remain debug only.
+
+### Root cause, impact, and fix
+
+Historical fix `222f993ed` changed every VLS exception redirect from `flush`
+to `flushAfter` before distributing it through MemBlock. StoreQueue recovery
+and StoreMisalignBuffer need that view so the faulting vector store can drain
+residual side effects, but load/store ExceptionBuffers must see the original
+`flush`. Seeing `flushAfter` retained the faulting entry, which continued to
+win oldest selection over later same-direction faults.
+
+This stale address propagates through `LSQWrapper` and the MemBlock exception
+mux into Backend and CSR trap handling, where memory faults and breakpoints can
+write it to `mtval`, `stval`, or `vstval`. The dynamic reproducers establish
+the stale VA in both directions. A retained guest-fault record could also
+carry stale GPA/non-leaf metadata toward `mtval2`/`htval` and instruction
+markers, but that consequence was not dynamically reproduced and is not part
+of the confirmed evidence.
+
+Repair `4b976f156`, patch-equivalent to PR #6548 at `f67f9e78f`, preserves a
+raw redirect for ExceptionBuffers and ordinary consumers while sending the
+`flushAfter` view only to vector-store drain consumers. The frozen schema-2
+artifact `build/memblock/vls-postfix.json` has SHA-256
+`e2a84f4422adfe8ff77da91dc418902a5662d9bec1370d4dd9d1c0333dc52c69`
+and records post-fix passes for `vector-fof`, `vector-segment-fof`, and
+`trigger-contracts` with unchanged runtime/controller hashes.
+
+These tests prove stale-address removal. They do not prove the original
+residual vector-store drain behavior protected by `222f993ed`; a legal
+store-progress/memory-effect mutation that distinguishes a revert remains a
+verification gap.
 
 ## Audit
 
@@ -54,7 +136,7 @@ propagation, and post-fix evidence are in
 | 2026-08-10 | `e541289b` | Preserve SQ address-valid state on TLB miss | **Reproduced** | `store-tlb-miss-preserve`: mutant violates the all-entry identity-preserving SVA one cycle after a miss. |
 | 2026-08-04 | `2cac7a0d` | Strict ordering of misaligned vector elements | Boundary gap | Current tests generate vector misaligned replays, but the distinguishing reverse-order sequence is not legal/stable with the current dispatch contract. |
 | 2026-07-30 | `7754c3a8` | Memory-stall top-down attribution | Non-functional/outside MemBlock UT | Performance-counter attribution, not an architectural memory result. |
-| 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Producer implemented; mutation gap | `vector-fof`, `vector-segment-fof`, and `trigger-contracts` now drive a `flush` redirect with `isVlsException=1` for the identified vector uop. They reproduce the distinct stale-address regression documented in [`CPU_BUG_VLS_EXCEPTION_REDIRECT.md`](CPU_BUG_VLS_EXCEPTION_REDIRECT.md), caused by applying `flushAfter` globally. They do not yet prove that reverting `222f993e` loses required residual vector-store side effects; that original SQ-drain behavior still needs a distinguishing legal mutation experiment. |
+| 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Producer implemented; mutation gap | `vector-fof`, `vector-segment-fof`, and `trigger-contracts` now drive a `flush` redirect with `isVlsException=1` for the identified vector uop. They reproduce the distinct stale-address regression from [upstream PR #6548](#upstream-pr-6548-vls-exception-buffer-redirect), caused by applying `flushAfter` globally. They do not yet prove that reverting `222f993e` loses required residual vector-store side effects; that original SQ-drain behavior still needs a distinguishing legal mutation experiment. |
 | 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `random-mixed` vector-store replay/readback phases. |
 | 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Boundary gap | HLV, HLVX, HSV and SPVP-specific PMP reference checks are not modeled. |
 | 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | Rebuilt pre-fix mutant hash `5bfe14db...`; the expanded translated cross-page vector-store progress sequence still passed with exact writeback, dequeue, and readback. |

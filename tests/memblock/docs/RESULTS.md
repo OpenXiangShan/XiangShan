@@ -10,7 +10,7 @@
   `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
   address selection), `39a7b9629` (PTW D-channel error propagation), and
   `42152f6ba` (CMO D-channel error propagation).
-- VLS exception redirect repair: `4b976f156` (raw redirect for exception
+- Historical upstream PR #6548 replay: `4b976f156` (raw redirect for exception
   buffers; `flushAfter` retained only for vector-store drain consumers).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
@@ -34,8 +34,10 @@
 - Current bootstrap Picker pin: `794e2d9085cf7eae31638119d15a976558ba9490`
 - Current bootstrap xcomm pin: `29c290bb1f14fa2a4a72c01ab746a10cff504b2c`
 
-## VLS Exception Redirect Address Lifetime
+## Historical PR #6548: VLS Exception Redirect Address Lifetime
 
+This was an upstream-guided historical reproduction, not an independent UT
+discovery: PR #6548 was fetched before the focused VLS reproducer was added.
 The initial focused reproducers on complete RTL SHA-256
 `27a5f512452d7e60401b611dd30c0b8316de81c4415d9bde4c058dc35ef2f057`
 showed that a VLS exception redirect retained the matching load/store
@@ -60,8 +62,9 @@ The frozen schema-2 focused run passed `vector-fof` at cycle 137,
 artifact is `build/memblock/vls-postfix.json`, SHA-256
 `e2a84f4422adfe8ff77da91dc418902a5662d9bec1370d4dd9d1c0333dc52c69`;
 runtime, external dependencies, controller sources, and RTL identity remained
-unchanged across the run. Full root cause, CSR propagation, limitations, and
-reproduction commands are in `CPU_BUG_VLS_EXCEPTION_REDIRECT.md`.
+unchanged across the run. Full provenance, root cause, architectural impact,
+limitations, and reproduction commands are consolidated in
+[`HISTORICAL_BUG_AUDIT.md`](HISTORICAL_BUG_AUDIT.md#upstream-pr-6548-vls-exception-buffer-redirect).
 
 ## SPEC Vector Counter Classification Correction
 
