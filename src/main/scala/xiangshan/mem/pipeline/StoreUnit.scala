@@ -535,7 +535,10 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // mmio and exception
   io.lsq_replenish := s2_out
   io.lsq_replenish.af := s2_out.af && s2_valid && !s2_kill
-  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero) && !s2_exception // reuse `mmiostall` logic in sq
+  // NC/MMIO cbo.zero: no STA stout and not nc FSM; mark pending for mmioIsCboZero.
+  val s2_uncacheCboZero =
+    LSUOpType.isCboZero(s2_in.uop.fuOpType) && (s2_in.nc || s2_mmio)
+  io.lsq_replenish.mmio := (s2_mmio || s2_isCbo_noZero || s2_uncacheCboZero) && !s2_exception // reuse `mmiostall` logic in sq
 
   // prefetch related
   io.lsq_replenish.miss := io.dcache.resp.fire && io.dcache.resp.bits.miss // miss info
