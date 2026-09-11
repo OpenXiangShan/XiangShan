@@ -289,7 +289,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   /*
    * bpu training folded phr compute
    */
-  private val bpTrainValid  = io.commit.valid
   private val bpTrain       = io.commit.bits
   private val predictHist   = getRedirectPhr(bpTrain.meta.phr)
   private val metaPhrFolded = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -380,7 +379,4 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
   }
 
-  // TODO: remove dontTouch
-  dontTouch(phrValue)
-  dontTouch(histFoldedPhr)
 }

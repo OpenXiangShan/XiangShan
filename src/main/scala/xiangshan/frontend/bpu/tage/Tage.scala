@@ -105,15 +105,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s2_fire     = io.stageCtrl.s2_fire
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
   private val s2_tag      = RegEnable(s1_tag, s1_fire)
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
 
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
-    val position = branch.bits.cfiPosition
-
     // compare tags of each branch with all tables
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
       val tag          = s2_tag(i)(tableIdx)
@@ -223,7 +220,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
     table.getSetIndex(t0_startPc, hist.forIdx)
   })
-  dontTouch(t0_setIdx)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.readReq(1).valid         := t0_fire && t0_needRead
@@ -233,7 +229,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   // only for perf
   private val debug_readBankConflictReg     = RegNext(debug_readBankConflict)
-  private val debug_readBankConflictPos     = debug_readBankConflict && (!debug_readBankConflictReg)
   private val debug_readBankConflictNeg     = !debug_readBankConflict && debug_readBankConflictReg
   private val debug_readBankConflictDistCnt = RegInit(0.U(4.W))
   private val debug_s0AlignedPc             = getAlignedPc(s0_startPc)
@@ -297,7 +292,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_fire     = RegNext(t1_fire, init = false.B)
   private val t2_branches = RegEnable(t1_branches, t1_fire)
   private val t2_startPc  = RegEnable(t1_startPc, t1_fire)
-  dontTouch(t2_startPc)
 
   private val t2_setIdx   = RegEnable(t1_setIdx, t1_fire)
   private val t2_bankMask = RegEnable(t1_bankMask, t1_fire)
@@ -320,7 +314,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val tag          = t2_rawTag(tableIdx) ^ position
       val hitWayMask   = tableReadResp.entries.map(entry => entry.valid && entry.tag === tag)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
-      dontTouch(tag.suggestName(s"t2_branch_${i}_table_${tableIdx}_tag"))
 
       val result = Wire(new TrainTagMatchResult).suggestName(s"t2_branch_${i}_table_${tableIdx}_result")
       result.hit          := hitWayMask.reduce(_ || _)
@@ -331,7 +324,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       result
     }
     val hitTableMask = allTableTagMatchResults.map(_.hit)
-    dontTouch(hitTableMask.asUInt.suggestName(s"t2_branch_${i}_hitTableMask"))
 
     val hasProvider     = Wire(Bool())
     val providerTableOH = Wire(UInt(NumTables.W))
@@ -481,7 +473,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       Fill(NumTables, true.B)
     )
   }
-  dontTouch(t3_longerHistoryTableMask)
 
   private val t3_allTableCanAllocateWayMask = t3_readResp.map { tableReadResp =>
     val notValidMask  = tableReadResp.entries.map(!_.valid).asUInt
@@ -517,8 +508,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
   private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
-  dontTouch(t3_allocateTableOH)
-  dontTouch(t3_allocateWayOH)
 
   private val t3_allocateEntry = {
     val rawTag      = Mux1H(t3_allocateTableOH, t3_rawTag)

@@ -17,8 +17,6 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import difftest.DiffRefillEvent
-import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.DataHoldBypass
@@ -248,8 +246,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // the offset of the start pc within the cache line
   private val s1_offset = VecInit(s1_req.map(_.startVAddr(blockOffBits - 1, 0)))
 
-  private val s1_lineSel = VecInit(s1_offset.map(getLineSel))
-
   /* *******************************************************************
    * Receive data from sram and mshr
    * ******************************************************************* */
@@ -400,8 +396,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       s1_exception.isNone && !s1_isMmio
     }
   })
-
-  dontTouch(s1_shouldFetch)
 
   private val toMissArbiter = Module(new Arbiter(new MissReqBundle, MaxFetchLineNum))
 

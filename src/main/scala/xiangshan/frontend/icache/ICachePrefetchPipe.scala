@@ -133,8 +133,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_state     = RegInit(S1FsmState.Idle)
   private val s1_nextState = WireDefault(s1_state)
   private val s0_fireNext  = RegNext(s0_fire)
-  dontTouch(s1_state)
-  dontTouch(s1_nextState)
   s1_state := s1_nextState
 
   /**
@@ -203,9 +201,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // for area concern, we don't have 64 bits vaddr in frontend, but spec asks page fault when high bits are not all 0/1
   // this check is finished in backend, and passed to frontend with redirect, we see it as a part of itlb exception
   private val s1_itlbException = s1_backendException || s1_itlbExceptionRaw
-  // debug
-  dontTouch(s1_itlbExceptionRaw)
-  dontTouch(s1_itlbException)
 
   /**
     ******************************************************************************
@@ -277,9 +272,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_sramHits = VecInit(s1_metaInfo.map(_.waymask.orR))
 
   private val s1_reqMetaInfo = s1_twoPrefetchCase.generateReqMetaInfo(s1_metaInfo)
-
-  dontTouch(s1_metaInfo)
-  dontTouch(s1_reqMetaInfo)
 
   /**
     ******************************************************************************

@@ -83,9 +83,6 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
     }
     val replacerWay  = replacer.way(io.replaceSetIdx)
     val replacerDiff = genReplaceWay === replacerWay
-    dontTouch(genReplaceWay)
-    dontTouch(replacerWay)
-    dontTouch(replacerDiff)
     when(io.writeValid) {
       assert(
         replacerDiff,
