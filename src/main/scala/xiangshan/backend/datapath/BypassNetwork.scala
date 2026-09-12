@@ -153,7 +153,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     sink.bits.is0Lat.foreach(_ := 0.U)
     sink.bits.predictInfo.foreach{ case x =>
       x.target := source.bits.predTarget.get
-      x.fixedTaken := source.bits.fixedTaken.get
       x.predTaken := source.bits.predTaken.get
     }
     sink.bits.frm.foreach(_ := source.bits.frm.get)
