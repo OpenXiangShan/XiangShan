@@ -1403,15 +1403,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
   XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
 
-  XSPerfAccumulate("waitVfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfalu.U)
-  XSPerfAccumulate("waitVfmulCycle" , deqNotWritebacked && deqHeadInfoFuType === FuType.vfmul.U)
+  XSPerfAccumulate("waitVfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfmac.U)
   XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
-
-  val vfalufuop = Seq() // Todo: vector pma
-
-  vfalufuop.zipWithIndex.map{
-    case(fuoptype,i) =>  XSPerfAccumulate(s"waitVfalu_${i}Cycle", deqNotWritebacked && deqHeadInfoFuType === fuoptype && deqHeadInfoFuType === FuType.vfalu.U)
-  }
 
   XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
   XSPerfAccumulate("waitBranchCycle", deqNotWritebacked && Itype.isBranch(debug_deqUop.traceBlockInPipe.itype))
