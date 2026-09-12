@@ -66,7 +66,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val sdRange = AddressSet(0x40002000L, 0xfff)
   val dmacRange = AddressSet(0x40003000L, 0xfff)
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
-  val apbRange = AddressSet(0x40100000L, 0xffff)
+  val iopmpApbRange = AddressSet(0x40100000L, 0xffff)
+  val iommuApbRange = AddressSet(0x40200000L, 0xffff)
 
   val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ Seq(
     soc.UARTLiteRange,
@@ -75,7 +76,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     sdRange,
     dmacRange,
     intrGenRange,
-    apbRange
+    iopmpApbRange,
+    iommuApbRange
   )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
@@ -122,22 +124,39 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     AXI4IdIndexer(1) :=
     axiBus
 
-  val apb_node = APBSlaveNode(Seq(APBSlavePortParameters(
+  val iopmp_apb_node = APBSlaveNode(Seq(APBSlavePortParameters(
     Seq(APBSlaveParameters(
-      address       = Seq(apbRange),
+      address       = Seq(iopmpApbRange),
       regionType    = RegionType.UNCACHED)),
     beatBytes     = 4)))
 
   val iopmp = LazyModule(new IopmpLazy(numBridge = 1)) // only one bridge test pass
+  val iommu = LazyModule(new IommuLazy)
+  val deviceMemXbar = AXI4Xbar()
 
-  apb_node :=
+  iopmp_apb_node :=
     TLToAPB() :=
     TLFragmenter(4,8) :=
     TLWidthWidget(8) :=
     tlBus
 
-  iopmp.slaveNodes(0) := dmac.masterNode
-  memNode := iopmp.masterNodes(0)
+  val iommu_apb_node = APBSlaveNode(Seq(APBSlavePortParameters(
+    Seq(APBSlaveParameters(
+      address       = Seq(iommuApbRange),
+      regionType    = RegionType.UNCACHED)),
+    beatBytes     = 4)))
+
+  iommu_apb_node :=
+    TLToAPB() :=
+    TLFragmenter(4,8) :=
+    TLWidthWidget(8) :=
+    tlBus
+
+  iommu.slaveNode := AXI4IdIndexer(10) := dmac.masterNode
+  iopmp.slaveNodes(0) := iommu.masterNode
+  deviceMemXbar := iopmp.masterNodes(0)
+  deviceMemXbar := iommu.dsMasterNode
+  memNode := deviceMemXbar
 
   val io_axi4 = InModuleBody {
     node.makeIOs()
@@ -175,7 +194,8 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   lazy val module = new SimMMIOImp(this){
     
-    val iopmp_apb = apb_node.in.head._1
+    val iopmp_apb = iopmp_apb_node.in.head._1
+    val iommu_apb = iommu_apb_node.in.head._1
 
     iopmp.module.apb_s.paddr    <> iopmp_apb.paddr
     iopmp.module.apb_s.psel     <> iopmp_apb.psel
@@ -185,5 +205,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     iopmp.module.apb_s.pready   <> iopmp_apb.pready
     iopmp.module.apb_s.prdata   <> iopmp_apb.prdata
     iopmp.module.apb_s.pslverr  <> iopmp_apb.pslverr
+
+    iommu.module.apb <> iommu_apb
   }
 }
