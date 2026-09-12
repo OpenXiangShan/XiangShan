@@ -158,7 +158,12 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
       // Only a conditional exit is ever learned as a second block, since anything else either takes its target from
       // elsewhere or moves the return stack. Checking it where the entry is used keeps a stale or aliased entry from
       // presenting one of those as a second block.
-      s1_providerEntry.p2.attribute.isConditional
+      s1_providerEntry.p2.attribute.isConditional &&
+      // A second block is not free to be wrong the way a first block is. Nothing checks it until the duplicated
+      // lookup answers three stages later, and an entry that fails there collapses the group and flushes what was
+      // predicted behind it. A block the entry is merely leaning towards is not worth that, so only a counter that
+      // has saturated puts one out.
+      s1_providerEntry.p2.counter.isSaturatePositive
 
   private def decode(block: PtageBlock, target: PrunedAddr): Prediction = {
     val prediction = Wire(new Prediction)
@@ -365,6 +370,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("predMiss", s1_fire && !s1_p1Usable)
   XSPerfAccumulate("predTwoBlocks", s1_fire && s1_p2Usable)
   XSPerfAccumulate("predP2SuppressedByAttribute", s1_fire && s1_p1Usable && s1_providerEntry.p2Valid && !s1_p2Usable)
+  XSPerfAccumulate(
+    "predP2SuppressedByCounter",
+    s1_fire && s1_p1Usable && s1_providerEntry.p2Valid &&
+      s1_providerEntry.p2.attribute.isConditional && !s1_providerEntry.p2.counter.isSaturatePositive
+  )
   Seq.tabulate(NumTables)(t =>
     XSPerfAccumulate(s"providerTable$t", s1_fire && s1_provider.valid && s1_provider.bits === t.U)
   )
