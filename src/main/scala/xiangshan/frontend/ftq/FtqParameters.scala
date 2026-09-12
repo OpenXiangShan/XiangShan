@@ -20,7 +20,7 @@ import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 
 case class FtqParameters(
-    FtqSize:           Int = 64,
+    FtqSize:           Int = 128,
     ResolveQueueSize:  Int = 16,
     BpTrainStallLimit: Int = 8,
     CommitQueueSize:   Int = 64
