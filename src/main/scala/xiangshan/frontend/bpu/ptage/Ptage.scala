@@ -163,7 +163,12 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
       // lookup answers three stages later, and an entry that fails there collapses the group and flushes what was
       // predicted behind it. A block the entry is merely leaning towards is not worth that, so only a counter that
       // has saturated puts one out.
-      s1_providerEntry.p2.counter.isSaturatePositive
+      s1_providerEntry.p2.counter.isSaturatePositive &&
+      // The shortest-history table is the one an entry lands in when little distinguishes the paths reaching it, so
+      // it is where a pair is most likely to describe a successor belonging to some other path through the same
+      // address. A first block can afford that and be corrected a stage later; a pair cannot, because what a wrong
+      // successor costs is the whole group.
+      s1_provider.bits =/= 0.U
 
   private def decode(block: PtageBlock, target: PrunedAddr): Prediction = {
     val prediction = Wire(new Prediction)
