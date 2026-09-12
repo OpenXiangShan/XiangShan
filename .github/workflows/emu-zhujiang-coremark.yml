@@ -1,0 +1,97 @@
+# PR functional test: single-core XiangShan + ZhuJiang L3 + CoreMark.
+# EMU is built with the same Verilator flow as EMU Basics Test.
+# --num-cores 1 selects the RTL topology (NUM_CORES), not emulator compile parallelism.
+name: EMU ZhuJiang CoreMark
+
+on:
+  push:
+    branches: [ kunminghu-v3 ]
+  pull_request:
+    branches: [ kunminghu-v3 ]
+
+env:
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  PERF_HOME: /nfs/home/ci-runner/emu-zhujiang-coremark/${{ github.run_number }}
+
+jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
+  run:
+    name: EMU - ZhuJiang L3 - Single-Core Config - CoreMark
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    timeout-minutes: 300
+    continue-on-error: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          # Same emu compile flow as EMU Basics Test.
+          # --llc ZhuJiang selects L3; --num-cores 1 selects single-core RTL.
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 8 --num-cores 1 --llc ZhuJiang \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: Run CoreMark
+        id: run
+        shell: bash
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 8 \
+            --ci coremark \
+            2> stderr.log | tee stdout.log
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-zhujiang-coremark"
+          echo "IPC=$(cat "${PERF_HOME}/ipc-zhujiang-coremark")" | tee -a "$GITHUB_OUTPUT"
+      - name: Archive log
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
+        run: |
+          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+            cat stderr.log
+          else
+            mv stderr.log stderr.log.raw
+            cat stderr.log.raw | sort | tee stderr.log
+          fi
+          tar -czvf "${PERF_HOME}/coremark.tar.gz" stdout.log stderr.log
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## EMU ZhuJiang CoreMark"
+            echo "| Config | Value |"
+            echo "| ------ | ----- |"
+            echo "| LLC | ZhuJiang |"
+            echo "| RTL cores | 1 |"
+            echo "| Test | coremark |"
+            if [[ -f "${PERF_HOME}/ipc-zhujiang-coremark" ]]; then
+              echo "| IPC | $(cat "${PERF_HOME}/ipc-zhujiang-coremark") |"
+            else
+              echo "| IPC | n/a |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
