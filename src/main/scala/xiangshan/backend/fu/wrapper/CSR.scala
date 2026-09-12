@@ -143,11 +143,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
   csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
+  csrMod.io.fromRob.trap.bits.slotIsFormer := csrIn.exception.bits.slotIsFormer
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
-  csrMod.io.fromRob.commit.vxsat.valid := setVxsat.valid
-  csrMod.io.fromRob.commit.vxsat.bits := setVxsat.bits
+  csrMod.io.fromRob.commit.vxsat := setVxsat
   csrMod.io.fromRob.commit.vsDirty := setVsDirty
   csrMod.io.fromRob.commit.vstart := setVstart
   csrMod.io.fromRob.commit.vl := vlFromPreg
@@ -592,6 +592,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val custom = new Bundle {
     // Rename
     val fusion_enable = Bool()
+    val high_density_rob_compression_enable = Bool()
     val wfi_enable = Bool()
   }
 

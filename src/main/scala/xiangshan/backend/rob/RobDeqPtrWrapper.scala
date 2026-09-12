@@ -46,7 +46,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends
     val intrBitSetReg = Input(Bool())
     val allowOnlyOneCommit = Input(Bool())
     val hasNoSpecExec = Input(Bool())
-    val interrupt_safe = Input(Bool())
+    val interruptSafe = Input(Bool())
     val blockCommit = Input(Bool())
     // output: the CommitWidth deqPtr
     val out = Vec(CommitWidth, Output(new RobPtr))
@@ -57,19 +57,21 @@ class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends
   })
 
   val bankAddrWidth = log2Up(CommitWidth)
-  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(_.U.asTypeOf(new RobPtr))))
+  val deqPtrVec = RegInit(VecInit((0 until CommitWidth).map(i => RobPtr(false.B, i.U))))
   val deqPosition = deqPtrVec(0).value(bankAddrWidth - 1, 0)
 
   // for exceptions (flushPipe included) and interrupts:
   // only consider the first instruction
-  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interrupt_safe
-  val exceptionEnable = io.deq_w(deqPosition) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx === deqPtrVec(0)
+  val intrEnable = io.intrBitSetReg && !io.hasNoSpecExec && io.interruptSafe
+  val exceptionEnable = io.deq_w(deqPosition) && io.exception_state.valid && io.exception_state.bits.not_commit && io.exception_state.bits.robIdx.isSameEntry(deqPtrVec(0))
   val redirectOutValid = io.state === 0.U && io.deq_v(deqPosition) && (intrEnable || exceptionEnable)
 
   // for normal commits: only to consider when there're no exceptions
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
-  val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
-  val commit_exception = io.exception_state.valid && !isAfter(io.exception_state.bits.robIdx, realCommitLast)
+  val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U))
+  val realCommitLastSlot = WireInit(realCommitLast)
+  realCommitLastSlot.slotIsFormer := false.B
+  val commit_exception = io.exception_state.valid && !io.exception_state.bits.robIdx.isAfterSlot(realCommitLastSlot)
   val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) || io.hasCommitted(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B) - PopCount(io.hasCommitted)
   // when io.intrBitSetReg or there're possible exceptions in these instructions,
@@ -84,7 +86,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends
   }
   io.canCommitPriorityCond := Mux(allowOnlyOne, allowOnlyOneCond, VecInit(canCommit.map(c => !c) :+ true.B))
 
-  val commitDeqPtrAll = VecInit((0 until 2*CommitWidth).map{case i => deqPtrVec(0).lineHeadPtr + i.U})
+  val commitDeqPtrAll = VecInit((0 until 2 * CommitWidth).map(i => deqPtrVec(0).lineHeadPtr.addEntries(i.U).asFormer))
   val commitDeqPtrVec = Wire(chiselTypeOf(deqPtrVec))
   for (i <- 0 until CommitWidth){
     commitDeqPtrVec(i) := PriorityMuxDefault(io.canCommitPriorityCond.zip(commitDeqPtrAll.drop(i).take(CommitWidth+1)), deqPtrVec(i))

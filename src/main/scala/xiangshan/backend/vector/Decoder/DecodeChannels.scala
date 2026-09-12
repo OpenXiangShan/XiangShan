@@ -662,7 +662,6 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val crossPageIPFFix  = Bool()
   val ftqPtr           = new FtqPtr
   val ftqOffset        = UInt(FetchBlockInstOffsetWidth.W)
-  val isLastInFtqEntry = Bool()
   val vtype            = VType()
   val oldVType         = VType()
   val rawInst          = UInt(32.W)

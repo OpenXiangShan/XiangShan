@@ -243,6 +243,28 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val difftest = DifftestModule(new DiffArchIntRenameTable(IntPhyRegs), delay = 2)
     difftest.coreid := io.hartId
     difftest.value := diffRatBuffer.get.io.diffRat.intRat
+
+    // Export observations only; DiffTest reconstructs the grouped commit RAT.
+    val updates = io.renameUpdates.get
+    val boundaries = io.snapshotEnds.get
+    val retired = io.diffRatCommitRobIdxVec.get
+    val selected = io.diffRatCommitRobIdx.get
+    val rename = DifftestModule(new DiffRenameEvent(
+      updates.size, retired.size, boundaries.head.bits.value.getWidth + 1, 2, PhyRegIdxWidth
+    ), delay = 3)
+    rename.coreid := io.hartId
+    rename.base := VecInit(Seq(intRat.io.diffRatBase.get, fpRat.io.diffRatBase.get, vecRat.io.diffRatBase.get).flatten)
+    rename.renameValid := VecInit(updates.map(_.valid)).asUInt
+    rename.writeEnable := VecInit(updates.map(u => Cat(u.bits.vecWen, u.bits.fpWen, u.bits.rfWen)))
+    rename.ldest := VecInit(updates.map(_.bits.ldest))
+    rename.pdest := VecInit(updates.map(_.bits.pdest))
+    rename.groupId := VecInit(boundaries.map(b => Cat(b.bits.flag, b.bits.value)))
+    rename.member := VecInit(boundaries.map(b => (!b.bits.slotIsFormer).asUInt))
+    rename.commitValid := selected.valid
+    rename.commitGroupId := Cat(selected.bits.flag, selected.bits.value)
+    rename.fallbackMember := !selected.bits.slotIsFormer
+    rename.retireValid := VecInit(retired.map(_.valid)).asUInt
+    rename.retireGroupId := VecInit(retired.map(r => Cat(r.bits.flag, r.bits.value)))
   }
   intRat.io.readPorts <> io.intReadPorts.flatten
   intRat.io.redirect := io.redirect

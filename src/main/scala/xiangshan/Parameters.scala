@@ -84,6 +84,7 @@ case class XSCoreParameters
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
+  EnableRobCompression: Boolean = true,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
@@ -111,7 +112,7 @@ case class XSCoreParameters
   StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 352,
+  RobSize: Int = 120,
   RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
@@ -735,6 +736,7 @@ trait HasXSParameter {
   def RobCommitWidth = coreParams.RobCommitWidth
   def RabCommitWidth = coreParams.RabCommitWidth
   def MaxUopSize = coreParams.MaxUopSize
+  def EnableRobCompression = coreParams.EnableRobCompression
   def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   def RenameSnapshotNum = coreParams.RenameSnapshotNum
   def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp

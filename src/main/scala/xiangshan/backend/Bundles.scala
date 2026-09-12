@@ -18,6 +18,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rename.CompressType
 import xiangshan.backend.trace._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
@@ -29,6 +30,12 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
+  def NormalUopNumWidth(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).MaxUopSize * 2 + 1)
+
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
+    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -114,7 +121,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
     val vtype            = new VType()
     val specvtype        = new VType()
     val instr = UInt(32.W)
@@ -148,7 +154,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
     val instr = UInt(32.W)
     // commitType will be used in rob to calculate lsq commit count
@@ -170,6 +175,7 @@ object Bundles {
     val blockBackward = Bool()
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress = Bool()
+    val simple = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
     val frm = Frm()
@@ -235,11 +241,18 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
+    val slotHeadRvcMask = UInt(2.W)
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val entryPairType = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -270,7 +283,8 @@ object Bundles {
     val oldVType = VType()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = NumWB() // rob need this
+    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
     val latency = Latency()
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -282,9 +296,11 @@ object Bundles {
     val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
     val robIdx = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W) // TODO: move it to dispatchOut
     val dirtyFs = Bool()
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    val formerTraceIretire = UInt(IretireWidthEncoded.W)
     // Take snapshot at this CFI inst
     val snapshot = Bool()
     val storeSetHit = Bool() // inst has been allocated an store set
@@ -300,11 +316,8 @@ object Bundles {
     val lsqIdxStart = new LSIdx
     val lsqIdxEnd = new LSIdx
     val hasException = Bool()
-    val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
-    val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
-    val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
     def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
@@ -313,7 +326,7 @@ object Bundles {
     val pc = UInt(VAddrBits.W)
     val debug_seqNum = InstSeqNum()
     val instr = UInt(32.W)
-    val fusionNum = UInt(2.W)
+    val fusionNum = UInt(log2Ceil(RenameWidth + 1).W)
     val perfDebugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
   }
@@ -332,7 +345,8 @@ object Bundles {
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
       this.hasException := source.hasException || source.singleStep
-      this.numWB        := Mux(source.singleStep, 0.U, source.numWB)
+      this.formerNumWB  := Mux(source.singleStep, 0.U, source.formerNumWB)
+      this.latterNumWB  := Mux(source.singleStep, 0.U, source.latterNumWB)
       this.stdwriteNeed := FuType.isStore(source.fuType)
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
@@ -372,6 +386,7 @@ object Bundles {
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
@@ -405,6 +420,7 @@ object Bundles {
     val vtype = VType()
     val oldVType = VType()
     val robIdx = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val numLsElem = NumLsElem()
     val rasAction = BranchAttribute.RasAction()
     // for mdp
@@ -466,6 +482,7 @@ object Bundles {
     val latency  = Latency()
     // from rename
     val robIdx    = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcV0    = Option.when(params.readV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
@@ -605,13 +622,13 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC           = Bool()
     val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
-    val ftqLastOffset   = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before channge in rename
     val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
@@ -628,7 +645,13 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
-    val fusionNum       = UInt(2.W)
+    val entryPairType    = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
+    val fusionNum       = UInt(log2Ceil(RenameWidth + 1).W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
     val frm             = Frm()
@@ -643,7 +666,8 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val numWB           = NumWB() // rob need this
+    val formerNumWB     = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB     = UInt(CompressedSlotUopNumWidth.W) // rob need this
     val latency         = Latency()
     val commitType      = CommitType()
     // rename
@@ -889,6 +913,7 @@ object Bundles {
     val rcIdx          = Option.when(exuParams.needReadRegCache)(Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val fuType         = FuType()
     val robIdx         = new RobPtr
+    val chanelIdx      = UInt(log2Up(RenameWidth).W)
     val iqIdx          = UInt(log2Up(iqParams.numEntries).W)
     val isFirstIssue   = Bool()
     val rfBankRen      = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Vec(coreParams.intPreg.numBank, Bool())))
@@ -1249,7 +1274,7 @@ object Bundles {
       uop.flushPipe      := this.flushPipe.getOrElse(false.B)
       uop.pc             := this.pc.getOrElse(0.U)
       uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
-      uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
+      uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(RobPtr(false.B, 0.U))
       uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)
       uop.loadWaitStrict := this.loadWaitStrict.getOrElse(false.B)
       uop.ssid           := this.ssid.getOrElse(0.U(SSIDWidth.W))
@@ -1715,6 +1740,7 @@ object Bundles {
     val pc = UInt((VAddrData().dataWidth + 1).W)
     val instr = UInt(32.W)
     val commitType = CommitType()
+    val isStore = Bool()
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
     val satpFlushFirstFetchFault = Bool()
     val isPcBkpt = Bool()
@@ -1727,6 +1753,8 @@ object Bundles {
     val vls = Bool()
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
+    // Identifies the faulting slot when two instructions share one ROB entry.
+    val slotIsFormer = Bool()
   }
 
   object UopIdx extends NamedUInt(3)
