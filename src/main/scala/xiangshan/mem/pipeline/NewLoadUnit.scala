@@ -345,7 +345,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.loadWaitStrict := uop.loadWaitStrict
   storeForwardReq.ssid := uop.ssid
   storeForwardReq.storeSetHit := uop.storeSetHit
-  storeForwardReq.waitForRobIdx := uop.waitForRobIdx
+  storeForwardReq.waitSqIdx := uop.waitSqIdx
 
   if(debugEn) {
     storeForwardReq.debug_robIdx.get := uop.robIdx
@@ -574,7 +574,7 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   // storeset
   val isStoreSetHit = uop.storeSetHit
-  val waitRobIdx = uop.waitForRobIdx
+  val waitSqIdx = uop.waitSqIdx
 
   /**
     * Redirect
@@ -678,7 +678,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   }).orR && paddrEffective
   // if nuke is storeSetHit store, let load fast replay
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _)
+    req.sqIdx === waitSqIdx && v}.reduce(_ || _)
 
   /**
     * Pipeline connect
@@ -886,7 +886,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
   val isStoreSetHit = uop.storeSetHit
-  val waitRobIdx = uop.waitForRobIdx
+  val waitSqIdx = uop.waitSqIdx
 
   /**
     * Redirect
@@ -1025,7 +1025,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   // if nuke is storeSetHit store, let load fast replay
   val prevStageFastReplayNukeFirst = in.fastReplayNukeFirst.get
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
+    req.sqIdx === waitSqIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
 
   /**
     * Preliminary assessment of the load exit
@@ -1101,7 +1101,6 @@ class LoadUnitS2(param: ExeUnitParams)(
   /**
     * Load replay
     */
-  val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get // including fast replay
   cause(C_UNCACHE) := troubleMaker && Mux(
     isUncacheReplay,
     isNCReplay && (sqDataInvalid || rarNack || rawNack || nuke || forwardInvalid),
@@ -1119,6 +1118,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_NK) := troubleMaker && nuke
   cause(C_MF) := false.B
   cause(C_SMF) := troubleMaker && forwardInvalid
+  val causeOrR = cause.asUInt.orR
+  val shouldReplay = causeOrR || in.shouldFastReplay.get // including fast replay
 
   def hasHigherPriorityCauses(cause: Vec[Bool], index: Int): Bool = {
     if (index == 0) false.B
@@ -1178,6 +1179,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     io.rrBankConflictFastReplayGrant && !rrBankConflictFastReplayCandidate,
     "rr bank conflict fast replay grant without candidate in s2"
   )
+  stageInfo.causeOrR.get := causeOrR
   stageInfo.troubleMaker.get := troubleMaker
   stageInfo.rrBankConflictFastReplay.get := rrBankConflictFastReplay
   stageInfo.rrBankConflictFastReplayGrant.get := io.rrBankConflictFastReplayGrant
@@ -1359,7 +1361,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val troubleMaker = in.troubleMaker.get
   val cause = in.cause.get
-  val shouldReplay = cause.asUInt.orR || in.shouldFastReplay.get
+  val causeOrR = in.causeOrR.get
+  val shouldReplay = causeOrR || in.shouldFastReplay.get
 
   assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
 
@@ -1392,7 +1395,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadAlwaysWriteback = s4Head.headAlwaysWriteback.get
   val s4HeadWritebackDependOnTail = s4Head.writebackDependOnTail.get
   val s4HeadHasException = s4Head.hasException.get
-  val s4HeadShouldReplay = s4HeadReplayCause.asUInt.orR
+  val s4HeadShouldReplay = s4Head.causeOrR.get
   val s4HeadShouldRARViolation = s4Head.shouldRarViolation.get
   val s4HeadIsReplay = LoadEntrance.isReplay(s4Head.entrance)
   val s4HeadCacheMiss = s4Head.cause.get(C_DM)
@@ -1469,7 +1472,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     * RAR / RAW revoke
     */
   val s3RevokeException = s3Exception
-  val s3RevokeReplay = cause.asUInt.orR
+  val s3RevokeReplay = causeOrR
   val s3Revoke = s3RevokeException || s3RevokeReplay
   val s4HeadRevoke = s4HeadHasException || s4HeadShouldReplay
   val revokeLastCycle = s3Revoke || s4HeadValid && s4HeadRevoke
@@ -1550,7 +1553,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteTlbId = Mux(useS4HeadReplay, s4Head.tlbId.get, in.tlbId.get)
   val lqWriteTlbFull = Mux(useS4HeadReplay, s4Head.tlbFull.get, in.tlbFull.get)
   
-  val lqWriteNeedReplay = lqWriteCause.asUInt.orR
+  val lqWriteNeedReplay = useS4HeadReplay || causeOrR
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
   val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)

@@ -138,6 +138,7 @@ class LoadPipeBundle(
   // S1 -> S2
   val shouldFastReplay = Option.when(param.hasS2PreProcess)(Bool())
   // S2 -> S3
+  val causeOrR = Option.when(param.hasS3PreProcess)(Bool())
   val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
   val rrBankConflictFastReplay = Option.when(param.hasS3PreProcess)(Bool())
   val rrBankConflictFastReplayGrant = Option.when(param.hasS3PreProcess)(Bool())
@@ -268,6 +269,7 @@ class StorePipeBundle(
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val isFirstIssue = Bool()
+  val illegalIssue = Bool()
 
   // StoreSet
   val ssid = Option.when(param.hasStoreSet)(UInt(SSIDWidth.W))

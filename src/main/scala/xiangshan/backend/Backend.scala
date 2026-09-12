@@ -531,7 +531,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     val enableMdp = Constantin.createRecord("EnableMdp", true)
     sink.bits.pc.foreach(_ := source.bits.data.pc.get + (source.bits.ctrl.ftqOffset.get << instOffsetBits))
     sink.bits.loadWaitBit.foreach(_ := Mux(enableMdp, source.bits.loadWaitBit.get, false.B))
-    sink.bits.waitForRobIdx.foreach(_ := Mux(enableMdp, source.bits.waitForRobIdx.get, 0.U.asTypeOf(new RobPtr)))
+    sink.bits.waitSqIdx.foreach(_ := Mux(enableMdp, source.bits.waitSqIdx.get, 0.U.asTypeOf(new SqPtr)))
     sink.bits.storeSetHit.foreach(_ := Mux(enableMdp, source.bits.storeSetHit.get, false.B))
     sink.bits.loadWaitStrict.foreach(_ := Mux(enableMdp, source.bits.loadWaitStrict.get, false.B))
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))

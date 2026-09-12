@@ -108,14 +108,32 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   val doAllocate = io.doAllocate.asUInt.orR
   val numAllocate = PopCount(io.doAllocate)
   val freeSlotCnt = RegInit(size.U(log2Up(size + 1).W))
+  val allocateWindow = Reg(Vec(allocWidth * 2, UInt(log2Up(size).W)))
+
+  if (enablePreAlloc) {
+    // use allocWidth * 2 request to align timing of allocate.
+    /*
+    *  initial status: allocateNumReg = 0, headPtr = 0, allocateWindow[0, 2N - 1] = freeList[headPtr, headPtr + 2N - 1].
+    *
+    *  T0: allocate N entries, allocateWindow[0, N - 1] was be allocated, allocateNumReg = 0, headPtr = 0.
+    *  T1: allocate N entries, allocatedWindow[N, 2N - 1] was be allocated,  allocateNumReg = N, headPtr = N.
+    *  T2: allocatedWindow[0, 2N - 1] = freeList[headPtr, headPtr + 2N - 1]
+    * */
+
+    for (i <- 0 until allocWidth * 2) {
+      allocateWindow(i) := freeList((headPtr + i.U).value)
+    }
+  }
 
   for (i <- 0 until allocWidth) {
     val offset = PopCount(io.allocateReq.take(i))
 
     if (enablePreAlloc) {
-      val deqPtr = headPtr + numAllocate + offset
-      io.canAllocate(i) := RegEnable(isBefore(deqPtr, tailPtr), enablePreAlloc.B)
-      io.allocateSlot(i) := RegEnable(freeList(deqPtr.value), enablePreAlloc.B)
+      val preAllocateNum = numAllocate +& offset
+      val preAllocatePtr = headPtr + preAllocateNum
+      val allocateNumReg = RegNext(numAllocate)
+      io.canAllocate(i) := RegEnable(isBefore(preAllocatePtr, tailPtr), enablePreAlloc.B)
+      io.allocateSlot(i) := allocateWindow(allocateNumReg +& i.U)
     } else {
       val deqPtr = headPtr + offset
       io.canAllocate(i) := isBefore(deqPtr, tailPtr)
