@@ -10,7 +10,6 @@ import xiangshan.backend.decode.opcode.Latency
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
-import xiangshan.backend.fu.wrapper.VFAluWrapper
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
@@ -71,12 +70,10 @@ object Func {
     val ex = Vec(cfg.latency + 1, ValidIO(new InUop))
     val frm = Option.when(cfg.needSrcFrm)(Frm())
     val vxrm = Option.when(cfg.needSrcVxrm)(Vxrm())
-    val vfaluInput = Option.when(cfg.isVfalu)(ValidIO(new VFAluWrapper.VFAluInput(cfg)))
   }
 
   class Out(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
     val ex = Vec(cfg.latency + 1, ValidIO(new OutUop))
-    val op3OutContext = Option.when(cfg.isVfalu)(ValidIO(new VFAluWrapper.OP3Context(cfg)))
   }
 
   class InUop(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
@@ -107,6 +104,7 @@ object Func {
     val vlWen     = Option.when(cfg.needVlWen)(Bool())
     val flushPipe = Option.when(cfg.flushPipe)(Bool())
     val fflagsWen = Option.when(cfg.writeFflags)(Bool())
+    val frm       = Option.when(cfg.needSrcFrm)(Frm())
     val vtype     = Option.when(cfg.readVType)(VType())
     val oldVType  = Option.when(cfg.writeVType)(VType())
     val vm        = Option.when(cfg.readVType)(Bool())
