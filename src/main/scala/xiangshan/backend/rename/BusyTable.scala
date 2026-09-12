@@ -34,7 +34,6 @@ class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
 }
 
 class VlBusyTableReadIO(implicit p: Parameters) extends XSBundle {
-  val is_nonzero = Output(Bool())
   val is_vlmax = Output(Bool())
 }
 
@@ -188,7 +187,6 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
 
   val io_vl_Wb = IO(new Bundle() {
     val vlWriteBackInfo = new Bundle {
-      val vlFromIntIsZero  = Input(Bool())
       val vlFromIntIsVlmax = Input(Bool())
     }
   })
@@ -198,31 +196,15 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
 
   var intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
 
-  val nonzeroTableUpdate = Wire(Vec(numPhyPregs, Bool()))
   val vlmaxTableUpdate = Wire(Vec(numPhyPregs, Bool()))
 
   val intVlWb = Mux(io.wbPregs(intSchdVlWbPort).valid, UIntToOH(io.wbPregs(intSchdVlWbPort).bits), 0.U)
   // when other ports write back, we cannot know the vl value, so we should set the vl table to busy
   val otherPortsWb = io.wbPregs.zipWithIndex.filter(x => x._2 != intSchdVlWbPort).map(x => Mux(x._1.valid, UIntToOH(x._1.bits), 0.U)).foldLeft(0.U)(_ | _)
 
-  val nonzeroTable = VecInit((0 until numPhyPregs).zip(nonzeroTableUpdate).map{ case (idx, update) =>
-    RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || intVlWb(idx) || otherPortsWb(idx))
-  }).asUInt
   val vlmaxTable = VecInit((0 until numPhyPregs).zip(vlmaxTableUpdate).map{ case (idx, update) =>
     RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || intVlWb(idx) || otherPortsWb(idx))
   }).asUInt
-
-
-  nonzeroTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
-    when(intVlWb(idx)) {
-      // int schd vl write back, check whether the vl is zero
-      update := io_vl_Wb.vlWriteBackInfo.vlFromIntIsZero
-    }.elsewhen(otherPortsWb(idx) || allocMask(idx) || ldCancelMask(idx)) {
-      update := true.B
-    }.otherwise {
-      update := nonzeroTable(idx)
-    }
-  }
 
   vlmaxTableUpdate.zipWithIndex.foreach{ case (update, idx) =>
     when(intVlWb(idx)) {
@@ -236,7 +218,6 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
   }
 
   io_vl_read.vlReadInfo.zip(io.read).foreach{ case (vlRes, res) =>
-    vlRes.is_nonzero := !nonzeroTable(res.req)
     vlRes.is_vlmax := !vlmaxTable(res.req)
   }
 }

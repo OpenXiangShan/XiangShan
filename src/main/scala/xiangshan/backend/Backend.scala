@@ -199,8 +199,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val csrin = intRegion.io.csrin.get
   private val csrio = intRegion.io.csrio.get
 
-  private val vlFromIntIsZero = false.B // Todo: enable this when vs3 dependency elimination is ready
-  private val vlFromIntIsVlmax = false.B
+  private val vlFromIntIsVlmax = false.B // Todo: enable this when vs3 dependency elimination is ready
 
   private val backendCriticalError = Wire(Bool())
 
@@ -265,7 +264,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     x._1.valid := x._2.wen
     x._1.bits := x._2.pdest
   })
-  ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsZero := vlFromIntIsZero
   ctrlBlock.io.toDispatch.vlWriteBackInfo.vlFromIntIsVlmax := vlFromIntIsVlmax
   ctrlBlock.io.csrCtrl <> intRegion.io.csrio.get.customCtrl
   ctrlBlock.io.robio.csr.intrBitSet := intRegion.io.csrio.get.interrupt
