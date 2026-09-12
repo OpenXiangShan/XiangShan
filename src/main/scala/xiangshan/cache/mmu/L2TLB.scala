@@ -511,21 +511,63 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   llptw_mem.flush_latch := flush_latch.take(l2tlbParams.llptwsize)
   llptw_mem.req_mask := waiting_resp.take(l2tlbParams.llptwsize)
   ptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize)
-  for (i <- 0 until l2tlbParams.hptwSize) {
-    hptw.io.mem(i).mask := waiting_resp(HptwMemReqBase + i)
-  }
   if (HasBitmapCheck) {
     bitmap.get.io.mem.req_mask := waiting_resp.slice(BitmapMemReqBase, MemReqWidth)
   }
 
   if (HasMptCheck) { mptc.get.io.mem.mask := waiting_resp(mptcMemReqID) }
+
+  val hptwRefill = Reg(Vec(l2tlbParams.hptwSize, new HPTWRefillBundle))
+  val hptwBypassed = Reg(Vec(l2tlbParams.hptwSize, Bool()))
+  val hptwOwnerAddr = Reg(Vec(l2tlbParams.hptwSize, UInt(PAddrBits.W)))
+  val hptwWaiterMask = RegInit(VecInit(Seq.fill(l2tlbParams.hptwSize)(0.U(l2tlbParams.hptwSize.W))))
+  for (i <- 0 until l2tlbParams.hptwSize) {
+    val hptwLogicalWaiting = hptwWaiterMask.map(_(i)).reduce(_ || _)
+    hptw.io.mem(i).mask := waiting_resp(HptwMemReqBase + i) || hptwLogicalWaiting
+  }
+
+  mem.d.ready := true.B
+  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
+  val mem_resp_done = refill_helper._3
+
+  val hptwOwnerActive = (0 until l2tlbParams.hptwSize).map { j =>
+    waiting_resp(HptwMemReqBase + j) && !flush_latch(HptwMemReqBase + j)
+  }
+  val hptwOwnerDLast = (0 until l2tlbParams.hptwSize).map { j =>
+    mem_resp_done && mem.d.bits.source === (HptwMemReqBase + j).U
+  }
+  val hptwOwnerMatches = Seq.tabulate(l2tlbParams.hptwSize) { i =>
+    val req = hptw.io.mem(i).req.bits
+    val reqRefill = hptw.io.refill(i)
+    VecInit(Seq.tabulate(l2tlbParams.hptwSize) { j =>
+      val samePrefix = MuxLookup(reqRefill.level, false.B)((0 to Level).map { level =>
+        level.U -> (getVpnClip(reqRefill.req_info.vpn, level) === getVpnClip(hptwRefill(j).req_info.vpn, level))
+      })
+      hptwOwnerActive(j) && req.addr === hptwOwnerAddr(j) &&
+        req.hptw_bypassed === hptwBypassed(j) &&
+        reqRefill.level === hptwRefill(j).level &&
+        from_pre(reqRefill.req_info.source) === from_pre(hptwRefill(j).req_info.source) &&
+        samePrefix
+    })
+  }
+  val hptwHasMatch = hptwOwnerMatches.map { ownerMatches =>
+    assert(PopCount(ownerMatches) <= 1.U)
+    ownerMatches.asUInt.orR
+  }
+  val hptwMergeClosed = hptwOwnerMatches.map { ownerMatches =>
+    ownerMatches.zip(hptwOwnerDLast).map { case (matches, done) => matches && done }.reduce(_ || _)
+  }
+
   val extraMemPort = 2 + l2tlbParams.hptwSize
   val memPortCount = extraMemPort + (if (HasBitmapCheck || HasMptCheck) 1 else 0)
   val mem_arb = Module(new Arbiter(new L2TlbMemReqBundle(), memPortCount))
   mem_arb.io.in(0) <> ptw.io.mem.req
   mem_arb.io.in(1) <> llptw_mem.req
   for (i <- 0 until l2tlbParams.hptwSize) {
-    mem_arb.io.in(2 + i) <> hptw.io.mem(i).req
+    mem_arb.io.in(2 + i).valid := hptw.io.mem(i).req.valid && !hptwHasMatch(i)
+    mem_arb.io.in(2 + i).bits := hptw.io.mem(i).req.bits
+    hptw.io.mem(i).req.ready :=
+      Mux(hptwHasMatch(i), !hptwMergeClosed(i), mem_arb.io.in(2 + i).ready) && !flush && !wfiReq
   }
   if (HasBitmapCheck) {
     mem_arb.io.in(extraMemPort) <> bitmap.get.io.mem.req
@@ -533,6 +575,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   if (HasMptCheck) {mem_arb.io.in(extraMemPort) <> mptc.get.io.mem.req}
   mem_arb.io.out.ready := mem.a.ready && !flush && !wfiReq
+
+  val hptwMergeReqFire = hptw.io.mem.zip(hptwHasMatch).map { case (memory, hasMatch) =>
+    memory.req.fire && hasMatch
+  }
+  val hptwMergeMaskByOwner = Seq.tabulate(l2tlbParams.hptwSize) { j =>
+    VecInit(Seq.tabulate(l2tlbParams.hptwSize) { i =>
+      hptwMergeReqFire(i) && hptwOwnerMatches(i)(j)
+    }).asUInt
+  }
 
   // // assert, should not send mem access at same addr for twice.
   // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
@@ -561,6 +612,25 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     req_addr_low(mem_arb.io.out.bits.id) := addr_low_from_paddr(mem_arb.io.out.bits.addr)
     waiting_resp(mem_arb.io.out.bits.id) := true.B
   }
+  for (j <- 0 until l2tlbParams.hptwSize) {
+    val ownerIssue = mem_arb.io.in(2 + j).fire
+    when (ownerIssue) {
+      hptwOwnerAddr(j) := hptw.io.mem(j).req.bits.addr
+      hptwRefill(j) := hptw.io.refill(j)
+      hptwBypassed(j) := hptw.io.mem(j).req.bits.hptw_bypassed
+    }
+    when (flush || hptwOwnerDLast(j)) {
+      hptwWaiterMask(j) := 0.U
+    }.elsewhen (ownerIssue) {
+      hptwWaiterMask(j) := (BigInt(1) << j).U(l2tlbParams.hptwSize.W)
+    }.elsewhen (hptwMergeMaskByOwner(j).orR) {
+      hptwWaiterMask(j) := hptwWaiterMask(j) | hptwMergeMaskByOwner(j)
+    }
+    assert(!hptwWaiterMask(j).orR || hptwWaiterMask(j)(j))
+  }
+  for (i <- 0 until l2tlbParams.hptwSize) {
+    assert(PopCount((0 until l2tlbParams.hptwSize).map(j => hptwWaiterMask(j)(i))) <= 1.U)
+  }
   // mem read
   val memRead =  edge.Get(
     fromSource = mem_arb.io.out.bits.id,
@@ -571,11 +641,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mem.a.bits := memRead
   mem.a.valid := mem_arb.io.out.valid && !flush && !wfiReq
   mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
-  mem.d.ready := true.B
   // mem -> data buffer
   val refill_data = RegInit(VecInit.fill(blockBits / l1BusDataWidth)(0.U(l1BusDataWidth.W)))
-  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
-  val mem_resp_done = refill_helper._3
   val mem_resp_from_llptw = from_llptw(mem.d.bits.source)
   val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
@@ -591,11 +658,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_data_tmp = WireInit(refill_data)
   refill_data_tmp(refill_helper._4) := mem.d.bits.data
 
+  val hptwRespMask = Mux1H(hptwOwnerDLast, hptwWaiterMask)
+  val hptwRespPte = get_part(refill_data_tmp, req_addr_low(mem.d.bits.source))
+
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val pteBufferCount = PtwMemReqCount + (if (HasMptCheck) 1 else 0)
   val resp_pte = VecInit((0 until pteBufferCount).map { i =>
-    if (i >= l2tlbParams.llptwsize) {
+    if (i >= HptwMemReqBase && i < PtwMemReqCount) {
+      RegEnable(hptwRespPte, 0.U.asTypeOf(hptwRespPte), hptwRespMask(i - HptwMemReqBase) && !flush)
+    } else if (i >= l2tlbParams.llptwsize) {
       val pte = get_part(refill_data_tmp, req_addr_low(i))
       RegEnable(pte, 0.U.asTypeOf(pte), mem_resp_done && mem.d.bits.source === i.U)
     } else {
@@ -659,8 +731,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> hptw
   for (i <- 0 until l2tlbParams.hptwSize) {
     val sourceId = HptwMemReqBase + i
-    hptw.io.mem(i).resp.valid := mem_resp_done && mem.d.bits.source === sourceId.U &&
-      !flush_latch(sourceId)
+    hptw.io.mem(i).resp.valid := hptwRespMask(i) && !flush
     hptw.io.mem(i).resp.bits := resp_pte(sourceId)
   }
 
@@ -671,11 +742,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> cache
   val refill_from_llptw = mem_resp_from_llptw
   val refill_from_ptw = mem_resp_from_ptw
-  val hptwRefill = VecInit(hptw.io.mem.zip(hptw.io.refill).map { case (memory, refill) =>
-    RegEnable(refill, memory.req.fire)
-  })
-  val hptwBypassed = VecInit(hptw.io.mem.map(memory =>
-    RegEnable(memory.req.bits.hptw_bypassed, memory.req.fire)))
   val hptwRefillIndex = Wire(UInt(log2Ceil(l2tlbParams.hptwSize).W))
   hptwRefillIndex := mem.d.bits.source - HptwMemReqBase.U
   val selectedHptwRefill = hptwRefill(hptwRefillIndex)
@@ -1075,8 +1141,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("mem_d_beat_count", mem.d.fire)
   XSPerfAccumulate("mem_d_resp_count", mem_resp_done)
 
-  val hptwWaitingD = (HptwMemReqBase until PtwMemReqCount).map { id =>
-    waiting_resp(id) && !flush_latch(id) && !flush
+  val hptwWaitingD = (0 until l2tlbParams.hptwSize).map { i =>
+    hptwWaiterMask.map(_(i)).reduce(_ || _) && !flush
   }
   val hptwDrainingD = (HptwMemReqBase until PtwMemReqCount).map { id =>
     waiting_resp(id) && flush_latch(id)
@@ -1095,9 +1161,35 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("hptw_no_free_flush_drain_cycle", hptwNoFree && Cat(hptwDrainingD).orR)
   XSPerfAccumulate("hptw_mem_d_resp_count",
     mem_resp_done && mem_resp_from_hptw && !flush_latch(mem.d.bits.source) && !flush)
+  val hptwPhysicalMemReqFire = mem.a.fire && from_hptw(mem.a.bits.source)
+  XSPerfAccumulate("hptw_physical_mem_req_count", hptwPhysicalMemReqFire)
+  XSPerfAccumulate("hptw_merged_mem_req_count", PopCount(hptwMergeReqFire))
+  val hptwSameLineDifferentPte = (0 until l2tlbParams.hptwSize).map { i =>
+    val matches = (0 until l2tlbParams.hptwSize).map { j =>
+      hptwOwnerActive(j) && !hptwOwnerDLast(j) &&
+        blockBytes_align(hptw.io.mem(i).req.bits.addr) === blockBytes_align(hptwOwnerAddr(j)) &&
+        hptw.io.mem(i).req.bits.addr =/= hptwOwnerAddr(j)
+    }
+    hptw.io.mem(i).req.valid && matches.reduce(_ || _) && !flush && !wfiReq
+  }
+  val hptwSamePteIncompatible = (0 until l2tlbParams.hptwSize).map { i =>
+    val matches = (0 until l2tlbParams.hptwSize).map { j =>
+      hptwOwnerActive(j) && !hptwOwnerDLast(j) &&
+        !hptwOwnerMatches(i)(j) &&
+        hptw.io.mem(i).req.bits.addr === hptwOwnerAddr(j)
+    }
+    hptw.io.mem(i).req.valid && matches.reduce(_ || _) && !flush && !wfiReq
+  }
+  val hptwMergeClosedByResp = hptw.io.mem.zip(hptwMergeClosed).map { case (memory, closed) =>
+    memory.req.valid && closed && !flush && !wfiReq
+  }
+  XSPerfAccumulate("hptw_same_line_different_pte_cycle", PopCount(hptwSameLineDifferentPte))
+  XSPerfAccumulate("hptw_same_pte_incompatible_cycle", PopCount(hptwSamePteIncompatible))
+  XSPerfAccumulate("hptw_merge_closed_by_resp_cycle", PopCount(hptwMergeClosedByResp))
+  assert(PopCount(hptw.io.mem.map(_.req.fire)) === PopCount(Seq(hptwPhysicalMemReqFire)) + PopCount(hptwMergeReqFire))
 
   val hptwMemArbLost = hptw.io.mem.zipWithIndex.map { case (memory, i) =>
-    memory.req.valid && mem_arb.io.chosen =/= (2 + i).U && !flush && !wfiReq
+    memory.req.valid && !hptwHasMatch(i) && mem_arb.io.chosen =/= (2 + i).U && !flush && !wfiReq
   }
   XSPerfAccumulate("hptw_mem_arb_lost_cycle", Cat(hptwMemArbLost).orR)
   XSPerfAccumulate("hptw_mem_arb_lost_bank_cycle", PopCount(hptwMemArbLost))
