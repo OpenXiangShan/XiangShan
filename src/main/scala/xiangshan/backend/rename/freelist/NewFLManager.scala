@@ -119,12 +119,13 @@ class NewFLManager(
     selectedBanks = selectedBanksNext
   }
 
-  // Emit both candidates from each bank before moving to the next bank.  If
-  // the s1 queue has only a few free slots, the fuller banks are therefore
-  // selected first and the refill moves the bank occupancies toward balance.
+  // Emit the same candidate kind across all ranked banks before moving to the
+  // next kind: first candidates of every bank, then last candidates.  Thus a
+  // partial refill still visits all high-availability banks before taking the
+  // second candidate from any bank.
   for (candidateIdx <- 0 until renameWidth) {
-    val candidateBank = rankedBankOrder(candidateIdx / 2)
-    val candidateInBank = candidateIdx % 2
+    val candidateBank = rankedBankOrder(candidateIdx % bankCount)
+    val candidateInBank = candidateIdx / bankCount
     s0CandidateBank(candidateIdx) := candidateBank
     s0Candidates(candidateIdx) := s0BankCandidates(candidateBank)(candidateInBank)
     s0CandidateValid(candidateIdx) := s0BankCandidateValid(candidateBank)(candidateInBank)
