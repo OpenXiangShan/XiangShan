@@ -26,7 +26,6 @@ import xiangshan.frontend.GuardedPcInit
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
       wbRedirect:      Valid[FrontendRedirect],
-      specTopAddr:     UInt,
       backendRedirect: Bool
   ): (Valid[FtqPtr], Valid[Redirect], Valid[Resolve]) = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
@@ -39,7 +38,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.isRVC     := wbRedirect.bits.isRVC
     redirect.bits.attribute := wbRedirect.bits.attribute
     redirect.bits.pc        := wbRedirect.bits.pc
-    val selectedTarget = GuardedPcInit(Mux(wbRedirect.bits.attribute.isReturn, specTopAddr, wbRedirect.bits.target))
+    val selectedTarget = GuardedPcInit(wbRedirect.bits.target)
     redirect.bits.target    := selectedTarget.toUInt
     redirect.bits.taken     := wbRedirect.bits.taken
     redirect.bits.isMisPred := true.B

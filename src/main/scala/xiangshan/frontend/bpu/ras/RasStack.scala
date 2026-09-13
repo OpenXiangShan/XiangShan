@@ -57,10 +57,10 @@ class RasStack(implicit p: Parameters) extends RasModule
     val spec:     RasSpecIO       = new RasSpecIO
     val commit:   RasCommitIO     = new RasCommitIO
     val redirect: RasRedirectIO   = new RasRedirectIO
+    val specRead: ReadRetAddr     = new ReadRetAddr
     val meta:     RasInternalMeta = Output(new RasInternalMeta)
 
-    val specNearOverflow: Bool     = Output(Bool())
-    val debug:            RasDebug = new RasDebug
+    val debug: RasDebug = new RasDebug
   }
   val io: RasStackIO = IO(new RasStackIO)
 
@@ -77,8 +77,6 @@ class RasStack(implicit p: Parameters) extends RasModule
   private val tosr = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
   private val tosw = RegInit(RasPtr(false.B, 0.U))
   private val bos  = RegInit(RasPtr(false.B, 0.U))
-
-  private val specNearOverflowed = RegInit(false.B)
 
   private val writeBypassEntry = Reg(new RasEntry)
   private val writeBypassNos   = Reg(new RasPtr)
@@ -322,7 +320,12 @@ class RasStack(implicit p: Parameters) extends RasModule
     specPop(ssp, sctr, tosr, tosw, topNos)
   }
 
-  io.spec.popAddr := timingTop.retAddr
+  private val specQueueRetAddr  = specQueue(io.specRead.tosr.value).retAddr
+  private val specCommitRetAddr = commitStack(io.specRead.ssp).retAddr
+  private val notInSpec         = tosrInRange(io.specRead.tosr, tosw)
+  private val specReadRetAddr   = Mux(notInSpec, specCommitRetAddr, specQueueRetAddr)
+  io.spec.popAddr     := timingTop.retAddr
+  io.specRead.retAddr := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr))
 
   io.meta.tosw := tosw
   io.meta.tosr := tosr
@@ -413,14 +416,6 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }
 
-  when(distanceBetween(tosw, bos) > (SpecQueueSize - 2).U) {
-    specNearOverflowed := true.B
-  }.otherwise {
-    specNearOverflowed := false.B
-  }
-
-  io.specNearOverflow := specNearOverflowed
-  XSPerfAccumulate("specNearOverflow", specNearOverflowed)
   io.debug.bos := bos
   io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
   io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }

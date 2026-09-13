@@ -128,10 +128,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
-  private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
+  private val specTosr       = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.tosr
+  private val specSsp        = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.ssp
+  private val specTopRetAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr
   private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
     io.fromIfu.wbRedirect,
-    specTopAddr,
     backendRedirect.valid
   )
 
@@ -382,7 +383,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
   io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
-  io.toBpu.redirectFromIFU         := ifuRedirect.valid
+  io.toBpu.redirectFromIFU         := ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn
+  io.toBpu.advanceTosr             := specTosr
+  io.toBpu.advanceSsp              := specSsp
+  io.toBpu.specRetAddr             := RegNext(specTopRetAddr)
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
@@ -574,6 +578,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("conditional", redirect.bits.attribute.isConditional),
       ("direct", redirect.bits.attribute.isDirect),
       ("indirect", redirect.bits.attribute.isIndirect),
+      ("ret", redirect.bits.attribute.isReturn),
       ("indirect_ret_call", redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect)
     )
   )

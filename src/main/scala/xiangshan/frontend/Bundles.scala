@@ -39,6 +39,7 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.ras.RasPtr
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
@@ -67,6 +68,9 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val commit:          Valid[BpuCommit]      = Valid(new BpuCommit)
   val bpuPtr:          FtqPtr                = Output(new FtqPtr)
   val redirectFromIFU: Bool                  = Output(Bool())
+  val advanceTosr:     RasPtr                = Output(new RasPtr)
+  val advanceSsp:      UInt                  = Output(UInt(log2Up(16).W))
+  val specRetAddr:     GuardedPc             = Output(GuardedPc())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)

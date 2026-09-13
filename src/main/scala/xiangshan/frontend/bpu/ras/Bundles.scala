@@ -82,6 +82,12 @@ class RasCommitMeta(implicit p: Parameters) extends RasBundle {
   val tosw: RasPtr = new RasPtr
 }
 
+class ReadRetAddr(implicit p: Parameters) extends RasBundle {
+  val tosr:    RasPtr    = Input(new RasPtr)
+  val ssp:     UInt      = Input(UInt(log2Up(CommitStackSize).W))
+  val retAddr: GuardedPc = Output(GuardedPc())
+}
+
 object RasCommitMeta {
   def apply(ssp: UInt, tosw: RasPtr)(implicit p: Parameters): RasCommitMeta = {
     val e = Wire(new RasCommitMeta)
