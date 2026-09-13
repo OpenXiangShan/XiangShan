@@ -264,6 +264,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    // Global stuck-recovery mode for loads that remain at the ROB head.
+    val specialMode = Output(Bool())
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
@@ -284,6 +286,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val vaddr = Reg(Vec(LoadQueueReplaySize, UInt(VAddrBits.W)))
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
   val blocking = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val specialReplay = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val strict = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   // Saturating residence timer for each LRQ entry. It covers the whole lifetime from the
   // first allocation to normal release; re-replay and cause updates do not restart it.
@@ -783,6 +786,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.vecTriggerMask.get := DontCare
     replay_req(i).bits.hasROBEntry := true.B
     replay_req(i).bits.missDbUpdated := s1_missDbUpdated
+    replay_req(i).bits.specialReplay := specialReplay(s1_replayIdx(i))
 
     XSError(replay_req(i).fire && !allocated(s1_replayIdx(i)), p"LoadQueueReplay: why replay an invalid entry ${s1_replayIdx(i)} ?")
   }
@@ -894,6 +898,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       val replayInfo = enq.bits.rep_info
       val dataInLastBeat = replayInfo.last_beat
       cause(enqIndex) := replayInfo.cause.asUInt
+      specialReplay(enqIndex) := replayInfo.specialReplay
 
 
       // init
@@ -937,6 +942,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       when (isFF) {
         blocking(enqIndex) := !ffProducerReadyNow
+      }
+
+      // Special-mode replays are intentionally immediately selectable. They
+      // must not wait for the normal TLB/MSHR wakeup conditions.
+      when (replayInfo.specialReplay) {
+        blocking(enqIndex) := false.B
       }
 
       // extra info
@@ -1019,6 +1030,43 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
   io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
   io.replayAllocate := allocated.asUInt.orR
+
+  // Enter special mode only after a ROB-head TLB/cache miss or MSHR replay has remained in the
+  // replay queue for 2048 cycles. The mode is released by ROB-head movement.
+  private val specialCounterWidth = 12
+  private val specialThreshold = 2048
+  val specialCounter = RegInit(0.U(specialCounterWidth.W))
+  val specialModeReg = RegInit(false.B)
+  val specialRobIdx = Reg(new RobPtr)
+  val lastRobHeadPtr = RegNext(io.robHeadPtr)
+  val robHeadMoved = io.robHeadPtr =/= lastRobHeadPtr
+  val robHeadMiss = VecInit((0 until LoadQueueReplaySize).map { entryIdx =>
+    allocated(entryIdx) &&
+      uop(entryIdx).robIdx === io.robHeadPtr &&
+      (cause(entryIdx)(LoadReplayCauses.C_TM) ||
+       cause(entryIdx)(LoadReplayCauses.C_DM) ||
+       cause(entryIdx)(LoadReplayCauses.C_DR)) &&
+      !needCancel(entryIdx)
+  }).asUInt.orR
+
+  when (robHeadMoved) {
+    specialCounter := 0.U
+    specialModeReg := false.B
+  }.elsewhen (!specialModeReg) {
+    // robHeadMiss starts the observation window. Once started, count every
+    // cycle until the ROB head moves, regardless of the current replay cause.
+    when (robHeadMiss || specialCounter =/= 0.U) {
+      when (specialCounter === (specialThreshold - 1).U) {
+        specialModeReg := true.B
+        specialRobIdx := io.robHeadPtr
+      }.otherwise {
+        specialCounter := specialCounter + 1.U
+      }
+    }
+  }
+  io.specialMode := specialModeReg && io.robHeadPtr === specialRobIdx
+  val specialModeEnter = specialModeReg && !RegNext(specialModeReg, false.B)
+  XSPerfAccumulate("replay_special_mode_enter", specialModeEnter)
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt

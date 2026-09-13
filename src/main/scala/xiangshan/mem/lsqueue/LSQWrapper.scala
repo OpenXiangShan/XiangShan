@@ -150,6 +150,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    val specialMode = Output(Bool())
 
     val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
   })
@@ -330,6 +331,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   loadQueue.io.debugTopDown <> io.debugTopDown
   loadQueue.io.replayAllocate <> io.replayAllocate
+  io.specialMode := loadQueue.io.specialMode
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.toUncacheBuffer.resp.valid))
   assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.toUncacheBuffer.idResp.valid))

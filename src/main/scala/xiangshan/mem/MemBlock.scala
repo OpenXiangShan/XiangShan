@@ -914,8 +914,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // Perf-only head/full qualifiers for MDP counters.
     newLoadUnits(i).io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
+    newLoadUnits(i).io.robHeadPtr := io.ooo_to_mem.lsqio.pendingPtrNext
     newLoadUnits(i).io.perfLqHeadPtr := lsq.io.lqDeqPtr
     newLoadUnits(i).io.perfLqFull := lsq.io.lqFull
+    newLoadUnits(i).io.specialMode := lsq.io.specialMode
 
     // software prefetch to frontend (prefetch.i)
     io.ifetchPrefetch(i) <> newLoadUnits(i).io.swInstrPrefetch

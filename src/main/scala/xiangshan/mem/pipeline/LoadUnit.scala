@@ -58,6 +58,8 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   val last_beat       = Bool()
   // whether any replay cause is active for this request
   val need_rep        = Bool()
+  // special stuck-recovery replay: enter LRQ without blocking/wakeup
+  val specialReplay   = Bool()
   // replay cause
   val cause           = Vec(LoadReplayCauses.allCauses, Bool())
   // performance debug information
