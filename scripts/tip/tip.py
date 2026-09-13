@@ -1,5 +1,6 @@
 import argparse
 import importlib
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,16 @@ else:
 
 
 _PLOT_MODULE = None
+
+
+def default_out_dir() -> Path:
+    root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return root / "xiangshan" / "tip"
+
+
+def default_sym_cache() -> Path:
+    root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return root / "xiangshan" / "tip" / "symbols.json"
 
 
 def _plot_module():
@@ -116,13 +127,13 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--db", default=None, help="path to sqlite db; default uses latest build/*.db")
     common.add_argument("--hart", default=0, type=int, help="hart id, default 0")
-    common.add_argument("--out-dir", default="scripts/tip/results", help="output directory")
+    common.add_argument("--out-dir", default=default_out_dir(), help="output directory")
     common.add_argument("--top", default=20, type=int, help="top N hotspots to export")
     common.add_argument(
         "--elf",
         help="path to ELF binary for symbolizing addresses (required for 'symbols'; optional for 'all')",
     )
-    common.add_argument("--sym-cache", default="scripts/tip/.symbol-cache.json", help="JSON cache for symbol resolutions")
+    common.add_argument("--sym-cache", default=default_sym_cache(), help="JSON cache for symbol resolutions")
     parser = argparse.ArgumentParser(description="TIP analysis for XiangShan ChiselDB output", parents=[common])
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
     subparsers.add_parser("summary", help="print summary and write summary CSVs", parents=[common])

@@ -87,6 +87,7 @@ def fetch_commit_width_summary(conn: sqlite3.Connection, hart: int) -> list[dict
         select ({width_expr}) as commit_width,
                count(*) as count
         from {table}
+        where COMMITS_ISCOMMIT=1
         group by commit_width
         order by commit_width
         """
@@ -236,23 +237,79 @@ def fetch_redirect_event_rows(conn: sqlite3.Connection, hart: int, top: int | No
     )
 
 
+def _replay_entries_cte(table: str) -> str:
+    order = "STAMP, rowid"
+    return f"""
+        with ordered as (
+          select STAMP,
+                 COMMITS_INFO_0_DEBUG_PC as pc_raw,
+                 COMMITS_ISCOMMIT,
+                 COMMITS_COMMITVALID_0,
+                 DEBUGLSINFO_S3_ISREPLAY as is_replay,
+                 DEBUGLSINFO_S3_ISREPLAYFAST as fast_replay,
+                 DEBUGLSINFO_S3_ISREPLAYSLOW as slow_replay,
+                 DEBUGLSINFO_S3_ISREPLAYRS as rs_replay,
+                 DEBUGLSINFO_S2_ISBANKCONFLICT as bank_conflict,
+                 DEBUGLSINFO_S2_ISDCACHEFIRSTMISS as dcache_first_miss,
+                 DEBUGLSINFO_S2_ISFORWARDFAIL as forward_fail,
+                 DEBUGLSINFO_REPLAYCNT as replay_cnt,
+                 lag(STAMP) over (order by {order}) as prev_stamp,
+                 lag(COMMITS_INFO_0_DEBUG_PC) over (order by {order}) as prev_pc,
+                 lag(DEBUGLSINFO_REPLAYCNT) over (order by {order}) as prev_replay_cnt,
+                 lag(COMMITS_ISCOMMIT and COMMITS_COMMITVALID_0) over (order by {order}) as prev_committed
+          from {table}
+        ), boundaries as (
+          select *,
+                 case when prev_stamp is null
+                            or STAMP != prev_stamp + 1
+                            or pc_raw != prev_pc
+                            or replay_cnt < prev_replay_cnt
+                            or prev_committed
+                      then 1 else 0 end as new_entry
+          from ordered
+        ), grouped as (
+          select *,
+                 sum(new_entry) over (order by STAMP rows unbounded preceding) as entry_id
+          from boundaries
+        ), replay_entries as (
+          select entry_id,
+                 pc_raw,
+                 max(is_replay) as is_replay,
+                 max(fast_replay) as fast_replay,
+                 max(slow_replay) as slow_replay,
+                 max(rs_replay) as rs_replay,
+                 max(bank_conflict) as bank_conflict,
+                 max(dcache_first_miss) as dcache_first_miss,
+                 max(forward_fail) as forward_fail,
+                 max(replay_cnt) as replay_cnt
+          from grouped
+          group by entry_id, pc_raw
+          having max(is_replay)=1
+              or max(bank_conflict)=1
+              or max(dcache_first_miss)=1
+              or max(forward_fail)=1
+        )
+    """
+
+
 def fetch_replay_summary(conn: sqlite3.Connection, hart: int) -> list[dict]:
     table = ensure_tip_table(conn, hart)
-    rows = _execute_dicts(
+    return _execute_dicts(
         conn,
         f"""
-        select count(*) as rows,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAY), 0) as replay_rows,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYFAST), 0) as fast_replay,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYSLOW), 0) as slow_replay,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYRS), 0) as rs_replay,
-               coalesce(sum(DEBUGLSINFO_S2_ISBANKCONFLICT), 0) as bank_conflict,
-               coalesce(sum(DEBUGLSINFO_S2_ISDCACHEFIRSTMISS), 0) as dcache_first_miss,
-               coalesce(sum(DEBUGLSINFO_S2_ISFORWARDFAIL), 0) as forward_fail
-        from {table}
-        """
+        {_replay_entries_cte(table)}
+        select count(*) as entries,
+               coalesce(sum(is_replay), 0) as replay_entries,
+               coalesce(sum(fast_replay), 0) as fast_replay,
+               coalesce(sum(slow_replay), 0) as slow_replay,
+               coalesce(sum(rs_replay), 0) as rs_replay,
+               coalesce(sum(bank_conflict), 0) as bank_conflict,
+               coalesce(sum(dcache_first_miss), 0) as dcache_first_miss,
+               coalesce(sum(forward_fail), 0) as forward_fail,
+               coalesce(sum(replay_cnt), 0) as replay_cnt_sum
+        from replay_entries
+        """,
     )
-    return rows
 
 
 def fetch_replay_event_rows(conn: sqlite3.Connection, hart: int, top: int | None = 100) -> list[dict]:
@@ -262,22 +319,19 @@ def fetch_replay_event_rows(conn: sqlite3.Connection, hart: int, top: int | None
     return _execute_dicts(
         conn,
         f"""
-        select COMMITS_INFO_0_DEBUG_PC as pc_raw,
-               printf('0x%x', COMMITS_INFO_0_DEBUG_PC) as pc,
+        {_replay_entries_cte(table)}
+        select pc_raw,
+               printf('0x%x', pc_raw) as pc,
                count(*) as count,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYFAST), 0) as fast_replay,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYSLOW), 0) as slow_replay,
-               coalesce(sum(DEBUGLSINFO_S3_ISREPLAYRS), 0) as rs_replay,
-               coalesce(sum(DEBUGLSINFO_S2_ISBANKCONFLICT), 0) as bank_conflict,
-               coalesce(sum(DEBUGLSINFO_S2_ISDCACHEFIRSTMISS), 0) as dcache_first_miss,
-               coalesce(sum(DEBUGLSINFO_S2_ISFORWARDFAIL), 0) as forward_fail,
-               coalesce(sum(DEBUGLSINFO_REPLAYCNT), 0) as replay_cnt_sum
-        from {table}
-        where DEBUGLSINFO_S3_ISREPLAY=1
-           or DEBUGLSINFO_S2_ISBANKCONFLICT=1
-           or DEBUGLSINFO_S2_ISDCACHEFIRSTMISS=1
-           or DEBUGLSINFO_S2_ISFORWARDFAIL=1
-        group by COMMITS_INFO_0_DEBUG_PC
+               coalesce(sum(fast_replay), 0) as fast_replay,
+               coalesce(sum(slow_replay), 0) as slow_replay,
+               coalesce(sum(rs_replay), 0) as rs_replay,
+               coalesce(sum(bank_conflict), 0) as bank_conflict,
+               coalesce(sum(dcache_first_miss), 0) as dcache_first_miss,
+               coalesce(sum(forward_fail), 0) as forward_fail,
+               coalesce(sum(replay_cnt), 0) as replay_cnt_sum
+        from replay_entries
+        group by pc_raw
         order by replay_cnt_sum desc, count desc, pc_raw asc
         {limit_clause}
         """,

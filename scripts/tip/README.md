@@ -13,7 +13,7 @@ If `--db` is omitted, the script uses the latest `build/*.db`.
 Run all analyses and generate CSV/PNG outputs:
 
 ```bash
-python3 scripts/tip/tip.py all --db build/<your-db>.db --out-dir scripts/tip/results
+python3 scripts/tip/tip.py all --db build/<your-db>.db
 ```
 
 Run `all` with an ELF to additionally export symbolized commit reports:
@@ -21,8 +21,7 @@ Run `all` with an ELF to additionally export symbolized commit reports:
 ```bash
 python3 scripts/tip/tip.py all \
   --db build/<your-db>.db \
-  --elf /path/to/program.elf \
-  --out-dir scripts/tip/results-with-symbols
+  --elf /path/to/program.elf
 ```
 
 Use the latest database automatically:
@@ -46,7 +45,7 @@ python3 scripts/tip/tip.py hotspots --db build/<your-db>.db --top 30
 Generate only plots:
 
 ```bash
-python3 scripts/tip/tip.py plot --db build/<your-db>.db --out-dir scripts/tip/results
+python3 scripts/tip/tip.py plot --db build/<your-db>.db
 ```
 
 Export symbolized commit hotspots:
@@ -54,9 +53,7 @@ Export symbolized commit hotspots:
 ```bash
 python3 scripts/tip/tip.py symbols \
   --db build/<your-db>.db \
-  --elf /path/to/program.elf \
-  --sym-cache scripts/tip/.symbol-cache.json \
-  --out-dir scripts/tip/results-symbols
+  --elf /path/to/program.elf
 ```
 
 Example symbolized workflow
@@ -65,7 +62,7 @@ Example symbolized workflow
 python3 scripts/tip/tip.py all \
   --db /path/to/2026-04-14@13:15:58.db \
   --elf /path/to/program.elf \
-  --out-dir scripts/tip/results-symbols \
+  --out-dir /path/to/tip-results \
   --top 20
 ```
 
@@ -73,10 +70,12 @@ python3 scripts/tip/tip.py all \
 
 - `--db`: explicit sqlite path
 - `--hart`: hart id, default `0`
-- `--out-dir`: output directory, default `scripts/tip/results`
+- `--out-dir`: output directory, default `$XDG_STATE_HOME/xiangshan/tip` (or `~/.local/state/xiangshan/tip`)
 - `--top`: hotspot row count, default `20`
 - `--elf`: ELF binary for symbol resolution (required for `symbols`; optional for `all`)
-- `--sym-cache`: path to JSON cache for `nm`/`addr2line` (default `scripts/tip/.symbol-cache.json`)
+- `--sym-cache`: path to JSON cache for `nm`/`addr2line` (default `$XDG_CACHE_HOME/xiangshan/tip/symbols.json` or `~/.cache/xiangshan/tip/symbols.json`)
+
+The defaults keep generated reports and symbol caches outside the source tree. Explicit paths still override them.
 
 ## Outputs
 
@@ -122,3 +121,7 @@ Commit type:
 - `2 = LOAD`
 - `3 = STORE`
 - `>= 4 = FUSED_OR_OTHER`
+
+Replay and miss reports count dynamic head-entry residences, not logged cycles. Sticky flags contribute at most once per
+entry, and cumulative `replayCnt` contributes its maximum value for that entry. A new residence starts after a lane-0
+commit, a PC change, a timestamp gap, or a replay-counter reset.

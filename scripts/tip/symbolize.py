@@ -109,17 +109,29 @@ def _resolve_locations(elf: Path, pcs: Iterable[str]) -> Dict[str, dict[str, obj
 
 class ElfResolver:
     def __init__(self, elf: Path, cache_path: Optional[Path] = None):
-        self.elf = Path(elf)
+        self.elf = Path(elf).resolve()
         self.cache_path = Path(cache_path) if cache_path else None
+        self._elf_identity = self._identity()
+        self._cache_file: Dict[str, object] = {"version": 1, "elfs": {}}
         self._cache: Dict[str, dict[str, object]] = self._load_cache()
+
+    def _identity(self) -> str:
+        try:
+            stat = self.elf.stat()
+            return f"{self.elf}|{stat.st_size}|{stat.st_mtime_ns}"
+        except OSError:
+            return str(self.elf)
 
     def _load_cache(self) -> Dict[str, dict[str, object]]:
         if not self.cache_path or not self.cache_path.exists():
             return {}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                return {str(k): dict(v) for k, v in data.items()}
+            if isinstance(data, dict) and data.get("version") == 1 and isinstance(data.get("elfs"), dict):
+                self._cache_file = data
+                entries = data["elfs"].get(self._elf_identity, {})
+                if isinstance(entries, dict):
+                    return {str(k): dict(v) for k, v in entries.items()}
         except (json.JSONDecodeError, OSError):
             pass
         return {}
@@ -128,8 +140,9 @@ class ElfResolver:
         if not self.cache_path:
             return
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self._cache_file["elfs"][self._elf_identity] = self._cache
         try:
-            self.cache_path.write_text(json.dumps(self._cache, indent=2), encoding="utf-8")
+            self.cache_path.write_text(json.dumps(self._cache_file, indent=2), encoding="utf-8")
         except OSError:
             pass
 
