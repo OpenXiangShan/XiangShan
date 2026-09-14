@@ -22,13 +22,12 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   private val isJr = JumpOpType.jumpUopisjr(func)
   private val jumpTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
 
-  private val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
   private val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   private val jumpRealTarget = jumpTarget(VAddrData().dataWidth - 1, 0)
 
   private val targetWrong = jumpRealTarget =/= jmpPredictTarget
-  private val needRedirect = !fixedTaken || targetWrong
+  private val needRedirect = !predTaken || targetWrong
   private val needTrain = !predTaken || targetWrong
 
   val redirect: Redirect = io.out.bits.res.redirect.get.bits

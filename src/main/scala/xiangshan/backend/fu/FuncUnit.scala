@@ -63,7 +63,6 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst || cfg.isSta || cfg.isCsr, UInt(FetchBlockInstOffsetWidth.W))
   val predictInfo = OptionWrapper(cfg.needPdInfo, new Bundle {
     val target     = UInt(VAddrData().dataWidth.W)
-    val fixedTaken = Bool()
     val predTaken  = Bool()
   })
   val frm         = Option.when(cfg.needInstFrm)(Frm())

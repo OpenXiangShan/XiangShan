@@ -553,9 +553,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
   }
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
-    a.predTaken  := s2_expandedInstrVec(i).isPredTaken && !s2_useUncacheFetch
-    a.fixedTaken := checkerOutStage1.fixedTaken(i) && !s2_useUncacheFetch
-    a.offset     := s2_endOffsetVec(i)
+    a.predTaken := s2_expandedInstrVec(i).isPredTaken && !s2_useUncacheFetch
+    a.offset    := s2_endOffsetVec(i)
   }
   io.toIBuffer.bits.foldpc := s2_alignedFoldPc
   // mark the exception only on first instruction
