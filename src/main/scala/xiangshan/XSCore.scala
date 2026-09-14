@@ -67,8 +67,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val backend = LazyModule(new Backend(backendParams))
 
   val memBlock = LazyModule(new MemBlock)
-
-  memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -120,6 +118,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val ptw_cchi = new CCHIType4Port
     // Compact CHI Type 3 Uncache (from MemBlock); not wired to L2 in phase 2.3a
     val d_mmio_cchi = new CCHIType3Port
+    // Compact CHI Type 3 InstrUncache (from Frontend); not wired to L2 in phase 2.3b
+    val i_mmio_cchi = new CCHIType3Port
   })
 
   dontTouch(io.l2_flush_done)
@@ -198,6 +198,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
   // ICache Compact CHI Type 4: Frontend <-> MemBlock buffer <-> tile; RXDAT not wired to L2 in phase 2.1
   memBlock.io.inner_icache_cchi <> frontend.io.icache_cchi
+  // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock buffer <-> tile; RX not wired to L2 in phase 2.3b
+  memBlock.io.inner_i_mmio_cchi <> frontend.io.i_mmio_cchi
   // I$ Ctrl Compact CHI Type 3: MemBlock Type3Router <-> Frontend (not via L2)
   if (icacheCtrlEnabled) {
     frontend.io.icache_ctrl_cchi <> memBlock.io.inner_icache_ctrl_cchi
@@ -224,6 +226,17 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.d_mmio_cchi.rxrsp.bits  := DontCare
   io.d_mmio_cchi.rxdat.valid := false.B
   io.d_mmio_cchi.rxdat.bits  := DontCare
+  // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock <-> tile; RX not wired to L2 in phase 2.3b
+  io.i_mmio_cchi.txreq <> memBlock.io.outer_i_mmio_cchi.txreq
+  io.i_mmio_cchi.txdat <> memBlock.io.outer_i_mmio_cchi.txdat
+  io.i_mmio_cchi.rxrsp <> memBlock.io.outer_i_mmio_cchi.rxrsp
+  io.i_mmio_cchi.rxdat <> memBlock.io.outer_i_mmio_cchi.rxdat
+  io.i_mmio_cchi.txreq.ready := true.B
+  io.i_mmio_cchi.txdat.ready := true.B
+  io.i_mmio_cchi.rxrsp.valid := false.B
+  io.i_mmio_cchi.rxrsp.bits  := DontCare
+  io.i_mmio_cchi.rxdat.valid := false.B
+  io.i_mmio_cchi.rxdat.bits  := DontCare
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.vecIssue <> backend.io.mem.vecIssue
