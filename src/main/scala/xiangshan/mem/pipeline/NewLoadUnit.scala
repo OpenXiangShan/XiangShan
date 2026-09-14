@@ -696,7 +696,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val exception = tlbException || bp
   val stageInfo = Wire(chiselTypeOf(pipeOut.bits))
   connectSamePort(stageInfo, in)
-  stageInfo.specialReplay := specialRequest
+  stageInfo.specialModeRequest := specialRequest
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := bp
   stageInfo.uop.exceptionVec(loadPageFault) := pf
@@ -1004,7 +1004,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
   val needDCacheAccess = !fullForward && !isUncache && !isUncacheReplay
-  val specialRequest = in.specialReplay
+  val specialRequest = in.specialModeRequest
 
   // Uncache bypass
   afBypassDenied := io.uncacheBypassResp.valid && io.uncacheBypassResp.bits.nderr
@@ -1115,7 +1115,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     isUncache
   )
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
-  cause(C_TM) := troubleMaker && tlbMiss
+  cause(C_TM) := (troubleMaker && tlbMiss || specialRequest)
   cause(C_FF) := troubleMaker && sqDataInvalid
   cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
@@ -1126,11 +1126,6 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_NK) := troubleMaker && nuke
   cause(C_MF) := false.B
   cause(C_SMF) := troubleMaker && forwardInvalid
-
-  when (specialRequest) {
-    cause := 0.U.asTypeOf(cause)
-    cause(C_TM) := true.B
-  }
 
   def hasHigherPriorityCauses(cause: Vec[Bool], index: Int): Bool = {
     if (index == 0) false.B
@@ -1203,7 +1198,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.shouldWriteback.get := shouldWriteback
   stageInfo.sqSbufferForwarded.get := sqSbufferForwarded
   stageInfo.sqSbufferFullForwarded.get := sqSbufferFullForwarded
-  stageInfo.specialReplay := specialRequest
+  stageInfo.specialModeRequest := specialRequest
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -1586,6 +1581,13 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
   lqWrite.isHyper := in.tlbException.get.isHyper
   lqWrite.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
+  // An S4 request carrying a TLB/cache replay cause can start special-mode counting.
+  lqWrite.specialModeRequest := Mux(useS4HeadReplay, s4Head.specialModeRequest, in.specialModeRequest)
+  lqWrite.specialModeEligible := s4HeadValid && (
+    lqWriteCause(LoadReplayCauses.C_TM) ||
+    lqWriteCause(LoadReplayCauses.C_DR) ||
+    lqWriteCause(LoadReplayCauses.C_DM)
+  )
   lqWrite.isvec := isVector
   lqWrite.isLastElem := DontCare // TODO: remove this
   lqWrite.is128bit := MemorySize.sizeIs(_.Q)(in.size)
@@ -1616,7 +1618,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.tlb_id := lqWriteTlbId
   lqWrite.rep_info.tlb_full := lqWriteTlbFull
   lqWrite.rep_info.rep_from_unalign_head := useS4HeadReplay
-  lqWrite.rep_info.specialReplay := in.specialReplay
 
   val perfIsReplayExec = LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
   val perfMdpAddrValid = Mux(s4HeadValid, s4Head.perfMdpAddrValid.get, in.perfMdpAddrValid.get)
