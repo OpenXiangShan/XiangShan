@@ -15,8 +15,10 @@ from env.model.backend_state import FtqEntry
 from env.model.backend_state import PATH_STATE_CORRECT
 from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
+from env.model.backend_state import ResolveEntry
 from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
+from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model import GoldenTrace
 from env.model import TraceEntry
 from env.support import fold_pc
@@ -82,6 +84,269 @@ def _source_bound_cfi_model() -> tuple[BackendModel, QueueInstr]:
     source.is_cfi = True
     model._cfvec_queue = deque([source])
     return model, source
+
+
+def _resolve_entry(
+    source: QueueInstr,
+    queue_index: int,
+    target: int,
+    *,
+    branch_type: int = 1,
+) -> ResolveEntry:
+    return ResolveEntry(
+        ready_cycle=int(source.cycle),
+        inst_pc=int(source.pc),
+        pc=int(source.pc),
+        target=int(target),
+        taken=True,
+        mispredict=True,
+        ftq_flag=int(source.ftq_flag),
+        ftq_value=int(source.ftq_value),
+        ftq_offset=int(source.ftq_offset),
+        branch_type=int(branch_type),
+        ras_action=0,
+        queued_cycle=int(source.cycle),
+        is_rvc=bool(source.is_rvc),
+        queue_index=int(queue_index),
+    )
+
+
+def test_resolve_target_scan_preserves_same_cycle_slot_order() -> None:
+    model = BackendModel()
+    older_target = _queue_instr(0x2000, 0, 1)
+    older_target.cycle = 9
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.slot = 1
+    source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 2
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 3
+    model._cfvec_queue = deque([older_target, source, target, successor])
+
+    assert model._resolve_target_path_state(_resolve_entry(source, 1, 0x2000)) == (
+        True,
+        True,
+        False,
+        False,
+        False,
+    )
+
+
+def test_resolve_target_scan_ignores_target_before_dynamic_cfi() -> None:
+    model = BackendModel()
+    old_target = _queue_instr(0x2000, 0, 1)
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    unrelated = _queue_instr(0x3000, 0, 2)
+    unrelated.cycle = 11
+    model._cfvec_queue = deque([old_target, source, unrelated])
+
+    assert model._resolve_target_path_state(_resolve_entry(source, 1, 0x2000)) == (
+        False,
+        False,
+        False,
+        False,
+        False,
+    )
+
+
+def test_resolve_target_scan_requires_progress_after_target() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    target0 = _queue_instr(0x2000, 0, 3)
+    target0.cycle = 11
+    target1 = _queue_instr(0x2000, 0, 3)
+    target1.cycle = 11
+    successor = _queue_instr(0x2004, 0, 3)
+    successor.cycle = 12
+    model._cfvec_queue = deque([source, target0, target1])
+    entry = _resolve_entry(source, 0, 0x2000)
+
+    assert model._resolve_target_path_state(entry)[:4] == (True, False, True, False)
+
+    model._cfvec_queue.append(successor)
+
+    assert model._resolve_target_path_state(entry)[:4] == (True, True, True, True)
+
+
+def test_indirect_resolve_scan_binds_to_source_golden_index() -> None:
+    model = BackendModel()
+    model.golden_trace = GoldenTrace(
+        [
+            TraceEntry(index=0, pc=0x1000, instr=0x00008067, size=4, kind="jump_indirect", taken=True, target_pc=0x3000),
+            TraceEntry(index=1, pc=0x3000, instr=0x13, size=4),
+            TraceEntry(index=2, pc=0x3004, instr=0x13, size=4),
+            TraceEntry(index=3, pc=0x1000, instr=0x00008067, size=4, kind="jump_indirect", taken=True, target_pc=0x2000),
+            TraceEntry(index=4, pc=0x2000, instr=0x13, size=4),
+            TraceEntry(index=5, pc=0x2004, instr=0x13, size=4),
+        ]
+    )
+    model.golden_trace.cursor = 0
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.slot = 1
+    source.is_cfi = True
+    source.golden_index = 3
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 2
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 3
+    model._cfvec_queue = deque([source, target, successor])
+
+    state = model._resolve_target_path_state(
+        _resolve_entry(source, 0, 0x2000, branch_type=3)
+    )
+
+    assert state == (True, True, False, False, True)
+
+
+def test_resolve_target_scan_rejects_queue_identity_mismatch() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.is_cfi = True
+    model._cfvec_queue = deque([source])
+    entry = _resolve_entry(source, 0, 0x2000)
+    entry.ftq_offset = 1
+
+    with pytest.raises(AssertionError, match="queue entry identity mismatch"):
+        model._resolve_target_path_state(entry)
+
+
+def test_commit_pop_remaps_resolve_target_scan_source() -> None:
+    model = BackendModel()
+    older0 = _queue_instr(0x0FF0, 0, 1)
+    older1 = _queue_instr(0x0FF4, 0, 1)
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 3)
+    target.cycle = 11
+    model._cfvec_queue = deque([older0, older1, source, target])
+    model._pending_resolves = deque([_resolve_entry(source, 2, 0x2000)])
+
+    model._cfvec_queue_pop_head(2)
+
+    assert model._pending_resolves[0].queue_index == 0
+    assert model._resolve_target_path_state(model._pending_resolves[0])[:4] == (
+        True,
+        False,
+        True,
+        False,
+    )
+
+
+def test_wrong_path_flush_removes_pending_resolve_with_source() -> None:
+    model = BackendModel()
+    older = _queue_instr(0x0FF0, 0, 1)
+    older.path_state = PATH_STATE_CORRECT
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    source.path_state = PATH_STATE_WRONG
+    model._cfvec_queue = deque([older, source])
+    model._pending_resolves = deque([_resolve_entry(source, 1, 0x2000)])
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=1,
+        target_pc=0x2000,
+        redirect_context=None,
+    )
+
+    model._cfvec_queue_flush_wrong_path()
+
+    assert list(model._cfvec_queue) == [older]
+    assert model._pending_resolves == deque()
+
+
+def test_queue_range_removal_drops_and_remaps_pending_resolves() -> None:
+    model = BackendModel()
+    older = _queue_instr(0x0FF0, 0, 1)
+    removed_source = _queue_instr(0x1000, 0, 2)
+    removed_source.is_cfi = True
+    kept_source = _queue_instr(0x1100, 0, 3)
+    kept_source.cycle = 10
+    kept_source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 4)
+    target.cycle = 11
+    model._cfvec_queue = deque([older, removed_source, kept_source, target])
+    model._pending_resolves = deque(
+        [
+            _resolve_entry(removed_source, 1, 0x3000),
+            _resolve_entry(kept_source, 2, 0x2000),
+        ]
+    )
+
+    model._cfvec_queue_remove_range(1, 2)
+
+    assert len(model._pending_resolves) == 1
+    assert model._pending_resolves[0].queue_index == 1
+    assert model._resolve_target_path_state(model._pending_resolves[0])[:4] == (
+        True,
+        False,
+        True,
+        False,
+    )
+
+
+def test_ready_indirect_resolve_uses_queue_without_monitor_history() -> None:
+    model = BackendModel()
+    model.current_cycle = 13
+    model.golden_trace = GoldenTrace(
+        [
+            TraceEntry(
+                index=0,
+                pc=0x1000,
+                instr=0x00008067,
+                size=4,
+                kind="jump_indirect",
+                taken=True,
+                target_pc=0x2000,
+            ),
+            TraceEntry(index=1, pc=0x2000, instr=0x13, size=4),
+            TraceEntry(index=2, pc=0x2004, instr=0x13, size=4),
+        ]
+    )
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    source.path_state = PATH_STATE_CORRECT
+    source.resolve_state = RESOLVE_STATE_PENDING
+    source.golden_index = 0
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 1
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 2
+    model._cfvec_queue = deque([source, target, successor])
+    model._pending_resolves = deque(
+        [_resolve_entry(source, 0, 0x2000, branch_type=3)]
+    )
+
+    ready = model._ready_resolves_for_cycle()
+
+    assert len(ready) == 1
+    assert ready[0].mispredict is False
+    assert model._pending_resolves == deque()
+
+
+def test_ready_resolve_rejects_stale_queue_index() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.is_cfi = True
+    source.path_state = PATH_STATE_CORRECT
+    model._pending_resolves = deque([_resolve_entry(source, 1, 0x2000)])
+
+    with pytest.raises(AssertionError, match="queue index is out of range"):
+        model._ready_resolves_for_cycle()
 
 
 @pytest.mark.parametrize(("is_rvc", "expected_pc"), ((False, 0x80001008), (True, 0x8000100A)))

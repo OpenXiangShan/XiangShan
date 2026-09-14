@@ -3,6 +3,7 @@ import logging
 import random
 from collections import deque
 from dataclasses import replace
+from itertools import islice
 from typing import Callable, Deque, Dict, Optional
 
 from ..agents.backend_agent import BackendAgent
@@ -3038,16 +3039,6 @@ class BackendModel:
                 return True
         return False
 
-    def _target_observed_after_cycle(self, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        for obs in reversed(self.monitor.observations):
-            if int(obs.cycle) <= int(start_cycle):
-                break
-            if int(obs.pc) == int(target_pc):
-                return True
-        return False
-
     def _target_path_progressed_since(self, target_pc: int, start_cycle: int) -> bool:
         if self.monitor is None:
             return False
@@ -3063,96 +3054,86 @@ class BackendModel:
                 return True
         return False
 
-    def _target_path_progressed_after_cycle(self, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        saw_target = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) <= int(start_cycle):
-                continue
-            if not saw_target:
-                if int(obs.pc) == int(target_pc):
-                    saw_target = True
-                continue
-            if int(obs.pc) != int(target_pc):
-                return True
-        return False
+    def _resolve_target_path_state(
+        self,
+        entry: ResolveEntry,
+    ) -> tuple[bool, bool, bool, bool, bool]:
+        if entry.queue_index is None:
+            return False, False, False, False, False
+        queue_index = int(entry.queue_index)
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
+            raise AssertionError(
+                "pending resolve queue index is out of range: "
+                f"queue_index={queue_index} queue_size={len(self._cfvec_queue)}"
+            )
+        source = self._cfvec_queue[queue_index]
+        identity_mismatches = []
+        for field, actual, expected in (
+            ("pc", source.pc, entry.inst_pc),
+            ("ftq_flag", source.ftq_flag, entry.ftq_flag),
+            ("ftq_value", source.ftq_value, entry.ftq_value),
+            ("ftq_offset", source.ftq_offset, entry.ftq_offset),
+        ):
+            if int(actual) != int(expected):
+                identity_mismatches.append(f"{field}={int(actual)} expected={int(expected)}")
+        if not bool(source.is_cfi):
+            identity_mismatches.append("is_cfi=0 expected=1")
+        if identity_mismatches:
+            raise AssertionError(
+                "pending resolve queue entry identity mismatch: "
+                f"queue_index={queue_index} " + " ".join(identity_mismatches)
+            )
 
-    def _target_observed_after_issue(self, inst_pc: int, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        armed = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if int(obs.pc) == int(target_pc):
-                return True
-        return False
+        golden_target_pc = None
+        golden_successor_pc = None
+        if (
+            int(entry.branch_type) == 3
+            and self.golden_trace is not None
+            and source.golden_index is not None
+        ):
+            golden_index = int(source.golden_index)
+            trace_entries = self.golden_trace.entries
+            if 0 <= golden_index and golden_index + 2 < len(trace_entries):
+                golden_entry = trace_entries[golden_index]
+                if getattr(golden_entry, "target_pc", None) is not None:
+                    golden_target_pc = int(trace_entries[golden_index + 1].pc)
+                    golden_successor_pc = int(trace_entries[golden_index + 2].pc)
 
-    def _target_path_progressed_after_issue(self, inst_pc: int, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        armed = False
-        saw_target = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if not saw_target:
-                if int(obs.pc) == int(target_pc):
-                    saw_target = True
-                continue
-            if int(obs.pc) != int(target_pc):
-                return True
-        return False
+        target_pc = int(entry.target)
+        queued_cycle = int(entry.queued_cycle)
+        target_seen_after_issue = False
+        target_path_progressed_after_issue = False
+        target_seen_after_cycle = False
+        target_path_progressed_after_cycle = False
+        golden_target_seen_after_issue = False
+        golden_successor_progressed_after_issue = False
 
-    def _current_golden_cfi_successor_observed_after_issue(self, inst_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None or self.golden_trace is None:
-            return False
-        trace = self.golden_trace
-        start = int(trace.cursor)
-        if start + 1 >= len(trace.entries):
-            return False
-        cur = trace.entries[start]
-        nxt = trace.entries[start + 1]
-        if int(getattr(cur, "target_pc", 0) or 0) == 0:
-            return False
+        for queue_entry in islice(self._cfvec_queue, queue_index + 1, None):
+            pc = int(queue_entry.pc)
+            if not target_seen_after_issue:
+                target_seen_after_issue = pc == target_pc
+            elif pc != target_pc:
+                target_path_progressed_after_issue = True
 
-        armed = False
-        saw_cur = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if not saw_cur:
-                if int(obs.pc) == int(cur.pc):
-                    saw_cur = True
-                continue
-            if int(obs.pc) == int(nxt.pc):
-                return True
-        return False
+            if int(queue_entry.cycle) > queued_cycle:
+                if not target_seen_after_cycle:
+                    target_seen_after_cycle = pc == target_pc
+                elif pc != target_pc:
+                    target_path_progressed_after_cycle = True
+
+            if golden_target_pc is not None and golden_successor_pc is not None:
+                if not golden_target_seen_after_issue:
+                    golden_target_seen_after_issue = pc == golden_target_pc
+                elif pc == golden_successor_pc:
+                    golden_successor_progressed_after_issue = True
+
+        return (
+            target_seen_after_issue,
+            target_path_progressed_after_issue,
+            target_seen_after_cycle,
+            target_path_progressed_after_cycle,
+            golden_successor_progressed_after_issue,
+        )
 
     def _queue_redirect_event(
         self,
@@ -3925,8 +3906,11 @@ class BackendModel:
                 continue
             if entry.queue_index is not None:
                 if not (0 <= int(entry.queue_index) < len(self._cfvec_queue)):
-                    to_remove.append(entry)
-                    continue
+                    raise AssertionError(
+                        "pending resolve queue index is out of range: "
+                        f"queue_index={int(entry.queue_index)} "
+                        f"queue_size={len(self._cfvec_queue)}"
+                    )
                 queue_entry = self._cfvec_queue[int(entry.queue_index)]
                 if queue_entry.path_state == PATH_STATE_WRONG:
                     self._cfvec_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_SKIPPED)
@@ -3939,42 +3923,25 @@ class BackendModel:
             target_path_progressed_after_queue = False
             target_seen_after_issue = False
             target_path_progressed_after_issue = False
-            if frontier_pc is not None:
-                target_seen_after_queue = self._target_observed_after_cycle(
-                    int(entry.target),
-                    int(entry.queued_cycle),
-                )
-                if target_seen_after_queue:
-                    target_path_progressed_after_queue = self._target_path_progressed_after_cycle(
-                        int(entry.target),
-                        int(entry.queued_cycle),
-                    )
-                if int(entry.branch_type) != 3:
-                    target_seen_after_issue = self._target_observed_after_issue(
-                        int(entry.inst_pc),
-                        int(entry.target),
-                        int(entry.queued_cycle),
-                    )
-                    if target_seen_after_issue:
-                        target_path_progressed_after_issue = self._target_path_progressed_after_issue(
-                            int(entry.inst_pc),
-                            int(entry.target),
-                            int(entry.queued_cycle),
-                        )
+            golden_successor_progressed_after_issue = False
+            if frontier_pc is not None and entry.queue_index is not None:
+                (
+                    target_seen_after_issue,
+                    target_path_progressed_after_issue,
+                    target_seen_after_queue,
+                    target_path_progressed_after_queue,
+                    golden_successor_progressed_after_issue,
+                ) = self._resolve_target_path_state(entry)
             if effective_mispredict and int(entry.branch_type) != 3 and (
                 target_seen_after_issue or target_path_progressed_after_issue
             ):
                 effective_mispredict = False
-            if effective_mispredict and int(entry.branch_type) == 3 and target_path_progressed_after_queue:
-                effective_mispredict = False
-            elif (
+            if (
                 effective_mispredict
                 and int(entry.branch_type) == 3
-                and self.current_golden_pc() is not None
-                and int(entry.target) != int(self.current_golden_pc())
-                and self._current_golden_cfi_successor_observed_after_issue(
-                    int(entry.inst_pc),
-                    int(entry.queued_cycle),
+                and (
+                    target_path_progressed_after_queue
+                    or golden_successor_progressed_after_issue
                 )
             ):
                 effective_mispredict = False
