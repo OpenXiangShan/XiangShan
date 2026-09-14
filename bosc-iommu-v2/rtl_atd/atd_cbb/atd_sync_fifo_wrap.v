@@ -86,10 +86,6 @@ end else begin :FIFO
            .ren       (ren ),
            .din       (din ),
            .dout      (dout),
-	   .afull     (),
-           .wptr      (),
-           .rptr      (),
-           .cnt       (),
            .full      (full),
            .empty     (empty)
    );
@@ -99,4 +95,3 @@ endgenerate
 
 
 endmodule
-
