@@ -51,7 +51,7 @@ def test_pre_drive_observer_samples_before_agents_and_regular_observer(monkeypat
     monkeypatch.setattr(env.ptw_full_ppn_checker, "on_clock_edge", lambda _cycle: None)
     monkeypatch.setattr(env.ptw_resp_input_checker, "on_clock_edge", lambda _cycle: None)
     monkeypatch.setattr(env, "_begin_backend_cycle", lambda _cycle: order.append("backend_begin"))
-    monkeypatch.setattr(env.monitor, "on_clock_edge", lambda _cycle: None)
+    monkeypatch.setattr(env.monitor, "on_clock_edge", lambda _cycle, _snapshot: None)
     monkeypatch.setattr(env.translation_oracle, "on_clock_edge", lambda _cycle: None)
     monkeypatch.setattr(env, "_drive_backend_cycle", lambda _cycle: order.append("backend_drive"))
     dut.reset.value = 0

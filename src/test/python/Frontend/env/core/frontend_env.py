@@ -42,6 +42,7 @@ from ..support.signal_utils import read_internal_signal
 from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
+from ..model.backend_runtime import CfVecCycleSnapshot
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
@@ -466,10 +467,11 @@ class FrontendEnv:
         for paddr, payload in self._iter_memory_ranges():
             module.sync_memory(int(paddr), payload)
 
-    def _begin_backend_cycle(self, cycle: int) -> None:
+    def _begin_backend_cycle(self, cycle: int) -> CfVecCycleSnapshot:
         self.backend_model.begin_cycle(cycle)
         observation = self.backend_observe_monitor.snapshot()
         self.backend_model.consume_backend_observation(observation)
+        return self.backend_model.capture_cfvec_snapshot()
 
     def _drive_backend_cycle(self, cycle: int) -> None:
         actions = self.backend_model.plan_cycle_actions()
@@ -636,8 +638,8 @@ class FrontendEnv:
         self.ptw_agent.on_clock_edge(cycle)
         self.ptw_full_ppn_checker.on_clock_edge(cycle)
         self.ptw_resp_input_checker.on_clock_edge(cycle)
-        self._begin_backend_cycle(cycle)
-        self.monitor.on_clock_edge(cycle)
+        cfvec_snapshot = self._begin_backend_cycle(cycle)
+        self.monitor.on_clock_edge(cycle, cfvec_snapshot)
         self.translation_oracle.on_clock_edge(cycle)
         self._drive_backend_cycle(cycle)
         for observer in list(self._cycle_observers):

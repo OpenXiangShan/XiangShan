@@ -21,16 +21,19 @@ from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model import GoldenTrace
 from env.model import TraceEntry
+from env.monitors.frontend_monitor import FrontendMonitor
 from env.support import fold_pc
 
 
 class _Signal:
     def __init__(self, value: int = 0) -> None:
         self._value = int(value)
+        self.read_count = 0
         self.write_count = 0
 
     @property
     def value(self) -> int:
+        self.read_count += 1
         return self._value
 
     @value.setter
@@ -41,10 +44,15 @@ class _Signal:
 
 class _ObserveIf:
     def __init__(self) -> None:
+        self.redirect_valid = _Signal()
+        self.redirect_bits_pc = _Signal()
+        self.redirect_bits_target = _Signal()
+        self.redirect_bits_taken = _Signal()
         self.cfvec_valid = [_Signal() for _ in range(8)]
         self.cfvec_foldpc = [_Signal() for _ in range(8)]
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
+        self.cfvec_pred_taken = [_Signal() for _ in range(8)]
         self.cfvec_fixed_taken = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
@@ -395,6 +403,52 @@ def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
 
     with pytest.raises(AssertionError, match="foldpc does not match FTQ-derived PC"):
         model.observed_cfvec_pc(0)
+
+
+def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.begin_cycle(7)
+    _set_first_cfvec(model, interface, 0x80001000, ftq_value=3)
+    interface.cfvec_pred_taken[0].value = 1
+    interface.cfvec_fixed_taken[0].value = 0
+    interface.cfvec_exception_vec_12[0].value = 1
+
+    snapshot = model.capture_cfvec_snapshot()
+
+    assert snapshot.slots[0].valid is True
+    assert snapshot.slots[0].pred_taken is True
+    assert snapshot.slots[0].fixed_taken is False
+    assert snapshot.slots[0].exception_bits == 1 << 12
+    assert interface.cfvec_valid[0].read_count == 1
+    assert interface.cfvec_foldpc[0].read_count == 1
+    assert interface.cfvec_instr[0].read_count == 1
+    assert interface.cfvec_is_rvc[0].read_count == 1
+    assert interface.cfvec_pred_taken[0].read_count == 1
+    assert interface.cfvec_fixed_taken[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_flag[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_value[0].read_count == 1
+    assert interface.cfvec_ftq_offset[0].read_count == 1
+    assert interface.cfvec_is_last_in_ftq_entry[0].read_count == 1
+    assert interface.cfvec_exception_vec_1[0].read_count == 1
+    assert interface.cfvec_exception_vec_2[0].read_count == 1
+    assert interface.cfvec_exception_vec_12[0].read_count == 1
+    assert interface.cfvec_exception_vec_19[0].read_count == 1
+    assert interface.cfvec_exception_vec_20[0].read_count == 1
+
+    monitor = FrontendMonitor()
+    monitor.interface = interface
+    monitor.attach_backend_model(model)
+    monitor.on_clock_edge(7, snapshot)
+    model._sample_cfvec(snapshot)
+
+    assert monitor.observations[0].pc == 0x80001000
+    assert monitor.observations[0].pred_taken is True
+    assert model._cfvec_queue[0].pc == 0x80001000
+    assert model._cfvec_queue[0].pred_taken is False
+    assert interface.cfvec_foldpc[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_value[0].read_count == 1
 
 
 def _redirect_drive_if():

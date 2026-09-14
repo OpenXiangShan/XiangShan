@@ -9,7 +9,12 @@ from typing import Callable, Deque, Dict, Optional
 from ..agents.backend_agent import BackendAgent
 from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
 from ..support.pc_utils import pc_from_ftq_start, require_matching_foldpc
-from ..model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
+from ..model.backend_runtime import (
+    BackendCycleActions,
+    BackendObservationSnapshot,
+    CfVecCycleSnapshot,
+    CfVecSlotSnapshot,
+)
 from ..model.backend_state import (
     ActiveWrongPathEpisode,
     BackendEvent,
@@ -125,6 +130,8 @@ class BackendModel:
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
         self._last_observation = BackendObservationSnapshot()
+        self._cfvec_cycle_snapshot: Optional[CfVecCycleSnapshot] = None
+        self._cfvec_snapshot_pc_cache: Dict[int, int] = {}
         self._explicit_injection_enabled = True
         self._explicit_injection_block_reason = ""
         self._last_correct_cfi_context: Optional[dict] = None
@@ -2863,6 +2870,8 @@ class BackendModel:
 
     def begin_cycle(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
+        self._cfvec_cycle_snapshot = None
+        self._cfvec_snapshot_pc_cache.clear()
         self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
         self._cycle_start_golden_pc = self.current_golden_pc()
         self._planned_commit_apply = None
@@ -2880,6 +2889,54 @@ class BackendModel:
 
     def current_frontend_observation(self) -> BackendObservationSnapshot:
         return self._last_observation
+
+    def _read_cfvec_slot_signal(self, name: str, slot: int, default: int = 0) -> int:
+        signals = getattr(self.observe_if, str(name), None)
+        try:
+            signal = signals[int(slot)]
+        except (IndexError, TypeError):
+            return int(default)
+        return self._read(signal, int(default))
+
+    def capture_cfvec_snapshot(self) -> CfVecCycleSnapshot:
+        assert self.observe_if is not None
+        slots = []
+        exception_signals = (
+            (1, "cfvec_exception_vec_1"),
+            (2, "cfvec_exception_vec_2"),
+            (12, "cfvec_exception_vec_12"),
+            (19, "cfvec_exception_vec_19"),
+            (20, "cfvec_exception_vec_20"),
+        )
+        for slot in range(8):
+            valid = bool(self._read_cfvec_slot_signal("cfvec_valid", slot))
+            if not valid:
+                slots.append(CfVecSlotSnapshot(slot=slot))
+                continue
+            exception_bits = 0
+            for bit, name in exception_signals:
+                if self._read_cfvec_slot_signal(name, slot):
+                    exception_bits |= 1 << int(bit)
+            slots.append(
+                CfVecSlotSnapshot(
+                    slot=slot,
+                    valid=True,
+                    foldpc=self._read_cfvec_slot_signal("cfvec_foldpc", slot),
+                    instr=self._read_cfvec_slot_signal("cfvec_instr", slot),
+                    is_rvc=bool(self._read_cfvec_slot_signal("cfvec_is_rvc", slot)),
+                    pred_taken=bool(self._read_cfvec_slot_signal("cfvec_pred_taken", slot)),
+                    fixed_taken=bool(self._read_cfvec_slot_signal("cfvec_fixed_taken", slot)),
+                    ftq_flag=self._read_cfvec_slot_signal("cfvec_ftq_ptr_flag", slot),
+                    ftq_value=self._read_cfvec_slot_signal("cfvec_ftq_ptr_value", slot),
+                    ftq_offset=self._read_cfvec_slot_signal("cfvec_ftq_offset", slot),
+                    is_last=bool(self._read_cfvec_slot_signal("cfvec_is_last_in_ftq_entry", slot)),
+                    exception_bits=exception_bits,
+                )
+            )
+        snapshot = CfVecCycleSnapshot(cycle=int(self.current_cycle), slots=tuple(slots))
+        self._cfvec_cycle_snapshot = snapshot
+        self._cfvec_snapshot_pc_cache.clear()
+        return snapshot
 
     def _snapshot_bound_observation(self) -> BackendObservationSnapshot:
         return BackendObservationSnapshot(
@@ -3445,15 +3502,16 @@ class BackendModel:
             self._ftq_start_pc_cache[ftq_idx] = start_pc
             self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
 
-    def observed_cfvec_pc(self, slot: int) -> int:
-        """Return the full PC derived from native cfVec and FTQ observations."""
-        assert self.observe_if is not None
-        slot = int(slot)
-        ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0)
-        ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0)
-        ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[slot], 0)
-        is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0))
-        observed_foldpc = self._read(self.observe_if.cfvec_foldpc[slot], 0)
+    def _resolve_cfvec_pc(
+        self,
+        *,
+        slot: int,
+        ftq_flag: int,
+        ftq_value: int,
+        ftq_offset: int,
+        is_rvc: bool,
+        observed_foldpc: int,
+    ) -> int:
         ftq_key = (int(ftq_flag) << 6) | (int(ftq_value) & 0x3F)
         start_pc = self._ftq_start_pc_cache.get(
             ftq_key,
@@ -3474,12 +3532,52 @@ class BackendModel:
                 f"offset={int(ftq_offset)} is_rvc={int(is_rvc)}"
             ) from exc
 
-    def _has_later_cfvec_slot_matching_pc(self, current_slot: int, target_pc: int) -> bool:
+    def observed_cfvec_pc(self, slot: int) -> int:
+        """Return the full PC derived from native cfVec and FTQ observations."""
         assert self.observe_if is not None
+        slot = int(slot)
+        return self._resolve_cfvec_pc(
+            slot=slot,
+            ftq_flag=self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0),
+            ftq_value=self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0),
+            ftq_offset=self._read(self.observe_if.cfvec_ftq_offset[slot], 0),
+            is_rvc=bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0)),
+            observed_foldpc=self._read(self.observe_if.cfvec_foldpc[slot], 0),
+        )
+
+    def observed_cfvec_snapshot_pc(self, snapshot: CfVecCycleSnapshot, slot: int) -> int:
+        if snapshot is not self._cfvec_cycle_snapshot:
+            raise AssertionError("cfVec snapshot is not the active backend cycle snapshot")
+        if int(snapshot.cycle) != int(self.current_cycle):
+            raise AssertionError(
+                f"stale cfVec snapshot: snapshot_cycle={int(snapshot.cycle)} "
+                f"current_cycle={int(self.current_cycle)}"
+            )
+        slot = int(slot)
+        if slot in self._cfvec_snapshot_pc_cache:
+            return int(self._cfvec_snapshot_pc_cache[slot])
+        entry = snapshot.slots[slot]
+        pc = self._resolve_cfvec_pc(
+            slot=slot,
+            ftq_flag=int(entry.ftq_flag),
+            ftq_value=int(entry.ftq_value),
+            ftq_offset=int(entry.ftq_offset),
+            is_rvc=bool(entry.is_rvc),
+            observed_foldpc=int(entry.foldpc),
+        )
+        self._cfvec_snapshot_pc_cache[slot] = int(pc)
+        return int(pc)
+
+    def _has_later_cfvec_slot_matching_pc(
+        self,
+        snapshot: CfVecCycleSnapshot,
+        current_slot: int,
+        target_pc: int,
+    ) -> bool:
         for slot in range(int(current_slot) + 1, 8):
-            if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
+            if not snapshot.slots[slot].valid:
                 continue
-            if self.observed_cfvec_pc(slot) == int(target_pc):
+            if self.observed_cfvec_snapshot_pc(snapshot, slot) == int(target_pc):
                 return True
         return False
 
@@ -3637,12 +3735,21 @@ class BackendModel:
             f"target_pc=0x{int(target_pc):x}"
         )
 
-    def _sample_cfvec(self) -> None:
+    def _sample_cfvec(self, snapshot: Optional[CfVecCycleSnapshot] = None) -> None:
         assert self.observe_if is not None
         if self._skip_cfvec_until_cycle is not None:
             if int(self.current_cycle) <= int(self._skip_cfvec_until_cycle):
                 return
             self._skip_cfvec_until_cycle = None
+        if snapshot is None:
+            snapshot = self._cfvec_cycle_snapshot
+        if snapshot is None or int(snapshot.cycle) != int(self.current_cycle):
+            snapshot = self.capture_cfvec_snapshot()
+        if (
+            snapshot is not self._cfvec_cycle_snapshot
+            or int(snapshot.cycle) != int(self.current_cycle)
+        ):
+            raise AssertionError("BackendModel requires the active cfVec snapshot for the current cycle")
         recovery_first_cfvec_seen = False
         recovery_target_seen_this_cycle = False
 
@@ -3685,28 +3792,19 @@ class BackendModel:
                 1 if bool(pred_taken) else 0,
             )
 
-        exception_vecs = (
-            (1, self.observe_if.cfvec_exception_vec_1),
-            (2, self.observe_if.cfvec_exception_vec_2),
-            (12, self.observe_if.cfvec_exception_vec_12),
-            (19, self.observe_if.cfvec_exception_vec_19),
-            (20, self.observe_if.cfvec_exception_vec_20),
-        )
         for i in range(8):
-            if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
+            cfvec = snapshot.slots[i]
+            if not cfvec.valid:
                 continue
-            pc = self.observed_cfvec_pc(i)
-            instr = self._read(self.observe_if.cfvec_instr[i], 0)
-            is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[i], 0))
-            pred_taken = bool(self._read(self.observe_if.cfvec_fixed_taken[i], 0))
-            ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[i], 0)
-            ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[i], 0)
-            ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
-            is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
-            exception_bits = 0
-            for bit, signals in exception_vecs:
-                if self._read(signals[i], 0) != 0:
-                    exception_bits |= 1 << int(bit)
+            pc = self.observed_cfvec_snapshot_pc(snapshot, i)
+            instr = int(cfvec.instr)
+            is_rvc = bool(cfvec.is_rvc)
+            pred_taken = bool(cfvec.fixed_taken)
+            ftq_flag = int(cfvec.ftq_flag)
+            ftq_value = int(cfvec.ftq_value)
+            ftq_offset = int(cfvec.ftq_offset)
+            is_last = bool(cfvec.is_last)
+            exception_bits = int(cfvec.exception_bits)
 
             recovery_target_pc = self._current_recovery_target_pc()
             if (
@@ -3876,7 +3974,11 @@ class BackendModel:
                 queue_index=int(queue_index),
                 entry=self._cfvec_queue[int(queue_index)],
                 target_pc=int(next_entry.pc),
-                target_visible_immediately=self._has_later_cfvec_slot_matching_pc(i, int(next_entry.pc)),
+                target_visible_immediately=self._has_later_cfvec_slot_matching_pc(
+                    snapshot,
+                    i,
+                    int(next_entry.pc),
+                ),
             ):
                 continue
             if self._current_ftq_entry is not None:
@@ -4675,7 +4777,7 @@ class BackendModel:
         self._clear_stale_auxiliary_states()
         self._watchdog(observation)
         if self.observe_if is not None:
-            self._sample_cfvec()
+            self._sample_cfvec(self._cfvec_cycle_snapshot)
         ftq_idx_ahead = self._ready_ftq_idx_ahead_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
@@ -4708,6 +4810,7 @@ class BackendModel:
         agent = self._bound_backend_agent()
         agent.start_cycle(self.can_accept, self.wfi_req, self.backend_empty_for_dut())
         self.consume_backend_observation(self._snapshot_bound_observation())
+        self.capture_cfvec_snapshot()
         actions = self.plan_cycle_actions()
         agent.drive_ftq_idx_ahead(actions.ftq_idx_ahead)
         agent.drive_resolves(actions.resolve_entries)
