@@ -189,6 +189,15 @@ TB_ENABLE_DUT_TESTS=1 TB_INCLUDE_FUNCOV_CLOSURE_PENDING=1 \
   src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
+- 随机回归入口：
+
+```bash
+src/test/python/Frontend/scripts/run_random_regression_suite.sh smoke
+src/test/python/Frontend/scripts/run_random_regression_suite.sh nightly
+```
+
+完整参数和重放方法见脚本开头或 `--help`。
+
 地址翻译随机回归保留两个独立入口：
 
 - `tests/py/zhaoxinran/translation/test_translation_random_regression_dut.py` 保留原始的
