@@ -82,7 +82,7 @@ case class L2TLBParameters
   missqueueExtendSize: Int = 0,
   // llptw
   llptwsize: Int = 6,
-  hptwSize: Int = 4,
+  hptwSize: Int = 6,
   parallelHptw: Boolean = true,
   // way size
   blockBytes: Int = 64,
