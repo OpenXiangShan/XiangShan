@@ -138,6 +138,22 @@ class TageTable(
   private val writeReqValid = RegNext(io.writeReq.valid, init = false.B)
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
+  // A prediction read prevents the single-port SRAM from draining the entry
+  // write buffer for the same bank.  Keep the per-bank read history so that
+  // an overwrite can be attributed to a continuously reused prediction bank.
+  private val predictionReadByBank = VecInit((0 until NumBanks).map { bankIdx =>
+    io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+  })
+  private val previousPredictionReadByBank = RegNext(
+    predictionReadByBank,
+    VecInit.fill(NumBanks)(false.B)
+  )
+  private val consecutivePredictionReadByBank = VecInit(
+    predictionReadByBank.zip(previousPredictionReadByBank).map { case (current, previous) =>
+      current && previous
+    }
+  )
+
   // write to write buffer
   entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
     buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
@@ -237,5 +253,18 @@ class TageTable(
   XSPerfAccumulate(
     "overwrite",
     PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
+  )
+  XSPerfAccumulate(
+    "train_write_buffer_overwrite_with_prediction_read",
+    PopCount(entryWriteBuffers.zip(predictionReadByBank).flatMap { case (buffer, predictionRead) =>
+      buffer.io.overwrite.map(_ && predictionRead)
+    })
+  )
+  XSPerfAccumulate(
+    "train_write_buffer_overwrite_with_consecutive_prediction_read",
+    PopCount(entryWriteBuffers.zip(consecutivePredictionReadByBank).flatMap {
+      case (buffer, consecutivePredictionRead) =>
+        buffer.io.overwrite.map(_ && consecutivePredictionRead)
+    })
   )
 }
