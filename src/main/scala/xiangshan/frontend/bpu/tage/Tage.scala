@@ -234,6 +234,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val mispredicted = branch.bits.mispredict
     mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
   }.reduce(_ || _)
+  // Keep the two reasons for a TAGE SRAM re-read separate.  A read conflict is
+  // only possible when one of these reasons requests the training read.
+  private val t0_needReadMispredict = t0_branches.zipWithIndex.map { case (branch, i) =>
+    t0_mbtbHitMask(i) && t0_condMask(i) && branch.bits.mispredict
+  }.reduce(_ || _)
+  private val t0_needReadAlt = t0_branches.zipWithIndex.map { case (_, i) =>
+    t0_mbtbHitMask(i) && t0_condMask(i) && !t0_meta(i).useProvider && t0_meta(i).hasAlt
+  }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
   private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
@@ -262,7 +270,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val debug_readBankConflictDistCnt = RegInit(0.U(4.W))
   private val debug_s0AlignedPc             = getAlignedPc(s0_startPc)
   private val debug_s1AlignedPc             = getAlignedPc(s1_startPc)
+  private val debug_t0AlignedPc             = getAlignedPc(t0_startPc)
   private val debug_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
+  private val debug_sameFetchBlock          = debug_s0AlignedPc === debug_t0AlignedPc
+  private val debug_nearbyFetchBlock      = !debug_sameFetchBlock &&
+    ((debug_s0AlignedPc.toUInt > debug_t0AlignedPc.toUInt &&
+      debug_s0AlignedPc.toUInt - debug_t0AlignedPc.toUInt <= FetchBlockSize.U) ||
+      (debug_t0AlignedPc.toUInt > debug_s0AlignedPc.toUInt &&
+        debug_t0AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U))
+  private val debug_sameBankPredictionStream = s1_fire && debug_s1BankIdx === s0_bankIdx
+  private val debug_sameBankPredictionLoop = debug_sameBankPredictionStream &&
+    ((debug_s0AlignedPc.toUInt > debug_s1AlignedPc.toUInt &&
+      debug_s0AlignedPc.toUInt - debug_s1AlignedPc.toUInt <= FetchBlockSize.U) ||
+      (debug_s1AlignedPc.toUInt > debug_s0AlignedPc.toUInt &&
+        debug_s1AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U))
   // pred target within align 64B,and not blocked by s2
   private val debug_readBankConflictShortLoop = debug_readBankConflictReg && s1_fire &&
     (debug_s1BankIdx === s0_bankIdx) &&
@@ -735,6 +756,54 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
+  // Read-conflict cause breakdown. These counters are cycle counts, so a
+  // training request held by trainReady may contribute more than once.
+  XSPerfAccumulate("read_conflict_train_mispredict", debug_readBankConflict && t0_needReadMispredict)
+  XSPerfAccumulate("read_conflict_train_alt", debug_readBankConflict && t0_needReadAlt)
+  XSPerfAccumulate(
+    "read_conflict_train_mispredict_and_alt",
+    debug_readBankConflict && t0_needReadMispredict && t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_train_mispredict_only",
+    debug_readBankConflict && t0_needReadMispredict && !t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_train_alt_only",
+    debug_readBankConflict && t0_needReadAlt && !t0_needReadMispredict
+  )
+  XSPerfAccumulate("read_conflict_same_fetch_block", debug_readBankConflict && debug_sameFetchBlock)
+  XSPerfAccumulate("read_conflict_nearby_fetch_block", debug_readBankConflict && debug_nearbyFetchBlock)
+  XSPerfAccumulate(
+    "read_conflict_other_same_bank",
+    debug_readBankConflict && !debug_sameFetchBlock && !debug_nearbyFetchBlock
+  )
+  XSPerfAccumulate(
+    "read_conflict_same_bank_prediction_stream",
+    debug_readBankConflict && debug_sameBankPredictionStream
+  )
+  XSPerfAccumulate(
+    "read_conflict_same_bank_prediction_loop",
+    debug_readBankConflict && debug_sameBankPredictionLoop
+  )
+  // Event counts avoid weighting a long trainReady stall by its duration.
+  XSPerfAccumulate("read_conflict_event", debug_readBankConflictPos)
+  XSPerfAccumulate(
+    "read_conflict_event_train_mispredict",
+    debug_readBankConflictPos && t0_needReadMispredict
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_train_alt",
+    debug_readBankConflictPos && t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_same_fetch_block",
+    debug_readBankConflictPos && debug_sameFetchBlock
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_nearby_fetch_block",
+    debug_readBankConflictPos && debug_nearbyFetchBlock
+  )
   XSPerfRolling("rolling_read_conflict", debug_readBankConflict, 10000, clock, reset)
   XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
