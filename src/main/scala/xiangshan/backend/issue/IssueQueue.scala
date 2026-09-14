@@ -70,7 +70,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   def allWakeUp = wakeupFromWB ++ wakeupFromIQ
 }
 
-class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XSModule with HasXSParameter {
+class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XSModule with HasXSParameter with HasCircularQueuePtrHelper {
 
   override def desiredName: String = s"${params.getIQName}"
 
@@ -206,11 +206,149 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val v0WbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val vlWbBusyTableMask = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
-  val s0_enqValidVec = io.enq.map(_.valid)
+  val s0_enqValidVec = Wire(Vec(params.numEnq, Bool()))
   val s0_enqSelValidVec = Wire(Vec(params.numEnq, Bool()))
   val s0_enqNotFlush = !io.flush.valid
-  val s0_enqBits = WireInit(VecInit(io.enq.map(_.bits)))
+  val s0_enqBits = Wire(Vec(params.numEnq, new RegionInUop(params)))
   val s0_doEnqSelValidVec = s0_enqSelValidVec.map(_ && s0_enqNotFlush) //enqValid && notFlush && enqReady
+
+  // Long-load consumers that have no other outstanding dependency do not need an
+  // IQ entry while the load is in flight. Keep a small set of full uops outside
+  // the issue matrix and put them back into this IQ after the long-load scoreboard
+  // clears. The feature is limited to the integer scheduler's ALU/LDU queues.
+  private val enableLongLoadParking = params.inIntSchd && (params.AluCnt > 0 || params.isLdAddrIQ)
+  private val longLoadParkEntries = 8
+  private val parkedValid = if (enableLongLoadParking) {
+    Some(RegInit(VecInit(Seq.fill(longLoadParkEntries)(false.B))))
+  } else None
+  private val parkedBits = if (enableLongLoadParking) {
+    Some(Reg(Vec(longLoadParkEntries, new RegionInUop(params))))
+  } else None
+  private val parkedDeqSel = Wire(Vec(longLoadParkEntries, Bool()))
+  private val parkedDeqValid = Wire(Bool())
+  private val parkedDeqRawBits = Wire(new RegionInUop(params))
+  private val parkedDeqBits = Wire(new RegionInUop(params))
+  private val parkEnqFire = Wire(Vec(params.numEnq, Bool()))
+  private val parkEnqReady = Wire(Vec(params.numEnq, Bool()))
+  private val baseEnqReady = Wire(Bool())
+
+  parkedDeqSel := VecInit(Seq.fill(longLoadParkEntries)(false.B))
+  parkedDeqValid := false.B
+  parkedDeqRawBits := 0.U.asTypeOf(parkedDeqRawBits)
+  parkedDeqBits := 0.U.asTypeOf(parkedDeqBits)
+  parkEnqFire := VecInit(Seq.fill(params.numEnq)(false.B))
+  parkEnqReady := VecInit(Seq.fill(params.numEnq)(false.B))
+
+  private def srcWaitsLongLoad(bits: RegionInUop): Seq[Bool] = {
+    (0 until params.numRegSrc).map { srcIdx =>
+      val srcType = bits.srcType(srcIdx)
+      val waitInt = SrcType.isXp(srcType) && io.longMissInt(bits.psrc(srcIdx))
+      val waitFp = SrcType.isFp(srcType) && io.longMissFp(bits.psrc(srcIdx))
+      SrcState.isBusy(bits.srcState(srcIdx)) && (waitInt || waitFp)
+    }
+  }
+
+  private val parkEligible = if (enableLongLoadParking) {
+    io.enq.map { enq =>
+      val waits = srcWaitsLongLoad(enq.bits)
+      val hasLongWait = waits.reduce(_ || _)
+      val onlyLongWait = (0 until params.numRegSrc).map { srcIdx =>
+        val srcType = enq.bits.srcType(srcIdx)
+        waits(srcIdx) || !SrcState.isBusy(enq.bits.srcState(srcIdx)) || SrcType.isNotReg(srcType)
+      }.reduce(_ && _)
+      (FuType.isAlu(enq.bits.fuType) || FuType.isLoad(enq.bits.fuType)) &&
+        hasLongWait && onlyLongWait && !io.flush.valid
+    }
+  } else {
+    Seq.fill(params.numEnq)(false.B)
+  }
+  private val parkCandidate = io.enq.zip(parkEligible).map { case (enq, eligible) => enq.valid && eligible }
+
+  if (enableLongLoadParking) {
+    val parkSlotOH = Wire(Vec(params.numEnq, UInt(longLoadParkEntries.W)))
+    require(longLoadParkEntries % params.numEnq == 0)
+    val slotsPerEnq = longLoadParkEntries / params.numEnq
+    for (enqIdx <- 0 until params.numEnq) {
+      val slotOffset = enqIdx * slotsPerEnq
+      val freeMask = VecInit(parkedValid.get.slice(slotOffset, slotOffset + slotsPerEnq).map(!_)).asUInt
+      val slotOHLocal = PriorityEncoderOH(freeMask)
+      val slotOH = Wire(UInt(longLoadParkEntries.W))
+      slotOH := slotOHLocal << slotOffset
+      parkSlotOH(enqIdx) := slotOH
+      parkEnqReady(enqIdx) := parkEligible(enqIdx) && slotOH.orR && !parkedDeqValid
+      parkEnqFire(enqIdx) := parkCandidate(enqIdx) && parkEnqReady(enqIdx)
+    }
+
+    val parkedWaits = parkedBits.get.map(srcWaitsLongLoad)
+    val parkedReady = parkedValid.get.zip(parkedWaits).map { case (valid, waits) =>
+      valid && !waits.reduce(_ || _)
+    }
+    for (slotIdx <- 0 until longLoadParkEntries) {
+      val olderReady = (0 until longLoadParkEntries).filter(_ != slotIdx).map { otherIdx =>
+        parkedReady(otherIdx) && isAfter(parkedBits.get(otherIdx).robIdx, parkedBits.get(slotIdx).robIdx)
+      }
+      parkedDeqSel(slotIdx) := parkedReady(slotIdx) && !olderReady.fold(false.B)(_ || _)
+    }
+    parkedDeqValid := parkedDeqSel.asUInt.orR && !io.flush.valid && baseEnqReady
+    parkedDeqRawBits := Mux1H(parkedDeqSel, parkedBits.get)
+    parkedDeqBits := parkedDeqRawBits
+    for (srcIdx <- 0 until params.numRegSrc) {
+      val selectedSrcType = parkedDeqRawBits.srcType(srcIdx)
+      val selectedWaitInt = SrcType.isXp(selectedSrcType) && io.longMissInt(parkedDeqRawBits.psrc(srcIdx))
+      val selectedWaitFp = SrcType.isFp(selectedSrcType) && io.longMissFp(parkedDeqRawBits.psrc(srcIdx))
+      val selectedWait = selectedWaitInt || selectedWaitFp
+      val selectedBusy = SrcState.isBusy(parkedDeqRawBits.srcState(srcIdx))
+      parkedDeqBits.srcState(srcIdx) := Mux(selectedBusy, SrcState.rdy, parkedDeqRawBits.srcState(srcIdx))
+      parkedDeqBits.srcLoadDependency(srcIdx) := Mux(selectedBusy,
+        0.U.asTypeOf(parkedDeqBits.srcLoadDependency(srcIdx)), parkedDeqRawBits.srcLoadDependency(srcIdx))
+    }
+    for (slotIdx <- 0 until longLoadParkEntries) {
+      when(io.flush.valid && parkedValid.get(slotIdx) && parkedBits.get(slotIdx).robIdx.needFlush(io.flush)) {
+        parkedValid.get(slotIdx) := false.B
+      }
+      when(parkEnqFire.reduce(_ || _)) {
+        when(parkEnqFire.zip(parkSlotOH).map { case (fire, slotOH) => fire && slotOH(slotIdx) }.reduce(_ || _)) {
+          parkedBits.get(slotIdx) := Mux1H(
+            VecInit(parkEnqFire.zip(parkSlotOH).map { case (fire, slotOH) => fire && slotOH(slotIdx) }),
+            io.enq.map(_.bits)
+          )
+          parkedValid.get(slotIdx) := true.B
+        }
+      }
+      when(parkedDeqSel(slotIdx)) {
+        parkedValid.get(slotIdx) := false.B
+      }
+    }
+    XSPerfAccumulate("long_load_consumer_park", PopCount(parkEnqFire))
+    XSPerfAccumulate("long_load_consumer_reinsert", parkedDeqValid)
+    XSPerfAccumulate("long_load_consumer_park_occupancy", PopCount(parkedValid.get))
+  }
+
+  if (enableLongLoadParking) {
+    for (enqIdx <- 0 until params.numEnq) {
+      io.enq(enqIdx).ready := !io.flush.valid && !parkedDeqValid &&
+        Mux(parkEnqReady(enqIdx), true.B, baseEnqReady)
+      s0_enqBits(enqIdx) := io.enq(enqIdx).bits
+      s0_enqValidVec(enqIdx) := io.enq(enqIdx).valid && !parkEnqFire(enqIdx)
+    }
+    s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map { case (valid, enq) => valid && enq.ready }
+    when(parkedDeqValid) {
+      s0_enqBits(0) := parkedDeqBits
+      s0_enqValidVec(0) := true.B
+      s0_enqSelValidVec(0) := true.B
+      for (enqIdx <- 1 until params.numEnq) {
+        s0_enqValidVec(enqIdx) := false.B
+        s0_enqSelValidVec(enqIdx) := false.B
+      }
+    }
+  } else {
+    for (enqIdx <- 0 until params.numEnq) {
+      io.enq(enqIdx).ready := !io.flush.valid && baseEnqReady
+      s0_enqBits(enqIdx) := io.enq(enqIdx).bits
+      s0_enqValidVec(enqIdx) := io.enq(enqIdx).valid
+      s0_enqSelValidVec(enqIdx) := s0_enqValidVec(enqIdx) && io.enq(enqIdx).ready
+    }
+  }
 
 
   val finalDeqSelValidVec = Wire(Vec(params.numDeq, Bool()))
@@ -438,7 +576,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
 
-  s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map{ case (enqValid, enq) => enqValid && enq.ready}
+  // s0_enqValidVec already includes both normal inputs and a parked-uop reinsertion.
 
   // if deq port can accept the uop
   protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
@@ -1105,7 +1243,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     othersCanotIn := simpCanotIn
   }
   val enqReady = GatedValidRegNext((!othersCanotIn || !enqHasValidRegNext) && !enqHasIssuedRegNext, false.B)
-  io.enq.foreach(_.ready := enqReady)
+  baseEnqReady := enqReady
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux(FuType.isUncertain(fuType),
