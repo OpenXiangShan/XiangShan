@@ -68,6 +68,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
   val iopmpApbRange = AddressSet(0x40100000L, 0xffff)
   val iommuApbRange = AddressSet(0x40200000L, 0xffff)
+  private val enableIommu = p(EnableIommuKey)
 
   val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ Seq(
     soc.UARTLiteRange,
@@ -76,9 +77,9 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     sdRange,
     dmacRange,
     intrGenRange,
-    iopmpApbRange,
-    iommuApbRange
-  )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
+    iopmpApbRange
+  ) ++ Option.when(enableIommu)(iommuApbRange).toSeq
+  ).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val bootSram = Option.when(useExternalLLC) {
@@ -131,7 +132,6 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     beatBytes     = 4)))
 
   val iopmp = LazyModule(new IopmpLazy(numBridge = 1)) // only one bridge test pass
-  val iommu = LazyModule(new IommuLazy)
   val deviceMemXbar = AXI4Xbar()
 
   iopmp_apb_node :=
@@ -140,22 +140,31 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     TLWidthWidget(8) :=
     tlBus
 
-  val iommu_apb_node = APBSlaveNode(Seq(APBSlavePortParameters(
+  val iommu_apb_node = Option.when(enableIommu)(APBSlaveNode(Seq(APBSlavePortParameters(
     Seq(APBSlaveParameters(
       address       = Seq(iommuApbRange),
       regionType    = RegionType.UNCACHED)),
-    beatBytes     = 4)))
+    beatBytes     = 4))))
 
-  iommu_apb_node :=
-    TLToAPB() :=
-    TLFragmenter(4,8) :=
-    TLWidthWidget(8) :=
-    tlBus
+  iommu_apb_node.foreach { node =>
+    node :=
+      TLToAPB() :=
+      TLFragmenter(4,8) :=
+      TLWidthWidget(8) :=
+      tlBus
+  }
 
-  iommu.slaveNode := AXI4IdIndexer(10) := dmac.masterNode
-  iopmp.slaveNodes(0) := iommu.masterNode
+  val iommu = Option.when(enableIommu)(LazyModule(new IommuLazy))
+  if (enableIommu) {
+    iommu.get.slaveNode := AXI4IdIndexer(10) := dmac.masterNode
+    iopmp.slaveNodes(0) := iommu.get.masterNode
+  } else {
+    // GSIM has no external-RTL blackbox support. Preserve the existing
+    // DMA protection path when the IOMMU is intentionally disabled.
+    iopmp.slaveNodes(0) := AXI4IdIndexer(10) := dmac.masterNode
+  }
   deviceMemXbar := iopmp.masterNodes(0)
-  deviceMemXbar := iommu.dsMasterNode
+  iommu.foreach(i => deviceMemXbar := i.dsMasterNode)
   memNode := deviceMemXbar
 
   val io_axi4 = InModuleBody {
@@ -195,8 +204,6 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   lazy val module = new SimMMIOImp(this){
     
     val iopmp_apb = iopmp_apb_node.in.head._1
-    val iommu_apb = iommu_apb_node.in.head._1
-
     iopmp.module.apb_s.paddr    <> iopmp_apb.paddr
     iopmp.module.apb_s.psel     <> iopmp_apb.psel
     iopmp.module.apb_s.penable  <> iopmp_apb.penable
@@ -206,6 +213,11 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     iopmp.module.apb_s.prdata   <> iopmp_apb.prdata
     iopmp.module.apb_s.pslverr  <> iopmp_apb.pslverr
 
-    iommu.module.apb <> iommu_apb
+    for {
+      node <- iommu_apb_node
+      i <- iommu
+    } {
+      i.module.apb <> node.in.head._1
+    }
   }
 }
