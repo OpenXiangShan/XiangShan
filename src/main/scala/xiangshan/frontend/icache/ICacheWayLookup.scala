@@ -47,7 +47,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   val io: ICacheWayLookupIO = IO(new ICacheWayLookupIO)
 
-  class ICacheWayLookupPtr extends CircularQueuePtr[ICacheWayLookupPtr](WayLookupSize)
+  class ICacheWayLookupPtr extends CircularQueuePtr[ICacheWayLookupPtr](PrefetchDepth)
   private object ICacheWayLookupPtr {
     def apply(f: Bool, v: UInt): ICacheWayLookupPtr = {
       val ptr = Wire(new ICacheWayLookupPtr)
@@ -57,7 +57,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     }
   }
 
-  private val entries  = RegInit(VecInit(Seq.fill(WayLookupSize)(0.U.asTypeOf(new WayLookupEntry))))
+  private val entries  = RegInit(VecInit(Seq.fill(PrefetchDepth)(0.U.asTypeOf(new WayLookupEntry))))
   private val readPtr  = RegInit(ICacheWayLookupPtr(false.B, 0.U))
   private val writePtr = RegInit(ICacheWayLookupPtr(false.B, 0.U))
 
@@ -66,7 +66,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   private val empty = readPtr === writePtr
 
   private val numValidEntries = distanceBetween(writePtr, readPtr)
-  private val numFreeEntries  = WayLookupSize.U - numValidEntries
+  private val numFreeEntries  = PrefetchDepth.U - numValidEntries
 
   // NOTE: May be unportable, we have bp3 == pf2 now, and WayLookup is written in pf1,
   // so up to one tail entry still in WayLookup might be flushed by bp3,
@@ -188,7 +188,7 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     distanceBetween(writePtr, readPtr),
     true.B,
     0,
-    WayLookupSize
+    PrefetchDepth
   )
   XSPerfAccumulate("write", io.write.head.fire)
   XSPerfAccumulate("empty_when_write", empty && io.write.head.fire)

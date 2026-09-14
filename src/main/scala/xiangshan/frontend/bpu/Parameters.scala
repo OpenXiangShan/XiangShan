@@ -80,6 +80,12 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def CompareAddrLowWidth: Int = bpuParameters.mbtbParameters.TargetWidth
 
+  def MaxBtbTargetWidth: Int = Seq(
+    bpuParameters.mbtbParameters.TargetWidth + (if (bpuParameters.mbtbParameters.EnableTargetFix) 1 else 0),
+    bpuParameters.ubtbParameters.TargetWidth + (if (bpuParameters.ubtbParameters.EnableTargetFix) 1 else 0),
+    bpuParameters.abtbParameters.TargetWidth + (if (bpuParameters.abtbParameters.EnableTargetFix) 1 else 0)
+  ).max
+
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {

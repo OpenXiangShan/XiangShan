@@ -15,7 +15,7 @@ object Bundles {
   /**
     * vtype bundle, should not used as csr reg
     */
-  class VType(implicit p: Parameters) extends Bundle {
+  class VType extends Bundle {
     val illegal = Bool()
     val vma     = Bool()
     val vta     = Bool()
@@ -39,7 +39,7 @@ object Bundles {
   }
 
   object VType {
-    def apply()(implicit p: Parameters) : VType = {
+    def apply() : VType = {
       new VType
     }
 
@@ -73,7 +73,7 @@ object Bundles {
       res
     }
 
-    def initVtype()(implicit p: Parameters) : VType = {
+    def init() : VType = {
       val res = Wire(VType())
       res.illegal := true.B
       res.vma := false.B
@@ -189,13 +189,27 @@ object Bundles {
   object Vl {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)
 
+    def apply(vlen: Int): UInt = UInt(width(vlen).W)
+
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth
+
+    def width(vlen: Int): Int = log2Up(vlen) + 1
+  }
+
+  object V0 {
+    def apply()(implicit p: Parameters): UInt = UInt(width.W)
+
+    def width(implicit p: Parameters): Int = p(XSCoreParamsKey).VLEN
   }
 
   object Vstart {
     def apply()(implicit p: Parameters): UInt = UInt(width.W)
 
+    def apply(vlen: Int): UInt = UInt(width(vlen).W)
+
     def width(implicit p: Parameters) = p(XSCoreParamsKey).vlWidth - 1
+
+    def width(vlen: Int): Int = log2Up(vlen)
   }
 
   object Vxsat extends NamedUInt(1)
@@ -212,16 +226,16 @@ object Bundles {
     def width(implicit p: Parameters) = log2Up(p(XSCoreParamsKey).maxElemPerVreg) + 1
   }
 
-  class Fpu extends Bundle{
-    val isFpToVecInst = Bool()
-    val isFP32Instr   = Bool()
-    val isFP64Instr   = Bool()
-    val isReduction   = Bool()
-    val isFoldTo1_2   = Bool()
-    val isFoldTo1_4   = Bool()
-    val isFoldTo1_8   = Bool()
-  }
-  object Fpu {
-    def apply() = new Fpu
+  object Vlmax extends NamedUInt(3) {
+    def apply(vsew: UInt, vlmul: UInt, elen: Int): ValidIO[UInt] = {
+      val vsewMinusVlmul = (vsew -& vlmul).asSInt
+      val illegal = vsewMinusVlmul > (log2Ceil(elen) - log2Ceil(64) + 3).S
+      val encode = vsewMinusVlmul.take(3)
+      Cat(illegal, encode).asTypeOf(ValidIO(UInt(3.W)))
+    }
+
+    def asVl(vlen: Int): Unit = {
+
+    }
   }
 }

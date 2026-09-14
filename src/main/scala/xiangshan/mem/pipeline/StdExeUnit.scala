@@ -25,10 +25,11 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.rob.RobPtr
 
 class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
-  val in = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
+  val in = Flipped(DecoupledIO(new ExuInput(param)))
   val vstdIn = Flipped(ValidIO(new StoreQueueDataWrite))
   val out = new MemWriteBack(param) // std -> wb
   val atomicData = Valid(new ExuInput(param)) // std -> atomicsUnit
@@ -36,6 +37,8 @@ class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSB
   val feedBack = ValidIO(new RSFeedback)
   // store queue deqPtr
   val sqDeqPtr = Input(new SqPtr)
+  val perfRobHeadPtr = Input(new RobPtr)
+  val writebackAtRobHead = Output(Bool())
 }
 
 class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
@@ -68,6 +71,7 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.toRob.bits.debugInfo := DontCare
   io.out.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
   io.out.toRob.bits.debugInfo.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.writebackAtRobHead := io.out.toRob.valid && io.out.toRob.bits.robIdx === io.perfRobHeadPtr
 
   io.atomicData.valid := io.in.fire && FuType.storeIsAMO(io.in.bits.fuType)
   io.atomicData.bits := io.in.bits

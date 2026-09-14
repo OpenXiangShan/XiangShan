@@ -59,21 +59,12 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
   hasWakeupIQ.foreach(x => dontTouch(x.srcWakeupByIQIsUncertain))
 }
 
-class OthersEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends OthersEntry(isComp)
-  with HasCircularQueuePtrHelper {
-
-  require(params.isVecMemIQ, "OthersEntryVecMem can only be instance of VecMem IQ")
-  EntryVecMemConnect(io.commonIn, entryReg, entryUpdate)
-}
-
 object OthersEntry {
   def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): OthersEntry = {
     iqParams.schdType match {
       case IntScheduler() => new OthersEntry(isComp)
       case FpScheduler()  => new OthersEntry(isComp)
-      case VecScheduler() =>
-        if (iqParams.isVecMemIQ) new OthersEntryVecMem(isComp)
-        else new OthersEntry(isComp)
+      case VecScheduler() => new OthersEntry(isComp)
       case _ => null
     }
   }

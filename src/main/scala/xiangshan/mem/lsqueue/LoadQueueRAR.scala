@@ -277,7 +277,13 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     }
   })
 
-  io.lqFull := freeList.io.empty
+  // Unaligned replay may allocate one RAR entry for the head and another one
+  // for the tail. Do not wake C_RAR replays when the queue only has a few
+  // slots left; otherwise the head can consume the last slots and the paired
+  // tail immediately nacks, causing the same replay to spin.
+  val freeEntryCount = LoadQueueRARSize.U - freeList.io.validCount
+  val hasEnoughReplayEntries = freeEntryCount >= (2 * LoadPipelineWidth).U
+  io.lqFull := !hasEnoughReplayEntries
   io.validCount := freeList.io.validCount
 
   // perf cnt

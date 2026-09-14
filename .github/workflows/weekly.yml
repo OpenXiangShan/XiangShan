@@ -14,7 +14,7 @@ on:
 
 jobs:
   run:
-    name: Run GCC16 Performance Test
+    name: Run SPEC06 GCC16 Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
@@ -22,10 +22,19 @@ jobs:
       servers: all
 
   run-xscc:
-    name: Run XSCC Performance Test
+    name: Run SPEC06 XSCC Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
-      benchmark_type: spec06-xscc-1.0c
+      benchmark_type: spec06-rva23-novec-xscc-1.0c
       artifact_name: score-xscc
+      servers: all
+  
+  run-spec17:
+    name: Run SPEC17 GCC16 Performance Test
+    uses: ./.github/workflows/perf-template.yml
+    with:
+      test_branch: ${{ github.event.inputs.test_branch }}
+      benchmark_type: spec17-rva23-novec-gcc16-1.0c
+      artifact_name: score-spec17
       servers: all

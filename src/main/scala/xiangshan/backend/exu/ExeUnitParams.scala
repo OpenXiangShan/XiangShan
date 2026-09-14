@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.fu.FuConfig.{BrhCfg, JmpCfg, needUncertainWakeupFuConfigs}
+import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchedulerType, VecScheduler}
 
 import scala.collection.mutable
@@ -23,16 +23,20 @@ case class ExeUnitParams(
   fuConfigs     : Seq[FuConfig],
   wbPortConfigs : Seq[PregWB],
   rfrPortConfigs: Seq[Seq[RdConfig]],
-  copyWakeupOut: Boolean = false,
-  copyDistance: Int = 1,
+  copyWakeupOut : Boolean = false,
+  copyDistance  : Int = 1,
   fakeUnit      : Boolean = false,
+  v0RD          : V0RD = null,
+  v0WB          : V0WB = null,
   vlRD          : VlRD = null,
   vlWB          : VlWB = null,
 )(
   implicit
   val schdType: SchedulerType,
 ) {
+  require(rfrPortConfigs.forall(!_.exists(_.isInstanceOf[V0RD])), "V0RD should not appear in rfrPortConfigs")
   require(rfrPortConfigs.forall(!_.exists(_.isInstanceOf[VlRD])), "VlRD should not appear in rfrPortConfigs")
+  require(!wbPortConfigs.exists(_.isInstanceOf[V0WB]), "V0WB should not appear in wbPortConfigs")
   require(!wbPortConfigs.exists(_.isInstanceOf[VlWB]), "VlWB should not appear in wbPortConfigs")
 
   // calculated configs
@@ -58,12 +62,12 @@ case class ExeUnitParams(
   val readFpRf: Boolean = numFpSrc > 0
   val readVecRf: Boolean = numVecSrc > 0
   val readVfRf: Boolean = numVfSrc > 0
-  val readV0Rf: Boolean = numV0Src > 0
+  val readV0Rf: Boolean = fuConfigs.exists(_.readV0)
   val readVlRf: Boolean = fuConfigs.exists(_.readVl)
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
-  val writeV0Rf: Boolean = fuConfigs.map(_.writeV0Rf).reduce(_ || _)
+  val writeV0Rf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
   val writeVlRf: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val needIntWen: Boolean = fuConfigs.map(_.needIntWen).reduce(_ || _)
   val needFpWen: Boolean = fuConfigs.map(_.needFpWen).reduce(_ || _)
@@ -72,7 +76,7 @@ case class ExeUnitParams(
   val needVlWen: Boolean = fuConfigs.map(_.needVlWen).reduce(_ || _)
   val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
   val needTaken: Boolean = fuConfigs.map(x => x.isJmp || x.isBrh).reduce(_ || _)
-  val needRasAction: Boolean = fuConfigs.map(x => x.isJmp).reduce(_ || _)
+  val needRasAction: Boolean = fuConfigs.map(_.isJmp).reduce(_ || _)
   val needImm: Boolean = fuConfigs.map(x => x.immType.nonEmpty).reduce(_ || _)
   def deqImmTypes: Seq[Imm] = fuConfigs.flatMap(_.immType).distinct
   // set load imm to 32-bit for fused_lui_load
@@ -92,16 +96,14 @@ case class ExeUnitParams(
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
-  def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
-  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR || this.hasVLoadFu
-  def needFtqPtrOffset: Boolean = needFtqPtr || this.aluNeedPc
+  val aluBjuNeedPc: Boolean = fuConfigs.map(_.aluBjuNeedPc).reduce(_ || _)
+  def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR
+  def needFtqPtrOffset: Boolean = needFtqPtr
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
-  val needFPUCtrl: Boolean = fuConfigs.map(_.needFPUCtrl).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val needVIaluCtrl: Boolean = fuConfigs.map(_.needVIaluCtrl).reduce(_ || _)
   val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
@@ -205,16 +207,14 @@ case class ExeUnitParams(
     *
     * @return Map[ [[BigInt]], Latency]
     */
-  def fuLatencyMap(addJump: Boolean = false): Map[FuType.OHType, Int] = {
-    val addBJUFuConfigs = if (addJump) fuConfigs :+ JmpCfg else fuConfigs
+  def fuLatencyMap(): Map[FuType.OHType, Int] = {
     if (latencyCertain)
-      if(needOg2) addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
-      addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
+      fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
-      val latencyCertainFuConfigsAddJump = if (addJump) latencyCertainFuConfigs :+ JmpCfg else latencyCertainFuConfigs
-      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
-      latencyCertainFuConfigsAddJump.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigs")
+      latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
@@ -315,15 +315,9 @@ case class ExeUnitParams(
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
+  def hasLinkFu = fuConfigs.map(_.fuType == FuType.link).reduce(_ || _)
+
   def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
-
-  def hasVLoadFu = fuConfigs.map(_.fuType == FuType.vldu).reduce(_ || _)
-
-  def hasVStoreFu = fuConfigs.map(_.fuType == FuType.vstu).reduce(_ || _)
-
-  def hasVecLsFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vldu, FuType.vstu))).reduce(_ || _)
-
-  def hasVSegFu = fuConfigs.map(x => FuType.FuTypeOrR(x.fuType, Seq(FuType.vsegldu, FuType.vsegstu))).reduce(_ || _)
 
   def hasStoreAddrFu = fuConfigs.map(_.name == "sta").reduce(_ || _)
 
@@ -333,9 +327,11 @@ case class ExeUnitParams(
 
   def hasMoudFu = fuConfigs.map(_.name == "moud").reduce(_ || _)
 
-  def hasStoreFu = hasStoreAddrFu || hasStdFu
+  def hasStoreFu = hasStoreAddrFu || hasStdFu || hasVStdFu
 
-  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasVLoadFu || hasHyldaFu || hasHystaFu || hasVLoadFu || hasVStoreFu
+  def hasMemAddrFu = hasLoadFu || hasStoreAddrFu || hasHyldaFu || hasHystaFu
+
+  def hasMemFu = hasMemAddrFu || hasStdFu || hasVStdFu
 
   def hasHyldaFu = fuConfigs.map(_.name == "hylda").reduce(_ || _)
 
@@ -345,9 +341,7 @@ case class ExeUnitParams(
 
   def hasStoreAddrExu = hasStoreAddrFu || hasHystaFu
 
-  def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
-
-  def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialuF).reduce(_ || _)
+  def hasVStdFu = fuConfigs.map(_.name == "vstd").reduce(_ || _)
 
   def CanCompress = !hasBrhFu || (hasBrhFu && hasi2vFu)
 
@@ -425,10 +419,8 @@ case class ExeUnitParams(
     }
   }
 
-  def getV0WBPort = {
-    wbPortConfigs.collectFirst {
-      case x: V0WB => x
-    }
+  def getV0WBPort: Option[V0WB] = {
+    Option(v0WB)
   }
 
   def getVlWBPort: Option[VlWB] = {
@@ -493,16 +485,16 @@ case class ExeUnitParams(
     new ExuInput(this)
   }
 
-  def genExuInputCopySrcBundle(implicit p: Parameters): ExuInput = {
-    new ExuInput(this, hasCopySrc = true)
-  }
-
-  def genNewExuInputCopySrcBundle(implicit p: Parameters): NewExuInput = {
-    new NewExuInput(this, hasCopySrc = true)
+  def genNewExuInputBundle(implicit p: Parameters): NewExuInput = {
+    new NewExuInput(this)
   }
 
   def genExuOutputBundle(implicit p: Parameters): ExuOutput = {
     new ExuOutput(this)
+  }
+
+  def genExuOutputBundle(dataConfigs: Seq[DataConfig])(implicit p: Parameters): ExuOutput = {
+    new ExuOutput(this, dataConfigs)
   }
 
   def genNewExuOutputBundle(implicit p: Parameters): NewExuOutput = {

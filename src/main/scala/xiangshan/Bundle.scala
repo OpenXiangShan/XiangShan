@@ -19,8 +19,6 @@ package xiangshan
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.experimental.decode.EspressoMinimizer
 import utility._
 import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
@@ -36,7 +34,6 @@ import xiangshan.frontend.FrontendRedirect
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
-import xiangshan.backend.decode.XDecode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
@@ -97,7 +94,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
-  val fixedTaken = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
@@ -152,21 +148,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
   val canRobCompress = Bool()
-
-  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
-
-  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
-    allSignals zip decoder foreach { case (s, d) => s := d }
-    commitType := DontCare
-    this
-  }
-
-  def decode(bit: List[BitPat]): CtrlSignals = {
-    allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
-    this
-  }
 
   def isWFI: Bool = fuType === FuType.csr.U && fuOpType === CSROpType.wfi
   def isSoftPrefetch: Bool = {
@@ -666,14 +647,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val hd_misalign_ld_enable = Output(Bool())
   val power_down_enable = Output(Bool())
   val flush_l2_enable = Output(Bool())
-  // Rename
-  val fusion_enable = Output(Bool())
-  val wfi_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
-  // TODO: move it to a new bundle, since single step is not a custom control signal
-  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode
@@ -722,6 +698,8 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
 
   def shouldBeSext: Bool = sv39 || sv48
   def shouldBeZext: Bool = bare || sv39x4 || sv48x4
+
+  def extend(pc: UInt, len: Int): UInt = Mux(shouldBeSext, SignExt(pc, len), ZeroExt(pc, len))
 }
 
 object AddrTransType {

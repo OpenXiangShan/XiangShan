@@ -233,10 +233,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlush && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
-  io.exception.valid := writeback
-  io.exception.bits := req
-  io.exception.bits.uop.exceptionVec(loadAccessFault) := nderr
-  io.exception.bits.uop.exceptionVec(hardwareError) := derr
+  io.exception.valid := RegNext(writeback)
+  io.exception.bits := RegEnable(req, writeback)
+  io.exception.bits.uop.exceptionVec(loadAccessFault) := RegEnable(nderr, writeback)
+  io.exception.bits.uop.exceptionVec(hardwareError) := RegEnable(derr, writeback)
 
   /* debug log */
   XSDebug(io.uncache.req.fire,

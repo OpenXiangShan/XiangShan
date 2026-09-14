@@ -19,9 +19,6 @@ FROM ghcr.io/openxiangshan/xs-env:latest
 ENTRYPOINT [ "/bin/bash" ]
 ENV VERILATOR=/usr/local/bin/verilator-wrap.sh
 
-# explict set LC_ALL to C.UTF-8
-ENV LC_ALL=C.UTF-8
-
 #
 # Mill
 #

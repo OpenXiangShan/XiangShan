@@ -188,8 +188,6 @@ class StoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends Me
   val enq                = new VirtualStoreQueueEnqIO(new SqPtr) // from dispatch to VirtualStoreQueue
   val fromRob            = new ROBToVirtualStoreQueueIO // from ROB to VirtualStoreQueue
   val toLsqEnqCtrl       = new ToLsqEnqCtrl(hasStore = true, hasLoad = false) // to lsqEnqCtrl
-  // when VStoreMergeBuffer writeback micro-op, storeQueue need to set `vecMbCommit`
-  val fromVMergeBuffer   = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be remove in the feature
   val storeDataIn        = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
   val fromStoreUnit      = new StaIO // from storeUnit
   val writeToSbuffer     = new SbufferWriteIO // write committed store to sbuffer
@@ -328,7 +326,6 @@ class VirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Phys
   val fromPhysicalQueue  = new PhysicalQueueToVirtualStoreQueueIO(PhysicalQueuePtr)
   // to lsqEnqCtrl
   val sqRecoverStall     = Output(Bool())
-  val fromVMergeBuffer   = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be remove in the feature
 
   val empty              = Output(Bool())
 }

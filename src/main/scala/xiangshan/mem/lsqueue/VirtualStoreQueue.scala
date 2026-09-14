@@ -38,8 +38,6 @@ class VirtualStoreQueueDataEntry (implicit p: Parameters) extends MemBlockBundle
 
 class VirtualStoreQueueCtrlEntry (implicit p: Parameters) extends MemBlockBundle {
   val allocated = Bool()
-  val isVec = Bool()
-  val vecMbCommit = Bool()
 }
 
 class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[PhysicalQueuePtrType]] (
@@ -101,9 +99,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val needCancel    = WireInit(VecInit(Seq.fill(Size)(false.B)))
   val retireVec     = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val physicalQueueEnqPtr = RegInit(0.U.asTypeOf(PhysicalQueuePtr.cloneType))
-  // TODO: vecMbCommit will be remove in the future.
-  val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))
-  val vecCommit = Wire(Vec(StoreQueueSize, Bool()))
 
   // Reconstruct per-entry end sqIdx from the snapshot group's first-entry end sqIdx.
   private def getEntryEndSqIdx(entryPtr: VirtualStoreQueuePtr): PhysicalQueuePtrType = {
@@ -180,10 +175,8 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
     when(enqSet) {
       ctrlEntries(i).allocated := true.B
-      ctrlEntries(i).isVec := enqBits.uop.isVec
     }.elsewhen(deqCancel || needCancel(i)) {
       ctrlEntries(i).allocated := false.B
-      ctrlEntries(i).isVec := false.B
     }
 
     when(enqSet) {
@@ -201,21 +194,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     // snapshot queue
     when(enqSet && (i % SnapshotInterval == 0).B){
       snapshotQueue(i / SnapshotInterval).entryEndSqIdx := enqBits.reqEndPtr.sqIdx
-    }
-
-    // TODO: vecMbCommit will be remove in the future.
-    val fbk = io.fromVMergeBuffer
-    for (j <- 0 until VecStorePipelineWidth) {
-      vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
-        dataEntries(i).robIdx === fbk(j).bits.robidx && dataEntries(i).uopIdx === fbk(j).bits.uopidx
-    }
-    // vector feedback may occur with deqCancel/needCancel at the same time
-    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
-
-    when (vecCommit(i)) {
-      ctrlEntries(i).vecMbCommit := true.B
-    }.elsewhen(deqCancel || needCancel(i)) {
-      ctrlEntries(i).vecMbCommit := false.B
     }
 
     // debug info
@@ -309,8 +287,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val deqAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
   val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(deqRobIdxVec(i), robHeadPtr) && deqAllocatedVec(i)))
-  val deqMbCommitVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).vecMbCommit))
-  val mbCommitVec = VecInit((0 until CommitWidth).map(i => (deqRobIdxVec(i) === robHeadPtr) && deqMbCommitVec(i) && deqAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
   val retireCarryVec = Wire(Vec(CommitWidth, Bool()))
@@ -318,9 +294,9 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   for (i <- 0 until CommitWidth) {
     val releaseHit = if (i < EnsbufferWidth) preCommitRelease(i) else false.B
     if (i == 0) {
-      retireCarryVec(i) := (retireBaseVec(i) || mbCommitVec(i)) || releaseHit
+      retireCarryVec(i) := retireBaseVec(i) || releaseHit
     } else {
-      retireCarryVec(i) := ((retireBaseVec(i) || mbCommitVec(i)) && retireCarryVec(i - 1)) || releaseHit
+      retireCarryVec(i) := (retireBaseVec(i) && retireCarryVec(i - 1)) || releaseHit
     }
     retireVec(i) := retireCarryVec(i)
   }
@@ -337,8 +313,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // precommit store, it will be write to sbuffer before rob retire.
   val preCommitEntry = ctrlEntries(preCommitPtr.value)
-  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr &&
-    preCommitEntry.allocated && (!preCommitEntry.isVec || preCommitEntry.vecMbCommit)
+  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr && preCommitEntry.allocated
 
   val preCommitPtrNext = WireInit(preCommitPtr)
   when(redirectReg.valid) { // redirect next cycle update preCommitPtr

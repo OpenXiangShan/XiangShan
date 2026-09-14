@@ -41,8 +41,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupToLRQCancel = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpCancelBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
-  val vlFromVfIsZero = Input(Bool())
-  val vlFromVfIsVlmax = Input(Bool())
   val og0Cancel = Input(ExuVec())
   val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
@@ -101,8 +99,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
-  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
-  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
+  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap()))) }
+  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap()))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
   val intWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(x.intFuLatencyMap))) }
   val fpWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(x.fpFuLatencyMap))) }
@@ -316,26 +314,15 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
-        enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
-                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
-                                                                          SrcState.rdy,
-                                                                          s0_enqBits(enqIdx).srcState(j))
-                                                                    } else {
-                                                                      s0_enqBits(enqIdx).srcState(j)
-                                                                    })
-        enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
-                                                                      MuxCase(DataSource.reg, Seq(
-                                                                        (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
-                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
-                                                                        (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                      ))
-                                                                    } else {
-                                                                      MuxCase(DataSource.reg, Seq(
-                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
-                                                                      ))
-                                                                    })
+        enq.bits.status.srcStatus(j).srcState                   := s0_enqBits(enqIdx).srcState(j)
+        enq.bits.status.srcStatus(j).dataSources.value          := MuxCase(DataSource.reg, Seq(
+          (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
+          SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
+        ))
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         enq.bits.status.srcStatus(j).exuSources.foreach(_       := 0.U.asTypeOf(ExuSource()))
+      }
+      for (j <- 0 until params.numIntSrc) {
         enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))
         enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := s0_enqBits(enqIdx).regCacheIdx(j))
       }
@@ -344,6 +331,12 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           vlSrcStatus.srcState                                  := s0_enqBits(enqIdx).srcStateVl.get
           vlSrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcVl.get
           vlSrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
+      }
+      enq.bits.status.srcStatusV0.foreach {
+        v0SrcStatus =>
+          v0SrcStatus.srcState                                  := s0_enqBits(enqIdx).srcStateV0.get
+          v0SrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcV0.get
+          v0SrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
       }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
@@ -355,8 +348,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.payload.og1Payload.imm.foreach(_                 := s0_enqBits(enqIdx).imm.get)
       connectSamePort(enq.bits.payload.og1Payload, s0_enqBits(enqIdx))
       // dirty code, for uopidx and lastUop's assign
-      enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
-      enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)
+      enq.bits.payload.og1Payload.uopIdx.foreach(_              := s0_enqBits(enqIdx).uopIdx.get)
+      enq.bits.payload.og1Payload.lastUop.foreach(_             := s0_enqBits(enqIdx).lastUop.get)
       enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
     }
     entriesIO.og0Resp                                           := io.og0Resp
@@ -369,10 +362,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
       entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
-      if (params.aluDeqNeedPickJump && (deqIdx == 1)) {
-        val needCancelDeq1 = deqEntryVec(0).valid && FuType.isJump(deqEntryVec(0).bits.payload.fuType)
-        entriesIO.deqSelOH(deqIdx).valid                        := deqSelValidVec(deqIdx) && !needCancelDeq1
-      }
       entriesIO.deqSelOH(deqIdx).bits                           := deqSelOHVec(deqIdx)
       entriesIO.enqEntryOldestSel(deqIdx)                       := enqEntryOldestSel(deqIdx)
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
@@ -406,25 +395,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.wakeUpFromIQDelayed                               := wakeupFromIQDelayed
     entriesIO.vlFromIntIsZero                                   := io.vlFromIntIsZero
     entriesIO.vlFromIntIsVlmax                                  := io.vlFromIntIsVlmax
-    entriesIO.vlFromVfIsZero                                    := io.vlFromVfIsZero
-    entriesIO.vlFromVfIsVlmax                                   := io.vlFromVfIsVlmax
     entriesIO.og0Cancel                                         := io.og0Cancel
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
     entriesIO.simpEntryDeqSelVec.foreach(_                      := VecInit(simpEntryOldestSel.get.takeRight(params.numEnq).map(_.bits)))
-    if (params.isVecMemIQ){
-      entries.io.enq.zipWithIndex.map{ case(enqData, i) =>
-        val enqPayload = enqData.bits.payload.og1Payload
-        enqPayload.sqIdx.get := s0_enqBits(i).sqIdx.get
-        enqPayload.lqIdx.get := s0_enqBits(i).lqIdx.get
 
-        val isFirstLoad = s0_enqBits(i).lqIdx.get <= io.memIO.get.lqDeqPtr.get
-        val isVleff = s0_enqBits(i).vpu.get.isVleff
-        enqData.bits.status.blocked := !isFirstLoad && isVleff
-      }
-    }
-    entries.io.vecMemIn.foreach(_.sqDeqPtr := io.memIO.get.sqDeqPtr.get)
-    entries.io.vecMemIn.foreach(_.lqDeqPtr := io.memIO.get.lqDeqPtr.get)
     //output
     fuTypeVec                                                   := entriesIO.fuType
     deqEntryVec                                                 := entriesIO.deqEntry
@@ -437,27 +412,16 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map{ case (enqValid, enq) => enqValid && enq.ready}
 
-  // if deq port can accept the uop
-  protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    Cat(fuTypeVec.map(fuType =>
-      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
-    ).reverse)
-  }
+  // // if deq port can accept the uop
+  // protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+  //   Cat(fuTypeVec.map(fuType =>
+  //     FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
+  //   ).reverse)
+  // }
 
-  protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    // alu and jmp are not same deq port, alu select intWen uop (include auipc and jalr)
-    val aluDeqNeedPickJump = param.aluDeqNeedPickJump && fuCfgs.contains(AluCfg)
-    val bjuDeqPickCond = param.aluDeqNeedPickJump && fuCfgs.contains(JmpCfg)
-    if (aluDeqNeedPickJump) println(s"${param.getIQName} need select intWen uop")
-    fuTypeVec.zip(rfWenVec).map { case (fuType, rfWen) =>
-      val bjuDeqCanAccept = FuType.isBrh(fuType) || FuType.isJump(fuType) && !rfWen
-      // alu and csr in same exeunit, but csr's rfwen may be false.B
-      // not (branch || jump && !rfWen)
-      val aluDeqCanAccept = !bjuDeqCanAccept
-      val deqCanAccept = if (aluDeqNeedPickJump) aluDeqCanAccept
-                         else if (bjuDeqPickCond) bjuDeqCanAccept
-                         else FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
-      deqCanAccept
+  protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs =>
+    fuTypeVec.map { fuType =>
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
     }
   }
 
@@ -632,8 +596,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqResp.bits.failed := false.B
     deqResp.bits.finalSuccess := false.B
     deqResp.bits.fuType := deqBeforeDly(i).bits.fuType
-    deqResp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
     deqResp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+    deqResp.bits.isFmac := false.B
   }
 
   //fuBusyTable
@@ -882,10 +846,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
-    // bju deq valid
-    if (params.aluDeqNeedPickJump && (i ==1)) {
-      deq.valid := finalDeqSelValidVec(i) && !cancelDeqVec(i) || entries.io.aluDeqSelectJump.get && deqBeforeDly(0).valid
-    }
     deq.bits.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
@@ -896,7 +856,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.fpRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.fpRen.get(idx)})
     deq.bits.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.vecRen.get(idx)})
     deq.bits.vlRen .foreach(x => x := deq.valid && deqEntryVec(i).bits.vlRen.get)
-    deq.bits.v0Ren .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.v0Ren.get(idx)})
+    deq.bits.v0Ren .foreach(x => x := deq.valid && deqEntryVec(i).bits.v0Ren.get)
     deq.bits.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
     deq.bits.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
     deq.bits.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
@@ -904,6 +864,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen.get)
     deq.bits.flushPipe.foreach(_ := false.B)
     deq.bits.pdest := deqEntryVec(i).bits.payload.pdest
+    deq.bits.pdestV0.foreach(_ := deqEntryVec(i).bits.payload.pdestV0.get)
     deq.bits.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
 
@@ -911,21 +872,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.dataSources.zip(deqDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
-    // when alu select jump uop, src0's refren change to false
-    if (params.aluDeqNeedPickJump && (i == 0)) {
-      val src0IsReadReg = deqDataSources(i)(0).readReg
-      when(entries.io.aluDeqSelectJump.get && src0IsReadReg){
-        deq.bits.rfBankRen.get(0) := 0.U.asTypeOf(deq.bits.rfBankRen.get(0))
-      }
-    }
-    else if (params.aluDeqNeedPickJump && (i == 1)) {
-      // assign jump uop form alu deq
-      when(entries.io.aluDeqSelectJump.get) {
-        deq.bits.dataSources := deqDataSources(0)
-        deq.bits.exuSources.foreach(_ := deqBeforeDly(0).bits.exuSources.get)
-        deq.bits.loadDependency.foreach(_ := deqBeforeDly(0).bits.loadDependency.get)
-      }
-    }
 
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
     deq.bits.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
@@ -956,12 +902,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       io.wakeupFromExu.foreach(x => {
         deq.ready := !x.head.valid
         deqDly.valid := deq.valid && !x.head.valid
-      })
-    }
-    if (params.aluDeqNeedPickJump && deqFuCfgs(i).contains(JmpCfg)) {
-      io.wakeupFromExu.foreach(x => {
-        deq.ready := !entries.io.aluDeqSelectJump.get
-        deqDly.valid := deq.valid && !(entries.io.aluDeqSelectJump.get && x.head.valid)
       })
     }
   }
@@ -1027,6 +967,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeup.bits.v0Wen   := (param.writeV0Rf ).B && RegNext(loadWakeUp.bits.v0Wen && loadWakeUp.valid)
         wakeup.bits.vlWen   := (param.writeVlRf ).B && RegNext(loadWakeUp.bits.vlWen && loadWakeUp.valid)
         wakeup.bits.pdest   := RegNext(loadWakeUp.bits.pdest)
+        wakeup.bits.pdestV0 := 0.U
         wakeup.bits.pdestVl := 0.U
         wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
         wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
@@ -1214,7 +1155,4 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 class IssueQueueMemBundle(implicit p: Parameters, params: IssueBlockParams) extends Bundle {
   // load wakeup
   val loadWakeUp = Input(Vec(params.LdExuCnt, ValidIO(new MemWakeUpBundle)))
-  // vector
-  val sqDeqPtr = Option.when(params.isVecMemIQ)(Input(new SqPtr))
-  val lqDeqPtr = Option.when(params.isVecMemIQ)(Input(new LqPtr))
 }

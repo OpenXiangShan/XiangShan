@@ -40,7 +40,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect    = Flipped(Valid(new Redirect))
-    val vecCommit   = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3
@@ -67,7 +66,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   //  Flags       : load flags
   val allocated = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val robIdx = Reg(Vec(VirtualLoadQueueSize, new RobPtr))
-  val uopIdx = Reg(Vec(VirtualLoadQueueSize, UopIdx()))
   val isvec = RegInit(VecInit(List.fill(VirtualLoadQueueSize)(false.B))) // vector load flow
   val committed = Reg(Vec(VirtualLoadQueueSize, Bool()))
 
@@ -139,7 +137,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
   deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
-  val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
+  val commitCount = PriorityEncoder(true.B ## ~deqCountMask)
   val lastCommitCount = GatedRegNext(commitCount)
 
   // update deqPtr
@@ -186,8 +184,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     when (entryCanEnq) {
       allocated(i) := true.B
       robIdx(i) := selectBits.robIdx
-      uopIdx(i) := selectBits.uopIdx
-      isvec(i) :=  FuType.isVLoad(selectBits.fuType)
+      isvec(i) := LSUOpType.isVecMemOp(selectBits.fuOpType)
       committed(i) := false.B
 
       debug_mmio(i) := false.B
@@ -216,21 +213,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     XSError(commitCount > i.U && !allocated((deqPtr+i.U).value), s"why commit invalid entry $i?\n")
   })
 
-  // vector commit or replay
-  val vecLdCommittmp = Wire(Vec(VirtualLoadQueueSize, Vec(VecLoadPipelineWidth, Bool())))
-  val vecLdCommit = Wire(Vec(VirtualLoadQueueSize, Bool()))
-  for (i <- 0 until VirtualLoadQueueSize) {
-    val cmt = io.vecCommit
-    for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && robIdx(i) === cmt(j).bits.robidx && uopIdx(i) === cmt(j).bits.uopidx
-    }
-    vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
-
-    when (vecLdCommit(i) && isvec(i)) {
-      committed(i) := true.B
-    }
-  }
-
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
   for (i <- 0 until VirtualLoadQueueSize) {
@@ -258,7 +240,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val need_valid = io.ldin(i).bits.updateAddrValid
     when (io.ldin(i).valid) {
       val hasExceptions = io.ldin(i).bits.uop.exceptionVec.selectByFu(LduCfg).orR
-      when (!need_rep && need_valid && !io.ldin(i).bits.isvec) {
+      when (!need_rep && need_valid) {
         committed(loadWbIndex) := true.B
         //  Debug info
         debug_mmio(loadWbIndex) := io.ldin(i).bits.mmio

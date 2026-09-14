@@ -31,7 +31,6 @@ abstract class RegType
 case object Reg_I extends RegType
 case object Reg_F extends RegType
 case object Reg_V extends RegType
-case object Reg_V0 extends RegType
 case object Reg_Vl extends RegType
 
 class RatReadPort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
@@ -57,23 +56,26 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     case Reg_I => 2
     case Reg_F => 3
     case Reg_V => 3
-    case Reg_V0 => 1
     case Reg_Vl => 1
   }
   val rdataNums = reg_t match {
+    case Reg_I => IntLogicRegs
+    case Reg_F => FpLogicRegs
+    case Reg_V => VecStdLogicRegs // with v0
+    case Reg_Vl => VlLogicRegs // vl
+    // FIXME: rebase
     case Reg_I => diffRatParams.intEntries
     case Reg_F => diffRatParams.fpEntries
     case Reg_V => diffRatParams.vecEntries
-    case Reg_V0 => diffRatParams.v0Entries
     case Reg_Vl => diffRatParams.vlEntries
   }
   val renameTableWidth = reg_t match {
     case Reg_I => log2Ceil(IntLogicRegs)
     case Reg_F => log2Ceil(FpLogicRegs)
     case Reg_V => log2Ceil(VecLogicRegs)
-    case Reg_V0 => log2Ceil(V0LogicRegs)
     case Reg_Vl => log2Ceil(VlLogicRegs)
   }
+
   val io = IO(new Bundle {
     val redirect = Input(Bool())
     val readPorts = Vec(readPortsNum * RenameWidth, new RatReadPort(renameTableWidth))
@@ -84,10 +86,6 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     val snpt = Input(new SnapshotPort)
     val diffRatBase = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0 = if (backendParams.debugEn) reg_t match {
-      case Reg_V0 => Some(Output(UInt(PhyRegIdxWidth.W)))
-      case _ => None
-    } else None
     val debug_vl = if (backendParams.debugEn) reg_t match {
       case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
@@ -99,7 +97,6 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     case Reg_I => VecInit.fill    (IntLogicRegs)(0.U(PhyRegIdxWidth.W))
     case Reg_F => VecInit.tabulate(FpLogicRegs)(_.U(PhyRegIdxWidth.W))
     case Reg_V => VecInit.tabulate(VecLogicRegs)(_.U(PhyRegIdxWidth.W))
-    case Reg_V0 => VecInit.tabulate(V0LogicRegs)(_.U(PhyRegIdxWidth.W))
     case Reg_Vl => VecInit.tabulate(VlLogicRegs)(_.U(PhyRegIdxWidth.W))
   }
   val spec_table = RegInit(rename_table_init)
@@ -167,18 +164,12 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
 
   io.old_pdest := old_pdest
   io.need_free := need_free
-  io.debug_rdata.foreach{ x => reg_t match {
-      case Reg_V => x := arch_table.drop(1).take(rdataNums)
-      case _ => x := arch_table.take(rdataNums)
-    }
-  }
-  io.debug_v0.foreach(_ := arch_table(0))
+  io.debug_rdata.foreach(_ := arch_table.take(io.debug_rdata.get.size))
   io.debug_vl.foreach(_ := arch_table(0))
   // spec_table_next is the recovered speculative base before this cycle's rename updates.
   // Reusing it keeps Difftest aligned with the functional checkpoint, redirect, and walk recovery path.
   io.diffRatBase.foreach { base =>
     reg_t match {
-      case Reg_V => base := VecInit(spec_table_next.drop(diffRatParams.v0Entries).take(rdataNums))
       case _ => base := VecInit(spec_table_next.take(rdataNums))
     }
   }
@@ -209,34 +200,29 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(FpLogicRegs))))
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort(log2Ceil(VecLogicRegs))))
     val vecRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(VecLogicRegs))))
-    val v0ReadPorts = Vec(RenameWidth, new RatReadPort(log2Ceil(V0LogicRegs)))
-    val v0RenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(V0LogicRegs))))
     val vlReadPorts = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     val vlRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(VlLogicRegs))))
 
     val int_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val fp_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val vec_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
-    val v0_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val vl_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
 
     // for debug assertions
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(diffRatParams.intEntries, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(diffRatParams.fpEntries, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vec_rat = if (backendParams.debugEn) Some(Vec(diffRatParams.vecEntries, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(diffRatParams.v0Entries, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(diffRatParams.vlEntries, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_int_rat = Option.when(backendParams.debugEn)(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_fp_rat  = Option.when(backendParams.debugEn)(Vec(FpLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vec_rat = Option.when(backendParams.debugEn)(Vec(VecStdLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
+    val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
 
     // for difftest
-    val diff_vl_rat = if (backendParams.basicDebugEn) Some(Vec(diffRatParams.vlEntries, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diff_vl_rat  = Option.when(backendParams.basicDebugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I, 0))
   val fpRat  = Module(new RenameTable(Reg_F, 0))
   val vecRat = Module(new RenameTable(Reg_V, 0))
-  val v0Rat  = Module(new RenameTable(Reg_V0, 0))
   val vlRat  = Module(new RenameTable(Reg_Vl, 0))
   val diffRatBuffer = if (backendParams.basicDebugEn) Some(Module(new DiffRatStateBuffer)) else None
 
@@ -244,7 +230,6 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     rat.io.diffRatBase.intRat := intRat.io.diffRatBase.get
     rat.io.diffRatBase.fpRat := fpRat.io.diffRatBase.get
     rat.io.diffRatBase.vecRat := vecRat.io.diffRatBase.get
-    rat.io.diffRatBase.v0Rat := v0Rat.io.diffRatBase.get
     rat.io.diffRatBase.vlRat := vlRat.io.diffRatBase.get
     rat.io.renameUpdates := io.renameUpdates.get
     rat.io.snapshotEnds := io.snapshotEnds.get
@@ -315,11 +300,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   }
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
     // Split each 128-bit vector reg into two 64-bit regs (lo, hi), so convert index to (2*index, 2*index+1)
-    val splitVecPregs = 2 * (V0PhyRegs + VfPhyRegs)
+    val splitVecPregs = VLEN / 64 * VfPhyRegs
     val difftest = DifftestModule(new DiffArchVecRenameTable(splitVecPregs), delay = 2)
     difftest.coreid := io.hartId
     // When merge v0Rat and vecRat, the index of vecRats should starts from V0PhyRegs
-    val vecRats = diffRatBuffer.get.io.diffRat.v0Rat ++ diffRatBuffer.get.io.diffRat.vecRat.map(_ + V0PhyRegs.U)
+    val vecRats = diffRatBuffer.get.io.diffRat.vecRat
     difftest.value := VecInit(vecRats.flatMap { r =>
       val splitDest = (r << 1).asUInt
       Seq(splitDest, splitDest + 1.U)
@@ -353,33 +338,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
       spec.data := rename.data
     }
   }
-  // debug read ports for difftest
-  io.debug_v0_rat.foreach(_ := v0Rat.io.debug_rdata.get)
-  v0Rat.io.readPorts <> io.v0ReadPorts
-  v0Rat.io.redirect := io.redirect
-  v0Rat.io.snpt := io.snpt
-  io.v0_old_pdest := v0Rat.io.old_pdest
 
-  if (backendParams.debugEn) {
-    dontTouch(v0Rat.io)
-  }
-  for ((arch, i) <- v0Rat.io.archWritePorts.zipWithIndex) {
-    arch.wen := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && io.rabCommits.info(i).v0Wen
-    arch.addr := io.rabCommits.info(i).ldest
-    arch.data := io.rabCommits.info(i).pdest
-  }
-  for ((spec, i) <- v0Rat.io.specWritePorts.zipWithIndex) {
-    spec.wen := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && io.rabCommits.info(i).v0Wen
-    spec.addr := io.rabCommits.info(i).ldest
-    spec.data := io.rabCommits.info(i).pdest
-  }
-  for ((spec, rename) <- v0Rat.io.specWritePorts.zip(io.v0RenamePorts)) {
-    when(rename.wen) {
-      spec.wen := true.B
-      spec.addr := rename.addr
-      spec.data := rename.data
-    }
-  }
   // debug read ports for difftest
   io.debug_vl_rat.foreach(_ := vlRat.io.debug_rdata.get)
   io.diff_vl_rat.foreach(_ := diffRatBuffer.get.io.diffRat.vlRat)

@@ -30,12 +30,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   private val oldPregVecFromRat: Vec[ValidIO[UInt]] = Wire(Vec(RabCommitWidth, ValidIO(UInt(VfPhyRegIdxWidth.W))))
   oldPregVecFromRat.zipWithIndex.foreach { case (oldPreg: ValidIO[UInt], idx) =>
     val vecOldVd = i.fromRat.vecOldVdPdest(idx)
-    val v0OldVd  = i.fromRat.v0OldVdPdest(idx)
-    oldPreg.valid := (vecOldVd.valid || v0OldVd.valid)
-    oldPreg.bits := Mux1H(Seq(
-      vecOldVd.valid -> vecOldVd.bits,
-      v0OldVd.valid -> v0OldVd.bits,
-    ))
+    oldPreg.valid := vecOldVd.valid
+    oldPreg.bits := vecOldVd.bits
   }
 
   private val lregNewPregVecFromRab = WireInit(i.fromRab.logicPhyRegMap)
@@ -516,7 +512,6 @@ class VecExcpInfo(implicit p: Parameters) extends XSBundle {
 
 class RatToVecExcpMod(implicit p: Parameters) extends XSBundle {
   val vecOldVdPdest = Vec(RabCommitWidth, ValidIO(UInt(VfPhyRegIdxWidth.W)))
-  val v0OldVdPdest = Vec(RabCommitWidth, ValidIO(UInt(VfPhyRegIdxWidth.W)))
 }
 
 class VprfToExcpMod(numPort: Int)(implicit p: Parameters) extends XSBundle {

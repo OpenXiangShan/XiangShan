@@ -36,8 +36,6 @@ case class ICacheParameters(
     // missUnit
     NumFetchMshr:    Int = 4,
     NumPrefetchMshr: Int = 10,
-    // wayLookup
-    WayLookupSize: Int = 32,
     // ecc
     // NOTE: we call it "ecc" since it can be configured to use ecc like "secded", but by default it is parity
     // TODO: support disabling ecc completely (currently "none" will use "identity", we want to remove entire ecc logic)
@@ -117,9 +115,6 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def NumFetchMshr:    Int = icacheParameters.NumFetchMshr
   def NumPrefetchMshr: Int = icacheParameters.NumPrefetchMshr
   def NumAllMshr:      Int = NumFetchMshr + NumPrefetchMshr
-
-  // wayLookup
-  def WayLookupSize: Int = icacheParameters.WayLookupSize
 
   // metaArray w/ parity
   def MetaEcc:       String = icacheParameters.MetaEcc

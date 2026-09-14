@@ -70,11 +70,18 @@ class MemoryRequestHelper(requestType: Int)
     "  input             io_req_valid,",
     "  input      [63:0] io_req_bits_addr,",
     "  input      [31:0] io_req_bits_id,",
-    "  output            io_response",
+    "  output reg        io_response",
     ");",
     "",
-    " assign io_response = (reset ? 1'b0 :",
-    "               (io_req_valid ? memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE) : 1'b0));",
+    "always @(negedge clock or posedge reset) begin",
+    "  if (reset) begin",
+    "    io_response <= 1'b0;",
+    "  end else if (io_req_valid) begin",
+    "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
+    "  end else begin",
+    "    io_response <= 1'b0;",
+    "  end",
+    "end",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -116,11 +123,18 @@ class MemoryResponseHelper(requestType: Int)
     "  input             clock,",
     "  input             reset,",
     "  input             enable,",
-    "  output [63:0]     response",
+    "  output reg [63:0] response",
     ");",
     "",
-    "assign response = reset ? 64'b0 :",
-    "((!reset && enable) ? memory_response(REQUEST_TYPE) : 64'b0);",
+    "always @(negedge clock or posedge reset) begin",
+    "  if (reset) begin",
+    "    response <= 64'b0;",
+    "  end else if (enable) begin",
+    "    response <= memory_response(REQUEST_TYPE);",
+    "  end else begin",
+    "    response <= 64'b0;",
+    "  end",
+    "end",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))

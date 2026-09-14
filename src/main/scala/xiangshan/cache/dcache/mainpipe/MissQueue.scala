@@ -1642,7 +1642,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
-  val VLENB = VLEN / 8
   // Forwarding paddr CAM, shared by io.forward and io.forward_stData
   val paddrFwd = Wire(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
   val s1PaddrMatchVec = Wire(Vec(LoadPipelineWidth, Vec(cfg.nMissEntries, Bool())))

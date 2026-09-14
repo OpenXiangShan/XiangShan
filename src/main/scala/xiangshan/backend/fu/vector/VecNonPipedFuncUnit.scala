@@ -1,14 +1,12 @@
 package xiangshan.backend.fu.vector
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
-import xiangshan.backend.fu.vector.Bundles.VConfig
-import xiangshan.backend.fu.vector.utils.ScalaDupToVector
-import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import xiangshan.ExceptionNO
-import yunsuan.VialuFixType
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
+import xiangshan.backend.fu.{FuConfig, FuncUnit}
 
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with VecFuncUnitAlias
@@ -23,34 +21,24 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)
   protected val outData     = DataHoldBypass(io.in.bits.data, io.in.fire)
 
-  protected val outVecCtrl  = outCtrl.vpu.get
-  protected val outVm       = outVecCtrl.vm
+  protected val outVType    = outCtrl.vtype.get
+  protected val outVm       = outCtrl.vm.get
+  protected val outUopIdx   = outCtrl.uopIdx.get
 
   // vadc.vv, vsbc.vv need this
-  protected val outNeedClearMask: Bool = VialuFixType.needClearMask(outCtrl.fuOpType)
+  protected val outNeedClearMask: Bool = VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType)
 
   protected val outVl       = outData.vl.get
-  protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {
+  protected val outSrcMask: UInt = {
     MuxCase(
-      outData.getSrcMask, Seq(
+      outData.v0.get, Seq(
         outNeedClearMask -> allMaskFalse,
         outVm -> allMaskTrue
       )
     )
-  }
-
-  // vstart illegal
-  if (cfg.exceptionOut.nonEmpty) {
-    val outVstart = outCtrl.vpu.get.vstart
-    val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.zeroInit()
-    require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
-      "VecNonPipedFuncUnit with non-empty excptionOut must have illegal instruction exception output")
-    io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
   }
 
   connectNonPipedCtrlSingal

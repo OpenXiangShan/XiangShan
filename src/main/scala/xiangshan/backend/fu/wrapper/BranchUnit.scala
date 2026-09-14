@@ -35,12 +35,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.src(0) := io.in.bits.data.src(0) // rs1
   dataModule.io.src(1) := io.in.bits.data.src(1) // rs2
   dataModule.io.func := io.in.bits.ctrl.fuOpType
-  dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
+  dataModule.io.predTaken := io.in.bits.ctrl.predictInfo.get.predTaken
 
-  val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, VAddrBits + 2),
-    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 2)
-  )
+  val pcExtend = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, VAddrBits + 2)
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
@@ -52,7 +49,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
 
   val brhPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val brhRealTarget = addModule.io.target(VAddrData().dataWidth - 1, 0)
-  val targetWrong = dataModule.io.fixedTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
+  val targetWrong = dataModule.io.predTaken && dataModule.io.taken && (brhRealTarget =/= brhPredictTarget)
   val isMisPred = dataModule.io.mispredict || targetWrong
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
@@ -82,8 +79,6 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
-  if (io.toFrontendBJUResolve.get.bits.debug_isRVC.isDefined) {
-    io.toFrontendBJUResolve.get.bits.debug_isRVC.get := io.in.bits.ctrl.isRVC.get
-  }
+  io.toFrontendBJUResolve.get.bits.debug_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
   connect0LatencyCtrlSingal
 }

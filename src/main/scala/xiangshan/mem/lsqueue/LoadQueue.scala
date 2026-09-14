@@ -72,30 +72,19 @@ object LqPtr {
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
     val fpWen = uop.fpWen
-    LookupTree(uop.fuOpType, List(
-      LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+    LookupTree(LSUOpType.getSignSize(uop.fuOpType), List(
+      LSUOpType.sign ## LSUOpType.B -> SignExt(rdata(7, 0) , XLEN),
+      LSUOpType.sign ## LSUOpType.H -> SignExt(rdata(15, 0), XLEN),
       /*
           riscv-spec-20191213: 12.2 NaN Boxing of Narrower Values
           Any operation that writes a narrower result to an f register must write
           all 1s to the uppermost FLEN−n bits to yield a legal NaN-boxed value.
       */
-      LSUOpType.lw   -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), XLEN)),
-      LSUOpType.ld   -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), XLEN)),
-      LSUOpType.lbu  -> ZeroExt(rdata(7, 0) , XLEN),
-      LSUOpType.lhu  -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.lwu  -> ZeroExt(rdata(31, 0), XLEN),
-
-      // hypervisor
-      LSUOpType.hlvb -> SignExt(rdata(7, 0), XLEN),
-      LSUOpType.hlvh -> SignExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvw -> SignExt(rdata(31, 0), XLEN),
-      LSUOpType.hlvd -> SignExt(rdata(63, 0), XLEN),
-      LSUOpType.hlvbu -> ZeroExt(rdata(7, 0), XLEN),
-      LSUOpType.hlvhu -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvwu -> ZeroExt(rdata(31, 0), XLEN),
-      LSUOpType.hlvxhu -> ZeroExt(rdata(15, 0), XLEN),
-      LSUOpType.hlvxwu -> ZeroExt(rdata(31, 0), XLEN),
+      LSUOpType.sign ## LSUOpType.W -> Mux(fpWen, FPU.box(rdata, FPU.S), SignExt(rdata(31, 0), XLEN)),
+      LSUOpType.sign ## LSUOpType.D -> Mux(fpWen, FPU.box(rdata, FPU.D), SignExt(rdata(63, 0), XLEN)),
+      LSUOpType.unsign ## LSUOpType.W  -> ZeroExt(rdata(7, 0) , XLEN),
+      LSUOpType.unsign ## LSUOpType.W  -> ZeroExt(rdata(15, 0), XLEN),
+      LSUOpType.unsign ## LSUOpType.W  -> ZeroExt(rdata(31, 0), XLEN),
     ))
   }
 
@@ -182,7 +171,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     val redirect = Flipped(Valid(new Redirect))
-    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
       val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
@@ -221,6 +209,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
+    val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val lqEmpty = Output(Bool())
@@ -263,7 +252,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * VirtualLoadQueue
    */
   virtualLoadQueue.io.redirect      <> io.redirect
-  virtualLoadQueue.io.vecCommit     <> io.vecFeedback
   virtualLoadQueue.io.enq           <> io.enq
   virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
   virtualLoadQueue.io.lqFull        <> io.lqFull
@@ -301,6 +289,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueReplay
    */
   loadQueueReplay.io.redirect         <> io.redirect
+  loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtrNext
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup
@@ -316,17 +305,20 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
+  loadQueueReplay.io.fast_tlb_hint    <> io.fast_tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   loadQueueReplay.io.storeAddrWakeup.zip(io.wakeupToLRQ.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeAddrWakeupCancel.zip(io.wakeupToLRQCancel.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeupCancel.zip(io.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeDataWrite.zip(io.std.storeDataIn).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits.sqIdx
+  }
   loadQueueReplay.io.physicalUpperSqIdx <> io.sq.physicalUpperSqIdx
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
   loadQueueReplay.io.ncWakeup := uncacheBuffer.io.ncWakeup
-  // TODO: implement it!
-  loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
   loadQueueReplay.io.replayAllocate <> io.replayAllocate

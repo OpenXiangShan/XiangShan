@@ -18,7 +18,8 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{HasCircularQueuePtrHelper, HasPerfEvents}
-import xiangshan.{DebugOptionsKey, XSBundle, XSModule}
+import utils.NamedUInt
+import xiangshan.{DebugOptionsKey, LSUOpType, XSBundle, XSModule}
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.mem.HasVLSUParameters
 
@@ -47,18 +48,18 @@ object MemoryType {
   def apply() = UInt(width.W)
 }
 
-object CboType {
-  def clean: UInt       = "b00".U
-  def flush: UInt       = "b01".U
-  def inval: UInt       = "b10".U
-  def zero:  UInt       = "b11".U
+// CboType is a compatibility wrapper over the CBO sub-opcode defined in LSUOpType,
+// keeping the original compact 2-bit encoding so that existing cboType usage is unchanged.
+object CboType extends NamedUInt(2) {
+  // cbo sub-opcode values are referenced from LSUOpType (single source of truth)
+  def clean: UInt = LSUOpType.getCboOpcode(LSUOpType.cbo_clean)
+  def flush: UInt = LSUOpType.getCboOpcode(LSUOpType.cbo_flush)
+  def inval: UInt = LSUOpType.getCboOpcode(LSUOpType.cbo_inval)
+  def zero:  UInt = LSUOpType.getCboOpcode(LSUOpType.cbo_zero)
 
   def isCboClean(in: UInt): Bool = in === this.clean
   def isCboFlush(in: UInt): Bool = in === this.flush
   def isCboInval(in: UInt): Bool = in === this.inval
   def isCboZero(in: UInt):  Bool = in === this.zero
-
-  def width: Int = 2
-  def apply() = UInt(width.W)
 }
 

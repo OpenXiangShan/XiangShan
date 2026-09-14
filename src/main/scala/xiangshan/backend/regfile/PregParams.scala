@@ -2,6 +2,7 @@ package xiangshan.backend.regfile
 
 import chisel3._
 import chisel3.util._
+import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 
 abstract class PregParams {
@@ -26,6 +27,17 @@ abstract class PregParams {
   def bankAddr(addr: UInt): UInt = {
     require(numBank > 0 && isPow2(numBank), s"numBank must be a positive power of two, but got $numBank")
     addr(addrWidth - 1, bankRaddrWidth)
+  }
+
+  def getNumWrite(backendParams: BackendParams): Int = {
+    this match {
+      case _: FpPregParams => backendParams.getFpRfWriteSize
+      case _: IntPregParams => backendParams.getIntRfWriteSize
+      case _: V0PregParams => backendParams.getV0RfWriteSize
+      case _: VfPregParams => backendParams.getVfRfWriteSize
+      case _: VlPregParams => backendParams.getVlRfWriteSize
+      case _ => throw new RuntimeException(s"the type[${this.getClass}] is not permitted to call getNumWrite method")
+    }
   }
 }
 

@@ -30,6 +30,7 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
@@ -64,6 +65,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   // tlb hint
   val tlb_id          = UInt(log2Up(loadfiltersize).W)
   val tlb_full        = Bool()
+  val rep_from_unalign_head = Bool()
 
   // alias
   def mem_amb       = cause(LoadReplayCauses.C_MA)

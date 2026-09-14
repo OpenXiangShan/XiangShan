@@ -90,7 +90,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_hitEntry = Mux1H(s1_hitOH, entries)
 
   // we do always-taken prediction in ubtb
-  io.prediction.valid            := s1_hit
+  io.prediction.valid            := s1_hit && io.enable
   io.prediction.bits.taken       := s1_hit
   io.prediction.bits.cfiPosition := s1_hitEntry.slot1.position
   io.prediction.bits.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)

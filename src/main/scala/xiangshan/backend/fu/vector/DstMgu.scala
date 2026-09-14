@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.vector.Bundles.VSew
-import yunsuan.vector._
+import yunsuan.vector.Common.SewOH
 
 class DstMgu(vlen: Int)(implicit p: Parameters) extends Module {
   val io = IO(new DstMguIO(vlen))

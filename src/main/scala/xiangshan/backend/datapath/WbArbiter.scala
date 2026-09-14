@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.Vstart
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.backend.regfile.RfWritePortBundle
+import xiangshan.backend.issue.{FpScheduler, IntScheduler, NoScheduler, SchdBlockParams, VecScheduler}
 
 class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
   val in = Flipped(DecoupledIO(gen))
@@ -88,6 +89,14 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
     val hartId = Input(UInt(8.W))
   }
 
+  val dataConfigs = schdParams.schdType match {
+    case IntScheduler() => Seq(IntData(), VlData())
+    case FpScheduler() => Seq(FpData())
+    case VecScheduler() => Seq(VecData(), V0Data(), VlData())
+    case NoScheduler() => ???
+  }
+
+  // Todo: fix rebase
   val fromIntExu: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.intSchdParams.get.genNewExuOutputDecoupledBundle)
 
   val fromFpExu: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = Flipped(params.fpSchdParams.get.genNewExuOutputDecoupledBundle)
@@ -105,7 +114,7 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
   val toVlPreg = Output(backendParams.genVlWriteBackBundle)
 
   val toCtrlBlock = new Bundle {
-    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle.flatten)
+    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle(needExtraVld = false).flatten)
   }
 }
 
@@ -115,23 +124,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   // split
   val fromExuPre = collection.mutable.Seq() ++ (io.fromIntExu ++ io.fromFpExu ++ io.fromVfExu).flatten
   val wbReplaceVld = fromExuPre
-  if (schdParams.isVecSchd) {
-    val fromExuVld: Seq[DecoupledIO[NewExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
-    val vldMgu: Seq[VldMergeUnit] = fromExuVld.map(x => Module(new VldMergeUnit(x.bits.params)))
-    vldMgu.zip(fromExuVld).foreach { case (mgu, exu) =>
-      mgu.io.flush := io.flush
-      mgu.io.writeback <> exu
-      // Since xs will flush pipe, when vstart is not 0 and execute vector mem inst, the value of vstart in CSR is the
-      // first element of this vector instruction. When exception occurs, the vstart in writeback bundle is the new one,
-      // So this vstart should never be used as the beginning of vector mem operation.
-      mgu.io.writeback.bits.toRob.bits.vls.get.vpu.vstart := io.fromCSR.vstart
-    }
-    val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
-    println("vldIdx: " + vldIdx)
-    vldIdx.zip(vldMgu).foreach { case (id, wb) =>
-      wbReplaceVld.update(id, wb.io.writebackAfterMerge)
-    }
-  }
+
   val fromExu = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld.toSeq)))
 
   // io.fromExuPre ------------------------------------------------------------> fromExu

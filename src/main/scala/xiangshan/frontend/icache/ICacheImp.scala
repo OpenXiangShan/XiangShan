@@ -71,7 +71,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  Size(set * way * block): $nSets * $nWays * $blockBytes = ${nSets * nWays * blockBytes} bytes")
   println(s"  Replacer: $Replacer")
   println(s"  Mshr(fetch, prefetch): $NumFetchMshr, $NumPrefetchMshr entries")
-  println(s"  WayLookupSize: $WayLookupSize entries")
+  println(s"  WayLookup: $PrefetchDepth entries")
   println(s"  DataBanks: $DataBanks banks")
   println(s"  DataEccUnit: $DataEccUnit bits")
   println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
