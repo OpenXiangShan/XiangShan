@@ -11,6 +11,11 @@ class BackendAgent:
     def __init__(self) -> None:
         self.interface = None
         self._drive_if = None
+        self._commit_valid_driven = False
+        self._redirect_valid_driven = False
+        self._resolve_valid_channels: set[int] = set()
+        self._call_ret_commit_valid_lanes: set[int] = set()
+        self._ftq_idx_ahead_valid_driven = False
 
     @staticmethod
     def _write(signal, value: int) -> None:
@@ -24,6 +29,11 @@ class BackendAgent:
             raise TypeError(f"BackendAgent.bind requires a backend control interface, got {type(target).__name__}")
         self.interface = target
         self._drive_if = target
+        self._commit_valid_driven = False
+        self._redirect_valid_driven = False
+        self._resolve_valid_channels.clear()
+        self._call_ret_commit_valid_lanes.clear()
+        self._ftq_idx_ahead_valid_driven = False
 
     @staticmethod
     def _encode_backend_addr(addr: int) -> int:
@@ -31,16 +41,18 @@ class BackendAgent:
 
     def clear_one_shot_signals(self) -> None:
         assert self._drive_if is not None
-        self._write(self._drive_if.redirect_valid, 0)
-        for channel in range(3):
+        if self._redirect_valid_driven:
+            self._write(self._drive_if.redirect_valid, 0)
+            self._redirect_valid_driven = False
+        for channel in self._resolve_valid_channels:
             self._write(self._drive_if.resolve_valid[channel], 0)
-        for lane in range(8):
+        self._resolve_valid_channels.clear()
+        for lane in self._call_ret_commit_valid_lanes:
             self._write(self._drive_if.call_ret_commit_valid[lane], 0)
-            self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], 0)
-            self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], 0)
-        self._write(self._drive_if.ftq_idx_ahead_valid, 0)
-        self._write(self._drive_if.ftq_idx_ahead_flag, 0)
-        self._write(self._drive_if.ftq_idx_ahead_value, 0)
+        self._call_ret_commit_valid_lanes.clear()
+        if self._ftq_idx_ahead_valid_driven:
+            self._write(self._drive_if.ftq_idx_ahead_valid, 0)
+            self._ftq_idx_ahead_valid_driven = False
 
     def start_cycle(self, can_accept: int, wfi_req: int = 0, backend_empty: int = 1) -> None:
         assert self._drive_if is not None
@@ -51,23 +63,25 @@ class BackendAgent:
 
     def drive_ftq_idx_ahead(self, txn: Optional[FtqIdxAheadTxn]) -> None:
         assert self._drive_if is not None
-        self._write(self._drive_if.ftq_idx_ahead_valid, 0)
-        self._write(self._drive_if.ftq_idx_ahead_flag, 0)
-        self._write(self._drive_if.ftq_idx_ahead_value, 0)
         if txn is None:
             return
         self._write(self._drive_if.ftq_idx_ahead_flag, int(txn.ftq_flag))
         self._write(self._drive_if.ftq_idx_ahead_value, int(txn.ftq_value))
-        self._write(self._drive_if.ftq_idx_ahead_valid, 1)
+        if not self._ftq_idx_ahead_valid_driven:
+            self._write(self._drive_if.ftq_idx_ahead_valid, 1)
+            self._ftq_idx_ahead_valid_driven = True
 
     def drive_commit(self, entry: Optional[FtqEntry]) -> None:
         assert self._drive_if is not None
-        self._write(self._drive_if.commit_valid, 0)
         if entry is None:
+            if self._commit_valid_driven:
+                self._write(self._drive_if.commit_valid, 0)
+                self._commit_valid_driven = False
             return
         self._write(self._drive_if.commit_bits_flag, int(entry.ftq_flag))
         self._write(self._drive_if.commit_bits_value, int(entry.ftq_value))
         self._write(self._drive_if.commit_valid, 1)
+        self._commit_valid_driven = True
 
     def drive_resolves(self, entries: Iterable[ResolveEntry]) -> None:
         assert self._drive_if is not None
@@ -81,14 +95,18 @@ class BackendAgent:
             self._write(self._drive_if.resolve_bits_mispredict[channel], int(entry.mispredict))
             self._write(self._drive_if.resolve_bits_attribute_branch_type[channel], int(entry.branch_type))
             self._write(self._drive_if.resolve_bits_attribute_ras_action[channel], int(entry.ras_action))
-            self._write(self._drive_if.resolve_valid[channel], 1)
+            if channel not in self._resolve_valid_channels:
+                self._write(self._drive_if.resolve_valid[channel], 1)
+                self._resolve_valid_channels.add(channel)
 
     def drive_call_ret_commit(self, group: Iterable[object]) -> None:
         assert self._drive_if is not None
         for lane, inst in enumerate(list(group)[:8]):
             self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], int(getattr(inst, "ras_action", 0)))
             self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], int(getattr(inst, "ftq_value", 0)))
-            self._write(self._drive_if.call_ret_commit_valid[lane], 1)
+            if lane not in self._call_ret_commit_valid_lanes:
+                self._write(self._drive_if.call_ret_commit_valid[lane], 1)
+                self._call_ret_commit_valid_lanes.add(lane)
 
     def drive_redirect(self, payload: Mapping[str, object]) -> None:
         assert self._drive_if is not None
@@ -117,4 +135,6 @@ class BackendAgent:
         self._write(self._drive_if.redirect_bits_satp_flush, int(payload.get("satp_flush", 0)))
         self._write(self._drive_if.redirect_bits_debug_is_ctrl, debug_is_ctrl)
         self._write(self._drive_if.redirect_bits_debug_is_mem_vio, debug_is_mem_vio)
-        self._write(self._drive_if.redirect_valid, 1)
+        if not self._redirect_valid_driven:
+            self._write(self._drive_if.redirect_valid, 1)
+            self._redirect_valid_driven = True

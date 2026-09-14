@@ -26,7 +26,17 @@ from env.support import fold_pc
 
 class _Signal:
     def __init__(self, value: int = 0) -> None:
-        self.value = int(value)
+        self._value = int(value)
+        self.write_count = 0
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    @value.setter
+    def value(self, value: int) -> None:
+        self._value = int(value)
+        self.write_count += 1
 
 
 class _ObserveIf:
@@ -411,12 +421,16 @@ def _redirect_drive_if():
 
 
 def _ftq_idx_ahead_drive_if():
-    fields = (
-        "ftq_idx_ahead_valid",
-        "ftq_idx_ahead_flag",
-        "ftq_idx_ahead_value",
+    return SimpleNamespace(
+        redirect_valid=_Signal(),
+        resolve_valid=[_Signal() for _ in range(3)],
+        call_ret_commit_valid=[_Signal() for _ in range(8)],
+        call_ret_commit_bits_ras_action=[_Signal() for _ in range(8)],
+        call_ret_commit_bits_ftq_ptr_value=[_Signal() for _ in range(8)],
+        ftq_idx_ahead_valid=_Signal(),
+        ftq_idx_ahead_flag=_Signal(),
+        ftq_idx_ahead_value=_Signal(),
     )
-    return SimpleNamespace(**{field: _Signal() for field in fields})
 
 
 def test_format_queue_pc_ranges_keeps_adjacent_ftq_segments_distinct() -> None:
@@ -612,7 +626,7 @@ def test_backend_agent_rejects_redirect_without_structured_class() -> None:
         agent.drive_redirect({"redirect_class": "control_flow"})
 
 
-def test_backend_agent_drives_and_clears_ftq_idx_ahead() -> None:
+def test_backend_agent_clears_ftq_idx_ahead_valid_without_rewriting_payload() -> None:
     agent = BackendAgent()
     drive_if = _ftq_idx_ahead_drive_if()
     agent._drive_if = drive_if
@@ -622,12 +636,47 @@ def test_backend_agent_drives_and_clears_ftq_idx_ahead() -> None:
     assert drive_if.ftq_idx_ahead_valid.value == 1
     assert drive_if.ftq_idx_ahead_flag.value == 1
     assert drive_if.ftq_idx_ahead_value.value == 63
+    drive_if.call_ret_commit_bits_ras_action[0].value = 2
+    drive_if.call_ret_commit_bits_ftq_ptr_value[0].value = 9
+    valid_write_count = drive_if.ftq_idx_ahead_valid.write_count
 
+    agent.clear_one_shot_signals()
+    assert drive_if.ftq_idx_ahead_valid.write_count == valid_write_count + 1
     agent.drive_ftq_idx_ahead(None)
+    agent.clear_one_shot_signals()
 
     assert drive_if.ftq_idx_ahead_valid.value == 0
-    assert drive_if.ftq_idx_ahead_flag.value == 0
-    assert drive_if.ftq_idx_ahead_value.value == 0
+    assert drive_if.ftq_idx_ahead_valid.write_count == valid_write_count + 1
+    assert drive_if.ftq_idx_ahead_flag.value == 1
+    assert drive_if.ftq_idx_ahead_value.value == 63
+    assert drive_if.call_ret_commit_bits_ras_action[0].value == 2
+    assert drive_if.call_ret_commit_bits_ftq_ptr_value[0].value == 9
+
+
+def test_backend_agent_writes_commit_valid_for_each_transaction_and_clears_once() -> None:
+    agent = BackendAgent()
+    drive_if = SimpleNamespace(
+        commit_valid=_Signal(),
+        commit_bits_flag=_Signal(),
+        commit_bits_value=_Signal(),
+    )
+    agent._drive_if = drive_if
+
+    agent.drive_commit(FtqEntry(ftq_flag=0, ftq_value=3))
+    valid_write_count = drive_if.commit_valid.write_count
+    agent.drive_commit(FtqEntry(ftq_flag=1, ftq_value=4))
+
+    assert drive_if.commit_valid.value == 1
+    assert drive_if.commit_valid.write_count == valid_write_count + 1
+    assert drive_if.commit_bits_flag.value == 1
+    assert drive_if.commit_bits_value.value == 4
+
+    agent.drive_commit(None)
+    assert drive_if.commit_valid.value == 0
+    assert drive_if.commit_valid.write_count == valid_write_count + 2
+
+    agent.drive_commit(None)
+    assert drive_if.commit_valid.write_count == valid_write_count + 2
 
 
 @pytest.mark.parametrize(
