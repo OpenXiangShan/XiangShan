@@ -141,7 +141,7 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
             bits = tuple(
                 bit
                 for bit in _CFVEC_EXCEPTION_BITS
-                if _read_exception_bit(observe.cfvec_exception_vec[slot][bit]) != 0
+                if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) != 0
             )
             if bits:
                 records.append(

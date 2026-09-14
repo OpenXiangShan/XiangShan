@@ -178,7 +178,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
                     "exception_bits": tuple(
                         bit
                         for bit in _OBSERVED_EXCEPTION_BITS
-                        if int(observe.cfvec_exception_vec[slot][bit].value or 0) == 1
+                        if int(getattr(observe, f"cfvec_exception_vec_{bit}")[slot].value or 0) == 1
                     ),
                 }
             )

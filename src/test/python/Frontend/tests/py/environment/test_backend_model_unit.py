@@ -40,7 +40,11 @@ class _ObserveIf:
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
         self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec = [[_Signal() for _ in range(24)] for _ in range(8)]
+        self.cfvec_exception_vec_1 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_2 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_19 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_20 = [_Signal() for _ in range(8)]
 
 
 class _EmptyTrace:
@@ -989,7 +993,7 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
     _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
     interface.cfvec_fixed_taken[0].value = 1
-    interface.cfvec_exception_vec[0][2].value = 1
+    interface.cfvec_exception_vec_2[0].value = 1
 
     model._sample_cfvec()
 
@@ -1023,7 +1027,7 @@ def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
 
     _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_exception_vec[0][2].value = 1
+    interface.cfvec_exception_vec_2[0].value = 1
 
     model._sample_cfvec()
 

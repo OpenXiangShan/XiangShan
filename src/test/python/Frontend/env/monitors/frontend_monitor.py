@@ -410,11 +410,11 @@ class FrontendMonitor:
             ftq_offset = self._read(self.interface.cfvec_ftq_offset[i], 0)
             is_last = bool(self._read(self.interface.cfvec_is_last_in_ftq_entry[i], 0))
             ex_sum = (
-                self._read(self.interface.cfvec_exception_vec[i][1], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][2], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][12], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][19], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][20], 0)
+                self._read(self.interface.cfvec_exception_vec_1[i], 0)
+                + self._read(self.interface.cfvec_exception_vec_2[i], 0)
+                + self._read(self.interface.cfvec_exception_vec_12[i], 0)
+                + self._read(self.interface.cfvec_exception_vec_19[i], 0)
+                + self._read(self.interface.cfvec_exception_vec_20[i], 0)
             )
             if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
                 recovery_first_cfvec_seen = True

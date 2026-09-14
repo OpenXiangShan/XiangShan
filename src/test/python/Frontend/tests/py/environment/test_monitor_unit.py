@@ -26,7 +26,11 @@ class _ObserveIf:
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
         self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec = [[_Signal() for _ in range(24)] for _ in range(8)]
+        self.cfvec_exception_vec_1 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_2 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_19 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_20 = [_Signal() for _ in range(8)]
 
 
 class _Trace:
@@ -155,7 +159,7 @@ def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
     _set_first_cfvec(interface, 0x8000_3248)
     interface.cfvec_instr[0].value = 0x05130000
     interface.cfvec_is_rvc[0].value = 1
-    interface.cfvec_exception_vec[0][2].value = 1
+    interface.cfvec_exception_vec_2[0].value = 1
     monitor.on_clock_edge(20)
 
     assert monitor.get_errors() == []
@@ -225,7 +229,7 @@ def test_redirect_recovery_accepts_ftq_derived_exception_pc_with_matching_foldpc
     monitor.on_clock_edge(11)
 
     _set_first_cfvec(interface, target)
-    interface.cfvec_exception_vec[0][1].value = 1
+    interface.cfvec_exception_vec_1[0].value = 1
     monitor.on_clock_edge(12)
 
     assert monitor.get_errors() == []
@@ -244,7 +248,7 @@ def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
 
     _set_first_cfvec(interface, target)
     interface.cfvec_foldpc[0].value = fold_pc(target) ^ 1
-    interface.cfvec_exception_vec[0][1].value = 1
+    interface.cfvec_exception_vec_1[0].value = 1
     import pytest
 
     with pytest.raises(AssertionError, match="cfVec foldpc does not match FTQ-derived PC"):

@@ -3685,6 +3685,13 @@ class BackendModel:
                 1 if bool(pred_taken) else 0,
             )
 
+        exception_vecs = (
+            (1, self.observe_if.cfvec_exception_vec_1),
+            (2, self.observe_if.cfvec_exception_vec_2),
+            (12, self.observe_if.cfvec_exception_vec_12),
+            (19, self.observe_if.cfvec_exception_vec_19),
+            (20, self.observe_if.cfvec_exception_vec_20),
+        )
         for i in range(8):
             if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
                 continue
@@ -3697,8 +3704,8 @@ class BackendModel:
             ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
             is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
             exception_bits = 0
-            for bit in (1, 2, 12, 19, 20):
-                if self._read(self.observe_if.cfvec_exception_vec[i][bit], 0) != 0:
+            for bit, signals in exception_vecs:
+                if self._read(signals[i], 0) != 0:
                     exception_bits |= 1 << int(bit)
 
             recovery_target_pc = self._current_recovery_target_pc()

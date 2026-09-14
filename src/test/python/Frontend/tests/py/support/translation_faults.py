@@ -56,8 +56,8 @@ def _capture_cfvec_deliveries(env) -> list[dict]:
                 continue
             exception_bits = tuple(
                 bit
-                for bit in range(24)
-                if _read_exception_bit(observe.cfvec_exception_vec[slot][bit]) == 1
+                for bit in (1, 2, 12, 19, 20)
+                if _read_exception_bit(getattr(observe, f"cfvec_exception_vec_{bit}")[slot]) == 1
             )
             records.append(
                 {
