@@ -1,6 +1,22 @@
 # PrefetchBuffer 设计规格
 
-本文定义 PrefetchBuffer（PB）的实现规范，包括预取分配与回填、MainPipe 请求处理、LoadPipe 接口、冲突处理和 PB 核心模块。跨模块冲突的完整规则见 [conflict.md](conflict.md)。
+> 文档状态：实现约束与接口契约。涉及 ready/valid、状态转换、所有权交接和统计口径的条款是规范性要求；代码注释、测试和性能分析不能覆盖或隐式修改这些条款。
+
+本文定义 PrefetchBuffer（PB）的实现规范，包括预取分配与回填、MainPipe 请求处理、LoadPipe 接口、冲突处理、PB 状态机、WBQueue 交接、统计口径和 RTL 组织要求。跨模块冲突的完整规则见 [conflict.md](conflict.md)；本文件保留模块行为和接口的权威摘要，两份文档冲突时以更具体的接口/时序条款为准。
+
+## 文档导航
+
+| 章节 | 内容 |
+| --- | --- |
+| 冲突与一致性 | 跨模块职责、同拍事件和全局所有权不变量 |
+| prefetchReq / prefetchRefill | MSHR 接纳、PB 预留、合并、直接回填和 Probe 保护窗口 |
+| storeReq / probeReq | MainPipe Store 搬运、Probe 应答和 S3 完成 |
+| loadpipe | Load 并行查询、S1 授权、S2 数据返回和 `dcacheUse` |
+| PB 核心模块 | 容量、状态机、MSHR/MainPipe/LoadPipe/WBQueue 接口 |
+| 预取统计与代码风格 | 计数器语义、延迟观测、Bundle 和 RTL 组织 |
+| 配套修改 | 实现交付清单与验收边界 |
+
+## 1. 范围、术语与不变量
 
 PB 属于 L1 DCache 内部，可持有干净的 B（Branch）或 T（Trunk）权限。数据修改必须在搬入 DCache 后进行，PB 不接收 Store 数据写入。本版面向标量 Load 与现有 MainPipe Store 路径，不扩展 AMO、向量和独立 StorePipe。
 
@@ -11,9 +27,24 @@ PB 容量为 16 个 CacheLine。
 上述 16 项是当前 DefaultConfig 和本轮验证使用的容量；容量仍由
 `DCacheParameters.nPBEntries` 参数化。
 
-接口迁移状态：PB、MainPipe、LoadPipe、MissQueue、Wrapper 已适配本规格接口，删除旧 claim/readReq/finish/publish 等调用，不保留兼容包装。生产代码编译与分批定向测试已通过；各测试批次、孤立性能计数器测试、统计打印核对和已知多顶层 BoringUtils 测试限制记录见 `.planning/pb-refactor/progress.md` 与 `findings.md`。本轮按用户要求不运行 CI/CR；以上结果不代表工作负载验证或时序收敛。
+接口迁移状态：PB、MainPipe、LoadPipe、MissQueue、Wrapper 按本规格使用当前接口，删除旧 claim/readReq/finish/publish 等调用，不保留兼容包装。生产代码编译、定向测试和统计核对记录见 `.planning/pb-implementation/progress.md` 与 `.planning/pb-implementation/spec-coverage.md`；这些记录只说明对应批次的验证范围，不替代当前源代码、工作负载或时序验证。
 
-## 冲突与一致性
+### 规范性术语
+
+- **请求有效**：`valid=1`；**实际接收**：Decoupled 接口的 `fire=valid && ready`，或无 ready 接口的有效沿。
+- **命中**：本规格中的 `hit` 默认表示“可在本次阶段使用的数据读授权”；“目录中存在该物理块”明确写作 `match` 或 `owner`，不与 `hit` 混用。
+- **锁定**：PB 已把该 entry 的一致性/搬运责任交给 Probe、Store 或主动 Move；候选被选中、`valid=1` 或请求等待握手都不算锁定。
+- **交接点**：唯一改变外部所有权的握手沿。PB Release 是 `releaseReq.fire`，Probe/Move 是 MainPipe 的 `s3_*Done`，PB 回填是 `refillReq.fire`。
+
+### 全局不变量
+
+1. 同一物理 cache block 在 PB 中至多有一个非 `Invalid`、非 `Released` 的 entry；`matchBlock` 必须返回零或 one-hot。
+2. PB 只保存干净的 B/T 权限。任何 Store 字节写入都必须在数据搬入 DCache 后由后续 Store 流程完成。
+3. 数据和权限的外部所有权只在明确的交接点转移。未握手的候选、pending buffer 项或 MainPipe 在途请求都不能提前使 entry 失效。
+4. 已在 S1 获得 Load 授权的请求必须能够完成固定的 S2 响应；之后发生的 Probe、Store、Move 或 Release 不能覆盖其数据窗口或身份。
+5. 统计、错误上报和 WFI 观测逻辑不得驱动功能性 ready、授权、仲裁或状态转换。
+
+## 2. 冲突与一致性
 
 PB 与 MainPipe、LoadPipe、MissQueue、WBQueue、ProbeQueue 的冲突责任、同拍优先级和边界时序统一记录在 [conflict.md](conflict.md)。以下仅保留关键摘要，详细规则以 `conflict.md` 为准。
 
@@ -43,7 +74,7 @@ PB 组合逻辑使用沿前状态，寄存器在时钟沿统一更新。对同�
 
 PB 的 `entryLocked` 只表示已经取得 Probe 或 Move 所有权，不等同于“有数据可读”；`entryReadable` 只表示普通 Load 可以取数。Released 是一次 Release 交接后的退休窗口，不能重新授权新查询、分配或接管。这样 PB 的状态检查与原有五类机制形成分层保护：MainPipe 管流水冲突，MissQueue 管 MSHR/refill/probe 窗口，WBQueue 管写回地址唯一性，PB 管自身 entry 的物理匹配和生命周期。
 
-## prefetchReq
+## 3. prefetchReq
 
 prefetchReq 经过 MainPipe，同时查询 DCache 和 PB。需要发起 miss 时，进入 MissQueue 进行分配、合并或拒绝判断。
 
@@ -66,7 +97,7 @@ PB 分配成功的时钟沿建立 Reserved，最早下一拍参与 fill，不在
 
 未取得 PB entry 不得单独阻止已发出事务的 Grant 接收或正常 GrantAck。MQ 必须保留接收数据所需资源；等待 PB 的 MSHR 不占用 MainPipe，不阻止 PB fill 仲裁、维护、Probe 完成及 WBQueue 推进。多个等待申请采用公平仲裁，重复选中同一 MSHR 不能产生重复预留。MSHR 仅在预留、数据和通知责任均已正确处理后才能释放或复用。
 
-## prefetchRefill
+## 4. prefetchRefill
 
 ### 合并与回填目的地
 
@@ -96,7 +127,7 @@ MQ 的 PB owner 使用 MSHR 自身的物理块地址产生，不依赖是否已�
 
 错误结果也通过同一 refillReq.fire 提交并由 MQ 记录完成：denied 后无 PB 数据所有权，Poison 由 PB 的错误清理路径接管。第一拍 Grant 之前不因等待 PB 或 Reserved 单独施加本窗口的阻挡，继续遵循原有 L2/MQ 事务排序约定。
 
-## storeReq
+## 5. storeReq
 
 Store 首次命中 PB 后，先把 PB 原始数据和干净 B/T 权限搬入 DCache，随后 replay，实际写入由后续正常 Store 流程完成。PB 不接收 Store 字节数据或 mask，即使已有 T 权限也不在本次搬运中修改数据。
 
@@ -110,19 +141,19 @@ S2 锁定成功后需要选择 DCache 目标 way、处理替换。替换冲突�
 
 Store 响应/replay 的责任由 MainPipe 持有：PB 所有权导致重试、S2 取消或成功搬运后都须准确返回一次响应，不能把待回复 Store credit 隐藏到已解锁 PB entry 中等待 Probe 或未来 move 返回。普通 PB miss（success=false 且 retry=false）继续走原有 MQ 流程。新接口无 PB→MainPipe 的异步 storeReplay 端口，该责任已迁回 MainPipe。
 
-### Scheme B: S3-serialized Store completion
+### 5.1 S3 串行化 Store 完成（Scheme B）
 
-`StoreRespQueue` is removed. S3 is the only completion outlet for a Store transaction:
+删除 `StoreRespQueue`，S3 是 Store 事务唯一的完成出口：
 
-- A normal S3 Store hit or a successful PB-to-DCache move produces its completion through the S3 response slot.
-- If an S2 Store must terminate through MissQueue admission, MissQueue replay, B→T failure, PB retry, or PB move abort, MainPipe does not emit the external response directly from S2. It waits until the S3 response slot is available, advances the request into an `s3_response_only` cycle, and emits the response from the registered S3-side response path.
-- `s3_response_only` performs no tag/meta/data write, victim writeback, access-bit update, replacement update, PB completion, or other cache-side effect. It carries the original Store ID and the replay/miss result captured at S2.
-- A normal S3 Store completion has priority over an S2 terminal response. When S3 is completing a normal Store, the S2 Store remains stalled; this prevents two Store responses from being produced in one cycle.
-- Store MissQueue valid is also gated by the S3 response-slot availability. Thus MissQueue admission and the corresponding terminal Store response cannot be separated by an untracked queue entry.
+* 普通 S3 Store 命中和成功的 PB→DCache 搬运，都通过 S3 响应槽完成。
+* 若 S2 Store 因 MissQueue 接纳、MissQueue replay、B→T 失败、PB retry 或 move abort 结束，MainPipe 不从 S2 直接输出外部响应。请求必须等 S3 响应槽可用，进入一个 `s3_response_only` 周期，再由已寄存的 S3 路径输出。
+* `s3_response_only` 不执行 tag/meta/data 写入、victim 写回、访问位/替换状态更新、PB 完成或其他缓存副作用，只携带 S2 保存的 Store ID 和 replay/miss 结果。
+* 普通 S3 Store 完成优先于 S2 终结响应。S3 正在完成普通 Store 时，S2 Store 保持阻塞，保证每拍至多产生一个 Store 响应。
+* Store 发往 MissQueue 的 valid 同样受 S3 响应槽可用性约束，避免 MissQueue 已接纳而对应 Store 响应没有可追踪出口。
 
-The registered response slot emits at most one Store response per cycle. This adds at least one cycle of response latency to an S2-terminal Store, but removes the PB-capacity-coupled credit queue and keeps response identity entirely in MainPipe.
+寄存的响应槽每拍至多输出一个 Store 响应。S2 终结型 Store 因而至少增加一个响应周期；代价是删除与 PB 容量耦合的 credit queue，并把响应身份完全保留在 MainPipe 内。
 
-## probeReq
+## 6. probeReq
 
 MQ 的保护窗口不变：准备回填 PB 的 MSHR 从第一拍 Grant 握手当拍起，到 PB fill 握手当拍为止阻挡同物理块 Probe，不要求 alias 匹配或已取得 PB entry。ProbeQueue 入口及 MainPipe 的 MQ owner 检查必须保留，覆盖已排队 Probe。普通 DCache 回填沿用原规则。
 
@@ -171,7 +202,7 @@ S3 应答被 WBQueue 接收时，仅当保存的 `locked=true`，MainPipe 发一
 
 ProbeAck 与主动 Release 被 WBQueue 接收的事件都沿用 DCache→LSU 的 release 通知，PB Load 继续参加 LoadQueueRAR 跟踪与恢复。PB 的新 Load 授权截止点仍是锁定沿；不能只依靠 RAR 修复锁定后的新读取。
 
-## loadpipe
+## 7. loadpipe
 
 ### 设计原则
 
@@ -267,7 +298,7 @@ Load 授权不依赖当拍 claim.fire，也不因为 Probe 在 ProbeQueue 中等
 
 即使 Load B 在 C0 的 S0 已被接收，C1 的 S1 也必须因当前状态为锁定状态而拒绝授权。S3 等待多久，都不改变这个截止点。该规则同样适用于 S1 Store 锁定和 S0 move 接收；直接 release 的沿前授权及迟到使用按“搬运与直接驱逐”节处理。真正的 Store 写入仍在搬运完成并 replay 之后。
 
-## PB 核心模块
+## 8. PB 核心模块
 
 ### 容量、数据与身份
 
@@ -277,7 +308,7 @@ Load 授权不依赖当拍 claim.fire，也不因为 Probe 在 ProbeQueue 中等
 | --- | --- |
 | entry 数量 | 默认 16 项，参数化配置；Reserved、锁定状态和 Released 均占用容量 |
 | 每项数据 | 一条缓存块，当前为 64 B；默认数据容量为 512 B，不含 metadata |
-| Load 读端口 | 与标量 LoadPipe 数量一致，当前为三路独立 S1 查询、S2 响应接口 |
+| Load 读端口 | 与标量 LoadPipe 数量一致，由 `LoadPipelineWidth` 参数化；当前 DefaultConfig 为三路独立 S1 查询、S2 响应接口 |
 | Load 返回窗口 | 与现有 LoadPipe 数据窗口一致，当前为 128 bit；不等于增加向量支持 |
 | 物理目录 | 全相联，按物理块地址查询 |
 | 数据实现 | 当前使用寄存器阵列；本规格不据此承诺 SRAM 宏实现或目标频率 |
@@ -333,6 +364,21 @@ Reserved 项在取消或回填前禁止替换、复用，故 MSHR 只需保存 e
 不保留独立的 take、publish 或 fillDone：allocReq.fire 提交预留；refillReq.fire 提交回填。MQ 根据后者与 missEntryId 寄存完成状态，握手当拍仍阻挡匹配 Probe，下一拍才由 PB 状态和 MainPipe 接管。正常回填成为 Resident；denied 释放为 Invalid；未 denied 的 corrupt 成为 Poison。MSHR 释放还须满足正常 GrantAck 条件。
 
 若数据写端口未能在当前沿接收整行，PB 必须令 refillReq.ready=false，不能先握手后排队写入而提前解除保护。MainPipe 不产生 PB 预取回填，也不因等待 PB 回填占用流水级。
+
+### 接口方向与握手总表
+
+PB 的同名阶段信号属于不同对端，不能仅凭字段名推断握手方式：
+
+| 接口 | 查询/响应方式 | `valid` 的含义 | `ready` 的含义 |
+| --- | --- | --- | --- |
+| `PBLoadIO.s1_paddr` | `Valid`，无反压 | LoadPipe 本拍有 S1 物理地址 | 不存在；LoadPipe 的 S1→S2 延迟固定 |
+| `PBLoadIO.s2_dataResp` | `Valid`，无反压 | 对应 S1 查询的固定 S2 响应 | 不存在；`s2_use` 只是 LSU 对实际使用的反馈 |
+| `PBPipeIO.s1_paddr` | `Decoupled` | MainPipe 当前 S1 查询有效 | PB 能接收并保存该查询的后续响应 |
+| `PBPipeIO.s2_dataResp` | `Decoupled` | MainPipe 当前 S2 响应已准备好 | MainPipe 已消费整行响应；Store sideband 随该握手一起消费 |
+| `PBMSHRIO.allocReq/refillReq` | `Decoupled` | MQ 提交分配/回填请求 | PB 在本拍能提交对应状态和数据更新 |
+| `releaseReq` | `Decoupled` | PB 有一个待交接的 WB 请求 | WBQueue pending buffer 能接收该请求；只有 `fire` 才改变 PB 所有权 |
+
+除无 ready 的固定延迟接口外，所有 Decoupled 字段都必须遵守：`valid && !ready` 时保持 bits 稳定，不能因为候选刷新或下游阻塞而改写请求身份。无 ready 的 `s0_probeReq`、`s3_probeDone`、`s3_moveDone` 只在约定的实际事件沿采样，不能把候选 valid 当成已接收。
 
 ### 与 MainPipe 的接口
 
@@ -452,7 +498,7 @@ Release 沿前已授权的 Load 必须保留正确响应/身份；Released 只�
 
 PB 假定数据和 metadata 永远可靠，不产生本地 ECC 错误或 fatal 目录错误。L2 的 denied/corrupt 仍沿事务结果路径处理；进入低功耗等流程时，除 PB 的 Reserved、锁定状态、维护请求、整行响应和在途 Load/fill 通知外，还须计入 MQ 中尚无 PB entry 的有效事务，不能仅凭 PB 状态判断系统已空闲。
 
-## 预取统计修复与性能计数器
+## 9. 预取统计修复与性能计数器
 
 统计修复和新增观测是本次重构的必需交付，不能只实现 PB 数据路径后继续沿用失真的 L1 预取结果。统计应支持分析容量压力、预取前瞻距离、有效使用、搬运等待和额外 replay，并能用于控制变量的性能研究。
 
@@ -532,7 +578,7 @@ warmup 后清零统计不得清除功能上的 used、来源或 pending。延迟
 
 交付计数器字典和 CI/CR 日志解析结果，至少能回答：填了多少块、多少实际被用到、多少未用就退出、PB 占用在哪里、等待槽位与等待搬运各占多少、预取回填后多久使用，以及 PB 引入多少 Load replay。
 
-## 代码风格与可读性
+## 10. 代码风格与可读性
 
 代码应让读者直接看出请求来自哪里、处于哪一拍、何时生效以及为何需要该条件。不能以减少字符数代替清晰表达，也不能仅靠增加注释弥补含糊命名和混杂的逻辑组织。
 
@@ -656,7 +702,7 @@ XSPerfAccumulate("refill", refillFire)
 
 注释必须反映目标实现，删除失效的“claim[0] 优先”或“当拍 claim 一律禁止 Load”等旧说明。采用 one-hot 时解释其位与 entry 的对应关系，不仅写“优化时序”。命名重构与代码分区不能改变寄存边界、握手行为或同拍优先关系；必要的功能变化应能与纯可读性调整分别审阅。
 
-## 配套修改
+## 11. 配套修改
 
 ### 本版需要落实的修改
 
