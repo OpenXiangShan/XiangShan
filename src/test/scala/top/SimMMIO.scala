@@ -161,7 +161,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   } else {
     // GSIM has no external-RTL blackbox support. Preserve the existing
     // DMA protection path when the IOMMU is intentionally disabled.
-    iopmp.slaveNodes(0) := AXI4IdIndexer(10) := dmac.masterNode
+    iopmp.slaveNodes(0) := dmac.masterNode
   }
   deviceMemXbar := iopmp.masterNodes(0)
   iommu.foreach(i => deviceMemXbar := i.dsMasterNode)
