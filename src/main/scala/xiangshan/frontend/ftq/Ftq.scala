@@ -263,10 +263,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   XSError(freeNumNext > FtqSize.U, "Ftq free entry count overflows\n")
 
+  // Which entries hold a group's later block. What a second block is worth is not what the predictor offers but what
+  // the icache goes on to fetch, and those are not the same number: a later block is always the younger of its pair,
+  // so it is the one a redirect reaches first.
+  private val entryIsLaterBlock = RegInit(VecInit(Seq.fill(FtqSize)(false.B)))
+
   private val entryEnqueue = (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
   when(entryEnqueue) {
-    predictionBlocks.zip(predictionPtrVec).foreach { case (block, ptr) =>
+    predictionBlocks.zip(predictionPtrVec).zipWithIndex.foreach { case ((block, ptr), blockIdx) =>
       when(block.valid) {
+        entryIsLaterBlock(ptr.value)      := (blockIdx > 0).B
         metaQueueResolveValid(ptr.value)  := false.B
         entryQueue(ptr.value).startPc     := block.bits.startPc
         entryQueue(ptr.value).taken       := block.bits.taken
@@ -278,6 +284,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Frontend bandwidth at the two interfaces Ftq sits between: fetch blocks accepted from Bpu, and fetch blocks
   // handed on to ICache. A 2-taken group raises the first directly; the second is what that is worth.
   XSPerfAccumulate("bandwidth_blocksEnqueued", Mux(entryEnqueue, prediction.bits.numBlocks, 0.U))
+  XSPerfAccumulate(
+    "bandwidth_laterBlocksEnqueued",
+    Mux(entryEnqueue && prediction.bits.numBlocks > 1.U, prediction.bits.numBlocks - 1.U, 0.U)
+  )
   XSPerfAccumulate("bandwidth_groupsEnqueued", entryEnqueue)
   XSPerfAccumulate("bandwidth_enqueueStalledCycles", prediction.valid && !prediction.ready)
 
@@ -358,6 +368,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "bandwidth_blocksFetched",
     Mux(io.toICache.toMainPipe.fire, Mux(io.fromICache.fromMainPipe.realTwoFetchValid, 2.U, 1.U), 0.U)
+  )
+  private val fetchHeadIsLater = entryIsLaterBlock(fetchPtr(0).value)
+  private val fetchNextIsLater = entryIsLaterBlock((fetchPtr(0) + 1.U).value)
+  XSPerfAccumulate(
+    "bandwidth_laterBlocksFetched",
+    Mux(
+      io.toICache.toMainPipe.fire,
+      fetchHeadIsLater.asUInt +&
+        Mux(io.fromICache.fromMainPipe.realTwoFetchValid, fetchNextIsLater.asUInt, 0.U),
+      0.U
+    )
   )
 
   for (stage <- 2 to 3) {
