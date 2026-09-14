@@ -18,52 +18,45 @@ package xiangshan.frontend.instruncache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModuleImp
-import freechips.rocketchip.tilelink.TLArbiter
+import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
-import utils.HasTLDump
 import xiangshan.WfiReqBundle
+import xiangshan.cache.CCHIType3Port
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 
 class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
-    with HasInstrUncacheParameters
-    with HasTLDump {
+    with HasInstrUncacheParameters {
 
   class InstrUncacheIO(implicit p: Parameters) extends InstrUncacheBundle {
     val fromIfu: IfuToInstrUncacheIO = Flipped(new IfuToInstrUncacheIO)
     val toIfu:   InstrUncacheToIfuIO = new InstrUncacheToIfuIO
     val flush:   Bool                = Input(Bool())
     val wfi:     WfiReqBundle        = Flipped(new WfiReqBundle)
+    val cchi:    CCHIType3Port       = new CCHIType3Port
   }
 
   val io: InstrUncacheIO = IO(new InstrUncacheIO)
 
-  private val (bus, edge) = wrapper.clientNode.out.head
-
   private val respArbiter = Module(new Arbiter(new InstrUncacheResp, nMmioEntry))
 
-  private val req         = io.fromIfu.req
-  private val resp        = io.toIfu.resp
-  private val mmioAcquire = bus.a
-  private val mmioGrant   = bus.d
+  private val req  = io.fromIfu.req
+  private val resp = io.toIfu.resp
 
-  private val entryAllocIdx = Wire(UInt())
+  private val entryAllocIdx = Wire(UInt(log2Up(nMmioEntry).W))
   private val reqReady      = WireInit(false.B)
 
-  // assign default values to output signals
-  bus.b.ready := false.B
-  bus.c.valid := false.B
-  bus.c.bits  := DontCare
-  bus.d.ready := false.B
-  bus.e.valid := false.B
-  bus.e.bits  := DontCare
+  // assign default values to output signals (read-only: no txdat)
+  io.cchi.txdat.valid := false.B
+  io.cchi.txdat.bits  := DontCare
+  io.cchi.rxrsp.ready := true.B
+  io.cchi.rxdat.ready := true.B
 
   private val entries = (0 until nMmioEntry).map { i =>
-    val entry = Module(new InstrUncacheEntry(edge))
+    val entry = Module(new InstrUncacheEntry)
 
     entry.io.id    := i.U(log2Up(nMmioEntry).W)
     entry.io.flush := io.flush
-
     entry.io.wfi.wfiReq := io.wfi.wfiReq
 
     // entry req
@@ -76,23 +69,25 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
     // entry resp
     respArbiter.io.in(i) <> entry.io.resp
 
-    entry.io.mmioGrant.valid := false.B
-    entry.io.mmioGrant.bits  := DontCare
-    when(mmioGrant.bits.source === i.U) {
-      entry.io.mmioGrant <> mmioGrant
+    // route CompData to entry by TxnID (same role as TL source)
+    entry.io.compData.valid := false.B
+    entry.io.compData.bits  := DontCare
+    when(io.cchi.rxdat.valid && io.cchi.rxdat.bits.TxnID === i.U) {
+      entry.io.compData <> io.cchi.rxdat
     }
     entry
   }
 
-  // override mmioGrant.ready to prevent x-propagation
-  mmioGrant.ready := true.B
-
-  entryAllocIdx := PriorityEncoder(entries.map(m => m.io.req.ready))
+  entryAllocIdx := PriorityEncoder(entries.map(_.io.req.ready))
 
   req.ready := reqReady
   resp <> respArbiter.io.out
 
-  TLArbiter.lowestFromSeq(edge, mmioAcquire, entries.map(_.io.mmioAcquire))
+  private val readReqArb = Module(new Arbiter(new FlitREQ, nMmioEntry))
+  (readReqArb.io.in zip entries.map(_.io.readReq)).foreach { case (in, readReq) =>
+    in <> readReq
+  }
+  io.cchi.txreq <> readReqArb.io.out
 
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := entries.map(_.io.wfi.wfiSafe).reduce(_ && _)

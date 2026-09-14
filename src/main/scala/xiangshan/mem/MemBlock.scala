@@ -45,7 +45,6 @@ import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.cache.CCHIType4Port
-import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
 trait HasMemBlockParameters extends HasXSParameter {
@@ -267,58 +266,15 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
-// triple buffer applied in i-mmio path (two at MemBlock, one at L2Top)
-class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasInstrUncacheConst {
-  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
-  lazy val module = new InstrUncacheBufferImpl
-
-  class InstrUncacheBufferImpl extends LazyModuleImp(this) {
-    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
-      out.a <> BufferParams.default(BufferParams.default(in.a))
-      in.d <> BufferParams.default(BufferParams.default(out.d))
-
-      // only a.valid, a.ready, a.address can change
-      // hoping that the rest would be optimized to keep MemBlock port unchanged after adding buffer
-      out.a.bits.data := 0.U
-      out.a.bits.mask := Fill(MmioBusBytes, 1.U(1.W))
-      out.a.bits.opcode := 4.U // Get
-      out.a.bits.size := log2Ceil(MmioBusBytes).U
-      out.a.bits.source := 0.U
-    }
-  }
-}
-
-// double Queue buffer on L1I CHI path (same depth as legacy ICacheBuffer: BufferParams.default x2)
-object ICacheCCHIBuffer {
+// double Queue buffer (depth 2 x2, same as legacy BufferParams.default x2 / chainNode(2))
+object DoubleQueueBuffer {
   private val depth = 2
   def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
     Queue(Queue(x, depth), depth)
 }
 
-// double Queue buffer on PTW CHI path (same depth as legacy ptw_to_l2_buffer at MemBlock)
-object PTWCCHIBuffer {
-  private val depth = 2
-  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
-    Queue(Queue(x, depth), depth)
-}
-
-// single Queue buffer on Uncache CHI path (replaces legacy uncache_port chainNode(2))
-object UncacheCCHIBuffer {
-  private val depth = 2
-  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
-    Queue(x, depth)
-}
-
-// double Queue buffer on I$ Ctrl CHI path (same depth as ICacheCCHIBuffer)
-object ICacheCtrlCCHIBuffer {
-  private val depth = 2
-  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
-    Queue(Queue(x, depth), depth)
-}
-
-// Frontend bus goes through MemBlock
+// Not used. Legacy FrontendBridge placeholder: TL buffers removed. Kept as empty LazyModule for now.
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
-  val instr_uncache_node = LazyModule(new InstrUncacheBuffer()).suggestName("instr_uncache").node
   lazy val module = new LazyModuleImp(this) {
   }
 }
@@ -429,6 +385,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // Uncache Compact CHI Type 3 (NC + MMIO); buffered in MemBlock like legacy uncache_port
     val inner_d_mmio_cchi = Flipped(new CCHIType3Port)
     val outer_d_mmio_cchi = new CCHIType3Port
+
+    // InstrUncache Compact CHI Type 3 (MMIO/NC fetch); buffered in MemBlock like legacy InstrUncacheBuffer
+    val inner_i_mmio_cchi = Flipped(new CCHIType3Port)
+    val outer_i_mmio_cchi = new CCHIType3Port
 
     val inner_icache_ctrl_cchi = new CCHIType3Port
 
@@ -1298,18 +1258,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
   // txreq: Frontend -> L2; rxdat: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
-  io.outer_icache_cchi.txreq <> ICacheCCHIBuffer(io.inner_icache_cchi.txreq)
-  io.inner_icache_cchi.rxdat <> ICacheCCHIBuffer(io.outer_icache_cchi.rxdat)
+  io.outer_icache_cchi.txreq <> DoubleQueueBuffer(io.inner_icache_cchi.txreq)
+  io.inner_icache_cchi.rxdat <> DoubleQueueBuffer(io.outer_icache_cchi.rxdat)
 
   // txreq: L2TLB -> L2; rxdat: L2 -> L2TLB (mirror legacy ptw_to_l2_buffer A/D)
-  io.outer_ptw_cchi.txreq <> PTWCCHIBuffer(io.inner_ptw_cchi.txreq)
-  io.inner_ptw_cchi.rxdat <> PTWCCHIBuffer(io.outer_ptw_cchi.rxdat)
+  io.outer_ptw_cchi.txreq <> DoubleQueueBuffer(io.inner_ptw_cchi.txreq)
+  io.inner_ptw_cchi.rxdat <> DoubleQueueBuffer(io.outer_ptw_cchi.rxdat)
   ptw.io.cchi <> io.inner_ptw_cchi
 
-  io.outer_d_mmio_cchi.txreq <> UncacheCCHIBuffer(io.inner_d_mmio_cchi.txreq)
-  io.outer_d_mmio_cchi.txdat <> UncacheCCHIBuffer(io.inner_d_mmio_cchi.txdat)
-  io.inner_d_mmio_cchi.rxrsp <> UncacheCCHIBuffer(io.outer_d_mmio_cchi.rxrsp)
-  io.inner_d_mmio_cchi.rxdat <> UncacheCCHIBuffer(io.outer_d_mmio_cchi.rxdat)
+  io.outer_d_mmio_cchi.txreq <> DoubleQueueBuffer(io.inner_d_mmio_cchi.txreq)
+  io.outer_d_mmio_cchi.txdat <> DoubleQueueBuffer(io.inner_d_mmio_cchi.txdat)
+  io.inner_d_mmio_cchi.rxrsp <> DoubleQueueBuffer(io.outer_d_mmio_cchi.rxrsp)
+  io.inner_d_mmio_cchi.rxdat <> DoubleQueueBuffer(io.outer_d_mmio_cchi.rxdat)
+
+  io.outer_i_mmio_cchi.txreq <> DoubleQueueBuffer(io.inner_i_mmio_cchi.txreq)
+  io.outer_i_mmio_cchi.txdat <> DoubleQueueBuffer(io.inner_i_mmio_cchi.txdat)
+  io.inner_i_mmio_cchi.rxrsp <> DoubleQueueBuffer(io.outer_i_mmio_cchi.rxrsp)
+  io.inner_i_mmio_cchi.rxdat <> DoubleQueueBuffer(io.outer_i_mmio_cchi.rxdat)
 
   val type3Router = Module(new Type3Router)
   uncache.io.cchi <> type3Router.io.up
@@ -1317,10 +1282,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   type3Router.io.downL2 <> io.inner_d_mmio_cchi
 
   if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    dcache.io.ctrl_cchi.req <> UncacheCCHIBuffer(type3Router.io.downCtrl(0).txreq)
-    dcache.io.ctrl_cchi.updat <> UncacheCCHIBuffer(type3Router.io.downCtrl(0).txdat)
-    type3Router.io.downCtrl(0).rxrsp <> UncacheCCHIBuffer(dcache.io.ctrl_cchi.dnrsp)
-    type3Router.io.downCtrl(0).rxdat <> UncacheCCHIBuffer(dcache.io.ctrl_cchi.dndat)
+    dcache.io.ctrl_cchi.req <> DoubleQueueBuffer(type3Router.io.downCtrl(0).txreq)
+    dcache.io.ctrl_cchi.updat <> DoubleQueueBuffer(type3Router.io.downCtrl(0).txdat)
+    type3Router.io.downCtrl(0).rxrsp <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnrsp)
+    type3Router.io.downCtrl(0).rxdat <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dndat)
   } else {
     type3Router.io.downCtrl(0).txreq.ready := false.B
     type3Router.io.downCtrl(0).txdat.ready := false.B
@@ -1331,10 +1296,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   if (icacheCtrlEnabled) {
-    io.inner_icache_ctrl_cchi.txreq <> ICacheCtrlCCHIBuffer(type3Router.io.downCtrl(1).txreq)
-    io.inner_icache_ctrl_cchi.txdat <> ICacheCtrlCCHIBuffer(type3Router.io.downCtrl(1).txdat)
-    type3Router.io.downCtrl(1).rxrsp <> ICacheCtrlCCHIBuffer(io.inner_icache_ctrl_cchi.rxrsp)
-    type3Router.io.downCtrl(1).rxdat <> ICacheCtrlCCHIBuffer(io.inner_icache_ctrl_cchi.rxdat)
+    io.inner_icache_ctrl_cchi.txreq <> DoubleQueueBuffer(type3Router.io.downCtrl(1).txreq)
+    io.inner_icache_ctrl_cchi.txdat <> DoubleQueueBuffer(type3Router.io.downCtrl(1).txdat)
+    type3Router.io.downCtrl(1).rxrsp <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.rxrsp)
+    type3Router.io.downCtrl(1).rxdat <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.rxdat)
   } else {
     type3Router.io.downCtrl(1).txreq.ready := false.B
     type3Router.io.downCtrl(1).txdat.ready := false.B
