@@ -318,7 +318,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
     // because a block that moves the return stack is not allowed to carry a successor, see Bpu's second block.
     (0 until MaxPredictionNum).foreach { i =>
       when(i.U < io.fromBpu.s3NumBlocks) {
-        metaQueueRedirect((io.fromBpu.s3FtqPtr + i.U).value) := io.fromBpu.meta.bits.redirectMeta
+        val groupPtr = (io.fromBpu.s3FtqPtr + i.U).value
+        metaQueueRedirect(groupPtr) := io.fromBpu.meta.bits.redirectMeta
+        // Commit meta belongs to the group for the same reason the recovery state does: any of its entries can be the
+        // one that commits, and this is what the return stack is trained from. An entry left holding what the index
+        // last carried would train it from a block that retired long ago.
+        metaQueueCommit(groupPtr) := io.fromBpu.meta.bits.commitMeta
+        // Likewise the performance meta. Leaving it stale does not change what the core does, but it does decide what
+        // every commit-time counter says about a group's later block, which is how the block gets judged.
+        s3PerfQueue(groupPtr).bpuPerf := io.fromBpu.perfMeta
+        s3PerfQueue(groupPtr).isCfi.foreach(_ := false.B)
+        s3PerfQueue(groupPtr).mispredict := false.B
       }
     }
     metaQueueResolve(s3BpuPtr)      := io.fromBpu.meta.bits.resolveMeta
@@ -329,11 +339,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
       metaQueueResolve(laterPtr)      := io.fromBpu.s3LaterResolveMeta.bits
       metaQueueResolveValid(laterPtr) := true.B
     }
-    metaQueueCommit(s3BpuPtr) := io.fromBpu.meta.bits.commitMeta
-
-    s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
-    s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
-    s3PerfQueue(s3BpuPtr).mispredict := false.B
   }
 
   // The group sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
@@ -753,6 +758,82 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("resolve_redirects", backendRedirect.valid)
   XSPerfAccumulate("resolve_branch_mispredicts", backendRedirect.valid && backendRedirect.bits.isMisPred)
   XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
+
+  /* *** a group's blocks, told apart ***
+   * Everything below is split by whether the entry holds the first block of a group or one that followed it. A later
+   * block is predicted from a pair held in one pTAGE entry rather than from a lookup of its own address, and it is
+   * checked by a duplicate of the main predictors rather than by them, so nothing about it can be assumed to behave
+   * like a first block until it is counted separately.
+   */
+  private val commitIsLater      = entryIsLaterBlock(commitPtr(0).value)
+  private val commitPred         = commitPerfMeta.bpuPerf.bpPred
+  private val commitMispredInfo  = commitPerfMeta.mispredictBranchInfo
+  private val commitCfiNum       = PopCount(commitPerfMeta.isCfi)
+  private val commitMispredicted = commit && commitPerfMeta.mispredict
+
+  XSPerfAccumulate("grp_commit_blocks_first", commit && !commitIsLater)
+  XSPerfAccumulate("grp_commit_blocks_later", commit && commitIsLater)
+  XSPerfAccumulate("grp_commit_cfi_first", Mux(commit && !commitIsLater, commitCfiNum, 0.U))
+  XSPerfAccumulate("grp_commit_cfi_later", Mux(commit && commitIsLater, commitCfiNum, 0.U))
+  XSPerfAccumulate("grp_commit_mispred_first", commitMispredicted && !commitIsLater)
+  XSPerfAccumulate("grp_commit_mispred_later", commitMispredicted && commitIsLater)
+  XSPerfAccumulate("grp_commit_taken_first", commit && !commitIsLater && commitPred.taken)
+  XSPerfAccumulate("grp_commit_taken_later", commit && commitIsLater && commitPred.taken)
+
+  // why a block that committed had been mispredicted, in the order a predictor would have had to get them right
+  private val commitWrongTaken  = commitMispredInfo.taken =/= commitPred.taken
+  private val commitWrongPos    = commitMispredInfo.cfiPosition =/= commitPred.cfiPosition
+  private val commitWrongAttr   = commitMispredInfo.attribute =/= commitPred.attribute
+  private val commitWrongTarget = commitMispredInfo.target.toUInt =/= commitPred.target.toUInt
+  Seq("first" -> !commitIsLater, "later" -> commitIsLater).foreach { case (role, isRole) =>
+    XSPerfSeqAccumulate(
+      s"grp_commit_mispred_reason_$role",
+      commitMispredicted && isRole,
+      Seq(
+        ("wrong_taken", commitWrongTaken),
+        ("wrong_position", commitWrongPos),
+        ("wrong_attribute", commitWrongAttr),
+        ("wrong_target", commitWrongTarget)
+      ),
+      withPriority = true
+    )
+  }
+
+  // which stage of the predictor the committed block's answer came from
+  Seq("first" -> !commitIsLater, "later" -> commitIsLater).foreach { case (role, isRole) =>
+    XSPerfSeqAccumulate(
+      s"grp_commit_source_$role",
+      commit && isRole,
+      Seq(
+        ("s3Override", commitPerfMeta.bpuPerf.bpSource.s3Override),
+        ("s2Override", commitPerfMeta.bpuPerf.bpSource.s2Override),
+        ("s1", true.B)
+      ),
+      withPriority = true
+    )
+  }
+
+  // a redirect names one entry; whether that entry is a later block says whose prediction cost the flush
+  private val redirectIsLater = entryIsLaterBlock(backendRedirect.bits.ftqIdx.value)
+  XSPerfAccumulate("grp_redirect_on_first", backendRedirect.valid && !redirectIsLater)
+  XSPerfAccumulate("grp_redirect_on_later", backendRedirect.valid && redirectIsLater)
+  XSPerfAccumulate(
+    "grp_redirect_mispred_on_first",
+    backendRedirect.valid && backendRedirect.bits.isMisPred && !redirectIsLater
+  )
+  XSPerfAccumulate(
+    "grp_redirect_mispred_on_later",
+    backendRedirect.valid && backendRedirect.bits.isMisPred && redirectIsLater
+  )
+
+  // the shape the predictor actually offered, as opposed to what it was able to propose
+  XSPerfAccumulate("grp_enqueue_size1", entryEnqueue && prediction.bits.numBlocks === 1.U)
+  XSPerfAccumulate("grp_enqueue_size2", entryEnqueue && prediction.bits.numBlocks === 2.U)
+  XSPerfAccumulate("grp_enqueue_blocked_no_room", prediction.valid && !prediction.ready && !ftqHasRoom)
+  XSPerfAccumulate(
+    "grp_enqueue_blocked_room_for_one_only",
+    prediction.valid && !prediction.ready && ftqHasRoomForOne && !ftqHasRoom
+  )
 
   // Commit-time statistics, should be correct-path only
   XSPerfSeqAccumulate(

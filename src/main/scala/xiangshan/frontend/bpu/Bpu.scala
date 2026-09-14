@@ -428,6 +428,27 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s1_firstMovesRas = s1_prediction.attribute.hasPush || s1_prediction.attribute.hasPop
   private val s1_emitSecond    = usePtage && s1_secondBlock.valid && !s1_firstMovesRas
 
+  /* *** the funnel a second block has to pass ***
+   * pTAGE holds a pair, but a pair is only offered when the first block of that pair is the block the top level chose
+   * anyway, the first block does not move the return stack, and the pair survived the filters inside pTAGE. Counting
+   * each refusal separately is what says whether a second block is rare because it is wrong or because it is refused.
+   */
+  XSPerfAccumulate("grp_s1_fire", s1_fire)
+  XSPerfAccumulate("grp_ptageHasPair", s1_fire && s1_secondBlock.valid)
+  XSPerfAccumulate("grp_ptageAgreesOnFirst", s1_fire && usePtage)
+  XSPerfAccumulate("grp_refusedByPtageFirst", s1_fire && s1_secondBlock.valid && !usePtage)
+  XSPerfAccumulate("grp_refusedByRas", s1_fire && s1_secondBlock.valid && usePtage && s1_firstMovesRas)
+  XSPerfAccumulate("grp_emitSecond", s1_fire && s1_emitSecond)
+  // the two blocks of an offered group must be adjacent: the second starts where the first said it was going
+  XSPerfAccumulate(
+    "grp_emitSecondTaken",
+    s1_fire && s1_emitSecond && s1_secondBlock.bits.taken
+  )
+  XSPerfAccumulate(
+    "grp_emitSecondNotTaken",
+    s1_fire && s1_emitSecond && !s1_secondBlock.bits.taken
+  )
+
   private val s1_group = Wire(Vec(MaxPredictionNum, Valid(new Prediction)))
   s1_group(0).valid            := true.B
   s1_group(0).bits             := s1_prediction
