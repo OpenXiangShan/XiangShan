@@ -685,6 +685,14 @@ object ScalaUopTable {
     tableSvinval ++ tableSvinvalH
   }
 
+  val tableSmmtt = {
+    import xiangshan.backend.decode.isa.Instructions.SMMTTType
+
+    SMMTTType.mapUopcode(
+      _.MFENCE -> mfence,
+    )
+  }
+
   def tableSExt = {
   }
 

@@ -122,6 +122,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     (PrivExceptionCause.sfencePart, in.fromCSR.illegalInst.sfencePart,             in.fromCSR.virtualInst.sfencePart),
     (PrivExceptionCause.hfenceGVMA, in.fromCSR.illegalInst.hfenceGVMA,             in.fromCSR.virtualInst.hfence),
     (PrivExceptionCause.hfenceVVMA, in.fromCSR.illegalInst.hfenceVVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.mfence,     in.fromCSR.illegalInst.mfence.getOrElse(false.B), false.B),
     (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
     (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
     (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrs_nto,                in.fromCSR.virtualInst.wrs_nto),
@@ -197,7 +198,7 @@ object SimpleDecodeChannel {
     val isJ = Bool()
     val isJr = Bool()
     val isMove = Bool()
-  val exceptionII = Bool()
+    val exceptionII = Bool()
     val exceptionVI = Bool()
   }
 
@@ -218,14 +219,16 @@ object SimpleDecodeChannelMain extends App {
     case XSCoreParamsKey => XSCoreParameters()
   })
 
-  val insts: Seq[InstPattern] = InstPattern.extensionInsts(extensions: _*).collect { case x if !x.isInstanceOf[VecInstPattern] => x }
+  val coreParams = defaultConfig(XSCoreParamsKey)
+  val simpleExts: Seq[ExtBase] = extensions(defaultConfig)
+  val insts: Seq[InstPattern] = InstPattern.extensionInsts(simpleExts: _*).collect { case x if !x.isInstanceOf[VecInstPattern] => x }
 
   println(s"number of insts: ${insts.size}")
 
   val targetDir = "build/decoder"
 
   Verilog.emitVerilog(
-    new SimpleDecodeChannel(insts, extensions)(defaultConfig),
+    new SimpleDecodeChannel(insts, simpleExts)(defaultConfig),
     Array("--full-stacktrace", "--target-dir", targetDir),
   )
 

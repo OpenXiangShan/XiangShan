@@ -91,7 +91,7 @@ class DecodeChannels(
 //  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
 //  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
-  val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, extensions))
+  val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, simpleExts))
   val pseudoDecodeChannel: Definition[PseudoDecodeChannel] = Definition(new PseudoDecodeChannel())
 
 //  out.bits.imm := Mux1HLookUp(
@@ -397,14 +397,14 @@ object DecodeChannelOutput {
     uop.opcode := vuop.opcode
     uop.isVset := vuop.isVset
 
-    uop.src1Ren := Mux(vuop.src12Rev, vuop.renameInfo.src2Ren, vuop.renameInfo.src1Ren)
-    uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.src2Type, vuop.renameInfo.src1Type)
-    uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.src1Ren,vuop.renameInfo.src2Ren)
-    uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.src1Type,vuop.renameInfo.src2Type)
+    uop.src1Ren := vuop.renameInfo.src1Ren
+    uop.src1Type := vuop.renameInfo.src1Type
+    uop.src2Ren := vuop.renameInfo.src2Ren
+    uop.src2Type := vuop.renameInfo.src2Type
     uop.src3Ren := vuop.renameInfo.readVdAsSrc || vuop.vdDepElim =/= VdDepElim.Always
     uop.src3Type.value := DecodeSrcType.VP
-    uop.lsrc1 := Mux(vuop.src12Rev, vuop.src.src2, vuop.src.src1)
-    uop.lsrc2 := Mux(vuop.src12Rev, vuop.src.src1, vuop.src.src2)
+    uop.lsrc1 := vuop.src.src1
+    uop.lsrc2 := vuop.src.src2
     uop.lsrc3 := vuop.src.dest
     uop.vlRen := vuop.renameInfo.vlRen
     uop.v0Ren := vuop.v0Ren

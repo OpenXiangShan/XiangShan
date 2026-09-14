@@ -257,12 +257,12 @@ class IssuePipe(
 
   out.ex0 := ex0
 
-  private val is0FixedLatVpWen = is0.bits.vpWen && !FuType.FuTypeOrR(is0.bits.fuType, FuType.vidiv)
-  private val is1FixedLatVpWen = is1.bits.vpWen && !FuType.FuTypeOrR(is1.bits.fuType, FuType.vidiv)
+  private val is0FixedLatVpWen = is0.bits.vpWen && !FuType.FuTypeOrR(is0.bits.fuType, FuType.vidiv, FuType.vfdiv)
+  private val is1FixedLatVpWen = is1.bits.vpWen && !FuType.FuTypeOrR(is1.bits.fuType, FuType.vidiv, FuType.vfdiv)
   private val is2FixedLatVpWen =
-    is2.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(is2.bits.ctrl.fuType, FuType.vidiv)
+    is2.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(is2.bits.ctrl.fuType, FuType.vidiv, FuType.vfdiv)
   private val ex0FixedLatVpWen =
-    ex0.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(ex0.bits.ctrl.fuType, FuType.vidiv)
+    ex0.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(ex0.bits.ctrl.fuType, FuType.vidiv, FuType.vfdiv)
 
   private val is0WakeupValid: Bool = is0.valid && is0FixedLatVpWen && 0.U === is0.bits.latency
   private val is1WakeupValid: Bool = is1.valid && is1FixedLatVpWen && 1.U === is1.bits.latency

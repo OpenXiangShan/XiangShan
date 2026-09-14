@@ -131,6 +131,8 @@ case class HfenceGVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstP
 
 case class HfenceVVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
+case class MfenceInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+
 case class WaitForInterruptInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
 case class ZawrsNtoPattern()(implicit rawInst: BitPat) extends SystemInstPattern
@@ -491,6 +493,7 @@ object InstPattern {
               case s if rawStringMatches(s, "0001001?????") || rawStringMatches(s, "0001011?????") => SfenceVMAInstPattern()
               case s if rawStringMatches(s, "0110001?????") || rawStringMatches(s, "0110011?????") => HfenceGVMAInstPattern()
               case s if rawStringMatches(s, "0010001?????") || rawStringMatches(s, "0010011?????") => HfenceVVMAInstPattern()
+              case s if rawStringMatches(s, "1011111?????") => MfenceInstPattern()
               case _ => PrivInstPattern()
             }
           case "100" =>

@@ -127,7 +127,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
     // to vlbusytable
     val vlWriteBackInfo = new Bundle {
-      val vlFromIntIsZero  = Input(Bool())
       val vlFromIntIsVlmax = Input(Bool())
     }
     // from LsqEnqCtrl
@@ -386,10 +385,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val vma = fromRename(i).bits.vtype.vma
     val vm = fromRename(i).bits.vm
     val vlIsVlmax = vlBusyTable.io_vl_read.vlReadInfo(i).is_vlmax
-    val vlIsNonZero = vlBusyTable.io_vl_read.vlReadInfo(i).is_nonzero
     val ignoreTail = vlIsVlmax && (vm =/= 0.U || vma)
     val ignoreWhole = (vm =/= 0.U || vma) && vta
-    ignoreOldVdVec(i) := vlBusyTable.io.read(i).resp && vlIsNonZero && (ignoreTail || ignoreWhole) && !FuType.isStore(fromRename(i).bits.fuType)
+    ignoreOldVdVec(i) := vlBusyTable.io.read(i).resp && (ignoreTail || ignoreWhole) && !FuType.isStore(fromRename(i).bits.fuType)
     allSrcState(i)(j)(k) := Mux1H(Seq(
       SrcType.isVp(fromRename(i).bits.srcType(j)) -> (vpBusyTable.out.readResp(readidx) || ignoreOldVdVec(i)),
       SrcType.isImm(fromRename(i).bits.srcType(j)) -> SrcState.rdy,

@@ -2,12 +2,10 @@ package xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel
 
 import chisel3.UInt
 import chisel3.util.BitPat
-import xiangshan.FuOpType
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
-import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField}
 

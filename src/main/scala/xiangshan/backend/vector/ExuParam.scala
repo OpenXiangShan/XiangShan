@@ -305,7 +305,7 @@ class ExuParam(
   @BeanProperty
   var exeUnitParams: ExeUnitParams = _
 
-  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.fuType == FuType.vidiv)
+  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(cfg => Seq(FuType.vidiv, FuType.vfdiv).contains(cfg.fuType))
 
   def numNonFixedLatFu: Int = nonFixedLatFuConfigs.size
 
