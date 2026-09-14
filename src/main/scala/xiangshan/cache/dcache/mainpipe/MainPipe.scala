@@ -36,6 +36,9 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_dirty = Bool()
   val occupy_way = UInt(nWays.W)
   val miss_fail_cause_evict_btot = Bool()
+  val pbEntryId = UInt(PBIdBits.W)
+  val prefetchOrigin = UInt(L1PfSourceBits.W)
+  val pbReq = Bool()
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -71,6 +74,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  val pbEligible = Bool()
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -78,7 +82,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   def isLoad: Bool = source === LOAD_SOURCE.U
   def isStore: Bool = source === STORE_SOURCE.U
   def isAMO: Bool = source === AMO_SOURCE.U
-  def isPrefetch: Bool = source === DCACHE_PREFETCH_SOURCE.U
+  def isPrefetch: Bool = source === DCACHE_PREFETCH_SOURCE.U && !pbReq
 
   def quad_word_idx = word_idx >> 1
 
@@ -90,6 +94,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.probe := false.B
     req.probe_need_data := false.B
     req.source := STORE_SOURCE.U
+    req.pbReq := false.B
+    req.pbEligible := false.B
     req.cmd := store.cmd
     req.addr := store.addr
     req.vaddr := store.vaddr
@@ -110,6 +116,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.probe := false.B
     req.probe_need_data := false.B
     req.source := DCACHE_PREFETCH_SOURCE.U
+    req.pbReq := false.B
+    req.pbEligible := !prefetch.is_store
     req.cmd := MemoryOpConstants.M_PFR
     req.addr := prefetch.paddr
     req.vaddr := prefetch.vaddr
@@ -161,6 +169,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val mainpipe_info = Output(new MainPipeInfoToMQ)
     // missqueue refill data
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
+    val pb = Flipped(new PBPipeIO)
+    val pbOwners = Input(Vec(cfg.nMissEntries, Valid(UInt(PAddrBits.W))))
+    val prefetchUseInstall = Output(Valid(new PrefetchUseInstall))
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
@@ -248,11 +259,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_s0_set_conflict, s2_s0_set_conflict, s3_s0_set_conflict = Wire(Bool())
   val set_conflict = s1_s0_set_conflict || s2_s0_set_conflict || s3_s0_set_conflict
-  // check sbuffer store req set_conflict in parallel with req arbiter
-  // it will speed up the generation of store_req.ready, which is in crit. path
-  val s1_s0_set_conflict_store, s2_s0_set_conflict_store, s3_s0_set_conflict_store = Wire(Bool())
-  val store_set_conflict = s1_s0_set_conflict_store || s2_s0_set_conflict_store || s3_s0_set_conflict_store
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
+  val s3_store_completion = Wire(Bool())
 
   // convert store req to main pipe req, and select a req from store and probe
   val storeWaitCycles = RegInit(0.U(4.W))
@@ -282,31 +290,45 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
-  arbiter(
-    in = Seq(
-      io.probe_req,
-      io.refill_req,
-      prefetch_req, // Todo: what's the best priority
-      store_req, // Note: store_req.ready is now manually assigned for better timing
-      io.atomic_req,
-    ),
-    out = req,
-    name = Some("main_pipe_req")
-  )
-
-  val store_idx = get_dcache_idx(io.store_req.bits.vaddr)
-  // manually assign store_req.ready for better timing
-  // now store_req set conflict check is done in parallel with req arbiter
-  store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid && !prefetch_req.valid
-  // Prefetch request has lower priority, so it needs to check higher priority requests
-  prefetch_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid
+  val move_req = Wire(Decoupled(new MainPipeReq))
+  move_req.bits := 0.U.asTypeOf(new MainPipeReq)
+  move_req.bits.pbReq := true.B
+  move_req.bits.pbEntryId := io.pb.s0_moveReq.bits.entryId
+  move_req.bits.addr := io.pb.s0_moveReq.bits.paddr
+  move_req.bits.vaddr := io.pb.s0_moveReq.bits.vaddr
+  move_req.bits.cmd := M_PFR
+  move_req.bits.source := DCACHE_PREFETCH_SOURCE.U
+  move_req.valid := io.pb.s0_moveReq.valid
+  io.pb.s0_moveReq.ready := move_req.ready
+  val retryMask = RegInit(0.U(6.W))
+  val reqArb = Module(new RRArbiter(new MainPipeReq, 4))
+  val normalReqs = Seq(io.refill_req, move_req, store_req, io.atomic_req)
+  for ((port, i) <- normalReqs.zipWithIndex) {
+    reqArb.io.in(i).valid := port.valid && !retryMask(i + 1)
+    reqArb.io.in(i).bits := port.bits
+    port.ready := reqArb.io.in(i).ready && !retryMask(i + 1)
+  }
+  val probeValid = io.probe_req.valid && !retryMask(0)
+  val pfValid = prefetch_req.valid && !retryMask(5)
+  val reqIdx = Mux(probeValid, 0.U, Mux(reqArb.io.out.valid, reqArb.io.chosen +& 1.U, 5.U))
+  req.valid := probeValid || reqArb.io.out.valid || pfValid
+  req.bits := Mux(probeValid, io.probe_req.bits, Mux(reqArb.io.out.valid, reqArb.io.out.bits, prefetch_req.bits))
+  io.probe_req.ready := req.ready && probeValid
+  reqArb.io.out.ready := req.ready && !probeValid
+  prefetch_req.ready := req.ready && !probeValid && !reqArb.io.out.valid && !retryMask(5)
   val s0_req = req.bits
+  val s0_pb_owner = s0_req.probe && io.pbOwners.map(o =>
+    o.valid && get_block_addr(o.bits) === get_block_addr(s0_req.addr)).reduce(_ || _)
   val s0_idx = get_dcache_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
-  val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
+  val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict && !s0_pb_owner
   val s0_fire = req.valid && s0_can_go
+  retryMask := Mux(req.valid && s0_pb_owner, UIntToOH(reqIdx, 6), 0.U)
+  XSPerfAccumulate("pb_probe_mq_owner_wait", probeValid && s0_pb_owner)
+  XSPerfAccumulate("pb_probe_pipeline_wait", probeValid && set_conflict)
+
+  io.pb.s0_probeReq.valid := io.probe_req.fire
+  io.pb.s0_probeReq.bits := s0_req.addr
 
   req.ready := s0_can_go
 
@@ -353,21 +375,28 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s1: read data
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
+  val s1_pb_probe = s1_req.probe && io.pb.s1_probeResp.valid && io.pb.s1_probeResp.bits.locked
+  val s1_pb_candidate = Wire(Bool())
+  val s1_pb_store = Wire(Bool())
 
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
-  val s1_need_data = if (dcacheParameters.alwaysReleaseData) {
+  val s1_need_data = Mux(s1_pb_candidate,
+    s1_repl_coh.state === ClientStates.Dirty || (dcacheParameters.alwaysReleaseData.B && s1_repl_coh.isValid()),
+    !s1_pb_probe && !s1_req.pbReq && (if (dcacheParameters.alwaysReleaseData) {
     RegEnable(banked_need_data, s0_fire)
   } else {
     Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire), s1_repl_coh.state === ClientStates.Dirty)
-  }
+  }))
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
   val s1_banked_store_wmask = RegEnable(banked_store_wmask, s0_fire)
   val s1_need_tag = RegEnable(s0_need_tag, s0_fire)
-  val s1_can_go = s2_ready && (io.data_readline.ready || !s1_need_data)
+  val s1_can_advance = s2_ready && (io.data_readline.ready || !s1_need_data)
+  val s1_can_go = s1_can_advance && io.pb.s1_paddr.ready
   val s1_fire = s1_valid && s1_can_go
+  val s1_to_s2 = s1_fire
   val s1_idx = get_dcache_idx(s1_req.vaddr)
   val s1_dmWay = RegEnable(get_direct_map_way(s0_req.vaddr), s0_fire)
   val s1_isPrefetch = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isPrefetch
@@ -378,8 +407,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s1_valid := false.B
   }
   s1_ready := !s1_valid || s1_can_go
-  s1_s0_set_conflict := s1_valid && s0_idx === s1_idx && !s1_isPrefetch
-  s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx && !s1_isPrefetch
+  s1_s0_set_conflict := s1_valid && ((s0_idx === s1_idx && !s1_isPrefetch) ||
+    get_block_addr(s0_req.addr) === get_block_addr(s1_req.addr))
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   meta_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegEnable(meta_resp, s1_valid))
@@ -408,6 +437,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_ecc_eq_way = wayMap((w: Int) => s1_tag_eq_way(w) && !s1_tag_errors(w)).asUInt
   val s1_tag_ecc_match_way = wayMap((w: Int) => s1_tag_ecc_eq_way(w) && s1_meta_valids(w)).asUInt
   val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
+  val s1_store = !s1_req.miss && !s1_req.probe && !s1_req.replace && s1_req.isStore
+  s1_pb_candidate := s1_req.pbReq || (PBEntries > 0).B && s1_store && !s1_tag_match && !s1_tag_errors.orR
+  val s1_pb_store_req = (PBEntries > 0).B && s1_store && !s1_tag_match && !s1_tag_errors.orR
+  s1_pb_store := s1_pb_store_req && io.pb.s1_hit
+  val s1_pb_store_blocked = s1_store && io.pb.s1_hit && !s1_tag_match && !s1_pb_store
+  io.pb.s1_paddr.valid := s1_valid && s1_can_advance
+  io.pb.s1_paddr.bits := s1_req.addr
+  io.pb.s1_alias := get_alias(s1_req.vaddr)
+  io.pb.s1_storeReq := s1_pb_store_req
+  XSPerfAccumulate("pb_store_lock_attempt", s1_fire && s1_pb_store)
+  XSPerfAccumulate("pb_read_port_wait", io.pb.s1_paddr.valid && !io.pb.s1_paddr.ready)
+  when (s1_valid && s1_req.pbReq) {
+    assert(!s1_tag_match, "PB move found a second DCache owner")
+  }
+  when (s1_valid && io.pb.s1_hit && !s1_tag_errors.orR) {
+    assert(!s1_tag_match, "PB and DCache must not independently own the same physical block")
+  }
   val s1_real_tag_eq_way = wayMap((w: Int) => io.tag_resp(w)(tagBits - 1, 0) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt
   val s1_has_real_tag_eq_way = ParallelORR(s1_real_tag_eq_way)
   val s1_real_tag_match_way_en = PriorityEncoderOH(s1_real_tag_eq_way)
@@ -449,8 +495,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_real_tag = ParallelMux(s1_real_tag_match_way_en.asBools, (0 until nWays).map(w => io.tag_resp(w)))
 
-  val s1_need_replacement = s1_req.miss && !s1_tag_match
-  val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
+  val s1_need_replacement = (s1_req.miss || s1_pb_candidate) && !s1_tag_match
+  val s1_need_eviction = s1_need_replacement && s1_repl_coh.state =/= ClientStates.Nothing
 
   val s1_way_en = Mux(io.pseudo_error.valid && s1_has_real_tag_eq_way, s1_real_tag_match_way_en, 
                       Mux(s1_need_replacement, s1_repl_way_en, s1_tag_ecc_match_way))
@@ -468,41 +514,62 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_hit = s1_tag_match && s1_has_permission
   val s1_isStore = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isStore
   val s1_isAMO = !s1_req.replace && !s1_req.probe && !s1_req.miss && s1_req.isAMO && s1_req.cmd =/= M_XSC
-  val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO || s1_isPrefetch) && !s1_hit
+  val s1_pregen_can_go_to_mq = (s1_isStore || s1_isAMO || s1_isPrefetch) && !s1_hit &&
+    !s1_req.pbReq && !s1_pb_store && !(s1_isPrefetch && io.pb.s1_hit)
   val s1_grow_perm = s1_shrink_perm === BtoT && !s1_has_permission
 
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
-  val s2_req = RegEnable(s1_req, s1_fire)
-  val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
-  val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
-  val s2_has_real_tag_eq_way = RegEnable(s1_has_real_tag_eq_way, s1_fire)
-  val s2_tag_ecc_match_way = RegEnable(s1_tag_ecc_match_way, s1_fire)
-  val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
-  val s2_has_permission = RegEnable(s1_has_permission, s1_fire)
-  val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_fire)
-  val s2_grow_perm = RegEnable(s1_grow_perm, s1_fire) && s2_tag_match
-  val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
+  val s1_next = WireInit(s1_req)
+  when (s1_pb_store) {
+    s1_next.pbReq := true.B
+    s1_next.source := DCACHE_PREFETCH_SOURCE.U
+    s1_next.cmd := M_PFR
+    s1_next.store_mask := 0.U
+  }
+  val s2_req = RegEnable(s1_next, s1_to_s2)
+  val s2_pb_probe = RegEnable(s1_pb_probe, false.B, s1_to_s2)
+  val s2_probe_resp = RegEnable(io.pb.s1_probeResp.bits, s1_to_s2)
+  val s2_pb_store = RegEnable(s1_pb_store, false.B, s1_to_s2)
+  val s2_pb_move = RegEnable(s1_req.pbReq, false.B, s1_to_s2)
+  val s2_pb_store_blocked = RegEnable(s1_pb_store_blocked, false.B, s1_to_s2)
+  val s2_pb_response = s2_req.probe || (PBEntries == 0).B || io.pb.s2_dataResp.valid
+  val s2_move = s2_pb_move || s2_pb_store && io.pb.s2_storeResp.valid && io.pb.s2_storeResp.bits
+  val s2_pb_retry = !s2_req.probe && io.pb.s2_dataResp.valid &&
+    (io.pb.s2_dataResp.bits.retry || s2_pb_store && !s2_move || s2_pb_store_blocked)
+  val s2_pf_drop = RegEnable(s1_isPrefetch && io.pb.s1_hit, false.B, s1_to_s2)
+  when (s1_valid && s1_pb_probe) {
+    assert(!s1_tag_match, "Probe found independent PB and DCache owners")
+  }
+  val s2_tag_errors = RegEnable(s1_tag_errors, s1_to_s2)
+  val s2_tag_match = RegEnable(s1_tag_match, s1_to_s2)
+  val s2_has_real_tag_eq_way = RegEnable(s1_has_real_tag_eq_way, s1_to_s2)
+  val s2_tag_ecc_match_way = RegEnable(s1_tag_ecc_match_way, s1_to_s2)
+  val s2_hit_coh = RegEnable(s1_hit_coh, s1_to_s2)
+  val s2_has_permission = RegEnable(s1_has_permission, s1_to_s2)
+  val s2_new_hit_coh = RegEnable(s1_new_hit_coh, s1_to_s2)
+  val s2_grow_perm = RegEnable(s1_grow_perm, s1_to_s2) && s2_tag_match
+  val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_to_s2)
 
-  val s2_repl_tag = RegEnable(s1_repl_tag, s1_fire)
-  val s2_repl_coh = RegEnable(s1_repl_coh, s1_fire)
-  val s2_repl_pf  = RegEnable(s1_repl_pf, s1_fire)
+  val s2_repl_tag = RegEnable(s1_repl_tag, s1_to_s2)
+  val s2_repl_coh = RegEnable(s1_repl_coh, s1_to_s2)
+  val s2_repl_pf  = RegEnable(s1_repl_pf, s1_to_s2)
 
-  val s2_has_pesudo_inj = RegEnable(io.pseudo_error.valid, false.B, s1_fire)
-  val s2_real_tag_has_error = dcacheParameters.tagCode.decode(RegEnable(s1_real_tag, s1_fire)).error
+  val s2_has_pesudo_inj = RegEnable(io.pseudo_error.valid, false.B, s1_to_s2)
+  val s2_real_tag_has_error = dcacheParameters.tagCode.decode(RegEnable(s1_real_tag, s1_to_s2)).error
   val s2_refill_tag_eq_way = s2_has_pesudo_inj && s2_has_real_tag_eq_way & !s2_real_tag_has_error
 
-  val s2_need_replacement = RegEnable(s1_need_replacement, s1_fire)
-  val s2_need_eviction = RegEnable(s1_need_eviction, s1_fire)
-  val s2_need_data = RegEnable(s1_need_data, s1_fire)
-  val s2_need_tag = RegEnable(s1_need_tag, s1_fire)
+  val s2_need_replacement = RegEnable(s1_need_replacement, s1_to_s2)
+  val s2_need_eviction = RegEnable(s1_need_eviction, s1_to_s2)
+  val s2_need_data = RegEnable(s1_need_data, s1_to_s2)
+  val s2_need_tag = RegEnable(s1_need_tag, s1_to_s2)
   val s2_idx = get_dcache_idx(s2_req.vaddr)
 
-  val s2_way_en = RegEnable(s1_way_en, s1_fire)
-  val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
-  val s2_coh = Mux(s2_need_replacement, s2_repl_coh, RegEnable(s1_coh, s1_fire))
-  val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
-  val s2_flag_error = RegEnable(s1_flag_error, s1_fire)
+  val s2_way_en = RegEnable(s1_way_en, s1_to_s2)
+  val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_to_s2))
+  val s2_coh = Mux(s2_need_replacement, s2_repl_coh, RegEnable(s1_coh, s1_to_s2))
+  val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_to_s2)
+  val s2_flag_error = RegEnable(s1_flag_error, s1_to_s2)
   val s2_tag_error = WireInit(false.B)
   val s2_l2_error = Mux(io.refill_info.valid, io.refill_info.bits.error, 0.U.asTypeOf(new TLError()))
   val s2_refill_latency = Mux(io.refill_info.valid && isFromL1Prefetch(s2_req.pf_source), io.refill_info.bits.refill_latency, 0.U)
@@ -517,6 +584,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_store_hit = s2_hit && !s2_req.probe && !s2_req.miss && s2_req.isStore
   val s2_should_not_report_ecc_error = !s2_req.miss && (s2_req.isAMO && !s2_lr || s2_req.isStore)
   val s2_isPrefetch = !s2_req.replace && !s2_req.probe && !s2_req.miss && s2_req.isPrefetch
+  val s2_isStore = RegEnable(s1_isStore, s1_to_s2)
+  val s2_isAMO = RegEnable(s1_isAMO, s1_to_s2)
 
   if(EnableTagEcc) {
     val s2_probe_or_atomic = (s2_req.probe || s2_req.isAMO && !s2_sc) && !s2_req.miss
@@ -525,8 +594,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s2_tag_error := (s2_probe_atomic_tag_error || s2_evict_tag_error) && s2_need_tag
   }
 
-  s2_s0_set_conflict := s2_valid && s0_idx === s2_idx && !s2_isPrefetch
-  s2_s0_set_conflict_store := s2_valid && store_idx === s2_idx && !s2_isPrefetch
+  s2_s0_set_conflict := s2_valid && ((s0_idx === s2_idx && !s2_isPrefetch) ||
+    get_block_addr(s0_req.addr) === get_block_addr(s2_req.addr))
 
   // BtoT grow blocked: too many in-flight BtoT occupies in this set; replay store
   val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
@@ -539,32 +608,58 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_replace_block = io.replace.block && io.replace.req.valid
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
-  val s2_can_go_to_mq_evict_fail = s2_replace_block // refill eviction conflicts with in-flight MSHR (BtoT); replay to MQ for another evict way
+  val s2_can_go_to_mq_evict_fail = s2_replace_block && s2_req.miss
   val s2_can_go_to_mq_replay = s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail
-  val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
-  val s2_can_go_to_s3 = (s2_sc || s2_req.replace || s2_req.probe ||
+  val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_to_s2) && s2_pb_response && !s2_pb_retry
+  val s2_pb_abort = s2_move && io.pb.s2_dataResp.valid && (s2_replace_block ||
+    (io.btot_ways_for_set & s2_way_en).orR || io.pb.s2_dataResp.bits.dataBad || s2_tag_error)
+  val replay = !io.miss_req.ready || io.wbq_block_miss_req
+  val s2_store_terminal = s2_valid && s2_isStore && s2_pb_response &&
+    (s2_can_go_to_mq || s2_grow_perm_fail || s2_pb_retry || s2_pb_abort)
+  val s2_store_replay = (s2_can_go_to_mq && replay) ||
+    s2_grow_perm_fail || s2_pb_retry || s2_pb_abort
+  val s2_store_response_ready = s3_ready && !s3_store_completion
+  val s2_store_to_s3 = s2_store_terminal && s2_store_response_ready
+  val s2_can_go_to_s3 = Mux(s2_req.pbReq,
+    s2_move && io.pb.s2_dataResp.valid && !s2_pb_abort,
+    !s2_pb_retry && !s2_pf_drop && (s2_sc || s2_req.replace || s2_req.probe ||
     Mux(
       s2_req.miss,
       io.refill_info.valid && !s2_replace_block,
       (s2_req.isStore || s2_req.isAMO || s2_req.isPrefetch) && s2_hit
     )
-  ) && s3_ready
+  )) && s3_ready && s2_pb_response
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
-  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay
+  val s2_can_go = s2_pb_response && (
+    s2_can_go_to_s3 ||
+      s2_store_to_s3 ||
+      (!s2_isStore && (s2_can_go_to_mq || s2_can_go_to_mq_replay ||
+        s2_pb_abort || s2_pb_retry || s2_grow_perm_fail)) ||
+      s2_pf_drop
+  )
   val s2_fire = s2_valid && s2_can_go
-  val s2_fire_to_s3 = s2_valid && s2_can_go_to_s3
-  when (s1_fire) {
+  val s2_fire_to_s3 = s2_valid && (s2_can_go_to_s3 || s2_store_to_s3)
+  when (s1_to_s2) {
     s2_valid := true.B
   }.elsewhen (s2_fire) {
     s2_valid := false.B
   }
   s2_ready := !s2_valid || s2_can_go
-  val s2_valid_to_s3 = s2_valid && s3_ready
-  val replay = !io.miss_req.ready || io.wbq_block_miss_req
+  val s2_valid_to_s3 = s2_fire_to_s3
+  io.pb.s2_dataResp.ready := s2_fire && !s2_req.probe
+  io.pb.s2_moveAbort.valid := s2_fire && s2_pb_abort
+  io.pb.s2_moveAbort.bits.entryId := io.pb.s2_dataResp.bits.entryId
+  io.pb.s2_moveAbort.bits.dataBad := io.pb.s2_dataResp.bits.dataBad
+  when (s2_valid && s2_pb_move && io.pb.s2_dataResp.valid) {
+    assert(io.pb.s2_dataResp.bits.entryId === s2_req.pbEntryId)
+  }
+  when (s2_valid && s2_pb_store && io.pb.s2_dataResp.valid) {
+    assert(io.pb.s2_storeResp.valid, "Store result must accompany its data response")
+  }
 
-  io.data_readline_can_go := GatedValidRegNext(s1_fire)
+  io.data_readline_can_go := GatedValidRegNext(s1_to_s2)
   io.data_readline_stall := s2_valid
-  io.data_readline_can_resp := s2_fire_to_s3
+  io.data_readline_can_resp := s2_fire_to_s3 && !s2_store_to_s3
 
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
@@ -587,6 +682,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s3: write data, meta and tag
   val s3_valid = RegInit(false.B)
   val s3_req = RegEnable(s2_req, s2_valid_to_s3)
+  val s3_response_only = RegEnable(s2_store_to_s3, false.B, s2_fire_to_s3)
+  val s3_pb_probe = RegEnable(s2_pb_probe, false.B, s2_fire_to_s3)
+  val s3_probe_resp = RegEnable(s2_probe_resp, s2_fire_to_s3)
+  val s3_pb_store = RegEnable(s2_pb_store && !s2_store_to_s3, false.B, s2_fire_to_s3)
+  val s3_move = RegEnable(s2_move && !s2_store_to_s3, false.B, s2_fire_to_s3)
+  val s3_line = RegEnable(io.pb.s2_dataResp.bits, s2_fire_to_s3 && s2_move && !s2_store_to_s3)
   val s3_miss_param = RegEnable(io.refill_info.bits.miss_param, s2_valid_to_s3)
   val s3_miss_dirty = RegEnable(io.refill_info.bits.miss_dirty, s2_fire_to_s3)
   val s3_tag = RegEnable(s2_tag, s2_valid_to_s3)
@@ -647,7 +748,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val store_update_meta = s3_req.isStore && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh
   val amo_update_meta = s3_req.isAMO && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh && !s3_sc_fail
   val amo_wait_amoalu = s3_req.isAMO && s3_req.cmd =/= M_XLR && s3_req.cmd =/= M_XSC && !isAMOCAS(s3_req.cmd)
-  val update_meta = (miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta) && !s3_req.replace
+  val update_meta = (miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta) &&
+    !s3_req.replace && !s3_response_only
 
   def missCohGen(cmd: UInt, param: UInt, dirty: Bool) = {
     val c = categorize(cmd)
@@ -762,7 +864,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSError(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
 
 
-  val update_data = s3_req.miss || s3_store_hit || s3_can_do_amo_write
+  val update_data = (s3_req.miss || s3_store_hit || s3_can_do_amo_write) && !s3_response_only
 
   // generate write data
   // AMO hits
@@ -814,10 +916,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     )
   }
   val s3_amo_data_merged_reg = RegEnable(s3_amo_data_merged, do_amoalu)
-  val miss_wb = s3_req.miss && s3_need_replacement && s3_coh.state =/= ClientStates.Nothing
+  val miss_wb = (s3_req.miss || s3_move) && s3_need_replacement && s3_coh.state =/= ClientStates.Nothing
   val probe_wb = s3_req.probe
   val replace_wb = s3_req.replace
-  val need_wb = miss_wb || probe_wb || replace_wb
+  val need_wb = !s3_response_only && (miss_wb || probe_wb || replace_wb)
 
   val writeback_param = Mux(probe_wb, probe_shrink_param, miss_shrink_param)
   val writeback_data = if (dcacheParameters.alwaysReleaseData) {
@@ -828,7 +930,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   val s3_probe_can_go = s3_req.probe && io.wb.ready && (io.meta_write.ready || !probe_update_meta)
-  val s3_store_can_go = s3_req.source === STORE_SOURCE.U && !s3_req.probe && (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data) && !s3_req.miss
+  val s3_store_can_go = !s3_response_only && s3_req.source === STORE_SOURCE.U && !s3_req.probe &&
+    (io.meta_write.ready || !store_update_meta) && (io.data_write.ready || !update_data) && !s3_req.miss
   val s3_prefetch_can_go = s3_req.isPrefetch && !s3_req.replace && !s3_req.probe && !s3_req.miss && (io.meta_write.ready || !update_meta) && (io.data_write.ready || !update_data)
   val s3_amo_can_go = s3_amo_hit && (io.meta_write.ready || !amo_update_meta) && (io.data_write.ready || !update_data) && (s3_s_amoalu || !amo_wait_amoalu) || s3_sc_fail
   val s3_miss_can_go = s3_req.miss &&
@@ -839,9 +942,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     io.wb.ready
   val s3_replace_nothing = s3_req.replace && s3_coh.state === ClientStates.Nothing
   val s3_replace_can_go = s3_req.replace && (s3_replace_nothing || io.wb.ready)
-  val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go || s3_prefetch_can_go
+  val s3_pb_writes = io.meta_write.ready && io.tag_write.ready && io.data_write.ready &&
+    io.error_flag_write.ready && io.prefetch_flag_write.ready && io.access_flag_write.ready && io.latency_flag_write.ready
+  val s3_pb_go = s3_move && s3_pb_writes && (!need_wb || io.wb.ready)
+  XSPerfAccumulate("pb_s3_wait", s3_valid && s3_req.pbReq && !s3_pb_go)
+  XSPerfAccumulate("pb_s3_write_port_wait", s3_valid && s3_move && !s3_pb_writes)
+  XSPerfAccumulate("pb_s3_wbqueue_wait", s3_valid && s3_req.pbReq && need_wb && !io.wb.ready)
+  val s3_can_go = Mux(s3_response_only, true.B, Mux(s3_req.pbReq, s3_pb_go,
+    s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go || s3_prefetch_can_go)
+  )
   val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
+  s3_store_completion := s3_fire && !s3_response_only && (s3_store_can_go || s3_pb_store)
   when (s2_fire_to_s3) {
     s3_valid := true.B
   }.elsewhen (s3_fire) {
@@ -884,14 +996,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   assert(!(s3_valid && banked_wmask.orR && !update_data))
 
   for (i <- 0 until DCacheBanks) {
-    io.data_write_dup(i).valid := s3_valid && s3_update_data_cango && update_data
+    io.data_write_dup(i).valid := s3_valid && !s3_response_only && s3_update_data_cango && update_data
     io.data_write_dup(i).bits.way_en := s3_way_en
     io.data_write_dup(i).bits.addr := s3_req.vaddr
   }
 
   s3_ready := !s3_valid || s3_can_go
-  s3_s0_set_conflict := s3_valid && s3_idx === s0_idx && !s3_isPrefetch
-  s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx && !s3_isPrefetch
+  s3_s0_set_conflict := s3_valid && ((s3_idx === s0_idx && !s3_isPrefetch) ||
+    get_block_addr(s0_req.addr) === get_block_addr(s3_req.addr))
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
   io.meta_read.valid := req.valid
@@ -903,17 +1015,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_read.bits.way_en := ~0.U(nWays.W)
 
   io.data_read_intend := s1_valid && s1_need_data
-  io.data_readline.valid := s1_valid && s1_need_data
-  io.data_readline.bits.rmask := s1_banked_rmask
+  io.data_readline.valid := s1_valid && s1_need_data && s2_ready && io.pb.s1_paddr.ready
+  io.data_readline.bits.rmask := Mux(s1_pb_candidate, banked_full_rmask, s1_banked_rmask)
   io.data_readline.bits.way_en := s1_way_en
   io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr
 
-  io.miss_req.valid := s2_valid && s2_can_go_to_mq
+  val s2_miss_req_valid = s2_valid && s2_can_go_to_mq &&
+    (!s2_isStore || s2_store_response_ready)
+  io.miss_req.valid := s2_miss_req_valid
   val miss_req = io.miss_req.bits
   miss_req := DontCare
   miss_req.source := s2_req.source
   miss_req.pf_source := s2_req.pf_source
+  miss_req.pbEligible := s2_req.isPrefetch && s2_req.pbEligible
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
@@ -931,32 +1046,30 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way
 
-  io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
+  io.wbq_conflict_check.valid := s2_miss_req_valid
   io.wbq_conflict_check.bits := s2_req.addr
 
-  /**
-    * `s2_req.isStore` includes miss requests from Sbuffer sent from MissQueue,
-    * while `s2_isStore`` only requests from sbuffer.
-    * In the case of `BtoT` fail, only requests from sbuffer are allowed to return replay response.
-    */
-  val s2_isStore = RegEnable(s1_isStore, s1_fire)
-  val s2_isAMO = RegEnable(s1_isAMO, s1_fire)
-  io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore)
-  io.store_replay_resp.bits.data := DontCare
-  io.store_replay_resp.bits.miss := true.B // s2_can_go_to_mq && replay
-  io.store_replay_resp.bits.replay := true.B // s2_grow_perm_fail
-  io.store_replay_resp.bits.id := s2_req.id
+  val s3_store_response_valid = !s3_response_only && (s3_store_can_go || s3_pb_store)
+  val s3_store_response_bits = Wire(new DCacheLineResp)
+  s3_store_response_bits.data := 0.U
+  s3_store_response_bits.miss := s3_pb_store
+  s3_store_response_bits.replay := s3_pb_store
+  s3_store_response_bits.id := s3_req.id
+  val s3_store_response_fire = s3_fire && s3_store_response_valid
+  val s2_store_response_bits = Wire(new DCacheLineResp)
+  s2_store_response_bits.data := 0.U
+  s2_store_response_bits.miss := true.B
+  s2_store_response_bits.replay := s2_store_replay
+  s2_store_response_bits.id := s2_req.id
+  val store_response_fire = s2_store_to_s3 || s3_store_response_fire
+  val store_response_bits_next = Mux(s2_store_to_s3, s2_store_response_bits, s3_store_response_bits)
+  val store_response_valid = RegNext(store_response_fire, false.B)
+  val store_response_bits = RegEnable(store_response_bits_next, 0.U.asTypeOf(new DCacheLineResp), store_response_fire)
 
-  val mshr_handled_store_miss = s2_valid && s2_can_go_to_mq && s2_req.isStore && !io.store_replay_resp.valid
-  val mshr_handled_store_miss_s3 = RegNext(mshr_handled_store_miss)
-  val mshr_handled_store_miss_id_s3 = RegEnable(s2_req.id, mshr_handled_store_miss)
-  // If a store is miss and accepted by mshr, tell Sbuffer it is a "hit". Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
-  //                                      (1) real hit       (2) store miss and accepted by mshr
-  io.store_hit_resp.valid := s3_valid && s3_store_can_go || mshr_handled_store_miss_s3
-  io.store_hit_resp.bits.data := DontCare
-  io.store_hit_resp.bits.miss := mshr_handled_store_miss_s3
-  io.store_hit_resp.bits.replay := false.B
-  io.store_hit_resp.bits.id := Mux(mshr_handled_store_miss_s3, mshr_handled_store_miss_id_s3, s3_req.id)
+  io.store_replay_resp.valid := store_response_valid && store_response_bits.replay
+  io.store_replay_resp.bits := store_response_bits
+  io.store_hit_resp.valid := store_response_valid && !store_response_bits.replay
+  io.store_hit_resp.bits := store_response_bits
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source
@@ -986,49 +1099,51 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.atomic_resp.bits := Mux(atomic_replay_resp_valid, atomic_replay_resp, atomic_hit_resp)
 
   val total_prefetch = s2_fire && s2_isPrefetch
-  val pf_late_in_cache = s2_fire && s2_hit && s2_isPrefetch
+  val pf_late_in_cache = s2_fire && (s2_hit || s2_pf_drop) && s2_isPrefetch
 
   io.prefetch_stat.total_prefetch := total_prefetch
   io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
-  io.prefetch_stat.pf_late_in_cache_source := s2_hit_prefetch
+  io.prefetch_stat.pf_late_in_cache_source := Mux(s2_pf_drop, io.pb.s2_dataResp.bits.prefetchSource, s2_hit_prefetch)
   io.prefetch_stat.nack_prefetch := s2_valid && s2_can_go_to_mq && !io.miss_req.ready && s2_isPrefetch
   io.prefetch_stat.pf_source := s2_req.pf_source
-  io.prefetch_stat.hit_pf_in_cache := DontCare
-  io.prefetch_stat.hit_source := DontCare
+  io.prefetch_stat.hit_pf_in_cache := false.B
+  io.prefetch_stat.hit_source := 0.U
 
-  io.prefetch_stat.demand_miss := DontCare
-  io.prefetch_stat.pollution := DontCare
+  io.prefetch_stat.demand_miss := false.B
+  io.prefetch_stat.pollution := false.B
 
   // io.replace_resp.valid := s3_fire && s3_req.replace
   // io.replace_resp.bits := s3_req.miss_id
 
-  io.meta_write.valid := s3_fire && update_meta
+  io.meta_write.valid := s3_fire && !s3_response_only && update_meta
   io.meta_write.bits.idx := s3_idx
   io.meta_write.bits.way_en := s3_way_en
   io.meta_write.bits.meta.coh := new_coh
 
-  io.error_flag_write.valid := s3_fire && update_meta && (s3_l2_error_wb.asUInt.orR || s3_req.miss)
+  io.error_flag_write.valid := s3_fire && !s3_response_only && update_meta &&
+    (s3_l2_error_wb.asUInt.orR || s3_req.miss)
   io.error_flag_write.bits.idx := s3_idx
   io.error_flag_write.bits.way_en := s3_way_en
   io.error_flag_write.bits.error := s3_l2_error_wb
 
   // if we use (prefetch_flag && meta =/= ClientStates.Nothing) for prefetch check
   // prefetch_flag_write can be omited
-  io.prefetch_flag_write.valid := s3_fire && s3_req.miss
+  io.prefetch_flag_write.valid := s3_fire && !s3_response_only && s3_req.miss
   io.prefetch_flag_write.bits.idx := s3_idx
   io.prefetch_flag_write.bits.way_en := s3_way_en
   io.prefetch_flag_write.bits.source := s3_req.pf_source
 
-  io.latency_flag_write.valid := s3_fire && s3_req.miss
+  io.latency_flag_write.valid := s3_fire && !s3_response_only && s3_req.miss
   io.latency_flag_write.bits.idx := s3_idx
   io.latency_flag_write.bits.way_en := s3_way_en
   io.latency_flag_write.bits.latency := s3_refill_latency
 
   // regenerate repl_way & repl_coh
-  io.bloom_filter_query.set.valid := s2_fire_to_s3 && s2_req.miss && !isFromL1Prefetch(s2_repl_pf) && s2_repl_coh.isValid() && isFromL1Prefetch(s2_req.pf_source)
+  io.bloom_filter_query.set.valid := s2_fire_to_s3 && !s2_store_to_s3 && s2_req.miss &&
+    !isFromL1Prefetch(s2_repl_pf) && s2_repl_coh.isValid() && isFromL1Prefetch(s2_req.pf_source)
   io.bloom_filter_query.set.bits.addr := io.bloom_filter_query.set.bits.get_addr(Cat(s2_repl_tag, get_untag(s2_req.vaddr))) // the evict block address
 
-  io.bloom_filter_query.clr.valid := s3_fire && isFromL1Prefetch(s3_req.pf_source)
+  io.bloom_filter_query.clr.valid := s3_fire && !s3_response_only && isFromL1Prefetch(s3_req.pf_source)
   io.bloom_filter_query.clr.bits.addr := io.bloom_filter_query.clr.bits.get_addr(s3_req.addr)
 
   XSPerfAccumulate("prefetch_write_valid", s3_fire && s3_req.miss)
@@ -1041,24 +1156,24 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("mainpipe_slot_conflict_1_3", (s1_idx === s3_idx && s1_way_en === s3_way_en && s1_req.miss && s3_req.miss && s1_valid && s3_valid))
   XSPerfAccumulate("mainpipe_slot_conflict_2_3", (s2_idx === s3_idx && s2_way_en === s3_way_en && s2_req.miss && s3_req.miss && s2_valid && s3_valid))
   // probe / replace will not update access bit
-  io.access_flag_write.valid := s3_fire && !s3_req.probe && !s3_req.replace
+  io.access_flag_write.valid := s3_fire && !s3_response_only && !s3_req.probe && !s3_req.replace
   io.access_flag_write.bits.idx := s3_idx
   io.access_flag_write.bits.way_en := s3_way_en
   // io.access_flag_write.bits.flag := true.B
   io.access_flag_write.bits.flag :=Mux(s3_req.miss, s3_req.access, true.B)
 
-  io.tag_write.valid := s3_fire && s3_req.miss
+  io.tag_write.valid := s3_fire && !s3_response_only && s3_req.miss
   io.tag_write.bits.idx := s3_idx
   io.tag_write.bits.way_en := s3_way_en
   io.tag_write.bits.tag := get_tag(s3_req.addr)
   io.tag_write.bits.ecc := DontCare // generate ecc code in tagArray
   io.tag_write.bits.vaddr := s3_req.vaddr
 
-  io.tag_write_intend := s3_req.miss && s3_valid
+  io.tag_write_intend := s3_req.miss && s3_valid && !s3_response_only
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
   XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
 
-  io.replace.req.valid := s2_valid && s2_need_eviction && !s2_refill_tag_eq_way
+  io.replace.req.valid := s2_valid && (s2_req.miss || s2_move) && s2_need_eviction && !s2_refill_tag_eq_way
   io.replace.req.bits.addr := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
   io.replace.req.bits.vaddr := s2_req.vaddr
 
@@ -1066,7 +1181,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   assert(!RegNext(io.tag_write.valid && !io.tag_write_intend))
 
-  io.data_write.valid := s3_valid && s3_update_data_cango && update_data
+  io.data_write.valid := s3_valid && !s3_response_only && s3_update_data_cango && update_data
   io.data_write.bits.way_en := s3_way_en
   io.data_write.bits.addr := s3_req.vaddr
   io.data_write.bits.wmask := banked_wmask
@@ -1083,11 +1198,40 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       )
     )
   )
+  // Publish the original PB line and all metadata on one edge. Victim data stays
+  // on the existing readline/WBQ path and is never replaced with this payload.
+  val s3_pb_used = s3_line.used
+  io.prefetchUseInstall.valid := io.tag_write.fire && !s3_response_only && (!s3_tag_match || s3_move)
+  io.prefetchUseInstall.bits.set := s3_idx
+  io.prefetchUseInstall.bits.way := OHToUInt(s3_way_en)
+  io.prefetchUseInstall.bits.source := Mux(s3_move, s3_line.prefetchSource,
+    Mux(s3_l2_error_wb.asUInt.orR, 0.U, s3_req.prefetchOrigin))
+  io.prefetchUseInstall.bits.used := s3_move && s3_pb_used
+  when (s3_req.pbReq) {
+    io.meta_write.valid := s3_fire && !s3_response_only && s3_move
+    io.meta_write.bits.meta.coh := s3_line.coh
+    io.tag_write.valid := s3_fire && !s3_response_only && s3_move
+    io.tag_write_intend := s3_valid && !s3_response_only && s3_move
+    io.data_write.valid := s3_fire && !s3_response_only && s3_move
+    io.data_write.bits.wmask := banked_full_wmask
+    for (i <- 0 until DCacheBanks) {
+      io.data_write.bits.data(i) := get_data_of_bank(i, s3_line.data)
+      io.data_write_dup(i).valid := s3_fire && !s3_response_only && s3_move
+    }
+    io.error_flag_write.valid := s3_fire && !s3_response_only && s3_move
+    io.error_flag_write.bits.error := 0.U.asTypeOf(new TLError)
+    io.prefetch_flag_write.valid := s3_fire && !s3_response_only && s3_move
+    io.prefetch_flag_write.bits.source := Mux(s3_pb_used, L1_HW_PREFETCH_CLEAR, s3_line.prefetchSource)
+    io.access_flag_write.valid := s3_fire && !s3_response_only && s3_move
+    io.access_flag_write.bits.flag := s3_pb_used
+    io.latency_flag_write.valid := s3_fire && !s3_response_only && s3_move
+    io.latency_flag_write.bits.latency := 0.U
+  }
   //assert(RegNext(!io.meta_write.valid || !s3_req.replace))
   assert(RegNext(!io.tag_write.valid || !s3_req.replace))
   assert(RegNext(!io.data_write.valid || !s3_req.replace))
 
-  io.wb.valid := s3_valid && (
+  io.wb.valid := s3_valid && !s3_response_only && (
     // replace
     s3_req.replace && !s3_replace_nothing ||
     // probe can go to wbq
@@ -1109,18 +1253,44 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
   io.wb.bits.delay_release := s3_req.replace
   io.wb.bits.miss_id := s3_req.miss_id
+  when (s3_pb_probe) {
+    io.wb.bits.addr := s3_req.addr
+    io.wb.bits.param := Mux(s3_probe_resp.coh.state === ClientStates.Trunk, TtoN, BtoN)
+    io.wb.bits.voluntary := false.B
+    io.wb.bits.hasData := false.B
+    io.wb.bits.dirty := false.B
+    io.wb.bits.data := 0.U
+    io.wb.bits.corrupt := false.B
+    io.wb.bits.delay_release := false.B
+  }
+  when (s3_req.pbReq) {
+    io.wb.valid := s3_valid && need_wb && s3_pb_writes
+    io.wb.bits.voluntary := true.B
+  }
+  io.pb.s3_probeDone.valid := s3_valid && s3_pb_probe && io.wb.fire
+  io.pb.s3_probeDone.bits := s3_probe_resp.entryId
+  io.pb.s3_moveDone.valid := s3_fire && s3_move
+  io.pb.s3_moveDone.bits := s3_line.entryId
+  when (s3_valid && s3_pb_probe) {
+    assert(!s3_req.probe_need_data, "PB Probe requires the current clean no-data L2 contract")
+    assert(s3_probe_resp.coh.state === ClientStates.Branch || s3_probe_resp.coh.state === ClientStates.Trunk)
+  }
 
   // update plru in main pipe s3
-  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
+  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_response_only &&
+    !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
+  when (s3_req.pbReq) {
+    io.replace_access.valid := s3_fire && !s3_response_only && s3_move
+  }
 
   io.replace_way.set.valid := GatedValidRegNext(s0_fire)
   io.replace_way.set.bits := s1_idx
   io.replace_way.dmWay := s1_dmWay
 
   // send evict hint to sms
-  val sms_agt_evict_valid = s2_valid && s2_req.miss && s2_fire_to_s3
+  val sms_agt_evict_valid = s2_valid && !s2_store_to_s3 && s2_req.miss && s2_fire_to_s3
   io.sms_agt_evict_req.valid := GatedValidRegNext(sms_agt_evict_valid)
   io.sms_agt_evict_req.bits.vaddr := RegEnable(Cat(s2_repl_tag(tagBits - 1, 2), s2_req.vaddr(13,12), 0.U((VAddrBits - tagBits).W)), sms_agt_evict_valid)
 
@@ -1141,8 +1311,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s.s1.valid := s1_valid
     s.s1.bits.set := RegEnable(get_dcache_idx(s0_req.vaddr), s0_fire)
     s.s1.bits.way_en := s1_way_en
-    s.s2.valid := s2_valid && !RegEnable(s1_req.replace, s1_fire)
-    s.s2.bits.set := RegEnable(get_dcache_idx(s1_req.vaddr), s1_fire)
+    s.s2.valid := s2_valid && !RegEnable(s1_req.replace, s1_to_s2)
+    s.s2.bits.set := RegEnable(get_dcache_idx(s1_req.vaddr), s1_to_s2)
     s.s2.bits.way_en := s2_way_en
     s.s3.valid := s3_valid && !RegEnable(s2_req.replace, s2_fire_to_s3)
     s.s3.bits.set := RegEnable(get_dcache_idx(s2_req.vaddr), s2_fire_to_s3)

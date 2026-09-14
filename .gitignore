@@ -383,3 +383,8 @@ bug-report.tar.gz
 .venv/
 venv/
 .planning
+
+# Test sources
+**/src/test/
+**/test/
+**/tests/

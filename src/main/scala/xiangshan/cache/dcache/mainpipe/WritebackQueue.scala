@@ -312,6 +312,10 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
+    // PB releases enter a private pending buffer before reaching a WB entry.
+    val pbRelease = Flipped(DecoupledIO(new WritebackReq))
+    // Actual allocation into a WritebackEntry, regardless of request source.
+    val accepted = Output(Valid(new WritebackReq))
     val req_ready_dup = Vec(nDupWbReady, Output(Bool()))
     // ========== Multi-channel support ==========
     // Each channel gets its own TL release/grant port
@@ -332,10 +336,15 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val primary_ready_vec = Wire(Vec(cfg.nReleaseEntries, Bool()))
   val alloc = Cat(primary_ready_vec).orR
 
-  val req = io.req
-  val block_conflict = Wire(Bool())
-
-  req.ready := alloc && !block_conflict
+  // --------------------------------------------------------------------------
+  // PB pending release buffer
+  // --------------------------------------------------------------------------
+  // The buffer is deliberately non-cut-through.  PB sees only this buffer's
+  // capacity and therefore cannot receive WB/MainPipe ready feedback.
+  val pendingValid = RegInit(VecInit(Seq.fill(2)(false.B)))
+  val pendingBits = Reg(Vec(2, new WritebackReq))
+  val pendingHeadValid = pendingValid(0)
+  val pendingTailFree = !pendingValid(1)
 
   // assign default values to output signals
   for (ch <- 0 until numMemChannels) {
@@ -344,11 +353,46 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     io.mem_grant(ch).ready   := false.B
   }
 
-  // delay data write in writeback req for 1 cycle
-  val req_data = RegEnable(io.req.bits.toWritebackReqData(), io.req.valid)
-
   require(isPow2(cfg.nMissEntries))
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
+
+  // --------------------------------------------------------------------------
+  // Internal request selection
+  // --------------------------------------------------------------------------
+  val activeBlockConflict = (addr: UInt) =>
+    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === addr)).asUInt.orR
+  val pendingBlockConflict = (addr: UInt) =>
+    VecInit((0 until 2).map(i => pendingValid(i) && pendingBits(i).addr === addr)).asUInt.orR
+
+  val mainConflict = activeBlockConflict(io.req.bits.addr) || pendingBlockConflict(io.req.bits.addr)
+  // A pending head is checked only against active WB entries.  It must not
+  // conflict with its own reservation in the pending buffer.
+  val pendingHeadConflict = activeBlockConflict(pendingBits(0).addr)
+  val pendingPriority = RegInit(false.B)
+  val pendingEligible = pendingHeadValid && !pendingHeadConflict
+  val selectPending = pendingEligible && (!io.req.valid || pendingPriority || mainConflict)
+  val selectMain = io.req.valid && !selectPending
+  val selectedValid = selectPending || selectMain
+  val selectedBits = Mux(selectPending, pendingBits(0), io.req.bits)
+  val selectedConflict = Mux(selectPending, pendingHeadConflict, mainConflict)
+  val selectedReady = alloc && !selectedConflict
+
+  io.req.ready := selectedReady && selectMain
+  val pendingDeqFire = selectedReady && selectPending
+  val pendingEnqFire = io.pbRelease.valid && io.pbRelease.ready
+  // Do not combine enqueue and dequeue in one cycle.  This keeps the FIFO
+  // update explicit and avoids a bypass path from PB to MainPipe.
+  io.pbRelease.ready := pendingTailFree && !pendingDeqFire &&
+    !(io.req.valid && io.req.bits.addr === io.pbRelease.bits.addr)
+
+  val req = Wire(DecoupledIO(new WritebackReq))
+  req.valid := selectedValid
+  req.bits := selectedBits
+  req.ready := selectedReady
+
+  // delay data write in WritebackEntry for 1 cycle
+  val req_data = RegEnable(req.bits.toWritebackReqData(), req.valid)
+
   entries.zipWithIndex.foreach {
     case (entry, i) =>
       val former_primary_ready = if(i == 0)
@@ -359,18 +403,14 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
       entry.io.id := entry_id
 
-      // entry req
-      entry.io.req.valid := req.valid && !block_conflict
-      primary_ready_vec(i)   := entry.io.primary_ready
-      entry.io.req.bits  := req.bits
-      entry.io.req_data  := req_data
-
-      entry.io.primary_valid := alloc &&
-        !former_primary_ready &&
-        entry.io.primary_ready
+      entry.io.req.valid := req.valid && !selectedConflict
+      primary_ready_vec(i) := entry.io.primary_ready
+      entry.io.req.bits := req.bits
+      entry.io.req_data := req_data
+      entry.io.primary_valid := alloc && !former_primary_ready && entry.io.primary_ready
 
       entry.io.mem_grant.valid := false.B
-      entry.io.mem_grant.bits  := DontCare
+      entry.io.mem_grant.bits := DontCare
       for (ch <- 0 until numMemChannels) {
         when ((entry_id === io.mem_grant(ch).bits.source) && io.mem_grant(ch).valid) {
           entry.io.mem_grant <> io.mem_grant(ch)
@@ -378,17 +418,45 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       }
   }
 
-  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
-    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !block_conflict
+  when (pendingDeqFire) {
+    when (pendingValid(1)) {
+      pendingBits(0) := pendingBits(1)
+      pendingValid(0) := true.B
+      pendingValid(1) := false.B
+    }.otherwise {
+      pendingValid(0) := false.B
+    }
+  }
+  when (pendingEnqFire) {
+    when (!pendingValid(0)) {
+      pendingBits(0) := io.pbRelease.bits
+      pendingValid(0) := true.B
+    }.otherwise {
+      pendingBits(1) := io.pbRelease.bits
+      pendingValid(1) := true.B
+    }
   }
 
-  block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR
+  // Alternate between an eligible pending release and MainPipe traffic when
+  // both are continuously valid.  A blocked pending head never monopolizes
+  // the WB entry needed by unrelated MainPipe requests.
+  when (pendingEligible && selectedReady) {
+    pendingPriority := !selectPending
+  }
+
+  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
+    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !mainConflict && selectMain
+  }
+
   val miss_req_conflict = io.miss_req_conflict_check.map{ r =>
-    VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === r.bits)).asUInt.orR
+    activeBlockConflict(r.bits) || pendingBlockConflict(r.bits)
   }
   io.block_miss_req.zipWithIndex.foreach{ case(blk, i) =>
     blk := io.miss_req_conflict_check(i).valid && miss_req_conflict(i)
   }
+
+  io.accepted.valid := req.fire
+  io.accepted.bits := req.bits
 
   private def selectChannel(addr: UInt): UInt = {
     if (hasDualChannel) {
@@ -421,7 +489,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // XSDebug(io.block_miss_req, "block_miss_req\n")
 
   // performance counters
-  XSPerfAccumulate("wb_req", io.req.fire)
+  XSPerfAccumulate("wb_req", io.accepted.valid)
   for(i <- 0 until MissReqPortCount) {
     XSPerfAccumulate(s"block_miss_req_$i", io.block_miss_req(i))
   }
@@ -432,7 +500,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
-    ("dcache_wbq_req      ", io.req.fire),
+    ("dcache_wbq_req      ", io.accepted.valid),
     ("dcache_wbq_1_4_valid", (perfValidCount < (cfg.nReleaseEntries.U/4.U))),
     ("dcache_wbq_2_4_valid", (perfValidCount > (cfg.nReleaseEntries.U/4.U)) & (perfValidCount <= (cfg.nReleaseEntries.U/2.U))),
     ("dcache_wbq_3_4_valid", (perfValidCount > (cfg.nReleaseEntries.U/2.U)) & (perfValidCount <= (cfg.nReleaseEntries.U*3.U/4.U))),
