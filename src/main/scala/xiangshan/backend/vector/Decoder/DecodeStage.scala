@@ -164,6 +164,7 @@ class DecodeStageImp(
         bits.canRobCompress := uopInfo.canRobCompress
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
+        bits.src12Rev := uopInfo.src12Rev
         bits.frm := uopInfo.frm
         bits.vm := uopInfo.vm
         bits.vtype := mopInfo.vtype

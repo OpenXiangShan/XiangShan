@@ -864,6 +864,7 @@ object VecIssueQueue {
     val opcode    = FuOpType()
 
     val vm        = Bool()
+    val src12Rev  = Bool()
     val vtype     = VType()
     val oldVType  = VType()
 
@@ -908,6 +909,7 @@ object VecIssueQueue {
       this.opcode := source.fuOpType
 
       this.vm := source.vm
+      this.src12Rev := source.src12Rev
       this.vtype := source.vtype
       this.oldVType := source.oldVType
 
@@ -951,6 +953,7 @@ object VecIssueQueue {
       this.opcode := source.fuOpType
 
       this.vm := source.vm.getOrElse(false.B)
+      this.src12Rev := false.B
       this.vtype := source.vtype.getOrElse(0.U.asTypeOf(this.vtype))
       this.oldVType := source.oldVType.getOrElse(0.U.asTypeOf(this.vtype))
 
@@ -1031,6 +1034,7 @@ object VecIssueQueue {
     val flushPipe    = Option.when(exuParam.needFlushPipe)(Bool())
 
     val vm           = Option.when(exuParam.needVM)(Bool())
+    val src12Rev     = Bool()
     val frm          = Option.when(exuParam.readFrm)(Frm())
     val vtype        = Option.when(exuParam.readVType)(VType())
     val oldVType     = Option.when(exuParam.readOldVType)(VType())
@@ -1041,6 +1045,7 @@ object VecIssueQueue {
       this.fuType := entry.payload.fuType
       this.opcode := entry.payload.opcode
       this.vm.foreach(_ := entry.payload.vm.get)
+      this.src12Rev := entry.payload.src12Rev
       this.robIdx := entry.status.robIdx
       this.uopIdx := entry.status.uopIdx
 
@@ -1166,6 +1171,7 @@ object VecIssueQueue {
     val fuType    = FuType()
     val opcode    = FuOpType()
     val vm        = Option.when(param.needVM)(Bool())
+    val src12Rev  = Bool()
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
     val immType   = Option.when(param.needImm)(SelImm())
@@ -1194,6 +1200,7 @@ object VecIssueQueue {
       this.fuType := enq.fuType
       this.opcode := enq.opcode
       this.vm.foreach(_ := enq.vm)
+      this.src12Rev := enq.src12Rev
       this.vtype.foreach(_ := enq.vtype)
       this.oldVType.foreach(_ := enq.oldVType)
       this.immType.foreach(_ := enq.selImm)
