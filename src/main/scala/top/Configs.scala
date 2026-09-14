@@ -317,6 +317,7 @@ case class L2CacheConfig
         name = "L2",
         ways = ways,
         sets = l2sets,
+        replacement = "lru",
         clientCaches = Seq(L1Param(
           "dcache",
           sets = 2 * p.dcacheParametersOpt.get.nSets / banks,
