@@ -14,6 +14,7 @@ object L1CCHINodeId {
   val ICacheSrcId: UInt = 1.U
   val PtwSrcId: UInt = 2.U
   val UncacheSrcId: UInt = 3.U
+  val InstrUncacheSrcId: UInt = 4.U
 
   val L2TgtId: UInt = 0.U
 }

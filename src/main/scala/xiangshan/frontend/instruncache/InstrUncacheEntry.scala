@@ -17,32 +17,29 @@ package xiangshan.frontend.instruncache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.TLBundleA
-import freechips.rocketchip.tilelink.TLBundleD
-import freechips.rocketchip.tilelink.TLEdgeOut
+import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.WfiReqBundle
+import xiangshan.cache.InstrUncacheCCHI
 import xiangshan.frontend.ifu.PreDecodeHelper
-import xscache.coupledL2.MemBackTypeMM
-import xscache.coupledL2.MemPageTypeNC
 
 // One miss entry deals with one mmio request
-class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheModule with PreDecodeHelper {
-  class InstrUncacheEntryIO(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUncacheBundle {
+class InstrUncacheEntry(implicit p: Parameters) extends InstrUncacheModule with PreDecodeHelper {
+  class InstrUncacheEntryIO(implicit p: Parameters) extends InstrUncacheBundle {
     val id: UInt = Input(UInt(log2Up(nMmioEntry).W))
     // client requests
     val req:  DecoupledIO[InstrUncacheReq]  = Flipped(DecoupledIO(new InstrUncacheReq))
     val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 
-    val mmioAcquire: DecoupledIO[TLBundleA] = DecoupledIO(new TLBundleA(edge.bundle))
-    val mmioGrant:   DecoupledIO[TLBundleD] = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
+    val readReq:  DecoupledIO[FlitREQ]      = Decoupled(new FlitREQ)
+    val compData: DecoupledIO[FlitDnDAT64]  = Flipped(Decoupled(new FlitDnDAT64))
 
     val flush: Bool         = Input(Bool())
     val wfi:   WfiReqBundle = Flipped(new WfiReqBundle)
   }
 
-  val io: InstrUncacheEntryIO = IO(new InstrUncacheEntryIO(edge))
+  val io: InstrUncacheEntryIO = IO(new InstrUncacheEntryIO)
 
   private def nState: Int = 4
   private object State extends EnumUInt(nState) {
@@ -75,19 +72,25 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   private val resending         = RegInit(false.B)
   private val resendAddr        = alignedAddr + 1.U
 
-  // send tilelink request
-  // if there is a pending wfi request, we should not send new requests to L2
-  io.mmioAcquire.valid := state === State.RefillReq && !io.wfi.wfiReq
-  io.mmioAcquire.bits := edge.Get(
-    fromSource = io.id,
-    toAddress = Cat(Mux(resending, resendAddr, alignedAddr), 0.U(log2Ceil(MmioBusBytes).W)),
-    lgSize = log2Ceil(MmioBusBytes).U
-  )._2
-  io.mmioAcquire.bits.user.lift(MemBackTypeMM).foreach(_ := reqReg.memBackTypeMM)
-  io.mmioAcquire.bits.user.lift(MemPageTypeNC).foreach(_ := reqReg.memPageTypeNC)
+  private val readAddr = Cat(Mux(resending, resendAddr, alignedAddr), 0.U(log2Ceil(MmioBusBytes).W))
 
-  // receive tilelink response
-  io.mmioGrant.ready := state === State.RefillResp
+  // send CHI read request
+  // if there is a pending wfi request, we should not send new requests to L2
+  io.readReq.valid := state === State.RefillReq && !io.wfi.wfiReq
+  io.readReq.bits := 0.U.asTypeOf(io.readReq.bits)
+  when(io.readReq.valid) {
+    InstrUncacheCCHI.Tx.readReq(
+      io.readReq.bits,
+      io.id,
+      readAddr,
+      log2Ceil(MmioBusBytes).U,
+      reqReg.memBackTypeMM,
+      reqReg.memPageTypeNC
+    )
+  }
+
+  // receive CHI CompData response
+  io.compData.ready := state === State.RefillResp
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := state =/= State.RefillResp
@@ -114,31 +117,29 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
     }
 
     is(State.RefillReq) {
-      when(io.mmioAcquire.fire) {
+      when(io.readReq.fire) {
         state := State.RefillResp
       }
     }
 
     is(State.RefillResp) {
-      when(io.mmioGrant.fire) {
-        // we request size <= mmio bus width, so we should be able to get full response in one beat,
-        // which means we can assert refillDone when io.mmioGrant.fire
-        val (_, _, refillDone, _) = edge.addr_inc(io.mmioGrant)
-        assert(refillDone)
+      when(io.compData.fire) {
+        // we request size <= mmio bus width, so we should be able to get full response in one beat
+        assert(CCHIOpcode.CompData.is(io.compData.bits.Opcode, io.compData.valid))
 
         val shiftedBusData = Mux1H(
           UIntToOH(reqReg.addr(2, 1)),
           Seq(
-            io.mmioGrant.bits.data(31, 0),
-            io.mmioGrant.bits.data(47, 16),
-            io.mmioGrant.bits.data(63, 32),
-            Cat(0.U(16.W), io.mmioGrant.bits.data(63, 48))
+            io.compData.bits.Data(31, 0),
+            io.compData.bits.Data(47, 16),
+            io.compData.bits.Data(63, 32),
+            Cat(0.U(16.W), io.compData.bits.Data(63, 48))
           )
         )
 
         // if crossing bus boundary, but not page boundary, we can automatically re-send request, except:
         // 1. if has exception, we need to raise an exception anyway, so no need to resend request
-        val respCorrupt = io.mmioGrant.bits.corrupt
+        val respCorrupt = InstrUncacheCCHI.Rx.corrupt(io.compData.bits.RespErr)
         // 2. if response is rvc, we need only 2B, so no need to resend request
         val respIsRvc = isRVC(shiftedBusData)
         // 3. also, if we are already resending, we should not resend again
@@ -148,13 +149,13 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
         resending := needResend
 
         when(resending) {
-          respDataReg(1) := io.mmioGrant.bits.data(15, 0)
+          respDataReg(1) := io.compData.bits.Data(15, 0)
         }.otherwise {
           respDataReg(0) := shiftedBusData(15, 0)
           respDataReg(1) := shiftedBusData(31, 16)
         }
-        respCorruptReg := io.mmioGrant.bits.corrupt
-        respDeniedReg  := io.mmioGrant.bits.denied
+        respCorruptReg := respCorrupt
+        respDeniedReg  := InstrUncacheCCHI.Rx.denied(io.compData.bits.RespErr)
       }
     }
 

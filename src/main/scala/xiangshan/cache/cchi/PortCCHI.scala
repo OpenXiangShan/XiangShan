@@ -353,6 +353,59 @@ object UncacheCCHI {
   }
 }
 
+object InstrUncacheCCHI {
+  object Params {
+    val srcId: UInt = L1CCHINodeId.InstrUncacheSrcId
+    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    val needRR: Boolean = true
+    val bufferableNC: Boolean = true
+  }
+
+  object Tx {
+    def sizeFromLgSize(lgSize: UInt): UInt = lgSize(2, 0)
+
+    private def fillReq(req: FlitREQ, memBackTypeMM: Bool, pageTypeNC: Bool, lgSize: UInt): Unit = {
+      val ewa = if (Params.bufferableNC) (pageTypeNC || memBackTypeMM) else false.B
+      req.SrcID := Params.srcId
+      req.TgtID := Params.tgtId
+      req.Size := sizeFromLgSize(lgSize)
+      req.NS := false.B
+      req.Order := {
+        if (Params.needRR) {
+          Mux(!memBackTypeMM, "b11".U(2.W), "b10".U(2.W))
+        } else {
+          0.U(2.W)
+        }
+      }
+      req.MemAttr := Cat(
+        false.B,
+        false.B,
+        !memBackTypeMM,
+        ewa
+      )
+      req.Excl := false.B
+      req.ExpCompData := true.B
+      req.WayValid := false.B
+      req.Way := 0.U
+      req.TraceTag := 0.U(1.W)
+    }
+
+    def readReq(req: FlitREQ, txnId: UInt, addr: UInt, lgSize: UInt,
+      memBackTypeMM: Bool, pageTypeNC: Bool): Unit = {
+      fillReq(req, memBackTypeMM, pageTypeNC, lgSize)
+      req.TxnID := txnId
+      req.Addr := addr(47, 0)
+      req.alias := 0.U(2.W)
+      req.Opcode := CCHIOpcode.ReadNoSnp.U
+    }
+  }
+
+  object Rx {
+    def denied(respErr: UInt): Bool = UncacheCCHI.Rx.denied(respErr)
+    def corrupt(respErr: UInt): Bool = UncacheCCHI.Rx.corrupt(respErr)
+  }
+}
+
 /*
  * D$ / I$ CtrlUnit Compact CHI Type 3 Completer helpers.
  */
