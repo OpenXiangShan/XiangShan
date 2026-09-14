@@ -39,6 +39,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   val bypass: BypassNetwork = Module(new BypassNetwork()(param, p))
   val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
+  private val nonFixedLatFus: Seq[VecNonFixedLatFunc] = fus.collect { case fu: VecNonFixedLatFunc => fu }
   val mgus: Seq[MergeUnit] = Seq.fill(numOfMgu)(Module(new MergeUnit()))
 
   val ex: Vec[ValidIO[Exu.ExStage]] = RegInit(
@@ -50,6 +51,12 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   inEx.bits :<#= in.uop.bits
   inEx.bits.fuSel := VecInit(param.fuConfigs.map(_.fuSel2(in.uop.bits)))
   inEx.bits.data.src := bypass.out.src
+  if (param.numRegSrc >= 2) {
+    when (inEx.bits.ctrl.src12Rev) {
+      inEx.bits.data.src(0) := bypass.out.src(1)
+      inEx.bits.data.src(1) := bypass.out.src(0)
+    }
+  }
 
   ex zip (inEx +: ex) foreach {
     case (sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]) =>
@@ -156,9 +163,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       out.bits.toRob.vxsat.foreach {
         case x =>
           val vxsat: Vec[UInt] = Mux1H(
-            fus.flatMap(_.out.ex.lift(i)).map(
-              validIO => validIO.valid -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
-            )
+            fus.flatMap(_.out.ex.lift(i)).map {
+              validIO =>
+                val vxsatWen = ex(i).bits.ctrl.vxsatWen.getOrElse(false.B)
+                (validIO.valid && vxsatWen) -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
+            }
           ).suggestName(s"ex${i}_vxsat")
 
           x := Mux1H(mgus(i).out.activeEn, vxsat)
@@ -177,7 +186,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   }
 
   val fuOutValidOH: Seq[Bool] = fus.flatMap(_.out.ex.map(_.valid))
-  val simultaneousOutCnt = PopCount(outFuUopEx.map(_.valid))
+  val simultaneousOutCnt = PopCount(fuOutValidOH)
 
   assert(
     simultaneousOutCnt <= 1.U,
@@ -186,6 +195,16 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
   out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
+  out.outFuLat.foreach { sink =>
+    sink.zip(nonFixedLatFus).foreach { case (toWbBusyTable, fu) =>
+      toWbBusyTable <> fu.outFuLat
+    }
+  }
+  out.outFuWakeUp.foreach { sink =>
+    sink.zip(nonFixedLatFus).foreach { case (wakeup, fu) =>
+      wakeup := fu.outFuWakeUp
+    }
+  }
 
   def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
     require(elemIdx.getWidth >= log2Up(VLEN))
@@ -218,6 +237,8 @@ object Exu {
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
+    val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
+    val outFuWakeUp = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)))
   }
 
   class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {
@@ -236,62 +257,6 @@ object Exu {
     val data = new InData(param)
     val bypassCtrl = new InBypassCtrl(param)
     val debug = Option.when(backendParams.debugEn)(new DebugBundle())
-
-    def toOldExuInput: Bundles.ExuInput = {
-      val exuInput = Wire(new Bundles.ExuInput(param.getExeUnitParams()))
-      exuInput.fuType := this.ctrl.fuType
-      exuInput.fuOpType := this.ctrl.opcode
-      exuInput.src := this.data.src
-      exuInput.v0.foreach(_ := this.data.v0.get)
-      exuInput.vl.foreach(_ := this.data.vl.get)
-      exuInput.is0Lat.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.copySrc.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.selImm := 0.U
-      exuInput.imm := this.data.imm.getOrElse(0.U)
-      exuInput.nextPcOffset.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.robIdx := this.ctrl.robIdx
-      exuInput.iqIdx := 0.U
-      exuInput.isFirstIssue := false.B
-      exuInput.pdestCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.rfWenCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.fpWenCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.vecWenCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.v0WenCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.vlWenCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.loadDependencyCopy.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.pdest := this.ctrl.pdest
-      exuInput.pdestV0.foreach(_ := this.ctrl.pdestV0.get)
-      exuInput.pdestVl.foreach(_ := this.ctrl.pdestVl.get)
-      exuInput.rfWen.foreach(_ := this.ctrl.gpWen.get)
-      exuInput.fpWen.foreach(_ := this.ctrl.fpWen.get)
-      exuInput.vecWen.foreach(_ := this.ctrl.vpWen.get)
-      exuInput.v0Wen.foreach(_ := this.ctrl.v0Wen.get)
-      exuInput.vlWen.foreach(_ := this.ctrl.vlWen.get)
-      exuInput.vpu.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.oldVType.foreach(_ := this.ctrl.oldVType.get)
-      exuInput.vtype.foreach(_ := this.ctrl.vtype.get)
-      exuInput.flushPipe.foreach(_ := this.ctrl.flushPipe.get)
-      exuInput.rasAction.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.pc.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.isRVC.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.ftqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.ftqOffset.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.predictInfo.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.loadWaitBit.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.waitForRobIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.storeSetHit.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.loadWaitStrict.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.ssid.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.sqIdx.foreach(x => x := this.ctrl.sqIdx.get)
-      exuInput.dataSources.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.exuSources.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.loadDependency.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.perfDebugInfo.foreach(x => x := this.ctrl.debug.get.perfDebugInfo)
-      exuInput.debug_seqNum.foreach(x => x := this.ctrl.debug.get.seqNum)
-
-      exuInput
-    }
 
     def <#=:(sink: Func.InCtrl): Unit = {
       sink.opcode                      := this.ctrl.opcode
@@ -412,6 +377,7 @@ object Exu {
 
     val frm       = Option.when(param.readFrm)(Frm())
     val vm        = Option.when(param.needVM)(Bool())
+    val src12Rev  = Bool()
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
 
@@ -442,6 +408,7 @@ object Exu {
 
       this.frm.foreach(_ := deq.frm.get)
       this.vm.foreach(_ := deq.vm.get)
+      this.src12Rev := deq.src12Rev
       this.vtype.foreach(_ := deq.vtype.get)
       this.oldVType.foreach(_ := deq.oldVType.get)
 
@@ -472,13 +439,6 @@ object Exu {
       this.bypassSource := deq.bypassSource
       this.bypassDelay := deq.bypassDelay
     }
-  }
-
-  class BypassCtrl(val param: ExuParam, val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
-    private val sourceWidth = log2Up(pregParams.getNumWrite(backendParams))
-
-    val source = UInt(sourceWidth.W)
-    val delay = BypassDelay()
   }
 
   class ToRf(val wbCfg: WbConfig, val pregParams: PregParams) extends Bundle {
@@ -524,22 +484,6 @@ object Exu {
       toRob.debug_seqNum  .foreach(_ := this.debug.get.seqNum)
 
       toRob
-    }
-
-    def fromOldExuOutput(source: xiangshan.backend.Bundles.ExuOutput): Unit = {
-      this.robIdx := source.robIdx
-      this.flushPipe   .foreach(_ := source.flushPipe   .get)
-      this.replay      .foreach(_ := source.replay      .get)
-      this.redirect    .foreach(_ := source.redirect    .get)
-      this.fflags      .foreach(_ := source.fflags      .get)
-      this.vxsat       .foreach(_ := source.vxsat       .get)
-      this.exceptionVec := source.exceptionVec
-      this.trigger     .foreach(_ := source.trigger     .get)
-      this.debug.foreach { case x =>
-        x.debug         := source.debug
-        x.perfDebugInfo := source.perfDebugInfo.get
-        x.seqNum        := source.debug_seqNum.get
-      }
     }
 
     def fromOldExuOutput(source: xiangshan.backend.Bundles.NewExuOutput): Unit = {

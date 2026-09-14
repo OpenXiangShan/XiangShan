@@ -21,14 +21,14 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   protected val outCtrl     = DataHoldBypass(io.in.bits.ctrl, io.in.fire)
   protected val outData     = DataHoldBypass(io.in.bits.data, io.in.fire)
 
-  protected val outVecCtrl  = outCtrl.vpu.get
-  protected val outVm       = outVecCtrl.vm
+  protected val outVType    = outCtrl.vtype.get
+  protected val outVm       = outCtrl.vm.get
+  protected val outUopIdx   = outCtrl.uopIdx.get
 
   // vadc.vv, vsbc.vv need this
   protected val outNeedClearMask: Bool = VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType)
 
   protected val outVl       = outData.vl.get
-  protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
@@ -39,16 +39,6 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
         outVm -> allMaskTrue
       )
     )
-  }
-
-  // vstart illegal
-  if (cfg.exceptionOut.nonEmpty) {
-    val outVstart = outCtrl.vpu.get.vstart
-    val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.zeroInit()
-    require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
-      "VecNonPipedFuncUnit with non-empty excptionOut must have illegal instruction exception output")
-    io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
   }
 
   connectNonPipedCtrlSingal

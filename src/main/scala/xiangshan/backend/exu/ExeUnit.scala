@@ -49,7 +49,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVlRf)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVlRf)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVlRf)(Output(Bool()))
-  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu || params.hasAluFu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasLinkFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
 class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {
@@ -59,12 +59,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   val funcUnits = fuCfgs.map(cfg => {
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
-    if (exuParams.aluNeedPc && cfg.isAlu) {
-      AluCfg.aluNeedPc = true
-      println(s"[ExeUnit] ${exuParams.name}'s alu need pc")
-    }
     val module = cfg.fuGen(p, cfg)
-    AluCfg.aluNeedPc = false
     module
   })
 
@@ -194,10 +189,10 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ctrl.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.ctrl.predictInfo.get)
       sink.bits.ctrl.fflagsWen   .foreach(x => x := source.bits.ctrl.fflagsWen.get)
-      sink.bits.ctrl.vpu         .foreach(x => x := source.bits.ctrl.vpu.get)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+      sink.bits.ctrl.vm          .foreach(x => x := source.bits.ctrl.vm.get)
+      sink.bits.ctrl.uopIdx      .foreach(x => x := source.bits.ctrl.uopIdx.get)
+      sink.bits.ctrl.lastUop     .foreach(x => x := source.bits.ctrl.lastUop.get)
+      sink.bits.ctrl.vtype       .foreach(x => x := source.bits.ctrl.vtype.get)
       sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
       sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
@@ -229,11 +224,10 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.ftqOffset.foreach(  x => x := source.ctrl.ftqOffset.get)
       sink.predictInfo.foreach(x => x := source.ctrl.predictInfo.get)
       sink.fflagsWen.foreach(x => x := source.ctrl.fflagsWen.get)
-      sink.vpu.foreach(x => x := source.ctrl.vpu.get)
-      sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
-      sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
-      sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
-      sink.vpu.foreach(x => x.maskVecGen := 0.U)
+      sink.vm.foreach(x => x := source.ctrl.vm.get)
+      sink.uopIdx.foreach(x => x := source.ctrl.uopIdx.get)
+      sink.lastUop.foreach(x => x := source.ctrl.lastUop.get)
+      sink.vtype.foreach(x => x := source.ctrl.vtype.get)
       sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       sink.frm.foreach(_ := source.ctrl.frm.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
