@@ -48,6 +48,17 @@ class CCHIType3Port extends Bundle {
   // dn (L2 / CtrlUnit -> Uncache)
   val dnRSP = Flipped(DecoupledIO(new FlitDnRSP))
   val dnDAT = Flipped(DecoupledIO(new FlitDnDAT64))
+
+  // Unused completer on a requester-direction port (e.g. Type3Router.downCtrl):
+  // never accept TX, never drive RX.
+  def tieOff(): Unit = {
+    upREQ.ready := false.B
+    upDAT.ready := false.B
+    dnRSP.valid := false.B
+    dnRSP.bits := DontCare
+    dnDAT.valid := false.B
+    dnDAT.bits := DontCare
+  }
 }
 
 // Completer (CtrlUnit, Type3Router.up): Flipped(new CCHIType3Port)

@@ -374,6 +374,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
 
+    // DCache Compact CHI Type 1 (cacheable); DCache <-> MemBlock buffer
+    val outer_dcache_cchi = Vec(numMemChannelsFromDcache, new CCHIType1Port)
+
     // ICache Compact CHI Type 4 (cacheable refill); Frontend <-> MemBlock buffer
     val inner_icache_cchi = Flipped(new CCHIType4Port)
     val outer_icache_cchi = new CCHIType4Port
@@ -388,7 +391,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val inner_i_mmio_cchi = Flipped(new CCHIType3Port)
     val outer_i_mmio_cchi = new CCHIType3Port
 
-    val inner_icache_ctrl_cchi = new CCHIType3Port
+    val inner_icache_ctrl_cchi = Option.when(icacheCtrlEnabled)(new CCHIType3Port)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1255,6 +1258,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
+  // DCache Type 1: one Queue(depth=2) per flit, same as legacy TLBuffer()
+  for (ch <- 0 until numMemChannelsFromDcache) {
+    io.outer_dcache_cchi(ch).upEVT <> Queue(dcache.io.cchi(ch).upEVT, 2)
+    io.outer_dcache_cchi(ch).upREQ <> Queue(dcache.io.cchi(ch).upREQ, 2)
+    io.outer_dcache_cchi(ch).upRSP <> Queue(dcache.io.cchi(ch).upRSP, 2)
+    io.outer_dcache_cchi(ch).upDAT <> Queue(dcache.io.cchi(ch).upDAT, 2)
+    dcache.io.cchi(ch).dnSNP <> Queue(io.outer_dcache_cchi(ch).dnSNP, 2)
+    dcache.io.cchi(ch).dnRSP <> Queue(io.outer_dcache_cchi(ch).dnRSP, 2)
+    dcache.io.cchi(ch).dnDAT <> Queue(io.outer_dcache_cchi(ch).dnDAT, 2)
+  }
+
   // upREQ: Frontend -> L2; dnDAT: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
   io.outer_icache_cchi.upREQ <> DoubleQueueBuffer(io.inner_icache_cchi.upREQ)
   io.inner_icache_cchi.dnDAT <> DoubleQueueBuffer(io.outer_icache_cchi.dnDAT)
@@ -1277,37 +1291,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   type3Router.io.downL2.dnDAT <> DoubleQueueBuffer(io.outer_d_mmio_cchi.dnDAT)
 
   if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    dcache.io.ctrl_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upREQ)
-    dcache.io.ctrl_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upDAT)
-    type3Router.io.downCtrl(0).dnRSP <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnRSP)
-    type3Router.io.downCtrl(0).dnDAT <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnDAT)
+    val dcacheCtrl = dcache.io.ctrl_cchi.get
+    dcacheCtrl.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upREQ)
+    dcacheCtrl.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upDAT)
+    type3Router.io.downCtrl(0).dnRSP <> DoubleQueueBuffer(dcacheCtrl.dnRSP)
+    type3Router.io.downCtrl(0).dnDAT <> DoubleQueueBuffer(dcacheCtrl.dnDAT)
   } else {
-    type3Router.io.downCtrl(0).upREQ.ready := false.B
-    type3Router.io.downCtrl(0).upDAT.ready := false.B
-    type3Router.io.downCtrl(0).dnRSP.valid := false.B
-    type3Router.io.downCtrl(0).dnRSP.bits := DontCare
-    type3Router.io.downCtrl(0).dnDAT.valid := false.B
-    type3Router.io.downCtrl(0).dnDAT.bits := DontCare
+    type3Router.io.downCtrl(0).tieOff()
   }
 
   if (icacheCtrlEnabled) {
-    io.inner_icache_ctrl_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upREQ)
-    io.inner_icache_ctrl_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upDAT)
-    type3Router.io.downCtrl(1).dnRSP <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.dnRSP)
-    type3Router.io.downCtrl(1).dnDAT <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.dnDAT)
+    val icacheCtrl = io.inner_icache_ctrl_cchi.get
+    icacheCtrl.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upREQ)
+    icacheCtrl.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upDAT)
+    type3Router.io.downCtrl(1).dnRSP <> DoubleQueueBuffer(icacheCtrl.dnRSP)
+    type3Router.io.downCtrl(1).dnDAT <> DoubleQueueBuffer(icacheCtrl.dnDAT)
   } else {
-    type3Router.io.downCtrl(1).upREQ.ready := false.B
-    type3Router.io.downCtrl(1).upDAT.ready := false.B
-    type3Router.io.downCtrl(1).dnRSP.valid := false.B
-    type3Router.io.downCtrl(1).dnRSP.bits := DontCare
-    type3Router.io.downCtrl(1).dnDAT.valid := false.B
-    type3Router.io.downCtrl(1).dnDAT.bits := DontCare
-    io.inner_icache_ctrl_cchi.upREQ.ready := false.B
-    io.inner_icache_ctrl_cchi.upDAT.ready := false.B
-    io.inner_icache_ctrl_cchi.dnRSP.valid := false.B
-    io.inner_icache_ctrl_cchi.dnRSP.bits := DontCare
-    io.inner_icache_ctrl_cchi.dnDAT.valid := false.B
-    io.inner_icache_ctrl_cchi.dnDAT.bits := DontCare
+    type3Router.io.downCtrl(1).tieOff()
   }
 
   // reset tree of MemBlock
