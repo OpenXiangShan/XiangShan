@@ -182,8 +182,8 @@ class WriteBuffer[T <: WriteReqBundle](
     dontTouch(hitRowIdxVec)
 
     when(writeValid) {
-      // if the entry is not written, it is useful
-      val notUsefulVec = dirty(portIdx).map(!_)
+      // Prefer a never-allocated shadow entry, then a clean entry, before overwriting pending data.
+      val notUsefulVec = shadowValid(portIdx).map(!_)
       val notUseful    = notUsefulVec.reduce(_ || _)
       val notUsefulIdx = PriorityEncoder(notUsefulVec)
       val victim = Mux(
