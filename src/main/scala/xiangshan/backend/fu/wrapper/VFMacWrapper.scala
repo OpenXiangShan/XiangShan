@@ -9,7 +9,6 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.vector.fu.Func._
 import xiangshan.backend.vector.fu.{Func, VecFixLatFunc, VecFuConfig}
-import yunsuan.encoding.Opcode.Opcodes.VFMiscOpcode
 import yunsuan.vector.Common.Fflags
 import yunsuan.vector.vfalu.{VectorFALU, VectorFALUInput}
 import yunsuan.vector.vfmul.VectorFMUL
@@ -225,8 +224,7 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   // ---------------------------------------------------------------------------
   // Release: one exit per sub-unit, timed by the op's real latency (`Opcode.getLat` ->
   // `ctrl.latency`), so each op leaves on the slot index of the ex stage it occupies then:
-  //   FADD port -> out.ex(1): vfadd (latency 1) at its ex(1) stage, together with the
-  //                mask-writing vfcompare / vfclass forms.
+  //   FADD port -> out.ex(1): vfadd / vfsgnj / vfclass (latency 1) at their ex(1) stage.
   //   FMUL port -> out.ex(2): vfmul (latency 2) at its ex(2) stage.
   //   FADD port -> out.ex(3): vfmac (latency 3) at its ex(3) stage.
   // `Func` already validates every slot (`ctrl.latency === i`), and the Exu reads the merge
@@ -234,19 +232,8 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   // three paths need nothing but their own data here.
   // ---------------------------------------------------------------------------
 
-  // vfcompare / vfclass style opcodes write the mask instead of the vector element
-  private val isMaskDest = makePipeReg(VFMiscOpcode.isDstMask(inOpcode), pipeRegValids)
-
   out.ex(1).bits.data.vec.foreach { vecData =>
-    when (isMaskDest.ex1) {
-      vecData.normal := 0.U
-      vecData.maskE8 := VecInit((0 until vlenb).map(i => faluResultUInt(i * 8))).asUInt
-      vecData.maskE16 := VecInit((0 until vlenb / 2).map(i => faluResultUInt(i * 16))).asUInt
-      vecData.maskE32 := VecInit((0 until vlenb / 4).map(i => faluResultUInt(i * 32))).asUInt
-      vecData.maskE64 := VecInit((0 until vlenb / 8).map(i => faluResultUInt(i * 64))).asUInt
-    }.otherwise {
-      vecData.normal := faluResultUInt
-    }
+    vecData.normal := faluResultUInt
     vecData.fflagsE8.get := faluFflagsData.asTypeOf(Vec(vlenb, Fflags()))
   }
 
