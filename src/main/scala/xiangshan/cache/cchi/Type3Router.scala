@@ -8,8 +8,8 @@ import oceanus.compactchi._
 
 /*
  * 1 upstream Type3 requester (Uncache) -> N downstream ports by address decode.
- * TXREQ/TXDAT: demux by Addr (txdatAddr from Uncache entry, same as txreq Addr).
- * RXRSP/RXDAT: RR arbiter when downstream respond.
+ * upREQ/upDAT: demux by Addr (txdatAddr from Uncache entry, same as upREQ Addr).
+ * dnRSP/dnDAT: RR arbiter when downstream respond.
  * downCtrl(0) = D$ CtrlUnit, downCtrl(1) = I$ CtrlUnit.
  */
 class Type3Router(implicit val p: Parameters) extends Module with HasDCacheParameters {
@@ -53,11 +53,11 @@ class Type3Router(implicit val p: Parameters) extends Module with HasDCacheParam
     up.ready := Mux(isCtrl, Mux1H(ctrlOH, downCtrl.map(_.ready)), downL2.ready)
   }
 
-  demuxTxReq(io.up.txreq, io.downCtrl.map(_.txreq), io.downL2.txreq)
-  demuxTxDat(io.up.txdat, io.txdatAddr, io.downCtrl.map(_.txdat), io.downL2.txdat)
-  assert(PopCount(io.downCtrl.map(_.txreq.valid) :+ io.downL2.txreq.valid) <= 1.U, "Type3Router: at most one to-downstream txreq valid")
+  demuxTxReq(io.up.upREQ, io.downCtrl.map(_.upREQ), io.downL2.upREQ)
+  demuxTxDat(io.up.upDAT, io.txdatAddr, io.downCtrl.map(_.upDAT), io.downL2.upDAT)
+  assert(PopCount(io.downCtrl.map(_.upREQ.valid) :+ io.downL2.upREQ.valid) <= 1.U, "Type3Router: at most one to-downstream upREQ valid")
 
-  // RXRSP/RXDAT: RR arbiter (downL2 = in(0), downCtrl(i) = in(i + 1))
+  // dnRSP/dnDAT: RR arbiter (downL2 = in(0), downCtrl(i) = in(i + 1))
   private def arbDownRx[T <: Data](up: DecoupledIO[T], downL2: DecoupledIO[T], downCtrl: Seq[DecoupledIO[T]]): Unit = {
     val arb = Module(new RRArbiter(chiselTypeOf(up.bits), 1 + downCtrl.length))
     arb.io.in(0).valid := downL2.valid
@@ -73,6 +73,6 @@ class Type3Router(implicit val p: Parameters) extends Module with HasDCacheParam
     }
   }
 
-  arbDownRx(io.up.rxrsp, io.downL2.rxrsp, io.downCtrl.map(_.rxrsp))
-  arbDownRx(io.up.rxdat, io.downL2.rxdat, io.downCtrl.map(_.rxdat))
+  arbDownRx(io.up.dnRSP, io.downL2.dnRSP, io.downCtrl.map(_.dnRSP))
+  arbDownRx(io.up.dnDAT, io.downL2.dnDAT, io.downCtrl.map(_.dnDAT))
 }

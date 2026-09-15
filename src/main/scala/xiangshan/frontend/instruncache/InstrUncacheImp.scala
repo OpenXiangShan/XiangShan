@@ -46,11 +46,11 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   private val entryAllocIdx = Wire(UInt(log2Up(nMmioEntry).W))
   private val reqReady      = WireInit(false.B)
 
-  // assign default values to output signals (read-only: no txdat)
-  io.cchi.txdat.valid := false.B
-  io.cchi.txdat.bits  := DontCare
-  io.cchi.rxrsp.ready := true.B
-  io.cchi.rxdat.ready := true.B
+  // assign default values to output signals (read-only: no upDAT)
+  io.cchi.upDAT.valid := false.B
+  io.cchi.upDAT.bits  := DontCare
+  io.cchi.dnRSP.ready := true.B
+  io.cchi.dnDAT.ready := true.B
 
   private val entries = (0 until nMmioEntry).map { i =>
     val entry = Module(new InstrUncacheEntry)
@@ -72,8 +72,8 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
     // route CompData to entry by TxnID (same role as TL source)
     entry.io.compData.valid := false.B
     entry.io.compData.bits  := DontCare
-    when(io.cchi.rxdat.valid && io.cchi.rxdat.bits.TxnID === i.U) {
-      entry.io.compData <> io.cchi.rxdat
+    when(io.cchi.dnDAT.valid && io.cchi.dnDAT.bits.TxnID === i.U) {
+      entry.io.compData <> io.cchi.dnDAT
     }
     entry
   }
@@ -87,7 +87,7 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   (readReqArb.io.in zip entries.map(_.io.readReq)).foreach { case (in, readReq) =>
     in <> readReq
   }
-  io.cchi.txreq <> readReqArb.io.out
+  io.cchi.upREQ <> readReqArb.io.out
 
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := entries.map(_.io.wfi.wfiSafe).reduce(_ && _)

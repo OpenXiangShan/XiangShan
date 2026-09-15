@@ -513,7 +513,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   if (HasMptCheck) {mem_arb.io.in(3) <> mptc.get.io.mem.req}
-  mem_arb.io.out.ready := io.cchi.txreq.ready && !flush && !wfiReq
+  mem_arb.io.out.ready := io.cchi.upREQ.ready && !flush && !wfiReq
 
   // // assert, should not send mem access at same addr for twice.
   // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
@@ -546,10 +546,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   // CHI ReadOnce request
-  io.cchi.txreq.valid := mem_arb.io.out.valid && !flush && !wfiReq
-  when (io.cchi.txreq.fire) {
+  io.cchi.upREQ.valid := mem_arb.io.out.valid && !flush && !wfiReq
+  when (io.cchi.upREQ.fire) {
     PtwCCHI.Tx.readReq(
-      io.cchi.txreq.bits,
+      io.cchi.upREQ.bits,
       txnId = mem_arb.io.out.bits.id,
       addr = blockBytes_align(mem_arb.io.out.bits.addr)
     )
@@ -562,33 +562,33 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   private val refillTxnId = Reg(UInt(bMemID.W))
 
   val compDataValid =
-    io.cchi.rxdat.valid && CCHIOpcode.CompData.is(io.cchi.rxdat.bits.Opcode, io.cchi.rxdat.valid)
-  val compDataFire = io.cchi.rxdat.fire && compDataValid
+    io.cchi.dnDAT.valid && CCHIOpcode.CompData.is(io.cchi.dnDAT.bits.Opcode, io.cchi.dnDAT.valid)
+  val compDataFire = io.cchi.dnDAT.fire && compDataValid
   val beatMatches =
-    (!gotDataId0 && !gotDataId1) || io.cchi.rxdat.bits.TxnID === refillTxnId
+    (!gotDataId0 && !gotDataId1) || io.cchi.dnDAT.bits.TxnID === refillTxnId
 
   // mem -> data buffer
   val refill_data = RegInit(VecInit.fill(refillCycles)(0.U(l1BusDataWidth.W)))
 
   when (compDataFire && beatMatches) {
     when (!gotDataId0 && !gotDataId1) {
-      refillTxnId := io.cchi.rxdat.bits.TxnID
+      refillTxnId := io.cchi.dnDAT.bits.TxnID
     }
-    when (io.cchi.rxdat.bits.DataID === 0.U) {
+    when (io.cchi.dnDAT.bits.DataID === 0.U) {
       gotDataId0 := true.B
-      refill_data(0) := io.cchi.rxdat.bits.Data
+      refill_data(0) := io.cchi.dnDAT.bits.Data
     }
-    when (io.cchi.rxdat.bits.DataID === 1.U) {
+    when (io.cchi.dnDAT.bits.DataID === 1.U) {
       gotDataId1 := true.B
-      refill_data(1) := io.cchi.rxdat.bits.Data
+      refill_data(1) := io.cchi.dnDAT.bits.Data
     }
   }
 
   val lastFire = compDataFire && beatMatches && (
-    (io.cchi.rxdat.bits.DataID === 0.U && gotDataId1) ||
-      (io.cchi.rxdat.bits.DataID === 1.U && gotDataId0)
+    (io.cchi.dnDAT.bits.DataID === 0.U && gotDataId1) ||
+      (io.cchi.dnDAT.bits.DataID === 1.U && gotDataId0)
   )
-  io.cchi.rxdat.ready := true.B
+  io.cchi.dnDAT.ready := true.B
 
   when (lastFire) {
     gotDataId0 := false.B
@@ -605,7 +605,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
   val refill_data_tmp = WireInit(refill_data)
   when (compDataFire && beatMatches) {
-    refill_data_tmp(io.cchi.rxdat.bits.DataID) := io.cchi.rxdat.bits.Data
+    refill_data_tmp(io.cchi.dnDAT.bits.DataID) := io.cchi.dnDAT.bits.Data
   }
 
   // save only one pte for each id
@@ -700,8 +700,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   if (env.EnableDifftest) {
     val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
-    when (io.cchi.txreq.fire) {
-      difftest_ptw_addr(io.cchi.txreq.bits.TxnID) := io.cchi.txreq.bits.Addr
+    when (io.cchi.upREQ.fire) {
+      difftest_ptw_addr(io.cchi.upREQ.bits.TxnID) := io.cchi.upREQ.bits.Addr
     }
 
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
@@ -1069,7 +1069,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   XSPerfAccumulate("req_full_cycle", tlbCounter === MissQueueSize.U)
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
   XSPerfAccumulate("mem_outstanding_cycle", PopCount(waiting_resp))
-  XSPerfAccumulate("mem_count", io.cchi.txreq.fire)
+  XSPerfAccumulate("mem_count", io.cchi.upREQ.fire)
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).fire && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.s1.af)
