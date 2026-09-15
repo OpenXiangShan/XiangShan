@@ -126,8 +126,6 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
   val Sv39x4Enable = csr.hgatp.mode === Sv39
   val Sv48x4Enable = csr.hgatp.mode === Sv48
 
-  val BareMode = Option.when(HasMptCheck)(
-    csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U)
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val mptEn = Option.when(HasMptCheck)(csr.mmpt.mode =/= 0.U)
   val vmEnable = Seq.fill(Width)(Wire(Bool()))
@@ -148,10 +146,12 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       else (Sv39Enable || Sv48Enable) && (info.mode < ModeM))
     val s2xlateEnable = isVirt &&
       (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (info.mode < ModeM)
-    info.translateEnable := (vmEnable(i) || s2xlateEnable) && !useReqS1Paddr(i)
+    val needTranslate = vmEnable(i) || s2xlateEnable
+    info.translateEnable := needTranslate && !useReqS1Paddr(i)
     if (HasMptCheck) {
-      info.mptCheckOnly.get := BareMode.get && RegEnable(!req(i).bits.no_translate, req(i).valid) &&
-        mptEn.get && (info.mode < ModeM)
+      val mptActive = mptEn.get && (info.mode < ModeM)
+      info.mptCheckOnly.get := !needTranslate && !req_out(i).no_translate && mptActive
+      info.mptCheckEnable.get := mptActive && (info.translateEnable || info.mptCheckOnly.get)
       io.ptw.req(i).bits.mptOnly.get := info.mptCheckOnly.get
     }
     info
@@ -166,7 +166,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
   val refill = ptw.resp.fire &&
     (!(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill ||
-      (if (HasMptCheck) BareMode.get else false.B)) &&
+      (if (HasMptCheck) ptw.resp.bits.mpt.get.mptOnly else false.B)) &&
     !flush_mmu
   // mpt only mode also returns and save to l1tlb
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
@@ -459,7 +459,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     result.s1IsLeaf := RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     result.s1IsFakePte := RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
     if (HasMptCheck) {
-      val mptPerm = Wire(new MptPermBundle(isTlbPort = true))
+      val mptPerm = Wire(new MptPermBundle)
       mptPerm.resp_apply(ptw.resp.bits.mpt.get)
       result.mptPerm.get := RegEnable(mptPerm, io.ptw.resp.fire)
     }
@@ -624,12 +624,13 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
   io.out.excp.gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
   io.out.excp.gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
 
-  val mptValid = accessInfo.mptCheckOnly
+  // MPT permissions and access faults apply to translated accesses and Bare-mode checks.
+  val mptValid = accessInfo.mptCheckEnable
   val mptPerm = io.in.mptPerm
   val mptInstf = Option.when(HasMptCheck)(!mptPerm.get.x && isInst)
   val mptWf = Option.when(HasMptCheck)(!(mptPerm.get.r && mptPerm.get.w) && isSt)
   val mptRf = Option.when(HasMptCheck)(!mptPerm.get.r && isLd)
-  val mptAf = Option.when(HasMptCheck)(mptPerm.get.af.get)
+  val mptAf = Option.when(HasMptCheck)(mptPerm.get.af)
   io.out.excp.af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
     (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
   io.out.excp.af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
