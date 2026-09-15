@@ -941,7 +941,9 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
   .ifed_ifu_to_ibuffer_ftq_value(inner_ifu.io_toIBuffer_bits_ftqPtr_0_value),
   .ifed_ifu_exception_type(_inner_ifu_io_toIBuffer_bits_exceptionType_value),
   .ifed_ifu_exception_cross_page(_inner_ifu_io_toIBuffer_bits_exceptionCrossPage),
-  .ifed_ifu_s2_req_is_uncache(inner_ifu.s2_reqIsUncache),
+  .ifed_ifu_s2_req_is_uncache(inner_ifu.s2_icacheMeta_0_pmpMmio ||
+                               inner_ifu.s2_icacheMeta_0_itlbPbmt == 2'h1 ||
+                               inner_ifu.s2_icacheMeta_0_itlbPbmt == 2'h2),
   .ifed_ifu_s2_prev_end_half_rvi(inner_ifu.s2_prevEndIsHalfRviInfo_valid),
   .ifed_ifu_s2_prev_end_half_rvi_pc(inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr),
   .ifed_ifu_s2_flush(inner_ifu.s2_flush),
@@ -1012,7 +1014,9 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
                        io_backend_cfVec_3_bits_trigger, io_backend_cfVec_2_bits_trigger,
                        io_backend_cfVec_1_bits_trigger, io_backend_cfVec_0_bits_trigger}),
   .mmio_s2_valid(inner_ifu.s2_valid_valid),
-  .mmio_s2_req_is_uncache(inner_ifu.s2_reqIsUncache),
+  .mmio_s2_req_is_uncache(inner_ifu.s2_icacheMeta_0_pmpMmio ||
+                           inner_ifu.s2_icacheMeta_0_itlbPbmt == 2'h1 ||
+                           inner_ifu.s2_icacheMeta_0_itlbPbmt == 2'h2),
   .mmio_s2_use_uncache(inner_ifu.s2_useUncacheFetch),
   .mmio_s2_double_line(inner_ifu.s2_fetchBlock_1_valid),
   .mmio_s2_pmp_mmio_0(inner_ifu.s2_icacheMeta_0_pmpMmio),
