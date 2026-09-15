@@ -31,6 +31,7 @@ class StdFreeList(
   regType          : RegType,
   commitWidth      : Int,
   debugNumLogicRegs: Int = 32,
+  checkArchFreeListFull: Boolean = true,
 )(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, debugNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
@@ -108,7 +109,9 @@ class StdFreeList(
 
   XSDebug(p"head:$headPtr tail:$tailPtrNext\n")
 
-  XSError(!isFull(tailPtrNext, archHeadPtr), s"${regType}ArchFreeList should always be full\n")
+  if (checkArchFreeListFull) {
+    XSError(!isFull(tailPtrNext, archHeadPtr), s"${regType}ArchFreeList should always be full\n")
+  }
 
   val enableFreeListCheck = false
   if (enableFreeListCheck) {

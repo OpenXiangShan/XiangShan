@@ -114,7 +114,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
-  val intFreeList = Module(new StdFreeList(IntPhyRegs - IntLogicRegs, IntLogicRegs, Reg_I, RabCommitWidth, IntLogicRegs))
+  val intFreeList = Module(new StdFreeList(IntPhyRegs - IntLogicRegs, IntLogicRegs, Reg_I, RabCommitWidth, IntLogicRegs, false))
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth, FpLogicRegs))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, VecStdLogicRegs))
   val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, RabCommitWidth, VlLogicRegs))
