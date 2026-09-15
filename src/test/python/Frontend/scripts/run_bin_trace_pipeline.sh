@@ -300,6 +300,7 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/py/zhaoxinran/test_bin_trace_dut.py" >&2
     exit 2
   fi
+  frontend_configure_vcs_preload "${REPO_DIR}"
   PYTEST_CMD=("${PYTHON_BIN}" -m pytest -v)
   if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
     PYTEST_CMD+=(-p no:rerunfailures)
