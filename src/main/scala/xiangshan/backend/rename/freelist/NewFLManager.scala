@@ -110,8 +110,7 @@ class NewFLManager(
   val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
   val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
   val s1ValidCountNext = s1ValidCount - s1DequeueCount +& s0EnqueueCount
-  val s1CanAllocateNext = !in.flush && (s1ValidCountNext >= renameWidth.U)
-  s1CanAllocateReg := s1CanAllocateNext
+  val s1CanAllocateNext = s1ValidCountNext >= renameWidth.U
   val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
   val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
 
@@ -125,12 +124,11 @@ class NewFLManager(
   out.allocateBitmap := selectedBitmap
   val s1DequeuedBitmap = Mux(s1DoDequeue, selectedBitmap, 0.U(numPhyRegs.W))
 
-  when(in.flush) {
-    s1HeadPtr := 0.U
-    s1HeadPtrOH := 1.U
-    s1TailPtr := 0.U
-    s1ValidCount := 0.U
-  }.otherwise {
+  // s1 holds unallocated prefetch candidates, which remain free across
+  // rollback. Freeze them throughout recovery, together with their reservation
+  // bits and availability flag, so they can be used as soon as recovery ends.
+  when(!in.flush) {
+    s1CanAllocateReg := s1CanAllocateNext
     s1HeadPtr := s1HeadPtrNext
     s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
     s1TailPtr := addS1Ptr(s1TailPtr, s0EnqueueCount)
@@ -143,13 +141,15 @@ class NewFLManager(
     }
   }
 
-  when(in.flush) {
-    reservedBitmap := 0.U
-  }.otherwise {
+  when(!in.flush) {
     reservedBitmap := (reservedBitmap | s0EnqueueBitmap) & ~s1DequeuedBitmap
   }
 
   when(!in.flush) {
+    assert((reservedBitmap & ~in.freeBitmap) === 0.U,
+      "s1 candidates must remain free after recovery")
+    assert(PopCount(reservedBitmap) === s1ValidCount)
+    assert(s1CanAllocateReg === (s1ValidCount >= renameWidth.U))
     assert(s1ValidCount <= s1QueueSize.U)
     assert(s1DequeueCount <= s1ValidCount)
     assert(s0EnqueueCount <= s1FreeCount)
@@ -171,6 +171,7 @@ object NewFLManager {
     val freeBitmap = UInt(numPhyRegs.W)
     val allocateReq = Vec(renameWidth, Bool())
     val doAllocate = Bool()
+    // Pause refill/allocation for the entire bitmap recovery, retaining s1.
     val flush = Bool()
   }
 

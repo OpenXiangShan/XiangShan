@@ -70,7 +70,11 @@ class NewFreeList(
   flManager.in.freeBitmap := specfreeListReg.asUInt
   flManager.in.allocateReq := io.allocateReq
   flManager.in.doAllocate := io.doAllocate && !io.walk
-  flManager.in.flush := io.redirect || io.walk
+  // RAB/VTypeBuffer enter walk one cycle after redirect; Rob registers their
+  // commit bundles once more before Rename sees isWalk. Bridge that gap so s1
+  // cannot refill or allocate against a bitmap that is about to be restored.
+  val redirectReg = RegNext(io.redirect, false.B)
+  flManager.in.flush := io.redirect || redirectReg || io.walk
 
   io.allocatePhyReg := flManager.out.allocatePhyReg
   io.canAllocate := flManager.out.canAllocate
@@ -97,7 +101,7 @@ class NewFreeList(
     )
   }.reduce(_ | _)
 
-  val lastCycleRedirect = RegNext(RegNext(io.redirect))
+  val lastCycleRedirect = RegNext(redirectReg, false.B)
   val lastCycleSnpt     = RegNext(RegNext(io.snpt, 0.U.asTypeOf(io.snpt)))
   val snapshots = FreeListSnapshotGenerator(specfreeListReg.asUInt|freePhyRegOHOR, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec, freePhyRegOHOR,numPhyRegs)
 
@@ -107,8 +111,10 @@ class NewFreeList(
     archfreeListReg.asUInt & ~walkPhyRegOHOR
   )
   
+  // As in StdFreeList/MEFreeList, walk must keep rebuilding allocation state
+  // even while normal allocation is paused. It does not consume s1 candidates.
   val isWalkAlloc = io.walk && io.doAllocate
-  val isNormalAlloc = io.canAllocate && io.doAllocate
+  val isNormalAlloc = !io.walk && io.canAllocate && io.doAllocate
   val isAllocate = isWalkAlloc || isNormalAlloc
 
   val allocate = Mux(io.walk,walkPhyRegOHOR,flManager.out.allocateBitmap)
