@@ -228,6 +228,11 @@ module iommu_wrap(
     input  [1:0]                iommu_ds_bresp
 );
 
+// Keep the wrapper ports visible in Verilator waveforms, but do not trace the
+// large IOMMU implementation hierarchy.  Full tracing exceeds the memory
+// available on the open CI builders when EMU_TRACE=fst is enabled.
+/* verilator tracing_off */
+
 
 //    localparam   BUS_ADDR_WIDTH              = 6'd40;
 //    localparam   BUS_DATA_WIDTH              = 9'd256;
