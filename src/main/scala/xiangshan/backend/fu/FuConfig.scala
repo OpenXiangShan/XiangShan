@@ -291,7 +291,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(3),
   )
 
   val I2vCfg: FuConfig = FuConfig (
@@ -807,7 +807,7 @@ object FuConfig {
   val FaluCfg = FuConfig(
     name = "falu",
     fuType = FuType.falu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FAlu(cfg)(p).suggestName("Falu")),
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
@@ -819,17 +819,17 @@ object FuConfig {
     needSrcFrm = true,
   )
 
-  val FmacCfg = FuConfig(
-    name = "fmac",
-    fuType = FuType.fmac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("Fmac")),
+  val FmulCfg = FuConfig(
+    name = "fmul",
+    fuType = FuType.fmul,
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData(), FpData()),
     ),
     piped = true,
     writeFpRf = true,
     writeFflags = true,
-    latency = CertainLatency(3),
+    latency = CertainLatency(value = 2),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -860,7 +860,9 @@ object FuConfig {
     writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(2, extraValue = 1),
+    // TODO, f2f 2cycle, f2i 3cycle
+    // latency = CertainLatency(2, extraValue = 1),
+    latency = CertainLatency(3),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -880,7 +882,7 @@ object FuConfig {
   def allConfigs = Seq(
     NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
-    FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
+    FaluCfg, FmulCfg, FcvtCfg, FdivCfg,
     VialuCfg, VimacCfg,
     VfaluCfg, VmoveCfg, VfmaCfg, HyldaCfg, HystaCfg
   )
