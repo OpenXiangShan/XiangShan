@@ -9,7 +9,6 @@ import xiangshan.backend.vector.Decoder.Types
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, MaskType, Operand, OperandType}
 import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, UopInfoRenameSimple}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
-import yunsuan.encoding.Opcode.Opcodes
 
 import scala.language.implicitConversions
 
@@ -71,9 +70,12 @@ object Opcode {
   val FCvtOpcodes       = Opcodes.FCvtOpcode
   val FMiscOpcodes      = Opcodes.FMiscOpcode
   val FMacOpcodes       = Opcodes.FMacOpcode
-  val VFMiscOpcodes     = Opcodes.VFMiscOpcode
-  val VFCvtOpcodes      = Opcodes.VFCvtOpcode
+  val FAluOpcodes       = Opcodes.FAluOpcode
   val VFMacOpcodes      = Opcodes.VFMacOpcode
+  val VFMiscOpcodes     = Opcodes.VFMiscOpcode
+  val VFRedOpcodes      = Opcodes.VFRedOpcode
+  val VFDivOpcodes      = Opcodes.VFDivOpcode
+  val VFCvtOpcodes      = Opcodes.VFCvtOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -852,7 +854,10 @@ object Opcode {
 
   object LduOpcodes extends LduOpcodes
 
-  object StuOpcodes extends StuOpcodes
+  object StuOpcodes extends StuOpcodes {
+    // A store has no destination register to write back, so the whole space is latency 0.
+    override def getLat(opcode: Opcode): Int = 0
+  }
 
   object AmoOpcodes extends AmoOpcodes
 
@@ -973,10 +978,6 @@ object Opcode {
   }
 
   object FDivOpcodes extends FDivOpcodes
-
-  object FAluOpcodes extends Opcodes.FMacOpcode
-  object VFRedOpcodes extends Opcodes.VFRedOpcode
-  object VFDivOpcodes extends Opcodes.VFDivOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm

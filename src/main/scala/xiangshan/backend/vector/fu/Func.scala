@@ -104,6 +104,7 @@ object Func {
     val vlWen     = Option.when(cfg.needVlWen)(Bool())
     val flushPipe = Option.when(cfg.flushPipe)(Bool())
     val fflagsWen = Option.when(cfg.writeFflags)(Bool())
+    val frm       = Option.when(cfg.needSrcFrm)(Frm())
     val vtype     = Option.when(cfg.readVType)(VType())
     val oldVType  = Option.when(cfg.writeVType)(VType())
     val vm        = Option.when(cfg.readVType)(Bool())
@@ -115,7 +116,6 @@ object Func {
     val vl        = Option.when(cfg.readVl)(Vl())
     val imm       = UInt(cfg.destDataBits.W)
     val pc        = Option.when(cfg.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma      = Option.when(cfg.fuType == FuType.vfma)(new VFMacInfo)
   }
 
   class OutCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {

@@ -168,9 +168,8 @@ case class FuConfig (
       vialu,
       vimac,
       vidiv,
-      vfalu,
+      vfmac,
       vmove,
-      vfma,
       vfdiv,
       vfcvt,
       vsha256ms,
@@ -203,8 +202,7 @@ case class FuConfig (
     fuType,
     FuType.vialu,
     FuType.vimac,
-    FuType.vfalu,
-    FuType.vfma,
+    FuType.vfmac,
     FuType.vfdiv,
     FuType.vfcvt,
     FuType.vidiv,
@@ -673,32 +671,9 @@ object FuConfig {
     readVType = true,
   )
 
-  val VfaluCfg = FuConfig (
-    name = "vfalu",
-    fuType = FuType.vfalu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
-    ),
-    piped = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = CertainLatency(1),
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    exceptionOut = Seq(illegalInstr),
-    needSrcFrm = true,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VfmaCfg = FuConfig (
-    name = "vfma",
-    fuType = FuType.vfma,
+  val VfmacCfg = FuConfig (
+    name = "vfmac",
+    fuType = FuType.vfmac,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
@@ -881,8 +856,9 @@ object FuConfig {
     NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VialuCfg, VimacCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, HyldaCfg, HystaCfg
+    VialuCfg, VimacCfg, VidivCfg, VmoveCfg,
+    VfmacCfg, VfdivCfg, VfcvtCfg,
+    HyldaCfg, HystaCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(

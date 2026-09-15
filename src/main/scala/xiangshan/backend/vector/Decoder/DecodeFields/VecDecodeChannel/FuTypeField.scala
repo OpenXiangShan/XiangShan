@@ -71,10 +71,10 @@ object FuTypeField {
       case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt
       case _: Opcode.FCvtOpcodes.type => FuType.fcvt
       case _: Opcode.FMiscOpcodes.type => FuType.fcmp
-      case _: Opcode.VFMacOpcodes.type => FuType.vfma
+      case _: Opcode.VFMacOpcodes.type => FuType.vfmac
       case _: Opcode.VFDivOpcodes.type => FuType.vfdiv
       case _: Opcode.VFCvtOpcodes.type => FuType.vfcvt
-      case _: Opcode.VFMiscOpcodes.type => FuType.vfalu
+      case _: Opcode.VFMiscOpcodes.type => FuType.vialu
       case _: Opcode.VSetOpcodes.type => FuType.vset
       case _: Opcode.VIAluOpcodes.type => FuType.vialu
       case _: Opcode.VMoveOpcodes.type => FuType.vmove
@@ -83,7 +83,7 @@ object FuTypeField {
       case _: Opcode.VIRedOpcodes.type => FuType.vredu
       case _: Opcode.VIPermOpcodes.type => FuType.vperm
       case _: Opcode.VIDivOpcodes.type => FuType.vidiv
-      case _: Opcode.VFRedOpcodes.type => FuType.vfalu
+      case _: Opcode.VFRedOpcodes.type => FuType.vredu
       case _: Opcode.VSha256msOpcodes.type => FuType.vsha256ms
       case _: Opcode.VSha256cOpcodes.type => FuType.vsha256c
     }

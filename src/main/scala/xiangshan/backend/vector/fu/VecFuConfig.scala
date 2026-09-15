@@ -182,8 +182,7 @@ case class VecFuConfig (
     fuType,
     FuType.vialu,
     FuType.vimac,
-    FuType.vfalu,
-    FuType.vfma,
+    FuType.vfmac,
     FuType.vfdiv,
     FuType.vfcvt,
     FuType.vidiv,
@@ -195,8 +194,8 @@ case class VecFuConfig (
   def needWidenOut: Boolean = FuType.FuTypeOrR(
     this.fuType,
     FuType.vialu,
+    FuType.vfmac,
     FuType.vfcvt,
-    FuType.vfma,
   )
 
   def needNarrowOut: Boolean = FuType.FuTypeOrR(
@@ -295,8 +294,7 @@ object VecFuConfig {
   val VimacCfg = VecFuConfig.fromFuConfig(FuConfig.VimacCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")))
   val VidivCfg = VecFuConfig.fromFuConfig(FuConfig.VidivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")))
   val VmoveCfg = VecFuConfig.fromFuConfig(FuConfig.VmoveCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")))
-  val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
-  val VfmaCfg  = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg,  (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfma")))
+  val VfmacCfg = VecFuConfig.fromFuConfig(FuConfig.VfmacCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfmac")))
   val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFDivWrapper(cfg)(p).suggestName("Vfdiv")))
   val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
@@ -337,8 +335,7 @@ object VecFuConfig {
     VimacCfg,
     VidivCfg,
     VmoveCfg,
-    VfaluCfg,
-    VfmaCfg,
+    VfmacCfg,
     VfdivCfg,
     VfcvtCfg,
     VSha256msCfg,
