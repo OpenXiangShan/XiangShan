@@ -362,19 +362,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
 
-    // ICache Compact CHI Type 4 (cacheable refill); buffered in MemBlock like legacy ICacheBuffer
+    // ICache Compact CHI Type 4 (cacheable refill); Frontend <-> MemBlock buffer
     val inner_icache_cchi = Flipped(new CCHIType4Port)
     val outer_icache_cchi = new CCHIType4Port
 
-    // PTW Compact CHI Type 4 (page-table refill); buffered in MemBlock like legacy ptw_to_l2_buffer
-    val inner_ptw_cchi = Flipped(new CCHIType4Port)
+    // PTW Compact CHI Type 4 (page-table refill). L2TLB lives in MemBlock; only outer port is IO
     val outer_ptw_cchi = new CCHIType4Port
 
-    // Uncache Compact CHI Type 3 (NC + MMIO); buffered in MemBlock like legacy uncache_port
-    val inner_d_mmio_cchi = Flipped(new CCHIType3Port)
+    // Uncache Compact CHI Type 3 (NC + MMIO). Type3Router lives in MemBlock; only outer port is IO
     val outer_d_mmio_cchi = new CCHIType3Port
 
-    // InstrUncache Compact CHI Type 3 (MMIO/NC fetch); buffered in MemBlock like legacy InstrUncacheBuffer
+    // InstrUncache Compact CHI Type 3 (MMIO/NC fetch); Frontend <-> MemBlock buffer
     val inner_i_mmio_cchi = Flipped(new CCHIType3Port)
     val outer_i_mmio_cchi = new CCHIType3Port
 
@@ -1439,62 +1437,59 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
-  // txreq: Frontend -> L2; rxdat: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
-  io.outer_icache_cchi.txreq <> DoubleQueueBuffer(io.inner_icache_cchi.txreq)
-  io.inner_icache_cchi.rxdat <> DoubleQueueBuffer(io.outer_icache_cchi.rxdat)
+  // upREQ: Frontend -> L2; dnDAT: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
+  io.outer_icache_cchi.upREQ <> DoubleQueueBuffer(io.inner_icache_cchi.upREQ)
+  io.inner_icache_cchi.dnDAT <> DoubleQueueBuffer(io.outer_icache_cchi.dnDAT)
 
-  // txreq: L2TLB -> L2; rxdat: L2 -> L2TLB (mirror legacy ptw_to_l2_buffer A/D)
-  io.outer_ptw_cchi.txreq <> DoubleQueueBuffer(io.inner_ptw_cchi.txreq)
-  io.inner_ptw_cchi.rxdat <> DoubleQueueBuffer(io.outer_ptw_cchi.rxdat)
-  ptw.io.cchi <> io.inner_ptw_cchi
+  // upREQ: L2TLB -> L2; dnDAT: L2 -> L2TLB (mirror legacy ptw_to_l2_buffer A/D)
+  io.outer_ptw_cchi.upREQ <> DoubleQueueBuffer(ptw.io.cchi.upREQ)
+  ptw.io.cchi.dnDAT <> DoubleQueueBuffer(io.outer_ptw_cchi.dnDAT)
 
-  io.outer_d_mmio_cchi.txreq <> DoubleQueueBuffer(io.inner_d_mmio_cchi.txreq)
-  io.outer_d_mmio_cchi.txdat <> DoubleQueueBuffer(io.inner_d_mmio_cchi.txdat)
-  io.inner_d_mmio_cchi.rxrsp <> DoubleQueueBuffer(io.outer_d_mmio_cchi.rxrsp)
-  io.inner_d_mmio_cchi.rxdat <> DoubleQueueBuffer(io.outer_d_mmio_cchi.rxdat)
-
-  io.outer_i_mmio_cchi.txreq <> DoubleQueueBuffer(io.inner_i_mmio_cchi.txreq)
-  io.outer_i_mmio_cchi.txdat <> DoubleQueueBuffer(io.inner_i_mmio_cchi.txdat)
-  io.inner_i_mmio_cchi.rxrsp <> DoubleQueueBuffer(io.outer_i_mmio_cchi.rxrsp)
-  io.inner_i_mmio_cchi.rxdat <> DoubleQueueBuffer(io.outer_i_mmio_cchi.rxdat)
+  io.outer_i_mmio_cchi.upREQ <> DoubleQueueBuffer(io.inner_i_mmio_cchi.upREQ)
+  io.outer_i_mmio_cchi.upDAT <> DoubleQueueBuffer(io.inner_i_mmio_cchi.upDAT)
+  io.inner_i_mmio_cchi.dnRSP <> DoubleQueueBuffer(io.outer_i_mmio_cchi.dnRSP)
+  io.inner_i_mmio_cchi.dnDAT <> DoubleQueueBuffer(io.outer_i_mmio_cchi.dnDAT)
 
   val type3Router = Module(new Type3Router)
   uncache.io.cchi <> type3Router.io.up
   type3Router.io.txdatAddr := uncache.io.txdatAddr
-  type3Router.io.downL2 <> io.inner_d_mmio_cchi
+  io.outer_d_mmio_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downL2.upREQ)
+  io.outer_d_mmio_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downL2.upDAT)
+  type3Router.io.downL2.dnRSP <> DoubleQueueBuffer(io.outer_d_mmio_cchi.dnRSP)
+  type3Router.io.downL2.dnDAT <> DoubleQueueBuffer(io.outer_d_mmio_cchi.dnDAT)
 
   if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    dcache.io.ctrl_cchi.req <> DoubleQueueBuffer(type3Router.io.downCtrl(0).txreq)
-    dcache.io.ctrl_cchi.updat <> DoubleQueueBuffer(type3Router.io.downCtrl(0).txdat)
-    type3Router.io.downCtrl(0).rxrsp <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnrsp)
-    type3Router.io.downCtrl(0).rxdat <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dndat)
+    dcache.io.ctrl_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upREQ)
+    dcache.io.ctrl_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upDAT)
+    type3Router.io.downCtrl(0).dnRSP <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnRSP)
+    type3Router.io.downCtrl(0).dnDAT <> DoubleQueueBuffer(dcache.io.ctrl_cchi.dnDAT)
   } else {
-    type3Router.io.downCtrl(0).txreq.ready := false.B
-    type3Router.io.downCtrl(0).txdat.ready := false.B
-    type3Router.io.downCtrl(0).rxrsp.valid := false.B
-    type3Router.io.downCtrl(0).rxrsp.bits := DontCare
-    type3Router.io.downCtrl(0).rxdat.valid := false.B
-    type3Router.io.downCtrl(0).rxdat.bits := DontCare
+    type3Router.io.downCtrl(0).upREQ.ready := false.B
+    type3Router.io.downCtrl(0).upDAT.ready := false.B
+    type3Router.io.downCtrl(0).dnRSP.valid := false.B
+    type3Router.io.downCtrl(0).dnRSP.bits := DontCare
+    type3Router.io.downCtrl(0).dnDAT.valid := false.B
+    type3Router.io.downCtrl(0).dnDAT.bits := DontCare
   }
 
   if (icacheCtrlEnabled) {
-    io.inner_icache_ctrl_cchi.txreq <> DoubleQueueBuffer(type3Router.io.downCtrl(1).txreq)
-    io.inner_icache_ctrl_cchi.txdat <> DoubleQueueBuffer(type3Router.io.downCtrl(1).txdat)
-    type3Router.io.downCtrl(1).rxrsp <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.rxrsp)
-    type3Router.io.downCtrl(1).rxdat <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.rxdat)
+    io.inner_icache_ctrl_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upREQ)
+    io.inner_icache_ctrl_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upDAT)
+    type3Router.io.downCtrl(1).dnRSP <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.dnRSP)
+    type3Router.io.downCtrl(1).dnDAT <> DoubleQueueBuffer(io.inner_icache_ctrl_cchi.dnDAT)
   } else {
-    type3Router.io.downCtrl(1).txreq.ready := false.B
-    type3Router.io.downCtrl(1).txdat.ready := false.B
-    type3Router.io.downCtrl(1).rxrsp.valid := false.B
-    type3Router.io.downCtrl(1).rxrsp.bits := DontCare
-    type3Router.io.downCtrl(1).rxdat.valid := false.B
-    type3Router.io.downCtrl(1).rxdat.bits := DontCare
-    io.inner_icache_ctrl_cchi.txreq.ready := false.B
-    io.inner_icache_ctrl_cchi.txdat.ready := false.B
-    io.inner_icache_ctrl_cchi.rxrsp.valid := false.B
-    io.inner_icache_ctrl_cchi.rxrsp.bits := DontCare
-    io.inner_icache_ctrl_cchi.rxdat.valid := false.B
-    io.inner_icache_ctrl_cchi.rxdat.bits := DontCare
+    type3Router.io.downCtrl(1).upREQ.ready := false.B
+    type3Router.io.downCtrl(1).upDAT.ready := false.B
+    type3Router.io.downCtrl(1).dnRSP.valid := false.B
+    type3Router.io.downCtrl(1).dnRSP.bits := DontCare
+    type3Router.io.downCtrl(1).dnDAT.valid := false.B
+    type3Router.io.downCtrl(1).dnDAT.bits := DontCare
+    io.inner_icache_ctrl_cchi.upREQ.ready := false.B
+    io.inner_icache_ctrl_cchi.upDAT.ready := false.B
+    io.inner_icache_ctrl_cchi.dnRSP.valid := false.B
+    io.inner_icache_ctrl_cchi.dnRSP.bits := DontCare
+    io.inner_icache_ctrl_cchi.dnDAT.valid := false.B
+    io.inner_icache_ctrl_cchi.dnDAT.bits := DontCare
   }
 
   // vector segmentUnit

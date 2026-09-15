@@ -47,7 +47,7 @@ class ICacheCCHICtrlUnit(implicit p: Parameters) extends LazyModule
     with ICacheMetaHelper {
 
   val io = IO(new Bundle {
-    val cchi = Flipped(new CCHIType3DownPort)
+    val cchi = Flipped(new CCHIType3Port)
     val eccEnable = Output(Bool())
     val injecting = Output(Bool())
     val metaRead = new MetaReadBundle
@@ -274,10 +274,10 @@ class ICacheCCHICtrlUnit(implicit p: Parameters) extends LazyModule
   val latchedTgtId = Reg(UInt(8.W))
   val latchedOffset = Reg(UInt(log2Ceil(regSpaceBytes.max(1)).W))
 
-  val req = io.cchi.req
-  val updat = io.cchi.updat
-  val dnrsp = io.cchi.dnrsp
-  val dndat = io.cchi.dndat
+  val req = io.cchi.upREQ
+  val updat = io.cchi.upDAT
+  val dnrsp = io.cchi.dnRSP
+  val dndat = io.cchi.dnDAT
 
   val reqOffset = req.bits.Addr - baseAddr
   val isReadReq = CCHIOpcode.ReadNoSnp.is(req.bits.Opcode, req.valid)

@@ -27,7 +27,7 @@ import oceanus.compactchi._
 /*
  * D$ CtrlUnit as a serial Compact CHI Type 3 Completer.
  * Write: CompDBIDResp then NonCopyBackWrData.
- * Read: CompData on dndat.
+ * Read: CompData on dnDAT.
  */
 class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyModule
   with HasDCacheParameters
@@ -44,7 +44,7 @@ class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) exte
 
   class DCacheCCHICtrlUnitImp extends LazyModuleImp(this) with HasDCacheParameters {
   val io = IO(new Bundle {
-    val cchi = Flipped(new CCHIType3DownPort)
+    val cchi = Flipped(new CCHIType3Port)
     val pseudoError = Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
 
@@ -156,10 +156,10 @@ class DCacheCCHICtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) exte
   val latchedTgtId = Reg(UInt(8.W))
   val latchedOffset = Reg(UInt(log2Ceil(regSpaceBytes).W))
 
-  val req = io.cchi.req
-  val updat = io.cchi.updat
-  val dnrsp = io.cchi.dnrsp
-  val dndat = io.cchi.dndat
+  val req = io.cchi.upREQ
+  val updat = io.cchi.upDAT
+  val dnrsp = io.cchi.dnRSP
+  val dndat = io.cchi.dnDAT
 
   val reqOffset = req.bits.Addr - baseAddr
   val isReadReq = CCHIOpcode.ReadNoSnp.is(req.bits.Opcode, req.valid)

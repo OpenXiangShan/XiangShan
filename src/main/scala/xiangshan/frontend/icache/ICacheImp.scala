@@ -33,7 +33,7 @@ import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
-import xiangshan.cache.CCHIType3DownPort
+import xiangshan.cache.CCHIType3Port
 import xiangshan.cache.CCHIType4Port
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
@@ -67,7 +67,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
     // Compact CHI Type 4 (ReadOnce + CompData)
     val cchi: CCHIType4Port = new CCHIType4Port
-    val ctrl_cchi: CCHIType3DownPort = Flipped(new CCHIType3DownPort)
+    val ctrl_cchi: CCHIType3Port = Flipped(new CCHIType3Port)
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -116,12 +116,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   if (EnableCtrlUnit) {
     io.ctrl_cchi <> chiCtrlUnit.get.io.cchi
   } else {
-    io.ctrl_cchi.req.ready := false.B
-    io.ctrl_cchi.updat.ready := false.B
-    io.ctrl_cchi.dnrsp.valid := false.B
-    io.ctrl_cchi.dnrsp.bits := DontCare
-    io.ctrl_cchi.dndat.valid := false.B
-    io.ctrl_cchi.dndat.bits := DontCare
+    io.ctrl_cchi.upREQ.ready := false.B
+    io.ctrl_cchi.upDAT.ready := false.B
+    io.ctrl_cchi.dnRSP.valid := false.B
+    io.ctrl_cchi.dnRSP.bits := DontCare
+    io.ctrl_cchi.dnDAT.valid := false.B
+    io.ctrl_cchi.dnDAT.bits := DontCare
   }
 
   // dataArray io
@@ -198,8 +198,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.wfi <> io.wfi
   missUnit.io.fetchReq <> mainPipe.io.missReq
   missUnit.io.prefetchReq <> prefetcher.io.missReq
-  missUnit.io.txreq <> io.cchi.txreq
-  missUnit.io.rxdat <> io.cchi.rxdat
+  missUnit.io.txreq <> io.cchi.upREQ
+  missUnit.io.rxdat <> io.cchi.dnDAT
 
   mainPipe.io.flush        := io.fromFtq.redirectFlush
   mainPipe.io.flushFromBpu := io.fromFtq.flushFromBpu
