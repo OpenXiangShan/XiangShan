@@ -211,9 +211,17 @@ override SIM_ARGS += --difftest-config G
 endif
 
 # emu for the release version
+ENABLE_NOC_PERF_PRINT := 0
+AUTO_PERF_DUMP := 0
 ifeq ($(CONFIG),XSNoCTopConfig)
-# KXY simulation RTL: retain only the performance endpoint's printfs. The
-# generated wrapper supplies dump/clean pulses at 20M and 40M commits.
+ENABLE_NOC_PERF_PRINT := 1
+AUTO_PERF_DUMP := 1
+else ifeq ($(CONFIG),XSNoCDiffTopConfig)
+ENABLE_NOC_PERF_PRINT := 1
+endif
+
+ifeq ($(ENABLE_NOC_PERF_PRINT),1)
+# Retain the NoC top's performance endpoint printfs in release RTL.
 RELEASE_ARGS += --fpga-platform --enable-module-print LogPerfEndpoint --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 else
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
@@ -287,7 +295,7 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
-ifeq ($(CONFIG),XSNoCTopConfig)
+ifeq ($(AUTO_PERF_DUMP),1)
 	./scripts/wrap-xsnoctop-auto-perf.sh "$@"
 endif
 endif
