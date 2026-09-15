@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 Beijing Institute of Open Source Chip
+
+rtl-y += iommu_wrap.sv \
+	 iommu_axi_mon.sv
+
+rtl-y += axi4_traffic.sv
+
+obj-y += rtl_acd/ rtl_atd/
+
+obj-y += lib_sram/
+
+IOMMU_QEMU_PICKER_OUT := $(obj)/picker/picker_out_iommu
+
+picker-$(CONFIG_UT_IOMMU_QEMU) += picker_out_iommu
+SOURCE_picker_out_iommu := $(src)/iommu_wrap.sv
+picker_out_iommu-filelist := $(srctree)/$(src)/iommu_wrap.f
+picker_out_iommu-clean-dir := $(IOMMU_QEMU_PICKER_OUT)
+picker_out_iommu-make-target := install
+
+clean-files += picker/

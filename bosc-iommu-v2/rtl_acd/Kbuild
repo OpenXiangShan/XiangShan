@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 Beijing Institute of Open Source Chip
+
+pkg-y += iommu_acd_pkg.sv
+rtl-y += $(pkg-y)
+
+rtl-y += iommu_acd.sv \
+	 iommu_acd_generate.sv \
+	 iommu_acd_ram_generic.sv
+
+rtl-y += bus_handler/iommu_acd_bus_handler_w_buf.sv \
+	 bus_handler/iommu_acd_bus_handler_trans_arb.sv \
+	 bus_handler/iommu_acd_bus_handler_queue_entry_update.sv \
+	 bus_handler/iommu_acd_bus_handler_mst_intf.sv \
+	 bus_handler/iommu_acd_bus_handler_top.sv \
+	 bus_handler/iommu_acd_bus_handler_trans_queue.sv \
+	 bus_handler/iommu_acd_bus_handler_trans_queue_entry.sv \
+	 bus_handler/iommu_acd_bus_handler_idx_fifo.sv \
+	 bus_handler/iommu_acd_bus_handler_mrif_agent.sv \
+	 bus_handler/iommu_acd_bus_handler_4k_boundary_check.sv \
+	 bus_handler/iommu_acd_bus_handler_r_buf.sv \
+	 bus_handler/iommu_acd_bus_handler_b_buf.sv \
+	 bus_handler/iommu_acd_bus_handler_bar_queue_entry.sv \
+	 bus_handler/iommu_acd_bus_handler_slv_err.sv \
+	 bus_handler/iommu_acd_bus_handler_slv_intf.sv \
+	 bus_handler/iommu_acd_bus_handler_regslice.sv
+
+rtl-y += tc_if/iommu_acd_tc_if.sv \
+	 tc_if/iommu_acd_c2t_if.sv \
+	 tc_if/iommu_acd_t2c_if.sv
+
+rtl-y += translate_unit/iommu_acd_mtlb_lkp_cabin_wrap.sv \
+	 translate_unit/iommu_acd_mtlb_tag_hit.sv \
+	 translate_unit/iommu_acd_mtlb_plru.sv \
+	 translate_unit/iommu_multi_bit_1_check.sv \
+	 translate_unit/iommu_acd_translate_unit.sv \
+	 translate_unit/iommu_acd_mtlb_inv_cabin_wrap.sv \
+	 translate_unit/iommu_acd_main_tlb.sv \
+	 translate_unit/iommu_acd_mtlb_bank.sv \
+	 translate_unit/iommu_acd_mtlb_bank_top.sv \
+	 translate_unit/iommu_acd_mtlb_ecc.sv \
+	 translate_unit/iommu_acd_tlb_wrap.sv \
+	 translate_unit/iommu_acd_micro_tlb_tag_hit.sv \
+	 translate_unit/iommu_acd_mtlb_upd_cabin_wrap.sv \
+	 translate_unit/iommu_acd_mtlb_idx.sv \
+	 translate_unit/iommu_acd_mtlb_ready_mux.sv \
+	 translate_unit/iommu_acd_mtlb_ram_wrap.sv \
+	 translate_unit/iommu_acd_micro_tlb.sv \
+	 translate_unit/iommu_acd_tlb_queue.sv \
+	 translate_unit/iommu_acd_tlb_queue_entry.sv \
+	 translate_unit/iommu_acd_micro_tlb_entry_update.sv \
+	 translate_unit/iommu_acd_micro_tlb_inv_hit.sv \
+	 translate_unit/iommu_acd_micro_tlb_plru.sv
+	 #translate_unit/iommu_acd_mtlb_rd.sv \
+
+rtl-y += cfg_ctrl_wrap/iommu_acd_ptw.sv \
+	 cfg_ctrl_wrap/iommu_acd_cfg.sv \
+	 cfg_ctrl_wrap/iommu_acd_int.sv \
+	 cfg_ctrl_wrap/iommu_acd_inv.sv \
+	 cfg_ctrl_wrap/iommu_acd_cfg_ctrl_wrap.sv \
+	 cfg_ctrl_wrap/iommu_acd_ptwackfilter.sv \
+	 cfg_ctrl_wrap/iommu_acd_fault.sv
+
+rtl-y += dbg_trace/iommu_acd_dbg.sv \
+	 dbg_trace/iommu_acd_mon_unit.sv \
+	 hpm_ctl/iommu_acd_hpm_bus_handler.sv \
+	 hpm_ctl/iommu_acd_hpm_tlbqueue.sv \
+	 hpm_ctl/iommu_acd_hpm_tlbwrap.sv \
+	 hpm_ctl/iommu_acd_hpm_top.sv \
+	 hpm_ctl/iommu_acd_hpm_translate_unit.sv \
+	 hpm_ctl/iommu_acd_riscv_hpm_cnt.sv
+
+# set `pkg-y` as global dependency
+$(patsubst %,$(obj)/%.o,$(filter-out $(pkg-y),$(rtl-y))): \
+$(obj)/%.o: $(patsubst %,$(obj)/%.o,$(pkg-y))

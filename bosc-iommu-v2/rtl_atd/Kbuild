@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2025 Beijing Institute of Open Source Chip
+
+pkg-y += atd_cache/iommu_atd_cache_pkg.sv
+rtl-y += $(pkg-y)
+
+rtl-y += atd_wrap/iommu_atd.sv
+
+rtl-y += atd_sw/iommu_sw_apb.sv \
+	 atd_sw/iommu_atd_pq.sv \
+	 atd_sw/iommu_atd_sw.sv \
+	 atd_sw/iommu_atd_cq.sv \
+	 atd_sw/iommu_atd_fq.sv \
+	 atd_sw/iommu_atd_msi.sv \
+	 atd_tw/iommu_tw_apb.sv \
+	 atd_tw/iommu_atd_tw.sv \
+	 atd_tw/iommu_atd_cdw.sv \
+	 atd_tw/iommu_atd_ptw.sv \
+	 atd_tw/iommu_atd_hpm.sv \
+	 atd_tc/iommu_tc_apb.sv \
+	 atd_tc/iommu_atd_tc.sv \
+	 atd_tc/iommu_atd_t2c.sv \
+	 atd_tc/iommu_atd_c2t.sv \
+	 atd_tr/iommu_atd_tr.sv \
+	 atd_tr/iommu_atd_t2r.sv \
+	 atd_tr/iommu_atd_r2t.sv
+
+rtl-y += atd_ds/iommu_atd_ds.sv \
+	 atd_ds/atd_arb_a.v \
+	 atd_ds/atd_arb_d.v \
+	 atd_ds/atd_rou_ad.v
+
+rtl-y += atd_cbb/atd_sync2_rstn.v \
+	 atd_cbb/atd_reg_slice.v \
+	 atd_cbb/atd_sync_fifo.v \
+	 atd_cbb/atd_sync_fifo_wrap.v
+
+obj-y += atd_cache/
+$(patsubst %,$(obj)/%.o,$(rtl-y)): $(obj)/atd_cache
