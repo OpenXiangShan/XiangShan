@@ -131,6 +131,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val specTosr       = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.tosr
   private val specSsp        = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.ssp
   private val specTopRetAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr
+  private val specTosrInSpec = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topInSpec
   private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
     io.fromIfu.wbRedirect,
     backendRedirect.valid
@@ -224,6 +225,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
     s3PerfQueue(s3BpuPtr).mispredict := false.B
+    s3PerfQueue(s3BpuPtr).nonCfiInfo.hasRedirect := false.B
+    s3PerfQueue(s3BpuPtr).nonCfiInfo.cfiPosition := 0.U
   }
 
   // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
@@ -386,6 +389,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirectFromIFU         := ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn
   io.toBpu.advanceTosr             := specTosr
   io.toBpu.advanceSsp              := specSsp
+  io.toBpu.advanceTosrInSpec       := specTosrInSpec
   io.toBpu.specRetAddr             := RegNext(specTopRetAddr)
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
@@ -489,6 +493,18 @@ class Ftq(implicit p: Parameters) extends FtqModule
       perfQueue(ftqIdx) := curPerfMeta
     }
     lastPerfMetas(i) := curPerfMeta
+  }
+
+  when(backendRedirect.valid && backendRedirect.bits.attribute.isNone) {
+    val redirectFtqIdx = backendRedirect.bits.ftqIdx.value
+    val newNonCfiInfo = Wire(new NonCfiInfo)
+    newNonCfiInfo.fromRedirect(backendRedirect.bits)
+    when(
+      !s3PerfQueue(redirectFtqIdx).nonCfiInfo.hasRedirect ||
+        newNonCfiInfo.cfiPosition < s3PerfQueue(redirectFtqIdx).nonCfiInfo.cfiPosition
+    ) {
+      perfQueue(redirectFtqIdx).nonCfiInfo := newNonCfiInfo
+    }
   }
 
   // --------------------------------------------------------------------------------
@@ -636,33 +652,41 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   private val perf_commitHasMispredict = commit && commitPerfMeta.mispredict
+  private val perf_commitHasEarlierNonCfiRedirect =
+    perf_commitHasMispredict &&
+      commitPerfMeta.nonCfiInfo.hasRedirect &&
+      commitPerfMeta.nonCfiInfo.cfiPosition < commitPerfMeta.mispredictBranchInfo.cfiPosition
+  private val perf_commitHasBpuMispredict =
+    perf_commitHasMispredict && !perf_commitHasEarlierNonCfiRedirect
   private val perf_commitHasMispredictConditional =
-    perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
+    perf_commitHasBpuMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
-    perf_commitHasMispredict &&
+    perf_commitHasBpuMispredict &&
       !commitPerfMeta.bpuPerf.bpSource.s2Override && !commitPerfMeta.bpuPerf.bpSource.s3Override,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_source",
-    perf_commitHasMispredict,
+    perf_commitHasBpuMispredict,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s3_source",
-    perf_commitHasMispredict,
+    perf_commitHasBpuMispredict,
     BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_reason",
     perf_commitHasMispredict,
-    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
-      perf_commitHasMispredict,
-      commitPerfMeta.bpuPerf,
-      commitPerfMeta.mispredictBranchInfo
-    ))
+    Seq(("non_cfi_redirect", perf_commitHasEarlierNonCfiRedirect)) ++
+      BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
+        perf_commitHasBpuMispredict,
+        commitPerfMeta.bpuPerf,
+        commitPerfMeta.mispredictBranchInfo
+      )),
+    withPriority = true
   )
   XSPerfSeqAccumulate(
     "commit_conditional_branch_mispredicts_reason",
