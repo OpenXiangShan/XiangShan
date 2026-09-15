@@ -135,17 +135,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (mode(i) < ModeM)
   )
 
-  val BareMode = Option.when(HasMptCheck) (
-    csr.hgatp.mode === 0.U && csr.vsatp.mode === 0.U && csr.satp.mode === 0.U
-  ) // will start mpt only check if not in M mode
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
   val portTranslateEnable = (0 until Width).map(i => privNeedTranslate(i) && !useReqS1Paddr(i))
-
+  val BareMode = Option.when(HasMptCheck) { privNeedTranslate.map(enable => !enable) }
   val mptEn = Option.when(HasMptCheck) (csr.mmpt.mode =/= 0.U)
-  val mptCheckOnly = Option.when(HasMptCheck) ((0 until Width).map( i =>
-    BareMode.get && RegEnable(!req(i).bits.no_translate, req(i).valid) && mptEn.get && (mode(i) < ModeM)
-  )) // need mptcheck even when ptw disable, but dont need it when req.no_trans
+  val mptCheckOnly = Option.when(HasMptCheck) { (0 until Width).map { i =>
+    BareMode.get(i) && !req_out(i).no_translate &&  mptEn.get && (mode(i) < ModeM)
+  }}
   (0 until Width).foreach{ i =>
     if (HasMptCheck) {
       io.ptw.req(i).bits.mptOnly.get := mptCheckOnly.get(i)
@@ -250,7 +247,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   val refill = ptw.resp.fire &&
     (!(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill ||
-      (if (HasMptCheck) BareMode.get else false.B)) &&
+      (if (HasMptCheck) ptw.resp.bits.mpt.get.mptOnly else false.B)) &&
     !flush_mmu
   // mpt only mode also returns and save to l1tlb
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
@@ -292,7 +289,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
       val mptTemp = Option.when(HasMptCheck) (mptPerm.get(i)(d))
-      perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), mptEn.getOrElse(false.B), perm(i)(d),
+      perm_check(mptTemp.getOrElse(0.U.asTypeOf(new MptPermBundle)), mptEn.getOrElse(false.B), perm(i)(d),
         req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i), pregpf(i), preaf(i))
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
@@ -483,11 +480,14 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val s1_valid = portTranslateEnable(idx) && !onlyS2
 
     // mptcheck val
-    val mptValid = Option.when(HasMptCheck) (mptCheckOnly.get(idx))
+    // MPT permissions and AF apply to translated accesses as well as Bare-mode checks.
+    val mptValid = Option.when(HasMptCheck) (
+      mptEn && (mode(idx) < ModeM) && (portTranslateEnable(idx) || mptCheckOnly.get(idx))
+    )
     val mptInstf = Option.when(HasMptCheck) (!mptPerm.x && isInst)
     val mptWf = Option.when(HasMptCheck) (!(mptPerm.r && mptPerm.w) && isSt)
     val mptRf = Option.when(HasMptCheck) (!mptPerm.r && isLd)
-    val mptAf = Option.when(HasMptCheck) (mptPerm.af.get)
+    val mptAf = Option.when(HasMptCheck) (mptPerm.af)
 
     // Stage 2 perm check
     val gpf = g_perm.pf
@@ -661,7 +661,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val stage1 = io.ptw.resp.bits.s1
       val stage2 = io.ptw.resp.bits.s2
       val s2xlate = io.ptw.resp.bits.s2xlate
-      val mptResp = Option.when(HasMptCheck) (Wire (new MptPermBundle(isTlbPort = true)))
+      val mptResp = Option.when(HasMptCheck) (Wire (new MptPermBundle))
       if (HasMptCheck) {mptResp.get.resp_apply(io.ptw.resp.bits.mpt.get)}
       resp(idx).valid := true.B
       resp(idx).bits.miss := false.B
@@ -688,7 +688,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         resp(idx).bits.paddr(d) := Mux(s2xlate === onlyStage2 || s2xlate === allStage, s2_paddr, s1_paddr)
         resp(idx).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, req_out(idx).vaddr, s1_gpaddr)
         pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
-        perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), mptEn.getOrElse(false.B),
+        perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle)), mptEn.getOrElse(false.B),
           stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, false.B, idx)
@@ -753,7 +753,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val p_s1_isLeaf = RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     val p_s1_isFakePte = RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
 
-    val p_mptPerm_temp = Option.when(HasMptCheck) (Wire(new MptPermBundle(isTlbPort = true)))
+    val p_mptPerm_temp = Option.when(HasMptCheck) (Wire(new MptPermBundle))
     if (HasMptCheck) {
       p_mptPerm_temp.get.resp_apply(ptw.resp.bits.mpt.get)
     }

@@ -101,7 +101,7 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
-  for (i <- 0 until ports) {
+  val hitVecs = (0 until ports).map { i =>
     val req = io.r.req(i)
     val resp = io.r.resp(i)
     val access = io.access(i)
@@ -150,7 +150,7 @@ class TLBFA(
           resp.bits.mptperm.get(d).x := mptperm.get(0).x
           resp.bits.mptperm.get(d).w := mptperm.get(0).w
           resp.bits.mptperm.get(d).r := mptperm.get(0).r
-          resp.bits.mptperm.get(d).af.get := false.B
+          resp.bits.mptperm.get(d).af := hitVecReg(0) && mptperm.get(0).af
         }
       }
     } else {
@@ -163,12 +163,10 @@ class TLBFA(
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
         if (HasMptCheck) {
           val mptpermtmp = Mux1H(hitVecReg zip mptperm.get)
-          if (HasMptCheck) {
-            resp.bits.mptperm.get(d).x := mptpermtmp.x
-            resp.bits.mptperm.get(d).w := mptpermtmp.w
-            resp.bits.mptperm.get(d).r := mptpermtmp.r
-            resp.bits.mptperm.get(d).af.get := false.B
-          }
+          resp.bits.mptperm.get(d).x := mptpermtmp.x
+          resp.bits.mptperm.get(d).w := mptpermtmp.w
+          resp.bits.mptperm.get(d).r := mptpermtmp.r
+          resp.bits.mptperm.get(d).af := mptpermtmp.af
         }
       }
     }
@@ -183,6 +181,7 @@ class TLBFA(
     resp.bits.g_pbmt.suggestName("g_pbmt")
     resp.bits.perm.suggestName("perm")
     resp.bits.g_perm.suggestName("g_perm")
+    hitVec
   }
 
   when (io.w.valid) {
@@ -319,6 +318,17 @@ class TLBFA(
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate) }
     }.otherwise {
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === sfence.bits.id) }
+    }
+  }
+
+  if (HasMptCheck) {
+    for (way <- 0 until nWays) {
+      for (port <- 0 until ports) {
+        when (io.r.req(port).valid && hitVecs(port)(way) && entries(way).mptperm.get.af) {
+          // Keep the entry data for the current response selected by hitVecReg.
+          v(way) := false.B
+        }
+      }
     }
   }
 

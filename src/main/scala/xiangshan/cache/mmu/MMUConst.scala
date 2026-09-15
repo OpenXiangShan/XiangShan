@@ -100,29 +100,33 @@ trait MPTCacheParam extends HasTlbConst {
   val mptOff = 16 // mpt offset of PA
   val smmpt43PAddrBits = 43
   val smmpt52PAddrBits = 52
-  // l3 8T
+  // l3 8 TiB
   val l3Size  = 1
   val mptL3TagLen = 5
   val l3Associative = "fa"
   val l3Replacer = "plru"
-  // l2 4G
+  // l2 16 GiB
   val mptL2TagLen = mptL3TagLen + 9
   val l2Size = 1
   val l2Associative = "fa"
   val l2Replacer = "plru"
-  // l1 32M
+  // l1 32 MiB
   val l1Size = 4
   val mptL1TagLen = mptL3TagLen + 9 * 2
   val l1Associative = "fa"
   val l1Replacer = "plru"
-  // l0 64k
+  // l0 64 KiB
   val l0nSets = 16 // 5bits
   val l0nWays = 8
   val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets) // 32-5=27
   val l0Replacer = "setplru"
   // sp
   val spSize = 16
-  val mptspTagLen = mptL3TagLen + 9 * 2
+  // A G=4 MPT NAPOT entry covers 1/16 of the ordinary SP range at the
+  // corresponding effective level.  Keep four additional address bits so
+  // the SP tag can match that narrower range without a second cache format.
+  val mptNapotExtraTagLen = 4
+  val mptspTagLen = mptL1TagLen + mptNapotExtraTagLen
   val spAssociative = "fa"
   val spReplacer = "plru"
 
