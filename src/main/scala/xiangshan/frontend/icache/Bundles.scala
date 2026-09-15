@@ -21,19 +21,14 @@ import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FetchRequestBundle
-import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
-import xiangshan.frontend.PcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ifu.IfuBundle
 
 /* ***
  * Naming:
@@ -323,17 +318,6 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val ftqIdx:           FtqPtr         = new FtqPtr
   val backendException: ExceptionType  = new ExceptionType
   val source:           PrefetchSource = new PrefetchSource
-
-  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    startVAddr       := PcInit(req.vaddr).signGuard
-    nextLineVAddr    := DontCare
-    vSetIdx          := VecInit(get_idx(startVAddr), 0.U(idxBits.W))
-    isCrossLine      := false.B
-    ftqIdx           := DontCare
-    backendException := ExceptionType.None
-    source           := PrefetchSource.Sw
-    this
-  }
 }
 
 /* ***** ICacheWayLookup ***** */
