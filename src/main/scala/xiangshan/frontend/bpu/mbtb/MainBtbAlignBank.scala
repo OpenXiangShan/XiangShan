@@ -217,9 +217,10 @@ class MainBtbAlignBank(
   private val s2_fire             = io.stageCtrl.s2_fire
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
-  private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
+  // Only the positions are needed in s2 for MainBtb/VBTB duplicate detection.
+  private val s2_rawPositions     = RegEnable(VecInit(s1_rawEntries.map(_.position)), s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
-  private val s2_vbtbEntries      = RegEnable(s1_vbtbEntries, s1_fire)
+  private val s2_vbtbPositions    = RegEnable(VecInit(s1_vbtbEntries.map(_.entry.position)), s1_fire)
   private val s2_vbtbHitMask      = RegEnable(s1_vbtbHitMask, s1_fire)
   private val s2_rawHitMask       = RegEnable(s1_rawHitMask, s1_fire)
   private val s2_predictions      = RegEnable(s1_predictions, s1_fire)
@@ -499,11 +500,9 @@ class MainBtbAlignBank(
   // Remove VBTB entries that duplicate a MainBtb hit at the same position. Once
   // MainBtb can provide the prediction directly, the victim copy is stale.
   private val s2_vbtbMultiHitMask = Wire(Vec(NumVictimBtbWays, Bool()))
-  private val s2_vbtbPositions    = s2_vbtbEntries.map(_.entry.position)
-  private val s2_positions        = s2_rawEntries.map(_.position)
   for (i <- 0 until NumVictimBtbWays) {
     val multiHitVec =
-      VecInit.tabulate(NumWay)(j => s2_vbtbHitMask(i) && s2_hitMask(j) && s2_vbtbPositions(i) === s2_positions(j))
+      VecInit.tabulate(NumWay)(j => s2_vbtbHitMask(i) && s2_hitMask(j) && s2_vbtbPositions(i) === s2_rawPositions(j))
     s2_vbtbMultiHitMask(i) := multiHitVec.reduce(_ || _)
   }
 
