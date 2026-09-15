@@ -227,7 +227,13 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Seq[Add
 }
 
 object AXI4WriteOnlyZeroReadAdapter {
-  def connect(upstream: AXI4Bundle, downstream: AXI4Bundle, clock: Clock, reset: Reset): Unit = {
+  def connect(
+      upstream: AXI4Bundle,
+      downstream: AXI4Bundle,
+      clock: Clock,
+      reset: Reset,
+      readLegalAddrMap: Seq[AddressSet] = Nil
+  ): Unit = {
     downstream.aw <> upstream.aw
     downstream.w <> upstream.w
     upstream.b <> downstream.b
@@ -239,12 +245,20 @@ object AXI4WriteOnlyZeroReadAdapter {
     val readBeatsLeft = withClockAndReset(clock, reset) {
       RegInit(0.U(upstream.ar.bits.len.getWidth.W))
     }
+    val readError = withClockAndReset(clock, reset) {
+      RegInit(false.B)
+    }
+    val readAddrIsLegal = if (readLegalAddrMap.nonEmpty) {
+      AddressSet.unify(readLegalAddrMap).map(_.contains(upstream.ar.bits.addr)).reduce(_ || _)
+    } else {
+      true.B
+    }
 
     upstream.ar.ready := !readPending
     upstream.r.valid := readPending
     upstream.r.bits := 0.U.asTypeOf(upstream.r.bits)
     upstream.r.bits.id := readId
-    upstream.r.bits.resp := AXI4Parameters.RESP_OKAY
+    upstream.r.bits.resp := Mux(readError, AXI4Parameters.RESP_SLVERR, AXI4Parameters.RESP_OKAY)
     upstream.r.bits.last := readBeatsLeft === 0.U
 
     withClockAndReset(clock, reset) {
@@ -253,6 +267,7 @@ object AXI4WriteOnlyZeroReadAdapter {
         readId := upstream.ar.bits.id
         // AXI LEN encodes beats minus one, so zero marks the final response beat.
         readBeatsLeft := upstream.ar.bits.len
+        readError := !readAddrIsLegal
       }.elsewhen(upstream.r.fire) {
         when (readBeatsLeft === 0.U) {
           readPending := false.B
@@ -268,7 +283,9 @@ object AXI4WriteOnlyZeroReadAdapter {
   }
 }
 
-class AXI4WriteOnlyZeroReadAdapter(implicit p: Parameters) extends LazyModule {
+class AXI4WriteOnlyZeroReadAdapter(
+    readLegalAddrMap: Seq[AddressSet] = Nil
+)(implicit p: Parameters) extends LazyModule {
   val node = AXI4AdapterNode()
 
   // Keep the cut at the containing module boundary so constant AR/R signals
@@ -277,7 +294,7 @@ class AXI4WriteOnlyZeroReadAdapter(implicit p: Parameters) extends LazyModule {
 
   lazy val module = new LazyModuleImp(this) {
     (node.in zip node.out).foreach { case ((in, _), (out, _)) =>
-      AXI4WriteOnlyZeroReadAdapter.connect(in, out, clock, reset)
+      AXI4WriteOnlyZeroReadAdapter.connect(in, out, clock, reset, readLegalAddrMap)
     }
   }
 }
@@ -905,6 +922,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       )),
       beatBytes = params.nocDataWidth / 8
     )))
+  val crsdieErrorAddrMap = Seq(AddressSet(0x800000000000L, 0xfffffffffffL))
 
   // instance data width switch bridge for s_noc2msi (256bit -> 64bit)
   val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth,
@@ -916,7 +934,8 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   // instance data width switch bridge
   val u_cpus_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth,
     DestDataWidth = params.MSIOutDataWidth,
-    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(params.localImsicAddrMap ++ params.crsimsicAddrMap :+ params.DebugAddrMap)))
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(
+      params.localImsicAddrMap ++ params.crsimsicAddrMap ++ Seq(params.DebugAddrMap) ++ crsdieErrorAddrMap)))
   u_cpus_DataBridge.axi_xbar_i := Cbus.cpum
   pbus_xbar := u_cpus_DataBridge.axi_xbar_o
   val pcieToPbusBuf = connectThroughBuffer(pbus_xbar, pcie_xbar1to2, "imsic_pcie_to_pbus_buf")
@@ -925,7 +944,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   // instance data width switch bridge from 32bit to 256bit
   val u_crsdie_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.MSIOutDataWidth,
     DestDataWidth = params.nocDataWidth,
-    errorAddrMap = Seq(AddressSet(0x800000000000L, 0xfffffffffffL))))
+    errorAddrMap = crsdieErrorAddrMap))
   u_crsdie_DataBridge.axi_xbar_i := pbus_xbar // 32bit
   crsdie_msi_sN := u_crsdie_DataBridge.axi_xbar_o // 256bit
   // imsic inside die
@@ -1406,7 +1425,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   }
   val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
   val cpu_imsic_filter_modules = Seq.tabulate(params.NumHarts) { i =>
-    val filter = LazyModule(new AXI4WriteOnlyZeroReadAdapter)
+    val filter = LazyModule(new AXI4WriteOnlyZeroReadAdapter(
+      readLegalAddrMap = params.localImsicAddrMap ++ params.crsimsicAddrMap))
     filter.suggestName(s"cpu_${i}_imsic_filter")
     filter
   }
