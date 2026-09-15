@@ -68,6 +68,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
+    val flushAfterRedirect = Flipped(ValidIO(new Redirect))
     val stvecFeedback = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val ldvecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LsqEnqIO
@@ -184,7 +185,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   // store queue wiring
-  storeQueue.io.brqRedirect <> io.brqRedirect
+  storeQueue.io.brqRedirect <> io.flushAfterRedirect
+  storeQueue.io.exceptionRedirect <> io.brqRedirect
   storeQueue.io.vecFeedback   <> io.stvecFeedback
   storeQueue.io.storeAddrIn <> io.sta.storeAddrIn // from store_s1
   storeQueue.io.storeAddrInRe <> io.sta.storeAddrInRe // from store_s2
