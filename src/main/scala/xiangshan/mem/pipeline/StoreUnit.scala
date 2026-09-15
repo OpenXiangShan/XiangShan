@@ -346,7 +346,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   storeTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   storeTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   storeTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  storeTrigger.io.fromLoadStore.vaddr                 := s1_fullva
+  storeTrigger.io.fromLoadStore.vaddr                 := Mux(s1_frm_mabuf, s1_out.vaddr, io.tlb.resp.bits.triggerVa)
   storeTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
   storeTrigger.io.fromLoadStore.mask                  := s1_in.mask
   storeTrigger.io.isCbo.get                           := s1_isCbo

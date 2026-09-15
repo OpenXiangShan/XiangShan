@@ -160,13 +160,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val portTranslateEnable = (0 until Width).map(i => privNeedTranslate(i) && !useReqS1Paddr(i))
 
   // pre fault: check fault before real do translate
-  val prepf = WireInit(VecInit(Seq.fill(Width)(false.B)))
-  val pregpf = WireInit(VecInit(Seq.fill(Width)(false.B)))
-  val preaf = WireInit(VecInit(Seq.fill(Width)(false.B)))
+  // Bit 0 checks the first byte; bit 1 checks the last byte of the access.
+  val prepf = WireInit(VecInit(Seq.fill(Width)(0.U(2.W))))
+  val pregpf = WireInit(VecInit(Seq.fill(Width)(0.U(2.W))))
+  val preaf = WireInit(VecInit(Seq.fill(Width)(0.U(2.W))))
   val premode = (0 until Width).map(i => Mux(req_in(i).bits.hyperinst, csr.priv.spvp, mode_tmp))
-  for (i <- 0 until Width) {
-    resp(i).bits.fullva := RegEnable(EffectiveVa(i), req(i).valid)
-  }
   val prevmEnable = (0 until Width).map(i => !(virt_in || req_in(i).bits.hyperinst) && (
     if (EnbaleTlbDebug) (Sv39Enable || Sv48Enable)
     else (Sv39Enable || Sv48Enable) && (premode(i) < ModeM))
@@ -215,11 +213,18 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       }
     }
 
-    val pf48 = SignExt(EffectiveVa(i)(47, 0), XLEN) =/= EffectiveVa(i)
-    val pf39 = SignExt(EffectiveVa(i)(38, 0), XLEN) =/= EffectiveVa(i)
-    val gpf48 = EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U
-    val gpf39 = EffectiveVa(i)(XLEN - 1, 39 + 2) =/= 0.U
-    val af = EffectiveVa(i)(XLEN - 1, PAddrBits) =/= 0.U
+    // Misalign-buffer requests do not check fullva again, so check the entire
+    // access here, after pointer masking. Keep the first-byte check as well:
+    // an invalid starting address can cross into a valid address range.
+    val isAtomic = req(i).bits.cmd === TlbCmd.atom_read || TlbCmd.isAmo(req(i).bits.cmd)
+    val size = Mux(isAtomic || req(i).bits.size > 3.U, 0.U, req(i).bits.size(1, 0))
+    val lastVa = EffectiveVa(i) + ((1.U << size) - 1.U)
+    val checkedVa = Seq(EffectiveVa(i), lastVa)
+    val pf48 = VecInit(checkedVa.map(va => SignExt(va(47, 0), XLEN) =/= va)).asUInt
+    val pf39 = VecInit(checkedVa.map(va => SignExt(va(38, 0), XLEN) =/= va)).asUInt
+    val gpf48 = VecInit(checkedVa.map(va => va(XLEN - 1, 48 + 2) =/= 0.U)).asUInt
+    val gpf39 = VecInit(checkedVa.map(va => va(XLEN - 1, 39 + 2) =/= 0.U)).asUInt
+    val af = VecInit(checkedVa.map(va => va(XLEN - 1, PAddrBits) =/= 0.U)).asUInt
     when (req(i).valid && req(i).bits.checkfullva) {
       when (prevmEnable(i) || pres2xlateEnable(i)) {
         when (req_in_s2xlate(i) === onlyStage2) {
@@ -245,6 +250,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         preaf(i) := af
       }
     }
+    // If only the last byte is invalid, report the first byte on the next page.
+    // Otherwise preserve the original effective address, including normal splits.
+    val faultOnLastByteOnly = (prepf(i) | pregpf(i) | preaf(i)) === 2.U
+    val faultVa = Mux(faultOnLastByteOnly, Cat(lastVa(XLEN - 1, offLen), 0.U(offLen.W)), EffectiveVa(i))
+    resp(i).bits.fullva := RegEnable(faultVa, req(i).valid)
+    resp(i).bits.triggerVa := RegEnable(EffectiveVa(i), req(i).valid)
   }
 
   val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu
@@ -281,7 +292,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
-      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i), pregpf(i), preaf(i))
+      perm_check(perm(i)(d), req_out(i).cmd, i, d, g_perm(i)(d), req_out(i).hlvx, req_out_s2xlate(i), prepf(i).orR, pregpf(i).orR, preaf(i).orR)
     }
     hasGpf(i) := hitVec(i) && (resp(i).bits.excp(0).gpf.ld || resp(i).bits.excp(0).gpf.st || resp(i).bits.excp(0).gpf.instr)
   }
@@ -513,7 +524,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
-      resp(idx).bits.gpaddr(nDups) := req_out(idx).fullva
+      resp(idx).bits.gpaddr(nDups) := resp(idx).bits.fullva
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
