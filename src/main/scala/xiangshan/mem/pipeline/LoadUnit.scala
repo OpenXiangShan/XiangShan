@@ -1022,7 +1022,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s1_out.nc := (s1_nc || Pbmt.isNC(s1_pbmt)) && !s1_prf
   s1_out.mmio := Pbmt.isIO(s1_pbmt)
 
-  when (!s1_dly_err) {
+  when (s1_nc_with_data) {
+    // Preserve exceptions reported by the completed Uncache access.
+    s1_out.uop.exceptionVec := s1_in.uop.exceptionVec
+  } .elsewhen (!s1_dly_err) {
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     // if is tlbNoQuery request, don't trigger exception from tlb resp
@@ -1235,6 +1238,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
     s2_isMisalign := false.B
   }
+  when (s2_nc_with_data) {
+    s2_exception_vec := s2_in.uop.exceptionVec
+  }
   val s2_exception = s2_vecActive &&
                     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_exception_vec, LduCfg).asUInt.orR)
   val s2_mis_align = s2_valid && GatedValidRegNext(io.csrCtrl.hd_misalign_ld_enable) &&
@@ -1349,6 +1355,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     s2_real_exceptionVec(hardwareError) := (s2_exception_vec(hardwareError) ||
     s2_fwd_frm_d_chan && s2_d_corrupt && !s2_d_denied ||
     s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied) && !s2_prf
+
+  when (s2_nc_with_data) {
+    s2_real_exceptionVec := s2_in.uop.exceptionVec
+  }
 
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
@@ -1638,6 +1648,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
   s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err ||
                                                  io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
+  when (s3_nc_with_data) {
+    s3_out.bits.uop.exceptionVec := s3_in.uop.exceptionVec
+  }
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
   s3_out.bits.data            := s3_in.data
