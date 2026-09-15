@@ -31,6 +31,7 @@ import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
+import xiangshan.frontend.icache.PrefetchSource
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
   val startPc:     GuardedPc = GuardedPc()
@@ -56,6 +57,11 @@ class ResolveEntry(implicit p: Parameters) extends FtqBundle {
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
   // used for bptrace & other debug proposes
   val debug_source: UInt = ResolveSource()
+}
+
+class PrefetchQueueEntry(implicit p: Parameters) extends FtqBundle {
+  val vAddr:  GuardedPc      = GuardedPc()
+  val source: PrefetchSource = new PrefetchSource
 }
 
 class FtqRead[T <: Data](private val gen: T)(implicit p: Parameters) extends FtqBundle {
@@ -120,10 +126,11 @@ class FtqToMainPipeBundle(implicit p: Parameters) extends FtqBundle {
 }
 
 class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {
-  val startVAddr:    GuardedPc = GuardedPc()
-  val nextLineVAddr: GuardedPc = GuardedPc()
-  val isCrossLine:   Bool      = Bool()
-  val vSetIdx:       Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val startVAddr:    GuardedPc      = GuardedPc()
+  val nextLineVAddr: GuardedPc      = GuardedPc()
+  val isCrossLine:   Bool           = Bool()
+  val vSetIdx:       Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val source:        PrefetchSource = new PrefetchSource
 
   def vPageNumber: UInt = startVAddr(GuardedVAddrBits - 1, PageOffsetWidth)
 
@@ -132,6 +139,16 @@ class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheL
     nextLineVAddr := entry.startPc + blockBytes.U
     isCrossLine   := super.isCrossLine(startVAddr, entry.endPosition)
     vSetIdx       := VecInit(get_idx(startVAddr), get_idx(startVAddr) + 1.U)
+    source        := PrefetchSource.Fdip
+    this
+  }
+
+  def fromPrefetchQueueEntry(entry: PrefetchQueueEntry): FtqPrefetchReq = {
+    startVAddr    := entry.vAddr
+    nextLineVAddr := DontCare
+    isCrossLine   := false.B
+    vSetIdx       := VecInit(get_idx(startVAddr), DontCare)
+    source        := entry.source
     this
   }
 }
