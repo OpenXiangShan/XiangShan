@@ -281,7 +281,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
 
-  val perfEvents: Seq[(String, UInt)] = Seq()
+  val perfEvents: Seq[PerfEventInfo] = Seq()
   generatePerfEvent()
 
   // debug info

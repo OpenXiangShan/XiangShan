@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
 import utils.HasTLDump
-import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility._
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
@@ -226,11 +226,11 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(
-    ("dcache_probq_req      ", io.pipe_req.fire),
-    ("dcache_probq_1_4_valid", (perfValidCount < (cfg.nProbeEntries.U/4.U))),
-    ("dcache_probq_2_4_valid", (perfValidCount > (cfg.nProbeEntries.U/4.U)) & (perfValidCount <= (cfg.nProbeEntries.U/2.U))),
-    ("dcache_probq_3_4_valid", (perfValidCount > (cfg.nProbeEntries.U/2.U)) & (perfValidCount <= (cfg.nProbeEntries.U*3.U/4.U))),
-    ("dcache_probq_4_4_valid", (perfValidCount > (cfg.nProbeEntries.U*3.U/4.U))),
+    ("dcache_probq_req"      , io.pipe_req.fire).withDescription("Probe requests issued from the L1D probe queue to the main pipeline."),
+    ("dcache_probq_1_4_valid", perfValidCount <= (cfg.nProbeEntries.U / 4.U)).withDescription("Cycles with at most one quarter of L1D probe entries valid."),
+    ("dcache_probq_2_4_valid", perfValidCount > (cfg.nProbeEntries.U / 4.U) && perfValidCount <= (cfg.nProbeEntries.U / 2.U)).withDescription("Cycles with L1D probe-queue occupancy above one quarter and at most one half."),
+    ("dcache_probq_3_4_valid", perfValidCount > (cfg.nProbeEntries.U / 2.U) && perfValidCount <= (cfg.nProbeEntries.U * 3.U / 4.U)).withDescription("Cycles with L1D probe-queue occupancy above one half and at most three quarters."),
+    ("dcache_probq_4_4_valid", perfValidCount > (cfg.nProbeEntries.U * 3.U / 4.U)).withDescription("Cycles with more than three quarters of L1D probe entries valid."),
   )
   generatePerfEvent()
 }

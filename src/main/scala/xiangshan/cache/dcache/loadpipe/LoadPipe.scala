@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
-import utility.{ParallelPriorityMux, OneHot, ChiselDB, ParallelORR, ParallelMux, XSDebug, XSPerfAccumulate, HasPerfEvents}
+import utility._
 import xiangshan.{XSCoreParamsKey, L1CacheErrorInfo}
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
@@ -656,13 +656,20 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire && s1_tag_match_dup_dc)
 
   val perfEvents = Seq(
-    ("load_req                 ", io.lsu.req.fire                                               ),
-    ("load_replay              ", io.lsu.resp.fire && resp.bits.replay                          ),
-    ("load_replay_for_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data          ),
-    ("load_replay_for_no_mshr  ", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr       ),
-    ("load_replay_for_conflict ", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow ),
-    ("l1D_read_dcache_access   ", io.lsu.resp.fire && !s2_is_prefetch                           ),
-    ("l1D_read_dcache_miss     ", io.lsu.resp.fire && !s2_is_prefetch && real_miss              )
+    ("load_req"                 , io.lsu.req.fire)
+      .withDescription("Load request accepted by this DCache load pipe."),
+    ("load_replay"              , io.lsu.resp.fire && resp.bits.replay)
+      .withDescription("Load response requests a pipeline replay."),
+    ("load_replay_for_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data)
+      .withDescription("Load replay caused by an unavailable DCache data response."),
+    ("load_replay_for_no_mshr"  , io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr)
+      .withDescription("Load replay caused by no available miss-status entry."),
+    ("load_replay_for_conflict" , io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow)
+      .withDescription("Load replay caused by a DCache bank conflict."),
+    ("l1D_read_dcache_access"   , io.lsu.resp.fire && !s2_is_prefetch)
+      .withDescription("Demand load access completed by this DCache load pipe."),
+    ("l1D_read_dcache_miss"     , io.lsu.resp.fire && !s2_is_prefetch && real_miss)
+      .withDescription("Demand load access that missed in the L1 data cache.")
   )
   generatePerfEvent()
 }

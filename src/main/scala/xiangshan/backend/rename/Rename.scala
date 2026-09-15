@@ -773,22 +773,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   XSPerfAccumulate("fused_lui_load_instr_count", PopCount(is_fused_lui_load))
 
   val renamePerf = Seq(
-    ("rename_in                  ", PopCount(io.in.map(_.valid & io.in(0).ready ))),
-    ("rename_waitinstr           ", PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))),
-    ("rename_stall               ", inHeadStall),
-    ("rename_stall_cycle_walk    ", inHeadValid &&  io.rabCommits.isWalk),
-    ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc),
-    ("rename_stall_cycle_int     ", inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !intFreeList.io.canAllocate),
-    ("rename_stall_cycle_fp      ", inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !fpFreeList.io.canAllocate),
-    ("rename_stall_cycle_vec     ", inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !vecFreeList.io.canAllocate),
-    ("rename_stall_cycle_v0      ", inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !v0FreeList.io.canAllocate),
-    ("rename_stall_cycle_vl      ", inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && !vlFreeList.io.canAllocate),
+    ("rename_in"                  , PopCount(io.in.map(_.valid & io.in(0).ready))).withDescription("Valid instructions accepted by rename."),
+    ("rename_waitinstr"           , PopCount((0 until RenameWidth).map(i => io.in(i).valid && !io.in(i).ready))).withDescription("Valid rename input slots stalled by backpressure."),
+    ("rename_stall"               , inHeadStall).withDescription("Cycles in which the head rename input cannot advance."),
+    ("rename_stall_cycle_walk"    , inHeadValid && io.rabCommits.isWalk).withDescription("Rename stall cycles caused by RAB walk recovery."),
+    ("rename_stall_cycle_dispatch", inHeadValid && !io.rabCommits.isWalk && !dispatchCanAcc).withDescription("Rename stall cycles caused by dispatch backpressure."),
+    ("rename_stall_cycle_int"     , inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !intFreeList.io.canAllocate).withDescription("Rename stall cycles caused by insufficient integer physical registers."),
+    ("rename_stall_cycle_fp"      , inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !fpFreeList.io.canAllocate).withDescription("Rename stall cycles caused by insufficient floating-point physical registers."),
+    ("rename_stall_cycle_vec"     , inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !vecFreeList.io.canAllocate).withDescription("Rename stall cycles caused by insufficient vector physical registers."),
+    ("rename_stall_cycle_v0"      , inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !v0FreeList.io.canAllocate).withDescription("Rename stall cycles caused by insufficient vector-mask physical registers."),
+    ("rename_stall_cycle_vl"      , inHeadValid && !io.rabCommits.isWalk && dispatchCanAcc && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && !vlFreeList.io.canAllocate).withDescription("Rename stall cycles caused by insufficient vector-length physical registers."),
   )
-  val intFlPerf = intFreeList.getPerfEvents
-  val fpFlPerf = fpFreeList.getPerfEvents
-  val vecFlPerf = vecFreeList.getPerfEvents
-  val v0FlPerf = v0FreeList.getPerfEvents
-  val vlFlPerf = vlFreeList.getPerfEvents
+  val intFlPerf = intFreeList.getPerfEventInfos
+  val fpFlPerf = fpFreeList.getPerfEventInfos
+  val vecFlPerf = vecFreeList.getPerfEventInfos
+  val v0FlPerf = v0FreeList.getPerfEventInfos
+  val vlFlPerf = vlFreeList.getPerfEventInfos
   val perfEvents = renamePerf ++ intFlPerf ++ fpFlPerf ++ vecFlPerf ++ v0FlPerf ++ vlFlPerf
   generatePerfEvent()
 }

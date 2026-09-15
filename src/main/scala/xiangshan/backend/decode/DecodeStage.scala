@@ -329,14 +329,14 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val frontendStall = GatedValidRegNext(!io.in.head.valid && io.backendCanAccept)
   val backendStall  = GatedValidRegNext(io.in.head.valid && !io.in.head.ready)
   val perfEvents = Seq(
-    ("decoder_fused_instr",  PopCount(fusionValid)       ),
-    ("decoder_waitInstr",    PopCount(inValidNotReady)   ),
-    ("decoder_stall_cycle",  hasValid && !io.out(0).ready),
-    ("decoder_utilization",  PopCount(io.in.map(_.valid))),
-    ("frontend_stall_cycle", frontendStall),
-    ("backend_stall_cycle",  backendStall),
-    ("INST_SPEC",            PopCount(io.in.map(_.fire))),
-    ("RECOVERY_BUBBLE",      recoveryFlag)
+    ("decoder_fused_instr" , PopCount(fusionValid)).withDescription("Instructions fused by the decoder."),
+    ("decoder_waitInstr"   , PopCount(inValidNotReady)).withDescription("Valid decoder input slots stalled by backpressure."),
+    ("decoder_stall_cycle" , hasValid && !io.out(0).ready).withDescription("Cycles in which the decoder has valid output but its first output is not accepted."),
+    ("decoder_utilization" , PopCount(io.in.map(_.valid))).withDescription("Valid instruction slots presented to the decoder."),
+    ("frontend_stall_cycle", frontendStall).withDescription("Cycles in which decode is ready but the frontend supplies no instruction."),
+    ("backend_stall_cycle" , backendStall).withDescription("Cycles in which decode input is valid but the backend cannot accept it."),
+    ("INST_SPEC"           , PopCount(io.in.map(_.fire))).withDescription("Instructions accepted into decode for speculative execution."),
+    ("RECOVERY_BUBBLE"     , recoveryFlag).withDescription("Cycles between a redirect and the next accepted decoder input.")
   )
   generatePerfEvent()
 

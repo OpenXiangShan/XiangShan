@@ -754,9 +754,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   XSPerfAccumulate("softPrefetch_drop_multi_req", PopCount(io.softPrefetch.map(_.valid)) > 1.U)
   XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.ftqPrefetch.req.valid)
 
-  val perfEvents: Seq[(String, Bool)] = Seq(
-    ("icache_miss_bubble", mainPipe.io.fetch.topdownIcacheMiss),
+  val perfEvents = Seq(
+    ("icache_miss_bubble" , mainPipe.io.fetch.topdownIcacheMiss).withDescription("Frontend top-down cycles attributed to an instruction-cache miss."),
     ("icache_miss_penalty", BoolStopWatch(start = false.B, stop = false.B || false.B, startHighPriority = true))
+      .withDescription("Reserved instruction-cache miss-penalty event; its current increment is always zero.")
   )
   generatePerfEvent()
 }

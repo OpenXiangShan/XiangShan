@@ -53,6 +53,7 @@ object ArgParser {
       |--external-llc
       |--enable-dfx
       |--dump-csr
+      |--dump-hpm
       |--imsic-bus-type <NONE|TL|AXI>
       |""".stripMargin
 
@@ -260,6 +261,10 @@ object ArgParser {
         case "--dump-csr" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(DumpCSR = true)
+          }), tail)
+        case "--dump-hpm" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(DumpHPM = true)
           }), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip

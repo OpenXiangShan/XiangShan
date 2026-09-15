@@ -984,23 +984,23 @@ class Sbuffer(implicit p: Parameters)
   // XSPerfAccumulate("store_req", io.lsu.req.fire)
 
   val perfEvents = Seq(
-    ("sbuffer_req_valid ", PopCount(VecInit(io.in.map(_.valid)).asUInt)                                                                ),
-    ("sbuffer_req_fire  ", PopCount(VecInit(io.in.map(_.fire)).asUInt)                                                               ),
-    ("sbuffer_merge     ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt)                ),
-    ("sbuffer_newline   ", PopCount(VecInit(io.in.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt)               ),
-    ("dcache_req_valid  ", io.dcache.req.valid                                                                                         ),
-    ("dcache_req_fire   ", io.dcache.req.fire                                                                                        ),
-    ("sbuffer_idle      ", sbuffer_state === x_idle                                                                                    ),
-    ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
-    ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
-    ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire                                                                         ),
+    ("sbuffer_req_valid" , PopCount(VecInit(io.in.map(_.valid)).asUInt)).withDescription("Valid store-buffer enqueue requests."),
+    ("sbuffer_req_fire"  , PopCount(VecInit(io.in.map(_.fire)).asUInt)).withDescription("Store-buffer enqueue requests accepted."),
+    ("sbuffer_merge"     , PopCount(VecInit(io.in.zipWithIndex.map { case (in, i) => in.fire && canMerge(i) }).asUInt)).withDescription("Accepted store-buffer requests merged into existing lines."),
+    ("sbuffer_newline"   , PopCount(VecInit(io.in.zipWithIndex.map { case (in, i) => in.fire && !canMerge(i) }).asUInt)).withDescription("Accepted store-buffer requests allocated as new lines."),
+    ("dcache_req_valid"  , io.dcache.req.valid).withDescription("Valid store-buffer requests to the data cache."),
+    ("dcache_req_fire"   , io.dcache.req.fire).withDescription("Store-buffer requests accepted by the data cache."),
+    ("sbuffer_idle"      , sbuffer_state === x_idle).withDescription("Cycles in which the store buffer state machine is idle."),
+    ("sbuffer_flush"     , sbuffer_state === x_drain_sbuffer).withDescription("Cycles in which the store buffer is being drained."),
+    ("sbuffer_replace"   , sbuffer_state === x_replace).withDescription("Cycles in which the store buffer is replacing an entry."),
+    ("mpipe_resp_valid"  , io.dcache.main_pipe_hit_resp.fire).withDescription("Data-cache main-pipeline hit responses accepted by the store buffer."),
     //("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
-    ("replay_resp_valid ", io.dcache.replay_resp.fire                                                                                ),
-    ("coh_timeout       ", cohHasTimeOut                                                                                               ),
-    ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
-    ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),
-    ("sbuffer_3_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/2.U)) & (perf_valid_entry_count <= (StoreBufferSize.U*3.U/4.U))),
-    ("sbuffer_full_valid", (perf_valid_entry_count > (StoreBufferSize.U*3.U/4.U)))
+    ("replay_resp_valid" , io.dcache.replay_resp.fire).withDescription("Data-cache replay responses accepted by the store buffer."),
+    ("coh_timeout"       , cohHasTimeOut).withDescription("Cycles in which the store buffer detects a coherence timeout."),
+    ("sbuffer_1_4_valid" , perf_valid_entry_count <= (StoreBufferSize.U / 4.U)).withDescription("Cycles with at most one quarter of store-buffer entries valid."),
+    ("sbuffer_2_4_valid" , perf_valid_entry_count > (StoreBufferSize.U / 4.U) && perf_valid_entry_count <= (StoreBufferSize.U / 2.U)).withDescription("Cycles with store-buffer occupancy above one quarter and at most one half."),
+    ("sbuffer_3_4_valid" , perf_valid_entry_count > (StoreBufferSize.U / 2.U) && perf_valid_entry_count <= (StoreBufferSize.U * 3.U / 4.U)).withDescription("Cycles with store-buffer occupancy above one half and at most three quarters."),
+    ("sbuffer_full_valid", perf_valid_entry_count > (StoreBufferSize.U * 3.U / 4.U)).withDescription("Cycles with more than three quarters of store-buffer entries valid.")
   )
   generatePerfEvent()
 

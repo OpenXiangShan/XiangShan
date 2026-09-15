@@ -837,20 +837,20 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
   XSPerfAccumulate("replay_allocate", io.replayAllocate)
 
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("enq", enqNumber),
-    ("deq", deqNumber),
-    ("deq_block", deqBlockCount),
-    ("replay_full", io.lqFull),
-    ("replay_rar_nack", replayRARRejectCount),
-    ("replay_raw_nack", replayRAWRejectCount),
-    ("replay_nuke", replayNukeCount),
-    ("replay_mem_amb", replayMemAmbCount),
-    ("replay_tlb_miss", replayTlbMissCount),
-    ("replay_bank_conflict", replayBankConflictCount),
-    ("replay_dcache_replay", replayDCacheReplayCount),
-    ("replay_forward_fail", replayForwardFailCount),
-    ("replay_dcache_miss", replayDCacheMissCount),
+  val perfEvents = Seq(
+    ("enq"                 , enqNumber).withDescription("Entries allocated in the load replay queue."),
+    ("deq"                 , deqNumber).withDescription("Entries dequeued from the load replay queue."),
+    ("deq_block"           , deqBlockCount).withDescription("Load replay dequeue opportunities blocked at the queue head."),
+    ("replay_full"         , io.lqFull).withDescription("Cycles in which the load replay queue reports full."),
+    ("replay_rar_nack"     , replayRARRejectCount).withDescription("Load replays rejected by the read-after-read queue."),
+    ("replay_raw_nack"     , replayRAWRejectCount).withDescription("Load replays rejected by the read-after-write queue."),
+    ("replay_nuke"         , replayNukeCount).withDescription("Load replays caused by a pipeline nuke request."),
+    ("replay_mem_amb"      , replayMemAmbCount).withDescription("Load replays caused by unresolved memory dependence."),
+    ("replay_tlb_miss"     , replayTlbMissCount).withDescription("Load replays caused by a TLB miss."),
+    ("replay_bank_conflict", replayBankConflictCount).withDescription("Load replays caused by a data-cache bank conflict."),
+    ("replay_dcache_replay", replayDCacheReplayCount).withDescription("Load replays requested by the data cache."),
+    ("replay_forward_fail" , replayForwardFailCount).withDescription("Load replays caused by failed store-to-load forwarding."),
+    ("replay_dcache_miss"  , replayDCacheMissCount).withDescription("Load replays caused by a data-cache miss."),
   )
   generatePerfEvent()
   // end
