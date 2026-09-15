@@ -236,7 +236,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   // misprediction; alternate-provider state is carried in the meta itself.
   private val t0_needReadMispredict = t0_needRead
   private val t0_needReadAlt        = false.B
-  private val t0_useMeta = !t0_needRead
+  private val t0_useMeta            = !t0_needRead
 
   private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
   io.trainReady := !t0_readBankConflict
@@ -267,7 +267,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val debug_t0AlignedPc             = getAlignedPc(t0_startPc)
   private val debug_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
   private val debug_sameFetchBlock          = debug_s0AlignedPc === debug_t0AlignedPc
-  private val debug_nearbyFetchBlock        = !debug_sameFetchBlock &&
+  private val debug_nearbyFetchBlock = !debug_sameFetchBlock &&
     ((debug_s0AlignedPc.toUInt > debug_t0AlignedPc.toUInt &&
       debug_s0AlignedPc.toUInt - debug_t0AlignedPc.toUInt <= FetchBlockSize.U) ||
       (debug_t0AlignedPc.toUInt > debug_s0AlignedPc.toUInt &&
