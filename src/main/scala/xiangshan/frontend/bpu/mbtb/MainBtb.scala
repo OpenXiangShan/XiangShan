@@ -111,7 +111,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  s3_fire := io.enable && io.stageCtrl.s3_fire
+  private val s3_fire = io.stageCtrl.s3_fire && io.enable
   // io.result is flattened, so use each align bank's last result as its VBTB taken feedback.
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.s3_vbtbTaken := io.s3_takenMask(i * (NumWay + 1) + NumWay)
