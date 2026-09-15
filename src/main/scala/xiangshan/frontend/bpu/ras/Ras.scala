@@ -116,6 +116,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.commit.metaSsp   := commitInfo.meta.ras.ssp
   stack.specRead.tosr    := io.specRead.tosr
   stack.specRead.ssp     := io.specRead.ssp
+  stack.specRead.tosrInSpec := io.specRead.tosrInSpec
 
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
 

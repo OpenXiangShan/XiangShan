@@ -97,6 +97,7 @@ class RasCommitMeta(implicit p: Parameters) extends RasBundle {
 class ReadRetAddr(implicit p: Parameters) extends RasBundle {
   val tosr:    RasPtr    = Input(new RasPtr)
   val ssp:     UInt      = Input(UInt(log2Up(CommitStackSize).W))
+  val tosrInSpec: Bool   = Input(Bool())
   val retAddr: GuardedPc = Output(GuardedPc())
 }
 

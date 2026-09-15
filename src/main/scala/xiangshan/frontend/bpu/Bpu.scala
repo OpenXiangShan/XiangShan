@@ -241,6 +241,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
   ras.io.specRead.tosr           := io.fromFtq.advanceTosr
   ras.io.specRead.ssp            := io.fromFtq.advanceSsp
+  ras.io.specRead.tosrInSpec     := io.fromFtq.advanceTosrInSpec
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions

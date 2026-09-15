@@ -362,7 +362,7 @@ class RasStack(implicit p: Parameters) extends RasModule
 
   private val specQueueRetAddr  = specQueue(io.specRead.tosr.value).retAddr
   private val specCommitRetAddr = commitStack(io.specRead.ssp).retAddr
-  private val isInQueue         = tosrInRange(io.specRead.tosr, tosw, true.B)
+  private val isInQueue         = tosrInRange(io.specRead.tosr, tosw, io.specRead.tosrInSpec)
   private val specReadRetAddr   = Mux(isInQueue, specQueueRetAddr, specCommitRetAddr)
   io.spec.popAddr     := timingTop.retAddr
   io.specRead.retAddr := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr))

@@ -70,6 +70,7 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val redirectFromIFU: Bool                  = Output(Bool())
   val advanceTosr:     RasPtr                = Output(new RasPtr)
   val advanceSsp:      UInt                  = Output(UInt(log2Up(16).W))
+  val advanceTosrInSpec:   Bool                  = Output(Bool())
   val specRetAddr:     GuardedPc             = Output(GuardedPc())
 }
 
