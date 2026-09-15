@@ -50,6 +50,7 @@ class WriteBuffer[T <: WriteReqBundle](
     hasCnt:     Boolean = false,
     hasWayMask: Boolean = false,
     hasFlush:   Boolean = false,
+    hasLookup:  Boolean = false,
     nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
@@ -63,6 +64,9 @@ class WriteBuffer[T <: WriteReqBundle](
     val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
     val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
     val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+
+    val lookupSetIdx: Option[UInt]          = Option.when(hasLookup)(Input(UInt(gen.setIdx.getWidth.W)))
+    val lookup:       Option[Vec[Valid[T]]] = Option.when(hasLookup)(Output(Vec(numPorts, Valid(gen))))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -90,6 +94,17 @@ class WriteBuffer[T <: WriteReqBundle](
   private val nextDirty       = WireInit(dirty)
   private val nextEntries     = WireInit(entries)
   private val nextShadowValid = WireInit(shadowValid)
+
+  if (hasLookup) {
+    val lookupSetIdx = io.lookupSetIdx.get
+    io.lookup.get.zipWithIndex.foreach { case (lookupEntry, portIdx) =>
+      val hitMask = VecInit(entries(portIdx).zip(shadowValid(portIdx)).map { case (entry, valid) =>
+        valid && entry.setIdx === lookupSetIdx
+      })
+      lookupEntry.valid := hitMask.reduce(_ || _)
+      lookupEntry.bits  := Mux1H(hitMask, entries(portIdx))
+    }
+  }
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))

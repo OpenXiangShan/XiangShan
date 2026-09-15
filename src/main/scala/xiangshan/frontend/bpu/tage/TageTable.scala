@@ -93,14 +93,15 @@ class TageTable(
 
   // use a write buffer to store a entrySram write request
   private val entryWriteBuffers =
-    Seq.tabulate(NumBanks) { bankIdx =>
+    Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
       Module(new WriteBuffer(
         new EntrySramWriteReq,
         WriteBufferSize,
-        numPorts = NumWays,
+        numPorts = 1,
         hasCnt = true,
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
+        hasLookup = true,
+        nameSuffix = s"tageTable${tableIdx}_${bankIdx}_way${wayIdx}"
+      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
   // use a write buffer to store a usefulCtr write request
@@ -138,12 +139,13 @@ class TageTable(
   private val writeReqValid = RegNext(io.writeReq.valid, init = false.B)
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
-  // A prediction read prevents the single-port SRAM from draining the entry
-  // write buffer for the same bank.  Keep the per-bank read history so that
-  // an overwrite can be attributed to a continuously reused prediction bank.
   private val predictionReadByBank = VecInit((0 until NumBanks).map { bankIdx =>
     io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
   })
+
+  // A prediction read prevents the single-port SRAM from draining the entry
+  // write buffer for the same bank.  Keep the per-bank read history so that
+  // an overwrite can be attributed to a continuously reused prediction bank.
   private val previousPredictionReadByBank = RegNext(
     predictionReadByBank,
     VecInit.fill(NumBanks)(false.B)
@@ -155,15 +157,16 @@ class TageTable(
   )
 
   // write to write buffer
-  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
-    buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
+  entryWriteBuffers.zipWithIndex.foreach { case (bankBuffers, bankIdx) =>
+    bankBuffers.zipWithIndex.foreach { case (buffer, wayIdx) =>
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeEntryEn(wayIdx)
-      bufferIn.valid       := writeValid
-      bufferIn.bits.setIdx := writeReq.setIdx
-      bufferIn.bits.entry  := writeReq.entries(wayIdx)
+      buffer.io.write.head.valid       := writeValid
+      buffer.io.write.head.bits.setIdx := writeReq.setIdx
+      buffer.io.write.head.bits.entry  := writeReq.entries(wayIdx)
+      buffer.io.takenMask.get.head     := writeReq.actualTakenMask(wayIdx)
+      buffer.io.lookupSetIdx.get       := io.readReq(0).bits.setIdx
     }
-    buffer.io.takenMask.get := writeReq.actualTakenMask
   }
 
   usefulCtrWriteBuffers.zipWithIndex.foreach { case (bankBuffer, bankIdx) =>
@@ -178,8 +181,9 @@ class TageTable(
   }
 
   // write entry to sram from write buffer
-  entrySram.zip(entryWriteBuffers).foreach { case (bank, buffer) =>
-    bank.zip(buffer.io.read).foreach { case (way, bufferOut) =>
+  entrySram.zip(entryWriteBuffers).foreach { case (bank, bankBuffers) =>
+    bank.zip(bankBuffers).foreach { case (way, buffer) =>
+      val bufferOut = buffer.io.read.head
       way.io.w.apply(
         bufferOut.valid && !way.io.r.req.valid,
         bufferOut.bits.entry,
@@ -190,6 +194,19 @@ class TageTable(
     }
   }
 
+  private val predictionBypassNow = Wire(Vec(NumWays, Valid(new TageEntry)))
+  predictionBypassNow.indices.foreach { wayIdx =>
+    val validByBank = VecInit(entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get.head.valid))
+    val entryByBank = entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get.head.bits.entry)
+    predictionBypassNow(wayIdx).valid := Mux1H(io.readReq(0).bits.bankMask, validByBank)
+    predictionBypassNow(wayIdx).bits  := Mux1H(io.readReq(0).bits.bankMask, entryByBank)
+  }
+  private val predictionBypassReg = RegInit(
+    VecInit(Seq.fill(NumWays)(0.U.asTypeOf(Valid(new TageEntry))))
+  )
+  when(io.readReq(0).valid) {
+    predictionBypassReg := predictionBypassNow
+  }
   usefulCtrSram.zip(usefulCtrWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffer), bankIdx) =>
     when(io.usefulResetStart) {
       usefulResetInFlightMask(bankIdx) := true.B
@@ -219,18 +236,33 @@ class TageTable(
   io.readResp.zipWithIndex.foreach { case (resp, i) =>
     val readBankMaskNext          = RegEnable(io.readReq(i).bits.bankMask, io.readReq(i).valid)
     val readDuringUsefulResetNext = RegEnable(readDuringUsefulReset(i), io.readReq(i).valid)
-
-    resp.entries := Mux1H(
+    val sramEntries = Mux1H(
       readBankMaskNext,
       entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
     )
+    val sramUsefulCtrs = Mux1H(
+      readBankMaskNext,
+      usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+    )
+
+    val mergedEntries = if (i == 0) {
+      VecInit(sramEntries.zip(predictionBypassReg).map { case (sramEntry, bypassEntry) =>
+        Mux(bypassEntry.valid, bypassEntry.bits, sramEntry)
+      })
+    } else {
+      sramEntries
+    }
+    resp.entries := mergedEntries
     resp.usefulCtrs := Mux(
       readDuringUsefulResetNext,
       VecInit.fill(NumWays)(UsefulCounter.Zero),
-      Mux1H(
-        readBankMaskNext,
-        usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
-      )
+      if (i == 0) {
+        VecInit(sramUsefulCtrs.zip(predictionBypassReg).map { case (sramUsefulCtr, bypassEntry) =>
+          Mux(bypassEntry.valid, UsefulCounter.Zero, sramUsefulCtr)
+        })
+      } else {
+        sramUsefulCtrs
+      }
     )
   }
 
@@ -252,19 +284,20 @@ class TageTable(
   XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
   XSPerfAccumulate(
     "overwrite",
-    PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
+    PopCount(entryWriteBuffers.flatMap(_.flatMap(_.io.overwrite)))
   )
   XSPerfAccumulate(
     "train_write_buffer_overwrite_with_prediction_read",
-    PopCount(entryWriteBuffers.zip(predictionReadByBank).flatMap { case (buffer, predictionRead) =>
-      buffer.io.overwrite.map(_ && predictionRead)
+    PopCount(entryWriteBuffers.zip(predictionReadByBank).flatMap { case (bankBuffers, predictionRead) =>
+      bankBuffers.flatMap(_.io.overwrite.map(_ && predictionRead))
     })
   )
   XSPerfAccumulate(
     "train_write_buffer_overwrite_with_consecutive_prediction_read",
     PopCount(entryWriteBuffers.zip(consecutivePredictionReadByBank).flatMap {
-      case (buffer, consecutivePredictionRead) =>
-        buffer.io.overwrite.map(_ && consecutivePredictionRead)
+      case (bankBuffers, consecutivePredictionRead) =>
+        bankBuffers.flatMap(_.io.overwrite.map(_ && consecutivePredictionRead))
     })
   )
+  XSPerfAccumulate("prediction_bypass_hit", PopCount(predictionBypassNow.map(_.valid)))
 }
