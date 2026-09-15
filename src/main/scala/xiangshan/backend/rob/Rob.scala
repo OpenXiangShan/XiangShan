@@ -148,6 +148,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val jmpWBs = io.exuWriteback.filter(_.bits.params.hasJmpFu).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
+  // Rename marks vector instructions dirty conservatively, before the actual
+  // vector VL is available.  Vector memory writeback carries the dynamic VL
+  // and vstart, so an empty ordinary vector memory operation can be identified
+  // precisely here and cleared before ROB commit.  Keep whole-register,
+  // masked and fault-only-first operations on the existing conservative path
+  // until their reference-model behavior is explicitly aligned.
+  val emptyVectorMemWBs = exuWBs.map { wb =>
+    wb.valid && wb.bits.vls.map { vls =>
+      !vls.isWhole && !vls.isMasked && !vls.vpu.isVleff &&
+        vls.vpu.vl === 0.U && vls.vpu.vstart === 0.U
+    }.getOrElse(false.B)
+  }
+
   PerfCCT.tick(clock, reset)
 
   io.exuWriteback.zipWithIndex.foreach{ case (wb, i) =>
@@ -1075,6 +1088,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       robEntries(i).vxsat := robEntries(i).vxsat | vxsatRes
     }
 
+    val clearDirtyVs = emptyVectorMemWBs.zip(exuWBs).map { case (empty, wb) =>
+      empty && wb.bits.robIdx.value === i.U
+    }.reduceOption(_ || _).getOrElse(false.B)
+    when (robEntries(i).valid && clearDirtyVs) {
+      robEntries(i).dirtyVs := false.B
+    }
+
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
     when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
@@ -1138,6 +1158,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
     needUpdate(i).vxsat := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).vxsat | vxsatRes)
+
+    val clearDirtyVs = emptyVectorMemWBs.zip(exuWBs).map { case (empty, wb) =>
+      empty && wb.bits.robIdx.value === needUpdateRobIdx(i)
+    }.reduceOption(_ || _).getOrElse(false.B)
+    when (clearDirtyVs) {
+      needUpdate(i).dirtyVs := false.B
+    }
 
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.cfiUpdate.taken).reduce(_ || _)
