@@ -67,7 +67,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
     // Compact CHI Type 4 (ReadOnce + CompData)
     val cchi: CCHIType4Port = new CCHIType4Port
-    val ctrl_cchi: CCHIType3Port = Flipped(new CCHIType3Port)
+    val ctrl_cchi: Option[CCHIType3Port] = Option.when(EnableCtrlUnit)(Flipped(new CCHIType3Port))
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -113,16 +113,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val chiCtrlUnit = if (EnableCtrlUnit) Some(outer.ctrlUnitOpt.get.module) else None
   private val eccEnable = if (EnableCtrlUnit) chiCtrlUnit.get.io.eccEnable else true.B
 
-  if (EnableCtrlUnit) {
-    io.ctrl_cchi <> chiCtrlUnit.get.io.cchi
-  } else {
-    io.ctrl_cchi.upREQ.ready := false.B
-    io.ctrl_cchi.upDAT.ready := false.B
-    io.ctrl_cchi.dnRSP.valid := false.B
-    io.ctrl_cchi.dnRSP.bits := DontCare
-    io.ctrl_cchi.dnDAT.valid := false.B
-    io.ctrl_cchi.dnDAT.bits := DontCare
-  }
+  io.ctrl_cchi.foreach(_ <> chiCtrlUnit.get.io.cchi)
 
   // dataArray io
   if (EnableCtrlUnit) {

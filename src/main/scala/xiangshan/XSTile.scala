@@ -58,7 +58,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
+  // L1D cacheable path uses Compact CHI Type 1 (see XSCore.io.dcache_cchi); not connected to L2 yet.
   // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
   // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
   // Data-side Uncache uses Compact CHI Type 3, 64b DAT (see XSCore.io.d_mmio_cchi); not connected to L2 yet.

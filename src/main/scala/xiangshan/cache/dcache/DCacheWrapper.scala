@@ -889,7 +889,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
-  val ctrl_cchi = Flipped(new CCHIType3Port)
+  val ctrl_cchi = Option.when(cacheCtrlParamsOpt.nonEmpty)(Flipped(new CCHIType3Port))
 }
 
 private object ArbiterCtrl {
@@ -1094,7 +1094,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   if (cacheCtrlParamsOpt.nonEmpty) {
     val ctrlUnit = outer.cacheCtrlOpt.get.module
-    io.ctrl_cchi <> ctrlUnit.io.cchi
+    io.ctrl_cchi.get <> ctrlUnit.io.cchi
 
     if (EnableTagEcc) {
       ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io.pseudoError(0))
@@ -1109,13 +1109,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
                                           (mainPipe.io.pseudo_data_error_inj_done ||
                                            ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
     }
-  } else {
-    io.ctrl_cchi.upREQ.ready := false.B
-    io.ctrl_cchi.upDAT.ready := false.B
-    io.ctrl_cchi.dnRSP.valid := false.B
-    io.ctrl_cchi.dnRSP.bits := DontCare
-    io.ctrl_cchi.dnDAT.valid := false.B
-    io.ctrl_cchi.dnDAT.bits := DontCare
   }
 
   val errors = Seq(mainPipe.io.error) ++ // store / misc error

@@ -86,7 +86,7 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   // Compact CHI Type 3 (InstrUncache MMIO/NC fetch); not connected to L2 in phase 2.3b
   val i_mmio_cchi: CCHIType3Port = new CCHIType3Port
   // Compact CHI Type 3 (I$ CtrlUnit); MemBlock Type3Router -> Frontend, not via L2
-  val icache_ctrl_cchi: CCHIType3Port = Flipped(new CCHIType3Port)
+  val icache_ctrl_cchi: Option[CCHIType3Port] = Option.when(icacheCtrlEnabled)(Flipped(new CCHIType3Port))
 
   // ctrl
   val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
@@ -278,7 +278,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   icache.io.hartId := io.hartId
   io.icache_cchi <> icache.io.cchi
-  icache.io.ctrl_cchi <> io.icache_ctrl_cchi
+  icache.io.ctrl_cchi.zip(io.icache_ctrl_cchi).foreach { case (a, b) => a <> b }
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 

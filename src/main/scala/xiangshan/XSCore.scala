@@ -33,7 +33,7 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
-import xiangshan.cache.{CCHIType3Port, CCHIType4Port}
+import xiangshan.cache.{CCHIType1Port, CCHIType3Port, CCHIType4Port}
 import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -112,6 +112,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     })
     val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
+    // Compact CHI Type 1 DCache (from MemBlock); not wired to L2 yet
+    val dcache_cchi = Vec(numMemChannelsFromDcache, new CCHIType1Port)
     // Compact CHI Type 4 ICache (from Frontend); not wired to L2 in phase 2.1
     val icache_cchi = new CCHIType4Port
     // Compact CHI Type 4 PTW (from MemBlock); not wired to L2 in phase 2.2
@@ -201,9 +203,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock buffer <-> tile; RX not wired to L2 in phase 2.3b
   memBlock.io.inner_i_mmio_cchi <> frontend.io.i_mmio_cchi
   // I$ Ctrl Compact CHI Type 3: MemBlock Type3Router <-> Frontend (not via L2)
-  if (icacheCtrlEnabled) {
-    frontend.io.icache_ctrl_cchi <> memBlock.io.inner_icache_ctrl_cchi
-  }
+  frontend.io.icache_ctrl_cchi.zip(memBlock.io.inner_icache_ctrl_cchi).foreach { case (a, b) => a <> b }
+  io.dcache_cchi <> memBlock.io.outer_dcache_cchi
   io.icache_cchi.upREQ <> memBlock.io.outer_icache_cchi.upREQ
   io.icache_cchi.dnDAT <> memBlock.io.outer_icache_cchi.dnDAT
   io.icache_cchi.upREQ.ready := true.B
