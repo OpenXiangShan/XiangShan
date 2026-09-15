@@ -236,7 +236,8 @@ object Instructions {
   def FDIV_Q             :BitPat = BitPat("b0001111??????????????????1010011")
   def FDIV_S             :BitPat = BitPat("b0001100??????????????????1010011")
   def FENCE              :BitPat = BitPat("b?????????????????000?????0001111")
-  def MFENCE             :BitPat = BitPat("b1011111??????????000000001110011") // HasMptCheck
+  def MFENCE_PA          :BitPat = BitPat("b1011111??????????000000001110011") // HasMptCheck
+  def MINVAL_PA          :BitPat = BitPat("b0111111??????????000000001110011") // HasMptCheck
   def FENCE_I            :BitPat = BitPat("b?????????????????001?????0001111")
   def FEQ_D              :BitPat = BitPat("b1010001??????????010?????1010011")
   def FEQ_H              :BitPat = BitPat("b1010010??????????010?????1010011")
@@ -1544,7 +1545,6 @@ object Instructions {
     def EBREAK             = outer.EBREAK
     def ECALL              = outer.ECALL
     def FENCE              = outer.FENCE
-    def MFENCE             = outer.MFENCE
     def JAL                = outer.JAL
     def JALR               = outer.JALR
     def LB                 = outer.LB
@@ -1607,6 +1607,16 @@ object Instructions {
       SW,
       XOR,
       XORI,
+    )
+  }
+
+  object MPTType extends InstType {
+    def MFENCE_PA          = outer.MFENCE_PA
+    def MINVAL_PA          = outer.MINVAL_PA
+
+    val allWithNames = withNameSeq(
+      MFENCE_PA,
+      MINVAL_PA,
     )
   }
 

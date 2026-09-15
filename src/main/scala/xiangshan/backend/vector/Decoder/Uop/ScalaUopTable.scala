@@ -373,6 +373,16 @@ object ScalaUopTable {
     )
   }
 
+  val tableMpt = {
+    import xiangshan.backend.decode.isa.Instructions.MPTType
+    import xiangshan.backend.decode.opcode.OpcodeTraits.FlushPipe
+
+    MPTType.mapUopcode(
+      _.MFENCE_PA -> mfence,
+      _.MINVAL_PA -> mfence.copy().removeTraits(FlushPipe),
+    )
+  }
+
   val tableH = {
     import xiangshan.backend.decode.isa.Instructions.{H64Type, HType}
 

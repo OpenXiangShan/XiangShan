@@ -199,7 +199,8 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val pteidx = Vec(tlbcontiguous, Bool())
   val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
-  val mptperm = Option.when(HasMptCheck) (new MptPermBundle(isTlbPort = false))
+  // Keep MPT AF until a lookup consumes the faulting entry.
+  val mptperm = Option.when(HasMptCheck) (new MptPermBundle)
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
@@ -389,13 +390,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       noS2xlate -> item.s1.entry.n.getOrElse(0.U)
     ))
 
-    val inner_n_mpt = Option.when(HasMptCheck)(mpt_merge_n(inner_level,inner_n,item.mpt.get.mptLevel,item.mpt.get.permIsNAPOT))
+    val inner_n_mpt = Option.when(HasMptCheck)(mpt_merge_n(inner_level,inner_n,item.mpt.get.mptLevel,item.mpt.get.permIs64KContinuous))
 
     if (HasMptCheck) {this.n :=  inner_n_mpt.get} else {this.n :=  inner_n}
 
     val isSuperPage = if (HasMptCheck) (inner_n_mpt.get =/= 0.U || mpt_level.get =/= 0.U) else (inner_level =/= 0.U || inner_n =/= 0.U)
     this.valididx := Mux(isSuperPage, VecInit(Seq.fill(tlbcontiguous)(true.B)),
-      Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), Mux((if (HasMptCheck) item.mpt.get.contigousPerm else true.B),
+      Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), Mux((if (HasMptCheck) item.mpt.get.permIs32KContinuous else true.B),
       Mux(if (HasMptCheck) (inner_level === 0.U) else true.B, item.s1.valididx,VecInit(Seq.fill(tlbcontiguous)(true.B))),item.s1.pteidx)))
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.pteidx)
     this.vmid := Mux(item.s2xlate === onlyStage2, item.s2.entry.vmid.getOrElse(0.U), item.s1.entry.vmid.getOrElse(0.U))
@@ -484,7 +485,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
       val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true)))) // add mptperm
+      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle))) // add mptperm
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -514,8 +515,8 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
 
 }
 
-class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends TlbBundle {
-  val af = Option.when(isTlbPort) (Bool()) // NOTE: if this is true, just raise af
+class MptPermBundle(implicit p: Parameters) extends TlbBundle {
+  val af = Bool() // NOTE: if this is true, just raise af
   val x = Bool()
   val w = Bool()
   val r = Bool()
@@ -524,9 +525,7 @@ class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends 
     this.x := mptResp.mptPerm(2) === 1.U
     this.w := mptResp.mptPerm(1) === 1.U
     this.r := mptResp.mptPerm(0) === 1.U
-    if (isTlbPort) (
-      this.af.get := mptResp.accessFault
-    )
+    this.af := mptResp.accessFault
   }
 }
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
@@ -543,7 +542,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true))))
+      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle)))
       // HasMptCheck,add mptperm
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
     }))
@@ -1250,7 +1249,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
 
     val vmid_hit = this.entry.vmid.getOrElse(0.U) === vmid
 
-    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIsNAPOT))
+    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIs64KContinuous))
     val mpt_level = Option.when(mergeMptLevel) (mptTlbResp.mptLevel min this.entry.level.get)
 
     val tag_match = Wire(Vec(Level + 1, Bool()))
@@ -1340,7 +1339,7 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     val asid_hit = if (HasMptCheck) (Mux(mptIgnoreAsid, true.B, if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))) else
       (if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))
 
-    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIsNAPOT))
+    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIs64KContinuous))
     val mpt_level = Option.when(mergeMptLevel) (mptTlbResp.mptLevel min this.entry.level.get)
 
     val tag_match = Wire(Vec(Level + 1, Bool()))
@@ -1490,9 +1489,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
       (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
       (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
 
-    val mptNapot = Option.when(HasMptCheck) (mpt_merge_n(level, allStage_n, mpt.get.mptLevel, mpt.get.permIsNAPOT))
+    val mptNapot = Option.when(HasMptCheck) (mpt_merge_n(level, allStage_n, mpt.get.mptLevel, mpt.get.permIs64KContinuous))
     val mptNapot_onlys1 = Option.when(HasMptCheck) (
-      mpt_merge_n(s1.entry.level.getOrElse(0.U), s1.entry.n.getOrElse(0.U), mpt.get.mptLevel, mpt.get.permIsNAPOT)
+      mpt_merge_n(s1.entry.level.getOrElse(0.U), s1.entry.n.getOrElse(0.U), mpt.get.mptLevel, mpt.get.permIs64KContinuous)
     )
     val mpt_level = Option.when(HasMptCheck) (level min mpt.get.mptLevel)
     val n = if (HasMptCheck) (Mux(this.s2xlate === onlyStage1, mptNapot_onlys1.get,mptNapot.get)) else

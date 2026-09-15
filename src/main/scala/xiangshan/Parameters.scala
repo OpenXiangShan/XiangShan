@@ -53,8 +53,8 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
-  HasMptCheck: Boolean = false, //enable mpt
-  HasBitmapCheck: Boolean = true,
+  HasMptCheck: Boolean = true, //enable mpt
+  HasBitmapCheck: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
