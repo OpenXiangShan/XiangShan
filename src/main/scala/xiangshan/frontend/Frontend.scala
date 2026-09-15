@@ -278,19 +278,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   icache.io.hartId := io.hartId
   io.icache_cchi <> icache.io.cchi
-  if (frontendParameters.icacheParameters.EnableCtrlUnit) {
-    icache.io.ctrl_cchi.req <> io.icache_ctrl_cchi.txreq
-    icache.io.ctrl_cchi.updat <> io.icache_ctrl_cchi.txdat
-    io.icache_ctrl_cchi.rxrsp <> icache.io.ctrl_cchi.dnrsp
-    io.icache_ctrl_cchi.rxdat <> icache.io.ctrl_cchi.dndat
-  } else {
-    io.icache_ctrl_cchi.txreq.ready := false.B
-    io.icache_ctrl_cchi.txdat.ready := false.B
-    io.icache_ctrl_cchi.rxrsp.valid := false.B
-    io.icache_ctrl_cchi.rxrsp.bits := DontCare
-    io.icache_ctrl_cchi.rxdat.valid := false.B
-    io.icache_ctrl_cchi.rxdat.bits := DontCare
-  }
+  icache.io.ctrl_cchi <> io.icache_ctrl_cchi
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 

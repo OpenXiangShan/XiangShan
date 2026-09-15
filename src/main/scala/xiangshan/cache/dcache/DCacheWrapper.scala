@@ -890,7 +890,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
-  val ctrl_cchi = Flipped(new CCHIType3DownPort)
+  val ctrl_cchi = Flipped(new CCHIType3Port)
 }
 
 private object ArbiterCtrl {
@@ -1111,12 +1111,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
                                            ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
     }
   } else {
-    io.ctrl_cchi.req.ready := false.B
-    io.ctrl_cchi.updat.ready := false.B
-    io.ctrl_cchi.dnrsp.valid := false.B
-    io.ctrl_cchi.dnrsp.bits := DontCare
-    io.ctrl_cchi.dndat.valid := false.B
-    io.ctrl_cchi.dndat.bits := DontCare
+    io.ctrl_cchi.upREQ.ready := false.B
+    io.ctrl_cchi.upDAT.ready := false.B
+    io.ctrl_cchi.dnRSP.valid := false.B
+    io.ctrl_cchi.dnRSP.bits := DontCare
+    io.ctrl_cchi.dnDAT.valid := false.B
+    io.ctrl_cchi.dnDAT.bits := DontCare
   }
 
   val errors = Seq(mainPipe.io.error) ++ // store / misc error
@@ -1332,7 +1332,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.rr_bank_conflict_slow := bankedDataArray.io.rr_bank_conflict_slow(i)
   })
 
-  // Forward rxdat CompData into load forward_D (per mem channel)
+  // Forward dnDAT CompData into load forward_D (per mem channel)
   def forwardCompData(forward: DCacheForward, rxdat: DecoupledIO[FlitDnDAT], loadPipeIdx: Int): Unit = {
     val s0ReqValid = forward.s0Req.valid
     val s0Req = forward.s0Req.bits
@@ -1362,7 +1362,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   io.lsu.forward_D.zipWithIndex.foreach { case (forwards, i) =>
     for (ch <- 0 until numMemChannels) {
-      forwardCompData(forwards(ch), io.cchi(ch).rxdat, i)
+      forwardCompData(forwards(ch), io.cchi(ch).dnDAT, i)
     }
   }
 
@@ -1373,11 +1373,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   for (ch <- 0 until numMemChannels) {
-    val compDataWakeup = io.cchi(ch).rxdat.valid &&
-      CCHIOpcode.CompData.is(io.cchi(ch).rxdat.bits.Opcode, io.cchi(ch).rxdat.valid) &&
-      io.cchi(ch).rxdat.bits.TxnID < cfg.nMissEntries.U
+    val compDataWakeup = io.cchi(ch).dnDAT.valid &&
+      CCHIOpcode.CompData.is(io.cchi(ch).dnDAT.bits.Opcode, io.cchi(ch).dnDAT.valid) &&
+      io.cchi(ch).dnDAT.bits.TxnID < cfg.nMissEntries.U
     loadWakeups(ch).valid := compDataWakeup
-    loadWakeups(ch).bits.mshrId := io.cchi(ch).rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
+    loadWakeups(ch).bits.mshrId := io.cchi(ch).dnDAT.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
   }
   io.lsu.loadWakeup := loadWakeups
   mainPipe.io.force_write <> io.force_write
@@ -1570,23 +1570,23 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
 
   val rxsnpArb = Wire(Decoupled(new FlitSNP))
-  val rxsnpSel = VecInit((0 until numMemChannels).map(ch => io.cchi(ch).rxsnp.valid))
+  val rxsnpSel = VecInit((0 until numMemChannels).map(ch => io.cchi(ch).dnSNP.valid))
   rxsnpArb.valid := rxsnpSel.asUInt.orR
-  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until numMemChannels).map(ch => io.cchi(ch).rxsnp.bits))
+  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until numMemChannels).map(ch => io.cchi(ch).dnSNP.bits))
   for (ch <- 0 until numMemChannels) {
-    io.cchi(ch).rxsnp.ready := rxsnpArb.ready && rxsnpSel(ch)
+    io.cchi(ch).dnSNP.ready := rxsnpArb.ready && rxsnpSel(ch)
   }
   val rxsnpChannel = OHToUInt(rxsnpSel.asUInt)
   probeQueue.io.rxsnp_channel := rxsnpChannel
 
   for (ch <- 0 until numMemChannels) {
-    io.cchi(ch).txreq <> missQueue.io.txreq(ch)
-    lowestArb(io.cchi(ch).txrsp, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
-    io.cchi(ch).txevt <> wb.io.txevt(ch)
-    io.cchi(ch).txdat <> wb.io.txdat(ch)
-    missQueue.io.rxdat(ch) <> io.cchi(ch).rxdat
+    io.cchi(ch).upREQ <> missQueue.io.txreq(ch)
+    lowestArb(io.cchi(ch).upRSP, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
+    io.cchi(ch).upEVT <> wb.io.txevt(ch)
+    io.cchi(ch).upDAT <> wb.io.txdat(ch)
+    missQueue.io.rxdat(ch) <> io.cchi(ch).dnDAT
 
-    val rxrsp = io.cchi(ch).rxrsp
+    val rxrsp = io.cchi(ch).dnRSP
     val rxrspTxnId = rxrsp.bits.TxnID
     val rxrspIsCompCMO = rxrsp.valid && CCHIOpcode.CompCMO.is(rxrsp.bits.Opcode, rxrsp.valid)
     val rxrspIsMqComp = rxrsp.valid && rxrspTxnId < cfg.nMissEntries.U &&
@@ -1728,14 +1728,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // assertions
   // dcache should only deal with DRAM addresses
   for (ch <- 0 until numMemChannels) {
-    when (io.cchi(ch).txreq.fire) {
-      assert(PmemRanges.map(_.cover(io.cchi(ch).txreq.bits.Addr)).reduce(_ || _))
+    when (io.cchi(ch).upREQ.fire) {
+      assert(PmemRanges.map(_.cover(io.cchi(ch).upREQ.bits.Addr)).reduce(_ || _))
     }
-    when (io.cchi(ch).rxsnp.fire) {
-      assert(PmemRanges.map(_.cover(Cat(io.cchi(ch).rxsnp.bits.Addr, 0.U(3.W)))).reduce(_ || _))
+    when (io.cchi(ch).dnSNP.fire) {
+      assert(PmemRanges.map(_.cover(Cat(io.cchi(ch).dnSNP.bits.Addr, 0.U(3.W)))).reduce(_ || _))
     }
-    when (io.cchi(ch).txevt.fire) {
-      assert(PmemRanges.map(_.cover(io.cchi(ch).txevt.bits.Addr)).reduce(_ || _))
+    when (io.cchi(ch).upEVT.fire) {
+      assert(PmemRanges.map(_.cover(io.cchi(ch).upEVT.bits.Addr)).reduce(_ || _))
     }
   }
 
@@ -1783,13 +1783,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (ch <- 0 until numMemChannels) {
     val chSuffix = s"_$ch"
 
-    val grant_data_fire = io.cchi(ch).rxdat.fire &&
-      CCHIOpcode.CompData.is(io.cchi(ch).rxdat.bits.Opcode, io.cchi(ch).rxdat.valid) &&
-      io.cchi(ch).rxdat.bits.DataID === 0.U
+    val grant_data_fire = io.cchi(ch).dnDAT.fire &&
+      CCHIOpcode.CompData.is(io.cchi(ch).dnDAT.bits.Opcode, io.cchi(ch).dnDAT.valid) &&
+      io.cchi(ch).dnDAT.bits.DataID === 0.U
     XSPerfAccumulate(s"grant_data_fire$chSuffix", grant_data_fire)
 
     val hint_source = io.l2_hint(ch).bits.sourceId
-    val grant_data_source = io.cchi(ch).rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
+    val grant_data_source = io.cchi(ch).dnDAT.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
 
     val hintPipe2 = Module(new Pipeline(UInt(32.W), 3))
     hintPipe2.io.in.valid := io.l2_hint(ch).valid

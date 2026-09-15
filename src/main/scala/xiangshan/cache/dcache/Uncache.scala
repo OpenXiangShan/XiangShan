@@ -186,7 +186,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val wfi = Flipped(new WfiReqBundle)
   val busError = Output(new L1BusErrorUnitInfo())
   val cchi = new CCHIType3Port
-  /** Physical address of the inflight TXDAT entry; valid with cchi.txdat (FlitREQ.Addr width). */
+  /** Physical address of the inflight upDAT entry; valid with cchi.upDAT (FlitREQ.Addr width). */
   val txdatAddr = Output(UInt(48.W))
 }
 
@@ -207,8 +207,8 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   val resp = io.lsq.resp
   val req_ready = WireInit(false.B)
 
-  io.cchi.rxrsp.ready := true.B
-  io.cchi.rxdat.ready := true.B
+  io.cchi.dnRSP.ready := true.B
+  io.cchi.dnDAT.ready := true.B
   req.ready := req_ready
 
   val entries = Reg(Vec(UncacheBufferSize, new UncacheEntry))
@@ -290,7 +290,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
 
   switch(uState){
     is(s_idle){
-      when(io.cchi.txreq.fire){
+      when(io.cchi.upREQ.fire){
         uState := s_inflight
       }
     }
@@ -398,21 +398,21 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
 
   val q0_isStore = q0_entry.cmd === MemoryOpConstants.M_XWR
 
-  io.cchi.txreq.valid := q0_canSent && !io.wfi.wfiReq
-  io.cchi.txreq.bits := 0.U.asTypeOf(io.cchi.txreq.bits)
-  when(io.cchi.txreq.valid) {
+  io.cchi.upREQ.valid := q0_canSent && !io.wfi.wfiReq
+  io.cchi.upREQ.bits := 0.U.asTypeOf(io.cchi.upREQ.bits)
+  when(io.cchi.upREQ.valid) {
     when(q0_isStore) {
       UncacheCCHI.Tx.writeReq(
-        io.cchi.txreq.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc
+        io.cchi.upREQ.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc
       )
     }.otherwise {
       UncacheCCHI.Tx.readReq(
-        io.cchi.txreq.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc
+        io.cchi.upREQ.bits, q0_canSentIdx, q0_entry.addr, lgSize, q0_entry.memBackTypeMM, q0_entry.nc
       )
     }
   }
 
-  when(io.cchi.txreq.fire) {
+  when(io.cchi.upREQ.fire) {
     states(q0_canSentIdx).setInflight(true.B)
     noPending(q0_canSentIdx) := false.B
     (0 until UncacheBufferSize).map(j =>
@@ -427,23 +427,23 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   val (chiTxdatIdx, chiTxdatValid) = PriorityEncoderWithFlag(chiTxdatReqVec)
   val chiTxdatEntry = entries(chiTxdatIdx)
 
-  io.cchi.txdat.valid := chiTxdatValid && !io.wfi.wfiReq
-  io.cchi.txdat.bits := 0.U.asTypeOf(io.cchi.txdat.bits)
+  io.cchi.upDAT.valid := chiTxdatValid && !io.wfi.wfiReq
+  io.cchi.upDAT.bits := 0.U.asTypeOf(io.cchi.upDAT.bits)
   io.txdatAddr := chiTxdatEntry.addr(47, 0)
-  when(io.cchi.txdat.valid) {
+  when(io.cchi.upDAT.valid) {
     UncacheCCHI.Tx.ncbWrData(
-      io.cchi.txdat.bits, chiDbid(chiTxdatIdx), chiDatTgtId(chiTxdatIdx), chiTxdatEntry.data, chiTxdatEntry.mask
+      io.cchi.upDAT.bits, chiDbid(chiTxdatIdx), chiDatTgtId(chiTxdatIdx), chiTxdatEntry.data, chiTxdatEntry.mask
     )
   }
-  when(io.cchi.txdat.fire) {
+  when(io.cchi.upDAT.fire) {
     chiNeedTxdat(chiTxdatIdx) := false.B
   }
 
   val chiStoreDoneVec = sizeMap(i => {
     val id = i.U
-    val txdatFired = io.cchi.txdat.fire && chiTxdatIdx === id
-    val compFired = io.cchi.rxrsp.fire && CCHIOpcode.Comp.is(io.cchi.rxrsp.bits.Opcode) &&
-                    io.cchi.rxrsp.bits.TxnID === id && chiWaitComp(id)
+    val txdatFired = io.cchi.upDAT.fire && chiTxdatIdx === id
+    val compFired = io.cchi.dnRSP.fire && CCHIOpcode.Comp.is(io.cchi.dnRSP.bits.Opcode) &&
+                    io.cchi.dnRSP.bits.TxnID === id && chiWaitComp(id)
     val needTxdatN = chiNeedTxdat(id) && !txdatFired
     val waitCompN = chiWaitComp(id) && !compFired
     states(id).isInflight() && isStore(entries(id)) &&
@@ -467,16 +467,16 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     val difftest = DifftestModule(new DiffUncacheMMStoreEvent, delay = 1)
     difftest.coreid := io.hartId
     difftest.index  := 0.U
-    difftest.valid  := io.cchi.txreq.fire && isStore(entries(q0_canSentIdx)) && entries(q0_canSentIdx).memBackTypeMM
+    difftest.valid  := io.cchi.upREQ.fire && isStore(entries(q0_canSentIdx)) && entries(q0_canSentIdx).memBackTypeMM
     difftest.addr   := entries(q0_canSentIdx).addr
     difftest.data   := entries(q0_canSentIdx).data.asTypeOf(Vec(DataBytes, UInt(8.W)))
     difftest.mask   := entries(q0_canSentIdx).mask
   }
 
-  when(io.cchi.rxdat.fire && CCHIOpcode.CompData.is(io.cchi.rxdat.bits.Opcode)) {
-    val id = io.cchi.rxdat.bits.TxnID
+  when(io.cchi.dnDAT.fire && CCHIOpcode.CompData.is(io.cchi.dnDAT.bits.Opcode)) {
+    val id = io.cchi.dnDAT.bits.TxnID
     when(!isStore(entries(id))) {
-      entries(id).updateCompData(io.cchi.rxdat.bits.Data, io.cchi.rxdat.bits.RespErr)
+      entries(id).updateCompData(io.cchi.dnDAT.bits.Data, io.cchi.dnDAT.bits.RespErr)
       states(id).updateUncacheResp()
       noPending(id) := true.B
       busRespFire := true.B
@@ -489,36 +489,36 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     }
   }
 
-  val rxrspIsCompDBIDResp = CCHIOpcode.CompDBIDResp.is(io.cchi.rxrsp.bits.Opcode)
-  val rxrspIsDBIDResp = CCHIOpcode.DBIDResp.is(io.cchi.rxrsp.bits.Opcode)
-  val rxrspIsComp = CCHIOpcode.Comp.is(io.cchi.rxrsp.bits.Opcode)
-  when(io.cchi.rxrsp.fire) {
-    val id = io.cchi.rxrsp.bits.TxnID
+  val rxrspIsCompDBIDResp = CCHIOpcode.CompDBIDResp.is(io.cchi.dnRSP.bits.Opcode)
+  val rxrspIsDBIDResp = CCHIOpcode.DBIDResp.is(io.cchi.dnRSP.bits.Opcode)
+  val rxrspIsComp = CCHIOpcode.Comp.is(io.cchi.dnRSP.bits.Opcode)
+  when(io.cchi.dnRSP.fire) {
+    val id = io.cchi.dnRSP.bits.TxnID
     when(rxrspIsDBIDResp || rxrspIsCompDBIDResp) {
       chiNeedTxdat(id) := true.B
-      chiDbid(id) := io.cchi.rxrsp.bits.DBID
-      chiDatTgtId(id) := io.cchi.rxrsp.bits.SrcID
+      chiDbid(id) := io.cchi.dnRSP.bits.DBID
+      chiDatTgtId(id) := io.cchi.dnRSP.bits.SrcID
       chiWaitComp(id) := !rxrspIsCompDBIDResp
       when(rxrspIsCompDBIDResp) {
-        entries(id).updateRespErr(io.cchi.rxrsp.bits.RespErr)
+        entries(id).updateRespErr(io.cchi.dnRSP.bits.RespErr)
       }
     }
     when(rxrspIsComp && chiWaitComp(id)) {
-      entries(id).updateRespErr(io.cchi.rxrsp.bits.RespErr)
+      entries(id).updateRespErr(io.cchi.dnRSP.bits.RespErr)
       chiWaitComp(id) := false.B
     }
   }
 
-  val chiStoreRspErr = io.cchi.rxrsp.fire && isStore(entries(io.cchi.rxrsp.bits.TxnID)) &&
+  val chiStoreRspErr = io.cchi.dnRSP.fire && isStore(entries(io.cchi.dnRSP.bits.TxnID)) &&
     (rxrspIsComp || rxrspIsCompDBIDResp) &&
-    (UncacheCCHI.Rx.denied(io.cchi.rxrsp.bits.RespErr) || UncacheCCHI.Rx.corrupt(io.cchi.rxrsp.bits.RespErr))
-  val chiLoadCompDataErr = io.cchi.rxdat.fire &&
-    CCHIOpcode.CompData.is(io.cchi.rxdat.bits.Opcode) && !isStore(entries(io.cchi.rxdat.bits.TxnID)) &&
-    (UncacheCCHI.Rx.denied(io.cchi.rxdat.bits.RespErr) || UncacheCCHI.Rx.corrupt(io.cchi.rxdat.bits.RespErr))
+    (UncacheCCHI.Rx.denied(io.cchi.dnRSP.bits.RespErr) || UncacheCCHI.Rx.corrupt(io.cchi.dnRSP.bits.RespErr))
+  val chiLoadCompDataErr = io.cchi.dnDAT.fire &&
+    CCHIOpcode.CompData.is(io.cchi.dnDAT.bits.Opcode) && !isStore(entries(io.cchi.dnDAT.bits.TxnID)) &&
+    (UncacheCCHI.Rx.denied(io.cchi.dnDAT.bits.RespErr) || UncacheCCHI.Rx.corrupt(io.cchi.dnDAT.bits.RespErr))
   io.busError.ecc_error.valid := chiStoreRspErr || chiLoadCompDataErr
   io.busError.ecc_error.bits := Mux(chiStoreRspErr,
-    entries(io.cchi.rxrsp.bits.TxnID).addr >> blockOffBits << blockOffBits,
-    entries(io.cchi.rxdat.bits.TxnID).addr >> blockOffBits << blockOffBits
+    entries(io.cchi.dnRSP.bits.TxnID).addr >> blockOffBits << blockOffBits,
+    entries(io.cchi.dnDAT.bits.TxnID).addr >> blockOffBits << blockOffBits
   )
 
   io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
@@ -652,7 +652,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
   XSPerfAccumulate("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc)
   XSPerfAccumulate("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc)
   XSPerfAccumulate("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc)
-  XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && io.cchi.txreq.fire)
+  XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && io.cchi.upREQ.fire)
   XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
@@ -661,7 +661,7 @@ class UncacheImp(outer: Uncache) extends LazyModuleImp(outer)
     ("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc),
     ("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc),
     ("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc),
-    ("uncache_outstanding", uState =/= s_idle && io.cchi.txreq.fire),
+    ("uncache_outstanding", uState =/= s_idle && io.cchi.upREQ.fire),
     ("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
   )

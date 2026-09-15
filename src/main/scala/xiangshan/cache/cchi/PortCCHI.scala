@@ -9,58 +9,48 @@ import oceanus.compactchi._
  * Compact CHI Type 1 (fully coherent) upstream port, DCache view.
  *
  * Each channel is Decoupled (valid/ready). No P-Credit, Retry, or QoS.
- *
- * Ready (wired in later DCache steps, not here):
- *   TX*: ready from downstream; arbiter if several sources share a TX channel
- *   RXSNP: ready = free ProbeEntry; must not stall on TXREQ (spec §9.1)
- *   RXRSP/RXDAT: always ready
  */
 class CCHIType1Port extends Bundle {
-  // TX (DCache -> L2)
-  val txevt = DecoupledIO(new FlitEVT)
-  val txreq = DecoupledIO(new FlitREQ)
-  val txrsp = DecoupledIO(new FlitUpRSP)
-  val txdat = DecoupledIO(new FlitUpDAT)
-  // RX (L2 -> DCache)
-  val rxsnp = Flipped(DecoupledIO(new FlitSNP))
-  val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
-  val rxdat = Flipped(DecoupledIO(new FlitDnDAT))
+  // up (DCache -> L2)
+  val upEVT = DecoupledIO(new FlitEVT)
+  val upREQ = DecoupledIO(new FlitREQ)
+  val upRSP = DecoupledIO(new FlitUpRSP)
+  val upDAT = DecoupledIO(new FlitUpDAT)
+  // dn (L2 -> DCache)
+  val dnSNP = Flipped(DecoupledIO(new FlitSNP))
+  val dnRSP = Flipped(DecoupledIO(new FlitDnRSP))
+  val dnDAT = Flipped(DecoupledIO(new FlitDnDAT))
 }
 
 /*
  * Compact CHI Type 4 (read-only non-coherent) upstream port.
  *
- * Active channels: TXREQ (ReadOnce) + RXDAT (CompData).
+ * Active channels: upREQ (ReadOnce) + dnDAT (CompData).
  * Used by ICache and PTW (L2TLB).
  */
 class CCHIType4Port extends Bundle {
-  val txreq = DecoupledIO(new FlitREQ)
-  val rxdat = Flipped(DecoupledIO(new FlitDnDAT))
+  // up (ICache/PTW -> L2)
+  val upREQ = DecoupledIO(new FlitREQ)
+  // dn (L2 -> ICache/PTW)
+  val dnDAT = Flipped(DecoupledIO(new FlitDnDAT))
 }
 
 /*
  * Compact CHI Type 3 (non-coherent) upstream port.
  *
- * Active channels: TXREQ + TXDAT + RXRSP + RXDAT.  DAT data width = 64b (Type3Uncache).
+ * Active channels: upREQ + upDAT + dnRSP + dnDAT.  DAT data width = 64b (Type3Uncache).
  * Type3 upstream for data-side Uncache (NC + MMIO)
  */
 class CCHIType3Port extends Bundle {
-  val txreq = DecoupledIO(new FlitREQ)
-  val txdat = DecoupledIO(new FlitUpDAT64)
-  val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
-  val rxdat = Flipped(DecoupledIO(new FlitDnDAT64))
+  // up (Uncache -> L2 / CtrlUnit)
+  val upREQ = DecoupledIO(new FlitREQ)
+  val upDAT = DecoupledIO(new FlitUpDAT64)
+  // dn (L2 / CtrlUnit -> Uncache)
+  val dnRSP = Flipped(DecoupledIO(new FlitDnRSP))
+  val dnDAT = Flipped(DecoupledIO(new FlitDnDAT64))
 }
 
-/*
- * Compact CHI Type 3 downstream (Completer) port.
- * Used by in-core MMIO slaves such as D$ CtrlUnit.
- */
-class CCHIType3DownPort extends Bundle {
-  val req = Flipped(DecoupledIO(new FlitREQ))
-  val updat = Flipped(DecoupledIO(new FlitUpDAT64))
-  val dnrsp = DecoupledIO(new FlitDnRSP)
-  val dndat = DecoupledIO(new FlitDnDAT64)
-}
+// Completer (CtrlUnit, Type3Router.up): Flipped(new CCHIType3Port)
 
 /*
  * DCache-side Compact CHI helpers: phase-1 pinned params, TX builders, RX decoders.

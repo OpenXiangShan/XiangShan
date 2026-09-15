@@ -204,39 +204,39 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   if (icacheCtrlEnabled) {
     frontend.io.icache_ctrl_cchi <> memBlock.io.inner_icache_ctrl_cchi
   }
-  io.icache_cchi.txreq <> memBlock.io.outer_icache_cchi.txreq
-  io.icache_cchi.rxdat <> memBlock.io.outer_icache_cchi.rxdat
-  io.icache_cchi.txreq.ready := true.B
-  io.icache_cchi.rxdat.valid := false.B
-  io.icache_cchi.rxdat.bits  := DontCare
-  // PTW Compact CHI Type 4: L2TLB <-> MemBlock buffer <-> tile; RXDAT not wired to L2 in phase 2.2
-  io.ptw_cchi.txreq <> memBlock.io.outer_ptw_cchi.txreq
-  io.ptw_cchi.rxdat <> memBlock.io.outer_ptw_cchi.rxdat
-  io.ptw_cchi.txreq.ready := true.B
-  io.ptw_cchi.rxdat.valid := false.B
-  io.ptw_cchi.rxdat.bits  := DontCare
+  io.icache_cchi.upREQ <> memBlock.io.outer_icache_cchi.upREQ
+  io.icache_cchi.dnDAT <> memBlock.io.outer_icache_cchi.dnDAT
+  io.icache_cchi.upREQ.ready := true.B
+  io.icache_cchi.dnDAT.valid := false.B
+  io.icache_cchi.dnDAT.bits  := DontCare
+  // PTW Compact CHI Type 4: L2TLB <-> MemBlock buffer <-> tile; dnDAT not wired to L2 in phase 2.2
+  io.ptw_cchi.upREQ <> memBlock.io.outer_ptw_cchi.upREQ
+  io.ptw_cchi.dnDAT <> memBlock.io.outer_ptw_cchi.dnDAT
+  io.ptw_cchi.upREQ.ready := true.B
+  io.ptw_cchi.dnDAT.valid := false.B
+  io.ptw_cchi.dnDAT.bits  := DontCare
   // Uncache Compact CHI Type 3: MemBlock <-> tile; RX not wired to L2 in phase 2.3a
-  io.d_mmio_cchi.txreq <> memBlock.io.outer_d_mmio_cchi.txreq
-  io.d_mmio_cchi.txdat <> memBlock.io.outer_d_mmio_cchi.txdat
-  io.d_mmio_cchi.rxrsp <> memBlock.io.outer_d_mmio_cchi.rxrsp
-  io.d_mmio_cchi.rxdat <> memBlock.io.outer_d_mmio_cchi.rxdat
-  io.d_mmio_cchi.txreq.ready := true.B
-  io.d_mmio_cchi.txdat.ready := true.B
-  io.d_mmio_cchi.rxrsp.valid := false.B
-  io.d_mmio_cchi.rxrsp.bits  := DontCare
-  io.d_mmio_cchi.rxdat.valid := false.B
-  io.d_mmio_cchi.rxdat.bits  := DontCare
+  io.d_mmio_cchi.upREQ <> memBlock.io.outer_d_mmio_cchi.upREQ
+  io.d_mmio_cchi.upDAT <> memBlock.io.outer_d_mmio_cchi.upDAT
+  io.d_mmio_cchi.dnRSP <> memBlock.io.outer_d_mmio_cchi.dnRSP
+  io.d_mmio_cchi.dnDAT <> memBlock.io.outer_d_mmio_cchi.dnDAT
+  io.d_mmio_cchi.upREQ.ready := true.B
+  io.d_mmio_cchi.upDAT.ready := true.B
+  io.d_mmio_cchi.dnRSP.valid := false.B
+  io.d_mmio_cchi.dnRSP.bits  := DontCare
+  io.d_mmio_cchi.dnDAT.valid := false.B
+  io.d_mmio_cchi.dnDAT.bits  := DontCare
   // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock <-> tile; RX not wired to L2 in phase 2.3b
-  io.i_mmio_cchi.txreq <> memBlock.io.outer_i_mmio_cchi.txreq
-  io.i_mmio_cchi.txdat <> memBlock.io.outer_i_mmio_cchi.txdat
-  io.i_mmio_cchi.rxrsp <> memBlock.io.outer_i_mmio_cchi.rxrsp
-  io.i_mmio_cchi.rxdat <> memBlock.io.outer_i_mmio_cchi.rxdat
-  io.i_mmio_cchi.txreq.ready := true.B
-  io.i_mmio_cchi.txdat.ready := true.B
-  io.i_mmio_cchi.rxrsp.valid := false.B
-  io.i_mmio_cchi.rxrsp.bits  := DontCare
-  io.i_mmio_cchi.rxdat.valid := false.B
-  io.i_mmio_cchi.rxdat.bits  := DontCare
+  io.i_mmio_cchi.upREQ <> memBlock.io.outer_i_mmio_cchi.upREQ
+  io.i_mmio_cchi.upDAT <> memBlock.io.outer_i_mmio_cchi.upDAT
+  io.i_mmio_cchi.dnRSP <> memBlock.io.outer_i_mmio_cchi.dnRSP
+  io.i_mmio_cchi.dnDAT <> memBlock.io.outer_i_mmio_cchi.dnDAT
+  io.i_mmio_cchi.upREQ.ready := true.B
+  io.i_mmio_cchi.upDAT.ready := true.B
+  io.i_mmio_cchi.dnRSP.valid := false.B
+  io.i_mmio_cchi.dnRSP.bits  := DontCare
+  io.i_mmio_cchi.dnDAT.valid := false.B
+  io.i_mmio_cchi.dnDAT.bits  := DontCare
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
