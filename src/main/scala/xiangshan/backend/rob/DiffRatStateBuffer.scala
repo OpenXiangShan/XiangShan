@@ -33,8 +33,9 @@ case class DiffRatStateParams()(implicit p: Parameters) {
   require(commitWidth > 0)
 
   val totalEntries: Int = intEntries + fpEntries + vecEntries + vlEntries
-  // Keep the two circular ROB pointer generations distinct in snapshot storage.
-  val storageEntries: Int = robEntries * 2
+  // Keep both pointer generations and both compressed commit boundaries distinct.
+  val slotsPerEntry: Int = 2
+  val storageEntries: Int = robEntries * 2 * slotsPerEntry
   val bankBits: Int = log2Ceil(renameWidth max 2)
   val slotBits: Int = log2Ceil(storageEntries)
 }
@@ -83,7 +84,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
 
   private def slotOf(ptr: RobPtr): UInt = {
     val generationOffset = Mux(ptr.flag, params.robEntries.U(params.slotBits.W), 0.U(params.slotBits.W))
-    (Cat(0.U(1.W), ptr.value) +& generationOffset)(params.slotBits - 1, 0)
+    val entrySlot = Cat(0.U(1.W), ptr.value) +& generationOffset
+    Cat(entrySlot, !ptr.slotIsFormer)(params.slotBits - 1, 0)
   }
 
   val laneRat = Wire(Vec(params.renameWidth + 1, new DiffRatState(params)))
@@ -152,14 +154,20 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   assert(!io.commitRobIdx.valid || !readWriteConflict, "diff RAT state is read and written in the same cycle")
 
   for (commit <- io.commitRobIdxVec) {
-    val commitSlot = slotOf(commit.bits)
+    val commitSlots = Seq(true.B, false.B).map { isFormer =>
+      val ptr = Wire(new RobPtr)
+      ptr := commit.bits
+      ptr.slotIsFormer := isFormer
+      slotOf(ptr)
+    }
     val commitWriteConflict = VecInit.tabulate(params.renameWidth) { lane =>
-      stateWriteValid(lane) && stateWriteSlots(lane) === commitSlot
+      stateWriteValid(lane) && io.snapshotEnds(lane).bits.isSameEntry(commit.bits)
     }.asUInt.orR
     when(commit.valid) {
-      assert(stateSlotValid(commitSlot), "diff RAT commit clears an invalid state")
+      assert(commitSlots.map(stateSlotValid(_)).reduce(_ || _), "diff RAT commit clears an invalid state")
       assert(!commitWriteConflict, "diff RAT state is committed and written in the same cycle")
-      stateSlotValid(commitSlot) := false.B
+      // A former-only retirement also discards the latter snapshot, if present.
+      commitSlots.foreach(slot => stateSlotValid(slot) := false.B)
     }
   }
   for {
@@ -168,8 +176,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   } {
     assert(
       !(io.commitRobIdxVec(older).valid && io.commitRobIdxVec(younger).valid &&
-        io.commitRobIdxVec(older).bits === io.commitRobIdxVec(younger).bits),
-      "two commit lanes clear the same diff RAT slot"
+        io.commitRobIdxVec(older).bits.isSameEntry(io.commitRobIdxVec(younger).bits)),
+      "two commit lanes clear the same diff RAT entry"
     )
   }
 

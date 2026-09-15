@@ -9,6 +9,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
@@ -104,7 +105,6 @@ class DecodeStageImp(
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
         ctrl.ftqPtr           := inMopBits.ftqPtr
         ctrl.ftqOffset        := inMopBits.ftqOffset
-        ctrl.isLastInFtqEntry := inMopBits.isLastInFtqEntry
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
@@ -138,7 +138,6 @@ class DecodeStageImp(
         bits.crossPageIPFFix := mopInfo.crossPageIPFFix
         bits.ftqPtr := mopInfo.ftqPtr
         bits.ftqOffset := mopInfo.ftqOffset
-        bits.isLastInFtqEntry := mopInfo.isLastInFtqEntry
         bits.instr := mopInfo.rawInst
         bits.commitType := uopInfo.commitType
         bits.srcType :=
@@ -160,6 +159,16 @@ class DecodeStageImp(
         bits.blockBackward := uopInfo.blockBack
         bits.flushPipe := uopInfo.flushPipe
         bits.canRobCompress := uopInfo.canRobCompress
+        bits.simple :=
+          bits.canRobCompress &&
+          in.fromCSR.custom.high_density_rob_compression_enable &&
+          !FuType.isLoadStore(bits.fuType) &&
+          !FuType.isBJU(bits.fuType) &&
+          !FuType.isAMO(bits.fuType) &&
+          !FuType.isFence(bits.fuType) &&
+          !FuType.isCsr(bits.fuType) &&
+          !FuType.isVset(bits.fuType) &&
+          !FuType.isVArith(bits.fuType)
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
         bits.src12Rev := uopInfo.src12Rev

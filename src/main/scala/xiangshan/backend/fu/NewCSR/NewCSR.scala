@@ -151,9 +151,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
+        val slotIsFormer = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
+      val diffLatterExceptionCommit = Option.when(env.AlwaysBasicDiff || env.EnableDifftest)(Bool())
     })
 
     val fromVecExcpMod = Input(new Bundle {
@@ -283,6 +285,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldSatpMode  = io.oldSatpMode
   val oldVsatpMode = io.oldVsatpMode
   val oldPrivState = io.oldPrivState
+  val trapIsFormer = io.fromRob.trap.bits.slotIsFormer
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -645,10 +648,12 @@ class NewCSR(implicit val p: Parameters) extends Module
       case m: HasRobCommitBundle =>
         // Todo: move RegNext from ROB to CSR
         m.robCommit.instNum := io.fromRob.commit.instNum
-        m.robCommit.fflags  := RegNextWithEnable(io.fromRob.commit.fflags)
+        for (i <- 0 until 5) {
+          m.robCommit.fflags(i)  := RegNext(io.fromRob.commit.fflags(i), false.B)
+        }
         m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty)
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
-        m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
+        m.robCommit.vxsat   := RegNext(io.fromRob.commit.vxsat, false.B)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
         m.robCommit.vl      := DelayN           (io.fromRob.commit.vl, 2) // not used yet
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
@@ -1614,6 +1619,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
   // Rename
   io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
+  io.toDecode.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
   io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
   io.toDecode.singlestep := io.status.singleStepFlag
 
@@ -1640,16 +1646,27 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    // Delay trap passed to difftest until VecExcpMod is not busy
+    // A latter exception redirects before the surviving former slot retires.
+    // Publish the event at that exact commit boundary, using the same delay
+    // as DiffInstrCommit, so the reference sees former -> exception -> handler.
     val pendingTrap = RegInit(false.B)
+    val needsFormerCommit = RegEnable(!trapIsFormer && !trapIsInterrupt, false.B, hasTrap)
+    val formerCommit = io.fromRob.diffLatterExceptionCommit.get
+    val trapReady = pendingTrap && !io.fromVecExcpMod.busy
+    val trapValid = trapReady && (!needsFormerCommit || formerCommit)
+    // A critical error can prevent further retirement; report it immediately.
+    val criticalTrapValid = trapReady && io.status.criticalErrorState
     when (hasTrap) {
       pendingTrap := true.B
-    }.elsewhen (!io.fromVecExcpMod.busy) {
+    }.elsewhen (trapValid || criticalTrapValid) {
       pendingTrap := false.B
+    }
+    when (formerCommit) {
+      assert(pendingTrap && needsFormerCommit && !io.fromVecExcpMod.busy,
+        "latter ArchEvent must be ready when its former slot commits")
     }
 
     val hartId = io.fromTop.hartId
-    val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val hasNMI = nmi && hasTrap
@@ -1678,6 +1695,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
     diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
+    diffArchEvent.nextSlot := RegEnable(!trapIsFormer, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
     diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && interrupt)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
@@ -1687,7 +1705,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
 
     val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent, delay = 4, dontCare = true)
-    diffCriticalErrorEvent.valid := io.status.criticalErrorState && trapValid
+    diffCriticalErrorEvent.valid := criticalTrapValid
     diffCriticalErrorEvent.coreid := hartId
     diffCriticalErrorEvent.criticalError := io.status.criticalErrorState
 
