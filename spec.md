@@ -486,6 +486,10 @@ move/Store 搬运均由 MainPipe 选 way、处理 victim，并在 moveDone 沿�
 
 PB release 不再与 MainPipe `wb` 在 DCacheWrapper 中仲裁。WBQueue 提供独立的 PB release 输入，并在内部维护两项 non-cut-through pending buffer；PB 只观察该 buffer 的入队 ready，pending 项再由 WBQueue 内部调度器搬入普通 WritebackEntry。pending buffer 中两个物理块地址都参与 `block_conflict` 和 `block_miss_req`，因此同块 MainPipe 写回和 MissQueue miss 会被阻挡；这不会阻挡 MainPipe S0 接收 Probe。PB release 使用 `voluntary=true`，按 B/T 生成 BtoN/TtoN；alwaysReleaseData 时提供完整行和 corrupt，否则干净块不带数据。PB 驱逐至 WBQueue 的数据采集在 PB 内部完成，不占 MainPipe 整行读事务。
 
+WBQueue 的 MainPipe `req.ready` 及其副本由空闲 WritebackEntry、同块冲突和仲裁许可决定，不依赖 `req.valid`。没有 MainPipe 请求时，pending 可以使用分配端口，此时 MainPipe ready 为高也不表示 MainPipe 发生交接。双方均有请求时按寄存优先级轮流分配，每拍至多分配一个 WritebackEntry。
+
+PB 入队 ready 由 pending 的寄存容量和同拍 MainPipe 同块请求保护决定，不依赖 WBQueue 本拍是否出队。pending 原先只有一项时允许同拍出入队，新请求补入腾出的头槽；原先已满时不旁路出队产生的空位，下一拍才允许入队。新入队请求不得在当拍直通 WritebackEntry。
+
 WBQueue 以 `accepted` 脉冲报告请求真正进入 WritebackEntry 的事件，事件携带完整 `WritebackReq`。DCacheWrapper 的 LSU release 通知和 LR/SC reservation 清除使用该事件；PB 进入 pending buffer 的握手不提前触发这些通知。
 
 Release 沿前已授权的 Load 必须保留正确响应/身份；Released 只保证该 Load 的下一拍数据访问，不允许新查询或复用旧槽位。Released 期间的 `s2_use` 不更新已退出 entry，退出统计以 `Released -> Invalid` 为准，不在 `release.fire` 沿提前复用容量。WBQueue 交接后的同地址请求/ProbeAck 排序沿用既有机制，并以实际 ReleaseAck/ProbeAck 交错用例验证。

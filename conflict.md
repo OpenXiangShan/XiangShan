@@ -70,6 +70,8 @@ PB Release 通过 WBQueue 独立入口进入两个 entry 的 registered pending 
 
 同拍 PB Release 入 pending 与 MainPipe 同块 WB 时，WBQueue 只允许一个请求进入 WritebackEntry，输入保护禁止双重交接。pending 头被 active entry 阻塞时，不得垄断无关 MainPipe WB；调度器应在 pending 可发送时提供公平机会。PB entry 在 `pbRelease.fire` 前仍可按协议被 Probe/Store 撤销。
 
+MainPipe 的 ready 和副本使用同一仲裁许可，许可不依赖 MainPipe valid；实际分配由 valid 与许可共同决定。PB 入队保留同块 MainPipe valid 保护，容量判断只读取 pending 寄存状态，不旁路出队信号。pending 非满时允许同拍出入队，头项交给 WritebackEntry 后，新请求留在 pending 中；两个 pending 地址到 active 地址的冲突保护在交接边沿连续。
+
 ## 7. 同拍事件表
 
 | 同拍事件 | 处理结果 | 正确性依据 |

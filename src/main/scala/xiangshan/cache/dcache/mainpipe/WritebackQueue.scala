@@ -339,8 +339,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // --------------------------------------------------------------------------
   // PB pending release buffer
   // --------------------------------------------------------------------------
-  // The buffer is deliberately non-cut-through.  PB sees only this buffer's
-  // capacity and therefore cannot receive WB/MainPipe ready feedback.
+  // 两项寄存队列不直通；入队由寄存容量和同块输入保护决定，
+  // 不旁路本拍出队产生的空位，避免 WB 分配反压组合传回 PB。
   val pendingValid = RegInit(VecInit(Seq.fill(2)(false.B)))
   val pendingBits = Reg(Vec(2, new WritebackReq))
   val pendingHeadValid = pendingValid(0)
@@ -370,28 +370,29 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val pendingHeadConflict = activeBlockConflict(pendingBits(0).addr)
   val pendingPriority = RegInit(false.B)
   val pendingEligible = pendingHeadValid && !pendingHeadConflict
-  val selectPending = pendingEligible && (!io.req.valid || pendingPriority || mainConflict)
-  val selectMain = io.req.valid && !selectPending
-  val selectedValid = selectPending || selectMain
-  val selectedBits = Mux(selectPending, pendingBits(0), io.req.bits)
-  val selectedConflict = Mux(selectPending, pendingHeadConflict, mainConflict)
-  val selectedReady = alloc && !selectedConflict
+  // 许可不依赖 MainPipe valid；无需回写的 miss 也用 wb.ready 完成 S3。
+  val mainGrant = !mainConflict && !(pendingEligible && pendingPriority)
+  io.req.ready := alloc && mainGrant
+  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
+    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && mainGrant
+  }
 
-  io.req.ready := selectedReady && selectMain
-  val pendingDeqFire = selectedReady && selectPending
+  // 无 MainPipe 请求时 pending 可使用空闲端口；有请求时按许可互斥选择。
+  val selectMain = io.req.valid && mainGrant
+  val selectPending = pendingEligible && (!io.req.valid || !mainGrant)
+  val pendingDeqFire = alloc && selectPending
   val pendingEnqFire = io.pbRelease.valid && io.pbRelease.ready
-  // Do not combine enqueue and dequeue in one cycle.  This keeps the FIFO
-  // update explicit and avoids a bypass path from PB to MainPipe.
-  io.pbRelease.ready := pendingTailFree && !pendingDeqFire &&
+  // 同块 MainPipe 请求优先交接；无关请求可以与 PB 入队并行。
+  io.pbRelease.ready := pendingTailFree &&
     !(io.req.valid && io.req.bits.addr === io.pbRelease.bits.addr)
 
   val req = Wire(DecoupledIO(new WritebackReq))
-  req.valid := selectedValid
-  req.bits := selectedBits
-  req.ready := selectedReady
+  req.valid := selectMain || selectPending
+  req.bits := Mux(selectPending, pendingBits(0), io.req.bits)
+  req.ready := alloc
 
   // delay data write in WritebackEntry for 1 cycle
-  val req_data = RegEnable(req.bits.toWritebackReqData(), req.valid)
+  val req_data = RegEnable(req.bits.toWritebackReqData(), req.fire)
 
   entries.zipWithIndex.foreach {
     case (entry, i) =>
@@ -403,7 +404,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
       entry.io.id := entry_id
 
-      entry.io.req.valid := req.valid && !selectedConflict
+      entry.io.req.valid := req.valid
       primary_ready_vec(i) := entry.io.primary_ready
       entry.io.req.bits := req.bits
       entry.io.req_data := req_data
@@ -428,7 +429,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     }
   }
   when (pendingEnqFire) {
-    when (!pendingValid(0)) {
+    // 同拍出入队时沿前只有头项有效，新请求补入腾出的头槽。
+    when (!pendingHeadValid || pendingDeqFire) {
       pendingBits(0) := io.pbRelease.bits
       pendingValid(0) := true.B
     }.otherwise {
@@ -440,13 +442,12 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // Alternate between an eligible pending release and MainPipe traffic when
   // both are continuously valid.  A blocked pending head never monopolizes
   // the WB entry needed by unrelated MainPipe requests.
-  when (pendingEligible && selectedReady) {
+  when (pendingEligible && req.fire) {
     pendingPriority := !selectPending
   }
 
-  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
-    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !mainConflict && selectMain
-  }
+  assert(!pendingValid(1) || pendingValid(0))
+  assert(!(io.req.fire && pendingDeqFire))
 
   val miss_req_conflict = io.miss_req_conflict_check.map{ r =>
     activeBlockConflict(r.bits) || pendingBlockConflict(r.bits)
