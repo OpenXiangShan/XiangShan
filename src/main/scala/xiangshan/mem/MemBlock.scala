@@ -383,7 +383,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val mem_to_ooo = new mem_to_ooo
     val fetch_to_mem = new fetch_to_mem
 
-    val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
+    val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIPrefetchBundle))
 
     // misc
     val dcacheError = Output(new L1BusErrorUnitInfo())

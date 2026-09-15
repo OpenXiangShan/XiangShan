@@ -51,7 +51,7 @@ import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
 import xiangshan.L1BusErrorUnitInfo
 import xiangshan.SfenceBundle
-import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.SoftIPrefetchBundle
 import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
@@ -76,8 +76,8 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val fencei:       Bool             = Input(Bool())
   val ptw:          TlbPtwIO         = new TlbPtwIO
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
-  val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
-    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
+  val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
+    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
   val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
 
   // ctrl
@@ -211,8 +211,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  // ICache-Memblock
-  icache.io.softPrefetchReq <> io.softPrefetch
+  // Ftq-Memblock
+  ftq.io.softPrefetch <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
   private val wfiReq = DelayN(io.backend.wfi.wfiReq, WfiReqPortDelay)

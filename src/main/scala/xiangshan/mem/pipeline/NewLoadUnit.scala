@@ -542,7 +542,7 @@ class LoadUnitS1(param: ExeUnitParams)(
     val prefetchTrainHint = Output(Bool())
 
     // Software instruction prefetch
-    val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
+    val swInstrPrefetch = ValidIO(new SoftIPrefetchBundle)
 
     // Load trigger
     val csrTrigger = Input(new CsrTriggerBundle)
@@ -2026,7 +2026,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle)
   // Software instruction prefetch
-  val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
+  val swInstrPrefetch = ValidIO(new SoftIPrefetchBundle)
   // CSR control signals and load trigger
   val csrCtrl = Flipped(new CustomCSRCtrlIO)
   val csrTrigger = Input(new CsrTriggerBundle)

@@ -309,7 +309,7 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   // val levelTlbHit = UInt(2.W)
 }
 
-class SoftIfetchPrefetchBundle(implicit p: Parameters) extends XSBundle {
+class SoftIPrefetchBundle(implicit p: Parameters) extends XSBundle {
   val vaddr = UInt(VAddrBits.W)
 }
 
