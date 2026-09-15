@@ -155,6 +155,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
+      val diffLatterExceptionCommit = Option.when(env.AlwaysBasicDiff || env.EnableDifftest)(Bool())
     })
 
     val fromVecExcpMod = Input(new Bundle {
@@ -1645,16 +1646,27 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    // Delay trap passed to difftest until VecExcpMod is not busy
+    // A latter exception redirects before the surviving former slot retires.
+    // Publish the event at that exact commit boundary, using the same delay
+    // as DiffInstrCommit, so the reference sees former -> exception -> handler.
     val pendingTrap = RegInit(false.B)
+    val needsFormerCommit = RegEnable(!trapIsFormer && !trapIsInterrupt, false.B, hasTrap)
+    val formerCommit = io.fromRob.diffLatterExceptionCommit.get
+    val trapReady = pendingTrap && !io.fromVecExcpMod.busy
+    val trapValid = trapReady && (!needsFormerCommit || formerCommit)
+    // A critical error can prevent further retirement; report it immediately.
+    val criticalTrapValid = trapReady && io.status.criticalErrorState
     when (hasTrap) {
       pendingTrap := true.B
-    }.elsewhen (!io.fromVecExcpMod.busy) {
+    }.elsewhen (trapValid || criticalTrapValid) {
       pendingTrap := false.B
+    }
+    when (formerCommit) {
+      assert(pendingTrap && needsFormerCommit && !io.fromVecExcpMod.busy,
+        "latter ArchEvent must be ready when its former slot commits")
     }
 
     val hartId = io.fromTop.hartId
-    val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val hasNMI = nmi && hasTrap
@@ -1693,7 +1705,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
 
     val diffCriticalErrorEvent = DifftestModule(new DiffCriticalErrorEvent, delay = 4, dontCare = true)
-    diffCriticalErrorEvent.valid := io.status.criticalErrorState && trapValid
+    diffCriticalErrorEvent.valid := criticalTrapValid
     diffCriticalErrorEvent.coreid := hartId
     diffCriticalErrorEvent.criticalError := io.status.criticalErrorState
 

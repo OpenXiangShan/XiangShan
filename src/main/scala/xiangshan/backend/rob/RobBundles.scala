@@ -389,6 +389,7 @@ class RobCSRIO(implicit p: Parameters) extends XSBundle {
   val trapTarget = Input(new TargetPCBundle)
   val wfiEvent   = Input(Bool())
   val criticalErrorState = Input(Bool())
+  val diffLatterExceptionCommit = Option.when(env.AlwaysBasicDiff || env.EnableDifftest)(Output(Bool()))
 
   val fflags     = Output(Vec(5, Bool()))
   val vxsat      = Output(Bool())

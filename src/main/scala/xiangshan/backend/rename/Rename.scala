@@ -348,14 +348,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val uops = Wire(Vec(RenameWidth, new RenameOutUop))
 
   rat.io.snapshotEnds.foreach { snapshotEnds =>
+    val accepted = io.out.map(out => out.fire && !io.redirect.valid)
     snapshotEnds.zipWithIndex.foreach { case (snapshotEnd, i) =>
-      snapshotEnd.valid := canOut && io.validVec(i) && io.in(i).bits.lastUop &&
-        isEntryTailLane(i) && !io.redirect.valid
+      // Retain the last accepted prefix of each member, including branches with no destination.
+      val overwritten = (i + 1 until RenameWidth).map { younger =>
+        accepted(younger) && uops(younger).robIdx.isSameSlot(uops(i).robIdx)
+      }.foldLeft(false.B)(_ || _)
+      snapshotEnd.valid := accepted(i) && !overwritten
       snapshotEnd.bits := uops(i).robIdx
     }
-    when(canOut && !io.redirect.valid) {
-      assert(PopCount(snapshotEnds.map(_.valid)) === validCount,
-        "diff RAT snapshots do not match allocated ROB entries")
+    for (i <- 0 until RenameWidth) {
+      when(accepted(i)) {
+        assert(PopCount(snapshotEnds.map(end => end.valid && end.bits.isSameSlot(uops(i).robIdx))) === 1.U,
+          "diff RAT snapshots do not cover an accepted ROB member")
+      }
     }
   }
 

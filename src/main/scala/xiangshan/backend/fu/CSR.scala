@@ -91,6 +91,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   val robDeqPtr = Input(new RobPtr)
+  val diffLatterExceptionCommit = Option.when(env.AlwaysBasicDiff || env.EnableDifftest)(Input(Bool()))
   // to ROB
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())

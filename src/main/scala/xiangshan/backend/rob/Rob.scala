@@ -805,13 +805,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   val hasCommit = io.commits.isCommit && io.commits.commitValid.asUInt.orR
+  // Match the last valid difftest member: NORMAL commits only former, pairs also commit latter.
+  val diffRatCommitPtrs = io.commits.robIdx.zip(io.commits.info).map { case (entryPtr, info) =>
+    val ptr = Wire(new RobPtr)
+    ptr := entryPtr
+    ptr.slotIsFormer := CompressType.isNORMAL(info.entryPairType)
+    ptr
+  }
   val newestCommit = PriorityMuxDefault(
-    io.commits.commitValid.zip(io.commits.robIdx).reverse,
+    io.commits.commitValid.zip(diffRatCommitPtrs).reverse,
     deqPtr
   )
+  // The VLS commit pulse is delayed from handleVlsExcp; retain its exact exception member too.
+  val diffRatVlsExceptionPtr = RegEnable(deqExceptionRobIdx, handleVlsExcp)
   io.diffRatCommitRobIdx.foreach { commitRobIdx =>
     commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
-    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr, newestCommit)
+    commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, diffRatVlsExceptionPtr, newestCommit)
   }
   io.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
     assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
@@ -822,7 +831,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     when(deqVlsExceptionNeedCommit) {
       commitRobIdxVec.head.valid := true.B
-      commitRobIdxVec.head.bits := deqPtr
+      commitRobIdxVec.head.bits := diffRatVlsExceptionPtr
     }
   }
 
@@ -907,6 +916,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)
   io.exception.bits.commitType := RegEnable(exceptionUop.commitType, exceptionHappen)
   io.exception.bits.slotIsFormer := RegEnable(exceptionIsFormer, exceptionHappen)
+  io.csr.diffLatterExceptionCommit.foreach { commit =>
+    val pending = RegInit(false.B)
+    val exceptionPtr = RegEnable(deqPtr, exceptionHappen && !exceptionIsFormer)
+    val matchingCommit = VecInit(io.commits.robIdx.zip(io.commits.commitValid).map {
+      case (ptr, valid) => valid && ptr.isSameEntry(exceptionPtr)
+    })
+    commit := pending && io.commits.isCommit && matchingCommit.asUInt.orR
+    when (exceptionHappen && !exceptionIsFormer) {
+      assert(!pending, "a latter exception is still waiting for its former commit")
+      pending := true.B
+    }.elsewhen (commit) {
+      pending := false.B
+    }
+    when (commit) {
+      assert(matchingCommit(0), "the former of a pending exception must be the first commit")
+      assert(CompressType.isNORMAL(io.commits.info(0).entryPairType),
+        "a latter exception must leave only its former slot to commit")
+    }
+  }
   io.exception.bits.isStore := RegEnable(FuType.isStore(exceptionUop.fuType), exceptionHappen)
   io.exception.bits.exceptionVec extendFrom RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   io.exception.bits.satpFlushFirstFetchFault := RegEnable(exceptionDataRead.bits.satpFlushFirstFetchFault && deqHasException, exceptionHappen)
