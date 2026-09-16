@@ -504,7 +504,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasDTSImp[XSNoCTop]
     with HasTraceIOImp[XSNoCTop]
   {
-    // Driven by the generated simulation wrapper at each 20M-instruction boundary.
+    // Driven by the auto controller inserted into the generated design top.
     val difftest_perfCtrl_clean = IO(Input(Bool()))
     val difftest_perfCtrl_dump = IO(Input(Bool()))
 
