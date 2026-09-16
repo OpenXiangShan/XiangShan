@@ -367,8 +367,14 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       curPtr := 0.U
       lowAddrStore.uop := req.uop
       lowAddrStore.uop.exceptionVec(storeAddrMisaligned) := false.B
+      lowAddrStore.fullva := req.fullva
       highAddrStore.uop := req.uop
       highAddrStore.uop.exceptionVec(storeAddrMisaligned) := false.B
+      highAddrStore.fullva := (if (VAddrBits > 48) {
+        Cat(req.fullva(XLEN - 1, VAddrBits), highAddrStore.vaddr)
+      } else {
+        req.fullva
+      })
 
       switch (alignedType(1, 0)) {
         is (SB) {
