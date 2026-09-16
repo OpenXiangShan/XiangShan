@@ -232,7 +232,8 @@ object AXI4WriteOnlyZeroReadAdapter {
       downstream: AXI4Bundle,
       clock: Clock,
       reset: Reset,
-      readLegalAddrMap: Seq[AddressSet] = Nil
+      readLegalAddrMap: Seq[AddressSet] = Nil,
+      readDecodeAddr: Option[UInt] = None
   ): Unit = {
     downstream.aw <> upstream.aw
     downstream.w <> upstream.w
@@ -249,7 +250,8 @@ object AXI4WriteOnlyZeroReadAdapter {
       RegInit(false.B)
     }
     val readAddrIsLegal = if (readLegalAddrMap.nonEmpty) {
-      AddressSet.unify(readLegalAddrMap).map(_.contains(upstream.ar.bits.addr)).reduce(_ || _)
+      val addr = readDecodeAddr.getOrElse(upstream.ar.bits.addr)
+      AddressSet.unify(readLegalAddrMap).map(_.contains(addr)).reduce(_ || _)
     } else {
       true.B
     }
@@ -1547,8 +1549,14 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     }
     val noc2msiAwIsLocal = noc2msi.aw.bits.addr(47, 44) === noc2msiSelfId
     val noc2msiAwAddr = routeNoc2msiAddr(noc2msi.aw.bits.addr, noc2msiAwIsLocal)
+    val noc2msiArIsLocal = noc2msi.ar.bits.addr(47, 44) === noc2msiSelfId
+    val noc2msiArAddr = routeNoc2msiAddr(noc2msi.ar.bits.addr, noc2msiArIsLocal)
 
-    AXI4WriteOnlyZeroReadAdapter.connect(noc2msi, hni_mNode.out.head._1, clock, reset)
+    // Reads terminate here, before the downstream error slave. Decode the routed
+    // AR address here as well so unmapped reads return SLVERR instead of OKAY.
+    AXI4WriteOnlyZeroReadAdapter.connect(noc2msi, hni_mNode.out.head._1, clock, reset,
+      readLegalAddrMap = params.localImsicAddrMap ++ params.crsimsicAddrMap,
+      readDecodeAddr = Some(noc2msiArAddr))
     hni_mNode.out.head._1.aw.bits.addr := noc2msiAwAddr
     peri_mNode.out.head._1 <> s_noc2cfg.viewAs[AXI4Bundle] // uncore peri cfg slave io
     cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) =>
