@@ -222,7 +222,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
-    s3PerfQueue(s3BpuPtr).mispredict := false.B
+    s3PerfQueue(s3BpuPtr).mispredict             := false.B
+    s3PerfQueue(s3BpuPtr).nonCfiInfo.hasRedirect := false.B
+    s3PerfQueue(s3BpuPtr).nonCfiInfo.cfiPosition := 0.U
   }
 
   // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
@@ -487,6 +489,18 @@ class Ftq(implicit p: Parameters) extends FtqModule
     lastPerfMetas(i) := curPerfMeta
   }
 
+  when(backendRedirect.valid && backendRedirect.bits.attribute.isNone) {
+    val redirectFtqIdx = backendRedirect.bits.ftqIdx.value
+    val newNonCfiInfo  = Wire(new NonCfiInfo)
+    newNonCfiInfo.fromRedirect(backendRedirect.bits)
+    when(
+      !s3PerfQueue(redirectFtqIdx).nonCfiInfo.hasRedirect ||
+        newNonCfiInfo.cfiPosition < s3PerfQueue(redirectFtqIdx).nonCfiInfo.cfiPosition
+    ) {
+      perfQueue(redirectFtqIdx).nonCfiInfo := newNonCfiInfo
+    }
+  }
+
   // --------------------------------------------------------------------------------
   // Commit and train BPU
   // --------------------------------------------------------------------------------
@@ -633,7 +647,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val perf_commitHasMispredict = commit && commitPerfMeta.mispredict
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
-
+  private val perf_commitHasEarlierNonCfiRedirect =
+    perf_commitHasMispredict &&
+      commitPerfMeta.nonCfiInfo.hasRedirect &&
+      commitPerfMeta.nonCfiInfo.cfiPosition < commitPerfMeta.mispredictBranchInfo.cfiPosition
+  private val perf_commitHasBpuMispredict =
+    perf_commitHasMispredict && !perf_commitHasEarlierNonCfiRedirect
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
     perf_commitHasMispredict &&
@@ -652,12 +671,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_reason",
-    perf_commitHasMispredict,
+    perf_commitHasBpuMispredict,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
       perf_commitHasMispredict,
       commitPerfMeta.bpuPerf,
       commitPerfMeta.mispredictBranchInfo
     ))
+  )
+  XSPerfAccumulate(
+    "commit_branch_mispredicts_reason_non_cfi_redirect",
+    perf_commitHasEarlierNonCfiRedirect
   )
   XSPerfSeqAccumulate(
     "commit_conditional_branch_mispredicts_reason",
