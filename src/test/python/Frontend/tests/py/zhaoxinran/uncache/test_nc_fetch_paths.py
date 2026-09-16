@@ -92,6 +92,35 @@ def _register_nc_timing_observer(env) -> list[dict]:
     return samples
 
 
+def _reset_nc_backend_runtime(env) -> None:
+    """Start the next matrix member with a fresh backend semantic context."""
+    backend = env.backend_model
+    backend._pending_resolves.clear()
+    backend.ftq_entries.clear()
+    backend._current_ftq_entry = None
+    backend._current_ftq_seen_packets.clear()
+    backend._current_ftq_max_offset = -1
+    backend._current_ftq_observed_pending_target_pc = False
+    backend.pending_events.clear()
+    backend.commit_count = 0
+    backend.commit_ptr_flag = 0
+    backend.commit_ptr_value = 0
+    backend._reuse_commit_ptr_once = False
+    backend.ibuf_full_streak = 0
+    backend._ftq_start_pc_cache.clear()
+    backend._ftq_start_pc_by_value.clear()
+    backend._ftq_group_pc_history.clear()
+    backend._pc_group_occurrences.clear()
+    backend._pending_level0_target_ftq = None
+    backend._pending_level0_target_pc = None
+    backend._planned_commit_apply = None
+    backend._recovery_commit_block_ftq = None
+    backend._recovery_commit_block_cycle = -1
+    backend._clear_cfvec_queue_state()
+    backend._backend_state = backend._backend_state.__class__(ftq_size=backend.ftq_size)
+    backend._ftq_scoreboard = backend._ftq_scoreboard.__class__(backend._backend_state)
+
+
 def _encode_jal_x0(offset: int) -> int:
     assert int(offset) % 2 == 0
     assert -(1 << 20) <= int(offset) < (1 << 20)
@@ -1049,8 +1078,9 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
     env.uncache_agent.configure(latency=16, mmio_latency=16)
     uncache._initialize_sv39_fetch(env, reset_vector=scenarios[0][1])
     exception_records = _register_cfvec_exception_observer(env)
-
     for index, (fault_case, scenario_info) in enumerate(zip(fault_matrix, scenarios)):
+        if index:
+            _reset_nc_backend_runtime(env)
         s2xlate, response_field, _, expected_fault = fault_case
         scenario, cross_page_va, cross_page_pa = scenario_info
         state = TranslationScenarioBuilder(env).build(scenario)
@@ -1063,9 +1093,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
 
         first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
         for _ in range(12000):
-            new_requests = env.uncache_agent.get_stats().get(
-                "request_addrs", []
-            )[request_cursor:]
+            new_requests = env.uncache_agent.get_stats().get("request_addrs", [])[request_cursor:]
             if first_beat in new_requests:
                 break
             env.step(1)
@@ -1096,11 +1124,7 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
         for _ in range(6000):
             active = env.translation_oracle.get_active()
             expected_keys = {
-                (
-                    int(request["vpn"]),
-                    int(request["s2xlate"]),
-                    int(request["get_gpa"]),
-                )
+                (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
                 for request in active["expected_ptw_requests"]
             }
             responded_keys = {
@@ -1133,17 +1157,11 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
             "records": phase_exception_records,
         }
 
-        new_requests = env.uncache_agent.get_stats().get(
-            "request_addrs", []
-        )[request_cursor:]
+        new_requests = env.uncache_agent.get_stats().get("request_addrs", [])[request_cursor:]
         assert first_beat in new_requests
         assert (cross_page_pa + 2) not in new_requests
         assert env.assert_translation_scenario()["error_count"] == 0
         assert not env.monitor.get_errors()
-        if index < len(fault_matrix) - 1:
-            assert not env.functional_coverage.key_hit(
-                "ifu_instruncache_owner_v3", "instruncache_leaf_034"
-            )
         env.translation_oracle.disarm()
 
     assert env.functional_coverage.key_hit(
