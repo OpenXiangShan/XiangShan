@@ -130,6 +130,7 @@ class MainBtbInternalBank(
     new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
     numPorts = NumWay,
+    hasReadBypass = true,
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
 
@@ -216,8 +217,14 @@ class MainBtbInternalBank(
     }
   }
 
+  entryWriteBuffer.io.readBypass.get.req.valid := read.req.valid
+  entryWriteBuffer.io.readBypass.get.req.bits  := read.req.bits.setIdx
+  private val entryWriteBufferResp = entryWriteBuffer.io.readBypass.get.resp
+
   // each entry sram template has 1 way, so here we only read data.head
-  read.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
+  read.resp.entries := VecInit(entrySrams.zip(entryWriteBufferResp).map { case (sram, bufferResp) =>
+    Mux(bufferResp.valid, bufferResp.bits.entry, sram.io.r.resp.data.head)
+  })
   read.resp.counters := counterSram.io.r.resp.data
 
   /* *** counter writeBuffer -> sram *** */
