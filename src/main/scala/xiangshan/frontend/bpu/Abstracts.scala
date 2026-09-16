@@ -35,6 +35,11 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   val enable: Bool = Input(Bool())
   // predict stage control
   val stageCtrl: StageCtrl = Input(new StageCtrl)
+  // Hold the predict stage for one cycle, so that the same startPc (and the same folded history) is
+  // issued again next cycle.  A predictor raises it when it cannot serve the prediction this cycle,
+  // e.g. TAGE needs to read a bank that a training read took, and the BPU then re-issues the very
+  // same block instead of losing its prediction.  Predictors that never hold leave it None.
+  val holdPredict: Option[Bool] = None
   // predict request
   val startPc: GuardedPc = Input(GuardedPc())
   // resolve train

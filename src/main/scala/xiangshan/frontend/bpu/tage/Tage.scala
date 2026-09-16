@@ -25,6 +25,7 @@ import utility.ParallelORR
 import utility.ParallelPriorityMux
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
@@ -35,12 +36,17 @@ import xiangshan.frontend.bpu.TageTableInfo
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
+    // control
+    override val holdPredict: Option[Bool] = Option(Output(Bool()))
+
     val fromPhr:     PhrToTageIO     = new PhrToTageIO
     val fromMainBtb: MainBtbToTageIO = new MainBtbToTageIO
     val toSc:        TageToScIO      = new TageToScIO
     val prediction:  TagePrediction  = Output(new TagePrediction)
     val meta:        TageMeta        = Output(new TageMeta)
 
+    // train.valid; used for perf counters and to qualify the holdPredict request (it must stay
+    // independent of train.ready, see the holdPredict comment)
     val debug_trainValid: Bool = Input(Bool())
   }
   val io: TageIO = IO(new TageIO)
@@ -90,8 +96,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s1_fire       = io.stageCtrl.s1_fire
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
-
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_readResp   = tables.map(table => DataHoldBypass(table.io.readResp(0), RegNext(s0_fire)))
 
   private val s1_tags = VecInit(io.fromMainBtb.s1_positions.map { position =>
     VecInit(tables.zip(s1_foldedHist).map { case (table, hist) =>
@@ -101,7 +106,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val s1_hits = VecInit(s1_tags.map { branchTags =>
     VecInit(s1_readResp.zip(branchTags).map { case (tableReadResp, tag) =>
-      tableReadResp.entries.map(entry => entry.valid && entry.tag === tag).asUInt
+      tableReadResp.entries.zip(tableReadResp.entryValid).map {
+        case (entry, valid) => valid && entry.valid && entry.tag === tag
+      }.asUInt
     })
   })
 
@@ -114,8 +121,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s2_fire     = io.stageCtrl.s2_fire
-  private val s2_readResp = RegEnable(s1_readResp, s1_fire)
   private val s2_hits     = RegEnable(s1_hits, s1_fire)
+  private val s2_readResp = s1_readResp.map(resp => RegEnable(resp, s1_fire))
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.indices.foreach { branchIdx =>
@@ -159,6 +166,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // find the alt, the table with the second longest history among the hit tables
     val hitTableMaskNoProvider = hitTableMask & (~providerTableOH)
     val hasAlt                 = hasProvider && ParallelORR(hitTableMaskNoProvider)
+    val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider.asBools)
     val alt = ParallelPriorityMux(
       hitTableMaskNoProvider.asBools.zip(allTableTagMatchResults).reverse
     )
@@ -178,15 +186,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
-    io.meta.entries(i).useProvider       := useProvider
-    io.meta.entries(i).hasProvider       := hasProvider
-    io.meta.entries(i).hasAlt            := hasAlt
-    io.meta.entries(i).providerTableIdx  := providerTableIdx
-    io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
+    io.meta.entries(i).useAltOnNa := useAltOnNa
+    io.meta.entries(i).providerLocation := encodeProviderLocation(
+      hasProvider,
+      providerTableOH.asBools,
+      provider.hitWayMaskOH
+    )
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
-    io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
-    io.meta.entries(i).altConf           := altConf
+    io.meta.entries(i).altLocation       := encodeAltLocation(hasAlt, altTableOH, alt.hitWayMaskOH)
+    io.meta.entries(i).altTakenCtr       := alt.takenCtr
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -223,20 +232,50 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
-  // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
-  // table entry is needed, or when the prediction was wrong and allocation state is needed.
+  // Re-read SRAM when has mispredict
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
     val mbtbHit      = t0_mbtbHitMask(i)
     val isCond       = t0_condMask(i)
-    val useProvider  = t0_meta(i).useProvider
-    val hasAlt       = t0_meta(i).hasAlt
     val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    mbtbHit && isCond && mispredicted
   }.reduce(_ || _)
-  private val t0_useMeta = !t0_needRead
 
-  private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
-  io.trainReady := !t0_readBankConflict
+  private val t0_needReadMispredict = t0_needRead
+  private val t0_needReadAlt        = false.B
+  private val t0_useMeta            = !t0_needRead
+
+  // The training read (readReq(1)) and the prediction read (readReq(0)) want the same bank this
+  // cycle, and the single-ported SRAM can only serve one of them.
+  //
+  // The training read keeps the bank (see io.trainReady below), but instead of dropping the
+  // prediction read of that bank - which loses the TAGE lookup of the whole fetch block - the BPU
+  // predict stage is held for one cycle: the same startPc is read again next cycle, when the
+  // training read is done and the bank is free.  The whole block is re-issued, so the set index,
+  // the tags and the folded history all stay consistent (`pc` does not change while the predict
+  // stage is held, and the bank index depends only on pc).
+  //
+  // The request is qualified with `io.debug_trainValid` (= `train.valid`) and deliberately not
+  // with `io.stageCtrl.t0_fire` (= `train.fire` = `train.valid && train.ready`): `train.ready` is
+  // the AND of every predictor's trainReady and Sc derives its own from `s0_fire`, so using the
+  // fire here would close a combinational cycle
+  //   s0_fire -> Sc.trainReady -> train.ready -> train.fire -> holdPredict -> s0_fire.
+  // `train.valid` comes straight out of an FTQ register.  Raising the hold cannot leave the
+  // training stream waiting for nothing: the only predictor that ever holds it back is Sc, and
+  // Sc's conflict condition also requires `s0_fire`, so the hold itself clears it and the training
+  // read is issued in this very cycle, with the prediction read suppressed.
+  private val t0_samePredictionBank = t0_bankIdx === s0_bankIdx
+  private val t0_readBankConflict   = t0_hasCond && t0_needRead && t0_samePredictionBank
+  io.holdPredict.get := io.enable && io.debug_trainValid && t0_needRead && t0_samePredictionBank
+  // The BPU must honour the hold, otherwise this cycle would issue a prediction read that the
+  // training read takes the bank from (and the TAGE lookup of the block would be lost).  The same
+  // property is asserted again at the SRAM level, one assert per bank, in TageTable.
+  assert(
+    !(s0_fire && io.holdPredict.get),
+    "prediction read and training read want the same bank: the predict stage must be held"
+  )
+  // Training reads arbitrate ahead of prediction reads; do not hold the training stream behind a
+  // same-bank prediction request (the predict side is held instead, see above).
+  io.trainReady := true.B
 
   // t0_readBankConflict can be high even there's no train.valid, causing perf counters to be inaccurate
   // so we use a debug_ signal for perf counters
@@ -261,7 +300,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val debug_readBankConflictDistCnt = RegInit(0.U(4.W))
   private val debug_s0AlignedPc             = getAlignedPc(s0_startPc)
   private val debug_s1AlignedPc             = getAlignedPc(s1_startPc)
+  private val debug_t0AlignedPc             = getAlignedPc(t0_startPc)
   private val debug_s1BankIdx               = RegEnable(s0_bankIdx, s0_fire)
+  private val debug_sameFetchBlock          = debug_s0AlignedPc === debug_t0AlignedPc
+  private val debug_nearbyFetchBlock = !debug_sameFetchBlock &&
+    ((debug_s0AlignedPc.toUInt > debug_t0AlignedPc.toUInt &&
+      debug_s0AlignedPc.toUInt - debug_t0AlignedPc.toUInt <= FetchBlockSize.U) ||
+      (debug_t0AlignedPc.toUInt > debug_s0AlignedPc.toUInt &&
+        debug_t0AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U))
+  private val debug_sameBankPredictionStream = s1_fire && debug_s1BankIdx === s0_bankIdx
+  private val debug_sameBankPredictionLoop = debug_sameBankPredictionStream &&
+    ((debug_s0AlignedPc.toUInt > debug_s1AlignedPc.toUInt &&
+      debug_s0AlignedPc.toUInt - debug_s1AlignedPc.toUInt <= FetchBlockSize.U) ||
+      (debug_s1AlignedPc.toUInt > debug_s0AlignedPc.toUInt &&
+        debug_s1AlignedPc.toUInt - debug_s0AlignedPc.toUInt <= FetchBlockSize.U))
   // pred target within align 64B,and not blocked by s2
   private val debug_readBankConflictShortLoop = debug_readBankConflictReg && s1_fire &&
     (debug_s1BankIdx === s0_bankIdx) &&
@@ -270,6 +322,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val debug_readBankConflictShortLoopReg = RegNext(debug_readBankConflictShortLoop)
   private val debug_readBankConflictShortLoopNeg = !debug_readBankConflictShortLoop & debug_readBankConflictShortLoopReg
   private val debug_readBankConflictShortLoopDistCnt = RegInit(0.U(4.W))
+  // only for perf: how many cycles in a row the predict stage is held for a bank conflict
+  private val debug_holdPredictReg     = RegNext(io.holdPredict.get, init = false.B)
+  private val debug_holdPredictNeg     = !io.holdPredict.get && debug_holdPredictReg
+  private val debug_holdPredictDistCnt = RegInit(0.U(4.W))
+  debug_holdPredictDistCnt := Mux(
+    debug_holdPredictNeg,
+    0.U,
+    Mux(io.holdPredict.get, debug_holdPredictDistCnt + 1.U, debug_holdPredictDistCnt)
+  )
   // dist cnt
   debug_readBankConflictShortLoopDistCnt := Mux(
     debug_readBankConflictShortLoopNeg,
@@ -310,7 +371,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
+  private val t1_readResp = tables.map(_.io.readResp(1))
 
   /* --------------------------------------------------------------------------------------------------------------
     train pipeline stage 2
@@ -325,7 +386,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_setIdx   = RegEnable(t1_setIdx, t1_fire)
   private val t2_bankMask = RegEnable(t1_bankMask, t1_fire)
   private val t2_rawTag   = RegEnable(t1_rawTag, t1_fire)
-  private val t2_readResp = RegEnable(t1_readResp, t1_fire)
+  private val t2_readResp = t1_readResp.map(resp => RegEnable(resp, t1_fire))
 
   private val t2_useMeta     = RegEnable(t1_useMeta, t1_fire)
   private val t2_meta        = RegEnable(t1_meta, t1_fire)
@@ -340,8 +401,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val actualTaken = branch.bits.taken
 
     val allTableTagMatchResults = t2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val tag          = t2_rawTag(tableIdx) ^ position
-      val hitWayMask   = tableReadResp.entries.map(entry => entry.valid && entry.tag === tag)
+      val tag = t2_rawTag(tableIdx) ^ position
+      val hitWayMask = tableReadResp.entries.zip(tableReadResp.entryValid).map {
+        case (entry, valid) => valid && entry.valid && entry.tag === tag
+      }
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
       dontTouch(tag.suggestName(s"t2_branch_${i}_table_${tableIdx}_tag"))
 
@@ -364,25 +427,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altTableOH = Wire(UInt(NumTables.W))
     val alt        = Wire(new TrainTagMatchResult)
 
-    val useProvider   = Wire(Bool())
-    val useAlt        = Wire(Bool())
-    val altOrBasePred = Wire(Bool())
+    val (metaHasProvider, metaProviderTableOH, metaProviderWayOH) = decodeProviderLocation(meta.providerLocation)
+    val (metaHasAlt, metaAltTableOH, metaAltWayOH)                = decodeAltLocation(meta.altLocation)
 
     when(t2_useMeta) {
-      hasProvider     := meta.hasProvider
-      providerTableOH := Mux(meta.hasProvider, UIntToOH(meta.providerTableIdx, NumTables), 0.U)
+      hasProvider     := metaHasProvider
+      providerTableOH := metaProviderTableOH
 
-      provider.hit          := meta.hasProvider
-      provider.hitWayMaskOH := Mux(meta.hasProvider, UIntToOH(meta.providerWayIdx, MaxNumWays), 0.U)
-      provider.tag          := t2_rawTag(meta.providerTableIdx) ^ position
+      provider.hit          := metaHasProvider
+      provider.hitWayMaskOH := metaProviderWayOH
+      provider.tag          := t2_rawTag(OHToUInt(metaProviderTableOH)) ^ position
       provider.takenCtr     := meta.providerTakenCtr
       provider.usefulCtr    := meta.providerUsefulCtr
 
-      hasAlt     := false.B
-      altTableOH := 0.U
-      alt        := 0.U.asTypeOf(new TrainTagMatchResult)
+      hasAlt     := metaHasAlt
+      altTableOH := metaAltTableOH
 
-      altOrBasePred := meta.altOrBasePred
+      alt.hit          := metaHasAlt
+      alt.hitWayMaskOH := metaAltWayOH
+      alt.tag          := t2_rawTag(OHToUInt(metaAltTableOH)) ^ position
+      alt.takenCtr     := meta.altTakenCtr
+      alt.usefulCtr    := UsefulCounter.Zero
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
@@ -392,15 +457,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       hasAlt     := hasProvider && hitTableMaskNoProvider.reduce(_ || _)
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
-
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
     }
 
-    val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
-    val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
-    useProvider := Mux(t2_useMeta, meta.useProvider, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
-    useAlt      := !t2_useMeta && !useProvider && hasAlt
+    val altOrBasePred     = Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
+    val altConf           = Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate)
+    val useAltOnNaIdx     = Cat(OHToUInt(providerTableOH), altConf)
+    val currentUseAltOnNa = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val useAltOnNa        = Mux(t2_useMeta, meta.useAltOnNa, currentUseAltOnNa)
+    val useProvider       = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
+    val useAlt            = !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
     val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
@@ -481,7 +546,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t3_setIdx       = RegEnable(t2_setIdx, t2_fire)
   private val t3_bankMask     = RegEnable(t2_bankMask, t2_fire)
   private val t3_rawTag       = RegEnable(t2_rawTag, t2_fire)
-  private val t3_readResp     = RegEnable(t2_readResp, t2_fire)
+  private val t3_readResp     = t2_readResp.map(resp => RegEnable(resp, t2_fire))
   private val t3_useMeta      = RegEnable(t2_useMeta, t2_fire)
   private val t3_mbtbHitMask  = RegEnable(t2_mbtbHitMask, t2_fire)
   private val t3_trainInfoVec = RegEnable(t2_trainInfoVec, t2_fire)
@@ -538,7 +603,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     t3_canAllocateTableMask
   )
   private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
-  private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
+  private val t3_allTableCanAllocateWayMaskPadded = t3_allTableCanAllocateWayMask.map { mask =>
+    val padded = Wire(UInt(MaxNumWays.W))
+    padded := mask
+    padded
+  }
+  private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMaskPadded)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
   dontTouch(t3_allocateTableOH)
   dontTouch(t3_allocateWayOH)
@@ -732,8 +802,68 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     }
   )
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
+  // Sum across every table/bank/way. Each full buffer contributes once per cycle.
+  private val entryWriteBufferFullCount  = tables.map(_.io.entryWriteBufferFullCount).reduce(_ +& _)
+  private val usefulWriteBufferFullCount = tables.map(_.io.usefulWriteBufferFullCount).reduce(_ +& _)
+  XSPerfAccumulate("entry_write_buffer_full", entryWriteBufferFullCount)
+  XSPerfAccumulate("useful_write_buffer_full", usefulWriteBufferFullCount)
+  // Conditional write-buffer lookup hit rate = bypass_hit / full_write (undefined if zero).
+  XSPerfAccumulate("prediction_read_full_write", tables.map(_.io.predictionReadFullWriteCount).reduce(_ +& _))
+  XSPerfAccumulate(
+    "prediction_read_full_write_bypass_hit",
+    tables.map(_.io.predictionReadFullWriteBypassHitCount).reduce(_ +& _)
+  )
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
+  // Read-conflict cause breakdown. These counters are cycle counts, so a
+  // training request held by trainReady may contribute more than once.
+  XSPerfAccumulate("read_conflict_train_mispredict", debug_readBankConflict && t0_needReadMispredict)
+  XSPerfAccumulate("read_conflict_train_alt", debug_readBankConflict && t0_needReadAlt)
+  XSPerfAccumulate(
+    "read_conflict_train_mispredict_and_alt",
+    debug_readBankConflict && t0_needReadMispredict && t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_train_mispredict_only",
+    debug_readBankConflict && t0_needReadMispredict && !t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_train_alt_only",
+    debug_readBankConflict && t0_needReadAlt && !t0_needReadMispredict
+  )
+  XSPerfAccumulate("read_conflict_same_fetch_block", debug_readBankConflict && debug_sameFetchBlock)
+  XSPerfAccumulate("read_conflict_nearby_fetch_block", debug_readBankConflict && debug_nearbyFetchBlock)
+  XSPerfAccumulate(
+    "read_conflict_other_same_bank",
+    debug_readBankConflict && !debug_sameFetchBlock && !debug_nearbyFetchBlock
+  )
+  XSPerfAccumulate(
+    "read_conflict_same_bank_prediction_stream",
+    debug_readBankConflict && debug_sameBankPredictionStream
+  )
+  XSPerfAccumulate(
+    "read_conflict_same_bank_prediction_loop",
+    debug_readBankConflict && debug_sameBankPredictionLoop
+  )
+  // Event counts avoid weighting a long trainReady stall by its duration.
+  XSPerfAccumulate("read_conflict_event", debug_readBankConflictPos)
+  XSPerfAccumulate(
+    "read_conflict_event_train_mispredict",
+    debug_readBankConflictPos && t0_needReadMispredict
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_train_alt",
+    debug_readBankConflictPos && t0_needReadAlt
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_same_fetch_block",
+    debug_readBankConflictPos && debug_sameFetchBlock
+  )
+  XSPerfAccumulate(
+    "read_conflict_event_nearby_fetch_block",
+    debug_readBankConflictPos && debug_nearbyFetchBlock
+  )
+  XSPerfRolling("rolling_read_conflict", debug_readBankConflict, 10000, clock, reset)
   XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
@@ -809,6 +939,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     "resolve_branch_use_base_table",
     t3_trainInfoVec.map(e => (t3_fire && e.valid && !e.useProvider && !e.useAlt).asUInt).reduce(_ +& _)
   )
+  XSPerfAccumulate(
+    "train_read",
+    io.debug_trainValid && t0_needRead
+  )
+  XSPerfAccumulate(
+    "train_read_conflict",
+    io.debug_trainValid && t0_needRead && t0_samePredictionBank
+  )
 
   /*
   sum -> total bubbles caused by read bank conflict
@@ -818,6 +956,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     "read_conflict_bubble_dist",
     debug_readBankConflictDistCnt,
     debug_readBankConflictNeg,
+    0,
+    16
+  )
+  /*
+  how long the predict stage is held so that a training read can keep the bank
+  sum -> total cycles held, sampled -> number of completed holds, mean -> mean hold length
+   */
+  XSPerfHistogram(
+    "predict_hold_dist",
+    debug_holdPredictDistCnt,
+    debug_holdPredictNeg,
     0,
     16
   )

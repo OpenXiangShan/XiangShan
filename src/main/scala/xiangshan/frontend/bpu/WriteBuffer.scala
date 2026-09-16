@@ -50,11 +50,14 @@ class WriteBuffer[T <: WriteReqBundle](
     hasCnt:     Boolean = false,
     hasWayMask: Boolean = false,
     hasFlush:   Boolean = false,
+    hasLookup:  Boolean = false,
+    numLookupPorts: Int = 1,
     nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
   require(numPorts <= numEntries)
+  require(!hasLookup || numLookupPorts >= 1)
   class WriteBufferIO extends Bundle {
     val write: Vec[ValidIO[T]]     = Vec(numPorts, Flipped(Valid(gen)))
     val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
@@ -63,6 +66,10 @@ class WriteBuffer[T <: WriteReqBundle](
     val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
     val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
     val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+
+    val lookupEn:     Option[Vec[Bool]]          = Option.when(hasLookup)(Input(Vec(numLookupPorts, Bool())))
+    val lookupSetIdx: Option[Vec[UInt]]          = Option.when(hasLookup)(Input(Vec(numLookupPorts, UInt(gen.setIdx.getWidth.W))))
+    val lookup:       Option[Vec[Vec[Valid[T]]]] = Option.when(hasLookup)(Output(Vec(numLookupPorts, Vec(numPorts, Valid(gen)))))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -90,6 +97,22 @@ class WriteBuffer[T <: WriteReqBundle](
   private val nextDirty       = WireInit(dirty)
   private val nextEntries     = WireInit(entries)
   private val nextShadowValid = WireInit(shadowValid)
+
+  if (hasLookup) {
+    io.lookup.get.zipWithIndex.foreach { case (lookupPort, lookupPortIdx) =>
+      val lookupEn     = io.lookupEn.get(lookupPortIdx)
+      val lookupSetIdx = io.lookupSetIdx.get(lookupPortIdx)
+      lookupPort.zipWithIndex.foreach { case (lookupEntry, writePortIdx) =>
+        // Lookup the computed next state so a write accepted in this cycle can
+        // be forwarded to a simultaneous SRAM read.
+        val hitMask = VecInit(nextEntries(writePortIdx).zip(nextShadowValid(writePortIdx)).map {
+          case (entry, valid) => lookupEn && valid && entry.setIdx === lookupSetIdx
+        })
+        lookupEntry.valid := hitMask.reduce(_ || _)
+        lookupEntry.bits  := Mux1H(hitMask, nextEntries(writePortIdx))
+      }
+    }
+  }
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))

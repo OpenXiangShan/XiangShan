@@ -84,6 +84,7 @@ class TableReadReq(implicit p: Parameters, info: TageTableInfo) extends TageBund
 }
 
 class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val entryValid: Vec[Bool]            = Vec(NumWays, Bool())
   val entries:    Vec[TageEntry]       = Vec(NumWays, new TageEntry)
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
@@ -112,15 +113,14 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
-  val useProvider:       Bool            = Bool()
-  val hasProvider:       Bool            = Bool()
-  val hasAlt:            Bool            = Bool()
-  val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
-  val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
+  val providerLocation:  UInt            = UInt(ProviderLocationWidth.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
-  val altOrBasePred:     Bool            = Bool()
-  val altConf:           Bool            = Bool()
+
+  val altLocation: UInt            = UInt(AltLocationWidth.W)
+  val altTakenCtr: SaturateCounter = TakenCounter()
+
+  val useAltOnNa: Bool = Bool()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {

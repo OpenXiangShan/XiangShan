@@ -38,6 +38,11 @@ class TageTable(
     val usefulResetInFlight: Bool = Output(Bool())
 
     val sramResetDone: Bool = Output(Bool())
+
+    val entryWriteBufferFullCount:             UInt = Output(UInt(log2Ceil(NumBanks * NumWays + 1).W))
+    val usefulWriteBufferFullCount:            UInt = Output(UInt(log2Ceil(NumBanks * NumWays + 1).W))
+    val predictionReadFullWriteCount:          UInt = Output(UInt(log2Ceil(NumBanks * NumWays + 1).W))
+    val predictionReadFullWriteBypassHitCount: UInt = Output(UInt(log2Ceil(NumBanks * NumWays + 1).W))
   }
 
   val io: TageTableIO = IO(new TageTableIO)
@@ -93,14 +98,15 @@ class TageTable(
 
   // use a write buffer to store a entrySram write request
   private val entryWriteBuffers =
-    Seq.tabulate(NumBanks) { bankIdx =>
+    Seq.tabulate(NumBanks, NumWays) { (bankIdx, wayIdx) =>
       Module(new WriteBuffer(
         new EntrySramWriteReq,
         WriteBufferSize,
-        numPorts = NumWays,
         hasCnt = true,
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
-      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
+        hasLookup = true,
+        numLookupPorts = 2,
+        nameSuffix = s"tageTable${tableIdx}_${bankIdx}_way${wayIdx}"
+      )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
   // use a write buffer to store a usefulCtr write request
@@ -115,39 +121,71 @@ class TageTable(
       )).suggestName(s"tage_useful_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
+  // Count full buffers, not blocked enqueues: a full queue can still drain this cycle.
+  io.entryWriteBufferFullCount  := PopCount(entryWriteBuffers.flatten.map(_.io.full.head))
+  io.usefulWriteBufferFullCount := PopCount(usefulCtrWriteBuffers.flatten.map(_.io.count === WriteBufferSize.U))
+
   // read sram
   entrySram.zip(usefulCtrSram).zipWithIndex.foreach { case ((entryBank, usefulBank), bankIdx) =>
-    val readValid = VecInit(
-      io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx),
-      io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
+    val predictionRead = io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+    val trainingRead   = io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
+    // The single-ported SRAM can only serve one read per bank, so the prediction read and the
+    // training read must never ask for the same bank in the same cycle.  When they would, the BPU
+    // holds the whole predict stage for one cycle (see Tage) and this block is read again next
+    // cycle, which is why the prediction read can no longer be suppressed by a training read here.
+    assert(
+      !(predictionRead && trainingRead),
+      s"tage_table_${tableIdx} bank_${bankIdx}: prediction read and training read use the same bank"
     )
-    val readSetIdx = Mux(readValid(0), io.readReq(0).bits.setIdx, io.readReq(1).bits.setIdx)
-
-    entryBank.foreach { way =>
-      way.io.r.req.valid       := readValid.reduce(_ || _)
-      way.io.r.req.bits.setIdx := readSetIdx
+    // Training reads have priority over prediction reads. The SRAM is
+    // single-ported, so a simultaneous prediction read is suppressed and the
+    // caller uses its write-buffer/MBTB fallback path.
+    val readSetIdx = Mux(trainingRead, io.readReq(1).bits.setIdx, io.readReq(0).bits.setIdx)
+    entryBank.zipWithIndex.foreach { case (way, wayIdx) =>
+      val full                = entryWriteBuffers(bankIdx)(wayIdx).io.full.head
+      val predictionReadGrant = predictionRead && !full
+      way.io.r.req.valid                := trainingRead || predictionReadGrant
+      way.io.r.req.bits.setIdx          := readSetIdx
+      usefulBank(wayIdx).io.r.req.valid := (trainingRead || predictionReadGrant) && !usefulResetInFlightMask(bankIdx)
+      usefulBank(wayIdx).io.r.req.bits.setIdx := readSetIdx
     }
-    usefulBank.foreach { way =>
-      way.io.r.req.valid       := readValid.reduce(_ || _) && !usefulResetInFlightMask(bankIdx)
-      way.io.r.req.bits.setIdx := readSetIdx
-    }
-    assert(!(readValid(0) && readValid(1)), s"read conflict in tage_table_${tableIdx}_bank_${bankIdx}")
   }
 
   // delay one cycle for better timing
   private val writeReqValid = RegNext(io.writeReq.valid, init = false.B)
   private val writeReq      = RegEnable(io.writeReq.bits, io.writeReq.valid)
 
+  private val predictionReadByBank = VecInit((0 until NumBanks).map { bankIdx =>
+    io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+  })
+
+  // A prediction read prevents the single-port SRAM from draining the entry
+  // write buffer for the same bank.  Keep the per-bank read history so that
+  // an overwrite can be attributed to a continuously reused prediction bank.
+  private val previousPredictionReadByBank = RegNext(
+    predictionReadByBank,
+    VecInit.fill(NumBanks)(false.B)
+  )
+  private val consecutivePredictionReadByBank = VecInit(
+    predictionReadByBank.zip(previousPredictionReadByBank).map { case (current, previous) =>
+      current && previous
+    }
+  )
+
   // write to write buffer
-  entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
-    buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
+  entryWriteBuffers.zipWithIndex.foreach { case (bankBuffers, bankIdx) =>
+    bankBuffers.zipWithIndex.foreach { case (buffer, wayIdx) =>
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeEntryEn(wayIdx)
-      bufferIn.valid       := writeValid
-      bufferIn.bits.setIdx := writeReq.setIdx
-      bufferIn.bits.entry  := writeReq.entries(wayIdx)
+      buffer.io.write.head.valid       := writeValid
+      buffer.io.write.head.bits.setIdx := writeReq.setIdx
+      buffer.io.write.head.bits.entry  := writeReq.entries(wayIdx)
+      buffer.io.takenMask.get.head     := writeReq.actualTakenMask(wayIdx)
+      buffer.io.lookupEn.get(0)        := io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+      buffer.io.lookupEn.get(1)        := io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
+      buffer.io.lookupSetIdx.get(0)    := io.readReq(0).bits.setIdx
+      buffer.io.lookupSetIdx.get(1)    := io.readReq(1).bits.setIdx
     }
-    buffer.io.takenMask.get := writeReq.actualTakenMask
   }
 
   usefulCtrWriteBuffers.zipWithIndex.foreach { case (bankBuffer, bankIdx) =>
@@ -162,18 +200,57 @@ class TageTable(
   }
 
   // write entry to sram from write buffer
-  entrySram.zip(entryWriteBuffers).foreach { case (bank, buffer) =>
-    bank.zip(buffer.io.read).foreach { case (way, bufferOut) =>
+  entrySram.zip(entryWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffers), bankIdx) =>
+    bank.zip(bankBuffers).zipWithIndex.foreach { case ((way, buffer), wayIdx) =>
+      val bufferOut      = buffer.io.read.head
+      val trainingRead   = io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
+      val predictionRead = io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+      val writeGrant     = !trainingRead && (!predictionRead || buffer.io.full.head)
       way.io.w.apply(
-        bufferOut.valid && !way.io.r.req.valid,
+        bufferOut.valid && writeGrant,
         bufferOut.bits.entry,
         bufferOut.bits.setIdx,
         1.U(1.W) // way mask
       )
-      bufferOut.ready := way.io.w.req.ready && !way.io.r.req.valid
+      bufferOut.ready := way.io.w.req.ready && writeGrant
+      // The SRAM is single ported: a write in the same cycle silently drops the read.  The write
+      // drain therefore gives the port up whenever a read is granted, and only writes in a cycle
+      // whose prediction read was suppressed by a full write buffer.
+      assert(
+        !(way.io.r.req.valid && way.io.w.req.valid),
+        s"tage_table_${tableIdx} bank_${bankIdx} way_${wayIdx}: SRAM read and write in the same cycle"
+      )
     }
   }
 
+  // Count per physical entry-SRAM bank/way, and only when the competing full-buffer
+  // write actually fires. Lookup port 0 is combinational and belongs to this same request.
+  private val predictionReadFullWrites = entryWriteBuffers.zipWithIndex.flatMap { case (bank, bankIdx) =>
+    bank.map(buffer => predictionReadByBank(bankIdx) && buffer.io.full.head && buffer.io.read.head.fire)
+  }
+  private val predictionReadFullWriteBypassHits =
+    predictionReadFullWrites.zip(entryWriteBuffers.flatten).map { case (blocked, buffer) =>
+      blocked && buffer.io.lookup.get(0).head.valid
+    }
+  io.predictionReadFullWriteCount          := PopCount(predictionReadFullWrites)
+  io.predictionReadFullWriteBypassHitCount := PopCount(predictionReadFullWriteBypassHits)
+  XSPerfAccumulate("prediction_read_full_write", io.predictionReadFullWriteCount)
+  XSPerfAccumulate("prediction_read_full_write_bypass_hit", io.predictionReadFullWriteBypassHitCount)
+
+  private val bypassNow = Seq.fill(2)(Wire(Vec(NumWays, Valid(new TageEntry))))
+  bypassNow.indices.foreach { readIdx =>
+    bypassNow(readIdx).indices.foreach { wayIdx =>
+      val validByBank = VecInit(entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get(readIdx).head.valid))
+      val entryByBank = entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get(readIdx).head.bits.entry)
+      bypassNow(readIdx)(wayIdx).valid := Mux1H(io.readReq(readIdx).bits.bankMask, validByBank)
+      bypassNow(readIdx)(wayIdx).bits  := Mux1H(io.readReq(readIdx).bits.bankMask, entryByBank)
+    }
+  }
+  private val bypassReg = Seq.fill(2) {
+    RegInit(VecInit(Seq.fill(NumWays)(0.U.asTypeOf(Valid(new TageEntry)))))
+  }
+  when(io.readReq(0).valid)(bypassReg(0) := bypassNow(0))
+  when(io.readReq(1).valid)(bypassReg(1) := bypassNow(1))
   usefulCtrSram.zip(usefulCtrWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffer), bankIdx) =>
     when(io.usefulResetStart) {
       usefulResetInFlightMask(bankIdx) := true.B
@@ -201,20 +278,45 @@ class TageTable(
   }
 
   io.readResp.zipWithIndex.foreach { case (resp, i) =>
-    val readBankMaskNext          = RegEnable(io.readReq(i).bits.bankMask, io.readReq(i).valid)
+    val readBankMaskNext = RegEnable(io.readReq(i).bits.bankMask, io.readReq(i).valid)
+    val readValidNext    = RegNext(io.readReq(i).valid, init = false.B)
+    val sramGrantedNow = VecInit((0 until NumWays).map { wayIdx =>
+      val grantedByBank = VecInit((0 until NumBanks).map { bankIdx =>
+        val trainingRead   = io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
+        val predictionRead = io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
+        if (i == 1) trainingRead
+        else predictionRead && !trainingRead && !entryWriteBuffers(bankIdx)(wayIdx).io.full.head
+      })
+      Mux1H(io.readReq(i).bits.bankMask, grantedByBank)
+    })
+    val sramGrantedNext           = RegEnable(sramGrantedNow, io.readReq(i).valid)
     val readDuringUsefulResetNext = RegEnable(readDuringUsefulReset(i), io.readReq(i).valid)
-
-    resp.entries := Mux1H(
+    val sramEntries = Mux1H(
       readBankMaskNext,
       entrySram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
     )
+    val sramUsefulCtrs = Mux1H(
+      readBankMaskNext,
+      usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
+    )
+
+    val mergedEntries = VecInit(sramEntries.zip(bypassReg(i)).map { case (sramEntry, bypassEntry) =>
+      Mux(bypassEntry.valid, bypassEntry.bits, sramEntry)
+    })
+    resp.entryValid := VecInit((0 until NumWays).map { wayIdx =>
+      readValidNext && (bypassReg(i)(wayIdx).valid || sramGrantedNext(wayIdx))
+    })
+    resp.entries := mergedEntries
     resp.usefulCtrs := Mux(
       readDuringUsefulResetNext,
       VecInit.fill(NumWays)(UsefulCounter.Zero),
-      Mux1H(
-        readBankMaskNext,
-        usefulCtrSram.map(bank => VecInit(bank.map(way => way.io.r.resp.data.head)))
-      )
+      if (i == 0) {
+        VecInit(sramUsefulCtrs.zip(bypassReg(i)).map { case (sramUsefulCtr, bypassEntry) =>
+          Mux(bypassEntry.valid, UsefulCounter.Zero, sramUsefulCtr)
+        })
+      } else {
+        sramUsefulCtrs
+      }
     )
   }
 
@@ -236,6 +338,20 @@ class TageTable(
   XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
   XSPerfAccumulate(
     "overwrite",
-    PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
+    PopCount(entryWriteBuffers.flatMap(_.flatMap(_.io.overwrite)))
   )
+  XSPerfAccumulate(
+    "train_write_buffer_overwrite_with_prediction_read",
+    PopCount(entryWriteBuffers.zip(predictionReadByBank).flatMap { case (bankBuffers, predictionRead) =>
+      bankBuffers.flatMap(_.io.overwrite.map(_ && predictionRead))
+    })
+  )
+  XSPerfAccumulate(
+    "train_write_buffer_overwrite_with_consecutive_prediction_read",
+    PopCount(entryWriteBuffers.zip(consecutivePredictionReadByBank).flatMap {
+      case (bankBuffers, consecutivePredictionRead) =>
+        bankBuffers.flatMap(_.io.overwrite.map(_ && consecutivePredictionRead))
+    })
+  )
+  XSPerfAccumulate("write_buffer_read_hit", PopCount(bypassNow(0).map(_.valid)))
 }
