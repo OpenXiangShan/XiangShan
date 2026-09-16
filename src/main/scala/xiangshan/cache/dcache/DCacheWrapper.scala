@@ -67,7 +67,7 @@ case class DCacheParameters
 
   // Channel selection strategy
   // true = select by address set低位
-  // false = select by MSHR ID
+  // false : unsupported for now
   channelSelByAddr: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
