@@ -1438,7 +1438,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   CCHIBuffer(io.inner_icache_cchi, io.outer_icache_cchi, nStages = 2)
-  CCHIBuffer(ptw.io.cchi, io.outer_ptw_cchi, nStages = 2)
+  CCHIBuffer(ptw.io.cchi, io.outer_ptw_cchi)
   CCHIBuffer(io.inner_i_mmio_cchi, io.outer_i_mmio_cchi, nStages = 2)
 
   val type3Router = Module(new Type3Router)
