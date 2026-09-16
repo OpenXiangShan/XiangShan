@@ -60,9 +60,20 @@ task fence_agent_agent_driver::main_phase(uvm_phase phase);
                 end
                 @this.vif.drv_mp.drv_cb;
                 this.send_pkt(req);
+                // Control-topology SFENCE 必须跨过一个完整采样周期；下一沿
+                // 立即清除全部字段，避免 valid 或 payload 残留到第二周期。
+                if (memblock_sync_pkg::control_runtime_handshake_active()) begin
+                    @this.vif.drv_mp.drv_cb;
+                    this.drive_idle(tcnt_dec_base::DRV_0);
+                end
                 repeat(req.post_pkt_gap) begin
                     @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
+                    if (memblock_sync_pkg::control_runtime_handshake_active()) begin
+                        this.drive_idle(tcnt_dec_base::DRV_0);
+                    end
+                    else begin
+                        this.drive_idle(this.cfg.drv_mode);
+                    end
                 end
                 seq_item_port.item_done();
             end
