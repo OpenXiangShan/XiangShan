@@ -135,6 +135,7 @@ awk -v top_module="${top_module}" '
     }
   }
 ' "${rtl_file}" > "${tmp_file}"
+chmod --reference="${rtl_file}" "${tmp_file}"
 
 # XSNoCDiffTop elaboration also emits a SimTop for verification. Remove only
 # the passthrough ports created by the design top perf-control IOs so the
@@ -202,6 +203,7 @@ if [[ -f "${sim_file}" ]]; then
       }
     }
   ' "${sim_file}" > "${sim_tmp_file}"
+  chmod --reference="${sim_file}" "${sim_tmp_file}"
 fi
 
 mv "${tmp_file}" "${rtl_file}"
