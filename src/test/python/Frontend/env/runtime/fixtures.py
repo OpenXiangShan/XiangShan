@@ -4,6 +4,7 @@ import logging
 import os
 import random
 import re
+import shutil
 import sys
 import tempfile
 from datetime import datetime
@@ -194,12 +195,16 @@ def _normalize_waveform_format(value: str | None) -> str:
 
 
 def _waveform_format_from_dut(dut) -> str:
-    if dut is None or not hasattr(dut, "GetWaveFormat"):
-        return "fst"
-    try:
-        return _normalize_waveform_format(dut.GetWaveFormat())
-    except Exception:
-        return "fst"
+    if dut is not None and hasattr(dut, "GetWaveFormat"):
+        try:
+            waveform_format = str(dut.GetWaveFormat()).strip().lower()
+            if waveform_format in {"fst", "vcd", "fsdb"}:
+                return waveform_format
+        except Exception:
+            pass
+    if os.getenv("TB_FRONTEND_SIM", "").strip().lower() == "vcs":
+        return "fsdb"
+    return "fst"
 
 
 def _waveform_path(request, default_dir: Path, *, waveform_format: str | None = None) -> Path:
@@ -224,6 +229,36 @@ def _vcs_batch_coverage_path(request, default_dir: Path) -> Path:
     coverage_dir = Path(os.getenv("TB_COVERAGE_DIR", str(_artifact_root_dir(request, default_dir))))
     coverage_dir.mkdir(parents=True, exist_ok=True)
     return coverage_dir / f"{_safe_path_component(_effective_run_id())}_vcs_batch.dat"
+
+
+def _vcs_coverage_vdb_path(request, default_dir: Path) -> Path:
+    coverage_dir = Path(
+        os.getenv("TB_COVERAGE_DIR", str(_artifact_root_dir(request, default_dir)))
+    )
+    coverage_dir.mkdir(parents=True, exist_ok=True)
+    return coverage_dir / "Frontend.vdb"
+
+
+def _prepare_vcs_coverage_vdb(request, default_dir: Path) -> Path | None:
+    if os.getenv("TB_FRONTEND_SIM", "").strip().lower() != "vcs":
+        return None
+    if not _is_enabled("TB_ENABLE_DUT_COVERAGE", default="1"):
+        return None
+    source = frontend_pylib_path() / "Frontend" / "Frontend.vdb"
+    target = _vcs_coverage_vdb_path(request, default_dir)
+    if target.exists():
+        return target
+    if not source.is_dir():
+        raise RuntimeError(f"compiled VCS coverage template not found: {source}")
+    shutil.copytree(source, target)
+    testdata = target / "snps" / "coverage" / "db" / "testdata"
+    if testdata.is_dir():
+        for child in testdata.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    return target
 
 
 def _dut_coverage_path(request, default_dir: Path) -> Path:
@@ -420,10 +455,18 @@ def create_dut(request):
         case_log_handler = _attach_case_log_handler(case_log_path)
     batch_run = _vcs_batch_run_enabled()
     created_batch_dut = False
+    vcs_coverage_vdb = None
+    if batch_run or os.getenv("TB_FRONTEND_SIM", "").strip().lower() == "vcs":
+        vcs_coverage_vdb = _prepare_vcs_coverage_vdb(request, data_dir)
     if batch_run and _VCS_BATCH_DUT is not None:
         dut = _VCS_BATCH_DUT
     else:
-        dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
+        dut = create_frontend_dut(
+            tc_name=tc_name,
+            dut_logger=logger,
+            vcs_coverage_vdb=None if vcs_coverage_vdb is None else str(vcs_coverage_vdb),
+            vcs_coverage_name=_safe_path_component(_effective_run_id()),
+        )
         if batch_run:
             _VCS_BATCH_DUT = dut
             created_batch_dut = True
