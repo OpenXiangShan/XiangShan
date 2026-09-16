@@ -256,13 +256,6 @@ class fetch_to_mem(implicit p: Parameters) extends XSBundle{
   val itlb = Flipped(new TlbPtwIO())
 }
 
-// double Queue buffer (depth 2 x2, same as legacy BufferParams.default x2 / chainNode(2))
-object DoubleQueueBuffer {
-  private val depth = 2
-  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
-    Queue(Queue(x, depth), depth)
-}
-
 // Not used. Legacy FrontendBridge placeholder: TL buffers removed. Kept as empty LazyModule for now.
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
   lazy val module = new LazyModuleImp(this) {
@@ -1440,54 +1433,27 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
-  // DCache Type 1: one Queue(depth=2) per flit, same as legacy TLBuffer()
   for (ch <- 0 until numMemChannelsFromDcache) {
-    io.outer_dcache_cchi(ch).upEVT <> Queue(dcache.io.cchi(ch).upEVT, 2)
-    io.outer_dcache_cchi(ch).upREQ <> Queue(dcache.io.cchi(ch).upREQ, 2)
-    io.outer_dcache_cchi(ch).upRSP <> Queue(dcache.io.cchi(ch).upRSP, 2)
-    io.outer_dcache_cchi(ch).upDAT <> Queue(dcache.io.cchi(ch).upDAT, 2)
-    dcache.io.cchi(ch).dnSNP <> Queue(io.outer_dcache_cchi(ch).dnSNP, 2)
-    dcache.io.cchi(ch).dnRSP <> Queue(io.outer_dcache_cchi(ch).dnRSP, 2)
-    dcache.io.cchi(ch).dnDAT <> Queue(io.outer_dcache_cchi(ch).dnDAT, 2)
+    CCHIBuffer(dcache.io.cchi(ch), io.outer_dcache_cchi(ch))
   }
 
-  // upREQ: Frontend -> L2; dnDAT: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
-  io.outer_icache_cchi.upREQ <> DoubleQueueBuffer(io.inner_icache_cchi.upREQ)
-  io.inner_icache_cchi.dnDAT <> DoubleQueueBuffer(io.outer_icache_cchi.dnDAT)
-
-  // upREQ: L2TLB -> L2; dnDAT: L2 -> L2TLB (mirror legacy ptw_to_l2_buffer A/D)
-  io.outer_ptw_cchi.upREQ <> DoubleQueueBuffer(ptw.io.cchi.upREQ)
-  ptw.io.cchi.dnDAT <> DoubleQueueBuffer(io.outer_ptw_cchi.dnDAT)
-
-  io.outer_i_mmio_cchi.upREQ <> DoubleQueueBuffer(io.inner_i_mmio_cchi.upREQ)
-  io.outer_i_mmio_cchi.upDAT <> DoubleQueueBuffer(io.inner_i_mmio_cchi.upDAT)
-  io.inner_i_mmio_cchi.dnRSP <> DoubleQueueBuffer(io.outer_i_mmio_cchi.dnRSP)
-  io.inner_i_mmio_cchi.dnDAT <> DoubleQueueBuffer(io.outer_i_mmio_cchi.dnDAT)
+  CCHIBuffer(io.inner_icache_cchi, io.outer_icache_cchi, nStages = 2)
+  CCHIBuffer(ptw.io.cchi, io.outer_ptw_cchi, nStages = 2)
+  CCHIBuffer(io.inner_i_mmio_cchi, io.outer_i_mmio_cchi, nStages = 2)
 
   val type3Router = Module(new Type3Router)
   uncache.io.cchi <> type3Router.io.up
   type3Router.io.txdatAddr := uncache.io.txdatAddr
-  io.outer_d_mmio_cchi.upREQ <> DoubleQueueBuffer(type3Router.io.downL2.upREQ)
-  io.outer_d_mmio_cchi.upDAT <> DoubleQueueBuffer(type3Router.io.downL2.upDAT)
-  type3Router.io.downL2.dnRSP <> DoubleQueueBuffer(io.outer_d_mmio_cchi.dnRSP)
-  type3Router.io.downL2.dnDAT <> DoubleQueueBuffer(io.outer_d_mmio_cchi.dnDAT)
+  CCHIBuffer(type3Router.io.downL2, io.outer_d_mmio_cchi, nStages = 2)
 
   if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    val dcacheCtrl = dcache.io.ctrl_cchi.get
-    dcacheCtrl.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upREQ)
-    dcacheCtrl.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(0).upDAT)
-    type3Router.io.downCtrl(0).dnRSP <> DoubleQueueBuffer(dcacheCtrl.dnRSP)
-    type3Router.io.downCtrl(0).dnDAT <> DoubleQueueBuffer(dcacheCtrl.dnDAT)
+    CCHIBuffer(type3Router.io.downCtrl(0), dcache.io.ctrl_cchi.get, nStages = 2)
   } else {
     type3Router.io.downCtrl(0).tieOff()
   }
 
   if (icacheCtrlEnabled) {
-    val icacheCtrl = io.inner_icache_ctrl_cchi.get
-    icacheCtrl.upREQ <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upREQ)
-    icacheCtrl.upDAT <> DoubleQueueBuffer(type3Router.io.downCtrl(1).upDAT)
-    type3Router.io.downCtrl(1).dnRSP <> DoubleQueueBuffer(icacheCtrl.dnRSP)
-    type3Router.io.downCtrl(1).dnDAT <> DoubleQueueBuffer(icacheCtrl.dnDAT)
+    CCHIBuffer(type3Router.io.downCtrl(1), io.inner_icache_ctrl_cchi.get, nStages = 2)
   } else {
     type3Router.io.downCtrl(1).tieOff()
   }
