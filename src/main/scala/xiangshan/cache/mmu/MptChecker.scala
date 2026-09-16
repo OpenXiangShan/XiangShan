@@ -1192,8 +1192,10 @@ class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   reqAltInput := reqFIFO.deq.bits
 
+  // A non-leaf refill contains the child table's PPN. Pair that pointer
+  // with the next level to read, just as the cache miss path does.
   when(hitFIFO && refilling) {
-    reqAltInput.hitLevel := refillReg.level
+    reqAltInput.hitLevel := refillReg.level >> 1
     reqAltInput.hitAddr  := refillReg.refillData.getPPN
   }
 
