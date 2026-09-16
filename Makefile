@@ -213,10 +213,8 @@ endif
 # emu for the release version
 ENABLE_NOC_PERF_PRINT := 0
 AUTO_PERF_DUMP := 0
-ifeq ($(CONFIG),XSNoCTopConfig)
-ENABLE_NOC_PERF_PRINT := 1
-AUTO_PERF_DUMP := 1
-else ifeq ($(CONFIG),XSNoCDiffTopConfig)
+NOC_TOP_CONFIGS := XSNoCTopConfig XSNoCDiffTopConfig
+ifneq ($(filter $(firstword $(CONFIG)),$(NOC_TOP_CONFIGS)),)
 ENABLE_NOC_PERF_PRINT := 1
 AUTO_PERF_DUMP := 1
 endif
