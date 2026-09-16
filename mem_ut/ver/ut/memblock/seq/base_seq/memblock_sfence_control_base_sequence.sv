@@ -73,15 +73,42 @@ task memblock_sfence_control_base_sequence::wait_for_sfence_work_or_shutdown();
     disable fork;
 endtask:wait_for_sfence_work_or_shutdown
 
-// 抽象职责：构造固定、非随机的基础 SFence payload。未来 SFence/HFence 专项只能
-// 修改本函数的 payload 选择；C0/C4 owner 匹配和 worker 生命周期保持不变。
+// 抽象职责：构造一笔 control SFENCE payload。valid、flushPipe、rs1、rs2
+// 固定为 1；addr/id 和合法 hv/hg 类型每笔随机一次。随机结果立即复制到
+// expected_fence，保证 C0 matcher 使用与实际传输完全相同的原始字段。
 task memblock_sfence_control_base_sequence::configure_sfence_control_xaction(
     ref memblock_sfence_control_action_t action,
     output fence_agent_agent_xaction tr
 );
+    bit [49:0] random_addr;
+    bit [15:0] random_id;
+    bit [1:0]  random_kind; // {hv,hg}: 00、10、01；11 由当前 decoder 拒绝
+    memblock_sync_pkg::dispatch_raw_csr_t csr_snapshot;
+    memblock_sync_pkg::memblock_control_csr_runtime_baseline_t csr_baseline;
+    int unsigned csr_snapshot_seq;
+
     if (!action.owner.valid) begin
         `uvm_fatal(get_type_name(), "SFence action has invalid owner")
     end
+
+    // control service 正常派发前应已发布当前 epoch 的 CSR baseline；这里只
+    // 验证前置条件，不伪造 CSR 或跨 epoch 的运行时上下文。
+    if (!memblock_sync_pkg::get_control_csr_runtime_baseline(csr_baseline)) begin
+        `uvm_fatal(get_type_name(), "SFence requires current control CSR baseline")
+    end
+    if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(csr_snapshot,
+                                                             csr_snapshot_seq) ||
+        !csr_snapshot.valid ||
+        csr_snapshot_seq < csr_baseline.first_snapshot_seq) begin
+        `uvm_fatal(get_type_name(), "SFence requires current runtime CSR snapshot")
+    end
+
+    if (!std::randomize(random_addr, random_id, random_kind) with {
+        random_kind dist {2'b00 := 1, 2'b10 := 1, 2'b01 := 1};
+    }) begin
+        `uvm_fatal(get_type_name(), "SFence payload randomization failed")
+    end
+
     tr = fence_agent_agent_xaction::type_id::create(
         $sformatf("sfence_control_uid_%0d_gen_%0d", action.owner.uid,
                   action.owner.action_generation));
@@ -91,23 +118,31 @@ task memblock_sfence_control_base_sequence::configure_sfence_control_xaction(
     tr.pre_pkt_gap = 0;
     tr.post_pkt_gap = 0;
     tr.io_ooo_to_mem_sfence_valid = 1'b1;
-    tr.io_ooo_to_mem_sfence_bits_rs1 = 1'b0;
-    tr.io_ooo_to_mem_sfence_bits_rs2 = 1'b0;
-    tr.io_ooo_to_mem_sfence_bits_addr = '0;
-    tr.io_ooo_to_mem_sfence_bits_id = '0;
-    tr.io_ooo_to_mem_sfence_bits_hv = 1'b0;
-    tr.io_ooo_to_mem_sfence_bits_hg = 1'b0;
-    tr.io_ooo_to_mem_sfence_bits_flushPipe = 1'b0;
+    tr.io_ooo_to_mem_sfence_bits_rs1 = 1'b1;
+    tr.io_ooo_to_mem_sfence_bits_rs2 = 1'b1;
+    tr.io_ooo_to_mem_sfence_bits_addr = random_addr;
+    tr.io_ooo_to_mem_sfence_bits_id = random_id;
+    tr.io_ooo_to_mem_sfence_bits_hv = random_kind[1];
+    tr.io_ooo_to_mem_sfence_bits_hg = random_kind[0];
+    tr.io_ooo_to_mem_sfence_bits_flushPipe = 1'b1;
 
     action.expected_fence = '{default:'0};
-    action.expected_fence.valid = 1'b1;
-    action.expected_fence.ignore_addr = 1'b0;
-    action.expected_fence.ignore_id = 1'b0;
-    action.expected_fence.addr = '0;
-    action.expected_fence.id = '0;
-    action.expected_fence.hv = 1'b0;
-    action.expected_fence.hg = 1'b0;
-    action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
+    action.expected_fence.valid = tr.io_ooo_to_mem_sfence_valid;
+    action.expected_fence.ignore_addr = tr.io_ooo_to_mem_sfence_bits_rs1;
+    action.expected_fence.ignore_id = tr.io_ooo_to_mem_sfence_bits_rs2;
+    action.expected_fence.addr = tr.io_ooo_to_mem_sfence_bits_addr;
+    action.expected_fence.id = tr.io_ooo_to_mem_sfence_bits_id;
+    action.expected_fence.hv = tr.io_ooo_to_mem_sfence_bits_hv;
+    action.expected_fence.hg = tr.io_ooo_to_mem_sfence_bits_hg;
+    if (tr.io_ooo_to_mem_sfence_bits_hg) begin
+        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_G_S2;
+    end
+    else if (tr.io_ooo_to_mem_sfence_bits_hv || csr_snapshot.priv_virt) begin
+        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_VS_S1;
+    end
+    else begin
+        action.expected_fence.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
+    end
 endtask:configure_sfence_control_xaction
 
 // 抽象职责：在 start_item 前冻结 L2TLB event/reset baseline 并 arm C0，随后交付
