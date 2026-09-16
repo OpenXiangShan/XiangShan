@@ -21,9 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
+import utility.XSPerfSeqAccumulate
 import xiangshan.SoftIPrefetchBundle
-import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.icache.PrefetchSource
@@ -31,22 +30,19 @@ import xiangshan.frontend.icache.PrefetchSource
 class PrefetchQueue(implicit p: Parameters) extends FtqModule
     with HasFtqPrefetchQueueParameters
     with HasCircularQueuePtrHelper {
-  class Entry extends Bundle {
-    val vAddr:  GuardedPc      = GuardedPc()
-    val source: PrefetchSource = new PrefetchSource
-  }
-
   class PrefetchQueueIO extends Bundle {
-    class Enqueue extends Entry {
+    class Enqueue extends PrefetchQueueEntry {
       def :=(that: SoftIPrefetchBundle): Unit = {
         this.vAddr  := PcInit(that.vaddr).signGuard
         this.source := PrefetchSource.Sw
       }
     }
 
-    class Dequeue extends FtqToPrefetchBundle {
+    class Dequeue extends Bundle {
+      val req:             Vec[FtqPrefetchReq] = Vec(MaxPrefetchReqNum, new FtqPrefetchReq)
+      val twoPrefetchCase: TwoPrefetchCase     = new TwoPrefetchCase
       // we need to represent "MaxPrefetchReqNum" itself, so we need log2(...+1) width
-      val fdipNum: UInt = UInt(log2Ceil(MaxPrefetchReqNum + 1).W)
+      val numFdip: UInt = UInt(log2Ceil(MaxPrefetchReqNum + 1).W)
     }
 
     // enqueue from non-FDIP sources
@@ -63,46 +59,107 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
 
   val io: PrefetchQueueIO = IO(new PrefetchQueueIO)
 
-  private val mem = RegInit(0.U.asTypeOf(Vec(Size, Valid(new Entry))))
+  private val mem = RegInit(0.U.asTypeOf(Vec(Size, Valid(new PrefetchQueueEntry))))
 
   private val enqPtr = RegInit(PrefetchQueuePtr(false.B, 0.U))
   private val deqPtr = RegInit(PrefetchQueuePtr(false.B, 0.U))
   private val full   = distanceBetween(enqPtr, deqPtr) >= (Size - EnqueueNum).U
 
   /* *** enqueue *** */
-  io.enq.foreach(_.ready := !full)
+  io.enq.zipWithIndex.foreach { case (enqPort, i) =>
+    enqPort.ready := !full
+    val enqIdx = (enqPtr + PopCount(io.enq.take(i).map(_.valid))).value
+    when(enqPort.valid && !full) {
+      mem(enqIdx).valid := true.B
+      mem(enqIdx).bits  := enqPort.bits
+    }
+  }
+  when(!full && io.enq.map(_.valid).reduce(_ || _)) { // gate using valid.orR to save some power, may be bad for timing
+    enqPtr := enqPtr + PopCount(io.enq.map(_.valid))
+  }
 
   /* *** dequeue *** */
-  // select prefetch source:
-  // 1. if FDIP (from Bpu -> entryQueue) can provide 2 non-conflict prefetch target, use them
-  // 2. otherwise, if FDIP and prefetchQueue can provide 1 each, and not conflict, use them (TODO)
+  private class PrefetchGroup extends Bundle {
+    val req:             Vec[Valid[FtqPrefetchReq]] = Vec(MaxPrefetchReqNum, Valid(new FtqPrefetchReq))
+    val twoPrefetchCase: TwoPrefetchCase            = new TwoPrefetchCase
 
-  private val prefetchReq = VecInit(
-    Wire(new FtqPrefetchReq).fromFtqEntry(io.fromEntryQueue(0).bits),
-    Wire(new FtqPrefetchReq).fromFtqEntry(io.fromEntryQueue(1).bits)
+    // pointer movements, invalid if !has1
+    // we need to represent "MaxPrefetchReqNum" itself, so we need log2(...+1) width
+    val numFdip:   UInt = UInt(log2Ceil(MaxPrefetchReqNum + 1).W)
+    val numQueued: UInt = UInt(log2Ceil(MaxPrefetchReqNum + 1).W)
+
+    def has1: Bool = req.head.valid
+    def has2: Bool = twoPrefetchCase.valid // !conflict
+  }
+  private object PrefetchGroup {
+    def apply(req: Vec[Valid[FtqPrefetchReq]], t: String): PrefetchGroup = {
+      val group = Wire(new PrefetchGroup)
+      group.req := req
+      // io.deq.fire is passed to apply(..., canAssert) to prevent assert(x-state)
+      group.twoPrefetchCase := TwoPrefetchCase(req, io.deq.fire)
+      // pointer movements
+      t match {
+        case "fdip" =>
+          group.numFdip   := Mux(group.twoPrefetchCase.valid, 2.U, 1.U)
+          group.numQueued := 0.U
+        case "mixed" =>
+          group.numFdip   := 1.U
+          group.numQueued := Mux(group.twoPrefetchCase.valid, 1.U, 0.U)
+        case "queued" =>
+          group.numFdip   := 0.U
+          group.numQueued := Mux(group.twoPrefetchCase.valid, 2.U, 1.U)
+      }
+      group
+    }
+  }
+
+  private def genFdipPrefetch(entry: Valid[FtqEntry]): Valid[FtqPrefetchReq] = {
+    val req = Wire(Valid(new FtqPrefetchReq))
+    req.bits.fromFtqEntry(entry.bits)
+    req.valid := entry.valid
+    req
+  }
+  private val fdipPrefetch = PrefetchGroup(VecInit(io.fromEntryQueue.map(genFdipPrefetch)), "fdip")
+
+  private def genQueuedPrefetch(entry: Valid[PrefetchQueueEntry]): Valid[FtqPrefetchReq] = {
+    val req = Wire(Valid(new FtqPrefetchReq))
+    req.bits.fromPrefetchQueueEntry(entry.bits)
+    req.valid := entry.valid
+    req
+  }
+  private val queuedPrefetch = PrefetchGroup(
+    VecInit(
+      genQueuedPrefetch(mem(deqPtr.value)),
+      genQueuedPrefetch(mem((deqPtr + 1.U).value))
+    ),
+    "queued"
   )
 
-  private val canTwoPrefetch =
-    // when ftq can provide 2 FDIP entry (valid && passedPnr && no backend flag)
-    io.fromEntryQueue(1).valid &&
-      // and the 2 entries are on the same page, to prevent extra ITLB port
-      prefetchReq(0).vPageNumber === prefetchReq(1).vPageNumber
+  private val mixedPrefetch = PrefetchGroup(VecInit(fdipPrefetch.req.head, queuedPrefetch.req.head), "mixed")
 
-  // (io.toICache.toPrefetch.fire && twoPrefetchValid) is passed to apply(..., canAssert) to prevent assert(x-state)
-  private val twoPrefetchCase = TwoPrefetchCase(prefetchReq, io.deq.fire && canTwoPrefetch)
+  // select prefetch source:
+  // 2-fdip > 1-fdip + 1-queued(software etc.) > 1-fdip > 2 or 1-queued
+//  private val selectedPrefetch = MuxCase(
+//    queuedPrefetch,
+//    Seq(
+//      fdipPrefetch.has2  -> fdipPrefetch,
+//      mixedPrefetch.has2 -> mixedPrefetch,
+//      fdipPrefetch.has1  -> fdipPrefetch
+//    )
+//  )
+  // NOTE: the above version can be bad at timing, a simplified version will be:
+  // 2-fdip > 1-fdip + 1-queued or 1-fdip, no 2-queued is allowed
+  private val selectedPrefetch = Mux(fdipPrefetch.has2, fdipPrefetch, mixedPrefetch)
 
-  io.deq.valid := io.fromEntryQueue(0).valid
-  io.deq.bits.req.zipWithIndex.foreach { case (req, i) =>
-    req.startVAddr       := prefetchReq(i).startVAddr
-    req.nextLineVAddr    := prefetchReq(i).nextLineVAddr
-    req.vSetIdx          := prefetchReq(i).vSetIdx
-    req.isCrossLine      := prefetchReq(i).isCrossLine
-    req.source           := PrefetchSource.Fdip
-    req.ftqIdx           := DontCare // assigned in Ftq top
-    req.backendException := DontCare // assigned in Ftq top
+  // send back to Ftq when has at least 1 prefetch req
+  io.deq.valid                := selectedPrefetch.has1
+  io.deq.bits.req             := VecInit(selectedPrefetch.req.map(_.bits))
+  io.deq.bits.twoPrefetchCase := selectedPrefetch.twoPrefetchCase
+  io.deq.bits.numFdip         := selectedPrefetch.numFdip
+
+  when(io.deq.fire) {
+    deqPtr := deqPtr + selectedPrefetch.numQueued
   }
-  io.deq.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Conflict)
-  io.deq.bits.fdipNum         := Mux(canTwoPrefetch, 2.U, 1.U)
 
   /* *** sanity check & perf *** */
   XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in FtqPrefetchQueue")
@@ -111,4 +168,46 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("drop", PopCount(io.enq.map(port => port.valid && !port.ready)))
   XSPerfAccumulate("enq_total", PopCount(io.enq.map(_.fire)))
   XSPerfAccumulate("enq_sw", PopCount(io.enqFromSw.map(_.fire)))
+
+  XSPerfSeqAccumulate(
+    "2pf",
+    io.deq.fire && selectedPrefetch.has2,
+    Seq(
+      ("total", true.B)
+    ) ++ selectedPrefetch.twoPrefetchCase.getValidSeq
+  )
+  XSPerfSeqAccumulate(
+    "fdip_2pf",
+    io.deq.fire && fdipPrefetch.has2,
+    Seq(
+      ("total", true.B)
+    ) ++ fdipPrefetch.twoPrefetchCase.getValidSeq
+  )
+  XSPerfSeqAccumulate(
+    "mixed_2pf",
+    io.deq.fire && !fdipPrefetch.has2 && mixedPrefetch.has2,
+    Seq(
+      ("total", true.B)
+    ) ++ mixedPrefetch.twoPrefetchCase.getValidSeq
+  )
+  XSPerfSeqAccumulate(
+    "fdip_1pf",
+    io.deq.fire && !fdipPrefetch.has2,
+    Seq(
+      ("no_target", !fdipPrefetch.req(1).valid),
+      ("page_conflict", fdipPrefetch.req(0).bits.vPageNumber =/= fdipPrefetch.req(1).bits.vPageNumber),
+      ("sram_conflict", fdipPrefetch.twoPrefetchCase.isConflict)
+    ),
+    withPriority = true
+  )
+  XSPerfSeqAccumulate(
+    "mixed_1pf",
+    io.deq.fire && !fdipPrefetch.has2 && !mixedPrefetch.has2,
+    Seq(
+      ("no_target", !mixedPrefetch.req(1).valid),
+      ("page_conflict", mixedPrefetch.req(0).bits.vPageNumber =/= mixedPrefetch.req(1).bits.vPageNumber),
+      ("sram_conflict", mixedPrefetch.twoPrefetchCase.isConflict)
+    ),
+    withPriority = true
+  )
 }

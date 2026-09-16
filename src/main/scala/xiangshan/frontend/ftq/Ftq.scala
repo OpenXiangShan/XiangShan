@@ -278,18 +278,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   when(io.toICache.toPrefetch.fire) {
-    pfPtr := pfPtr + prefetchQueue.io.deq.bits.fdipNum
+    pfPtr := pfPtr + prefetchQueue.io.deq.bits.numFdip
   }
 
   io.toICache.toPrefetch.valid := prefetchQueue.io.deq.valid
-  io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
-    req        := prefetchQueue.io.deq.bits.req(i)
-    req.ftqIdx := pfPtr(i)
+  (io.toICache.toPrefetch.bits.req zip prefetchQueue.io.deq.bits.req).zipWithIndex.foreach { case ((req, deq), i) =>
+    req.startVAddr    := deq.startVAddr
+    req.nextLineVAddr := deq.nextLineVAddr
+    req.vSetIdx       := deq.vSetIdx
+    req.isCrossLine   := deq.isCrossLine
+    req.ftqIdx        := pfPtr(i)
     if (i == 0) {
       req.backendException := Mux(backendFlagPtr === pfPtr(0), backendException, ExceptionType.None)
     } else { // we can do 2-prefetch only when !hasBackendFlag, so setting backendException on i != 0 is useless
       req.backendException := ExceptionType.None
     }
+    req.source := deq.source
   }
   io.toICache.toPrefetch.bits.twoPrefetchCase := prefetchQueue.io.deq.bits.twoPrefetchCase
 
@@ -727,25 +731,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "total_commits",
     commit
   )
-  XSPerfSeqAccumulate(
-    "2prefetch",
-    io.toICache.toPrefetch.fire && io.toICache.toPrefetch.bits.twoPrefetchCase.valid,
-    Seq(
-      ("total", true.B)
-    ) ++ io.toICache.toPrefetch.bits.twoPrefetchCase.getValidSeq
-  )
-//  XSPerfSeqAccumulate(
-//    "2prefetch_fail_reason",
-//    io.toICache.toPrefetch.fire && !io.toICache.toPrefetch.bits.twoPrefetchCase.valid,
-//    Seq(
-//      ("fb_not_passed_pnr", !passedPnr(pfPtr(1))),
-//      ("fb1_exception", backendException.hasException && backendFlagPtr === pfPtr(0)),
-//      ("fb2_exception", backendException.hasException && backendFlagPtr === pfPtr(1)),
-//      ("page_conflict", prefetchReq(0).vPageNumber =/= prefetchReq(1).vPageNumber),
-//      ("sram_conflict", twoPrefetchCase.isConflict)
-//    ),
-//    withPriority = true
-//  )
   XSPerfAccumulate(
     "total_fetch",
     io.toICache.toMainPipe.fire
