@@ -57,6 +57,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.ras.RasSpecReadReq
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason
@@ -128,10 +129,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
-  private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
+  private val specRedirectMeta = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras
+  private val specReadReq      = Wire(new RasSpecReadReq)
+  private val specTopRetAddr   = specRedirectMeta.topRetAddr
+  specReadReq.tosr       := specRedirectMeta.tosr
+  specReadReq.ssp        := specRedirectMeta.ssp
+  specReadReq.tosrInSpec := specRedirectMeta.topInSpec
   private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
     io.fromIfu.wbRedirect,
-    specTopAddr,
     backendRedirect.valid
   )
 
@@ -382,7 +387,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
   io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
-  io.toBpu.redirectFromIFU         := ifuRedirect.valid
+  io.toBpu.needChangeTarget        := ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn
+  io.toBpu.specReadReq             := specReadReq
+  io.toBpu.specRetAddr             := RegNext(specTopRetAddr)
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
@@ -574,6 +581,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("conditional", redirect.bits.attribute.isConditional),
       ("direct", redirect.bits.attribute.isDirect),
       ("indirect", redirect.bits.attribute.isIndirect),
+      ("ret", redirect.bits.attribute.isReturn),
       ("indirect_ret_call", redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect)
     )
   )
