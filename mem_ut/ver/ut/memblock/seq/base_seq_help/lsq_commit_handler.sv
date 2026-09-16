@@ -28,6 +28,10 @@ class lsq_commit_handler extends uvm_object;
     bit                fault_head_waiting;
     memblock_uid_t     fault_head_uid;
     int unsigned       fault_head_dynamic_epoch;
+    // fault terminal 后 modeled head 已可能移动，redirect 必须使用建 token 时的权威 ROB key。
+    memblock_rob_key_t fault_head_rob_key;
+    // 已有 older/equal redirect 覆盖 terminal fault 时，避免它完成后再发一次 fault redirect。
+    bit                fault_head_redirect_covered;
     bit                latched_is_store_exception;
 
     `uvm_object_utils(lsq_commit_handler)
@@ -45,6 +49,8 @@ class lsq_commit_handler extends uvm_object;
         fault_head_waiting = 1'b0;
         fault_head_uid = 0;
         fault_head_dynamic_epoch = 0;
+        fault_head_rob_key = '{default:'0};
+        fault_head_redirect_covered = 1'b0;
         latched_is_store_exception = 1'b0;
     endfunction:new
 
@@ -83,8 +89,75 @@ class lsq_commit_handler extends uvm_object;
         fault_head_waiting = 1'b0;
         fault_head_uid = 0;
         fault_head_dynamic_epoch = 0;
+        fault_head_rob_key = '{default:'0};
+        fault_head_redirect_covered = 1'b0;
         latched_is_store_exception = 1'b0;
     endfunction:reset_lsqcommit_runtime_state
+
+    // 只清 fault token 私有生命周期，不改 status、cursor、LQ/SQ 或 exception sideband latch。
+    function void clear_fault_head_token();
+        fault_head_waiting = 1'b0;
+        fault_head_uid = 0;
+        fault_head_dynamic_epoch = 0;
+        fault_head_rob_key = '{default:'0};
+        fault_head_redirect_covered = 1'b0;
+    endfunction:clear_fault_head_token
+
+    // 仅在 fault token terminal 等待期间扫描 recovery queue，保证未激活的真实 redirect
+    // 先由 exception handler 按 oldest 规则仲裁，避免与 fault redirect 竞争 cancel record。
+    function bit has_pending_monitor_redirect();
+        ensure_handles();
+        foreach (data.exception_event_q[idx]) begin
+            if (data.feedback_event_is_redirect(data.exception_event_q[idx])) begin
+                return 1'b1;
+            end
+        end
+        return 1'b0;
+    endfunction:has_pending_monitor_redirect
+
+    // 将已经 terminal 的 real-dispatch fault 转交既有 redirect owner；调用者负责 token/cursor。
+    function bit request_fault_head_redirect();
+        memblock_redirect_payload_t redirect;
+
+        ensure_handles();
+        if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
+            `uvm_fatal("LSQ_COMMIT", "fault redirect requested outside real dispatch topology")
+        end
+        if (!seq_csr_common::is_initialized() || !seq_csr_common::get_redirect_seq_en()) begin
+            `uvm_fatal("LSQ_COMMIT",
+                       "real-dispatch fault recovery requires MEMBLOCK_REDIRECT_SEQ_EN=1")
+        end
+        if (data.active_redirect.valid || data.has_pending_redirect_drive() ||
+            data.issue_blocked_by_global_flush() || has_pending_monitor_redirect()) begin
+            return 1'b0;
+        end
+
+        redirect = '{default:'0};
+        redirect.valid = 1'b1;
+        redirect.rob_key = fault_head_rob_key;
+        redirect.flush_itself = 1'b1;
+        redirect.level = 1'b1;
+        redirect.is_vls_exception = 1'b0;
+        data.request_redirect_flush(redirect);
+        data.push_redirect_drive(redirect);
+        `uvm_info("LSQ_COMMIT",
+                  $sformatf("request scalar fault redirect uid=%0d rob=%0d/%0d level=%0d flush_itself=%0d",
+                            fault_head_uid,
+                            fault_head_rob_key.flag,
+                            fault_head_rob_key.value,
+                            redirect.level,
+                            redirect.flush_itself),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:request_fault_head_redirect
+
+    // fault terminal 已确定后的统一收口。该函数不创建 redirect；调用者已经完成仲裁。
+    function void finish_fault_head_terminal();
+        commit_cursor_uid = fault_head_uid + 1;
+        clear_fault_head_token();
+        modeled_head_valid = 1'b0;
+        rebase_framework_head_from_commit_cursor();
+    endfunction:finish_fault_head_terminal
 
     function void ensure_modeled_rob_deq_ptr_initialized();
         ensure_handles();
@@ -589,6 +662,8 @@ class lsq_commit_handler extends uvm_object;
         fault_head_waiting = 1'b1;
         fault_head_uid = uid;
         fault_head_dynamic_epoch = status.dynamic_epoch;
+        fault_head_rob_key = status.get_rob_key();
+        fault_head_redirect_covered = 1'b0;
         data.try_retire_committed_uid(uid);
         sync_modeled_head_after_fault_terminal();
         latched_is_store_exception = fault_is_store_exception;
@@ -611,7 +686,7 @@ class lsq_commit_handler extends uvm_object;
             status.flushed || status.issue_killed ||
             !status.rob_commit) begin
             // Redirect 已经杀掉旧 fault 动态实例；保持 cursor 在同一 uid 等待 reissue。
-            fault_head_waiting = 1'b0;
+            clear_fault_head_token();
             modeled_head_valid = 1'b0;
             rebase_framework_head_from_commit_cursor();
             return 1'b0;
@@ -620,12 +695,34 @@ class lsq_commit_handler extends uvm_object;
             !status.fault || status.active_lq_mapped || status.active_sq_mapped) begin
             return 1'b0;
         end
-        commit_cursor_uid = fault_head_uid + 1;
-        fault_head_waiting = 1'b0;
-        fault_head_uid = 0;
-        fault_head_dynamic_epoch = 0;
-        modeled_head_valid = 1'b0;
-        rebase_framework_head_from_commit_cursor();
+
+        if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
+            // software-only fault sequence 没有 redirect responder/monitor，保持旧 terminal rebase。
+            finish_fault_head_terminal();
+            return 1'b1;
+        end
+        if (has_pending_monitor_redirect()) begin
+            // 让 recovery handler 先仲裁真实 monitor redirect，避免并发分配 cancel record。
+            return 1'b0;
+        end
+        if (data.active_redirect.valid) begin
+            if (rob_order_util::rob_need_flush(fault_head_rob_key, data.active_redirect)) begin
+                fault_head_redirect_covered = 1'b1;
+            end
+            return 1'b0;
+        end
+        if (data.has_pending_redirect_drive() || data.issue_blocked_by_global_flush()) begin
+            return 1'b0;
+        end
+        if (fault_head_redirect_covered) begin
+            // 已完成的覆盖 redirect 已负责年轻 UID 的 cancel/reissue，fault 本身仍只做 terminal skip。
+            finish_fault_head_terminal();
+            return 1'b1;
+        end
+        if (!request_fault_head_redirect()) begin
+            return 1'b0;
+        end
+        finish_fault_head_terminal();
         return 1'b1;
     endfunction:sync_modeled_head_after_fault_terminal
 

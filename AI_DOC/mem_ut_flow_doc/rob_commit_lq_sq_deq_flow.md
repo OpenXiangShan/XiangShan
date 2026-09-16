@@ -31,6 +31,9 @@
 | `pulse sideband` | 只描述本拍动作的输入 | `scommit`、`flushSb` | idle周期清0，不继承上一拍 |
 | `normal commit batch` | 从modeled head开始、连续满足writeback/pass/required-target条件的uid集合 | `select_rob_commit_batch()` | 最多`MEMBLOCK_COMMIT_WIDTH`个 |
 | `fault token` | fault head已发送commit语义但尚未完成LSQ release/非成功terminal的独占状态 | `fault_head_waiting`、`fault_head_uid`、`fault_head_dynamic_epoch` | fault未收敛前不允许更年轻normal commit越过 |
+| `stable fault anchor` | 建 token 时保存的完整 ROB key，terminal 后依然作为 DUT redirect anchor。 | `fault_head_rob_key` | UID5 使用 ROB `0/5`。 |
+| `terminal skip` | level=1 redirect 覆盖了 fault anchor 但扫描跳过其 terminal status 的恢复规则。 | `apply_redirect_flush_range()` | UID5 不 reissue，UID6 起重建。 |
+| `covered fault redirect` | 已有 active redirect 已经覆盖 fault anchor，token 只等待 owner 完成而不重复发 redirect。 | `fault_head_redirect_covered` | older redirect 覆盖 UID5。 |
 | `count-only sqDeq` | V2只提供SQ出队数量，不提供SQ出队pointer | `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR=0`、`raw.sq_deq` | 从软件`sq_deq_ptr`连续释放count个owner |
 | `terminal idle` | global stop后仍发布一次稳定level sideband、脉冲全0的最后transaction | `terminal_idle_published` | 发布后commit sequence才退出 |
 | `observation epoch` | monitor观察MMIO output时的环境flush epoch，不代表脉冲由哪个request产生 | `raw.mmio_flush_epoch` | 迟到旧load脉冲可能在redirect后的epoch被观察 |
@@ -52,6 +55,9 @@
   entry数量。两者没有同拍相等关系，`scommit`不能推进软件SQ deq pointer。
 - normal commit和fault convergence是两条互斥路径。fault head不混入normal `commit_uids`，也不计入
   normal-only `scommit`。
+- real dispatch 的 fault terminal 还必须建立 `level=1`、`flush_itself=1` redirect。fault 自身已 terminal，
+  `apply_redirect_flush_range()` 跳过它；strictly younger active UID 由既有 cancel/re-admission 恢复。software-only
+  topology 不建立该 redirect，维持原有 terminal rebase。
 - `isStoreException`不是`pendingst`的别名。它只在fault head transaction中由主表操作分类覆盖，
   transaction发送成功后锁存；normal commit、deq、redirect和terminal不会单独清零。
 
@@ -81,6 +87,13 @@ flowchart TD
     P --> P1[save committed_rob_watermark]
     P1 --> P2[rebase_framework_head_from_commit_cursor]
     Q --> Q1[fault_head_waiting and latch fault type]
+    Q1 --> Q2[wait deq then consume_fault_retire]
+    Q2 --> Q3[sync_modeled_head_after_fault_terminal]
+    Q3 --> Q4{real topology and no redirect conflict?}
+    Q4 -->|software-only| Q5[finish terminal and cursor=fault_uid+1]
+    Q4 -->|pending or active redirect| Q6[defer or record covered redirect]
+    Q4 -->|yes| Q7[request level=1 redirect and push drive]
+    Q7 --> Q8[terminal skip fault; re-admit UID6+]
     C --> S{global stop and terminal idle published?}
     S -->|yes| T[commit sequence exit]
 
@@ -125,6 +138,8 @@ flowchart TD
    若后续还有uid，以该uid status ROB key建立新modeled head；若已经是最后batch，只清active head，watermark继续发布；
    fault head先调用fault_uid_is_store_exception从权威主表分类load/store，随transaction驱动0/1；
    transaction发送后调用mark_fault_rob_commit_uid建立fault token并提交同一分类到latch，等deq/terminal收敛后才推进cursor；
+   real topology 的 token terminal 后先仲裁 pending monitor redirect 和 active redirect；无冲突时建立 level=1、flush_itself=1 payload 并送入既有 redirect drive FIFO；
+   fault 已 terminal 因而 redirect scan 跳过它，最早 younger UID6 通过既有 re-admission 恢复；software-only topology 保持直接 cursor rebase；
    token期间pendingst/pendingMMIOld保持0，isStoreException保持最近一次fault类型。
 
 4. idle和退出：
@@ -330,11 +345,13 @@ if (has_fault_head) mark_fault_rob_commit_uid(fault_uid);
 ```text
 只有normal batch为空时才检查fault head；
 fault candidate必须active、位于commit cursor、无replay/redirect/flushed/killed，且已有writeback或target fault；
-mark_fault_rob_commit_uid置rob_commit并保存uid、dynamic_epoch到fault token，同时把本次fault分类提交到
+mark_fault_rob_commit_uid置rob_commit并保存uid、dynamic_epoch和稳定ROB anchor到fault token，同时把本次fault分类提交到
 latched_is_store_exception；如果transaction没有进入该mark阶段，latch不提前变化；
 try_retire_committed_uid只有在LQ/SQ mapping释放后才调用consume_fault_retire，形成success=0的terminal；
-sync_modeled_head_after_fault_terminal确认token仍属于同一动态实例且已完整retire后，才推进commit cursor；
-若redirect杀掉旧fault实例，清token但cursor留在同一uid等待reissue。
+sync_modeled_head_after_fault_terminal确认token仍属于同一动态实例且已完整retire后，software-only场景才直接推进commit cursor；
+real topology 先等待pending monitor redirect 或 active redirect，active redirect 覆盖stable anchor时记录covered并避免第二次fault redirect；
+无冲突的real fault调用request_fault_head_redirect创建level=1、flush_itself=1 payload，成功后再推进cursor到fault_uid+1；
+若redirect在terminal前杀掉旧fault实例，清token但cursor留在同一uid等待reissue。
 ```
 
 normal和fault分流只约束ROB顺序，不要求`lqDeq/sqDeq`必须早于commit。commit与deq可以先后到达，
@@ -558,7 +575,9 @@ fault head：
   -> 等真实LQ/SQ mapping release
   -> consume_fault_retire
   -> success=0 terminal_done=1
-  -> token收敛后cursor推进
+  -> real topology: request level=1 / flush_itself=1 redirect
+  -> terminal fault skip；UID6+ cancel/re-admission
+  -> software-only: token收敛后cursor推进
 
 最后normal commit batch：
   mark_rob_commit_batch
@@ -583,7 +602,8 @@ normal commit只描述ROB顺序推进，LQ/SQ deq只描述DUT资源真正释放�
 公共retire helper等两条路径都完成后才设置最终success/terminal。
 
 fault不混入normal batch。独立fault token把cursor钉在当前head，直到该动态实例完成非成功terminal；
-redirect杀掉旧实例时token失效，但cursor仍等待同uid重新执行。
+real topology 随后固定以保存的ROB anchor驱动level=1 redirect，terminal fault本身不会reissue，UID6及其后旧实例由已有cancel/re-admission恢复。
+已有active redirect覆盖fault anchor时只记录covered并等待其owner完成；redirect在terminal前杀掉旧实例时token失效，但cursor仍等待同uid重新执行。
 
 最后一批normal commit后不存在active head，但StoreQueue仍需要看到已提交边界，所以driver持续发布已知batch
 tail watermark。watermark不带pendingst/MMIO语义，也不会推进status。global stop收敛后再发布一次terminal
