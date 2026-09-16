@@ -19,6 +19,20 @@ software-only fault smoke在注入fault writeback后还会调用既有`exception
 `exception_event_q`中的fault recovery event。该调用只复用`handle_fault_event()`的队列消费职责，不重复
 `mark_target_fault()`，避免测试结束时把合法已提交的fault event遗留在runtime drain检查中。
 
+## 术语与抽象功能说明
+
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
+| --- | --- | --- | --- |
+| `fault token` | fault head 已发送 lsqcommit commit 语义后，到 terminal recovery 完成前的 handler 私有状态。 | `fault_head_waiting`、UID、dynamic epoch 和 ROB anchor。 | UID5 等待其 SQ deq。 |
+| `fault terminal` | fault 已被既有 retire 收口的非成功终态。 | `consume_fault_retire()`。 | `success=0`、`terminal_done=1`、`active=0`。 |
+| `stable ROB anchor` | 建立 fault token 时保存的完整 ROB key；不能由之后移动的 commit cursor 推导。 | `fault_head_rob_key`。 | UID5 始终使用 `0/5` 发 redirect。 |
+| `level=1 redirect` | scalar exception 发送给 DUT 的 flush 类 redirect 等级。 | `request_fault_head_redirect()` payload。 | `level=1`、`is_vls_exception=0`。 |
+| `terminal skip` | redirect 扫描遇到已 terminal 的 fault 时不重新建立动态实例的既有规则。 | `apply_redirect_flush_range()`。 | UID5 被扫描跳过。 |
+| `re-admission` | younger 旧动态实例被 cancel 后，既有 admission 路径重新构造同一 UID。 | `prepare_uid_for_redirect_reissue()`。 | UID6 是第一个重新 admission UID。 |
+| `active redirect` | 已取得 cancel record、正在 drive/anchor/apply 的唯一 recovery owner。 | `data.active_redirect`。 | fault token 不能与其并发申请新 record。 |
+
+抽象功能描述：fault 状态、RM compare 和 fault terminal 仍由原有路径负责；本 flow 仅在 real dispatch topology 中把已 terminal 的 fault head 转为一次 `level=1` redirect。既有 redirect owner 负责 driver、monitor anchor、LSQ cancel 和 younger UID re-admission，fault UID 只作为 terminal skip，不会再次发射。
+
 ## 1. 函数调用 Flow 图
 
 ```mermaid
@@ -58,6 +72,16 @@ flowchart TD
     AF --> AG[mark_fault_rob_commit_uid latches type and token]
     AG --> AH[wait LQ or SQ deq]
     AH --> AI[consume_fault_retire]
+    AI --> AJ[sync_modeled_head_after_fault_terminal]
+    AJ --> AK{real dispatch topology?}
+    AK -->|no| AL[finish fault terminal and rebase]
+    AK -->|yes| AM{pending or active redirect?}
+    AM -->|yes| AN[defer or record covered redirect]
+    AM -->|no| AO[request_fault_head_redirect]
+    AO --> AP[request_redirect_flush and push_redirect_drive]
+    AP --> AQ[redirect driver plus monitor anchor]
+    AQ --> AR[apply_redirect_flush_range]
+    AR --> AS[skip terminal fault and re-admit UID6+]
 ```
 
 ## 1.1 函数调用 Flow 图整体文字伪代码
@@ -93,6 +117,13 @@ Fault / Exception 主流程：
    driver发送后，mark_fault_rob_commit_uid建立fault token并锁存同一bit；
    后续idle、normal commit、deq和redirect保持该level值，直到新的fault transaction覆盖；
    fault uid同时等待ROB commit和真实LQ/SQ mapping释放，再由consume_fault_retire进入非成功终态。
+
+6. fault terminal redirect recovery：
+   sync_modeled_head_after_fault_terminal 只在 token 仍是同一动态实例且已 terminal 时继续；
+   software-only topology 直接完成旧 cursor rebase，不创建 redirect；
+   real topology 先让 pending monitor redirect 或 active redirect 完成；active redirect 覆盖 fault anchor 时只记录覆盖事实；
+   无冲突时 request_fault_head_redirect 创建 `level=1`、`flush_itself=1`、`is_vls_exception=0` 的 payload，并交给既有 drive FIFO；
+   monitor anchor 后 apply_redirect_flush_range 跳过 terminal fault，cancel/reissue UID6 及更年轻的 active 实例。
 ```
 
 
@@ -405,6 +436,43 @@ retire_active_uid(uid);
 - `set_status_field(MEMBLOCK_STATUS_TERMINAL_DONE, 1)`：推进 completion 前缀。
 - `retire_active_uid()`：释放 active 生命周期。
 
+### 6.3 `sync_modeled_head_after_fault_terminal()` 与 fault redirect
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
+
+抽象功能描述：该 handler 在 fault token 已经 non-success terminal 后仲裁 software-only 兼容路径、已有 redirect 和新的 scalar-fault redirect。它不直接删除 LQ/SQ map 或写 DUT interface；既有 common-data redirect owner 仍拥有 cancel record、drive queue 和 active-window flush。
+
+真实逻辑摘要：
+
+```systemverilog
+if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
+    finish_fault_head_terminal();
+    return 1'b1;
+end
+if (has_pending_monitor_redirect()) return 1'b0;
+if (data.active_redirect.valid) begin
+    if (rob_order_util::rob_need_flush(fault_head_rob_key, data.active_redirect))
+        fault_head_redirect_covered = 1'b1;
+    return 1'b0;
+end
+if (!fault_head_redirect_covered && request_fault_head_redirect())
+    finish_fault_head_terminal();
+```
+
+文字伪代码：
+
+```text
+先验证 token 的 dynamic epoch、rob_commit 和 terminal/deq 状态；旧实例已被 redirect 杀掉时只清 token，并保持 cursor 等待同 UID 的既有 re-admission。
+software-only topology 没有 redirect driver/monitor，因此立即把 cursor 推到 fault_uid+1 并清 token，保持历史 directed test 行为。
+real topology 中，has_pending_monitor_redirect 扫描 recovery queue 中尚未仲裁的真实 redirect；存在时返回，避免两个 owner 同时申请 cancel record。
+如果 active_redirect 存在，使用 rob_need_flush 判断其是否覆盖 stable ROB anchor；覆盖时记录 covered 标记，任何 active redirect 都先等待其 apply 完成。
+已覆盖的 token 在 flush 完成后只完成 cursor rebase；不重复产生 fault redirect。
+无冲突时 request_fault_head_redirect 固定 payload 的 level=1、flush_itself=1、is_vls_exception=0，调用 request_redirect_flush 创建 owner，再用 push_redirect_drive 交给 responder。
+申请成功后 finish_fault_head_terminal 把 cursor 置为 fault_uid+1 并清 token；global flush 阻止 admission/issue，直到 monitor anchor 后的 apply_redirect_flush 完成。
+```
+
+`apply_redirect_flush_range()` 首先跳过 `terminal_done` 的 UID5，所以 `flush_itself=1` 不会重新发射 fault；对仍 active 的 UID6 及更年轻实例调用 `prepare_uid_for_redirect_reissue()`，由既有 admission 恢复。
+
 ## 7. `push_feedback_event()` 后 fault 入队
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
@@ -522,6 +590,10 @@ real writeback fault 未被 redirect 覆盖：
   -> try_retire_committed_uid
   -> consume_fault_retire
   -> success=0 / terminal_done=1 / active=0
+  -> sync_modeled_head_after_fault_terminal
+  -> real topology: request level=1 / flush_itself=1 redirect
+  -> redirect driver + monitor anchor + apply_redirect_flush_range
+  -> UID5 terminal skip；UID6+ cancel/re-admission
 
 fault 被 older redirect 覆盖：
   raw int writeback fault 与 older redirect 同 batch 或 active redirect 覆盖
@@ -557,7 +629,10 @@ real writeback fault 未被 redirect 覆盖：
     调用 consume_fault_retire；
     清 exception_pending，设置 success=0 和 terminal_done=1；
     retire_active_uid 释放 active 状态；
-    terminal_done_uid 可以越过该 fault uid。
+    terminal_done_uid 可以越过该 fault uid；
+  real dispatch topology 随后用保存的 fault ROB anchor 申请 level=1、flush_itself=1 redirect；
+  redirect owner 的 monitor anchor 完成后扫描 active window，UID5 已 terminal 因而跳过，UID6 及更年轻 UID 通过既有 cancel/re-admission 重建；
+  software-only topology 不申请 redirect，保持 terminal 后直接 rebase 的兼容流程。
 
 fault 被 older redirect 覆盖：
   如果同 batch 或 active redirect 覆盖该 fault 的 ROB，batch handler 直接 drop fault event；
