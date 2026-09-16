@@ -669,6 +669,8 @@ def _run_backend_fault_redirect_recovery(
     fault_kind: str,
     fault_bit: int,
     redirect_faults: dict[str, int],
+    *,
+    complete_recovery: bool = False,
 ) -> None:
     fault, normal = _backend_fault_recovery_scenarios(fault_kind)
     fault_pc = (fault.va & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
@@ -764,6 +766,20 @@ def _run_backend_fault_redirect_recovery(
         ),
         description=f"backend {fault_kind} recovery cfVec",
     )
+    if complete_recovery:
+        recovery = next(
+            record
+            for record in reversed(records["cfvec"])
+            if record["pc"] == fault_pc
+            and record["exception_bits"] == (fault_bit,)
+            and record["backend_exception"] == 1
+        )
+        env.backend_model.inject_exception(
+            cause=int(fault_bit),
+            tval=int(recovery["pc"]),
+            pc=int(normal.va),
+            satp_flush=1,
+        )
     assert not env.get_errors()
 
 

@@ -4483,14 +4483,15 @@ class BackendModel:
                     drive_from_pc = int(fallback_context.get("pc", drive_from_pc))
                     drive_ftq_offset = int(fallback_context.get("ftq_offset", drive_ftq_offset))
                     drive_is_rvc = int(fallback_context.get("is_rvc", drive_is_rvc))
-            self._assert_redirect_drive_ftq_not_stale(
-                payload_ftq_flag=int(ftq_flag),
-                payload_ftq_value=int(ftq_value),
-                drive_ftq_flag=int(drive_ftq_flag),
-                drive_ftq_value=int(drive_ftq_value),
-                target_pc=int(target_pc),
-                reason=str(reason),
-            )
+            if not bool(payload.get("trap_redirect", False)):
+                self._assert_redirect_drive_ftq_not_stale(
+                    payload_ftq_flag=int(ftq_flag),
+                    payload_ftq_value=int(ftq_value),
+                    drive_ftq_flag=int(drive_ftq_flag),
+                    drive_ftq_value=int(drive_ftq_value),
+                    target_pc=int(target_pc),
+                    reason=str(reason),
+                )
 
         drive_payload = {
             "pc": drive_from_pc,
@@ -4557,7 +4558,9 @@ class BackendModel:
                 )
             return self._plan_redirect_payload(top.payload)
         elif top.kind == "exception":
-            redirect_payload = self._plan_redirect_payload(top.payload)
+            redirect_payload = self._plan_redirect_payload(
+                {**top.payload, "trap_redirect": True}
+            )
             self._emit_event("exception", {"cause": top.payload.get("cause", 0)})
             return redirect_payload
         return None
@@ -4721,8 +4724,22 @@ class BackendModel:
             payload_extra=payload_extra,
         )
 
-    def inject_exception(self, cause: int, tval: int, pc: int, delay_cycles: int = _MIN_BACKEND_DELAY) -> None:
+    def inject_exception(
+        self,
+        cause: int,
+        tval: int,
+        pc: int,
+        delay_cycles: int = _MIN_BACKEND_DELAY,
+        *,
+        satp_flush: int = 0,
+    ) -> None:
         self._assert_explicit_injection_allowed("exception")
+        self._pending_resolves.clear()
+        self._clear_cfvec_queue_state()
+        self.ftq_entries.clear()
+        self._current_ftq_entry = None
+        self._current_ftq_seen_packets.clear()
+        self._last_correct_cfi_context = None
         ready_cycle = self.current_cycle + self._clamp_backend_delay(delay_cycles)
         from_pc = int(pc)
         if self.monitor is not None and self.monitor.observations:
@@ -4736,6 +4753,7 @@ class BackendModel:
                     "reason": "exception",
                     "cause": int(cause),
                     "tval": int(tval),
+                    "satp_flush": int(bool(satp_flush)),
                 },
             )
         )

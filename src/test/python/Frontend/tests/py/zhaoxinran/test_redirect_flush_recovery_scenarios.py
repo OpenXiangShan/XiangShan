@@ -384,6 +384,7 @@ def test_rfr_s01_fault_redirect_recovery_three_fetches(
         fault_kind=fault_kind,
         fault_bit=fault_bit,
         redirect_faults=redirect_faults,
+        complete_recovery=True,
     )
     _wait_for_three_main_fetches_after_redirect(env, main_fetch_samples)
     assert not env.monitor.get_errors()
