@@ -57,107 +57,48 @@ that boundary stable.
 
 ## Working Rules
 
-- If the requested path is not minimal, prefer the shorter path and explain the change in direction.
-- When splitting batched commits, prefer `git add -p` first. Do not make direct documentation edits as part of the commit-splitting phase. If `git add -p` cannot express the desired split, stop and ask the user before changing files further.
-- When the user says a file or change should not be uploaded, committed, staged,
-  or included in a diff, treat that strictly as a version-control boundary. Do
-  not delete, move, truncate, or rewrite the local file unless the user
-  explicitly asks for local deletion or cleanup.
+- Prefer the smallest path that satisfies the request.
 - When adding a contract test for a script, wrapper, or runner, place it in a
   dedicated test file named after that entrypoint. Do not hide runner contracts
   inside an unrelated feature test file.
-- Never use `git push -f` under any circumstances.
-- Never use `git merge` to incorporate remote code. When remote updates must
-  be integrated, use `git rebase` only.
+- Do not add low-signal tests under `tests/py/environment/` merely to assert
+  script text, help output, option names, or a hard-coded testcase selection.
+  Use direct shell syntax/help checks for those properties unless the runner
+  implements a stable behavior that needs a meaningful regression contract.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
   narrative logging.
-- Any user-provided process constraint must be written to the relevant repo
-  docs in the same turn; do not keep it only in chat memory.
-- When maintaining frontend testpoint CSVs, keep the hierarchy meaningful:
-  first-level testpoints are fixed by the source scope and must not be added
-  casually; fourth-level testpoints should group a mechanism, path, state, or
-  scenario class; fifth-level testpoints should be executable leaf cases with a
-  concrete input combination, timing relation, boundary, or expected behavior.
-  Do not leave a fourth-level and fifth-level testpoint identical after
-  inherited CSV hierarchy is expanded. If an existing fourth-level name is
-  already the leaf case, move it to the fifth level and rename the fourth level
-  to a real category.
-- Do not split frontend testpoints merely because a parameter value, position,
-  width, or legal combination changes. Split a leaf only when that change
-  creates a different observable correctness condition at the frontend/backend
-  boundary, exception behavior, flush/redirect behavior, or flow-control
-  behavior. Otherwise keep the value or position variation in `Condition`.
-- Do not translate established frontend testpoint terms just to make the CSV
-  read as Chinese prose. Keep domain terms such as `backend`, `redirect`,
-  `flush`, `commit`, `fence.i`, `sfence`, `hit`, `miss`, `refill`, `MSHR`,
-  `SRAM`, `BPU`, `FTQ`, `ICache`, `IBuffer`, and `InstrUncache` in English
-  when that is the normal project vocabulary. This does not permit Chisel code
-  snippets, signal-field expressions, or source references inside the testpoint
-  text.
-- When writing frontend testpoint descriptions, use natural language that is
-  easy to understand. Do not invent awkward shorthand terms such as "clean
-  return"; describe the observable behavior directly, for example "the uncache
-  response returns instruction data without `corrupt` or `denied`".
-- When filling a frontend testpoint CSV `Condition` column, write the trigger
-  condition, input state, timing relation, or boundary setup needed to exercise
-  the fifth-level testpoint. Derive that condition from the Chisel behavior
-  under `src/main/scala/xiangshan/frontend` and frontend architecture knowledge,
-  but do not put source paths, code snippets, or signal-field expressions in the
-  CSV cell.
-- Before constructing coverage for a new scenario, first check whether an
-  existing regression case can be extended without weakening its semantic
-  contract. If it can, extend or merge into that existing case; adding a new
-  testcase is forbidden. Add a new testcase only when no existing case can
-  encode the scenario cleanly.
+- Follow `src/test/python/Frontend/docs/03_funcov_model/skills.md` for all
+  testpoint, coverage-target, functional-coverage, and back-annotation rules.
+- Extend an existing regression when it can express the scenario without
+  weakening its semantic contract; otherwise add a focused new testcase.
 - Build verification-environment APIs, monitors, and oracles around reusable
   DUT behaviors, not individual testpoint names or directed testcase shapes.
   Collect the default functional coverage through reproducible regressions;
   add a directed testcase only for the small set of semantics that cannot be
   reached or judged reliably by that regression contract.
-- Do not change implementation code merely to satisfy an existing test when the
-  test contradicts the intended frontend behavior. Update or remove the invalid
-  expectation only after proving the semantic contract.
-- Do not turn a minimal reproducer into a permanent frontend regression test
-  unless it is suitable for continuous regression and carries real frontend
-  semantics. Prefer fixing the root cause first and only keep regression
-  coverage that matches the intended long-term contract.
-- A testcase that only checks whether a code edit behaved as expected must stay
-  temporary. Do not commit it under the regression test files; delete temporary
-  tests once they have served the local validation purpose.
-- Do not endlessly add minimal testcases to the regression suite. Any testcase
-  written into versioned regression files or documented as an official case must
-  be suitable for sustainable regression and must encode real frontend
-  semantics. Tests that exist only to check whether a local code edit behaves as
-  expected may be written as temporary tests, but they must not be placed in
-  long-lived regression files and must be deleted periodically.
-- Keep only functionally complete regression cases with clear pass/fail
-  assertions. Delete or merge development-only tests, generated exploratory
-  cases, cases that only send a few requests without proving DUT-visible
-  behavior, and cases whose assertions do not encode a stable semantic
-  contract.
-- Long-lived regression tests must not merely prove that one request can pass.
-  A kept testcase should cover a multi-request stream, a full multi-beat fetch
-  block, or a multi-stage boundary such as request/response/flush/backpressure
-  recovery. Exception cases that intentionally terminate early are acceptable
-  only when they assert DUT-visible exception behavior and, when relevant, that
-  an illegal resend or follow-up request does not occur.
+- Keep only regressions with stable frontend semantics and explicit pass/fail
+  assertions. Temporary edit checks and exploratory reproducers must not become
+  permanent tests.
+- Long-lived tests should cover a meaningful stream or boundary. Early-ending
+  exception cases must assert the DUT-visible exception and suppress any illegal
+  resend or follow-up request.
+- Keep each testcase centered on one primary observable behavior. Make relevant
+  PC boundaries and predictor training/check phases explicit in the instruction
+  stream instead of hiding semantics in host-side stimulus.
+- Randomized testcase generation must record enough seed and parameter data to
+  reproduce the exact instruction stream.
 - Do not frequently add low-signal or redundant cases to
   `src/test/python/Frontend/tests/py/environment/test_backend_model_unit.py`; only add a test
   there when it captures a distinct semantic contract, blocks a proven
   regression, or is the smallest meaningful reproducer for the root cause being
   fixed.
-- Do not abandon a semantically correct fix merely because existing tests turn
-  red. When current tests are inconsistent with the intended frontend/backend
-  contract, state that explicitly and update or remove the unreasonable tests
-  instead of distorting the implementation to satisfy them.
+- Do not distort implementation semantics to satisfy an invalid expectation;
+  prove the contract before updating the test.
 - When a frontend/backend semantic refactor is still incomplete, do not run any
   testcase, regression, or bin-trace reproduction until the refactor owner
   judges the new model complete enough for validation; do not use intermediate
   failing runs as a substitute for finishing the rewrite.
-- Before pushing frontend work, run `proxychains git fetch origin <current-branch>` and then
-  `git rebase origin/<current-branch>`. Do not replace this flow with
-  `git merge`.
 - For each verification alignment, record the exact `frontend-bt` commit and the
   corresponding `design_baseline_sha` from the `kunminghu-v3` merge already present in
   that commit. Do not independently synchronize from `kunminghu-v3`.
@@ -182,65 +123,21 @@ that boundary stable.
 
 ## Commit Message Rules
 
-When a frontend change is committed, the commit subject must follow the same
-format used by recent history under `src/test/python/Frontend/`:
-
-- use `type(scope): summary`
-- keep `type` and `scope` lowercase
-- for frontend verification changes, use `frontend` as the default scope
-- choose `type` from the actual change intent, for example:
-  `fix`, `feat`, `refactor`, `docs`, `test`, `chore`
-
-The summary must be derived from the staged file content, not from a vague
-intention. Therefore:
-
-- inspect the staged diff before writing the message
-- describe the concrete behavior or artifact change in the subject
-- do not use generic subjects such as `update frontend`, `misc fixes`, or
-  `tune logic`
-- if the commit mainly removes tests or checks that contradict the documented
-  semantic contract, say so explicitly instead of pretending it is a feature
-  change
-- commit message must be a single line only; do not add a multi-line body
+Inspect the staged diff first. Use a single-line `type(frontend): summary`
+subject that describes the concrete change; choose another lowercase scope only
+when it is more accurate.
 
 ## Build And Test
 
-Activate the mcpgateway environment before running Frontend Verilator build or
-Python DUT commands:
+Use the Frontend Python environment documented in
+`src/test/python/Frontend/README.md`; do not mix in an incompatible
+`libxspcomm.so`. The README and script `--help` output are the source of truth
+for build and run commands.
 
-```bash
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-cd "$NOOP_HOME"
-```
-
-Do not source `/nfs/share/unitychip/activate` for these commands. It prepends
-an older `libxspcomm.so` to `LD_LIBRARY_PATH`, which prevents the generated
-Frontend Python binding from loading. The required `mill`, `picker`, CMake,
-SWIG, and Verilator tools are available with the mcpgateway environment on
-this host.
-
-Build the default Verilator frontend DUT package from the repo root:
-
-```bash
-make frontend
-```
-
-Build the VCS frontend DUT package on a host with VCS and Verdi available; the
-target uses FSDB waveforms and requires explicit VCS/Verdi roots if the module
-environment does not export them:
-
-```bash
-make frontend-vcs \
-  FRONTEND_VCS_HOME=/path/to/vcs \
-  FRONTEND_VERDI_HOME=/path/to/verdi
-```
-
-`make frontend` defaults to Verilator. `make frontend-verilator` is an
-equivalent explicit alias and writes
-`build-frontend/pylib-verilator/Frontend/`; `make frontend-vcs` writes
-`build-frontend/pylib-vcs/Frontend/`. The two DUT packages can coexist. Select
-the package for a test process with `TB_FRONTEND_SIM=verilator` or
-`TB_FRONTEND_SIM=vcs`.
+The default build uses Verilator; the VCS build compiles FSDB support without
+embedding a shared startup waveform path. Their packages coexist under
+`build-frontend/pylib-<sim>/Frontend/` and are selected at runtime with
+`TB_FRONTEND_SIM`.
 
 Both build targets first run the `verilog` dependency when the Chisel/Scala
 inputs have changed, with `BUILD_DIR=build-frontend`, so the full RTL is emitted
@@ -250,17 +147,9 @@ directly under `build-frontend/rtl/`. Picker selects
 The VCS target appends the funcov SV sources after the complete RTL list in
 `build-frontend/full-rtl-picker.funcov.f`.
 
-In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
-by default. It opens a local socket during `pytest_configure` and otherwise
-fails before the testcase starts. Frontend helper scripts in this tree already
-do this by passing `-p no:rerunfailures`. If you invoke `pytest` directly,
-include the same flag unless you intentionally need that plugin outside the
-sandbox.
+Frontend helper scripts disable `pytest_rerunfailures` in sandboxed runs. For
+direct pytest, retain that behavior unless the plugin is intentionally needed.
 
-For direct `pytest`:
-
-- `-p no:rerunfailures`: disable the environment-level rerun plugin in
-  sandboxed/manual runs unless you intentionally need it.
 - `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
   existing `_RUN_DUT` pattern.
 - If a pytest result contains skips caused by `TB_ENABLE_DUT_TESTS` being unset,
@@ -271,45 +160,14 @@ For direct `pytest`:
 - A DUT batch regression is complete only if pytest reaches the final summary
   and the selected/completed case count matches the intended target.
 
-Run the default non-DUT frontend regression flow from the repo root:
-
-```bash
-src/test/python/Frontend/scripts/run_pytest_with_log.sh
-```
-
-Run the DUT-enabled frontend regression flow explicitly:
-
-```bash
-TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
-```
-
-`run_pytest_with_log.sh` accepts optional pytest arguments and documents its
-log-directory, log-file, log-level, and rerun-plugin controls in its header.
-It does not enable DUT integration by itself.
-
-With `TB_FRONTEND_SIM=vcs`, `TB_SKIP_DUT_FINISH=1` reuses one VCS DUT for the
-pytest process. Per-case teardown clears clock callbacks; pytest session
-teardown calls `dut.Finish()` once. This produces one run-scoped aggregate VDB
-result; it is not pass evidence by itself.
-
-Run the fast frontend smoke guard used by the local change hook:
-
-```bash
-python src/test/python/Frontend/change_guard.py
-```
-
-Enable the versioned git hook so staged frontend changes run the smoke guard before commit:
-
-```bash
-git config core.hooksPath .githooks
-```
-
-When the staged files include
-`src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`,
-the same hook also checks the staged CSV itself: every logical record must
-occupy exactly one physical line. The check is implemented in
-`src/test/python/Frontend/tests/py/environment/test_testpoint_csv_contract.py`
-and can be run directly with `--staged`.
+With `TB_FRONTEND_SIM=vcs`, `TB_SKIP_DUT_FINISH=1` reuses one DUT and calls
+`dut.Finish()` once at pytest session teardown. It dumps the coverage accumulated
+by all cases as `<run_id>_vcs_batch`. When `TB_ENABLE_DUT_COVERAGE=1`, the
+compiled VDB is treated as a read-only template and copied to
+`$TB_COVERAGE_DIR/Frontend.vdb`, or to
+`build-frontend/artifacts/<run_id>/Frontend.vdb` without an override.
+Concurrent processes must use different run roots. Merge their completed VDBs
+with URG after all processes finish.
 
 ## Bin-Trace Workflow
 
@@ -324,115 +182,19 @@ the runnable `.bin` must include the leading `0x1000` zero-byte padding. Name
 the final runnable file as the case `.bin`; do not add `_padded` to the
 filename. Keep ELF/map artifacts only for address inspection and disassembly.
 
-### Standard Entry
-
-Run one ready-to-run bin through the pipeline:
-
-```bash
-src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
-```
-
-### Regression List
-
-Run an explicitly selected ready-to-run bin-trace regression:
-
-```bash
-src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
-  ready-to-run/cfi_mix_case.bin \
-  ready-to-run/cfi_random_5inst_case.bin
-```
-
 Do not add a tracked default active-bin list. Keep the selected bin set explicit
 on the command line or in a user-provided `--list-file <path>` outside the
 commit unless the list itself is intentionally under review. Leave long-running
 workloads out unless they are explicitly requested for that run.
 
-Useful suite controls:
-
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list <bin ...>`:
-  print the selected bins without running them.
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list-file <path>`:
-  run a selected list file.
-- `TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL=1`: continue later bins after a case
-  failure.
-
-The pipeline defaults logging to `INFO`, `TB_TRACE_STAGNANT_CYCLES_LIMIT` to
-`20000`, `TB_TRACE_STALL_SNAPSHOT_INTERVAL` to `5000`, and
-`TB_PYTEST_TIMEOUT_SECS` to `6400` for the DUT stage. `PYTEST_ADDOPTS` defaults to
-`-s -o log_cli=true --log-cli-level=<cli-level>`. Use `TB_LOG_LEVEL=WARNING`
-to quiet both environment and pytest CLI logs, or use `TB_ENV_LOG_LEVEL` /
-`TB_LOG_CLI_LEVEL` to override them separately. The suite wrapper currently
-uses a 1200-second DUT-stage default for each case; set
-`TB_PYTEST_TIMEOUT_SECS` explicitly for long bins rather than treating that
-default as a universal limit.
-Long cases may lower routine logging and extend the timeout, but must retain
-progress or stall observability.
-
-NEMU trace generation is expected to finish from the finite program input and
-has no separate fixed timeout. An outer `timeout` is an optional whole-pipeline
-watchdog for infrastructure-risky runs; when used, choose it from measured
-trace-generation plus DUT time and leave enough cleanup margin.
-
-### Variants
-
-The script accepts optional explicit trace and NEMU-log paths after the
-binary. The following form is for importing a previously generated legacy
-trace; omitted paths default under the new run's `inputs/` directory:
-
-```bash
-TB_SKIP_NEMU=1 \
-src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh \
-  ready-to-run/<case>.bin \
-  NEMU/logs/<case>.trace.jsonl
-```
-
-Set `TB_RUN_DUT=0` only when you intentionally want to generate or refresh the
-NEMU trace without running the DUT:
-
-```bash
-TB_RUN_DUT=0 \
-src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
-```
-
-Other `run_bin_trace_pipeline.sh` knobs worth recording:
-
-- `TB_NEMU_MAX_INSTR=...`: pass `-I` to NEMU when you intentionally want an
-  instruction cap during trace generation.
-- `TB_TRACE_LIMIT=...`: truncate the converted golden trace when you
-  intentionally want a shorter debug input.
-- `TB_SKIP_NEMU=1`: skip NEMU trace generation and reuse the explicit or
-  default JSONL trace path. Required when the trace was generated separately.
-- `TB_TRACE_START_INDEX=...`: start golden comparison from a JSONL index for
-  local diagnosis only. It does not restore DUT, BPU, or FTQ state, so it is
-  not a valid mid-trace restart or full-pass workflow.
-- `TB_RESET_VECTOR=...`: choose the DUT reset/start PC; defaults to
-  `TB_BASE_ADDR` in the bin-trace pipeline.
-- `TB_LOG_LEVEL=...`: set both env and pytest CLI log levels; defaults to
-  `INFO`. `INFO` prints `INFO`/`WARNING`/`ERROR`; `WARNING` prints only
-  `WARNING`/`ERROR`.
-- `TB_ENV_LOG_LEVEL=...`: override only the environment logger level.
-- `TB_LOG_CLI_LEVEL=...`: override only pytest CLI log level.
-- Bin cases must be started through `run_bin_trace_pipeline.sh` or
-  `run_bin_trace_suite.sh`; do not invoke the underlying pytest case directly.
-- `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
-  keeps the run-to-completion behavior.
-- `TB_TRACE_TARGET_CURSOR=...`: stop once this golden-trace cursor is reached.
-  Use `0` to disable (default). A positive value is bounded debug/window
-  evidence only: reaching the cursor means no enabled checker failed in that
-  prefix, not that the full bin-trace regression completed.
-- `TB_PYTEST_TIMEOUT_SECS=...`: set the DUT-stage wall-clock timeout used by
-  the pipeline script; default is `6400`.
-- `TB_TRACE_STALL_SNAPSHOT_INTERVAL=...`: print stall snapshots every N
-  stagnant cycles; default is `5000`, and `0` disables snapshot printing.
-- `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: fail when the golden cursor is stagnant
-  for this many cycles; default is `20000`.
-- `PYTHON=...`: choose a non-default Python executable for the helper tools and
-  pytest stage.
-
 Run bin cases only through `run_bin_trace_pipeline.sh` for one binary or
 `run_bin_trace_suite.sh` for a selected list. The runners provide the required
 pipeline gate, trace input, runtime bounds, and artifact layout; direct pytest
 invocation is not a supported bin-case workflow.
+
+Use the runners' `--help` output for paths, environment variables, logging, and
+runtime controls. Bounded cursor, trace, instruction, or cycle limits are debug
+evidence only and do not establish a complete bin-trace pass.
 
 Although the runners use pytest internally for the DUT stage, a bin-trace case
 is a bin/trace integration regression, not a Python testcase. Exclude bin-trace
@@ -443,19 +205,10 @@ through their shell-runner result.
 
 Any DUT bin-trace case must meet the following operational requirements:
 
-- the DUT stage must have a hard runtime upper bound through
-  `TB_PYTEST_TIMEOUT_SECS`
-- every run must generate a waveform artifact
+- the DUT stage must have a hard runtime upper bound
+- every final evidence run must generate a waveform artifact
 - every run must generate a readable log artifact
-- every run must use a unique `run_id` and artifact root, normally
-  `build-frontend/artifacts/<run_id>/`; a suite must use a unique dated suite
-  root under `build-frontend/artifacts/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`
-- code coverage, waveform, funcov, and logs from one run must not be mixed with
-  another run's output directories
-- waveform and log filenames should be logically tied to the binary and test
-  case, so the reproduction can be matched back to the exact run
-- historical date directories and `data/funcov/` are read-only evidence, not
-  current run destinations
+- artifacts must follow the unique run-root rules below
 
 In addition, bin-trace runs must have explicit runtime observability. Do not
 run them as opaque long-running jobs with no bounded diagnostics. A valid
@@ -466,85 +219,21 @@ bin-trace run must provide at least one of the following while it is running:
 - an equivalent explicit observation mechanism that can distinguish
   “still making progress” from “stuck”
 
-Therefore:
-
-- a bin-trace case must not be allowed to sit in a silent apparent dead loop
-  after progress has stopped
-- if forward progress stalls, the run should surface that fact through logs or
-  an equivalent observation channel instead of only hanging until external kill
-  or manual interruption
-- for DUT bin runs, set `TB_TRACE_STAGNANT_CYCLES_LIMIT` and fail early when
-  golden-trace cursor stops advancing (pipeline default: `20000`)
-- for pipeline runs, use `TB_PYTEST_TIMEOUT_SECS` to set the DUT-stage timeout;
-  default is `6400` seconds
-- in interactive debug sessions, keep `TB_TRACE_STAGNANT_CYCLES_LIMIT` and
-  `TB_PYTEST_TIMEOUT_SECS` enabled; add an outer `timeout` guard only when a
-  whole-pipeline watchdog is needed
-- when debugging a stuck bin-trace case, prefer enabling progress/stall
-  reporting before changing semantic logic
-- for any bin-trace reproduction, use the local
-  `ready-to-run/riscv64-nemu-interpreter` for golden traces; it is not a tracked
-  repository artifact
-
-Implementation Notes:
-
-- `scripts/run_bin_trace_pipeline.sh` enforces positive values for
-  `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS`, and enforces
-  non-negative values for `TB_TRACE_TARGET_CURSOR` and
-  `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
-- waveform dumping is enabled by default, but can still be disabled with
-  `TB_ENABLE_FST_DUMP=0`
-- `env/runtime/fixtures.py` accepts `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, and
-  `TB_CASE_LOG_PATH` as explicit artifact-path overrides
-- golden progress is printed by the Python golden-trace runner as the cursor
-  advances; `TB_TRACE_PROGRESS_INTERVAL` only enables additional logger
-  checkpoints and is not required for normal progress visibility
-- stall snapshots are printed every `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
-  stagnant cycles; the script default is `5000`, and `0` disables snapshots
-- paired per-case log files are created by `env/runtime/fixtures.py` when `TB_BIN_PATH`
-  is set
-
-## Utilities
-
-Start the frontend web console:
-
-```bash
-TB_ENV_LOG_LEVEL=INFO \
-TB_WEB_HOST=127.0.0.1 \
-TB_WEB_PORT=8000 \
-src/test/python/Frontend/scripts/run_web_console.sh
-```
-
-Convert a frontend FST waveform to FSDB:
-
-```bash
-src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
-```
-
-Open a VCS-generated frontend FSDB with RTL in Verdi:
-
-```bash
-verdi -sv \
-  "$NOOP_HOME/build-frontend/pylib-vcs/Frontend/Frontend_top.sv" \
-  -F "$NOOP_HOME/build-frontend/full-rtl-picker.funcov.f" \
-  -top Frontend_top \
-  -ssf "$NOOP_HOME/build-frontend/artifacts/<run_id>/waveforms/<case>.fsdb"
-```
-
-Use `-F`, not `-f`, so relative RTL paths inside the generated filelist are
-resolved from the filelist directory. Include the picker/VCS wrapper
-`build-frontend/pylib-vcs/Frontend/Frontend_top.sv` explicitly and use
-`-top Frontend_top`; the generated RTL module `Frontend` is the DUT under
-that wrapper, not the FSDB top.
+If progress stops, the runner must report the stall and fail within its bounds;
+do not leave the process in a silent loop. Keep progress, stall, and timeout
+controls enabled during diagnosis before changing semantic logic.
 
 ## Artifact Naming
 
 - Use one unique `run_id` for every invocation and keep its outputs under one
-  run root.
-- A bin-trace run keeps coverage, waveforms, funcov, and logs in separate
-  subdirectories of `build-frontend/artifacts/<run_id>/`.
-- Waveform and log filenames use the testcase/binary artifact tag; by default
-  they are `<tag>.<wave-ext>` and `<tag>.log`.
+  run root, normally `build-frontend/artifacts/<run_id>/`.
+- A suite must allocate a separate run ID and `cases/<case_stem>/` directory for
+  every case. Cases must not write into one shared live directory.
+- Non-bin tests use the run root directly; bin-trace runners separate coverage,
+  waveforms, funcov, and logs into subdirectories.
+- Waveform and log names identify the testcase or binary. Verilator waveforms
+  use `.fst` or `.vcd` and coverage uses `.dat`; VCS waveforms use `.fsdb` and
+  coverage uses run-local `Frontend.vdb`.
 - Case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
   `0` only when intentionally suppressing a per-case log.
 - `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, `TB_CASE_LOG_PATH`, and
@@ -552,6 +241,7 @@ that wrapper, not the FSDB top.
   a regression or suite must remain unique to that run.
 - Historical date directories are read-only evidence and must not be reused as
   current run destinations.
+- Keep wrapper and pipeline logs in the same run root as their DUT artifacts.
 
 ## Test Authoring Rules
 
@@ -561,79 +251,11 @@ that wrapper, not the FSDB top.
   `src/test/python/Frontend/tests/py/environment/`; add assembly regressions
   under `src/test/python/Frontend/tests/asm_cases/<author>/`.
 - Name tests `test_*.py`.
-- Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
 - Reuse fixtures from `src/test/python/Frontend/env/runtime/fixtures.py`.
-- Frontend line coverage `.dat` files are registered with
-  `toffee_test.reporter.set_line_coverage` during DUT fixture teardown by
-  default. Reviewed file waives belong in
-  `src/test/python/Frontend/Frontend.ignore`; reviewed source-text line omits
-  belong in `src/test/python/Frontend/Frontend.omit`. The HTML script maps
-  file waives to `genhtml --exclude` and filters lcov records matched by omit
-  regexes before generating HTML.
-  Do not waive SRAM files by default. Override with `TB_LINE_COVERAGE_IGNORE=...`
-  or `TB_LINE_COVERAGE_OMIT=...`; disable reporter registration with
-  `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` for debugging.
+- Follow `src/test/python/Frontend/README.md` for Verilator `.dat` reporting and
+  reviewed ignore/omit handling.
 - Do not commit transient logs, generated waveforms, or other temporary
   artifacts unless they are intentional fixtures.
-
-### Frontend Testcase Design
-
-Keep frontend testcase design centered on controllable instruction flow rather
-than host-side test scaffolding.
-
-- Each testcase should target one primary frontend behavior such as fetch
-  sequencing, branch direction, target prediction, return prediction,
-  redirect recovery, or a boundary condition. Do not mix multiple unrelated
-  goals into one case when a smaller case can isolate the behavior.
-- When the testcase depends on frontend position semantics, make the PC shape
-  intentional. Use labels, alignment, and padding so fetch-block boundaries,
-  CFI offsets, and redirect targets are predictable from the source.
-- For predictor-training cases, separate the stable training phase from the
-  behavior-check phase. The testcase structure should make it obvious which
-  instructions build predictor state and which instructions validate reuse,
-  mispredict handling, or recovery.
-- Prefer describing the testcase in terms of instruction stream and expected
-  PC/control-flow behavior. Keep environment-side logic focused on load,
-  control, observation, and comparison; do not hide testcase semantics inside
-  custom host-side stimulus when the same behavior can be expressed in the
-  program itself.
-- Any randomized testcase generation must remain reproducible. Record the
-  seed and generation parameters in the checked-in artifact or in a stable
-  regeneration path, so the exact instruction stream can be reproduced later.
-
-## Artifact Naming
-
-- Use one unique `run_id` for every invocation and keep its outputs under one
-  run root.
-- Waveform and log filenames must identify the testcase or binary; the run
-  identity belongs in the parent directory and artifact metadata.
-- A suite must allocate a different run ID and a separate
-  `cases/<case_stem>/` directory for every case. It may aggregate `.dat` files
-  into `report/` after all cases finish, but it must not make the cases write
-  into one shared live directory.
-- Historical date directories are read-only evidence and must not be reused as
-  current run destinations.
-- Keep wrapper or pipeline logs for a DUT run in the same run root as the
-  waveform and case log. Do not create a separate ad-hoc log directory for a
-  run whose artifacts already live under that run root.
-
-Current default implementation details in `env/runtime/fixtures.py`:
-
-- waveform, case log, coverage `.dat`, and funcov default under
-  `build-frontend/artifacts/<run_id>/`
-- non-bin DUT tests use the same run-scoped layout as bin-trace tests
-- default waveform file name is `<bin-stem>_<test-name>.<wave-ext>`
-- default `wave-ext` is `fst`
-- if frontend is rebuilt with `FRONTEND_WAVEFORM_FORMAT=vcd`, default `wave-ext` becomes `vcd` and later `make frontend` runs keep using `vcd` until `FRONTEND_WAVEFORM_FORMAT=fst` is specified explicitly
-- default case log file name is `<bin-stem>_<test-name>.log`
-- when `TB_BIN_PATH` is unset, the artifact stem is the pytest case name
-- when `TB_BIN_PATH` is set, the artifact stem is
-  `<bin-stem>_<test-name>`
-- case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
-  `0` only when intentionally suppressing per-case logs
-- `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, `TB_CASE_LOG_PATH`, and
-  `TB_COVERAGE_DIR` still override default locations when explicitly set; any
-  regression or suite using overrides must keep them unique per run
 
 ## Deeper References
 
