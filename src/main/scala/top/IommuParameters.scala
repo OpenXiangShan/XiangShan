@@ -9,4 +9,4 @@ package top
 import org.chipsalliance.cde.config.Field
 
 /** Controls instantiation of the external bosc IOMMU simulation model. */
-case object EnableIommuKey extends Field[Boolean](true)
+case object EnableIommuKey extends Field[Boolean](false)

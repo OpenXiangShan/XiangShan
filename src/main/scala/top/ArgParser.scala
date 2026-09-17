@@ -40,6 +40,7 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
+      |--with-iommu
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
@@ -101,6 +102,10 @@ object ArgParser {
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
+          }), tail)
+        case "--with-iommu" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case EnableIommuKey => true
           }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {
@@ -255,14 +260,7 @@ object ArgParser {
       }
     }
     val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
-    // GSIM consumes CHIRRTL directly and cannot elaborate the external
-    // bosc-IOMMU RTL blackbox. Keep the IOMMU enabled for Verilator/VCS,
-    // but bypass it for the GSIM-only difftest configuration.
-    val gsim = args.sliding(2).collectFirst {
-      case Array("--difftest-config", cfg) => cfg.contains("G")
-    }.getOrElse(false)
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
-      case EnableIommuKey => !gsim
       case LogUtilsOptionsKey => LogUtilsOptions(
         enableDebug = here(DebugOptionsKey).EnableDebug,
         enablePerf = here(DebugOptionsKey).EnablePerfDebug,
