@@ -74,7 +74,8 @@ class NewFreeList(
   flManager.in.doAllocate := io.doAllocate && !io.walk
   // RAB/VTypeBuffer enter walk one cycle after redirect; Rob registers their
   // commit bundles once more before Rename sees isWalk. Bridge that gap so s1
-  // cannot refill or allocate against a bitmap that is about to be restored.
+  // cannot select bitmap candidates or allocate before restoration. Valid
+  // commit frees may still refill s1 throughout recovery.
   val redirectReg = RegNext(io.redirect, false.B)
   flManager.in.flush := io.redirect || redirectReg || io.walk
 
