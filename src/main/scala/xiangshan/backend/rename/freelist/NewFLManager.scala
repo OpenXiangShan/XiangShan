@@ -9,7 +9,8 @@ import xiangshan.{XSBundle, XSModule}
 class NewFLManager(
   numPhyRegs: Int,
   renameWidth: Int,
-  s1QueueSize: Int = NewFLManager.DefaultS1QueueSize
+  s1QueueSize: Int = NewFLManager.DefaultS1QueueSize,
+  freeReqWidth: Int = 0
 )(implicit p: Parameters) extends XSModule {
   require(renameWidth >= 2 && renameWidth % 2 == 0,
     s"NewFLManager rename width must be a positive even number, got $renameWidth")
@@ -17,8 +18,11 @@ class NewFLManager(
     s"Physical register count $numPhyRegs must cover ${renameWidth / 2} allocation banks")
   require(s1QueueSize >= renameWidth,
     s"NewFLManager s1 queue size $s1QueueSize must be no smaller than rename width $renameWidth")
+  private val freeWidth = if (freeReqWidth == 0) renameWidth else freeReqWidth
+  require(freeWidth > 0,
+    s"NewFLManager free-request width must be positive, got $freeWidth")
 
-  val in = IO(Input(new NewFLManager.In(numPhyRegs, renameWidth)))
+  val in = IO(Input(new NewFLManager.In(numPhyRegs, renameWidth, freeWidth)))
   val out = IO(Output(new NewFLManager.Out(numPhyRegs, renameWidth)))
 
   private val bankCount = renameWidth / 2
@@ -32,6 +36,7 @@ class NewFLManager(
   val s1HeadPtrOH = RegInit(1.U(s1QueueSize.W))
   val s1TailPtr = RegInit(0.U(s1PtrWidth.W))
   val s1ValidCount = RegInit(0.U(s1CountWidth.W))
+  val s1CanAllocateReg = RegInit(false.B)
 
   private def addS1Ptr(ptr: UInt, increment: UInt): UInt = {
     val sum = ptr +& increment
@@ -42,9 +47,15 @@ class NewFLManager(
   // consumes them, so the manager reserves them locally to prevent reselection.
   val reservedBitmap = RegInit(0.U(numPhyRegs.W))
   val s1FreeCount = s1QueueSize.U(s1CountWidth.W) - s1ValidCount
+  val allocateCount = PopCount(in.allocateReq)
+  val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
+  val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
+  // Head entries consumed this cycle free slots that can be reused by the
+  // append stream at tail, including when the queue was full at cycle start.
+  val s1EnqueueCapacity = s1FreeCount +& s1DequeueCount
 
   /** Stage 0: select up to two candidates from every bank. */
-  val s0CanEnqueue = !in.flush && s1ValidCount < s1QueueSize.U
+  val s0CanEnqueue = !in.flush && s1EnqueueCapacity =/= 0.U
   val s0AllocBitmap = Mux(s0CanEnqueue, in.freeBitmap & ~reservedBitmap, 0.U)
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
@@ -70,18 +81,47 @@ class NewFLManager(
     s0CandidateValid(bankIndex + bankCount) := bankHasCandidate && firstCandidate =/= lastCandidate
   }
 
-  val s0EnqueueOffset = Wire(Vec(renameWidth, UInt(log2Ceil(renameWidth + 1).W)))
-  val s0EnqueueValid = Wire(Vec(renameWidth, Bool()))
-  for (candidateIdx <- 0 until renameWidth) {
-    s0EnqueueOffset(candidateIdx) := PopCount(s0CandidateValid.take(candidateIdx))
-    s0EnqueueValid(candidateIdx) := s0CandidateValid(candidateIdx) &&
-      s0EnqueueOffset(candidateIdx) < s1FreeCount
-  }
-  val s0EnqueueCount = PopCount(s0EnqueueValid)
-  val s0EnqueueBitmap = (0 until renameWidth).map { candidateIdx =>
+  val s0CandidateBitmap = (0 until renameWidth).map { candidateIdx =>
     Mux(
-      s0EnqueueValid(candidateIdx),
+      s0CandidateValid(candidateIdx),
       UIntToOH(s0Candidates(candidateIdx), numPhyRegs),
+      0.U(numPhyRegs.W)
+    )
+  }.reduce(_ | _)
+
+  // Newly released registers are not yet in this cycle's bitmap. Append
+  // them after the s0-selected candidates so they can refill s1 immediately.
+  // Filter duplicates against s1 reservations, s0 candidates, and earlier
+  // free requests before compacting the combined enqueue stream.
+  val freeCandidateValid = Wire(Vec(freeWidth, Bool()))
+  for (freeIdx <- 0 until freeWidth) {
+    val freeReg = in.freePhyReg(freeIdx)
+    val duplicateFree = if (freeIdx == 0) {
+      false.B
+    } else {
+      in.freeReq.take(freeIdx).zip(in.freePhyReg.take(freeIdx)).map {
+        case (valid, previousReg) => valid && previousReg === freeReg
+      }.reduce(_ || _)
+    }
+    freeCandidateValid(freeIdx) := !in.flush && in.freeReq(freeIdx) &&
+      !reservedBitmap(freeReg) && !s0CandidateBitmap(freeReg) && !duplicateFree
+  }
+
+  val enqueueWidth = renameWidth + freeWidth
+  val enqueueCandidates = VecInit(s0Candidates ++ in.freePhyReg)
+  val enqueueCandidateValid = VecInit(s0CandidateValid ++ freeCandidateValid)
+  val enqueueOffset = Wire(Vec(enqueueWidth, UInt(log2Ceil(enqueueWidth + 1).W)))
+  val enqueueValid = Wire(Vec(enqueueWidth, Bool()))
+  for (candidateIdx <- 0 until enqueueWidth) {
+    enqueueOffset(candidateIdx) := PopCount(enqueueCandidateValid.take(candidateIdx))
+    enqueueValid(candidateIdx) := enqueueCandidateValid(candidateIdx) &&
+      enqueueOffset(candidateIdx) < s1EnqueueCapacity
+  }
+  val enqueueCount = PopCount(enqueueValid)
+  val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
+    Mux(
+      enqueueValid(candidateIdx),
+      UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
@@ -98,18 +138,14 @@ class NewFLManager(
     }
   }
   val s1HeadCandidates = Mux1H(s1HeadPtrOH, s1QueueVec)
-  val allocateCount = PopCount(in.allocateReq)
   for (laneIdx <- 0 until renameWidth) {
     val candidateOffset = PopCount(in.allocateReq.take(laneIdx))
     out.allocatePhyReg(laneIdx) := s1HeadCandidates(candidateOffset)
   }
   // Match StdFreeList timing: canAllocate is registered from the number of
   // candidates left after this cycle's dequeue/refill.
-  val s1CanAllocateReg = RegInit(false.B)
   out.canAllocate := s1CanAllocateReg && !in.flush
-  val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
-  val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
-  val s1ValidCountNext = s1ValidCount - s1DequeueCount +& s0EnqueueCount
+  val s1ValidCountNext = s1ValidCount - s1DequeueCount +& enqueueCount
   val s1CanAllocateNext = s1ValidCountNext >= renameWidth.U
   val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
   val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
@@ -131,18 +167,18 @@ class NewFLManager(
     s1CanAllocateReg := s1CanAllocateNext
     s1HeadPtr := s1HeadPtrNext
     s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
-    s1TailPtr := addS1Ptr(s1TailPtr, s0EnqueueCount)
+    s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
     s1ValidCount := s1ValidCountNext
-    for (candidateIdx <- 0 until renameWidth) {
-      when(s0EnqueueValid(candidateIdx)) {
-        val writePtr = addS1Ptr(s1TailPtr, s0EnqueueOffset(candidateIdx))
-        s1Queue(writePtr) := s0Candidates(candidateIdx)
+    for (candidateIdx <- 0 until enqueueWidth) {
+      when(enqueueValid(candidateIdx)) {
+        val writePtr = addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
+        s1Queue(writePtr) := enqueueCandidates(candidateIdx)
       }
     }
   }
 
   when(!in.flush) {
-    reservedBitmap := (reservedBitmap | s0EnqueueBitmap) & ~s1DequeuedBitmap
+    reservedBitmap := (reservedBitmap | enqueueBitmap) & ~s1DequeuedBitmap
   }
 
   when(!in.flush) {
@@ -152,13 +188,18 @@ class NewFLManager(
     assert(s1CanAllocateReg === (s1ValidCount >= renameWidth.U))
     assert(s1ValidCount <= s1QueueSize.U)
     assert(s1DequeueCount <= s1ValidCount)
-    assert(s0EnqueueCount <= s1FreeCount)
+    assert(enqueueCount <= s1EnqueueCapacity)
+    assert(PopCount(enqueueBitmap) === enqueueCount)
     assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
     assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
-    for (candidateIdx <- 0 until renameWidth) {
-      when(s0EnqueueValid(candidateIdx)) {
-        assert(s0Candidates(candidateIdx) < numPhyRegs.U)
-        assert(s0AllocBitmap(s0Candidates(candidateIdx)))
+    for (candidateIdx <- 0 until enqueueWidth) {
+      when(enqueueValid(candidateIdx)) {
+        assert(enqueueCandidates(candidateIdx) < numPhyRegs.U)
+        if (candidateIdx < renameWidth) {
+          assert(s0AllocBitmap(enqueueCandidates(candidateIdx)))
+        } else {
+          assert(in.freeReq(candidateIdx - renameWidth))
+        }
       }
     }
   }
@@ -167,9 +208,11 @@ class NewFLManager(
 object NewFLManager {
   val DefaultS1QueueSize = 16
 
-  class In(numPhyRegs: Int, renameWidth: Int)(implicit p: Parameters) extends XSBundle {
+  class In(numPhyRegs: Int, renameWidth: Int, freeReqWidth: Int)(implicit p: Parameters) extends XSBundle {
     val freeBitmap = UInt(numPhyRegs.W)
     val allocateReq = Vec(renameWidth, Bool())
+    val freeReq = Vec(freeReqWidth, Bool())
+    val freePhyReg = Vec(freeReqWidth, UInt(log2Up(numPhyRegs).W))
     val doAllocate = Bool()
     // Pause refill/allocation for the entire bitmap recovery, retaining s1.
     val flush = Bool()

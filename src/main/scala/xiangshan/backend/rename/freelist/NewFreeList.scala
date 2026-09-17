@@ -66,9 +66,11 @@ class NewFreeList(
   val archfreeListReg   = InitFreeList(regType)
 
   /** NewFreeList owns the free bitmaps; NewFLManager owns preg allocation. */
-  val flManager = Module(new NewFLManager(numPhyRegs, RenameWidth, s1QueueSize))
+  val flManager = Module(new NewFLManager(numPhyRegs, RenameWidth, s1QueueSize, commitWidth))
   flManager.in.freeBitmap := specfreeListReg.asUInt
   flManager.in.allocateReq := io.allocateReq
+  flManager.in.freeReq := io.freeReq
+  flManager.in.freePhyReg := io.freePhyReg
   flManager.in.doAllocate := io.doAllocate && !io.walk
   // RAB/VTypeBuffer enter walk one cycle after redirect; Rob registers their
   // commit bundles once more before Rename sees isWalk. Bridge that gap so s1
