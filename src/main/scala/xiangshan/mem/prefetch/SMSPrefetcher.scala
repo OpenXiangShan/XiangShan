@@ -933,6 +933,8 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val l2_pf_addr = DecoupledIO(UInt(PAddrBits.W))
     val pf_alias_bits = Output(UInt(2.W))
     val debug_source_type = Output(UInt(log2Up(nSourceType).W))
+    // request-level confidence tier from the predicted pattern density
+    val pf_conf = Output(UInt(3.W))
   })
   val entries = Seq.fill(smsParams.pf_filter_size){ Reg(new PrefetchFilterEntry()) }
   val valids = Seq.fill(smsParams.pf_filter_size){ RegInit(false.B) }
@@ -950,6 +952,18 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   }))
 
   io.debug_source_type := VecInit(entries.map(_.debug_source_type))(pf_req_arb.io.chosen)
+
+  // A denser predicted region pattern is stronger spatial evidence than a
+  // sparse one, so the pattern popcount of the chosen entry sets the
+  // request-level confidence tier by four packed 6-bit thresholds.
+  private val pfConfThresh = Constantin.createRecord(
+    s"sms_pfConfThresh${p(XSCoreParamsKey).HartId}", initValue = 4227330)
+  private val chosenDensity = PopCount(
+    VecInit(entries.map(e => PopCount(e.region_bits)))(pf_req_arb.io.chosen))
+  io.pf_conf := Mux(chosenDensity >= pfConfThresh(23, 18), 4.U,
+    Mux(chosenDensity >= pfConfThresh(17, 12), 3.U,
+      Mux(chosenDensity >= pfConfThresh(11, 6), 2.U,
+        Mux(chosenDensity >= pfConfThresh(5, 0), 1.U, 0.U))))
 
   val s1_valid = Wire(Bool())
   val s1_hit = Wire(Bool())
@@ -1235,6 +1249,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
   io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+  io.l2_req.bits.pfConf := pf_filter.io.pf_conf
   pf_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   // for now, sms will not send l1 prefetch requests
