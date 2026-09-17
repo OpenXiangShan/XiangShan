@@ -748,16 +748,16 @@ typedef struct packed {
 //////////////////////////////////////////////////////////////
     function automatic integer p_col_check(input integer value);
         if((value&(value-1))==0)
-            p_col_check = 1;
+            p_col_check = 32'd1;
         else
-            p_col_check = 0;
+            p_col_check = 32'd0;
     endfunction
 
     function automatic integer p_bit_idx(input integer value);  // log2(value)
         integer cnt;
         integer val;
         begin
-            cnt = 0;
+            cnt = 32'd0;
             val = value;
             while(val > 1) begin
                 val = val >> 1;
@@ -770,7 +770,7 @@ typedef struct packed {
     function automatic integer d_bit_idx(input integer value);
         integer cnt;
         begin
-            cnt = 0;
+            cnt = 32'd0;
             while((2**cnt)<value) begin
                 cnt = cnt + 1;
             end
@@ -787,9 +787,9 @@ typedef struct packed {
         begin
             log2c = p_bit_idx(c);
             if(r==log2c)
-                p_pos_check = 1;
+                p_pos_check = 32'd1;
             else
-                p_pos_check = 0;
+                p_pos_check = 32'd0;
         end
     endfunction
 

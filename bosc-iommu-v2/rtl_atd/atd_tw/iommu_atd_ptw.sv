@@ -1806,7 +1806,7 @@ always@(posedge iommu_clk or negedge iommu_rstn) begin
     else if ((ptw_cs == B_RESP) && ptw_bvalid_i && (ptw_bid_i == UP_D1_ID))
         ptw_s1_walk <= 1'b1;
     else
-    	ptw_s1_walk <= ptw_s1_walk_a || ptw_s1_walk_d;
+        ptw_s1_walk <= ptw_s1_walk_a || ptw_s1_walk_d;
 end
 
 always@(posedge iommu_clk or negedge iommu_rstn) begin
@@ -1819,7 +1819,6 @@ always@(posedge iommu_clk or negedge iommu_rstn) begin
     else
         ptw_s2_walk <= ptw_s2_walk_a || ptw_s2_walk_d;
 end
-
 
 ////////**********************************************************************************************************///////
 //gen ptw output signal to atd_tc module

@@ -445,7 +445,7 @@ endgenerate
             else if(csr_rd) begin
                 msg_rvalid_o <= 1'b1;
                 case(msg_addr)
-                IOMMU_FCTL                  : msg_rdata_o <= {iommu_fctl[31:3],3'd0,               19'd0, msg_addr[9:2], 1'd0, MSGCODE_CFG_ACK};
+                IOMMU_FCTL                  : msg_rdata_o <= {iommu_fctl[31:3],3'd0 ,               19'd0, msg_addr[9:2], 1'd0, MSGCODE_CFG_ACK};
                 IOMMU_DDTP                  : msg_rdata_o <= {iommu_ddtp            ,               19'd0, msg_addr[9:2], 1'd0, MSGCODE_CFG_ACK};
 //                IOMMU_TR_REQ_IOVA_L         : msg_rdata_o <= {tr_req_iova[31:0]     ,               19'd0, msg_addr[9:2], 1'd0, MSGCODE_CFG_ACK};
 //                IOMMU_TR_REQ_IOVA_H         : msg_rdata_o <= {tr_req_iova[63:32]    ,               19'd0, msg_addr[9:2], 1'd0, MSGCODE_CFG_ACK};

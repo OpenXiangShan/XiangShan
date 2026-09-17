@@ -58,7 +58,7 @@ typedef struct packed {
 
 
     iohpmevt_t                      iohpmevt;
-    logic                           atd_iocntinh;	
+    logic                           atd_iocntinh;
     logic                           atd_hpmctr_en;
     logic [63:0]                    atd_hpmctr;
     logic                           atd_hpm_rvalid;
@@ -152,7 +152,7 @@ end
 always@(posedge iommu_clk or negedge iommu_rstn) begin
     if (!iommu_rstn)
         atd_iocntinh <= 1'b0;
-    else 
+    else
         atd_iocntinh <= atd_iocntinh_i;
 end
 

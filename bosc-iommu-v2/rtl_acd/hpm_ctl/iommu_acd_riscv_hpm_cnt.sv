@@ -115,12 +115,13 @@ endgenerate
     always@(posedge clk or negedge rstn) begin
         if(~rstn)
             inhibit <= 1'b0;
-        else 
+        else
             inhibit <= inhibit_i;
     end
 
     always@(posedge clk or negedge rstn) begin
         if(~rstn)
+//            counter <= 64'hffff_ffff_ffff_fffe;//test int
             counter <= 64'd0;
         else if ((inhibit && !inhibit_i) || (ipsr_pmip_clr_i && counter[63]))
             counter <= iohpmctr_counter_i;
