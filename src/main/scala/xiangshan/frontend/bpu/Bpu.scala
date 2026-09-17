@@ -255,7 +255,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // pTAGE reads its resident folded histories straight out of FastPhr; its own a0 stage is driven by the shared
   // startPc, which for an ahead-indexed predictor is the key of the group after the one entering the pipeline.
   // Nothing selects its prediction yet, so it only observes and reports how well it would have done.
-  ptage.io.foldedHist := fastPhr.io.foldedHist
+  ptage.io.foldedHist := fastPhr.io.foldedHistAhead
 
   abtb.io.normalPathHist := phr.io.oldFoldedPhr
   abtb.io.debug_bpuS2StartPc.foreach(_ := s2_startPc.get)

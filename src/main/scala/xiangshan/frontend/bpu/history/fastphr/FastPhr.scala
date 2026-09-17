@@ -85,6 +85,31 @@ class FastPhr(implicit p: Parameters) extends FastPhrModule with HasFastPhrParam
     )
   )
 
+  // The ahead read that consumes this indexes a table with it, so the value has to be a function of the path and
+  // nothing else. The register alone is not: it takes a group's contribution the cycle after that group passes s1,
+  // so whether the most recent group is in it depends on whether the pipeline happened to bubble. The same point in
+  // the program would then index two different sets, and an entry trained under one would never be found under the
+  // other. Hand out the value the register is about to take instead, which is the same bypass the architectural
+  // history does for its own pending write.
   io.foldedHist := foldedHist
-  io.debug_phr  := phr
+  // What an ahead-indexed read must use. The register above takes a group's contribution the cycle after that group
+  // passes s1, so whether the most recent group is in it depends on whether the pipeline happened to bubble -- the
+  // same point in the program would index two different sets, and an entry trained under one would never be found
+  // under the other. This is the value the register is about to take, the same bypass the architectural history does
+  // for its own pending write. It is deliberately not io.foldedHist, which stays equal to a fold of the cached window
+  // so that the window check keeps meaning what it says.
+  io.foldedHistAhead := MuxCase(
+    foldedHist,
+    Seq(
+      io.redirect.valid -> refold(io.redirect.phr),
+      // The snapshot, not the corrected group folded into it. A read that indexes a cycle ahead keys an entry on the
+      // group before the one it answers for, paired with the history that group started from, so a correction hands
+      // back the state the corrected group started from -- which is what the snapshot holds. Folding the correction
+      // in as well would key the replayed read one group further on than every other read, and the entries the two
+      // build would never be found by each other.
+      io.overrideValid -> overrideSnap.folded,
+      io.valid         -> steadyFoldedNext
+    )
+  )
+  io.debug_phr := phr
 }

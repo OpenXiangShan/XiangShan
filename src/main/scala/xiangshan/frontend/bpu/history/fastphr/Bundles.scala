@@ -57,6 +57,9 @@ class FastPhrIO(implicit p: Parameters) extends FastPhrBundle with HasFastPhrPar
   val overrideNumBlocksOH: Vec[Bool] = Input(Vec(MaxPredictionNum + 1, Bool())) // corrected group's block count
 
   val foldedHist: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum))
+  // the same histories with the group now passing s1 already folded in, for a read that indexes a cycle ahead
+  val foldedHistAhead: PhrAllFoldedHistories =
+    Output(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum))
 
   // the cached window itself, so it can be asserted to stay in step with the big Phr it mirrors
   val debug_phr: UInt = Output(UInt(WindowLength.W))
