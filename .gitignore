@@ -397,3 +397,6 @@ build*/
 # Codex
 AGENTS.md
 *.dat
+
+# Alignment outputs are archived externally; keep the undated template tracked.
+src/test/python/Frontend/docs/04_alignment/*_[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].md

@@ -171,6 +171,14 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 - 跨周期场景必须保存并匹配最小充分的事务身份，例如 requestor/source、FTQ pointer 与 offset、VPN 或 transaction tag，再将 response、fault 或 redirect 归属于同一事务。全局 pending bit、任意下一次 `valid` response 或仅凭相邻周期不能证明事务关联。
 - 将 `PARTIAL` 或 `UNMAPPED` 时，说明缺失的是哪一个 Condition 信号、时序关系或事务身份；不要把尚未证明的 Checkpoint 当作模型缺口。Condition 建模完成但尚无真实 DUT 命中时应为 `MODELED`，只有同一版本、同一 run 的完整证据才能升级为 `HIT`。
 
+### 7.2 Producer 审计与诊断边界
+
+场景已描述、registry 已映射、runtime producer 可执行、当前 DUT 场景命中是不同证据。审计必须沿 `Bin_ID -> registry -> sampler/event source -> 实际采样条件` 检查，包括动态循环和跨周期 pending 状态；只搜索 registry key 或存在 `mark` 调用不能证明合法运行路径可达。已有 producer 缺口检查位于 `tests/py/jiabowen/test_functional_coverage_pilot_schema.py`，不在过程文档里另维护一份数量清单。
+
+发现缺口时记录具体阶段和所缺信号、身份或条件，不能仅凭缺少专用 producer 就自动改写测试点状态；是否需修订定义、建模或适用性须 review。`__Vtogcov__`、扁平 alias 与子模块端口需要按当前 build 验证语义及采样相位，并保存实际采用路径；缺失、不可读、跨拍错配的负例不得产生目标命中。
+
+未命中运行仅用于诊断。跨事务分别观察到子条件、raw candidate、少量 seed 失败或更换布局仍未命中，均不证明目标组合已覆盖，也不证明 RTL 全局不可达。可复用检查沉淀为 unit/contract/canary，未决设计前提保留在验证方案待评审项中；已结束的实验日志和阶段数字留在 artifact/Git 历史。
+
 ## 8. 覆盖率口径
 
 ### 8.1 功能覆盖率
@@ -263,6 +271,12 @@ Frontend 设计每周更新时执行固定流程：
 10. 自动反标后由人工完成新版本验收。
 
 设计新增测试点会改变分母，覆盖率短期下降是正常现象。不得为了保持百分比单调而沿用失效证据或删除有效未覆盖点。
+
+### 11.1 迁移门的复用边界
+
+每次设计刷新把影响分为探针/采样语义迁移、场景重跑、仅 provenance 更新和不受影响四类。记录 design baseline、编译 source/implementation、配置与产物哈希，不能将设计分支 SHA、验证分支 SHA 和 build hash 混为一个版本。
+
+先核对当前 manifest 和 signal inventory，再验证 alias/bind、采样相位、跨周期身份及缺探针负例，随后执行受影响的真实 DUT 场景。聚焦回归通过不等于全量 Python/ASM 已通过；通过、失败、skip 和 artifact eligibility 必须分开报告。旧基线的“迁移完成”、历史 HIT 数字或一次缺信号结论均不能放行新版 DUT；测试点增删或状态调整须先 review，不静默改变分母。
 
 ## 12. 三人协作与代码组织
 

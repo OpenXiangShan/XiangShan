@@ -258,6 +258,64 @@ io.backend.toFtq.redirect: Valid[Redirect]
 
 ---
 
+### 2.3 IFU 集成验证约束与待评审项
+
+本节承接旧迁移、producer 审计和可达性评审中的可复用结论。源码核对点为 verification `1045f5761a423ffb20b45d9ec3b69886d243f39f`、V3 design `3448f4ad4e381f1ede51a34a6d5cad39bc5daaed`、DefaultConfig；这是源码/合同复核，不是新版 DUT 运行验收。设计或配置变化后须重新核对，不沿用旧报告中的覆盖率快照、缺信号结论或“迁移完成”状态。
+
+#### 2.3.1 事务与场景约束
+
+以下为 RTL 实现约束和验证关注点，不代替 ISA/协议要求或人工认可的 golden：
+
+| 关注点 | 当前源码依据（仓库根目录相对路径） | 验证要求 |
+| --- | --- | --- |
+| 聚合 ICache 响应 | `src/main/scala/xiangshan/frontend/icache/Bundles.scala` 的 `MainPipeToIfuReq` | `firstRange/totalRange/maybeRvcMap` 使用统一 fetch 坐标；`info(0/1)` 承载 block 身份。覆盖单/双块、req1 无效、SRAM/MSHR 混合、跨 line、taken 截断及 stall/flush，不能沿用独立 per-block range/map 合同。 |
+| IFU 跨拍一致性 | `src/main/scala/xiangshan/frontend/ifu/Ifu.scala` 的 S1 对齐和 S2 `RegEnable` | 从 S0 response fire 关联事务，在 S1 检查 index、raw-data 取数/拼接与 predecode，在 S2 检查已注册的 instruction/PC/predecode 同属该事务；覆盖 valid hole 和逐级 flush，不能把同名 S2 predecode 当同拍组合计算。 |
+| 跨块与上一窗口 half-RVI | `Ifu.scala` 的 `s1_prevEndHalfRviInfo`、`ftqPtr` 和 `wbRedirect` | half-RVI 的 valid/data/PC 是原子状态。raw `blockSel` 用于取数和 half-RVI 来源；IBuffer/FTQ 与 checker redirect 的 effective owner 为 `blockSel || isCrossBlockInstr`。检查 instruction、PC、ftqPtr、endOffset、enqEnable、redirect payload 及恢复后无旧副作用，不能全局替换 raw selector。 |
+| invalidTaken 与指令有效位 | `Ifu.scala` 的 `s1_firstInstrCount/s1_instrValid`、`s1_invalidTakenMask`；`PredChecker.scala` 的 `remaskFault/stage1Fault` | 不完整的块尾 RVI 可以 `instrVec.valid=0, invalidTaken=1`，仍参与 PredChecker 修正优先级；普通 JAL/JALR/Non-CFI fault 则必须 valid。采样不可先按 valid 丢弃 invalidTaken，也不可把该槽当完整 taken CFI 或正常入队指令。BIN-989 的定向用例检查同请求较早 JAL、块尾 raw instruction/PC/预测 offset、逐槽裁剪及下一拍 redirect/FTQ 身份和 backend 无年轻交付；负例覆盖缺探针、普通无效槽、逆序和跨请求组合。 |
+| JALR 修正与架构目标 | `PredChecker.scala` 的 `fixedIsJump/fixedTarget`；ISA 的 AUIPC/JALR 寄存器与立即数语义 | 非 return JALR 未预测 taken 时，PredChecker 用 seqNextAddr（RVI 为 PC+4）修正，不知道寄存器决定的架构目标。BIN-983/990 定向场景用 AUIPC x6 + JALR x0,x6 构造独立 ISA oracle：检查同请求 JALR 优先级、完整入队 mask、PC/FTQ/offset，随后检查 source-bound backend redirect 和正确目标路径。oracle 应在目标 S2 请求到达 IBuffer 之前接入；不能因迟接 trace 产生的额外回退而误判 DUT 行为。 |
+| backend/checker 同拍仲裁 | `ftq/BackendRedirectReceiver.scala`、`IfuRedirectReceiver.scala`、`Ftq.scala`；`Ifu.scala` 的 `wbEnable` 和 backend 清理优先级 | BIN-949/995 的 IFU internal/outbound checker candidate 可以同时 valid，真正抑制在 FTQ：backend 优先选中，下一拍 IFU redirect/resolve 不生效。区分 ahead bypass 与 registered backend payload，核对源指令、FTQ/offset/target 和 checker effective owner。`wbEnable` 不依赖 IBuffer ready；被反压的年轻指令可产生候选写回，不能强求先入队。独立检查 flush、half-RVI bits/状态、enqPtr 及恢复后无旧交付；cfVec 恢复保护窗口不得屏蔽专用仲裁采样，reset 必须丢弃 pending。路径 canary 在同一采样相位比较可读的内部端口、alias 与 `__Vtogcov__`；缺探针、错误身份、残留副作用及非邻拍清理均不得命中。 |
+| 非 CFI 误预测训练 | `Ifu.scala` 的 `notCfiTaken` / `canTrain` | 跟踪 `notCfiTaken -> wbRedirect.canTrain -> FTQ resolve` 的同一身份；只看 redirect 出现不足以证明训练。 |
+| 第一块修正裁剪第二块 | `PredChecker.scala` 的 first-remask-fault prefix；`Ifu.scala` 的 `s2_fixedInstrValid` 和 IBuffer enqEnable | BIN-874 要求第二块 meta 有效且裁剪前确有 raw blockSel=1 有效槽，实际 fire 只交付完整第一块前缀。定向激励保留前序训练循环，仅替换后段双块窗口中第一块 JAL，fence.i/redirect 后从入口重启并通过 refill latency/反压形成 runahead；不要替换全部训练分支破坏目标双块历史。独立检查两块 PC/data/predecode、effective owner、FTQ/offset、下一拍第一块 redirect 和恢复后连续顺序；一个接受事务只计一次，缺 owner 或 enqEnable 泄漏不能命中。 |
+| valid 呈现与实际消费 | `ibuffer/IBuffer.scala` 的 outputEntries、decodeCanAccept；生成 `IBuffer.sv` / `Frontend.sv` | monitor.observations 包含反压期间重复 valid，不能直接作为已消费 trace。当前 IBuffer 由 decodeCanAccept 控制消费，未使用的 cfVec ready 已被优化；定向 checker 在 pre-drive 相位读取真实 decodeCanAccept 与逐槽 valid，并明确要求 resumingVType=0，再按 ISA 程序顺序检查已接受记录。不能补造 ready=1，也不能按预期 PC 过滤掉错误路径或重复消费。 |
+| BPU override 与 target 比较 | `src/main/scala/xiangshan/frontend/bpu/Bpu.scala`、`bpu/mbtb/Bundles.scala` 的 `compareBits` | all-not-taken 且 first-taken one-hot 为空时不应伪 override；mBTB WriteBuffer 比较 attribute、可存储 target lower 及配置存在时的 carry；BTB target diff 与 ITTAGE/RAS full-target diff 分开检查，不能使用统一全位 target 模型。 |
+| 共用预取深度 | `src/main/scala/xiangshan/frontend/FrontendParameters.scala`、`ftq/Ftq.scala`、`icache/ICacheWayLookup.scala` | DefaultConfig 的 `PrefetchDepth=32` 限制 BPU runahead 和 WayLookup 容量，不要求两个 occupancy 逐拍相等；覆盖 31/32、full/backpressure、flush-tail 和 wrap。 |
+| 旧事务自然完成与丢弃 | `src/main/scala/xiangshan/frontend/instruncache/InstrUncacheEntry.scala` 及 IFU uncache 路径 | BIN-1104 关联第二 beat A/D、resending、旧 response 和独立恢复身份，不能把 flush 当作总线响应已取消；BIN-1067 覆盖旧 cacheable checker redirect 与年轻 NC 的内部请求竞争，检查无旧 TL A、response、交付副作用。 |
+
+#### 2.3.2 测试点待评审与关闭条件
+
+下表只保留问题与下一项可证实的动作，不是第二份状态表。当前定义、映射与状态以测试点 CSV 和 pilot 为准；任何语义、适用性或分母修改先与用户/design owner review，再同步主表、模型和用例。本次整理不修改这些内容。
+
+| 测试点 | 已核对的边界或未决问题 | 建议 review / 验证动作 |
+| --- | --- | --- |
+| BIN-814 | `ICacheMainPipe` 的匹配 S1 BPU flush 会压低 `io.toIfu.req.valid`；IFU `s0_flushFromBpu` 又由此 valid 限定，原 IFU 侧同拍 conjunction 互斥。已有源码/生成 RTL 合同检查，不是缺探针。 | 讨论测试点是否应落在 ICache kill 边界及 IFU 无交付，而不是要求 IFU 看见已被上游抑制的 valid；未经批准不替换原 HIT 条件。 |
+| BIN-904 | FTQ raw dual 要求同虚拟页；PrefetchPipe 将同一 `isMmio/itlbPbmt` 复制到两个 WayLookup entry。当前 DUT 的冷 NC 循环有两项 NC WayLookup，但 FTQ req1=0；cacheable 训练后，通过真实 live CFI/FTQ 绑定 redirect 和全局 SFENCE 切到 PBMT.NC，可观察 req1=1、WayLookup1=1、两块 NC、realTwoFetchValid=0，旧 sampler 探针均可读。 | `test_ifu_nc_dual_suppression_v3_dut.py` 以固定 ISA trace、路径 canary 和输入/单块响应身份检查闭环；软件预取短暂占用合法高优先级入口，使首个匹配响应在相邻周期被 IFU s0 实际接受。绝对路径 artifact `ctrl_bin904_nc_exact_20260915_11` 通过 checker/monitor 和 exact-target 审计，已回标 HIT。SFENCE rs1/rs2 是“源寄存器为x0”的布尔值，全 VA/ASID 需1/1，默认0/0且addr=0不失效此高地址页。 |
+| BIN-908 | 双预取共享 iTLB 结果，WayLookup 仅保存首个 exception，FTQ 还限制同页及匹配 backend fault 的双块组合；MainPipe 无独立 req1 PMP 检查口。 | design owner 确认 second-only ITLB 的合法生产序列；独立第二块 PMP 必须单独讨论接口/适用性，不能由 OR-reduction 的单测代替。 |
+| BIN-909 | MainPipe 的 `s1_exceptionOut` 复制到各 `info(i).icacheMeta`，IFU late-fault 路径存在合并语义；“观察到异常”不足以证明第二 cacheline 精确 lane 归属。 | 保留 second-line-only denied/corrupt/parity、stall/flush 诊断；要求明确的 per-line 到 instruction-lane 归属证据或 RTL/testpoint 处置，不因接口迁移完成而提升状态。 |
+| BIN-1000 | 本节 SHA 的 `full-rtl-picker` 构建先生成完整 XSTop，再抽取 Frontend。`backend/fu/NewCSR/Debug.scala` 经 `MatchTriggerIO.GenTdataDistribute` 将 timing 固定为 false；CSR wrapper、Backend、XSCore 将该值接到 Frontend，生成 RTL 已消除 timing 输入/寄存器及差异比较。旧 sampler 的 `chain_pass + timing_block` 联合条件不是当前集成环境的合法场景；helper 源码保留 timing 参数不代表生成 DUT 可改变它。 | 与用户/design owner 讨论：当前集成点验证合法 chain 命中/阻断及固定 timing 语义；可变 timing 的 helper 单元合同单独保留。批准前不修改测试点、producer 或历史 HIT，不将缺探针默认成 0。BIN-927/928、996 至 1003 共用该配置读取入口，需同步迁移并真实重跑，不能因它们的旧 HIT 而放行新构建。 |
+| BIN-1004 | `Ifu.scala` 将 trigger data 接零；`ifu/FrontendTrigger.scala` 明确只支持 PC match，data/pds 保留未来使用。 | 讨论目标是“PC/config 不变时预译码变化不影响结果”的行为不变性，还是未来 data-match feature。前者需真实等价变体与 checker，后者需设计支持；优化掉的信号不是 HIT。 |
+| BIN-978 | 主表写“Taken位置15跨块且之前已有JAL”，现有 producer 仅检查较早 JAL 与较年轻有效跨块 taken CFI，未校验位置15。当前 DefaultConfig 及旧 c0ca46459 均为 FetchBlockSize=64，并非最近才从32B扩宽。当前 canary 的跨块 RVI 位于0x8000005e，第一块从0x8000003e开始、第二块从0x80000060开始：相对第一块位置16、相对其32B对齐起点位置31、32B块内低半字位置15、effective-owner第二块endOffset=0；这些坐标不可互换。 | 先由用户/design owner 确认“位置15”指哪一种坐标，或批准参数化为真实 fetch 边界；批准前不修改主表、分母和producer，不将普通跨块候选当BIN-978。非页尾截短的64B/32B-half-align fallthrough，其第一块末半字相对起点范围为16..31；只有该边界的证明不能推导所有设计路径不可达。`test_ifu_cross_taken_position_contract.py` 与无目标回标的 `test_ifu_cross_taken_position_v3_dut.py` 保留坐标、真实raw/effective owner和完整固定ISA trace证据；该canary没有较早JAL，不是该leaf命中。 |
+| BIN-940 | “invalidTaken 恢复保留所需 halfRviInfo”是跨拍因果关系，不要求原 invalidTaken 请求和恢复事务的 half-valid 同拍成立。producer 从已核对 raw selector/effective owner、half PC/data 和 FTQ payload 的 checker writeback 建立上下文，经过恢复 S0 fire、S1 拼接/predecode、S2 同身份实际交付后才命中；取消、缺探针、采样断拍和载荷变化均丢弃证明。 | 恢复指令的 endOffset 是新 fetch block 的 0，不是原 redirect offset 或 cacheline 半字索引；`Ifu.scala` 的 saved-half 拼接显式赋 0。定向 checker 验证完整指令/PC/FTQ/offset/mask、S1/S2 路径 canary 和固定 ISA trace 的 backend 恢复；允许 backend 修正前的合法推测交付，但不得把高半字作为额外指令交付。只凭保存半字或一次 S1 观察的旧证据不能闭环。 |
+| BIN-951 / BIN-920 / BIN-960 | `Ifu.scala` backend redirect 立即清除 `s0_prevEndIsHalfRvi`、S1/S2 stage valid、S1 half-RVI PC/data 和 enqueue pointer；`s1_prevEndHalfRviInfo.valid` 仅在 `s0_fire` 时寄存 `s0_prevEndIsHalfRvi`，不是 backend 直接清零。当前 DUT 的 live-half 定向证据中，redirect 后该 bit 仍为 1，但 S1/S2 已无效；下一次 S0 接收后 bit=0，恢复路径连续 16 条 C.NOP 正确。逐 bit“valid/data/PC 同拍清零”的旧假定与实现不同，暂不能据此认定功能 bug。 | 与用户/design owner review“清理”是否应定义为旧状态不被有效事务复用，并在首个恢复 S1 事务检查更新后的 half-valid、instruction/PC/FTQ。保留 `test_ifu_backend_half_state_v3_dut.py` 的未决字面 checkpoint 失败；BIN-951 尚缺 producer，不升级；BIN-920/960 的历史 HIT 不作为此新场景已通过的依据。批准前不改主表状态/分母、不用零 PC/data 替代 valid。 |
+| BIN-973 | 当前 producer 在单次 run 内累计无同事务 PredChecker fault 的 predicted-taken JALR/CALL/RET。架构执行过间接跳转不等于预测 taken；旧 head/tail 对齐及训练迭代尝试未能闭环。 | 分开记录 raw taken form 和合格 candidate，检查 BPU resolve/training 到预测结果；累计规则与 RVI/RVC 要求须同测试点一致，不能用实验次数或动态指令数替代目标命中。 |
+| BIN-979/984 | 本节 SHA 的 `Ifu.scala` 将 `s1_invalidTakenMask(i)` 定义为受 invalid 条件门控的 `s1_predTakenMask(i)`，合并、相同位移及同一 `s1_fire` 寄存后仍满足 `invalidTaken -> isPredTaken`。`PredChecker.scala` 的同槽 `jalFaultVec/jalrFaultVec` 均要求 `!isPredTaken`；因此当前完整 IFU 中“同槽 JAL/JALR fault 与 invalidTaken 并存”的前提互斥。FakeDut 将 invalidTaken=1、predTaken=0 可以测试 helper 优先级，却不是合法集成刺激。 | 请与用户/design owner review 是否将这两点归入 PredChecker 独立模块输入空间，或修订集成测试点适用性；当前不改主表状态/分母。不同槽的更早 JAL/JALR 与后续 invalidTaken 是 BIN-989/990 的独立场景，不能代替同槽要求。 |
+| BIN-1095/1096 | `InstrUncacheEntry` 通过 `user.lift(MemBackTypeMM/MemPageTypeNC)` 条件连接 TL user 字段；旧 build 缺失不代表新 build 仍缺失。 | 按当前构建 inventory/实际 path 复核，在真实 A.valid 且 !ready 区间检查相同请求的 user 位稳定性。缺失时保留明确诊断并评审配置/观测能力，不能由地址类型或默认值反推。 |
+
+#### 2.3.3 结论落地与追溯
+
+BIN-954 的 `hasSatpFlush` 与 ExceptionType 相互独立：`Ftq.scala` 分别寄存 backend fault 和 satpFlush，`Ifu.scala` 直接传递 meta(0).hasSatpFlush；正常无异常的 satp/context-change 交付不能被 `exceptionType != 0` 过滤。模型按主表“分别构造”保留 backend exception、satpFlush、跨页异常、GPF 地址及 VS nonleaf 五类已完成事务的独立 witness，需同一个 run 全部满足才标记目标；每类记录 cycle、FTQ 和实际 path。GPF 写入必须是 ExceptionType.Gpf（编码 2），跨页需 page-tail RVI half 与下一页窗口相邻，缺失探针不默认赋值。独立 component DUT 通过不等价于该叶子 HIT。
+
+串行多阶段回归必须验证环境 reset 合同：硬件 reset 后 Python backend 的 commit pointer、FTQ/PC 历史、待决 commit/resolve/redirect 必须与新硬件 epoch 同步。BIN-954 组合回归曾因这些旧状态残留，选取上一阶段已提交 FTQ 身份而触发 stale-context 检查；已通过独立 epoch 初始化修复，不放宽该检查。reset 期间不采样/规划 backend 事务并清除旧单拍反馈，monitor 只清 transient recovery 状态，不清错误、观察或统计；translation oracle 不在 reset 周期采样，也不自动宣告旧场景完成。`commit_count` 内部为 epoch-local，以保持初始 FTQ=0 的边界语义；`get_stats()` 另给出累计 commit、epoch commit 和 reset 次数。golden trace/cursor、RNG 和配置保留，reset 后程序重入必须由用例显式选择 trace/cursor，不能自动 seek。可执行入口为 `test_backend_hardware_reset_contract.py`、`test_backend_reset_epoch_v3_dut.py` 及 BIN-954 单 run 组合回归。
+
+reset 负例应同时覆盖旧 PC 映射、已排队但未驱动的 redirect、commit/resolve/RAS 反馈和新程序连续交付。`callRetCommit.valid` 可携带普通指令（rasAction=0），不能把 valid 本身当旧副作用；须检查实际 RAS 动作和 reset 后重新发布的 FTQ 身份。以上证据证明环境修正及当前元数据场景，不等同全环境随机 reset-inflight 验证，PTW/Uncache 在途 reset 策略仍需各协议回归独立证明。
+
+Trigger 当前构建的执行边界：两条旧用例曾因写不存在的 timing 输入失败，sampler 曾因四个 `tdataVec_*_timing` 不可读而拒绝整个入口。迁移后 BIN-927/928、996–999、1001–1003 只要求其必要的五个配置字段，缺失 timing 显式保留为 `None`，不以默认 0 代替。当前 PC 合同和 held-trigger flush 用例分别声明目标并检查配置更新/非目标稳定、同槽 instruction/PC/predecode/FTQ/endOffset、enable/select/debug、action 和断点许可，以及实际 flush 后的新路径交付。BIN-1003 的原完整 PC 调试输出已裁掉，身份改由 S2 PC、实际 foldpc 和 FTQ 联合核对；专用采样必须覆盖 backend cfVec skip 窗口。仅 ABI canary 的通过不等价于完整叶子闭环；缺探针信息仍保存于 `sampler_diagnostics.frontend_trigger_config_gap`，不能只依赖有界 recent-risk 列表。
+
+九项迁移的当前证明入口为上述 directed testcase、对应 model/negative tests 和逐例 exact-target artifact，最新证据写回主表，不另建状态表。BIN-1000 保留原 chain+timing 判据和显式 legacy-timing-contract 用例；该分支在当前 DUT 仍因缺 timing 输入失败，不能用其他分支的 PASS 放行。待 review 决定是把 timing-mismatch 放入可驱动它的独立 Trigger 环境，还是调整集成测试点适用性并补同 timing 的 chain 正反例。未经 review 不改该测试点、状态或分母，也不删除失败分支营造全绿回归。
+
+采样实现和已有负例入口见 [funcov 实现说明](../../env/funcov/README.md)；版本迁移与审计规则见 [闭环规范](../03_funcov_model/skills.md)。源码 review、模型单测、真实 DUT 命中分别记账，不将其中一类替代另一类。
+
+旧八份报告的正文、原 run_id、波形位置和未命中尝试保留在 Git 历史，读取方法见 [文档索引](../README.md)。只保留有新信息的失败/replay artifact，不在交付目录重复维护逐次运行日志或阶段覆盖率数字。
+
 ## 三、验证策略
 
 ### 3.1 验证架构框图
