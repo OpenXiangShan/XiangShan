@@ -30,7 +30,8 @@ import xscache.chi.{CHIDataCheckKey, CHIIssue, CHIAddrWidthKey, CHIPoisonKey, De
 import xscache.coupledL2.CoupledL2
 import xscache.common.BankBitsKey
 import system.HasSoCParameter
-import top.BusPerfMonitor
+import top.{BusPerfMonitor, ZhuJiangNoCTopology}
+import xijiang.NodeType
 import utility._
 import utility.sram.SramBroadcastBundle
 import xiangshan.cache.mmu.TlbRequestIO
@@ -117,13 +118,24 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         None
       }
     val config = new Config((_, _, _) => {
-      case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
-        hartId = p(XSCoreParamsKey).HartId,
-        FPGAPlatform = debugOpts.FPGAPlatform,
-        hasMbist = hasMbist,
-        PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
-        sliceCoherentClientMap = sliceCoherentClientMap
-      )
+      case L2ParamKey => {
+        val l2Params = coreParams.L2CacheParamsOpt.get.copy(
+          hartId = p(XSCoreParamsKey).HartId,
+          FPGAPlatform = debugOpts.FPGAPlatform,
+          hasMbist = hasMbist,
+          PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
+          sliceCoherentClientMap = sliceCoherentClientMap
+        )
+        if (isZhuJiang) {
+          val island = ZhuJiangNoCTopology(NumCores, soc.ZhuJiangParams, L3OuterBusWidth).island
+          l2Params.copy(
+            hnNodeIds = island.filter(_.nodeType == NodeType.HF).map(_.nodeId),
+            snNodeIds = island.filter(_.nodeType == NodeType.S).map(_.nodeId)
+          )
+        } else {
+          l2Params
+        }
+      }
       case CHIIssue => p(CHIIssue)
       case CHIAddrWidthKey => p(CHIAddrWidthKey)
       case NonSecureKey => p(NonSecureKey)
@@ -238,6 +250,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val l2_pmp_resp = Flipped(new PMPRespBundle)
       val l2_hint = Vec(numMemChannelsFromDcache, ValidIO(new L2ToL1Hint()))
       val l2_fdbk_pf_ctrl = Output(new L2ToL1PfCtrl)
+      val l2PfqBusy = Output(Bool())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
@@ -318,6 +331,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
       io.l2_hint := l2.io.l2_hint
       io.l2_fdbk_pf_ctrl := l2.io.l2_fdbk_pf_ctrl
+      io.l2PfqBusy := l2.io.l2PfqBusy
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
       l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
@@ -377,6 +391,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
+      io.l2PfqBusy := false.B
       io.debugTopDown <> DontCare
       io.l2Miss := false.B
 
