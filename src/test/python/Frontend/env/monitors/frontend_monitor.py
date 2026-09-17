@@ -284,6 +284,17 @@ class FrontendMonitor:
         self.expected_pc = int(pc)
         self.wait_sync_after_redirect = False
 
+    def on_hardware_reset(self, cycle: int, reset_vector: int) -> None:
+        """Drop transient recovery tracking, retaining every error/observation."""
+        self.current_cycle = int(cycle)
+        self.expected_pc = int(reset_vector)
+        self.redirect_grace = 0
+        self.wait_sync_after_redirect = False
+        self.redirect_sync_deadline = 0
+        self.last_dut_redirect = None
+        self._skip_cfvec_until_cycle = None
+        self._recovery_target_pc = None
+
     def set_translation_context(self, *, s2xlate: int, priv_imode: int) -> None:
         self._translation_s2xlate = int(s2xlate)
         self._translation_priv_imode = int(priv_imode)
@@ -340,7 +351,9 @@ class FrontendMonitor:
     def _observe_dut_redirect_for_cfvec_check(self, cycle: int) -> None:
         if self._read(self.interface.redirect_valid, 0) != 1:
             return
-        target_pc = int(self._read(self.interface.redirect_bits_target, 0))
+        # Redirect target is a 51-bit GuardedPc; cfVec and the checker model
+        # use the architectural 50-bit PC after RTL `.unGuard`.
+        target_pc = int(self._read(self.interface.redirect_bits_target, 0)) & ((1 << 50) - 1)
         self.last_dut_redirect = {
             "cycle": int(cycle),
             "pc": int(self._read(self.interface.redirect_bits_pc, 0)),

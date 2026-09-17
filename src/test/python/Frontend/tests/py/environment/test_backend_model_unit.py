@@ -17,6 +17,7 @@ from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
 from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
+from env.model.backend_runtime import BackendObservationSnapshot
 from env.model import GoldenTrace
 from env.model import TraceEntry
 from env.support import fold_pc
@@ -116,6 +117,23 @@ def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
 
     with pytest.raises(AssertionError, match="foldpc does not match FTQ-derived PC"):
         model.observed_cfvec_pc(0)
+
+
+def test_ftq_start_pc_cache_unguards_high_half_pc() -> None:
+    model = BackendModel()
+    high_pc = (1 << 50) - 0x2000
+    guarded_pc = (1 << 51) - 0x2000
+
+    model.consume_backend_observation(
+        BackendObservationSnapshot(
+            from_ftq_wen=1,
+            from_ftq_ftq_idx=1,
+            from_ftq_start_pc_addr=guarded_pc >> 1,
+        )
+    )
+
+    assert model._ftq_start_pc_cache[1] == high_pc
+    assert model._ftq_start_pc_by_value[1] == high_pc
 
 
 def _redirect_drive_if():
@@ -290,6 +308,94 @@ def test_source_bound_fault_redirect_rejects_unmatched_exception_bit() -> None:
         )
 
 
+@pytest.mark.parametrize("fault_bit", (1, 12, 20))
+@pytest.mark.parametrize("reuse_slot", (False, True))
+def test_source_bound_trap_handler_does_not_reinject_source_fault(fault_bit, reuse_slot) -> None:
+    model = BackendModel()
+    if reuse_slot:
+        model.commit_count = 1
+        model.commit_ptr_flag, model.commit_ptr_value = 1, 9
+        model._reuse_commit_ptr_once = True
+    source = _queue_instr(0x80000020, 1, 9)
+    source.exception_marked = True
+    source.exception_bits = 1 << fault_bit
+    model._cfvec_queue = deque([source])
+    model.inject_redirect_from_cfvec(
+        source_pc=source.pc, source_ftq_flag=1, source_ftq_value=9,
+        source_ftq_offset=0, target_pc=0x80001000,
+        reason="clean-handler", level=1,
+        redirect_class=BackendRedirectClass.TRAP_HANDLER,
+    )
+    model.current_cycle = model.pending_events[0].ready_cycle
+    payload = model._ready_redirect_for_cycle()
+    assert (payload["pc"], payload["ftq_flag"], payload["ftq_value"]) == (source.pc, 1, 9)
+    assert payload["target_pc"] == 0x80001000 and payload["level"] == 1
+    assert not any(payload[key] for key in ("backend_iaf", "backend_ipf", "backend_igpf", "satp_flush"))
+    assert payload["redirect_class"] is BackendRedirectClass.TRAP_HANDLER
+    assert not model._cfvec_queue
+
+
+@pytest.mark.parametrize("patch", [
+    {"level": 0}, {"backend_iaf": 1}, {"backend_ipf": 1}, {"backend_igpf": 1},
+    {"satp_flush": 1}, {"source_ftq_flag": None}, {"source_ftq_value": None},
+    {"source_ftq_offset": None}, {"source_ftq_value": 10},
+])
+def test_trap_handler_rejects_invalid_payload_or_source(patch) -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.exception_marked = True
+    source.exception_bits = 1 << 1
+    model._cfvec_queue = deque([source])
+    kwargs = dict(
+        source_pc=source.pc, source_ftq_flag=1, source_ftq_value=9,
+        source_ftq_offset=0, target_pc=0x80001000,
+        reason="clean-handler", level=1,
+        redirect_class=BackendRedirectClass.TRAP_HANDLER,
+    )
+    with pytest.raises(AssertionError):
+        model.inject_redirect_from_cfvec(**{**kwargs, **patch})
+    assert not model.pending_events
+
+
+@pytest.mark.parametrize("marked,bits", [(False, 0), (False, 2), (True, 0)])
+def test_trap_handler_requires_delivered_exception(marked, bits) -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.exception_marked = marked
+    source.exception_bits = bits
+    model._cfvec_queue = deque([source])
+    with pytest.raises(AssertionError, match="requires an exception-marked"):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc, source_ftq_flag=1, source_ftq_value=9,
+            source_ftq_offset=0, target_pc=0x80001000,
+            reason="clean-handler", level=1,
+            redirect_class=BackendRedirectClass.TRAP_HANDLER,
+        )
+
+
+@pytest.mark.parametrize("redirect_class", [BackendRedirectClass.CONTROL_FLOW, BackendRedirectClass.OTHER])
+def test_normal_redirect_still_rejects_exception_source(redirect_class) -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.exception_marked = True
+    source.exception_bits = 1 << 1
+    model._cfvec_queue = deque([source])
+    with pytest.raises(AssertionError, match="non-fault redirect cannot"):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc, source_ftq_flag=1, source_ftq_value=9,
+            source_ftq_offset=0, target_pc=0x80001000,
+            reason="not-an-explicit-trap-handler", level=1, redirect_class=redirect_class,
+        )
+
+
+def test_trap_handler_suppresses_same_cycle_ftq_commit(monkeypatch) -> None:
+    model = BackendModel()
+    candidate = FtqEntry(ftq_flag=0, ftq_value=4)
+    monkeypatch.setattr(model, "_ready_redirect_for_cycle", lambda: {"redirect_class": BackendRedirectClass.TRAP_HANDLER})
+    monkeypatch.setattr(model, "_plan_commit_entry_for_cycle", lambda apply=False: candidate)
+    assert model.plan_cycle_actions().commit_entry is None
+
+
 def test_backend_agent_drives_satp_flush_and_redirect_level() -> None:
     agent = BackendAgent()
     drive_if = _redirect_drive_if()
@@ -312,11 +418,30 @@ def test_backend_agent_drives_satp_flush_and_redirect_level() -> None:
     assert drive_if.redirect_valid.value == 1
 
 
+def test_backend_agent_sign_extends_high_half_pc_on_guarded_target_port() -> None:
+    agent = BackendAgent()
+    drive_if = _redirect_drive_if()
+    agent._drive_if = drive_if
+    high_pc = (1 << 50) - 0x2000
+
+    agent.drive_redirect(
+        {
+            "pc": 0x1004,
+            "target_pc": high_pc,
+            "redirect_class": BackendRedirectClass.CONTROL_FLOW,
+        }
+    )
+
+    assert drive_if.redirect_bits_pc.value == 0x1004
+    assert drive_if.redirect_bits_target.value == (1 << 51) - 0x2000
+
+
 @pytest.mark.parametrize(
     ("redirect_class", "debug_is_ctrl", "debug_is_mem_vio"),
     (
         (BackendRedirectClass.CONTROL_FLOW, 1, 0),
         (BackendRedirectClass.MEMORY_VIOLATION, 0, 1),
+        (BackendRedirectClass.TRAP_HANDLER, 0, 0),
         (BackendRedirectClass.OTHER, 0, 0),
     ),
 )
@@ -960,6 +1085,55 @@ def test_redirect_to_committed_ftq_entry_asserts() -> None:
                 "is_rvc": 0,
                 "level": 0,
             }
+        )
+
+
+@pytest.mark.parametrize("ftq_flag,ftq_value", [(0, 0), (0, 14), (1, 0)])
+@pytest.mark.parametrize("offset,is_rvc,reuses", [(0, True, True), (1, False, True), (1, True, False), (2, False, False)])
+def test_redirect_stale_guards_follow_flush_slot_reuse(ftq_flag, ftq_value, offset, is_rvc, reuses) -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    state = model._sync_backend_state()
+    older = state.decrement_ftq_ptr(ftq_flag, ftq_value)
+    state.commit_ptr_flag, state.commit_ptr_value = older
+    model._ftq_scoreboard.apply_redirect_flush(
+        ftq_flag=ftq_flag, ftq_value=ftq_value, ftq_offset=offset,
+        flush_itself=True, keep_cycle=10, current_cycle=10, is_rvc=is_rvc,
+        pending_event_survives=state.pending_event_survives_redirect,
+    )
+    model._apply_backend_state()
+    assert model._reuse_commit_ptr_once is reuses
+    for guard in (model._ftq_ptr_is_stale_relative_to_commit, model._redirect_drive_ftq_is_stale_relative_to_commit):
+        assert guard(ftq_flag, ftq_value) is (not reuses)
+        assert guard(*older) is True
+    kwargs = dict(target_pc=0x80001000, reason="reuse-guard", source="unit")
+    if reuses:
+        model._assert_redirect_ftq_not_committed(ftq_flag, ftq_value, **kwargs)
+    else:
+        with pytest.raises(AssertionError, match="redirect references committed"):
+            model._assert_redirect_ftq_not_committed(ftq_flag, ftq_value, **kwargs)
+    with pytest.raises(AssertionError, match="redirect references committed"):
+        model._assert_redirect_ftq_not_committed(*older, **kwargs)
+
+
+@pytest.mark.parametrize("mode", ["queue", "fallback"])
+def test_committing_reused_slot_restores_stale_redirect_rejection(mode) -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag, model.commit_ptr_value = 1, 9
+    model._reuse_commit_ptr_once = True
+    entry = FtqEntry(ftq_flag=1, ftq_value=9)
+    model.ftq_entries = deque([entry])
+    model._cfvec_queue = deque([_queue_instr(0x80001000, 1, 9)])
+    model._planned_commit_apply = dict(mode=mode, entry=entry, ftq_flag=1, ftq_value=9, span_len=1)
+    model._apply_planned_commit_entry()
+    assert not model._reuse_commit_ptr_once
+    assert model.commit_count == 2
+    assert model._redirect_drive_ftq_is_stale_relative_to_commit(1, 9)
+    with pytest.raises(AssertionError, match="redirect references committed"):
+        model._queue_redirect_event(
+            0x80002000, "already-committed-reuse",
+            payload_extra={"ftq_flag": 1, "ftq_value": 9},
         )
 
 

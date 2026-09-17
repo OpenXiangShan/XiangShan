@@ -20,6 +20,8 @@ class GoldenTraceSource:
 class BackendRedirectClass(str, Enum):
     CONTROL_FLOW = "control_flow"
     MEMORY_VIOLATION = "memory_violation"
+    # Synchronous exception delivery -> normal handler target (no target fault).
+    TRAP_HANDLER = "trap_handler"
     OTHER = "other"
 
 

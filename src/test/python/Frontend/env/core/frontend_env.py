@@ -622,7 +622,8 @@ class FrontendEnv:
         self.current_cycle = int(cycle)
         for observer in list(self._pre_drive_cycle_observers):
             observer(int(cycle), self)
-        if self._read(self.clock_reset.reset, 0):
+        in_reset = bool(self._read(self.clock_reset.reset, 0))
+        if in_reset:
             self.icache_agent.reset()
             self.icache_control_agent.reset()
         else:
@@ -632,10 +633,20 @@ class FrontendEnv:
         self.ptw_agent.on_clock_edge(cycle)
         self.ptw_full_ppn_checker.on_clock_edge(cycle)
         self.ptw_resp_input_checker.on_clock_edge(cycle)
-        self._begin_backend_cycle(cycle)
-        self.monitor.on_clock_edge(cycle)
-        self.translation_oracle.on_clock_edge(cycle)
-        self._drive_backend_cycle(cycle)
+        if in_reset:
+            self.backend_model.on_hardware_reset(cycle)
+            self.backend_agent.start_cycle(self.backend_model.can_accept, 0, 1)
+            self.backend_agent.drive_commit(None)
+            self.monitor.on_hardware_reset(
+                cycle, self._read(self.clock_reset.io_reset_vector_addr, 0) << 1,
+            )
+            # An armed oracle is not silently completed/disarmed. Its existing
+            # evidence/errors remain, but reset cycles are not transactions.
+        else:
+            self._begin_backend_cycle(cycle)
+            self.monitor.on_clock_edge(cycle)
+            self.translation_oracle.on_clock_edge(cycle)
+            self._drive_backend_cycle(cycle)
         for observer in list(self._cycle_observers):
             observer(int(cycle), self)
         self._emit_event("clock.tick", {"cycle": int(cycle)}, level="DEBUG")

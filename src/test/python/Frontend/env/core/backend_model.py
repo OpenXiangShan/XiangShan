@@ -93,6 +93,17 @@ class BackendModel:
         self._rng = random.Random(int(random_seed)) if random_seed is not None else random
 
         self.current_cycle = 0
+        self._previous_epoch_commit_count = 0
+        self.hardware_reset_count = 0
+        self._hardware_reset_active = False
+        self.last_events: Deque[dict] = deque(maxlen=64)
+        self.golden_trace: Optional[GoldenTrace] = None
+        self._explicit_injection_enabled = True
+        self._explicit_injection_block_reason = ""
+        self._initialize_epoch_state()
+
+    def _initialize_epoch_state(self) -> None:
+        """Invalidate hardware-associated state, not run configuration/history."""
         self.commit_count = 0
         self.ftq_entries: Deque[FtqEntry] = deque()
         self._pending_resolves: Deque[ResolveEntry] = deque()
@@ -101,7 +112,6 @@ class BackendModel:
         self._current_ftq_max_offset = -1
         self._current_ftq_observed_pending_target_pc = False
         self.pending_events: Deque[BackendEvent] = deque()
-        self.last_events: Deque[dict] = deque(maxlen=64)
 
         self.commit_ptr_flag = 0
         self.commit_ptr_value = 0
@@ -120,12 +130,9 @@ class BackendModel:
         self._scheduled_queue_call_ret_commit_groups: Deque[tuple[int, list[int]]] = deque()
         self._visible_queue_call_ret_commit_group: list[int] = []
         self._active_wrong_path_episode_state: Optional[ActiveWrongPathEpisode] = None
-        self.golden_trace: Optional[GoldenTrace] = None
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
         self._last_observation = BackendObservationSnapshot()
-        self._explicit_injection_enabled = True
-        self._explicit_injection_block_reason = ""
         self._last_correct_cfi_context: Optional[dict] = None
         self._last_committed_correct_cfi_context: Optional[dict] = None
         self._planned_commit_apply: Optional[dict] = None
@@ -137,6 +144,36 @@ class BackendModel:
 
         self._backend_state = BackendState(ftq_size=self.ftq_size)
         self._ftq_scoreboard = FtqScoreboard(self._backend_state)
+        self._sync_backend_state()
+
+    def on_hardware_reset(self, cycle: int) -> None:
+        """Start one clean FTQ epoch per reset assertion.
+
+        Keep cumulative diagnostics, RNG/configuration, bindings and attached
+        golden cursor unchanged. Replaying a program after reset requires an
+        explicit trace/cursor choice by the testcase, never an automatic seek.
+        commit_count is epoch-local for FTQ bootstrap/stale checks; get_stats
+        separately reports the preserved run total.
+        """
+        self.current_cycle = int(cycle)
+        if self._hardware_reset_active:
+            return
+        previous = {
+            "commit_ptr": [self.commit_ptr_flag, self.commit_ptr_value],
+            "epoch_commit_count": self.commit_count,
+            "pending_work": self.pending_work_count(),
+            "ftq_pc_entries": len(self._ftq_start_pc_by_value),
+            "golden_cursor": None if self.golden_trace is None else int(self.golden_trace.cursor),
+        }
+        self._previous_epoch_commit_count += self.commit_count
+        self._initialize_epoch_state()
+        self.hardware_reset_count += 1
+        self._hardware_reset_active = True
+        self._emit_event("hardware_reset", {
+            "reset_epoch": self.hardware_reset_count, "discarded_epoch": previous,
+            "cumulative_commit_count": self._previous_epoch_commit_count,
+            "golden_policy": "preserve_cursor_require_explicit_testcase_reentry",
+        })
 
     def _set_active_wrong_path_episode(
         self,
@@ -674,19 +711,12 @@ class BackendModel:
         ):
             return False
         rank = int(state.ftq_ptr_rank_after_commit(int(flag), int(value)))
-        return rank == 0 or rank > int(state.ftq_size)
+        # A head flush moves the cursor onto a slot that must be refetched and
+        # committed again. Equality is stale only after that reuse is consumed.
+        return (rank == 0 and not bool(state.reuse_commit_ptr_once)) or rank > int(state.ftq_size)
 
     def _redirect_drive_ftq_is_stale_relative_to_commit(self, flag: int, value: int) -> bool:
-        state = self._sync_backend_state()
-        if (
-            int(state.commit_count) <= 0
-            and int(state.commit_ptr_flag) == 0
-            and int(state.commit_ptr_value) == 0
-            and not bool(state.reuse_commit_ptr_once)
-        ):
-            return False
-        rank = int(state.ftq_ptr_rank_after_commit(int(flag), int(value)))
-        return rank == 0 or rank > int(state.ftq_size)
+        return self._ftq_ptr_is_stale_relative_to_commit(flag, value)
 
     def _assert_redirect_ftq_not_committed(
         self,
@@ -697,18 +727,10 @@ class BackendModel:
         reason: str,
         source: str,
     ) -> None:
+        if not self._ftq_ptr_is_stale_relative_to_commit(ftq_flag, ftq_value):
+            return
         state = self._sync_backend_state()
-        have_prior_commit = bool(
-            int(state.commit_count) > 0
-            or int(state.commit_ptr_flag) != 0
-            or int(state.commit_ptr_value) != 0
-            or bool(state.reuse_commit_ptr_once)
-        )
-        if not have_prior_commit:
-            return
         rank = int(state.ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value)))
-        if rank != 0 and rank <= int(state.ftq_size):
-            return
         committed_context = self._last_committed_correct_cfi_context
         if committed_context is not None and (
             int(committed_context.get("ftq_flag", -1)),
@@ -1998,8 +2020,6 @@ class BackendModel:
                 pred_taken_out, pred_target = pred_cfi
                 if bool(pred_taken_out) != bool(golden_taken):
                     mispredict = True
-                elif bool(golden_taken) and golden_target is not None and pred_target is None:
-                    mispredict = True
                 elif bool(golden_taken) and pred_target is not None and golden_target is not None:
                     mispredict = int(pred_target) != int(golden_target)
 
@@ -2861,6 +2881,7 @@ class BackendModel:
         return True
 
     def begin_cycle(self, cycle: int) -> None:
+        self._hardware_reset_active = False
         self.current_cycle = int(cycle)
         self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
         self._cycle_start_golden_pc = self.current_golden_pc()
@@ -3217,7 +3238,10 @@ class BackendModel:
 
     @staticmethod
     def _decode_backend_addr(addr: int) -> int:
-        return int(addr) << 1
+        # fromFtq.startPc is GuardedPc: its addr field omits bit 0 but retains
+        # the extra canonical guard bit. Backend comparisons use the 50-bit
+        # architectural PC carried by cfVec, equivalent to RTL `.unGuard`.
+        return (int(addr) << 1) & ((1 << BackendAgent._PC_BITS) - 1)
 
     def _consume_golden_entry(self, pc: int) -> Optional[TraceEntry]:
         trace = self.golden_trace
@@ -3862,6 +3886,7 @@ class BackendModel:
                 break
             if entry.ready_cycle > self.current_cycle:
                 continue
+            observed_indirect_mispredict = None
             if entry.queue_index is not None:
                 if not (0 <= int(entry.queue_index) < len(self._cfvec_queue)):
                     to_remove.append(entry)
@@ -3873,6 +3898,21 @@ class BackendModel:
                     continue
                 if queue_entry.path_state != PATH_STATE_CORRECT:
                     continue
+                if int(entry.branch_type) == 3 and queue_entry.golden_target_pc is not None:
+                    # cfVec.fixedTaken has already passed PredChecker. For an
+                    # indirect CFI it does not tell us whether the predicted
+                    # target was correct. Do not send an optimistic resolve
+                    # before the actual successor is delivered: a later
+                    # wrong-path redirect cannot repair an already sent resolve.
+                    if entry.mispredict:
+                        observed_indirect_mispredict = True
+                    elif int(entry.queue_index) + 1 < len(self._cfvec_queue):
+                        successor = self._cfvec_queue[int(entry.queue_index) + 1]
+                        observed_indirect_mispredict = (
+                            int(successor.pc) != int(queue_entry.golden_target_pc)
+                        )
+                    else:
+                        continue
             effective_mispredict = bool(entry.mispredict)
             target_seen_after_queue = False
             target_path_progressed_after_queue = False
@@ -3917,6 +3957,10 @@ class BackendModel:
                 )
             ):
                 effective_mispredict = False
+            if observed_indirect_mispredict is not None:
+                # Recovery progress may suppress another redirect, but cannot
+                # erase a target mismatch already observed for this occurrence.
+                effective_mispredict = observed_indirect_mispredict
             ready_entries.append(replace(entry, mispredict=bool(effective_mispredict)))
             entry_flushes_itself = False
             self._sync_backend_state()
@@ -3953,6 +3997,10 @@ class BackendModel:
                 if not self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value))
             )
             committed_rank = self._ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value))
+            if self._reuse_commit_ptr_once and (int(ftq_flag), int(ftq_value)) == (
+                int(self.commit_ptr_flag), int(self.commit_ptr_value)
+            ):
+                self._reuse_commit_ptr_once = False
             self.commit_ptr_flag = int(ftq_flag)
             self.commit_ptr_value = int(ftq_value)
             if pending_target_rank is not None and int(pending_target_rank) <= int(committed_rank):
@@ -4530,7 +4578,17 @@ class BackendModel:
             selected_fault_bits or int(satp_flush)
         ):
             raise AssertionError("memory-violation redirect cannot carry backend fault or satpFlush")
-        if selected_fault_bits:
+        if redirect_class is BackendRedirectClass.TRAP_HANDLER:
+            # CtrlBlock takes backendIAF/IPF/IGPF from the *trap target*,
+            # not the exception cause of the flushed source instruction.
+            # This class models only a normal target after a delivered fault.
+            if int(level) != 1 or selected_fault_bits or int(satp_flush):
+                raise AssertionError("trap-handler redirect requires level=1 and no target fault or satpFlush")
+            if any(value is None for value in (source_ftq_flag, source_ftq_value, source_ftq_offset)):
+                raise AssertionError("trap-handler redirect requires explicit source FTQ identity")
+            if not source.exception_marked or not int(source.exception_bits):
+                raise AssertionError("trap-handler redirect requires an exception-marked cfVec source")
+        elif selected_fault_bits:
             if int(level) != 1:
                 raise AssertionError("backend-fault redirect must use level=1 (flush)")
             for bit in selected_fault_bits:
@@ -4645,14 +4703,17 @@ class BackendModel:
         redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
         self._plan_instruction_commits_for_cycle()
-        backend_fault_redirect = bool(
+        exception_redirect = bool(
             redirect_payload is not None
-            and any(
-                int(redirect_payload.get(key, 0))
-                for key in ("backend_iaf", "backend_ipf", "backend_igpf")
+            and (
+                redirect_payload.get("redirect_class") is BackendRedirectClass.TRAP_HANDLER
+                or any(
+                    int(redirect_payload.get(key, 0))
+                    for key in ("backend_iaf", "backend_ipf", "backend_igpf")
+                )
             )
         )
-        commit_entry = None if backend_fault_redirect else self._plan_commit_entry_for_cycle(apply=False)
+        commit_entry = None if exception_redirect else self._plan_commit_entry_for_cycle(apply=False)
         call_ret_commit_group = self._current_semantic_call_ret_commit_group()
         self._schedule_next_queue_call_ret_commit_group()
         return BackendCycleActions(
@@ -4669,6 +4730,12 @@ class BackendModel:
     def on_clock_edge(self, cycle: int) -> None:
         if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None:
             return
+        if self._read(getattr(self.dut, "reset", None)):
+            self.on_hardware_reset(cycle)
+            agent = self._bound_backend_agent()
+            agent.start_cycle(self.can_accept, 0, 1)
+            agent.drive_commit(None)
+            return
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()
         agent.start_cycle(self.can_accept, self.wfi_req, self.backend_empty_for_dut())
@@ -4684,7 +4751,9 @@ class BackendModel:
 
     def get_stats(self) -> dict:
         return {
-            "commit_count": self.commit_count,
+            "commit_count": self._previous_epoch_commit_count + self.commit_count,
+            "epoch_commit_count": self.commit_count,
+            "hardware_reset_count": self.hardware_reset_count,
             "ftq_entries_pending": len(self.ftq_entries),
             "pending_resolves": len(self._pending_resolves),
             "pending_events": len(self.pending_events),

@@ -8,6 +8,8 @@ from ..model.backend_state import FtqEntry, ResolveEntry
 
 
 class BackendAgent:
+    _PC_BITS = 50
+
     def __init__(self) -> None:
         self.interface = None
         self._drive_if = None
@@ -28,6 +30,14 @@ class BackendAgent:
     @staticmethod
     def _encode_backend_addr(addr: int) -> int:
         return int(addr) >> 1
+
+    @classmethod
+    def _encode_guarded_pc(cls, addr: int) -> int:
+        """Encode a 50-bit architectural PC for the 51-bit GuardedPc port."""
+        pc_mask = (1 << cls._PC_BITS) - 1
+        pc = int(addr) & pc_mask
+        guard = (pc >> (cls._PC_BITS - 1)) & 1
+        return pc | (guard << cls._PC_BITS)
 
     def clear_one_shot_signals(self) -> None:
         assert self._drive_if is not None
@@ -96,13 +106,17 @@ class BackendAgent:
         debug_encoding = {
             BackendRedirectClass.CONTROL_FLOW: (1, 0),
             BackendRedirectClass.MEMORY_VIOLATION: (0, 1),
+            BackendRedirectClass.TRAP_HANDLER: (0, 0),
             BackendRedirectClass.OTHER: (0, 0),
         }
         if not isinstance(redirect_class, BackendRedirectClass):
             raise ValueError("redirect payload requires a valid BackendRedirectClass")
         debug_is_ctrl, debug_is_mem_vio = debug_encoding[redirect_class]
         self._write(self._drive_if.redirect_bits_pc, int(payload.get("pc", 0)))
-        self._write(self._drive_if.redirect_bits_target, int(payload.get("target_pc", 0)))
+        self._write(
+            self._drive_if.redirect_bits_target,
+            self._encode_guarded_pc(int(payload.get("target_pc", 0))),
+        )
         self._write(self._drive_if.redirect_bits_taken, int(payload.get("taken", 1)))
         self._write(self._drive_if.redirect_bits_ftq_idx_flag, int(payload.get("ftq_flag", 0)))
         self._write(self._drive_if.redirect_bits_ftq_idx_value, int(payload.get("ftq_value", 0)))

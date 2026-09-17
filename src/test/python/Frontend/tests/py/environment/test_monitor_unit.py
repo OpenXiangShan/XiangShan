@@ -233,6 +233,22 @@ def test_redirect_recovery_accepts_ftq_derived_exception_pc_with_matching_foldpc
     assert monitor.observations[0].foldpc == fold_pc(target)
 
 
+def test_redirect_recovery_unguards_high_half_target() -> None:
+    monitor, interface = _new_monitor()
+    high_pc = (1 << 50) - 0x2000
+    guarded_pc = (1 << 51) - 0x2000
+
+    _set_redirect(interface, valid=1, pc=0x1004, target=guarded_pc)
+    monitor.on_clock_edge(10)
+    _set_redirect(interface, valid=0)
+    monitor.on_clock_edge(11)
+    _set_first_cfvec(interface, high_pc)
+    monitor.on_clock_edge(12)
+
+    assert monitor.get_errors() == []
+    assert monitor.last_dut_redirect["target_pc"] == high_pc
+
+
 def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
     monitor, interface = _new_monitor()
     target = 0x8000_0FFE
