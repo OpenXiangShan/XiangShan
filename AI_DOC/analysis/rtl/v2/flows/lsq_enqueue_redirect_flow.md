@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `4ce3563a01254700ed5828797f288bafcc2b491c` |
+| 核验 commit | `a58ea2ee3aacd29cd536a72c1418811008613ef3` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-08-21` |
+| 最后核验日期 | `2026-09-08` |
 
 ## Flow 范围
 
@@ -61,6 +61,65 @@ sqCanAccept = sqCounter >= sqAllocNumber + LSQStEnqWidth
 `flushPipe` 不出现在上述任一直接 admission 表达式中。SFENCE/FENCE 等指令还具有
 独立的 `blockBackward` 属性，它会阻止更年轻指令继续 Dispatch；这是与
 `flushPipe` 同时配置的另一个控制属性，不能解释为 LSQ 检查了 `flushPipe`。
+
+## LSQ 模块边界与职责分类
+
+### 命名和真实层级
+
+当前 V2 Scala 与生成 Verilog 中没有字面量 `LSQN` 模块。以下“LSQ”指实际的
+Load/Store Queue 子系统；`LsqEnqCtrl` 是其上游 admission controller，物理上由
+`NewDispatch` 实例化，而不是 `LsqWrapper` 的子模块。
+
+```text
+NewDispatch
+  └─ LsqEnqCtrl                         // LSQ 入口资源与 redirect 恢复
+
+MemBlock
+  ├─ LsqWrapper
+  │   ├─ LoadQueue
+  │   │   ├─ VirtualLoadQueue
+  │   │   ├─ LoadQueueRAR
+  │   │   ├─ LoadQueueRAW
+  │   │   ├─ LoadQueueReplay
+  │   │   ├─ LoadQueueUncache
+  │   │   │   └─ UncacheEntry[*]
+  │   │   └─ LqExceptionBuffer
+  │   └─ StoreQueue
+  │       ├─ SQDataModule / SQData8Module
+  │       ├─ SQAddrModule (paddr/vaddr)
+  │       ├─ DatamoduleResultBuffer
+  │       └─ StoreExceptionBuffer
+  ├─ LoadMisalignBuffer                 // 与 LSQ 并列，不是其内部子模块
+  └─ StoreMisalignBuffer                // 与 LSQ 并列，不是其内部子模块
+```
+
+### 核心特性处理模块
+
+| 模块 | 支持特性 | 抽象职责 |
+|---|---|---|
+| `LsqEnqCtrl` | 多 slot、`numLsElem` 多 flow 分配、LQ/SQ 独立 free credit、预测 `lqIdx/sqIdx`、redirect cancel count 恢复 | LSQ 的入口资源控制器：将 Dispatch 接受的访存 uop 转成下一拍的 LSQ 请求，保证注册后的 admission 不会写穿 LQ/SQ，并在 redirect 后回退影子指针和容量。 |
+| `VirtualLoadQueue` | scalar/vector load entry 生命周期、`allocated/committed`、按 ROB 顺序 deq、vector feedback、redirect cancel | LQ 的主控制面：维护物理 LQ entry 的分配、完成、提交释放和回滚，不保存 RAR/RAW/replay 的专项策略。 |
+| `LoadQueueRAR` | load-load/release 相关顺序检查、partial paddr CAM、NC/release 状态、`rep_frm_fetch` | 保存仍受更老 load 约束的 load；当 cacheline release/NC 条件与地址匹配形成违反时，通知 Load Unit 从 fetch 重新执行。 |
+| `LoadQueueRAW` | store-load violation、paddr+mask CAM、按 ROB 年龄选最老违规 load、`RedirectLevel.flush` rollback | 保存因更老 store 地址尚未就绪而存在风险的 load；store 地址产生后检测“年轻 load 已读错数据”的情况，并发起精确 rollback。 |
+| `LoadQueueReplay` | TLB miss、memory ambiguity、forward fail、DCache replay/miss、bank conflict、RAR/RAW 满、misalign full、L2/TLB hint 唤醒、年龄仲裁和 cooldown | replay 的集中调度器：记录原因和阻塞条件，等待相应 store/TLB/DCache 事件解除阻塞，按 hint、优先级和程序年龄选择后重新送入 load pipeline。 |
+| `LoadQueueUncache` / `UncacheEntry` | MMIO/NC load、多 entry、ROB-head MMIO 顺序、NC 仲裁、外部 id/response 路由、总线错误转异常、redirect 安全 flush、满时 rollback | 非缓存 load 的事务引擎。`UncacheEntry` 承担单请求 `idle -> req -> resp -> wait` 生命周期；外层模块负责 entry 分配、MMIO/NC 仲裁、response/writeback 汇聚及最老失败请求的 rollback。 |
+| `StoreQueue` | store 地址/数据/掩码汇集、store-to-load forwarding、地址/数据未就绪反馈、ROB commit、SBuffer drain、MMIO/NC/CMO/CBO、scalar/vector、unaligned/cross-16B/cross-page、异常、redirect | SQ 的主状态机和数据顺序引擎：在 store 真正对外可见前维持顺序、forwarding 与提交边界，并处理各类特殊 store 的请求、响应、写回和释放。 |
+
+### 封装、集成和功能性支撑
+
+| 类别 | 模块 | 当前职责判断 |
+|---|---|---|
+| 封装/集成 | `LsqWrapper` | 主要负责 LQ/SQ 联合 `canAccept`、按 `needAlloc` 拆分请求、交叉回填 index 及接口汇聚。它并非纯连线：还含 LQ/SQ uncache 最老 ROB 仲裁、owner 保持和 exception-address mux；但不承载 LQ/SQ 的主要生命周期、违例或 replay 策略。 |
+| 封装/集成 | `LoadQueue` | 主要将 Load Unit、StoreQueue、ROB、DCache/TLB 和上述 LQ 专项模块接通，汇总 rollback/exception/full 等输出；load entry 生命周期与专项决策分别下沉至 `VirtualLoadQueue`、RAR、RAW、Replay、Uncache。 |
+| 核心功能支撑 | `LqPAddrModule`、`LqVAddrModule`、`LqMaskModule` | 带同步读和 CAM 比较的 LQ 地址/掩码存储，直接实现 RAR/RAW/replay 的匹配基础；不是决策策略模块，但也不是简单 wrapper。 |
+| 核心功能支撑 | `SQAddrModule`、`SQDataModule`、`SQData8Module` | 存储 store 地址、字节 mask 和数据，按更年轻 store 优先的规则产生 byte-level forwarding；策略由 `StoreQueue` 决定，实际转发数据由这些模块实现。 |
+| 数据通路支撑 | `DatamoduleResultBuffer` | 暂存从 SQ 读出的、准备写入 SBuffer 的请求；为 SBuffer backpressure 和跨 16B/异常路径提供寄存边界，不决定 store 的提交、顺序或异常策略。 |
+| 通用资源支撑 | `FreeList`、`AgeDetector` | 分别为 RAR/RAW/replay/uncache 提供多端口空闲 entry 分配，以及为 replay 提供入队年龄排序；具备局部算法但不定义 LSQ 的访存语义。 |
+| 异常汇聚支撑 | `LqExceptionBuffer`、`StoreExceptionBuffer` | 从各 load/store/vector/uncache 来源筛出最老未 flush 的异常地址和上下文；异常是否产生由上游 pipeline 判定。 |
+
+`LoadMisalignBuffer` 和 `StoreMisalignBuffer` 虽然源码位于 `mem/lsqueue` 目录，但在
+`MemBlock` 中与 `LsqWrapper` 并列实例化，只通过 `loadMisalignFull` 或 `maControl`
+与 LSQ 协作；它们属于 load/store pipeline 的失配访问协同单元，不能归为 LSQ 内部层级。
 
 ## 主流程图
 
@@ -465,6 +524,14 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 
 ## 源码证据
 
+- `src/main/scala/xiangshan/mem/MemBlock.scala:435-437,616-617`、`build/rtl/LsqWrapper.sv:1882,3522`：`LsqWrapper` 内只实例化 `LoadQueue/StoreQueue`；两类 MisalignBuffer 在 `MemBlock` 与它并列实例化。
+- `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:514`、`build/rtl/NewDispatch.sv:7028`：`LsqEnqCtrl` 由 `NewDispatch` 实例化，属于逻辑 LSQ admission 而非 `LsqWrapper` 子层级。
+- `src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:142-184,265-321`、`build/rtl/LsqWrapper.sv:1612-1783`：LQ/SQ request 拆分、联合 `canAccept`、exception mux 与全局 uncache owner 仲裁。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueue.scala:214-345`、`build/rtl/LoadQueue.sv:1162-2066`：LoadQueue 对 RAR、RAW、Replay、VirtualLoadQueue、exception、uncache 子模块的实例化和接口汇聚。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAR.scala:134-265`、`src/main/scala/xiangshan/mem/lsqueue/LoadQueueRAW.scala:115-362`、`src/main/scala/xiangshan/mem/lsqueue/LoadQueueReplay.scala:277-370,401-570,635-759`：三类 load 顺序/违例/replay 状态和触发条件。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala:33-267,300-525,528-591`、`build/rtl/LoadQueueUncache.sv:4269`：单请求 Uncache FSM、多 entry 事务仲裁、回包路由和满时 rollback。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:201-292,358-821,823-1165,1174-1529`、`build/rtl/StoreQueue.sv:57918,58758,59144,59219`：SQ 主状态、forwarding、MMIO/NC/CMO、SBuffer drain、异常/redirect，以及 data/address/exception 支撑模块。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueueData.scala:32-240`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueueData.scala:33-349`、`src/main/scala/xiangshan/mem/lsqueue/FreeList.scala:25-132`：LQ CAM 存储、SQ byte forwarding 存储和通用 entry 分配机制。
 - `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:444-451`：Dispatch ready/valid 的 LSQ、ROB、IQ联合条件。
 - `src/main/scala/xiangshan/Parameters.scala:149-150,778-780`：V2 默认 `RenameWidth=6`，以及 `LSQEnqWidth/LSQLdEnqWidth/LSQStEnqWidth` 派生公式。
 - `src/main/scala/xiangshan/Parameters.scala:167,174`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:58-63,335-429`：公共 6-slot enqueue 向量、独立的 72-entry LQ/56-entry SQ counter 和合并 `canAccept`。
@@ -505,6 +572,7 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 | 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已分配 entry 的 fault cancel 仅按 scalar store 描述，容易误读为 vector LS 与 MOU 都必须靠 ROB cancel 释放 | 补充 vector load 自然 `lqDeq`、vector store deq/cancel 双路径，以及 segment/MOU 不进入普通 LSQ 的边界 | 用户追问 vector LS、AMO/MOU fault 是否均依赖 ROB exception redirect/cancel | V2 vector merge buffer/VLQ/SQ/VSegmentUnit/AtomicsUnit/ROB redirect |
 | 2026-08-18 | `4ce3563a01254700ed5828797f288bafcc2b491c` | 已说明 segment/MOU 不进入普通 LSQ，但没有把共享 `req.valid`、`needAlloc` 和 queue 侧 `allocated` 的三层关系写清楚，也未列出非访存 vector uop。 | 增加 `req.valid` 与物理 entry 的区分，列出 vector arithmetic/vset、segment、FOF data/tail 的完整分类和源码条件。 | 用户追问哪些向量类型不进入 LSQ。 | V2 NewDispatch、LsqEnqCtrl、LsqWrapper、LQ/SQ、VSegmentUnit、VfofBuffer。 |
 | 2026-08-21 | `4ce3563a01254700ed5828797f288bafcc2b491c` | vector store fault 只按 feedback、`sqDeq` 和 redirect cancel 描述，未说明宏指令尾 `lastUop` 对异常后 SBuffer 写入的影响。 | 增加 `lastUop -> vecLastFlow -> vecExceptionFlag` 的 StoreQueue 收尾链，明确它是同一 `robIdx` 后续 vector-store 写入抑制边界，不替代 deq/cancel 规则。 | 用户追问 FOF 之外的 `lastUop` 影响。 | V2 LsqEnq、StoreQueue、SBuffer、vector store fault。 |
+| 2026-09-08 | `a58ea2ee3aacd29cd536a72c1418811008613ef3` | 现有 flow 覆盖 LSQ admission/redirect，但未按实际 Scala/Verilog 层级区分核心策略模块、数据支撑模块和集成 wrapper。 | 补充 `LsqEnqCtrl`、LQ/SQ 主体及 RAR/RAW/Replay/Uncache 的职责分类，明确 `LsqWrapper`/`LoadQueue` 是集成为主但含少量跨模块控制，且两类 MisalignBuffer 与 LSQ 并列而非内部子模块。 | 用户要求结合 Scala 与 Verilog 分析 LSQ 内部模块边界和核心特性。 | V2 NewDispatch、MemBlock、LsqWrapper、LoadQueue、StoreQueue 及生成 RTL。 |
 
 ## 待确认项
 
