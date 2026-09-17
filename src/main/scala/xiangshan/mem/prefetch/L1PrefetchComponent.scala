@@ -857,6 +857,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val forward_sent_vec = l2_array(i).sent_vec | issue_forward_sent_vec
     l2_pf_req_arb.io.in(i).valid := l2_array(i).can_send_pf(l2_valids(i), forward_sent_vec) && !evict
     l2_pf_req_arb.io.in(i).bits.req.addr := l2_array(i).get_pf_paddr(forward_sent_vec)
+    l2_pf_req_arb.io.in(i).bits.req.pfConf := Cat(l2_array(i).confidence, 0.U(2.W))
     l2_pf_req_arb.io.in(i).bits.req.source := MuxLookup(l2_array(i).source.value, MemReqSource.Prefetch2L2Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
@@ -916,6 +917,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val forward_sent_vec = l3_array(i).sent_vec | issue_forward_sent_vec
     l3_pf_req_arb.io.in(i).valid := l3_array(i).can_send_pf(l3_valids(i), forward_sent_vec) && !evict
     l3_pf_req_arb.io.in(i).bits.addr := l3_array(i).get_pf_paddr(forward_sent_vec)
+    l3_pf_req_arb.io.in(i).bits.pfConf := Cat(l3_array(i).confidence, 0.U(2.W))
     l3_pf_req_arb.io.in(i).bits.source := MuxLookup(l3_array(i).source.value, MemReqSource.Prefetch2L3Unknown.id.U)(Seq(
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L3Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L3Stream.id.U
@@ -1063,10 +1065,10 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
     stream_bit_vec_array.io.l3_prefetch_req.valid && stream_pf_ctrl.enable && streamEnable
   pf_queue_filter.io.l3_prefetch_req.bits := stream_bit_vec_array.io.l3_prefetch_req.bits
 
-  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && io.enable && !l2PfqBusy
+  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && io.enable
   io.l1_req.bits := pf_queue_filter.io.l1_req.bits
 
-  pf_queue_filter.io.l1_req.ready := io.l1_req.ready && !l2PfqBusy
+  pf_queue_filter.io.l1_req.ready := io.l1_req.ready
   pf_queue_filter.io.tlb_req <> io.tlb_req
   pf_queue_filter.io.pmp_resp := io.pmp_resp
   pf_queue_filter.io.enable := io.enable
@@ -1075,18 +1077,15 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
   val l2_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l2_pf_addr.bits.addr)).reduce(_ || _)
-  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable && !l2PfqBusy
+  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
-  pf_queue_filter.io.l2_pf_addr.ready := io.l2_req.ready && !l2PfqBusy
+  pf_queue_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits.addr)).reduce(_ || _)
-  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable && !l2PfqBusy
+  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
-  pf_queue_filter.io.l3_pf_addr.ready := io.l3_req.ready && !l2PfqBusy
+  pf_queue_filter.io.l3_pf_addr.ready := io.l3_req.ready
 
-  XSPerfAccumulate("l1_pf_hold_by_l2pfq", pf_queue_filter.io.l1_req.valid && io.enable && l2PfqBusy)
-  XSPerfAccumulate("l2_pf_hold_by_l2pfq", pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable && l2PfqBusy)
-  XSPerfAccumulate("l3_pf_hold_by_l2pfq", pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable && l2PfqBusy)
   XSPerfAccumulate("l1_pf_issue_fire", io.l1_req.fire)
   XSPerfAccumulate("l2_pf_issue_fire", io.l2_req.fire)
   XSPerfAccumulate("l3_pf_issue_fire", io.l3_req.fire)

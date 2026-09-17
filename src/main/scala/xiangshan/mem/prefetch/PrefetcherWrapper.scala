@@ -146,6 +146,24 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     x.bits := DontCare
   }
 
+  // Request-level confidence gating for L1 prefetch issue, following the
+  // same matrix as the L2 side: the L2-fed NoC busy tier sets the minimum
+  // request tier, and a full L2 prefetch queue bumps the busy tier to the
+  // >90% band. A blocked request is acknowledged and dropped fast instead
+  // of being held head-of-line.
+  val l1pfThrottleEn = Constantin.createRecord(s"l1pf_confThrottle$hartId", initValue = 1)
+  val l1pfMinTierPacked = Constantin.createRecord(s"l1pf_confMinTier$hartId", initValue = 2256)
+  val l1BusyTier = Mux(io.pfCtrlFromTile.l2PfqBusy, 3.U, io.l2_fdbk_pf_ctrl.nocTier)
+  def l1PfAdmit(pfConf: UInt): Bool =
+    l1pfThrottleEn === 0.U || pfConf >= (l1pfMinTierPacked >> (l1BusyTier * 3.U))(2, 0)
+  def gatePfReq[T <: Data](arbIn: DecoupledIO[T], engReq: DecoupledIO[T], pfConf: UInt, name: String): Unit = {
+    val admit = l1PfAdmit(pfConf)
+    arbIn.valid := engReq.valid && admit
+    arbIn.bits := engReq.bits
+    engReq.ready := arbIn.ready || !admit
+    XSPerfAccumulate(s"${name}_tier_drop", engReq.valid && !admit)
+  }
+
 
   /** Prefetchor
     * L1: Stride, Berti
@@ -211,7 +229,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(IdxSMS) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(IdxSMS)
 
-    l2_pf_arb.io.in(IdxSMS) <> pf.io.l2_req
+    gatePfReq(l2_pf_arb.io.in(IdxSMS), pf.io.l2_req, pf.io.l2_req.bits.pfConf, "sms_l2")
     pf.io.l1_req.ready := false.B
     pf.io.l3_req.ready := false.B
   })
@@ -260,9 +278,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(IdxStreamStride) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(IdxStreamStride)
 
-    l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
-    l2_pf_arb.io.in(IdxStreamStride) <> pf.io.l2_req
-    l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
+    gatePfReq(l1_pf_arb.io.in(IdxStreamStride), pf.io.l1_req,
+      Cat(pf.io.l1_req.bits.confidence, 0.U(2.W)), "ss_l1")
+    gatePfReq(l2_pf_arb.io.in(IdxStreamStride), pf.io.l2_req, pf.io.l2_req.bits.pfConf, "ss_l2")
+    gatePfReq(l3_pf_arb.io.in(IdxStreamStride), pf.io.l3_req, pf.io.l3_req.bits.pfConf, "ss_l3")
   })
 
   val bertiOpt: Option[BertiPrefetcher] = if(HasBerti) Some(Module(new BertiPrefetcher())) else None
@@ -303,8 +322,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(IdxBerti) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(IdxBerti)
 
-    l1_pf_arb.io.in(IdxBerti) <> pf.io.l1_req
-    l2_pf_arb.io.in(IdxBerti) <> pf.io.l2_req
+    gatePfReq(l1_pf_arb.io.in(IdxBerti), pf.io.l1_req, 4.U(3.W), "berti_l1")
+    gatePfReq(l2_pf_arb.io.in(IdxBerti), pf.io.l2_req, 2.U(3.W), "berti_l2")
     l3_pf_arb.io.in(IdxBerti) <> pf.io.l3_req
 
   })
