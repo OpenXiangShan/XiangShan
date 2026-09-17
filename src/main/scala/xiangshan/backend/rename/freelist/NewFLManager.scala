@@ -91,6 +91,7 @@ class NewFLManager(
 
   // Newly released registers are not yet in this cycle's bitmap. Append
   // them after the s0-selected candidates so they can refill s1 immediately.
+  // Commit frees remain valid during recovery, while bitmap selection stops.
   // Filter duplicates against s1 reservations, s0 candidates, and earlier
   // free requests before compacting the combined enqueue stream.
   val freeCandidateValid = Wire(Vec(freeWidth, Bool()))
@@ -103,7 +104,7 @@ class NewFLManager(
         case (valid, previousReg) => valid && previousReg === freeReg
       }.reduce(_ || _)
     }
-    freeCandidateValid(freeIdx) := !in.flush && in.freeReq(freeIdx) &&
+    freeCandidateValid(freeIdx) := in.freeReq(freeIdx) &&
       !reservedBitmap(freeReg) && !s0CandidateBitmap(freeReg) && !duplicateFree
   }
 
@@ -161,45 +162,44 @@ class NewFLManager(
   val s1DequeuedBitmap = Mux(s1DoDequeue, selectedBitmap, 0.U(numPhyRegs.W))
 
   // s1 holds unallocated prefetch candidates, which remain free across
-  // rollback. Freeze them throughout recovery, together with their reservation
-  // bits and availability flag, so they can be used as soon as recovery ends.
+  // rollback. Keep the head fixed during recovery, but allow commit frees to
+  // append at the tail. Track availability as the queue fills so allocation
+  // can resume immediately when recovery ends.
   when(!in.flush) {
-    s1CanAllocateReg := s1CanAllocateNext
     s1HeadPtr := s1HeadPtrNext
     s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
-    s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
-    s1ValidCount := s1ValidCountNext
-    for (candidateIdx <- 0 until enqueueWidth) {
-      when(enqueueValid(candidateIdx)) {
-        val writePtr = addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
-        s1Queue(writePtr) := enqueueCandidates(candidateIdx)
-      }
+  }
+  s1CanAllocateReg := s1CanAllocateNext
+  s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
+  s1ValidCount := s1ValidCountNext
+  for (candidateIdx <- 0 until enqueueWidth) {
+    when(enqueueValid(candidateIdx)) {
+      val writePtr = addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
+      s1Queue(writePtr) := enqueueCandidates(candidateIdx)
     }
   }
 
-  when(!in.flush) {
-    reservedBitmap := (reservedBitmap | enqueueBitmap) & ~s1DequeuedBitmap
-  }
+  reservedBitmap := (reservedBitmap | enqueueBitmap) & ~s1DequeuedBitmap
 
   when(!in.flush) {
     assert((reservedBitmap & ~in.freeBitmap) === 0.U,
       "s1 candidates must remain free after recovery")
-    assert(PopCount(reservedBitmap) === s1ValidCount)
-    assert(s1CanAllocateReg === (s1ValidCount >= renameWidth.U))
-    assert(s1ValidCount <= s1QueueSize.U)
-    assert(s1DequeueCount <= s1ValidCount)
-    assert(enqueueCount <= s1EnqueueCapacity)
-    assert(PopCount(enqueueBitmap) === enqueueCount)
-    assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
-    assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
-    for (candidateIdx <- 0 until enqueueWidth) {
-      when(enqueueValid(candidateIdx)) {
-        assert(enqueueCandidates(candidateIdx) < numPhyRegs.U)
-        if (candidateIdx < renameWidth) {
-          assert(s0AllocBitmap(enqueueCandidates(candidateIdx)))
-        } else {
-          assert(in.freeReq(candidateIdx - renameWidth))
-        }
+  }
+  assert(PopCount(reservedBitmap) === s1ValidCount)
+  assert(s1CanAllocateReg === (s1ValidCount >= renameWidth.U))
+  assert(s1ValidCount <= s1QueueSize.U)
+  assert(s1DequeueCount <= s1ValidCount)
+  assert(enqueueCount <= s1EnqueueCapacity)
+  assert(PopCount(enqueueBitmap) === enqueueCount)
+  assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
+  assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
+  for (candidateIdx <- 0 until enqueueWidth) {
+    when(enqueueValid(candidateIdx)) {
+      assert(enqueueCandidates(candidateIdx) < numPhyRegs.U)
+      if (candidateIdx < renameWidth) {
+        assert(s0AllocBitmap(enqueueCandidates(candidateIdx)))
+      } else {
+        assert(in.freeReq(candidateIdx - renameWidth))
       }
     }
   }
@@ -214,7 +214,7 @@ object NewFLManager {
     val freeReq = Vec(freeReqWidth, Bool())
     val freePhyReg = Vec(freeReqWidth, UInt(log2Up(numPhyRegs).W))
     val doAllocate = Bool()
-    // Pause refill/allocation for the entire bitmap recovery, retaining s1.
+    // Pause bitmap selection/allocation during recovery; freeReq may fill s1.
     val flush = Bool()
   }
 
