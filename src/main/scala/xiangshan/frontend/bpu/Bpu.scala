@@ -468,11 +468,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // they have to be told where the whole group ends, not where its first block jumped: a group that kept a second
   // block covers past that target itself.
   Seq(abtb.io, utage.io, ptage.io).foreach { predictorIo =>
-    predictorIo.redirect        := redirect.valid
-    predictorIo.bpuS2Override   := s2_override
-    predictorIo.bpuS3Override   := s3_override
-    predictorIo.newStartPc      := s1_groupTarget
-    predictorIo.overrideStartPc := Mux(s3_override, s3_prediction.target, s2_prediction.target)
+    predictorIo.redirect           := redirect.valid
+    predictorIo.bpuS2Override      := s2_override
+    predictorIo.bpuS3Override      := s3_override
+    predictorIo.newStartPc         := s1_groupTarget
+    predictorIo.overrideStartPc    := Mux(s3_override, s3_prediction.target, s2_prediction.target)
+    predictorIo.overrideOwnStartPc := Mux(s3_override, s3_startPc.get, s2_startPc.get)
   }
 
   private val s1_taken        = s1_prediction.taken

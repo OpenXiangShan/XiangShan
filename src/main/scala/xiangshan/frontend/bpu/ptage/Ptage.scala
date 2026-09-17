@@ -70,12 +70,16 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
    * that will be needed two cycles from here. Everything on this path is one XOR deep, because the pc itself is the
    * late signal, coming from the previous cycle's own prediction.
    */
-  private val a0_startPc = io.startPc
-  private val a0_bankIdx = getBankIndex(a0_startPc)
+  // On a correction cycle the pc at s0 belongs to the path just abandoned, so indexing from it returns an entry for
+  // a group that is no longer going to be fetched. The corrected group is what everything after it now follows, and
+  // the ahead history handed out this cycle already has that group folded in, so index from the corrected group and
+  // carry on. A redirect is still sat out: its meta names the control-flow instruction rather than the block it sits
+  // in, and an index built from the wrong pc is worse than none.
+  private val a0_override = io.bpuS2Override || io.bpuS3Override
+  private val a0_startPc  = Mux(a0_override, io.overrideOwnStartPc, io.startPc)
+  private val a0_bankIdx  = getBankIndex(a0_startPc)
 
-  // A read issued in a correction cycle indexes with the folded history as it stood before that correction reached
-  // FastPhr, so whatever it returns belongs to the path just abandoned. pTAGE sits that one group out.
-  private val a0_anchored = !io.redirect && !io.bpuS2Override && !io.bpuS3Override
+  private val a0_anchored = !io.redirect
 
   private def foldedFor(tableIdx: Int, width: Int): UInt = {
     val span = fastPhrParameters.Spans(tableIdx)
@@ -122,6 +126,21 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val s0_tag    = VecInit(Seq.tabulate(NumTables)(t => (s0_tagFold(t) ^ getTagPc(s0_startPc))(TagWidth - 1, 0)))
   private val s0_hitVec = VecInit(Seq.tabulate(NumTables)(t => s0_entry(t).valid && s0_entry(t).tag === s0_tag(t)))
 
+  /* *** useful marks ***
+   * A mark says an entry earned its place, and allocation passes marked entries over. They live here rather than in
+   * the entry itself for one reason: the only way to stop the tables filling with permanently-protected entries is to
+   * let every mark go at once, and a write port that spends its cycles on training cannot sweep an sram to do it.
+   * In flops the whole array clears in a cycle, and the entry loses a bit in the bargain.
+   */
+  private val usefulMarks = RegInit(VecInit(Seq.fill(NumTables)(
+    VecInit(Seq.fill(NumBanks * NumSets)(false.B))
+  )))
+  private def usefulAddr(bank: UInt, set: UInt): UInt = Cat(bank, set)
+
+  private val s0_useful =
+    VecInit(Seq.tabulate(NumTables)(t => usefulMarks(t)(usefulAddr(s0_bankIdx, s0_setIdx(t)))))
+  private val s1_useful = RegEnable(s0_useful, s0_fire)
+
   /* *** s1: select a provider and decode the group *** */
   private val s1_anchored = RegEnable(s0_anchored, false.B, s0_fire)
   private val s1_startPc  = RegEnable(s0_startPc, s0_fire)
@@ -144,6 +163,19 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   private val s1_providerEntry = Mux1H(UIntToOH(s1_provider.bits, NumTables), s1_entry)
 
+  // The alternate answer: the longest history that hit below the provider. A mark is only worth giving where the
+  // provider said something the alternate did not -- an entry that merely agrees with a shorter history is not
+  // holding any context of its own, and protecting it costs a place that a new group could have used.
+  private val s1_altHitVec = VecInit(s1_hitVec.zipWithIndex.map { case (hit, t) =>
+    hit && !(s1_provider.valid && s1_provider.bits === t.U)
+  })
+  private val s1_alt      = selectLongest(s1_altHitVec)
+  private val s1_altEntry = Mux1H(UIntToOH(s1_alt.bits, NumTables), s1_entry)
+  private val s1_providerDiffersFromAlt = s1_alt.valid && (
+    s1_providerEntry.p1.taken =/= s1_altEntry.p1.taken ||
+      s1_providerEntry.p1.cfiPosition =/= s1_altEntry.p1.cfiPosition
+  )
+
   // The first block starts where this group starts; the second starts at the first's next pc, which is why that field
   // is not stored twice.
   private val s1_p1Target = getFullTarget(s1_startPc, s1_providerEntry.p1.nextPcLow, None)
@@ -159,16 +191,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
       // elsewhere or moves the return stack. Checking it where the entry is used keeps a stale or aliased entry from
       // presenting one of those as a second block.
       s1_providerEntry.p2.attribute.isConditional &&
-      // A second block is not free to be wrong the way a first block is. Nothing checks it until the duplicated
-      // lookup answers three stages later, and an entry that fails there collapses the group and flushes what was
-      // predicted behind it. A block the entry is merely leaning towards is not worth that, so only a counter that
-      // has saturated puts one out.
-      s1_providerEntry.p2.counter.isSaturatePositive &&
-      // The shortest-history table is the one an entry lands in when little distinguishes the paths reaching it, so
-      // it is where a pair is most likely to describe a successor belonging to some other path through the same
-      // address. A first block can afford that and be corrected a stage later; a pair cannot, because what a wrong
-      // successor costs is the whole group.
-      s1_provider.bits =/= 0.U
+      // Both of the filters that used to sit here -- a saturated counter, and never pairing from the shortest table
+      // -- were added when this predictor was finding the wrong entry half the time, and what they were really doing
+      // was hiding that. They are left out now so the coverage the fixes recovered can reach the group, and the
+      // duplicated lookup at s3 is what says whether a pair was worth putting out.
+      true.B
 
   private def decode(block: PtageBlock, target: PrunedAddr): Prediction = {
     val prediction = Wire(new Prediction)
@@ -184,20 +211,23 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.prediction.blocks(1).valid := s1_p2Usable
   io.prediction.blocks(1).bits  := decode(s1_providerEntry.p2, s1_p2Target)
 
-  io.meta.setIdx        := s1_setIdx
-  io.meta.tag           := s1_tag
-  io.meta.bankIdx       := s1_bankIdx
-  io.meta.usefulVec     := VecInit(s1_entry.map(_.useful))
-  io.meta.provider      := s1_provider
-  io.meta.p1Counter     := s1_providerEntry.p1.counter
-  io.meta.p2Counter     := s1_providerEntry.p2.counter
-  io.meta.p2Valid       := s1_providerEntry.p2Valid
-  io.meta.p1CfiPosition := s1_providerEntry.p1.cfiPosition
-  io.meta.p1Attribute   := s1_providerEntry.p1.attribute
-  io.meta.p2CfiPosition := s1_providerEntry.p2.cfiPosition
-  io.meta.p2Attribute   := s1_providerEntry.p2.attribute
-  io.meta.p2NextPcLow   := s1_providerEntry.p2.nextPcLow
-  io.meta.noAnchor      := !s1_anchored
+  io.meta.setIdx                 := s1_setIdx
+  io.meta.tag                    := s1_tag
+  io.meta.bankIdx                := s1_bankIdx
+  io.meta.usefulVec              := s1_useful
+  io.meta.validVec               := VecInit(s1_entry.map(_.valid))
+  io.meta.providerDiffersFromAlt := s1_providerDiffersFromAlt
+  io.meta.provider               := s1_provider
+  io.meta.p1Counter              := s1_providerEntry.p1.counter
+  io.meta.p2Counter              := s1_providerEntry.p2.counter
+  io.meta.p2Valid                := s1_providerEntry.p2Valid
+  io.meta.p1CfiPosition          := s1_providerEntry.p1.cfiPosition
+  io.meta.p1NextPcLow            := s1_providerEntry.p1.nextPcLow
+  io.meta.p1Attribute            := s1_providerEntry.p1.attribute
+  io.meta.p2CfiPosition          := s1_providerEntry.p2.cfiPosition
+  io.meta.p2Attribute            := s1_providerEntry.p2.attribute
+  io.meta.p2NextPcLow            := s1_providerEntry.p2.nextPcLow
+  io.meta.noAnchor               := !s1_anchored
 
   /* *** training ***
    * Driven by s3's verified result, so pTAGE learns what the high-level predictor concluded rather than waiting for
@@ -255,23 +285,22 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val held     = pending.bits
   private val heldMeta = held.meta
   private val heldHit  = heldMeta.provider.valid
-  // the entry named this group's exit correctly, so only its direction was ever in question
+  // The entry described this group correctly: the same exit, in the same place, going to the same address. Leaving
+  // the target out of this counts an entry that rebuilds the wrong address as right, so it is strengthened rather
+  // than corrected, and once strengthened it can earn a mark and hold its place -- a confidently wrong entry that
+  // goes on being found and goes on being refused by the predictors that check it. Only the direction is left out,
+  // because that is what the counter beside the entry is for.
   private val heldCorrect = heldHit &&
     heldMeta.p1CfiPosition === held.cfiPosition &&
-    heldMeta.p1Attribute.asUInt === held.attribute.asUInt
-
-  // Useful marks an entry that earned its place, and allocation passes those over. Nothing ever clears the mark, so
-  // an entry that stopped being consulted would hold its table indefinitely and allocation would find nowhere left to
-  // go. Sweeping the tables to clear marks is not open to a training path that only writes, so instead count how
-  // often allocation is turned away and, once it has been often enough, let the next one take a marked entry.
-  private val allocRefusals = RegInit(0.U(AllocRefusalLimitWidth.W))
-  private val allocMayEvict = allocRefusals.andR
+    heldMeta.p1Attribute.asUInt === held.attribute.asUInt &&
+    heldMeta.p1NextPcLow === held.nextPcLow
 
   // A wrong entry is handed to a longer history to tell the two contexts apart, so allocation looks above the
-  // provider; a miss may go anywhere.
+  // provider; a miss may go anywhere. A marked entry is passed over, and when every candidate is marked the
+  // allocation simply fails -- the marks are what the reset below exists to take away.
   private val allocMask = VecInit(Seq.tabulate(NumTables) { t =>
     val longerThanProvider = if (t == 0) !heldHit else !heldHit || heldMeta.provider.bits < t.U
-    longerThanProvider && (!heldMeta.usefulVec(t) || allocMayEvict)
+    longerThanProvider && !heldMeta.usefulVec(t)
   })
   // an allocation looks for the shortest history that is free, so a new context is learned as cheaply as possible
   private val allocSel = {
@@ -294,9 +323,38 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // and marked entries would never be reclaimed at all.
   private val allocRefused = pending.valid && !heldCorrect && !allocSel.valid
 
+  /* *** letting the marks go ***
+   * Count sustained allocation pressure rather than a run of bad luck: up when an allocation found nowhere to go,
+   * down when one succeeded. When the count says the tables have been full of marked entries for long enough, drop
+   * every mark at once and let the entries that still deserve one earn it again.
+   */
+  private val usefulResetCnt = RegInit(0.U(log2Ceil(UsefulResetThreshold + 1).W))
+  private val doUsefulReset  = t0_valid && allocRefused && usefulResetCnt === (UsefulResetThreshold - 1).U
+
   when(t0_valid) {
-    when(doAllocate && allocMayEvict)(allocRefusals := 0.U)
-      .elsewhen(allocRefused)(allocRefusals := allocRefusals + 1.U)
+    when(allocRefused) {
+      when(doUsefulReset) {
+        usefulResetCnt := 0.U
+        usefulMarks.foreach(_.foreach(_ := false.B))
+      }.otherwise {
+        usefulResetCnt := usefulResetCnt + 1.U
+      }
+    }.elsewhen(doAllocate && usefulResetCnt =/= 0.U) {
+      usefulResetCnt := usefulResetCnt - 1.U
+    }
+  }
+
+  // A mark is earned where an entry was right about a group an alternate would have called differently. It is also
+  // lost: an allocation puts a different group in that place, and the mark belongs to the place rather than to the
+  // entry now, so leaving it would hand the newcomer a protection it never earned.
+  private val markEarned = doStrengthen && heldMeta.providerDiffersFromAlt
+  when(t1_write.valid) {
+    val markAddr = usefulAddr(t1_write.bits.bank, t1_write.bits.setIdx)
+    when(RegNext(doAllocate, init = false.B)) {
+      usefulMarks(t1_write.bits.table)(markAddr) := false.B
+    }.elsewhen(RegNext(markEarned, init = false.B)) {
+      usefulMarks(t1_write.bits.table)(markAddr) := true.B
+    }
   }
 
   private val writeTable = Mux(doAllocate, allocSel.bits, heldMeta.provider.bits)
@@ -304,9 +362,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val writeFresh = !doStrengthen
 
   private val entry = Wire(new PtageEntry)
-  entry.valid  := true.B
-  entry.tag    := heldMeta.tag(writeTable)
-  entry.useful := doStrengthen
+  entry.valid := true.B
+  entry.tag   := heldMeta.tag(writeTable)
 
   entry.p1.cfiPosition := held.cfiPosition
   entry.p1.attribute   := held.attribute
@@ -368,13 +425,69 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
   XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)
   XSPerfAccumulate("trainNoTableFree", t0_valid && allocRefused)
-  XSPerfAccumulate("trainAllocateEvicted", t0_valid && doAllocate && allocMayEvict)
+  /* *** allocation and the marks, counted the way the model counts them ***
+   * An allocation that lands on a live entry is an eviction; one that finds a table with nothing in it is free. The
+   * refusal count and the resets say whether the tables are able to take new groups at all, which is the thing the
+   * marks were quietly preventing.
+   */
+  XSPerfAccumulate("trainAllocateEvicted", t0_valid && doAllocate && heldMeta.validVec(allocSel.bits))
+  XSPerfAccumulate("trainAllocateFree", t0_valid && doAllocate && !heldMeta.validVec(allocSel.bits))
+  XSPerfAccumulate("usefulReset", doUsefulReset)
+
+  /* *** what a training event actually manages to do ***
+   * One write is spent per event, so an event that wants to correct a wrong provider and to hand the context to a
+   * longer table can only do one of them. Count how often both are wanted: allocation always goes to a table above
+   * the provider, so the two writes would never be to the same bank, and the restriction is this module's own.
+   */
+  private val wantsProviderUpdate = pending.valid && heldHit && !heldCorrect
+  private val wantsAllocation     = pending.valid && !heldCorrect && allocSel.valid
+  XSPerfAccumulate("trainWantsBoth", t0_valid && wantsProviderUpdate && wantsAllocation)
+  XSPerfAccumulate(
+    "trainRightExitWrongTarget",
+    t0_valid && pending.valid && heldHit &&
+      heldMeta.p1CfiPosition === held.cfiPosition &&
+      heldMeta.p1Attribute.asUInt === held.attribute.asUInt &&
+      heldMeta.p1NextPcLow =/= held.nextPcLow
+  )
+  XSPerfAccumulate("trainHitButWrong", t0_valid && pending.valid && heldHit && !heldCorrect)
+  XSPerfAccumulate("trainMissAllocated", t0_valid && pending.valid && !heldHit && doAllocate)
+  XSPerfAccumulate("trainMissRefused", t0_valid && pending.valid && !heldHit && !allocSel.valid)
+  XSPerfAccumulate("trainWroteNothing", t0_valid && pending.valid && !writeHappens)
+  // an entry counted correct may still have rebuilt the wrong target, since only where a block ends is compared
+  XSPerfAccumulate(
+    "trainCorrectButTargetWrong",
+    t0_valid && heldCorrect && heldMeta.p2NextPcLow =/= getEntryNextPc(t0_nextPc) && held.hasSecondBlock
+  )
+  (0 until NumTables).foreach { t =>
+    XSPerfAccumulate(s"trainAllocateTable$t", t0_valid && doAllocate && allocSel.bits === t.U)
+    XSPerfAccumulate(s"trainAllocCandidateTable$t", t0_valid && allocMask(t))
+  }
+  XSPerfAccumulate("usefulMarkEarned", t1_write.valid && RegNext(markEarned, init = false.B))
+  XSPerfAccumulate("usefulMarkWouldHaveBeenOld", t0_valid && doStrengthen)
+  XSPerfAccumulate(
+    "trainAllCandidatesMarked",
+    t0_valid && allocRefused && VecInit(Seq.tabulate(NumTables) { t =>
+      val longerThanProvider = if (t == 0) !heldHit else !heldHit || heldMeta.provider.bits < t.U
+      longerThanProvider && heldMeta.usefulVec(t)
+    }).reduce(_ || _)
+  )
+  XSPerfAccumulate("trainAllocPressureHigh", t0_valid && usefulResetCnt > (UsefulResetThreshold / 2).U)
 
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
+
+  XSPerfAccumulate("lookupHasAlt", s1_fire && s1_provider.valid && s1_alt.valid)
+  XSPerfAccumulate("lookupProviderMarked", s1_fire && s1_provider.valid && s1_useful(s1_provider.bits))
+  XSPerfAccumulate("lookupUnanchored", s1_fire && !s1_anchored)
+  XSPerfAccumulate("lookupReplayed", s1_fire && RegEnable(RegEnable(a0_override, s0_fire), s0_fire))
   XSPerfAccumulate("predHit", s1_fire && s1_p1Usable)
   XSPerfAccumulate("predMiss", s1_fire && !s1_p1Usable)
   XSPerfAccumulate("predTwoBlocks", s1_fire && s1_p2Usable)
   XSPerfAccumulate("predP2SuppressedByAttribute", s1_fire && s1_p1Usable && s1_providerEntry.p2Valid && !s1_p2Usable)
+  XSPerfAccumulate(
+    "predP2WouldSuppressByCounter",
+    s1_fire && s1_p2Usable && !s1_providerEntry.p2.counter.isSaturatePositive
+  )
+  XSPerfAccumulate("predP2WouldSuppressByTable0", s1_fire && s1_p2Usable && s1_provider.bits === 0.U)
   XSPerfAccumulate(
     "predP2SuppressedByCounter",
     s1_fire && s1_p1Usable && s1_providerEntry.p2Valid &&

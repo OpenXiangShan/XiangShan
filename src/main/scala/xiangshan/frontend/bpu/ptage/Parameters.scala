@@ -28,8 +28,11 @@ case class PtageParameters(
     NextPcLowWidth:  Int = 11,
     CounterWidth:    Int = 2,
     WriteBufferSize: Int = 4,
-    // how many refused allocations it takes before one is allowed to evict an entry that is marked useful
-    AllocRefusalLimitWidth: Int = 5
+    // How many refused allocations it takes to clear every useful mark. A mark protects an entry from being taken,
+    // and nothing else ever takes it away, so without this the tables fill with protected entries and allocation has
+    // nowhere left to go. Counting up on a refusal and down on a success measures sustained pressure rather than a
+    // run of bad luck.
+    UsefulResetThreshold: Int = 256
 ) {
   require(isPow2(NumBanks), "pTAGE banks are selected by pc bits, so the count must be a power of two")
   require(isPow2(NumSets), "pTAGE sets are selected by a folded history XOR, so the count must be a power of two")
@@ -39,13 +42,13 @@ case class PtageParameters(
 trait HasPtageParameters extends HasFastPhrParameters {
   def ptageParameters: PtageParameters = bpuParameters.ptageParameters
 
-  def NumBanks:               Int = ptageParameters.NumBanks
-  def NumSets:                Int = ptageParameters.NumSets
-  def TagWidth:               Int = ptageParameters.TagWidth
-  def NextPcLowWidth:         Int = ptageParameters.NextPcLowWidth
-  def CounterWidth:           Int = ptageParameters.CounterWidth
-  def WriteBufferSize:        Int = ptageParameters.WriteBufferSize
-  def AllocRefusalLimitWidth: Int = ptageParameters.AllocRefusalLimitWidth
+  def NumBanks:             Int = ptageParameters.NumBanks
+  def NumSets:              Int = ptageParameters.NumSets
+  def TagWidth:             Int = ptageParameters.TagWidth
+  def NextPcLowWidth:       Int = ptageParameters.NextPcLowWidth
+  def CounterWidth:         Int = ptageParameters.CounterWidth
+  def WriteBufferSize:      Int = ptageParameters.WriteBufferSize
+  def UsefulResetThreshold: Int = ptageParameters.UsefulResetThreshold
 
   // One table per FastPhr history span: a table is indexed by the folded history of its own span, which is what makes
   // the geometric-history structure of TAGE. The two therefore have to be configured together.

@@ -60,9 +60,8 @@ class PtageBlock(implicit p: Parameters) extends PtageBundle {
   * alias is caught by the high-level predictor rather than by a check here.
   */
 class PtageEntry(implicit p: Parameters) extends PtageBundle {
-  val valid:  Bool = Bool()
-  val tag:    UInt = UInt(TagWidth.W)
-  val useful: Bool = Bool()
+  val valid: Bool = Bool()
+  val tag:   UInt = UInt(TagWidth.W)
 
   val p1:      PtageBlock = new PtageBlock
   val p2:      PtageBlock = new PtageBlock
@@ -85,16 +84,23 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val setIdx:  Vec[UInt] = Vec(NumTables, UInt(SetIdxWidth.W))
   val tag:     Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
   val bankIdx: UInt      = UInt(BankIdxWidth.W)
-  // the hit entries' useful bits, used to pick an allocation victim; may be stale, which costs allocation quality
-  // but never correctness
-  val usefulVec: Vec[Bool]   = Vec(NumTables, Bool())
-  val provider:  Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  // the indexed entries' useful marks and valid bits, used to pick an allocation victim and to tell an allocation
+  // that took an empty entry from one that took a live one; may be stale, which costs allocation quality but never
+  // correctness
+  val usefulVec: Vec[Bool] = Vec(NumTables, Bool())
+  val validVec:  Vec[Bool] = Vec(NumTables, Bool())
+  // whether the provider said something the next-longest hit did not; a mark is only earned in that case
+  val providerDiffersFromAlt: Bool        = Bool()
+  val provider:               Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
   // the provider entry as it was read, so training need not read the table again to know what it is correcting
   val p1Counter:     SaturateCounter = PtageCounter()
   val p2Counter:     SaturateCounter = PtageCounter()
   val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val p1Attribute:   BranchAttribute = new BranchAttribute
-  val p2Valid:       Bool            = Bool()
+  // where the entry said the first block goes. Without it training cannot tell an entry that named the right exit
+  // from one that named the right exit and rebuilt the wrong target, and would reinforce both alike.
+  val p1NextPcLow: UInt            = UInt(NextPcLowWidth.W)
+  val p1Attribute: BranchAttribute = new BranchAttribute
+  val p2Valid:     Bool            = Bool()
   // the stored second block, carried so a write that learns nothing new about it can put it back unchanged instead of
   // dropping it
   val p2CfiPosition: UInt            = UInt(CfiPositionWidth.W)

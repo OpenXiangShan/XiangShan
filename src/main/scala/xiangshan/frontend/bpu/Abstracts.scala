@@ -52,6 +52,9 @@ trait HasAheadPredictorIO extends BasePredictorIO {
   val bpuS3Override:   Bool      = Input(Bool())
   val newStartPc:      GuardedPc = Input(GuardedPc())
   val overrideStartPc: GuardedPc = Input(GuardedPc())
+  // where the corrected group itself starts, as opposed to where it goes. A predictor keyed on the group before the
+  // one it answers for needs the former to carry on through a correction; one keyed on its own block needs the latter.
+  val overrideOwnStartPc: GuardedPc = Input(GuardedPc())
 }
 
 trait HasFastTrainIO extends BasePredictorIO {
