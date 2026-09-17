@@ -103,6 +103,8 @@ class WriteBuffer[T <: WriteReqBundle](
   private val readReadyVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val emptyVec     = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val fullVec      = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+  private val readArbiters =
+    Seq.fill(numPorts)(Module(new RRArbiter(UInt(log2Ceil(numEntries).W), numEntries)))
   // Replace is to prioritize replacing the entry of the same port as setIdx
   private val victimSameSetIdx = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
 
@@ -115,8 +117,13 @@ class WriteBuffer[T <: WriteReqBundle](
   // Apply drain first. Write requests below override it when they update the same slot,
   // and flush overrides both at the end of the next-state calculation.
   for (rowIdx <- 0 until numPorts) {
-    val drainIdx = PriorityEncoder(dirty(rowIdx))
-    when(io.read(rowIdx).fire) {
+    readArbiters(rowIdx).io.in.zipWithIndex.foreach { case (in, entryIdx) =>
+      in.valid := dirty(rowIdx)(entryIdx)
+      in.bits  := entryIdx.U
+    }
+    readArbiters(rowIdx).io.out.ready := io.read(rowIdx).ready
+    val drainIdx = readArbiters(rowIdx).io.out.bits
+    when(readArbiters(rowIdx).io.out.fire) {
       nextDirty(rowIdx)(drainIdx) := false.B
     }
   }
@@ -186,10 +193,12 @@ class WriteBuffer[T <: WriteReqBundle](
       val notUsefulVec = dirty(portIdx).map(!_)
       val notUseful    = notUsefulVec.reduce(_ || _)
       val notUsefulIdx = PriorityEncoder(notUsefulVec)
+      val plruWay      = replacerWay(portIdx)
+      val plruWayDirty = dirty(portIdx)(plruWay)
       val victim = Mux(
         victimSameSetIdx(portIdx).valid,
         victimSameSetIdx(portIdx).bits,
-        Mux(notUseful, notUsefulIdx, replacerWay(portIdx))
+        Mux(!plruWayDirty, plruWay, Mux(notUseful, notUsefulIdx, plruWay))
       )
       // if this write port !hit need to write a new entry
       when(!hit) {
@@ -257,9 +266,9 @@ class WriteBuffer[T <: WriteReqBundle](
     emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
     fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
     io.full(nRows)      := fullVec(nRows)
-    val readIdx = PriorityEncoder(readValidVec(nRows))
+    val readIdx = readArbiters(nRows).io.out.bits
 
-    io.read(nRows).valid := !emptyVec(nRows)
+    io.read(nRows).valid := readArbiters(nRows).io.out.valid
     io.read(nRows).bits  := DontCare
 
     when(readReadyVec(nRows) && !emptyVec(nRows)) {
