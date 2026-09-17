@@ -29,6 +29,7 @@ object NumWbField extends DecodeField[InstPattern, UInt] {
           }
           // JAL, JALR, AUIPC if rd not zero (RD==0 is in PseudoDecodeChannel, not here)
           case inst if numWbIs2IfRdNotZeroInsts.contains(inst.name) => 2
+          case _: CboInstPattern => 2
           case _ => 1
         }
       case fp: FpInstPattern =>
