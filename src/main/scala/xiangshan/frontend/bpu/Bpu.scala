@@ -741,7 +741,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
    * the first block, and the predictors that would read them are told to sit this event out.
    */
   private val s3_laterResolveMeta = WireInit(0.U.asTypeOf(new BpuResolveMeta))
-  s3_laterResolveMeta.tage         := block2.io.tageMeta
+  s3_laterResolveMeta.tage := block2.io.tageMeta
+  // Without this the meta is all zeros, so every predictor that asks whether its btb held the branch decides it did
+  // not, and a later block trains nothing at all. The duplicated lookup is the one that read this block's address.
+  s3_laterResolveMeta.mbtb         := block2.io.mbtbMeta
   s3_laterResolveMeta.phr          := s3_midPhrMeta
   s3_laterResolveMeta.isLaterBlock := true.B
 

@@ -300,10 +300,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t1_setIdx   = RegEnable(t0_setIdx, t0_fire)
   private val t1_bankMask = RegEnable(t0_bankMask, t0_fire)
 
-  private val t1_useMeta     = RegEnable(t0_useMeta, t0_fire)
-  private val t1_meta        = RegEnable(VecInit(t0_meta), t0_fire)
-  private val t1_baseCtr     = RegEnable(VecInit(t0_baseCtr), t0_fire)
-  private val t1_mbtbHitMask = RegEnable(VecInit(t0_mbtbHitMask), t0_fire)
+  private val t1_useMeta      = RegEnable(t0_useMeta, t0_fire)
+  private val t1_isLaterBlock = RegEnable(io.train.meta.isLaterBlock, t0_fire)
+  private val t1_meta         = RegEnable(VecInit(t0_meta), t0_fire)
+  private val t1_baseCtr      = RegEnable(VecInit(t0_baseCtr), t0_fire)
+  private val t1_mbtbHitMask  = RegEnable(VecInit(t0_mbtbHitMask), t0_fire)
 
   private val t1_foldedHist = RegEnable(t0_foldedHist, t0_fire)
   private val t1_rawTag = VecInit((tables zip t1_foldedHist).map { case (table, hist) =>
@@ -327,10 +328,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t2_rawTag   = RegEnable(t1_rawTag, t1_fire)
   private val t2_readResp = RegEnable(t1_readResp, t1_fire)
 
-  private val t2_useMeta     = RegEnable(t1_useMeta, t1_fire)
-  private val t2_meta        = RegEnable(t1_meta, t1_fire)
-  private val t2_baseCtr     = RegEnable(t1_baseCtr, t1_fire)
-  private val t2_mbtbHitMask = RegEnable(t1_mbtbHitMask, t1_fire)
+  private val t2_useMeta      = RegEnable(t1_useMeta, t1_fire)
+  private val t2_isLaterBlock = RegEnable(t1_isLaterBlock, t1_fire)
+  private val t2_meta         = RegEnable(t1_meta, t1_fire)
+  private val t2_baseCtr      = RegEnable(t1_baseCtr, t1_fire)
+  private val t2_mbtbHitMask  = RegEnable(t1_mbtbHitMask, t1_fire)
 
   private val t2_trainInfoVec = VecInit(t2_branches.zipWithIndex.map { case (branch, i) =>
     val isCond      = branch.valid && branch.bits.attribute.isConditional
@@ -743,6 +745,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       trainInfo.hasProvider && trainInfo.providerTableOH(NumTables - 1)
     }
   )
+  XSPerfAccumulate("train_later_block", t2_fire && t2_isLaterBlock)
   XSPerfAccumulate("allocate_needed", t3_fire && t3_needAllocate)
   XSPerfAccumulate("allocate_success", t3_fire && t3_allocate)
   XSPerfAccumulate("allocate_failure", t3_fire && t3_needAllocate && !t3_canAllocate)

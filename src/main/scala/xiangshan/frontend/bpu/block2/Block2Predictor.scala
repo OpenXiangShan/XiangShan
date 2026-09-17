@@ -26,6 +26,7 @@ import xiangshan.frontend.bpu.StageCtrl
 import xiangshan.frontend.bpu.Train
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.tage.TageMeta
 
@@ -66,6 +67,9 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
     // what the duplicated tage read, so the second block's branches can train the real tage. The copies are written
     // only by training, and by the same training, so they hold the same entries in the same ways.
     val tageMeta: TageMeta = Output(new TageMeta)
+    // This copy's btb meta for the same block. Tage only trains a branch its btb holds, so a later block needs one
+    // from the array that actually looked the block up.
+    val mbtbMeta: MainBtbMeta = Output(new MainBtbMeta)
   }
 
   val io: Block2PredictorIO = IO(new Block2PredictorIO)
@@ -131,6 +135,7 @@ class Block2Predictor(implicit p: Parameters) extends BpuModule {
   private val tageDecidedItTrue = Mux1H(compareMatrix.getLeastElementOH(takenMask), tagePred).valid
 
   io.tageMeta := tage.io.meta
+  io.mbtbMeta := mbtb.io.meta
 
   io.prediction.hasEntry          := anyEntry
   io.prediction.taken             := taken
