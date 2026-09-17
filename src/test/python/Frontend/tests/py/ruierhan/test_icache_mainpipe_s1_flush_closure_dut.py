@@ -158,14 +158,21 @@ def _snapshot(env) -> dict:
 
 def _register_s1_observer(env) -> list[dict]:
     samples: list[dict] = []
+    s2_valid_shadow = False
 
     def observe(cycle, active_env) -> None:
-        samples.append(
-            {
-                "cycle": int(cycle),
-                **{key: _read(active_env, key) for key in _SIGNALS},
-            }
-        )
+        nonlocal s2_valid_shadow
+        sample = {
+            "cycle": int(cycle),
+            **{key: _read(active_env, key) for key in _SIGNALS},
+            "s2_valid_shadow_before": int(s2_valid_shadow),
+        }
+        if int(sample["io_flush"]) == 1:
+            s2_valid_shadow = False
+        elif int(sample["s1_fire"]) == 1:
+            s2_valid_shadow = True
+        sample["s2_valid_shadow_after"] = int(s2_valid_shadow)
+        samples.append(sample)
 
     env.register_cycle_observer(observe)
     return samples
@@ -334,45 +341,125 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
-def _drive_bpu_s3_until_s2_hit(env, *, max_cycles: int) -> None:
-    predictor_disabled = False
-    disabled_at = -1
+def _train_live_cfi_for_s3_override(env, *, max_cycles: int) -> dict:
+    """Train MainBTB through one legal, currently-live FTQ identity."""
+    scheduler = env.bpu_ftq_scheduler
+    identity = scheduler.wait_live_identity(
+        cfi_only=True,
+        max_cycles=max_cycles,
+    )
+    env.backend_model.set_can_accept(0)
+    try:
+        scheduler.queue_mispredict(
+            identity,
+            target=int(identity["actual_target"]),
+        )
+        # Allow the real resolve interface and predictor update pipeline to
+        # consume the training transaction before changing predictor enables.
+        env.step(8)
+    finally:
+        env.backend_model.set_can_accept(1)
+    return identity
+
+
+def _drive_bpu_s3_until_s2_hit(
+    env,
+    samples: list[dict],
+    *,
+    max_cycles: int,
+) -> None:
+    """Create an s1/s3 disagreement while a reconstructed s2 context is live.
+
+    BIN-776 does not constrain the BPU FTQ pointer.  It only requires an
+    already-established shadow s2 context, no global flush, and a real BPU s3
+    valid.  Keep MainBTB enabled after training while disabling the s1 fast
+    predictors so a trained taken CFI can override the s1 fall-through result.
+    """
+    group = "icache_mainpipe_s2_ecc"
+    bin_name = "bpu_s3_flush_keeps_s2"
+    deadline = int(env.current_cycle) + int(max_cycles)
+    attempts: list[dict] = []
 
     try:
-        for _ in range(int(max_cycles)):
-            if env.functional_coverage.key_hit(
-                "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2"
-            ):
+        while int(env.current_cycle) < deadline:
+            if env.functional_coverage.key_hit(group, bin_name):
                 return
-            if (
-                _read(env, "s2_valid") == 1
-                and _read(env, "io_flush") == 0
-                and _read(env, "bpu_valid") == 0
-                and not predictor_disabled
-            ):
-                env.set_bp_ctrl_enable(
-                    ubtb_enable=0,
-                    abtb_enable=0,
-                    mbtb_enable=0,
-                    tage_enable=0,
-                    sc_enable=0,
-                    ittage_enable=0,
+
+            remaining = deadline - int(env.current_cycle)
+            try:
+                identity = _train_live_cfi_for_s3_override(
+                    env,
+                    max_cycles=min(512, max(0, remaining)),
                 )
-                predictor_disabled = True
-                disabled_at = int(env.current_cycle)
-            elif predictor_disabled and int(env.current_cycle) - disabled_at >= 6:
-                _restore_predictors(env)
-                predictor_disabled = False
-            env.step(1)
+                attempts.append(
+                    {
+                        "cycle": int(env.current_cycle),
+                        "ftq_flag": int(identity["ftq_flag"]),
+                        "ftq_value": int(identity["ftq_value"]),
+                        "inst_pc": int(identity["inst_pc"]),
+                        "target": int(identity["actual_target"]),
+                    }
+                )
+            except AssertionError as error:
+                attempts.append(
+                    {
+                        "cycle": int(env.current_cycle),
+                        "training_error": str(error),
+                    }
+                )
+                if int(env.current_cycle) < deadline:
+                    env.step(1)
+                continue
+
+            # Training may redirect and clear the shadow.  Re-establish it
+            # strictly after training, without relying on internal s2_valid.
+            while int(env.current_cycle) < deadline:
+                if (
+                    samples
+                    and int(samples[-1]["s2_valid_shadow_after"]) == 1
+                    and int(samples[-1]["io_flush"]) == 0
+                    and int(samples[-1]["bpu_valid"]) == 0
+                ):
+                    break
+                env.step(1)
+            if int(env.current_cycle) >= deadline:
+                break
+
+            env.set_bp_ctrl_enable(
+                ubtb_enable=0,
+                abtb_enable=0,
+                mbtb_enable=1,
+                tage_enable=1,
+                sc_enable=1,
+                ittage_enable=1,
+            )
+
+            # BPU control is delayed by two RTL cycles.  Continue running the
+            # loop so the trained CFI is revisited and MainBTB can disagree
+            # with the now-disabled s1 fast predictors.
+            observe_cycles = min(256, deadline - int(env.current_cycle))
+            for _ in range(observe_cycles):
+                env.step(1)
+                if env.functional_coverage.key_hit(group, bin_name):
+                    return
+
+            _restore_predictors(env)
+            if int(env.current_cycle) < deadline:
+                env.step(min(4, deadline - int(env.current_cycle)))
     finally:
+        env.backend_model.set_can_accept(1)
         _restore_predictors(env)
 
-    _wait_group_hit(
-        env,
-        "icache_mainpipe_s2_ecc",
-        "bpu_s3_flush_keeps_s2",
-        max_cycles=1,
-    )
+    assert env.functional_coverage.key_hit(group, bin_name), {
+        "reason": "trained MainBTB did not produce BPU s3 valid while shadow s2 was live",
+        "max_cycles": int(max_cycles),
+        "training_attempts": attempts[-16:],
+        "tail": samples[-64:],
+        "last": _snapshot(env),
+        "icache": env.icache_agent.get_stats(),
+        "backend": env.backend_model.get_stats(),
+        "monitor_errors": env.monitor.get_errors(),
+    }
 
 
 @pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
@@ -581,3 +668,73 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
             assert not env.monitor.get_errors()
             return
     _wait_hit(env, "flush_cancels_registered_refill", max_cycles=1)
+
+
+@pytest.mark.funcov_bins("BIN-645")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
+    samples = _register_s1_observer(env)
+    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+
+    attempts = _cycle_limit("TB_ICACHE_S2_GLOBAL_FLUSH_ATTEMPTS", 64)
+    for attempt in range(attempts):
+        _run_until(
+            env,
+            lambda: any(
+                sample["s2_valid_shadow_after"] == 1
+                and sample["io_flush"] == 0
+                and sample["bpu_valid"] == 0
+                for sample in samples[-1:]
+            ),
+            max_cycles=_cycle_limit("TB_ICACHE_S2_CONTEXT_WAIT", 6000),
+            label="s1 fire establishing the reconstructed s2 context",
+        )
+        env.backend_model.inject_redirect(
+            _redirect_target(attempt),
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        try:
+            _wait_group_hit(
+                env,
+                "icache_mainpipe_s2_ecc",
+                "global_flush_clears_s2",
+                max_cycles=32,
+            )
+            break
+        except AssertionError:
+            if attempt + 1 >= attempts:
+                raise
+
+    env.step(1)
+    assert any(
+        current["s2_valid_shadow_before"] == 1
+        and current["io_flush"] == 1
+        and current["bpu_valid"] == 0
+        and current["s1_fire"] == 0
+        and current["s2_valid_shadow_after"] == 0
+        and following["s2_valid_shadow_before"] == 0
+        for current, following in zip(samples, samples[1:])
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-776")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_bpu_s3_keeps_s2(env) -> None:
+    samples = _register_s1_observer(env)
+    _initialize_bpu_s3_stream(env)
+    _drive_bpu_s3_until_s2_hit(
+        env,
+        samples,
+        max_cycles=_cycle_limit("TB_ICACHE_S2_BPU_MAX_CYCLES", 4096),
+    )
+    assert any(
+        int(sample["s2_valid_shadow_before"]) == 1
+        and int(sample["io_flush"]) == 0
+        and int(sample["bpu_valid"]) == 1
+        and int(sample["s2_valid_shadow_after"]) == 1
+        for sample in samples
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()
+    assert not env.get_errors()

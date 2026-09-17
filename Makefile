@@ -327,15 +327,18 @@ FRONTEND_FUNCOV_FILELIST = $(FRONTEND_BUILD_DIR)/full-rtl-picker.funcov.f
 FRONTEND_CCACHE_DIR ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache)
 FRONTEND_CCACHE_TMP ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache-tmp)
 FRONTEND_BUILD_JOBS ?= 32
-FRONTEND_LOCAL_CONFIG ?= .local/frontend.local.mk
+FRONTEND_LOCAL_CONFIG ?=
 FRONTEND_VCS_HOME ?= $(VCS_HOME)
 FRONTEND_VERDI_HOME ?= $(VERDI_HOME)
 FRONTEND_VCS_HOST ?=
 FRONTEND_PICKER ?= picker
 FRONTEND_TOOL_PATH ?=
 FRONTEND_SWIG_LIB ?=
+FRONTEND_VCS_XSPCOMM_PYTHON ?=
 ifeq ($(FRONTEND_SIM),vcs)
+ifneq ($(FRONTEND_LOCAL_CONFIG),)
 -include $(FRONTEND_LOCAL_CONFIG)
+endif
 endif
 FRONTEND_SIM_ENV =
 
@@ -421,6 +424,8 @@ FRONTEND_FULL_RTL_PICKER_CCACHE_DIR = $(FRONTEND_CCACHE_DIR)
 FRONTEND_FULL_RTL_PICKER_CCACHE_TMP = $(FRONTEND_CCACHE_TMP)
 FRONTEND_FULL_RTL_PICKER_TMP = $(abspath $(FRONTEND_FULL_RTL_PICKER_BUILD_DIR)/.tmp)
 FRONTEND_FULL_RTL_PICKER_CACHE = $(abspath $(FRONTEND_FULL_RTL_PICKER_BUILD_DIR)/.cache)
+# VCS FSDB paths are selected per testcase at runtime; -w would embed one shared startup file.
+FRONTEND_FULL_RTL_PICKER_WAVEFORM_ARG = $(if $(filter vcs,$(FRONTEND_SIM)),,-w $(abspath $(FRONTEND_FULL_RTL_PICKER_BUILD_DIR))/frontend.$$frontend_waveform_format)
 FRONTEND_FULL_RTL_PICKER_BUILD_ENV = CCACHE_DIR=$(FRONTEND_FULL_RTL_PICKER_CCACHE_DIR) CCACHE_TEMPDIR=$(FRONTEND_FULL_RTL_PICKER_CCACHE_TMP) TMPDIR=$(FRONTEND_FULL_RTL_PICKER_TMP) XDG_CACHE_HOME=$(FRONTEND_FULL_RTL_PICKER_CACHE) NPROC=$(FRONTEND_BUILD_JOBS) MAKEFLAGS=-e $(if $(FRONTEND_TOOL_PATH),PATH=$(FRONTEND_TOOL_PATH)$$PATH) $(if $(FRONTEND_SWIG_LIB),SWIG_LIB=$(FRONTEND_SWIG_LIB)) $(FRONTEND_SIM_ENV)
 
 $(FRONTEND_FULL_RTL_PICKER_BASE_FILELIST): Makefile $(FRONTEND_FULL_RTL_PICKER_TOP_V) $(FRONTEND_FULL_RTL_PICKER_RTL_DIR)/Frontend.sv $(FRONTEND_FULL_RTL_PICKER_RTL_DIR)/filelist.f
@@ -469,8 +474,17 @@ $(FRONTEND_FULL_RTL_PICKER_PYLIB): $(FRONTEND_FULL_RTL_PICKER_FILELIST) $(FRONTE
 			--lang python --autobuild false --cp_lib true \
 			--sim $(FRONTEND_SIM) --access-mode $(FRONTEND_ACCESS_MODE) \
 			--tdir $(abspath $(FRONTEND_FULL_RTL_PICKER_PYLIB_DIR)) \
-			-w $(abspath $(FRONTEND_FULL_RTL_PICKER_BUILD_DIR))/frontend.$$frontend_waveform_format \
+			$(FRONTEND_FULL_RTL_PICKER_WAVEFORM_ARG) \
 			--coverage $(FRONTEND_PICKER_SIM_ARGS)
+	@if [ "$(FRONTEND_SIM)" = "vcs" ]; then \
+		smoke_makefile="$(FRONTEND_FULL_RTL_PICKER_PYLIB_DIR)/python/Makefile"; \
+		xspcomm_python="$(FRONTEND_VCS_XSPCOMM_PYTHON)"; \
+		test -f "$$xspcomm_python/xspcomm/_pyxspcomm.so" || { \
+			echo "VCS build requires a compatible FRONTEND_VCS_XSPCOMM_PYTHON"; exit 2; \
+		}; \
+		sed -i "/@cp -r .*\/xspcomm xspcomm/c\\\t@cp -r $$xspcomm_python/xspcomm xspcomm" "$$smoke_makefile"; \
+		sed -i "/python3 example.py/s|PYTHONPATH=|LD_PRELOAD=$(abspath $(FRONTEND_FULL_RTL_PICKER_PYLIB_DIR))/UT_Frontend/libUTFrontend.so PYTHONPATH=$$xspcomm_python:|" "$$smoke_makefile"; \
+	fi
 	@$(FRONTEND_FULL_RTL_PICKER_BUILD_ENV) $(MAKE) -C $(FRONTEND_FULL_RTL_PICKER_PYLIB_DIR) NPROC=$(FRONTEND_BUILD_JOBS)
 
 ifeq ($(FRONTEND_SIM),vcs)

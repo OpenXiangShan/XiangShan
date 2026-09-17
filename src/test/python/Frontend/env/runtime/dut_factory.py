@@ -97,7 +97,12 @@ class FakeDUTFrontend:
         return int(self._waveform_paused)
 
 
-def create_frontend_dut(tc_name: str = "frontend", dut_logger: Logger | None = None):
+def create_frontend_dut(
+    tc_name: str = "frontend",
+    dut_logger: Logger | None = None,
+    vcs_coverage_vdb: str | None = None,
+    vcs_coverage_name: str | None = None,
+):
     active_logger = dut_logger or logger
     try:
         from Frontend import DUTFrontend
@@ -111,7 +116,20 @@ def create_frontend_dut(tc_name: str = "frontend", dut_logger: Logger | None = N
             ) from exc
         active_logger.warning("compiled Frontend DUT not found; using fallback fake DUT for tc=%s", tc_name)
         return FakeDUTFrontend()
-    dut = DUTFrontend()
+    dut_args = []
+    if (
+        os.getenv("TB_FRONTEND_SIM", "").strip().lower() == "vcs"
+        and vcs_coverage_vdb
+        and vcs_coverage_name
+    ):
+        dut_args = [
+            "Frontend",
+            "-cm_dir",
+            str(vcs_coverage_vdb),
+            "-cm_name",
+            str(vcs_coverage_name),
+        ]
+    dut = DUTFrontend(dut_args) if dut_args else DUTFrontend()
     _install_vcs_vpi_name_adapter(dut)
     setattr(dut, "_is_fake_frontend_dut", False)
     setattr(dut, "_frontend_is_fake_dut", False)

@@ -201,6 +201,7 @@ _LATE_FAULT_SIGNALS = {
     "s2_instr_count": (f"{_IFU_PREFIX}s2_instrCount",),
     "to_ibuffer_valid": (
         "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+        f"{_IFU_PREFIX}io_toIBuffer_valid",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
     ),
     "to_ibuffer_ready": (
@@ -244,6 +245,7 @@ _BIN907_SIGNALS = {
     ),
     "to_ibuffer_valid": (
         "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+        f"{_IFU_PREFIX}io_toIBuffer_valid",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_valid",
     ),
     "to_ibuffer_ready": (

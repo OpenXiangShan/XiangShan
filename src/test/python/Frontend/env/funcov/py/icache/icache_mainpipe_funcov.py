@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from .signal_contract import MAIN_PMP_INSTR, MAIN_PMP_MMIO, TO_IFU_MAP, half_aligned_cross_line
+
 from .flush_from_bpu import (
     BpuS3Flush,
     ftq_ptr_is_strictly_after_current,
@@ -12,6 +14,8 @@ from .flush_from_bpu import (
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 _DATA_BANKS = 8
+_MAYBE_RVC_WIDTH = 32
+_MAYBE_RVC_MASK = (1 << _MAYBE_RVC_WIDTH) - 1
 
 _S1_CROSS = (
     (_MAIN + "s1_req_0_isCrossLine", _MAIN + "accessTrace_crossLine"),
@@ -25,12 +29,22 @@ _S1_HITS = tuple(
     for req in range(2)
     for line in range(2)
 )
+_S2_CORRUPT = tuple(
+    (
+        f"Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_{req}_{line}",
+        _ICACHE + f"__Vtogcov__io_toIfu_corrupt_{req}_{line}",
+        _MAIN + f"io_toIfu_corrupt_{req}_{line}",
+    )
+    for req in range(2)
+    for line in range(2)
+)
 
 
 ICACHE_MAINPIPE_COVERPOINTS = {
     "icache_mainpipe_s0_entry": "entry_behavior",
     "icache_mainpipe_s0_flush": "flush_behavior",
     "icache_mainpipe_s1_sram": "hit_bank_behavior",
+    "icache_mainpipe_maybe_rvc_align": "alignment_behavior",
     "icache_mainpipe_s1_backpressure": "stall_behavior",
     "icache_mainpipe_s1_flush": "flush_behavior",
     "icache_mainpipe_s1_refill": "refill_behavior",
@@ -53,8 +67,15 @@ ICACHE_MAINPIPE_SAMPLER_BIN_KEYS = frozenset(
         ("icache_mainpipe_s1_sram", "single_line_sram_hit"),
         ("icache_mainpipe_s1_sram", "cross_line_dual_sram_hit"),
         ("icache_mainpipe_s1_sram", "single_line_bank_range"),
-        ("icache_mainpipe_s1_sram", "cross_line_bank_mapping"),
         ("icache_mainpipe_s1_sram", "dual_request_independent"),
+        ("icache_mainpipe_maybe_rvc_align", "sram_req0_line0_shift_right"),
+        ("icache_mainpipe_maybe_rvc_align", "sram_req0_line1_shift_left"),
+        ("icache_mainpipe_maybe_rvc_align", "sram_req1_shift_right"),
+        ("icache_mainpipe_maybe_rvc_align", "sram_req1_shift_left_zero"),
+        ("icache_mainpipe_maybe_rvc_align", "sram_req1_line1_shift_left"),
+        ("icache_mainpipe_maybe_rvc_align", "invalid_req1_masked"),
+        ("icache_mainpipe_maybe_rvc_align", "mshr_request_line_alignment"),
+        ("icache_mainpipe_maybe_rvc_align", "mixed_source_merge"),
         ("icache_mainpipe_s1_backpressure", "hit_response_stall"),
         ("icache_mainpipe_s1_backpressure", "refill_completion_stall"),
         ("icache_mainpipe_s1_backpressure", "pending_miss_blocks_upstream"),
@@ -109,7 +130,12 @@ _SIGNALS = {
         _ICACHE + "dataArray.io_read_req_valid",
         _ICACHE + "dataArray.__Vtogcov__io_read_req_valid",
     ),
-    "data_req1_valid": (_ICACHE + "dataArray.io_read_req_bits_1_valid",),
+    "data_req1_valid": (
+        _ICACHE + "dataArray.io_read_req_bits_1_valid",
+        # Both outputs are wired to MainPipe.s0_realTwoFetchValid in full RTL.
+        "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
+        _ICACHE + "__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+    ),
     "io_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
@@ -137,6 +163,23 @@ _SIGNALS = {
     ),
     "req1_valid": (_MAIN + "s1_req_1_valid",),
     "req0_end_position": (_MAIN + "s1_req_0_endPosition",),
+    "two_fetch_valid": (_MAIN + "s1_twoFetchValid",),
+    "align_shift_right": (_MAIN + "s1_maybeRvcAlignInfo_shouldShiftRight",),
+    "align_first_range": (_MAIN + "s1_maybeRvcAlignInfo_firstBlockRange",),
+    "align_total_range": (_MAIN + "s1_maybeRvcAlignInfo_totalBlockRange",),
+    "toifu_maybe_rvc_map": TO_IFU_MAP,
+    "toifu_first_range": (
+        _ICACHE + "__Vtogcov__io_toIfu_req_bits_firstRange",
+        _MAIN + "s1_maybeRvcAlignInfo_firstBlockRange",
+    ),
+    "toifu_total_range": (
+        _ICACHE + "__Vtogcov__io_toIfu_req_bits_totalRange",
+        _MAIN + "s1_maybeRvcAlignInfo_totalBlockRange",
+    ),
+    "miss_resp_maybe_rvc_map": (
+        _MAIN + "io_missResp_bits_maybeRvcMap",
+        _MAIN + "__Vtogcov__io_missResp_bits_maybeRvcMap",
+    ),
     "backend_exception": (_MAIN + "s1_req_0_hasBackendException",),
     "cross0": _S1_CROSS[0],
     "cross1": _S1_CROSS[1],
@@ -174,11 +217,8 @@ _SIGNALS = {
         for req in range(2)
         for line in range(2)
     ),
-    "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
-    "pmp_mmio": (
-        _MAIN + "io_pmp_resp_mmio",
-        _ICACHE + "__Vtogcov__io_toIfu_req_bits_0_icacheMeta_pmpMmio",
-    ),
+    "pmp_instr": MAIN_PMP_INSTR,
+    "pmp_mmio": MAIN_PMP_MMIO,
     "itlb_exception": (
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
         _MAIN + "__Vtogcov__s1_exceptionInfo_0_itlbException_value",
@@ -214,6 +254,14 @@ _EVIDENCE_SCALARS = frozenset(
         "s1_ftq_flag",
         "s1_ftq_value",
         "req1_valid",
+        "two_fetch_valid",
+        "align_shift_right",
+        "align_first_range",
+        "align_total_range",
+        "toifu_maybe_rvc_map",
+        "toifu_first_range",
+        "toifu_total_range",
+        "miss_resp_maybe_rvc_map",
         "backend_exception",
         "cross0",
         "cross1",
@@ -457,6 +505,11 @@ def _mark(
 def reset_icache_mainpipe_coverage_state(recorder) -> None:
     recorder._icache_mainpipe_cov_state = {
         "prev": None,
+        # ICacheMainPipe.s2_valid is optimized out of the generated
+        # Verilator model.  Mirror its ValidHold(s1_fire, false, io.flush)
+        # state from observable DUT signals.  This is the value before the
+        # current cycle's sequential update, matching the RTL cover intent.
+        "s2_valid_shadow": False,
         "four_line_ready_cycles": 0,
         "miss_backpressure_cycles": 0,
         "ftq_waylookup_skew_pending": False,
@@ -464,6 +517,8 @@ def reset_icache_mainpipe_coverage_state(recorder) -> None:
         "refill_completion_pending": None,
         "hit_stall_active": False,
         "registered_refill_pending": None,
+        "req1_left_zero_modes_seen": set(),
+        "mshr_alignment_cases_seen": set(),
     }
 
 
@@ -494,6 +549,60 @@ def _snapshot(recorder) -> dict[str, Any]:
                 (
                     _MAIN + "s1_req_0_vAddr_0_addr",
                     _MAIN + "s1_req_1_vAddr_0_addr",
+                ),
+            ),
+            "align_shift_num": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s1_maybeRvcAlignInfo_shiftNum_{index}"
+                    for index in range(4)
+                ),
+            ),
+            "sram_raw_maps": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s1_wayLookupEntry_{req}_maybeRvcMap_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
+            "sram_aligned_maps": _read_names(
+                recorder,
+                tuple(
+                    _MAIN
+                    + f"s1_maybeRvcAlignInfo_sramAlignedMaybeRvcMap_{req}_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
+            "aligned_masks": _read_names(
+                recorder,
+                tuple(
+                    _MAIN
+                    + f"s1_maybeRvcAlignInfo_alignedMaybeRvcMaskVec_{req}_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
+            "mshr_aligned_maps": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s1_mshrAlignedMaybeRvcMapReg_{req}"
+                    for req in range(2)
+                ),
+            ),
+            "aligned_map_vec": _read_candidates(
+                recorder,
+                tuple(
+                    (
+                        _MAIN
+                        + "s1_alignedMaybeRvcMapVec_REG"
+                        + ("" if index == 0 else f"_{index}"),
+                        _MAIN
+                        + "s1_alignedMaybeRvcMapVec_r"
+                        + ("" if index == 0 else f"_{index}"),
+                    )
+                    for index in range(4)
                 ),
             ),
             "bank_sram": _read_names(
@@ -561,14 +670,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                     for line in range(2)
                 ),
             ),
-            "s2_corrupt": _read_names(
-                recorder,
-                tuple(
-                    _MAIN + f"io_toIfu_corrupt_{req}_{line}"
-                    for req in range(2)
-                    for line in range(2)
-                ),
-            ),
+            "s2_corrupt": _read_candidates(recorder, _S2_CORRUPT),
             "s2_meta_hitnum": _read_names(
                 recorder,
                 tuple(
@@ -656,10 +758,8 @@ def _snapshot(recorder) -> dict[str, Any]:
     if scalar["cross0"] is None and _known(
         (scalar["start_vaddr"][0], scalar["req0_end_position"])
     ):
-        scalar["cross0"] = (
-            (int(scalar["start_vaddr"][0]) >> 4)
-            & (int(scalar["req0_end_position"]) >> 4)
-            & 1
+        scalar["cross0"] = half_aligned_cross_line(
+            scalar["start_vaddr"][0], scalar["req0_end_position"]
         )
     return scalar
 
@@ -696,6 +796,93 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             "s2_corrupt": corrupt,
         }
     )
+
+    s2_valid_shadow_before = bool(state["s2_valid_shadow"])
+    if _on(s["io_flush"]):
+        s2_valid_shadow_after = False
+    elif _on(s["s1_fire"]):
+        s2_valid_shadow_after = True
+    else:
+        s2_valid_shadow_after = s2_valid_shadow_before
+    s2_valid_observed = s["s2_valid"]
+    evidence.update(
+        {
+            "s2_valid_shadow_before": int(s2_valid_shadow_before),
+            "s2_valid_shadow_after": int(s2_valid_shadow_after),
+            "s2_valid_shadow_source": "s1_fire_hold_until_global_flush",
+            "s2_valid_observed": s2_valid_observed,
+            "s2_valid_shadow_matches_observed": (
+                None
+                if s2_valid_observed is None
+                else int(_on(s2_valid_observed) == s2_valid_shadow_before)
+            ),
+        }
+    )
+
+    shift_num = s["align_shift_num"]
+    raw_maps = s["sram_raw_maps"]
+    sram_aligned_maps = s["sram_aligned_maps"]
+    aligned_masks = s["aligned_masks"]
+    mshr_aligned_maps = s["mshr_aligned_maps"]
+    aligned_map_vec = s["aligned_map_vec"]
+    evidence.update(
+        {
+            "align_shift_num": shift_num,
+            "sram_raw_maps": raw_maps,
+            "sram_aligned_maps": sram_aligned_maps,
+            "aligned_masks": aligned_masks,
+            "mshr_aligned_maps": mshr_aligned_maps,
+            "aligned_map_vec": aligned_map_vec,
+        }
+    )
+    if _known((*shift_num, *raw_maps, s["align_shift_right"])):
+        expected_sram_aligned = (
+            int(raw_maps[0]) >> int(shift_num[0]),
+            (int(raw_maps[1]) << (int(shift_num[1]) + 1)) & _MAYBE_RVC_MASK,
+            (
+                int(raw_maps[2]) >> int(shift_num[2])
+                if _on(s["align_shift_right"])
+                else (int(raw_maps[2]) << int(shift_num[2])) & _MAYBE_RVC_MASK
+            ),
+            (int(raw_maps[3]) << (int(shift_num[3]) + 2)) & _MAYBE_RVC_MASK,
+        )
+        evidence["expected_sram_aligned_maps"] = expected_sram_aligned
+        if _known(sram_aligned_maps):
+            evidence["sram_alignment_matches"] = (
+                _bits(sram_aligned_maps) == expected_sram_aligned
+            )
+    if _known((*aligned_masks, *aligned_map_vec, s["two_fetch_valid"])):
+        effective_masks = list(_bits(aligned_masks))
+        if not _on(s["two_fetch_valid"]):
+            effective_masks[2:] = (0, 0)
+        expected_output_map = 0
+        for aligned_map, mask in zip(aligned_map_vec, effective_masks):
+            expected_output_map |= int(aligned_map) & int(mask)
+        expected_output_map &= _MAYBE_RVC_MASK
+        evidence["effective_aligned_masks"] = tuple(effective_masks)
+        evidence["expected_toifu_maybe_rvc_map"] = expected_output_map
+        if s["toifu_maybe_rvc_map"] is not None:
+            evidence["toifu_maybe_rvc_map_matches"] = (
+                int(s["toifu_maybe_rvc_map"]) == expected_output_map
+            )
+    if _known(
+        (
+            s["align_first_range"],
+            s["align_total_range"],
+            s["two_fetch_valid"],
+            s["toifu_first_range"],
+            s["toifu_total_range"],
+        )
+    ):
+        expected_total_range = (
+            int(s["align_total_range"])
+            if _on(s["two_fetch_valid"])
+            else int(s["align_first_range"])
+        )
+        evidence["range_output_matches"] = (
+            int(s["toifu_first_range"]) == int(s["align_first_range"])
+            and int(s["toifu_total_range"]) == expected_total_range
+        )
 
     pending_miss = _on(s["s1_valid"]) and any(should)
     refill_match = _on(s["miss_resp_valid"]) and any(mshr)
@@ -946,20 +1133,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     _mark(
         recorder,
         "icache_mainpipe_s1_sram",
-        "cross_line_bank_mapping",
-        cycle,
-        _on(s["s1_valid"])
-        and _on(s["cross0"])
-        and start_offset0 is not None
-        and start_bank0 is not None
-        and start_bank0 > 0
-        and _known(s["sram_valid"][:2])
-        and _bits(s["sram_valid"][:2]) == (1, 1),
-        evidence,
-    )
-    _mark(
-        recorder,
-        "icache_mainpipe_s1_sram",
         "dual_request_independent",
         cycle,
         _on(s["s1_valid"])
@@ -974,6 +1147,190 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             or req0_hits != req1_hits
             or req0_should != req1_should
         ),
+        evidence,
+    )
+
+    req0_line0_sram = (
+        _on(s["s1_valid"])
+        and _off(s["req1_valid"])
+        and _off(s["cross0"])
+        and _on(s["sram_valid"][0])
+        and _known((s["waymask"][0], raw_maps[0], shift_num[0]))
+        and int(s["waymask"][0]) != 0
+        and int(raw_maps[0]) != 0
+        and int(shift_num[0]) > 0
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req0_line0_shift_right",
+        cycle,
+        req0_line0_sram,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req0_line1_shift_left",
+        cycle,
+        _on(s["s1_valid"])
+        and _on(s["cross0"])
+        and _known(s["sram_valid"][:2])
+        and _bits(s["sram_valid"][:2]) == (1, 1)
+        and _known((raw_maps[1], shift_num[1]))
+        and int(raw_maps[1]) != 0,
+        evidence,
+    )
+
+    req1_line0_sram = (
+        _on(s["s1_valid"])
+        and _on(s["req1_valid"])
+        and _on(s["sram_valid"][2])
+        and _known(
+            (s["waymask"][2], raw_maps[2], shift_num[2], s["align_shift_right"])
+        )
+        and int(s["waymask"][2]) != 0
+        and int(raw_maps[2]) != 0
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req1_shift_right",
+        cycle,
+        req1_line0_sram
+        and _on(s["align_shift_right"])
+        and int(shift_num[2]) > 0,
+        evidence,
+    )
+    if req1_line0_sram and _off(s["align_shift_right"]):
+        mode = "zero" if int(shift_num[2]) == 0 else "left"
+        state["req1_left_zero_modes_seen"].add(mode)
+    evidence["req1_left_zero_modes_seen"] = tuple(
+        sorted(state["req1_left_zero_modes_seen"])
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req1_shift_left_zero",
+        cycle,
+        state["req1_left_zero_modes_seen"] >= {"left", "zero"},
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req1_line1_shift_left",
+        cycle,
+        _on(s["s1_valid"])
+        and _on(s["req1_valid"])
+        and _on(s["cross1"])
+        and _on(s["sram_valid"][3])
+        and _known((raw_maps[3], shift_num[3]))
+        and int(raw_maps[3]) != 0,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "invalid_req1_masked",
+        cycle,
+        _on(s["s1_valid"])
+        and _off(s["req1_valid"])
+        and _off(s["two_fetch_valid"])
+        and _known((*raw_maps[2:], *aligned_masks[2:]))
+        and any(int(value) != 0 for value in raw_maps[2:]),
+        evidence,
+    )
+
+    mshr_reg_bits = _bits(s["mshr_reg"])
+    if _on(s["s1_valid"]) and _known((*s["mshr_reg"], s["align_shift_right"])):
+        if mshr_reg_bits[0]:
+            state["mshr_alignment_cases_seen"].add("req0_line0")
+        if mshr_reg_bits[1] and _on(s["cross0"]):
+            state["mshr_alignment_cases_seen"].add("req0_line1")
+        if mshr_reg_bits[2] and _on(s["req1_valid"]):
+            direction = "right" if _on(s["align_shift_right"]) else "left_or_zero"
+            state["mshr_alignment_cases_seen"].add(f"req1_line0_{direction}")
+        if mshr_reg_bits[3] and _on(s["req1_valid"]) and _on(s["cross1"]):
+            state["mshr_alignment_cases_seen"].add("req1_line1")
+    required_mshr_cases = {
+        "req0_line0",
+        "req0_line1",
+        "req1_line0_left_or_zero",
+        "req1_line0_right",
+        "req1_line1",
+    }
+    evidence["mshr_alignment_cases_seen"] = tuple(
+        sorted(state["mshr_alignment_cases_seen"])
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "mshr_request_line_alignment",
+        cycle,
+        state["mshr_alignment_cases_seen"] >= required_mshr_cases,
+        evidence,
+    )
+
+    valid_lines = (
+        True,
+        _on(s["cross0"]),
+        _on(s["req1_valid"]),
+        _on(s["req1_valid"]) and _on(s["cross1"]),
+    )
+    # ``sram_valid`` is only the one-cycle SRAM response pulse.  MainPipe can
+    # then hold that line through a long miss on its companion line, so at the
+    # later MSHR-response cycle the retained SRAM source is represented by the
+    # held hit plus the original non-zero WayLookup mask.  Requiring the SRAM
+    # pulse and MSHR response in the same cycle made the intended mixed-source
+    # transaction structurally impossible to sample.
+    mixed_source_known = _known((*s["mshr_reg"], *s["hits"], *s["waymask"]))
+    mshr_source_lines = tuple(
+        valid and bool(mshr_reg_bits[index]) for index, valid in enumerate(valid_lines)
+    )
+    sram_source_lines = tuple(
+        valid
+        and not bool(mshr_reg_bits[index])
+        and _on(s["hits"][index])
+        and int(s["waymask"][index]) != 0
+        for index, valid in enumerate(valid_lines)
+    ) if mixed_source_known else (False, False, False, False)
+    mixed_merge_known = _known(
+        (*sram_aligned_maps, *mshr_aligned_maps, *aligned_masks,
+         s["two_fetch_valid"], s["toifu_maybe_rvc_map"])
+    )
+    mixed_expected_map = None
+    mixed_map_matches = False
+    if mixed_merge_known:
+        mixed_expected_map = 0
+        for index, valid in enumerate(valid_lines):
+            if not valid:
+                continue
+            req = index // 2
+            selected = (
+                mshr_aligned_maps[req]
+                if mshr_reg_bits[index]
+                else sram_aligned_maps[index]
+            )
+            mixed_expected_map |= int(selected) & int(aligned_masks[index])
+        mixed_expected_map &= _MAYBE_RVC_MASK
+        mixed_map_matches = int(s["toifu_maybe_rvc_map"]) == mixed_expected_map
+    evidence["mshr_source_lines"] = mshr_source_lines
+    evidence["sram_source_lines"] = sram_source_lines
+    evidence["mixed_source_expected_map"] = mixed_expected_map
+    evidence["mixed_source_map_matches"] = mixed_map_matches
+    _mark(
+        recorder,
+        "icache_mainpipe_maybe_rvc_align",
+        "mixed_source_merge",
+        cycle,
+        _on(s["s1_valid"])
+        and mixed_source_known
+        and any(mshr_source_lines)
+        and any(sram_source_lines)
+        and mixed_merge_known
+        and mixed_map_matches
+        and evidence.get("range_output_matches") is True,
         evidence,
     )
 
@@ -1294,7 +1651,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
     prior_s1_fire = bool(prev) and _on(prev["s1_fire"])
-    s2_valid_observed = s["s2_valid"]
     s2_active = (
         prior_s1_fire
         and _off(s["io_flush"])
@@ -1423,7 +1779,10 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s2_ecc",
         "global_flush_clears_s2",
         cycle,
-        _on(s["s2_valid"]) and _on(s["io_flush"]) and _off(s["bpu_valid"]),
+        s2_valid_shadow_before
+        and _on(s["io_flush"])
+        and _off(s["bpu_valid"])
+        and not s2_valid_shadow_after,
         evidence,
     )
     _mark(
@@ -1431,8 +1790,12 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s2_ecc",
         "bpu_s3_flush_keeps_s2",
         cycle,
-        _on(s["s2_valid"]) and _off(s["io_flush"]) and _on(s["bpu_valid"]),
+        s2_valid_shadow_before
+        and _off(s["io_flush"])
+        and _on(s["bpu_valid"])
+        and s2_valid_shadow_after,
         evidence,
     )
 
+    state["s2_valid_shadow"] = s2_valid_shadow_after
     state["prev"] = s

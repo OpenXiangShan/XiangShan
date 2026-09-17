@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -12,7 +13,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, record_scenario, scenario_rng
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -32,6 +33,58 @@ _PMA_BOUNDARY_PA = _PMA_REGION_BASE + _PAGE_SIZE
 _PAYLOAD = b"\x13\x00\x00\x00" * 512
 _THREE_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 1089
 _FOUR_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 2113
+
+
+def _randomize_normal_ptw_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_paths: tuple[str, ...],
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/translation/normal/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    has_ptw = scenario.mode != "bare" or int(scenario.s2xlate) in (2, 3)
+    latency = rng.randint(1, 5) if has_ptw else int(scenario.ptw_response_latency)
+    latency_max = (
+        rng.randint(latency, 8)
+        if has_ptw and scenario.ptw_response_latency_max is not None
+        else None
+    )
+    ready_high_cycles = int(scenario.ptw_req_ready_high_cycles)
+    ready_low_cycles = int(scenario.ptw_req_ready_low_cycles)
+    if scenario.ptw_req_ready_strategy == "periodic":
+        ready_high_cycles = rng.randint(1, 2)
+        ready_low_cycles = rng.randint(1, 4)
+    randomized = replace(
+        scenario,
+        ptw_response_latency=latency,
+        ptw_response_latency_max=latency_max,
+        ptw_response_seed=seed,
+        ptw_req_ready_high_cycles=ready_high_cycles,
+        ptw_req_ready_low_cycles=ready_low_cycles,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "page_count": scenario.page_count,
+            "translation_mode": scenario.mode,
+            "stage2_mode": scenario.stage2_mode,
+            "s2xlate": scenario.s2xlate,
+            "ptw_timing_randomized": has_ptw,
+            "latency": latency,
+            "latency_max": latency_max,
+            "ready_strategy": scenario.ptw_req_ready_strategy,
+            "ready_high_cycles": ready_high_cycles,
+            "ready_low_cycles": ready_low_cycles,
+            "expected_paths": expected_paths,
+        },
+    )
+    return randomized
 
 
 def _pmp_allow(*, base: int = _PA, size: int = 0x2000) -> tuple[TranslationPmpPmaEntry, ...]:
@@ -533,6 +586,7 @@ _NORMAL_CASES = (
 @pytest.mark.parametrize("scenario,expected_paths", _NORMAL_CASES)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_address_translation_normal(env, scenario: TranslationScenario, expected_paths: tuple[str, ...]) -> None:
+    scenario = _randomize_normal_ptw_timing(env, scenario, expected_paths)
     sequence = TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario),))
     sequence.initialize_first_phase(env)
     phase_results = [record for record in sequence.run(env) if record["kind"] == "phase"]

@@ -185,6 +185,7 @@ def _eligible_provenance():
     values["registry_sha256"] = file_sha256(default_pilot_csv_path())
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
+    values["sampler_domains"] = ["all"]
     values["verification_env_sha256"] = current_verification_environment_sha256()
     values["simulator"] = "verilator"
     values["dut_source_sha"] = "a" * 40
@@ -215,6 +216,7 @@ def _resign_provenance(values):
         "generated_rtl_sha256",
         "registry_sha256",
         "sampler_sha256",
+        "sampler_domains",
         "verification_env_sha256",
         "signal_contract_sha256",
         "build_config",
@@ -900,7 +902,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 94
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 54
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
     assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 34
     assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 41
@@ -1125,7 +1127,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 566
+    assert len(recorder.definitions) == 573
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1228,6 +1230,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         ).hexdigest(),
         "definitions_sha256": hashlib.sha256(b"[]").hexdigest(),
         "sampler_sha256": sampler_sha256,
+        "sampler_domains": ["all"],
         "verification_env_sha256": verification_env_sha256,
         "signal_contract_sha256": manifest["signal_contract_sha256"],
         "build_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
@@ -1256,6 +1259,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
                         default_pilot_csv_path().read_bytes()
                     ).hexdigest(),
                     "sampler_sha256": sampler_sha256,
+                    "sampler_domains": ["all"],
                     "verification_env_sha256": verification_env_sha256,
                     "signal_contract_sha256": manifest["signal_contract_sha256"],
                     "build_config": "frontend-test",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -14,11 +15,48 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig, fold_pc
+from env.support import PmpPmaConfig, fold_pc, record_scenario, scenario_rng
 from tests.py.support import translation_faults
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+
+
+def _randomize_mmio_fault_timing(
+    env,
+    scenario: TranslationScenario,
+    expected_fault: str,
+) -> TranslationScenario:
+    scenario_key = f"zhaoxinran/mmio/translation-fault/{scenario.scenario_id}"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    ptw_latency = rng.randint(1, 8)
+    uncache_latency = rng.randint(1, 16)
+    env.uncache_agent.configure(
+        latency=uncache_latency,
+        mmio_latency=uncache_latency,
+    )
+    randomized = replace(
+        scenario,
+        ptw_response_latency=ptw_latency,
+        ptw_response_seed=seed,
+    )
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "scenario_id": scenario.scenario_id,
+            "va": scenario.va,
+            "pa": scenario.pa,
+            "page_count": scenario.page_count,
+            "ptw_latency": ptw_latency,
+            "uncache_latency": uncache_latency,
+            "expected_path": "fault",
+            "expected_fault": expected_fault,
+        },
+    )
+    return randomized
 
 
 def _prepare_cross_page_mmio_rvi(env) -> tuple[int, int, bytes]:
@@ -140,6 +178,7 @@ def test_mmio_cross_page_second_page_translation_fault(
         pa=cross_page_pa,
         payload=payload,
     )
+    scenario = _randomize_mmio_fault_timing(env, scenario, expected_fault)
     state = TranslationScenarioBuilder(env).build(scenario)
     env.monitor.clear()
     env.monitor.set_expected_pc(cross_page_va)
@@ -260,6 +299,11 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
             for page in range(2)
         ),
     )
+    scenario = _randomize_mmio_fault_timing(
+        env,
+        scenario,
+        "instruction_access_fault",
+    )
     snapshots: list[dict[str, int | None]] = []
 
     def capture(cycle: int, active_env) -> None:
@@ -373,6 +417,11 @@ def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
             )
             for page in range(2)
         ),
+    )
+    scenario = _randomize_mmio_fault_timing(
+        env,
+        scenario,
+        "instruction_access_fault",
     )
     snapshots: list[dict[str, int | None]] = []
 

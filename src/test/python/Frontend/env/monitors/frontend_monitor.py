@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from ..bundles import BackendObserveBundle
+from ..model.backend_runtime import CfVecCycleSnapshot
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
@@ -239,7 +240,15 @@ class FrontendMonitor:
     def attach_backend_model(self, backend_model) -> None:
         self.backend_model = backend_model
 
-    def _observed_cfvec_pc(self, slot: int) -> int:
+    def _observed_cfvec_pc(
+        self,
+        slot: int,
+        snapshot: Optional[CfVecCycleSnapshot] = None,
+    ) -> int:
+        if snapshot is not None:
+            snapshot_resolver = getattr(self.backend_model, "observed_cfvec_snapshot_pc", None)
+            if callable(snapshot_resolver):
+                return int(snapshot_resolver(snapshot, int(slot)))
         resolver = getattr(self.backend_model, "observed_cfvec_pc", None)
         if not callable(resolver):
             raise AssertionError("FrontendMonitor requires an FTQ-backed cfVec PC resolver")
@@ -384,9 +393,18 @@ class FrontendMonitor:
             level="DEBUG",
         )
 
-    def on_clock_edge(self, cycle: int) -> None:
+    def on_clock_edge(
+        self,
+        cycle: int,
+        cfvec_snapshot: Optional[CfVecCycleSnapshot] = None,
+    ) -> None:
         if self.interface is None:
             return
+        if cfvec_snapshot is not None and int(cfvec_snapshot.cycle) != int(cycle):
+            raise AssertionError(
+                f"stale cfVec snapshot: snapshot_cycle={int(cfvec_snapshot.cycle)} "
+                f"monitor_cycle={int(cycle)}"
+            )
 
         self.current_cycle = int(cycle)
         self._observe_dut_redirect_for_cfvec_check(cycle)
@@ -410,25 +428,34 @@ class FrontendMonitor:
         skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
         recovery_first_cfvec_seen = False
         for i in range(8):
-            if skip_cfvec or self._read(self.interface.cfvec_valid[i], 0) != 1:
+            cfvec = None if cfvec_snapshot is None else cfvec_snapshot.slots[i]
+            valid = (
+                self._read(self.interface.cfvec_valid[i], 0) == 1
+                if cfvec is None
+                else bool(cfvec.valid)
+            )
+            if skip_cfvec or not valid:
                 continue
 
-            pc = self._observed_cfvec_pc(i)
-            folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
-            instr = self._read(self.interface.cfvec_instr[i], 0)
-            is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
-            pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
-            ftq_flag = self._read(self.interface.cfvec_ftq_ptr_flag[i], 0)
-            ftq_value = self._read(self.interface.cfvec_ftq_ptr_value[i], 0)
-            ftq_offset = self._read(self.interface.cfvec_ftq_offset[i], 0)
-            is_last = bool(self._read(self.interface.cfvec_is_last_in_ftq_entry[i], 0))
-            ex_sum = (
-                self._read(self.interface.cfvec_exception_vec[i][1], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][2], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][12], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][19], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][20], 0)
-            )
+            pc = self._observed_cfvec_pc(i, cfvec_snapshot)
+            if cfvec is None:
+                folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
+                instr = self._read(self.interface.cfvec_instr[i], 0)
+                is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
+                pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
+                ex_sum = (
+                    self._read(self.interface.cfvec_exception_vec_1[i], 0)
+                    + self._read(self.interface.cfvec_exception_vec_2[i], 0)
+                    + self._read(self.interface.cfvec_exception_vec_12[i], 0)
+                    + self._read(self.interface.cfvec_exception_vec_19[i], 0)
+                    + self._read(self.interface.cfvec_exception_vec_20[i], 0)
+                )
+            else:
+                folded_pc = int(cfvec.foldpc)
+                instr = int(cfvec.instr)
+                is_rvc = bool(cfvec.is_rvc)
+                pred_taken = bool(cfvec.pred_taken)
+                ex_sum = int(cfvec.exception_bits)
             if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
                 recovery_first_cfvec_seen = True
                 target_pc = int(self._recovery_target_pc)

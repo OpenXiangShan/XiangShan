@@ -154,9 +154,7 @@ case class VecFuConfig (
   // predict info
   def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
-
-  var aluNeedPc: Boolean = false
+  def needPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
@@ -173,6 +171,8 @@ case class VecFuConfig (
   def isBrh: Boolean = fuType == FuType.brh
 
   def isJmp: Boolean = fuType == FuType.jmp
+
+  def isLink: Boolean = fuType == FuType.link
 
   def isFence: Boolean = fuType == FuType.fence
 
@@ -266,7 +266,8 @@ object VecFuConfig {
     newCfg
   }
 
-  val JmpCfg = VecFuConfig.fromFuConfig(FuConfig.JmpCfg)
+  val NJmpCfg = VecFuConfig.fromFuConfig(FuConfig.NJmpCfg)
+  val LinkCfg = VecFuConfig.fromFuConfig(FuConfig.LinkCfg)
   val BrhCfg = VecFuConfig.fromFuConfig(FuConfig.BrhCfg)
   val I2fCfg = VecFuConfig.fromFuConfig(FuConfig.I2fCfg)
   val FcmpCfg = VecFuConfig.fromFuConfig(FuConfig.FcmpCfg)
@@ -296,7 +297,7 @@ object VecFuConfig {
   val VmoveCfg = VecFuConfig.fromFuConfig(FuConfig.VmoveCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")))
   val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
   val VfmaCfg  = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg,  (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfma")))
-  val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg)
+  val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFDivWrapper(cfg)(p).suggestName("Vfdiv")))
   val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
   val VSha256cCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256cCfg)
@@ -307,7 +308,8 @@ object VecFuConfig {
   val VStdCfg = VecFuConfig.fromFuConfig(FuConfig.VStdCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VStdWrapper(cfg)(p).suggestName("Vstd")))
 
   def allConfigs = Seq(
-    JmpCfg,
+    NJmpCfg,
+    LinkCfg,
     BrhCfg,
     I2fCfg,
     FcmpCfg,

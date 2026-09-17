@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from toffee import Bundle, Signal, SignalList
-from toffee.bundle import DummySignal
 
 
 class BackendObserveBundle(Bundle):
@@ -40,12 +39,3 @@ class BackendObserveBundle(Bundle):
     gpaddr_mem_waddr = Signal()
     gpaddr_mem_gpaddr = Signal()
     gpaddr_mem_is_for_vs_nonleaf_pte = Signal()
-
-    @property
-    def cfvec_exception_vec(self):
-        result = [[DummySignal() for _ in range(24)] for _ in range(8)]
-        for bit in (1, 2, 12, 19, 20):
-            signals = getattr(self, f"cfvec_exception_vec_{bit}")
-            for slot in range(8):
-                result[slot][bit] = signals[slot]
-        return result

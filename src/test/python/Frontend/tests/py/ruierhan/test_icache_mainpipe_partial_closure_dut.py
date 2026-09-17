@@ -66,15 +66,23 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
     )
 
 
-@pytest.mark.parametrize("fault", [{"corrupt": 1, "denied": 0}, {"corrupt": 1, "denied": 1}])
-@pytest.mark.funcov_bins("BIN-624", "BIN-636")
+@pytest.mark.parametrize(
+    "fault,refill_bin",
+    [
+        ({"corrupt": 1, "denied": 0, "beat": 0}, "error_first_beat_no_sram_write"),
+        ({"corrupt": 1, "denied": 1, "beat": 1}, "error_second_beat_no_sram_write"),
+    ],
+    ids=("first-beat-corrupt", "second-beat-denied"),
+)
+@pytest.mark.funcov_bins("BIN-624", "BIN-636", "BIN-715", "BIN-1009")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_mainpipe_fault_refill_dut(env, fault) -> None:
+def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
     env.icache_agent.inject_response_fault_at(_BASE, **fault)
     _initialize_cacheable_stream(env, _BASE, latency=12)
 
     _wait_hit(env, "icache_mainpipe_s1_refill", "corrupt_refill_saved")
     _wait_hit(env, "icache_mainpipe_s1_protection", "tl_error_to_exception")
+    _wait_hit(env, "icache_missunit_refill", refill_bin)
     stats = env.icache_agent.get_stats()
     assert int(stats["corrupt_resp_count"]) >= 1
     if int(fault["denied"]):

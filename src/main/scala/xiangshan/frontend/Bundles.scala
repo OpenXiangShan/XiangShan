@@ -53,6 +53,7 @@ import xiangshan.frontend.instruncache.InstrUncacheResp
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
   val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
+  val s2FtqPtr:   FtqPtr                     = Output(new FtqPtr)
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta

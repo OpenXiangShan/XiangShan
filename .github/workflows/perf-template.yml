@@ -138,34 +138,25 @@ jobs:
           fi
           SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
 
-          DRY_RUN_OPT=""
-
           # set CKPT_HOME
           case "${{ inputs.benchmark_type }}" in
             spec06-rva23-novec-gcc16*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/checkpoint" >> $GITHUB_ENV
               ;;
-            spec06-rv64gcb-gcc16*)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rv64gcb_260819/checkpoint" >> $GITHUB_ENV
+            spec06-rva23-novec-xscc*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/checkpoint" >> $GITHUB_ENV
               ;;
-            spec06-xscc*)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+            spec17-rva23-novec-gcc16*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/checkpoint" >> $GITHUB_ENV
               ;;
             spec26-gcc15*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/checkpoint" >> $GITHUB_ENV
-              ;;
-            spec26-rv64gc-gcc15*)
-              echo "Warning: This checkpoint is compiled without b extension, performance may not be ideal, consider using -gcb version." >> $GITHUB_STEP_SUMMARY
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/checkpoint" >> $GITHUB_ENV
               ;;
             legacy-spec06-gcc15*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint" >> $GITHUB_ENV
               ;;
             custom)
               echo "CKPT_HOME=${{ inputs.checkpoint_path }}" >> $GITHUB_ENV
-              ;;
-            dryrun)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
           esac
 
@@ -177,32 +168,23 @@ jobs:
             spec06-rva23-novec-gcc16-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
-            spec06-rv64gcb-gcc16-0.3c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rv64gcb_260819/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+            spec06-rva23-novec-xscc-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
-            spec06-rv64gcb-gcc16-1.0c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc16_rv64gcb_260819/json/checkpoints_all.json" >> $GITHUB_ENV
+            spec06-rva23-novec-xscc-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
-            spec06-xscc-0.3c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.3.json" >> $GITHUB_ENV
+            spec17-rva23-novec-gcc16-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
-            spec06-xscc-0.8c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.8.json" >> $GITHUB_ENV
-              ;;
-            spec06-xscc-1.0c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+            spec17-rva23-novec-gcc16-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
             spec26-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
             spec26-gcc15-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" >> $GITHUB_ENV
-              ;;
-            spec26-rv64gc-gcc15-0.3c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
-              ;;
-            spec26-rv64gc-gcc15-1.0c)
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
             legacy-spec06-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
@@ -212,15 +194,6 @@ jobs:
               ;;
             custom)
               echo "CKPT_JSON_PATH=${{ inputs.json_path }}" >> $GITHUB_ENV
-              ;;
-            dryrun)
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/dryrun.json" >> $GITHUB_ENV
-
-              echo "dryrun testing:"
-              echo "    default SPEC_DIR: ${SPEC_DIR}"
-              SPEC_DIR="/nfs/home/cirunner/perf-report/dryrun${SPEC_TAG}"
-              echo "    dryrun SPEC_DIR: ${SPEC_DIR}"
-              DRY_RUN_OPT="--dry-run"
               ;;
             *)
               echo "Error: Invalid benchmark_type: ${{ inputs.benchmark_type }}"
@@ -235,8 +208,6 @@ jobs:
           SCORE_FILE="${SPEC_DIR}/score-${{ inputs.benchmark_type }}.txt"
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
-
-          echo "DRY_RUN_OPT=${DRY_RUN_OPT}" >> $GITHUB_ENV
 
       - name: Initialize submodules
         run: make init-force
@@ -277,7 +248,7 @@ jobs:
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
             ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
             --run \
-            $CST_RUN_OPT $DRY_RUN_OPT
+            $CST_RUN_OPT
 
       - name: Report SPEC CPU score
         run: |

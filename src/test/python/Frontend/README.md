@@ -192,6 +192,24 @@ src/test/python/Frontend/scripts/run_pytest_with_log.sh
 TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
+标准回归默认排除标记为 `funcov_closure_pending` 的当前不可达覆盖率闭环用例。
+夜间可达性检查使用下列命令保留并执行这些 strict-xfail 用例；若 DUT 变化使其
+意外通过，pytest 会以 XPASS 失败提示移除 pending 标记并正式修正用例。
+
+```bash
+TB_ENABLE_DUT_TESTS=1 TB_INCLUDE_FUNCOV_CLOSURE_PENDING=1 \
+  src/test/python/Frontend/scripts/run_pytest_with_log.sh
+```
+
+- 随机回归入口：
+
+```bash
+src/test/python/Frontend/scripts/run_random_regression_suite.sh smoke
+src/test/python/Frontend/scripts/run_random_regression_suite.sh nightly
+```
+
+完整参数和重放方法见脚本开头或 `--help`。
+
 地址翻译随机回归保留两个独立入口：
 
 - `tests/py/zhaoxinran/translation/test_translation_random_regression_dut.py` 保留原始的

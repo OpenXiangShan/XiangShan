@@ -12,6 +12,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -74,6 +75,7 @@ _REQUIRED_PROVENANCE = (
     "registry_sha256",
     "definitions_sha256",
     "sampler_sha256",
+    "sampler_domains",
     "verification_env_sha256",
     "signal_contract_sha256",
     "build_manifest_sha256",
@@ -107,6 +109,7 @@ _COMPATIBILITY_FIELDS = (
     "generated_rtl_sha256",
     "registry_sha256",
     "sampler_sha256",
+    "sampler_domains",
     "verification_env_sha256",
     "signal_contract_sha256",
     "build_config",
@@ -439,6 +442,18 @@ def _current_sampler_sha256() -> str | None:
     return current_funcov_sampler_sha256()
 
 
+def _current_sampler_domains() -> list[str]:
+    raw = os.getenv("TB_FUNCOV_SAMPLER_DOMAINS", "").strip().lower()
+    if not raw:
+        return ["all"]
+    domains = {
+        token
+        for token in raw.replace(",", " ").replace(";", " ").split()
+        if token
+    }
+    return sorted(domains or {"all"})
+
+
 def _current_verification_env_sha256() -> str | None:
     paths = verification_environment_paths()
     if not paths or any(not path.is_file() for path in paths.values()):
@@ -655,6 +670,13 @@ def evaluate_artifact(raw: Any) -> dict:
             and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None
         ):
             reasons.append(f"invalid_provenance:{key}")
+    recorded_domains = provenance.get("sampler_domains")
+    if not isinstance(recorded_domains, list) or any(
+        not isinstance(item, str) or not item.strip() for item in recorded_domains
+    ):
+        reasons.append("invalid_provenance:sampler_domains")
+    elif sorted({item.strip().lower() for item in recorded_domains}) != _current_sampler_domains():
+        reasons.append("sampler_domain_mismatch")
     source_sha = str(provenance.get("dut_source_sha") or "").strip()
     if runtime_contract and str(
         provenance.get("simulator") or ""

@@ -642,7 +642,10 @@ class TranslationPermissionOracle:
                 cycle,
                 pc=int(resolver(slot)),
                 folded_pc=self._read(observe_if.cfvec_foldpc[slot]),
-                exception_bits={bit: self._read(observe_if.cfvec_exception_vec[slot][bit]) for bit in _EXCEPTION_BITS},
+                exception_bits={
+                    bit: self._read(getattr(observe_if, f"cfvec_exception_vec_{bit}")[slot])
+                    for bit in _EXCEPTION_BITS
+                },
                 cross_page=bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot])),
             )
 

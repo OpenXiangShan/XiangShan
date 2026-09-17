@@ -245,8 +245,8 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
                 {
                     "cycle": int(cycle),
                     "pc": active_env.observed_cfvec_pc(slot),
-                    "iaf": int(monitor_if.cfvec_exception_vec[slot][1].value),
-                    "illegal": int(monitor_if.cfvec_exception_vec[slot][2].value),
+                    "iaf": int(monitor_if.cfvec_exception_vec_1[slot].value),
+                    "illegal": int(monitor_if.cfvec_exception_vec_2[slot].value),
                 }
             )
 

@@ -88,6 +88,7 @@ def _eligible_artifact(tmp_path: Path, simulator: str = "verilator") -> tuple[di
         ),
         "definitions_sha256": backannotate_funcov._json_sha256(definitions),
         "sampler_sha256": backannotate_funcov._current_sampler_sha256(),
+        "sampler_domains": ["all"],
         "verification_env_sha256": (
             backannotate_funcov._current_verification_env_sha256()
         ),

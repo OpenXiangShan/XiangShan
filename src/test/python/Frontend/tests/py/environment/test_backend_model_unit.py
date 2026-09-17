@@ -15,31 +15,55 @@ from env.model.backend_state import FtqEntry
 from env.model.backend_state import PATH_STATE_CORRECT
 from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
+from env.model.backend_state import ResolveEntry
 from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
+from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model.backend_runtime import BackendObservationSnapshot
 from env.model import GoldenTrace
 from env.model import TraceEntry
+from env.monitors.frontend_monitor import FrontendMonitor
 from env.support import fold_pc
 
 
 class _Signal:
     def __init__(self, value: int = 0) -> None:
-        self.value = int(value)
+        self._value = int(value)
+        self.read_count = 0
+        self.write_count = 0
+
+    @property
+    def value(self) -> int:
+        self.read_count += 1
+        return self._value
+
+    @value.setter
+    def value(self, value: int) -> None:
+        self._value = int(value)
+        self.write_count += 1
 
 
 class _ObserveIf:
     def __init__(self) -> None:
+        self.redirect_valid = _Signal()
+        self.redirect_bits_pc = _Signal()
+        self.redirect_bits_target = _Signal()
+        self.redirect_bits_taken = _Signal()
         self.cfvec_valid = [_Signal() for _ in range(8)]
         self.cfvec_foldpc = [_Signal() for _ in range(8)]
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
+        self.cfvec_pred_taken = [_Signal() for _ in range(8)]
         self.cfvec_fixed_taken = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
         self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
-        self.cfvec_exception_vec = [[_Signal() for _ in range(24)] for _ in range(8)]
+        self.cfvec_exception_vec_1 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_2 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_19 = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec_20 = [_Signal() for _ in range(8)]
 
 
 class _EmptyTrace:
@@ -85,6 +109,269 @@ def _source_bound_cfi_model() -> tuple[BackendModel, QueueInstr]:
     return model, source
 
 
+def _resolve_entry(
+    source: QueueInstr,
+    queue_index: int,
+    target: int,
+    *,
+    branch_type: int = 1,
+) -> ResolveEntry:
+    return ResolveEntry(
+        ready_cycle=int(source.cycle),
+        inst_pc=int(source.pc),
+        pc=int(source.pc),
+        target=int(target),
+        taken=True,
+        mispredict=True,
+        ftq_flag=int(source.ftq_flag),
+        ftq_value=int(source.ftq_value),
+        ftq_offset=int(source.ftq_offset),
+        branch_type=int(branch_type),
+        ras_action=0,
+        queued_cycle=int(source.cycle),
+        is_rvc=bool(source.is_rvc),
+        queue_index=int(queue_index),
+    )
+
+
+def test_resolve_target_scan_preserves_same_cycle_slot_order() -> None:
+    model = BackendModel()
+    older_target = _queue_instr(0x2000, 0, 1)
+    older_target.cycle = 9
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.slot = 1
+    source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 2
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 3
+    model._cfvec_queue = deque([older_target, source, target, successor])
+
+    assert model._resolve_target_path_state(_resolve_entry(source, 1, 0x2000)) == (
+        True,
+        True,
+        False,
+        False,
+        False,
+    )
+
+
+def test_resolve_target_scan_ignores_target_before_dynamic_cfi() -> None:
+    model = BackendModel()
+    old_target = _queue_instr(0x2000, 0, 1)
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    unrelated = _queue_instr(0x3000, 0, 2)
+    unrelated.cycle = 11
+    model._cfvec_queue = deque([old_target, source, unrelated])
+
+    assert model._resolve_target_path_state(_resolve_entry(source, 1, 0x2000)) == (
+        False,
+        False,
+        False,
+        False,
+        False,
+    )
+
+
+def test_resolve_target_scan_requires_progress_after_target() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    target0 = _queue_instr(0x2000, 0, 3)
+    target0.cycle = 11
+    target1 = _queue_instr(0x2000, 0, 3)
+    target1.cycle = 11
+    successor = _queue_instr(0x2004, 0, 3)
+    successor.cycle = 12
+    model._cfvec_queue = deque([source, target0, target1])
+    entry = _resolve_entry(source, 0, 0x2000)
+
+    assert model._resolve_target_path_state(entry)[:4] == (True, False, True, False)
+
+    model._cfvec_queue.append(successor)
+
+    assert model._resolve_target_path_state(entry)[:4] == (True, True, True, True)
+
+
+def test_indirect_resolve_scan_binds_to_source_golden_index() -> None:
+    model = BackendModel()
+    model.golden_trace = GoldenTrace(
+        [
+            TraceEntry(index=0, pc=0x1000, instr=0x00008067, size=4, kind="jump_indirect", taken=True, target_pc=0x3000),
+            TraceEntry(index=1, pc=0x3000, instr=0x13, size=4),
+            TraceEntry(index=2, pc=0x3004, instr=0x13, size=4),
+            TraceEntry(index=3, pc=0x1000, instr=0x00008067, size=4, kind="jump_indirect", taken=True, target_pc=0x2000),
+            TraceEntry(index=4, pc=0x2000, instr=0x13, size=4),
+            TraceEntry(index=5, pc=0x2004, instr=0x13, size=4),
+        ]
+    )
+    model.golden_trace.cursor = 0
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.slot = 1
+    source.is_cfi = True
+    source.golden_index = 3
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 2
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 3
+    model._cfvec_queue = deque([source, target, successor])
+
+    state = model._resolve_target_path_state(
+        _resolve_entry(source, 0, 0x2000, branch_type=3)
+    )
+
+    assert state == (True, True, False, False, True)
+
+
+def test_resolve_target_scan_rejects_queue_identity_mismatch() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.is_cfi = True
+    model._cfvec_queue = deque([source])
+    entry = _resolve_entry(source, 0, 0x2000)
+    entry.ftq_offset = 1
+
+    with pytest.raises(AssertionError, match="queue entry identity mismatch"):
+        model._resolve_target_path_state(entry)
+
+
+def test_commit_pop_remaps_resolve_target_scan_source() -> None:
+    model = BackendModel()
+    older0 = _queue_instr(0x0FF0, 0, 1)
+    older1 = _queue_instr(0x0FF4, 0, 1)
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 3)
+    target.cycle = 11
+    model._cfvec_queue = deque([older0, older1, source, target])
+    model._pending_resolves = deque([_resolve_entry(source, 2, 0x2000)])
+
+    model._cfvec_queue_pop_head(2)
+
+    assert model._pending_resolves[0].queue_index == 0
+    assert model._resolve_target_path_state(model._pending_resolves[0])[:4] == (
+        True,
+        False,
+        True,
+        False,
+    )
+
+
+def test_wrong_path_flush_removes_pending_resolve_with_source() -> None:
+    model = BackendModel()
+    older = _queue_instr(0x0FF0, 0, 1)
+    older.path_state = PATH_STATE_CORRECT
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    source.path_state = PATH_STATE_WRONG
+    model._cfvec_queue = deque([older, source])
+    model._pending_resolves = deque([_resolve_entry(source, 1, 0x2000)])
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=1,
+        target_pc=0x2000,
+        redirect_context=None,
+    )
+
+    model._cfvec_queue_flush_wrong_path()
+
+    assert list(model._cfvec_queue) == [older]
+    assert model._pending_resolves == deque()
+
+
+def test_queue_range_removal_drops_and_remaps_pending_resolves() -> None:
+    model = BackendModel()
+    older = _queue_instr(0x0FF0, 0, 1)
+    removed_source = _queue_instr(0x1000, 0, 2)
+    removed_source.is_cfi = True
+    kept_source = _queue_instr(0x1100, 0, 3)
+    kept_source.cycle = 10
+    kept_source.is_cfi = True
+    target = _queue_instr(0x2000, 0, 4)
+    target.cycle = 11
+    model._cfvec_queue = deque([older, removed_source, kept_source, target])
+    model._pending_resolves = deque(
+        [
+            _resolve_entry(removed_source, 1, 0x3000),
+            _resolve_entry(kept_source, 2, 0x2000),
+        ]
+    )
+
+    model._cfvec_queue_remove_range(1, 2)
+
+    assert len(model._pending_resolves) == 1
+    assert model._pending_resolves[0].queue_index == 1
+    assert model._resolve_target_path_state(model._pending_resolves[0])[:4] == (
+        True,
+        False,
+        True,
+        False,
+    )
+
+
+def test_ready_indirect_resolve_uses_queue_without_monitor_history() -> None:
+    model = BackendModel()
+    model.current_cycle = 13
+    model.golden_trace = GoldenTrace(
+        [
+            TraceEntry(
+                index=0,
+                pc=0x1000,
+                instr=0x00008067,
+                size=4,
+                kind="jump_indirect",
+                taken=True,
+                target_pc=0x2000,
+            ),
+            TraceEntry(index=1, pc=0x2000, instr=0x13, size=4),
+            TraceEntry(index=2, pc=0x2004, instr=0x13, size=4),
+        ]
+    )
+    source = _queue_instr(0x1000, 0, 2)
+    source.cycle = 10
+    source.is_cfi = True
+    source.path_state = PATH_STATE_CORRECT
+    source.resolve_state = RESOLVE_STATE_PENDING
+    source.golden_index = 0
+    target = _queue_instr(0x2000, 0, 2)
+    target.cycle = 10
+    target.slot = 1
+    successor = _queue_instr(0x2004, 0, 2)
+    successor.cycle = 10
+    successor.slot = 2
+    model._cfvec_queue = deque([source, target, successor])
+    model._pending_resolves = deque(
+        [_resolve_entry(source, 0, 0x2000, branch_type=3)]
+    )
+
+    ready = model._ready_resolves_for_cycle()
+
+    assert len(ready) == 1
+    assert ready[0].mispredict is False
+    assert model._pending_resolves == deque()
+
+
+def test_ready_resolve_rejects_stale_queue_index() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x1000, 0, 2)
+    source.is_cfi = True
+    source.path_state = PATH_STATE_CORRECT
+    model._pending_resolves = deque([_resolve_entry(source, 1, 0x2000)])
+
+    with pytest.raises(AssertionError, match="queue index is out of range"):
+        model._ready_resolves_for_cycle()
+
+
 @pytest.mark.parametrize(("is_rvc", "expected_pc"), ((False, 0x80001008), (True, 0x8000100A)))
 def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expected_pc) -> None:
     model = BackendModel()
@@ -117,6 +404,52 @@ def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
 
     with pytest.raises(AssertionError, match="foldpc does not match FTQ-derived PC"):
         model.observed_cfvec_pc(0)
+
+
+def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.begin_cycle(7)
+    _set_first_cfvec(model, interface, 0x80001000, ftq_value=3)
+    interface.cfvec_pred_taken[0].value = 1
+    interface.cfvec_fixed_taken[0].value = 0
+    interface.cfvec_exception_vec_12[0].value = 1
+
+    snapshot = model.capture_cfvec_snapshot()
+
+    assert snapshot.slots[0].valid is True
+    assert snapshot.slots[0].pred_taken is True
+    assert snapshot.slots[0].fixed_taken is False
+    assert snapshot.slots[0].exception_bits == 1 << 12
+    assert interface.cfvec_valid[0].read_count == 1
+    assert interface.cfvec_foldpc[0].read_count == 1
+    assert interface.cfvec_instr[0].read_count == 1
+    assert interface.cfvec_is_rvc[0].read_count == 1
+    assert interface.cfvec_pred_taken[0].read_count == 1
+    assert interface.cfvec_fixed_taken[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_flag[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_value[0].read_count == 1
+    assert interface.cfvec_ftq_offset[0].read_count == 1
+    assert interface.cfvec_is_last_in_ftq_entry[0].read_count == 1
+    assert interface.cfvec_exception_vec_1[0].read_count == 1
+    assert interface.cfvec_exception_vec_2[0].read_count == 1
+    assert interface.cfvec_exception_vec_12[0].read_count == 1
+    assert interface.cfvec_exception_vec_19[0].read_count == 1
+    assert interface.cfvec_exception_vec_20[0].read_count == 1
+
+    monitor = FrontendMonitor()
+    monitor.interface = interface
+    monitor.attach_backend_model(model)
+    monitor.on_clock_edge(7, snapshot)
+    model._sample_cfvec(snapshot)
+
+    assert monitor.observations[0].pc == 0x80001000
+    assert monitor.observations[0].pred_taken is True
+    assert model._cfvec_queue[0].pc == 0x80001000
+    assert model._cfvec_queue[0].pred_taken is False
+    assert interface.cfvec_foldpc[0].read_count == 1
+    assert interface.cfvec_ftq_ptr_value[0].read_count == 1
 
 
 def test_ftq_start_pc_cache_unguards_high_half_pc() -> None:
@@ -160,12 +493,16 @@ def _redirect_drive_if():
 
 
 def _ftq_idx_ahead_drive_if():
-    fields = (
-        "ftq_idx_ahead_valid",
-        "ftq_idx_ahead_flag",
-        "ftq_idx_ahead_value",
+    return SimpleNamespace(
+        redirect_valid=_Signal(),
+        resolve_valid=[_Signal() for _ in range(3)],
+        call_ret_commit_valid=[_Signal() for _ in range(8)],
+        call_ret_commit_bits_ras_action=[_Signal() for _ in range(8)],
+        call_ret_commit_bits_ftq_ptr_value=[_Signal() for _ in range(8)],
+        ftq_idx_ahead_valid=_Signal(),
+        ftq_idx_ahead_flag=_Signal(),
+        ftq_idx_ahead_value=_Signal(),
     )
-    return SimpleNamespace(**{field: _Signal() for field in fields})
 
 
 def test_format_queue_pc_ranges_keeps_adjacent_ftq_segments_distinct() -> None:
@@ -468,7 +805,7 @@ def test_backend_agent_rejects_redirect_without_structured_class() -> None:
         agent.drive_redirect({"redirect_class": "control_flow"})
 
 
-def test_backend_agent_drives_and_clears_ftq_idx_ahead() -> None:
+def test_backend_agent_clears_ftq_idx_ahead_valid_without_rewriting_payload() -> None:
     agent = BackendAgent()
     drive_if = _ftq_idx_ahead_drive_if()
     agent._drive_if = drive_if
@@ -478,12 +815,47 @@ def test_backend_agent_drives_and_clears_ftq_idx_ahead() -> None:
     assert drive_if.ftq_idx_ahead_valid.value == 1
     assert drive_if.ftq_idx_ahead_flag.value == 1
     assert drive_if.ftq_idx_ahead_value.value == 63
+    drive_if.call_ret_commit_bits_ras_action[0].value = 2
+    drive_if.call_ret_commit_bits_ftq_ptr_value[0].value = 9
+    valid_write_count = drive_if.ftq_idx_ahead_valid.write_count
 
+    agent.clear_one_shot_signals()
+    assert drive_if.ftq_idx_ahead_valid.write_count == valid_write_count + 1
     agent.drive_ftq_idx_ahead(None)
+    agent.clear_one_shot_signals()
 
     assert drive_if.ftq_idx_ahead_valid.value == 0
-    assert drive_if.ftq_idx_ahead_flag.value == 0
-    assert drive_if.ftq_idx_ahead_value.value == 0
+    assert drive_if.ftq_idx_ahead_valid.write_count == valid_write_count + 1
+    assert drive_if.ftq_idx_ahead_flag.value == 1
+    assert drive_if.ftq_idx_ahead_value.value == 63
+    assert drive_if.call_ret_commit_bits_ras_action[0].value == 2
+    assert drive_if.call_ret_commit_bits_ftq_ptr_value[0].value == 9
+
+
+def test_backend_agent_writes_commit_valid_for_each_transaction_and_clears_once() -> None:
+    agent = BackendAgent()
+    drive_if = SimpleNamespace(
+        commit_valid=_Signal(),
+        commit_bits_flag=_Signal(),
+        commit_bits_value=_Signal(),
+    )
+    agent._drive_if = drive_if
+
+    agent.drive_commit(FtqEntry(ftq_flag=0, ftq_value=3))
+    valid_write_count = drive_if.commit_valid.write_count
+    agent.drive_commit(FtqEntry(ftq_flag=1, ftq_value=4))
+
+    assert drive_if.commit_valid.value == 1
+    assert drive_if.commit_valid.write_count == valid_write_count + 1
+    assert drive_if.commit_bits_flag.value == 1
+    assert drive_if.commit_bits_value.value == 4
+
+    agent.drive_commit(None)
+    assert drive_if.commit_valid.value == 0
+    assert drive_if.commit_valid.write_count == valid_write_count + 2
+
+    agent.drive_commit(None)
+    assert drive_if.commit_valid.write_count == valid_write_count + 2
 
 
 @pytest.mark.parametrize(
@@ -849,7 +1221,7 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
     _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
     interface.cfvec_fixed_taken[0].value = 1
-    interface.cfvec_exception_vec[0][2].value = 1
+    interface.cfvec_exception_vec_2[0].value = 1
 
     model._sample_cfvec()
 
@@ -883,7 +1255,7 @@ def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
 
     _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_exception_vec[0][2].value = 1
+    interface.cfvec_exception_vec_2[0].value = 1
 
     model._sample_cfvec()
 

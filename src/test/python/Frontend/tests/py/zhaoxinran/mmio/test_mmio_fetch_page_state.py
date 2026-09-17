@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from env.support import record_scenario, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -11,8 +12,22 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
+    scenario_key = "zhaoxinran/mmio/page-state/tail-rvi-half"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    latency = rng.randint(8, 24)
+    env.uncache_agent.configure(latency=latency, mmio_latency=latency)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "latency": latency,
+            "pc": uncache._CROSS_PAGE_PC,
+            "expected_path": "page_tail_half_state_preserved",
+        },
+    )
     uncache._prepare_cross_page_rvi_stream(env)
-    env.uncache_agent.configure(latency=2, mmio_latency=16)
     samples = uncache._register_prev_half_rvi_observer(env)
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
 

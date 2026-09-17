@@ -323,7 +323,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     vstdEnq.bits.srcType(0) := staEnq.bits.srcType(vstdSrcIdx)
     vstdEnq.bits.psrc(0) := staEnq.bits.psrc(vstdSrcIdx)
 
-    vstdEnq.bits.vpu.get := 0.U.asTypeOf(vstdEnq.bits.vpu.get)
+    vstdEnq.bits.vtype.foreach(_ := staEnq.bits.vtype.get)
     vstdEnq.bits.pdest := 0.U
     vstdEnq.bits.useRegCache := 0.U.asTypeOf(vstdEnq.bits.useRegCache)
     vstdEnq.bits.regCacheIdx := 0.U.asTypeOf(vstdEnq.bits.regCacheIdx)

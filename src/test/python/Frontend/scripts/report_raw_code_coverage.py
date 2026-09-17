@@ -43,6 +43,7 @@ COMPATIBILITY_FIELDS = (
     *BUILD_HASH_FIELDS,
     "registry_sha256",
     "sampler_sha256",
+    "sampler_domains",
     "verification_env_sha256",
     "build_config",
     "toolchain",

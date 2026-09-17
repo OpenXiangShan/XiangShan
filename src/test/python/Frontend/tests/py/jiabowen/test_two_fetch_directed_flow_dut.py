@@ -182,6 +182,13 @@ def _recorder(env):
     return recorder
 
 
+def _funcov_domain_enabled(recorder, domain: str) -> bool:
+    checker = getattr(recorder, "sampler_domain_enabled", None)
+    if callable(checker):
+        return bool(checker(domain))
+    return True
+
+
 def _read_required(recorder, names: Iterable[str], *, label: str) -> int:
     names = tuple(str(name) for name in names)
     value = recorder._read_first_dut_signal(recorder.env.dut, names)

@@ -13,6 +13,7 @@ from .pmp_pma import (
     reconstruct_pmp_request_addr,
 )
 from .pc_utils import fold_pc, pc_from_ftq_start, require_matching_foldpc
+from .random_regression import derive_seed, read_seed, record_scenario, scenario_rng
 from .signal_utils import read_internal_signal
 
 __all__ = [
@@ -25,9 +26,13 @@ __all__ = [
     "csr_addresses_for_entry",
     "encode_pmp_pma_addr",
     "encode_pmp_pma_cfg",
+    "derive_seed",
     "fold_pc",
     "pc_from_ftq_start",
+    "read_seed",
+    "record_scenario",
     "reconstruct_pmp_request_addr",
     "require_matching_foldpc",
     "read_internal_signal",
+    "scenario_rng",
 ]

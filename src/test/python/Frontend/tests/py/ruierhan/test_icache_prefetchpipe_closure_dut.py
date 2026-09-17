@@ -13,10 +13,12 @@ from collections.abc import Iterable
 import pytest
 
 from env.funcov.py.icache.icache_prefetchpipe_funcov import _read_prefetch
-from env.sequences import TranslationScenario, TranslationScenarioBuilder
+from env.sequences import TranslationScenario, TranslationScenarioBuilder, TranslationPmpPmaEntry
+from env.support import PmpPmaConfig
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss as _run_trained_refill,
 )
+from tests.py.jiabowen.test_two_fetch_directed_flow_dut import _c_j
 from tests.py.zhaoxinran.test_multi_branch import (
     test_large_loop_multi_segment as _run_large_loop,
 )
@@ -106,6 +108,18 @@ def _load_nops(env, base: int, *, words: int = 8192) -> None:
     env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
 
 
+def _load_overlap2_loop(env, base: int) -> int:
+    # A starts at +0x60 and jumps to B at +0x30 without crossing a line.
+    # B crosses into the next line and jumps back to A at +0x50.  Once both
+    # branches are trained, consecutive FTQ entries repeat the Overlap2 layout.
+    noncross_entry = int(base) + 0x60
+    payload = bytearray((0x0001).to_bytes(2, "little") * 128)
+    payload[0x50:0x52] = _c_j(0x10).to_bytes(2, "little")
+    payload[0x70:0x72] = _c_j(-0x40).to_bytes(2, "little")
+    env.load_program(bytes(payload), int(base))
+    return noncross_entry
+
+
 def _prepare_nops(
     env,
     base: int,
@@ -136,6 +150,21 @@ def _clear_soft_prefetch(env) -> None:
             address.value = 0
 
 
+def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, allow_fault: bool = False) -> None:
+    """Do not end a coverage test before the affected fetch reaches its checker."""
+    for _ in range(max_cycles):
+        assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
+        stats = env.monitor.get_stats()
+        oracle = env.translation_oracle.get_stats()
+        assert not oracle["errors"], oracle["errors"][:4]
+        if not allow_fault:
+            assert stats["exception_mark_count"] == 0, stats
+        if int(stats["slots_valid"]) >= min_slots:
+            return
+        env.step(1)
+    raise AssertionError({"reason": "no checked cfVec completion", "monitor": env.monitor.get_stats()})
+
+
 def _set_soft_prefetch(env, addresses: Iterable[int]) -> None:
     _clear_soft_prefetch(env)
     for slot, address in enumerate(tuple(addresses)[:3]):
@@ -154,6 +183,13 @@ def _present_soft_prefetch(env, addresses: Iterable[int]) -> None:
     _clear_soft_prefetch(env)
 
 
+def _present_aligned_soft_prefetch(env, target: int) -> None:
+    """Let one same-set request dequeue before presenting the directed tag."""
+    _present_soft_prefetch(env, (int(target) + 0x4000,))
+    env.step(1)
+    _present_soft_prefetch(env, (int(target),))
+
+
 @pytest.fixture
 def prefetchpipe_env(env):
     try:
@@ -170,6 +206,9 @@ def prefetchpipe_env(env):
 def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _prepare_nops(env, _SOFT_BASE, latency=48, seed=0x6657)
+    # Data-bank SRAMs sweep 256 sets after reset.  Do not let a soft refill
+    # install metadata before its data bank can accept the corresponding write.
+    env.step(300)
     targets = {
         ("icache_prefetchpipe_s0_entry", "soft_priority_over_ftq"),
         ("icache_prefetchpipe_s0_entry", "multi_soft_single_accept"),
@@ -194,6 +233,8 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
         env.step(2)
 
     _wait_bins(env, targets, max_cycles=2048)
+    # Include the first prefetched lines in actual instruction comparison.
+    _wait_checked_cfvec(env, min_slots=256)
     assert not env.monitor.get_errors()
 
 
@@ -341,7 +382,13 @@ def _translation_state(
     pa: int,
     latency: int,
     page_fault: bool = False,
+    reset_entry: bool = False,
 ):
+    if reset_entry:
+        # Start with a virtual reset PC; a bare-mode PA boot followed by an
+        # unbound redirect can retain an unrelated FTQ context at recovery.
+        assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
+        env.initialize(reset_vector=int(va), bare_mode=False, reset_cycles=20)
     scenario = TranslationScenario(
         scenario_id=scenario_id,
         va=int(va),
@@ -353,6 +400,16 @@ def _translation_state(
         s1_pf=1 if page_fault else 0,
         expected_path="fault" if page_fault else "cacheable",
         expected_result="page_fault" if page_fault else "miss_refill",
+        # Sv39 executes in S mode.  A mapping alone does not grant PMP execute
+        # permission; without this entry a supposed cacheable test only faults.
+        pmp_entries=(TranslationPmpPmaEntry(
+            "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True),
+            int(pa) & ~0x3FFF, size=0x4000,
+        ),) if reset_entry else (),
+        pma_entries=(TranslationPmpPmaEntry(
+            "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
+            int(pa) & ~0x3FFF, size=0x4000,
+        ),) if reset_entry else (),
     )
     return TranslationScenarioBuilder(env).build(scenario)
 
@@ -364,36 +421,20 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     pa0 = 0x8040_0F00
     va0 = 0x4020_0F00
     _prepare_nops(env, pa0, latency=32, seed=0x6678)
-    first = _translation_state(
+    state = _translation_state(
         env,
-        scenario_id="prefetchpipe-itlb-resend",
+        scenario_id="prefetchpipe-itlb-flush-retry-page-fault",
         va=va0,
         pa=pa0,
-        latency=8,
+        latency=64,
+        # BIN-738/740 explicitly require an exception entry.  Declare the
+        # page fault instead of relying on speculative unmapped boot traffic.
+        page_fault=True,
+        reset_entry=True,
     )
     env.monitor.clear()
     env.monitor.set_expected_pc(va0)
-    env.arm_translation_scenario(first, page_indexes=(0, 1))
-    env.backend_model.inject_redirect(va0, "ctrl_redirect", delay_cycles=0)
-    _wait_bins(
-        env,
-        [("icache_prefetchpipe_s1_meta", "itlb_miss_resend_meta_retry")],
-        max_cycles=6000,
-    )
-
-    pa1 = 0x8042_0F00
-    va1 = 0x4022_0F00
-    second = _translation_state(
-        env,
-        scenario_id="prefetchpipe-itlb-wait-flush",
-        va=va1,
-        pa=pa1,
-        latency=64,
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va1)
-    env.arm_translation_scenario(second, page_indexes=(0, 1))
-    env.backend_model.inject_redirect(va1, "ctrl_redirect", delay_cycles=0)
+    env.arm_translation_scenario(state, page_indexes=(0,))
     for attempt in range(32):
         for _ in range(512):
             if _signal(env, "s1_valid") == 1 and _signal(
@@ -402,7 +443,7 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
                 break
             env.step(1)
         env.backend_model.inject_redirect(
-            va1 + ((attempt + 1) % 8) * 0x40,
+            va0,
             "ctrl_redirect",
             delay_cycles=0,
         )
@@ -413,26 +454,193 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
         env,
         [
             ("icache_prefetchpipe_s1_meta", "flush_cancels_itlb_wait"),
+            ("icache_prefetchpipe_s1_meta", "itlb_miss_resend_meta_retry"),
             ("icache_waylookup_exception", "exception_dequeue"),
             ("icache_waylookup_exception", "exception_waits_flush"),
         ],
-        max_cycles=512,
+        max_cycles=4096,
     )
+    _wait_checked_cfvec(env, min_slots=1, allow_fault=True)
+    assert env.translation_oracle.get_active()["fault_seen"]
+    env.assert_translation_scenario()
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-659", "BIN-661", "BIN-666", "BIN-700")
+@pytest.mark.funcov_bins("BIN-679")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> None:
+    """Hold MetaArray behind fence.i while a translated retry completes."""
+    env = prefetchpipe_env
+    pa = 0x8046_0F00
+    va = 0x4026_0F00
+    _prepare_nops(env, pa, latency=32, seed=0x6679)
+    state = _translation_state(
+        env,
+        scenario_id="prefetchpipe-meta-resend-backpressure",
+        va=va,
+        pa=pa,
+        latency=32,
+        reset_entry=True,
+    )
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state, page_indexes=(0, 1))
+
+    for _ in range(4096):
+        if _signal(env, "s1_valid") == 1 and _signal(env, "s1_wait_itlb") == 1:
+            break
+        env.step(1)
+    else:
+        raise AssertionError("PrefetchPipe did not enter the ITLB retry state")
+
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    try:
+        # fence.i legally owns the single-port MetaArray without flushing the
+        # PrefetchPipe.  Keep it asserted until the completed ITLB retry has
+        # spent two cycles in MetaResend, then release the same transaction.
+        fencei.value = 1
+        blocked_cycles = 0
+        for _ in range(4096):
+            if (
+                _signal(env, "s1_valid") == 1
+                and _signal(env, "s1_state") == 2
+                and _signal(env, "meta_req_valid") == 1
+                and _signal(env, "meta_ready") == 0
+            ):
+                blocked_cycles += 1
+                if blocked_cycles >= 2:
+                    break
+            env.step(1)
+        else:
+            raise AssertionError("MetaRead retry did not remain blocked for two cycles")
+        fencei.value = 0
+        env.step(1)
+    finally:
+        fencei.value = 0
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery")],
+        max_cycles=32,
+    )
+    _wait_checked_cfvec(env)
+    assert env.translation_oracle.get_active()["observed_normal_cfvec_count"] >= 32
+    assert any(int(record["address"]) == (pa & ~0x3F)
+               for record in env.icache_agent.get_stats()["request_records"])
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-661", "BIN-666", "BIN-700")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_trained_refill(env)
     targets = {
-        ("icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"),
         ("icache_prefetchpipe_s1_meta", "dual_layout_same_line"),
         ("icache_prefetchpipe_s2_miss", "sram_or_clean_mshr_hit"),
         ("icache_missunit_dedup", "prefetch_merge_any_mshr"),
     }
     _wait_bins(env, targets, max_cycles=4000)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-683")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) -> None:
+    """A clean response for an existing MSHR cancels an unissued s2 miss."""
+    env = prefetchpipe_env
+    _run_trained_refill(env)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_unissued_miss")],
+        max_cycles=4000,
+    )
+    hit = _recorder(env).hits[
+        (
+            "icache_prefetchpipe_s2_miss",
+            "miss_behavior",
+            "clean_mshr_cancels_unissued_miss",
+        )
+    ]
+    evidence = hit.evidence[0]
+    matched_ports = tuple(int(port) for port in evidence["unissued_clean_refill_ports"])
+    assert matched_ports
+    for port in matched_ports:
+        assert int(evidence[f"s2_has_send{port}"]) == 0
+        assert int(evidence[f"s2_miss{port}"]) == 0
+    assert int(evidence["miss_valid"]) == 0
+    target = int(evidence["refill_paddr"]) << 6
+    target_requests_before = sum(
+        int(record["address"]) == (int(target) & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    env.step(8)
+    target_requests_after = sum(
+        int(record["address"]) == (int(target) & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert target_requests_after == target_requests_before
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-659")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> None:
+    """Keep an exact prefetch probe live across its clean refill window."""
+    env = prefetchpipe_env
+    base = _SOFT_BASE + 0x2_0000
+    _prepare_nops(env, base, latency=96, seed=0x6659, words=32768)
+    env.set_bp_ctrl_enable(
+        ubtb_enable=0,
+        abtb_enable=0,
+        mbtb_enable=0,
+        tage_enable=0,
+        sc_enable=0,
+        ittage_enable=0,
+    )
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.backend_model.set_can_accept(0)
+
+    for episode in range(8):
+        if _hit(env, "icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"):
+            break
+        target = base + 0x1000 + episode * 0x4000
+        for _ in range(16):
+            _present_aligned_soft_prefetch(env, target)
+            try:
+                request = _wait_icache_request(env, target, max_cycles=32)
+                break
+            except AssertionError:
+                continue
+        else:
+            raise AssertionError(
+                {
+                    "reason": "directed soft prefetch did not reach ICache",
+                    "target": target,
+                    "icache": env.icache_agent.get_stats(),
+                }
+            )
+        request_cycle = int(request["cycle"])
+
+        # The response is scheduled 96 cycles after the accepted request.
+        # Re-presenting the exact key keeps a matching s1 transaction live so
+        # the sampler can observe the clean refill updating its Meta result.
+        while int(env.current_cycle) <= request_cycle + 104:
+            _present_soft_prefetch(env, (target,))
+            if _hit(
+                env,
+                "icache_prefetchpipe_s1_meta",
+                "clean_refill_updates_meta",
+            ):
+                break
+        env.step(4)
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "clean_refill_updates_meta")],
+        max_cycles=1,
+    )
     assert not env.monitor.get_errors()
 
 
@@ -515,7 +723,7 @@ def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-780")
+@pytest.mark.funcov_bins("BIN-758", "BIN-771", "BIN-772", "BIN-778", "BIN-780")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -525,10 +733,69 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
         [
             ("icache_prefetchpipe_s1_meta", "dual_layout_overlap1"),
             ("icache_prefetchpipe_s1_meta", "dual_layout_interleave"),
+            ("icache_waylookup_wrap", "dual_wrap"),
             ("icache_mainpipe_s2_ecc", "meta_code_mismatch_zero_way_ignored"),
             ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked"),
         ],
         max_cycles=6000,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-779")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.funcov_closure_pending
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "current V3 DUT has not produced the Overlap2 encoding from legal "
+        "top-level traffic; retain for nightly reachability checks"
+    ),
+)
+def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    base = _SOFT_BASE + 0x1_0000
+    noncross_entry = _load_overlap2_loop(env, base)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=16,
+        miss_rate=1.0,
+        seed=0x6779,
+    )
+    env.initialize(reset_vector=noncross_entry, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(noncross_entry)
+    for _ in range(1200):
+        if int(env.backend_model.get_stats().get("commit_count", 0)) >= 96:
+            break
+        env.step(1)
+    else:
+        raise AssertionError(
+            {
+                "reason": "Overlap2 branch pair did not train",
+                "backend": env.backend_model.get_stats(),
+            }
+        )
+
+    env.backend_model.set_can_accept(0)
+    for _ in range(1600):
+        occupancy = _signal(env, "waylookup_num_valid")
+        if occupancy is not None and int(occupancy) >= 30:
+            break
+        env.step(1)
+    else:
+        raise AssertionError(
+            {
+                "reason": "FTQ did not build enough prefetch backlog",
+                "waylookup_num_valid": _signal(env, "waylookup_num_valid"),
+                "backend": env.backend_model.get_stats(),
+            }
+        )
+    env.backend_model.set_can_accept(1)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "dual_layout_overlap2")],
+        max_cycles=2000,
     )
     assert not env.monitor.get_errors()
 

@@ -20,8 +20,13 @@ from tests.py.zhaoxinran.test_multi_branch import (
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x8008_0000
 _CROSS_BASE = 0x8009_0000
+_MULTI_BRANCH_BASE = 0x8000_0000
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
+
+from env.funcov.py.icache.signal_contract import (
+    TO_IFU_MAP, TO_IFU_READY, TO_IFU_VALID, half_aligned_cross_line,
+)
 
 
 def _aliases(name: str) -> tuple[str, str]:
@@ -32,20 +37,20 @@ _SIGNALS = {
     "s1_valid": _aliases(_MAIN + "s1_valid"),
     "s1_flush": _aliases(_MAIN + "s1_flush"),
     "cross0": (
-        _MAIN + "s1_req_0_isCrossLine",
         _MAIN + "accessTrace_crossLine",
+        _MAIN + "s1_req_0_isCrossLine",
     ),
     "cross1": (
-        _MAIN + "s1_req_1_isCrossLine",
         _MAIN + "s1_isCrossLine_1",
+        _MAIN + "s1_req_1_isCrossLine",
     ),
     "req1_valid": _aliases(_MAIN + "s1_req_1_valid"),
     "s1_addr": _aliases(_MAIN + "s1_req_0_vAddr_0_addr"),
     "s1_ftq_flag": _aliases(_MAIN + "s1_req_0_ftqIdx_flag"),
     "s1_ftq_value": _aliases(_MAIN + "s1_req_0_ftqIdx_value"),
-    "fetch_finish": _aliases(_MAIN + "io_toIfu_req_valid"),
-    "to_ifu_valid": _aliases(_MAIN + "io_toIfu_req_valid"),
-    "to_ifu_ready": _aliases(_MAIN + "io_toIfu_req_ready"),
+    "fetch_finish": TO_IFU_VALID,
+    "to_ifu_valid": TO_IFU_VALID,
+    "to_ifu_ready": TO_IFU_READY,
     "miss_resp_valid": _aliases(_MAIN + "io_missResp_valid"),
 }
 
@@ -54,10 +59,10 @@ for _index in range(4):
     _line = _index % 2
     _hit_r = _MAIN + "s1_hits_r" + (f"_{_index}" if _index else "")
     _SIGNALS[f"hit_{_index}"] = (
-        _MAIN + f"s1_hits_{_req}_{_line}",
         _hit_r,
-        "TOP." + _MAIN + f"s1_hits_{_req}_{_line}",
         "TOP." + _hit_r,
+        _MAIN + f"s1_hits_{_req}_{_line}",
+        "TOP." + _MAIN + f"s1_hits_{_req}_{_line}",
     )
     _SIGNALS[f"should_{_index}"] = _aliases(
         _MAIN + f"s1_shouldFetch_{_index}"
@@ -74,6 +79,26 @@ for _index in range(4):
 
 _SIGNALS["sram_valid_0"] = _aliases(_MAIN + "s1_sramRespValid")
 _SIGNALS["sram_valid_1"] = _aliases(_MAIN + "s1_sramValid_0_1")
+_SIGNALS["two_fetch_valid"] = _aliases(_MAIN + "s1_twoFetchValid")
+_SIGNALS["to_ifu_maybe_rvc_map"] = TO_IFU_MAP
+for _index in range(4):
+    _suffix = "" if _index == 0 else f"_{_index}"
+    _comb_suffix = ("", "_3", "_6", "_9")[_index]
+    _enable_suffix = ("_1", "_4", "_7", "_10")[_index]
+    _req = _index // 2
+    _line = _index % 2
+    _SIGNALS[f"aligned_map_stored_{_index}"] = _aliases(
+        _MAIN + f"s1_alignedMaybeRvcMapVec_r{_suffix}"
+    )
+    _SIGNALS[f"aligned_map_comb_{_index}"] = _aliases(
+        _MAIN + f"_s1_alignedMaybeRvcMapVec_T{_comb_suffix}"
+    )
+    _SIGNALS[f"aligned_map_enable_{_index}"] = _aliases(
+        _MAIN + f"_s1_alignedMaybeRvcMapVec_T{_enable_suffix}"
+    )
+    _SIGNALS[f"aligned_mask_{_index}"] = _aliases(
+        _MAIN + f"s1_maybeRvcAlignInfo_alignedMaybeRvcMaskVec_{_req}_{_line}"
+    )
 
 
 def _cycle_limit(name: str, default: int) -> int:
@@ -86,6 +111,9 @@ def _cycle_limit(name: str, default: int) -> int:
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
+    recorder = getattr(env, "functional_coverage", None)
+    if recorder is not None:
+        return recorder._read_first_dut_signal(env.dut, names)
     cache = getattr(env, "_ruierhan_internal_signal_cache", None)
     if cache is None:
         cache = {}
@@ -112,9 +140,15 @@ def _try_read(env, names: Sequence[str]) -> int | None:
     return None
 
 
-def _read(env, key: str, default: int = 0) -> int:
+def _read(env, key: str) -> int:
     value = _try_read(env, _SIGNALS[key])
-    return int(default) if value is None else int(value)
+    if value is None and key == "cross0":
+        value = half_aligned_cross_line(
+            _try_read(env, (_MAIN + "s1_req_0_vAddr_0_addr",)),
+            _try_read(env, (_MAIN + "s1_req_0_endPosition",)),
+        )
+    assert value is not None, {"missing_probe": key, "candidates": _SIGNALS[key]}
+    return int(value)
 
 
 def _snapshot(env) -> dict[str, int]:
@@ -158,6 +192,21 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
         max_cycles=max_cycles,
         label=f"{group}.{bin_name}",
     )
+
+
+def _direct_alignment_matches(sample: dict[str, int]) -> bool:
+    if sample["s1_valid"] != 1 or sample["to_ifu_valid"] != 1:
+        return False
+    effective_lines = 4 if sample["two_fetch_valid"] == 1 else 2
+    expected = 0
+    for index in range(effective_lines):
+        aligned_map = (
+            sample[f"aligned_map_comb_{index}"]
+            if sample[f"aligned_map_enable_{index}"] == 1
+            else sample[f"aligned_map_stored_{index}"]
+        )
+        expected |= aligned_map & sample[f"aligned_mask_{index}"]
+    return sample["to_ifu_maybe_rvc_map"] == (expected & 0xFFFF_FFFF)
 
 
 def _jal(rd: int, offset: int) -> int:
@@ -223,12 +272,16 @@ def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-609", "BIN-611")
+@pytest.mark.funcov_bins("BIN-609", "BIN-1133")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
     samples = _initialize_loop(env, _CROSS_BASE, target_offset=0x34, latency=8)
     _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-    _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
+    _wait_hit(
+        env,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req0_line1_shift_left",
+    )
     assert any(
         sample["s1_valid"] == 1
         and sample["cross0"] == 1
@@ -241,10 +294,25 @@ def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
         and ((sample["s1_addr"] << 1) & 0x3F) >= 8
         for sample in samples
     ), {"tail": samples[-96:]}
+    assert any(
+        sample["cross0"] == 1
+        and sample["sram_valid_0"] == 1
+        and sample["sram_valid_1"] == 1
+        and _direct_alignment_matches(sample)
+        for sample in samples
+    ), {"tail": samples[-96:]}
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-612")
+@pytest.mark.funcov_bins(
+    "BIN-612",
+    "BIN-1132",
+    "BIN-1133",
+    "BIN-1134",
+    "BIN-1135",
+    "BIN-1136",
+    "BIN-1137",
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
     samples = _register_observer(env)
@@ -261,6 +329,20 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
         "dual_request_independent",
         max_cycles=1,
     )
+    for bin_name in (
+        "sram_req0_line0_shift_right",
+        "sram_req0_line1_shift_left",
+        "sram_req1_shift_right",
+        "sram_req1_shift_left_zero",
+        "sram_req1_line1_shift_left",
+        "invalid_req1_masked",
+    ):
+        _wait_hit(
+            env,
+            "icache_mainpipe_maybe_rvc_align",
+            bin_name,
+            max_cycles=1,
+        )
     assert any(
         sample["s1_valid"] == 1
         and sample["req1_valid"] == 1
@@ -275,6 +357,112 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
         )
         for sample in samples
     ), {"tail": samples[-96:]}
+    assert any(_direct_alignment_matches(sample) for sample in samples), {
+        "tail": samples[-96:]
+    }
+
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-628")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.funcov_closure_pending
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "the trained current-DUT stream does not retain two cross-line FTQ "
+        "requests with all four miss slots pending for four ready cycles"
+    ),
+)
+def test_tc_icache_mainpipe_four_line_fixed_priority(env) -> None:
+    """Invalidate a trained cross-line dual stream and observe four miss slots."""
+    random_state = random.getstate()
+    random.seed(1)
+    try:
+        _run_multi_branch_positions(env)
+    finally:
+        random.setstate(random_state)
+
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=96,
+        miss_rate=1.0,
+        seed=0x628,
+    )
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    try:
+        for _episode in range(2):
+            fencei.value = 1
+            env.step(1)
+            fencei.value = 0
+            for _ in range(512):
+                if env.functional_coverage.key_hit(
+                    "icache_mainpipe_s1_miss", "four_line_fixed_priority"
+                ):
+                    break
+                env.step(1)
+            if env.functional_coverage.key_hit(
+                "icache_mainpipe_s1_miss", "four_line_fixed_priority"
+            ):
+                break
+        _wait_hit(
+            env,
+            "icache_mainpipe_s1_miss",
+            "four_line_fixed_priority",
+            max_cycles=1,
+        )
+    finally:
+        fencei.value = 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1138")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
+    """Train varied dual requests, then replay them through MainPipe refills."""
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=2,
+        miss_rate=1.0,
+        seed=0x7138,
+    )
+    random_state = random.getstate()
+    random.seed(1)
+    try:
+        _run_multi_branch_positions(env)
+    finally:
+        random.setstate(random_state)
+
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    try:
+        for _episode in range(8):
+            fencei.value = 1
+            env.step(1)
+            fencei.value = 0
+            for _ in range(192):
+                if env.functional_coverage.key_hit(
+                    "icache_mainpipe_maybe_rvc_align",
+                    "mshr_request_line_alignment",
+                ):
+                    break
+                env.step(1)
+            if env.functional_coverage.key_hit(
+                "icache_mainpipe_maybe_rvc_align",
+                "mshr_request_line_alignment",
+            ):
+                break
+
+        _wait_hit(
+            env,
+            "icache_mainpipe_maybe_rvc_align",
+            "mshr_request_line_alignment",
+            max_cycles=1,
+        )
+    finally:
+        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
     assert not env.monitor.get_errors()
 
 

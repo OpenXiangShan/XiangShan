@@ -70,6 +70,30 @@ def _read_instr_uncache(recorder, dut, stem: str) -> Optional[int]:
     )
 
 
+def _read_req_uncache(
+    recorder,
+    dut,
+    *,
+    req_stem: str,
+    valid_stem: str,
+    pmp_mmio_stem: str,
+    pbmt_stem: str,
+) -> Optional[int]:
+    """Read reqIsUncache or reconstruct its retained RTL expression."""
+    direct = _read_ifu(recorder, dut, req_stem)
+    if direct is not None:
+        return direct
+    valid = _read_ifu(recorder, dut, valid_stem)
+    pmp_mmio = _read_ifu(recorder, dut, pmp_mmio_stem)
+    pbmt = _read_ifu(recorder, dut, pbmt_stem)
+    if valid is None or pmp_mmio is None or pbmt is None:
+        return None
+    return int(
+        int(valid) == 1
+        and (int(pmp_mmio) == 1 or int(pbmt) in (_PBMT_NC, _PBMT_IO))
+    )
+
+
 def _mark(
     recorder, group: str, index: int, cycle: int, evidence: dict[str, Any]
 ) -> None:
@@ -183,21 +207,40 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
     if to_uncache_addr is None:
         to_uncache_addr = _read_uncache(recorder, dut, "uncachePAddr_addr")
 
+    s1_pmp_mmio = _read_ifu(recorder, dut, "s1_icacheMetaIn_0_pmpMmio")
+    s1_pbmt = _read_ifu(recorder, dut, "s1_icacheMetaIn_0_itlbPbmt")
+    s2_pmp_mmio = _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio")
+    s2_pbmt = _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt")
+
     return {
         "s1_valid": _read_ifu(recorder, dut, "s1_valid"),
         "s1_flush": _read_ifu(recorder, dut, "s1_flush"),
-        "s1_req_uncache": _read_ifu(recorder, dut, "s1_reqIsUncache"),
-        "s1_pmp_mmio": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_pmpMmio"),
-        "s1_pbmt": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_itlbPbmt"),
+        "s1_req_uncache": _read_req_uncache(
+            recorder,
+            dut,
+            req_stem="s1_reqIsUncache",
+            valid_stem="s1_valid",
+            pmp_mmio_stem="s1_icacheMetaIn_0_pmpMmio",
+            pbmt_stem="s1_icacheMetaIn_0_itlbPbmt",
+        ),
+        "s1_pmp_mmio": s1_pmp_mmio,
+        "s1_pbmt": s1_pbmt,
         "s1_paddr": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_pAddr_addr"),
         "s1_pc": _read_ifu(recorder, dut, "s1_fetchBlock_0_startVAddr_addr"),
         "s1_ftq_flag": _read_ifu(recorder, dut, "s1_fetchBlock_0_ftqIdx_flag"),
         "s1_ftq_value": _read_ifu(recorder, dut, "s1_fetchBlock_0_ftqIdx_value"),
         "s2_valid": _read_ifu(recorder, dut, "s2_valid_valid"),
-        "s2_req_uncache": _read_ifu(recorder, dut, "s2_reqIsUncache"),
+        "s2_req_uncache": _read_req_uncache(
+            recorder,
+            dut,
+            req_stem="s2_reqIsUncache",
+            valid_stem="s2_valid_valid",
+            pmp_mmio_stem="s2_icacheMeta_0_pmpMmio",
+            pbmt_stem="s2_icacheMeta_0_itlbPbmt",
+        ),
         "s2_use_uncache": _read_ifu(recorder, dut, "s2_useUncacheFetch"),
-        "s2_pmp_mmio": _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio"),
-        "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
+        "s2_pmp_mmio": s2_pmp_mmio,
+        "s2_pbmt": s2_pbmt,
         "s2_paddr": _read_ifu(recorder, dut, "s2_icacheMeta_0_pAddr_addr"),
         "s2_exception": _read_ifu(recorder, dut, "s2_icacheMeta_0_exception_value"),
         "s2_pc": _read_ifu(recorder, dut, "s2_fetchBlock_0_startVAddr_addr"),
@@ -409,11 +452,20 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
 
 def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
     """Read the retained DUT semantics needed by NC timing canaries."""
+    s2_pmp_mmio = _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio")
+    s2_pbmt = _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt")
     return {
         "s2_valid": _read_ifu(recorder, dut, "s2_valid_valid"),
-        "s2_req_uncache": _read_ifu(recorder, dut, "s2_reqIsUncache"),
-        "s2_pmp_mmio": _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio"),
-        "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
+        "s2_req_uncache": _read_req_uncache(
+            recorder,
+            dut,
+            req_stem="s2_reqIsUncache",
+            valid_stem="s2_valid_valid",
+            pmp_mmio_stem="s2_icacheMeta_0_pmpMmio",
+            pbmt_stem="s2_icacheMeta_0_itlbPbmt",
+        ),
+        "s2_pmp_mmio": s2_pmp_mmio,
+        "s2_pbmt": s2_pbmt,
         "uncache_busy": _read_ifu(recorder, dut, "uncacheBusy"),
         "uncache_state": _read_uncache(recorder, dut, "uncacheState"),
         "backend_redirect": _read(

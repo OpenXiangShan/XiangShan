@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional
 from ..agents.backend_agent import BackendAgent
 from ..agents.icache_agent import ICacheAgent
 from ..agents.icache_control_agent import ICacheControlAgent
+from ..agents.icache_ecc_injection_agent import ICacheECCInjectionAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from .backend_model import BackendModel
@@ -39,7 +40,9 @@ from ..support.pmp_pma import (
 )
 from ..support.signal_utils import read_internal_signal
 from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
+from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
+from ..model.backend_runtime import CfVecCycleSnapshot
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
@@ -96,6 +99,8 @@ class FrontendEnv:
         self._configure_collaborators(explicit_page_table=page_table_model is not None)
         self._bind_collaborators()
         self._connect_collaborators()
+        self.icache_ecc_agent = ICacheECCInjectionAgent(self)
+        self.bpu_ftq_scheduler = BpuFtqScheduler(self)
 
         self._init_inputs()
         self._register_callbacks(register_callbacks)
@@ -462,10 +467,11 @@ class FrontendEnv:
         for paddr, payload in self._iter_memory_ranges():
             module.sync_memory(int(paddr), payload)
 
-    def _begin_backend_cycle(self, cycle: int) -> None:
+    def _begin_backend_cycle(self, cycle: int) -> CfVecCycleSnapshot:
         self.backend_model.begin_cycle(cycle)
         observation = self.backend_observe_monitor.snapshot()
         self.backend_model.consume_backend_observation(observation)
+        return self.backend_model.capture_cfvec_snapshot()
 
     def _drive_backend_cycle(self, cycle: int) -> None:
         actions = self.backend_model.plan_cycle_actions()
@@ -630,13 +636,18 @@ class FrontendEnv:
             self.icache_agent.on_clock_edge(cycle)
             self.icache_control_agent.on_clock_edge(cycle)
         self.uncache_agent.on_clock_edge(cycle)
+        ptw_flushes_before = int(self.ptw_agent.sfence_dropped_responses)
         self.ptw_agent.on_clock_edge(cycle)
+        ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)
+        if ptw_flushes_after > ptw_flushes_before:
+            self.translation_oracle.discard_pending_ptw_responses(
+                int(cycle), agent_dropped=ptw_flushes_after - ptw_flushes_before
+            )
         self.ptw_full_ppn_checker.on_clock_edge(cycle)
         self.ptw_resp_input_checker.on_clock_edge(cycle)
         if in_reset:
             self.backend_model.on_hardware_reset(cycle)
-            self.backend_agent.start_cycle(self.backend_model.can_accept, 0, 1)
-            self.backend_agent.drive_commit(None)
+            self.backend_agent.drive_reset_idle()
             self.monitor.on_hardware_reset(
                 cycle, self._read(self.clock_reset.io_reset_vector_addr, 0) << 1,
             )

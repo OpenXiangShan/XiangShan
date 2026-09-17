@@ -50,6 +50,8 @@ class PTWAgent:
         self.request_get_gpa_provider: Optional[Callable[[], Optional[int]]] = None
         self.pending = deque()
         self.active_resp: Optional[_PTWPending] = None
+        self._resp_valid_driven = 0
+        self._driven_response_payload = None
         self.last_drive_expectation: Optional[dict] = None
         self.last_request_expectation: Optional[dict] = None
         self.event_sink: Optional[Callable[[Dict], None]] = None
@@ -424,7 +426,16 @@ class PTWAgent:
         return 1 if (int(cycle) % period) < self.ready_high_cycles else 0
 
     def _drive_response(self, resp: Optional[dict], valid: int) -> None:
-        self._write(self.interface.resp_valid, valid)
+        response_valid = 1 if int(valid) else 0
+        if response_valid != self._resp_valid_driven:
+            self._write(self.interface.resp_valid, response_valid)
+            self._resp_valid_driven = response_valid
+        if response_valid == 0:
+            self._driven_response_payload = None
+            return
+        if resp is self._driven_response_payload:
+            return
+
         payload = resp or {}
         ppn_low_signals = self.interface.resp_bits_s1_ppn_low
         valididx_signals = self.interface.resp_bits_s1_valididx
@@ -466,6 +477,7 @@ class PTWAgent:
             self._write(signal, pteidx_payload[idx])
         self._write(self.interface.resp_bits_s1_pf, payload.get("s1_pf", 0))
         self._write(self.interface.resp_bits_s1_af, payload.get("s1_af", 0))
+        self._driven_response_payload = resp
 
     def _flush_pending(self, cycle: int) -> None:
         dropped = len(self.pending) + (1 if self.active_resp is not None else 0)

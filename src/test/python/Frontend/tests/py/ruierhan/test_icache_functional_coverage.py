@@ -61,7 +61,9 @@ class _Recorder:
         self.hit_evidence[(group, bin_name)] = dict(evidence)
 
     def set_key(self, key, value):
-        self.env.dut.set(_SIGNALS[key][0], value)
+        names = _SIGNALS[key]
+        assert names, f"no DUT signal mapping for {key}; drive the source transaction instead"
+        self.env.dut.set(names[0], value)
 
     def set_prefetch_key(self, key, value):
         self.env.dut.set(_PREFETCH_SIGNALS[key][0], value)
@@ -90,8 +92,8 @@ def _hit(recorder, group, bin_name):
 
 
 def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
-    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 47
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 54
+    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 54
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
@@ -505,32 +507,19 @@ def _set_mainpipe_crossline_sram_hit(recorder, *, bank_mask=(1, 1, 1, 1, 1, 1, 1
     recorder.env.dut.set(_MAIN + "s1_sramRespValid", int(bank_mask[-1]))
 
 
-def test_mainpipe_crossline_sram_bins_sample_conditions_not_checkpoints():
+def test_mainpipe_crossline_sram_hit_samples_condition_not_checkpoints():
     recorder = _Recorder()
     _set_mainpipe_crossline_sram_hit(recorder)
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
 
     assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
 
     recorder = _Recorder()
     _set_mainpipe_crossline_sram_hit(recorder)
     recorder.env.dut.set(_MAIN + "s1_hits_0_1", 0)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 17)
     assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-
-    recorder = _Recorder()
-    _set_mainpipe_crossline_sram_hit(recorder, bank_mask=(1, 1, 0, 1, 1, 1, 1, 1))
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 18)
-    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
-
-    recorder = _Recorder()
-    _set_mainpipe_crossline_sram_hit(recorder)
-    recorder.env.dut.set(_MAIN + "s1_req_0_vAddr_0_addr", 0)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 19)
-    assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
-
 
 def _set_mainpipe_dual_request_independent(recorder):
     recorder.set_key("s1_valid", 1)
@@ -580,6 +569,239 @@ def test_mainpipe_dual_request_samples_condition_not_hit_checkpoints():
     sample_icache_mainpipe_coverage(recorder, recorder.env, 23)
 
     assert not _hit(recorder, "icache_mainpipe_s1_sram", "dual_request_independent")
+
+
+def _set_mainpipe_alignment_snapshot(
+    recorder,
+    *,
+    req1_valid=0,
+    cross0=0,
+    cross1=0,
+    shift_right=0,
+    shifts=(4, 27, 2, 27),
+    raw_maps=(0xF0, 0x3, 0x30, 0x1),
+    sram_valid=(1, 0, 0, 0),
+    mshr_reg=(0, 0, 0, 0),
+):
+    first_range = 0xFF
+    total_range = 0xFFFF
+    aligned_maps = (
+        int(raw_maps[0]) >> int(shifts[0]),
+        (int(raw_maps[1]) << (int(shifts[1]) + 1)) & 0xFFFF_FFFF,
+        (
+            int(raw_maps[2]) >> int(shifts[2])
+            if shift_right
+            else (int(raw_maps[2]) << int(shifts[2])) & 0xFFFF_FFFF
+        ),
+        (int(raw_maps[3]) << (int(shifts[3]) + 2)) & 0xFFFF_FFFF,
+    )
+    masks = (first_range, first_range, total_range ^ first_range, total_range ^ first_range)
+    effective_masks = masks if req1_valid else (*masks[:2], 0, 0)
+    mshr_maps = (
+        aligned_maps[0] if mshr_reg[0] else aligned_maps[1] if mshr_reg[1] else 0x12,
+        aligned_maps[2] if mshr_reg[2] else aligned_maps[3] if mshr_reg[3] else 0x34,
+    )
+    output_map = 0
+    for index, mask in enumerate(effective_masks):
+        req = index // 2
+        selected = mshr_maps[req] if mshr_reg[index] else aligned_maps[index]
+        output_map |= int(selected) & int(mask)
+
+    for key, value in {
+        "s1_valid": 1,
+        "req1_valid": req1_valid,
+        "two_fetch_valid": req1_valid,
+        "cross0": cross0,
+        "cross1": cross1,
+        "align_shift_right": shift_right,
+        "align_first_range": first_range,
+        "align_total_range": total_range,
+        "toifu_maybe_rvc_map": output_map,
+        "toifu_first_range": first_range,
+        "toifu_total_range": total_range if req1_valid else first_range,
+    }.items():
+        recorder.set_key(key, value)
+
+    sram_valid_names = (
+        _MAIN + "s1_sramRespValid",
+        _MAIN + "s1_sramValid_0_1",
+        _MAIN + "s1_sramValid_1_0",
+        _MAIN + "s1_sramValid_1_1",
+    )
+    for index in range(4):
+        req, line = divmod(index, 2)
+        recorder.env.dut.set(
+            _MAIN + f"s1_maybeRvcAlignInfo_shiftNum_{index}", shifts[index]
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_wayLookupEntry_{req}_maybeRvcMap_{line}", raw_maps[index]
+        )
+        recorder.env.dut.set(
+            _MAIN
+            + f"s1_maybeRvcAlignInfo_sramAlignedMaybeRvcMap_{req}_{line}",
+            aligned_maps[index],
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_maybeRvcAlignInfo_alignedMaybeRvcMaskVec_{req}_{line}",
+            masks[index],
+        )
+        suffix = "" if index == 0 else f"_{index}"
+        recorder.env.dut.set(
+            _MAIN + f"s1_alignedMaybeRvcMapVec_REG{suffix}", aligned_maps[index]
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_wayLookupEntry_{req}_waymask_{line}",
+            int(bool(sram_valid[index])),
+        )
+        recorder.env.dut.set(sram_valid_names[index], sram_valid[index])
+        recorder.env.dut.set(
+            _MAIN + f"s1_mshrValidReg_{req}_{line}", mshr_reg[index]
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_hits_{req}_{line}",
+            int(bool(sram_valid[index]) or bool(mshr_reg[index])),
+        )
+    recorder.env.dut.set(_MAIN + "s1_mshrAlignedMaybeRvcMapReg_0", mshr_maps[0])
+    recorder.env.dut.set(_MAIN + "s1_mshrAlignedMaybeRvcMapReg_1", mshr_maps[1])
+
+
+def test_mainpipe_sram_maybe_rvc_alignment_bins_cover_all_shift_modes():
+    cases = (
+        (
+            "sram_req0_line0_shift_right",
+            {"cross0": 0, "sram_valid": (1, 0, 0, 0)},
+        ),
+        (
+            "sram_req0_line1_shift_left",
+            {"cross0": 1, "sram_valid": (1, 1, 0, 0)},
+        ),
+        (
+            "sram_req1_shift_right",
+            {
+                "req1_valid": 1,
+                "shift_right": 1,
+                "sram_valid": (0, 0, 1, 0),
+            },
+        ),
+        (
+            "sram_req1_line1_shift_left",
+            {
+                "req1_valid": 1,
+                "cross1": 1,
+                "sram_valid": (0, 0, 1, 1),
+            },
+        ),
+    )
+    for cycle, (bin_name, kwargs) in enumerate(cases, start=30):
+        recorder = _Recorder()
+        _set_mainpipe_alignment_snapshot(recorder, **kwargs)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+        assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", bin_name)
+        evidence = recorder.hit_evidence[("icache_mainpipe_maybe_rvc_align", bin_name)]
+        assert evidence["sram_alignment_matches"]
+        assert evidence["toifu_maybe_rvc_map_matches"]
+        assert evidence["range_output_matches"]
+
+
+def test_mainpipe_req1_left_and_zero_shift_requires_both_subcases():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=1,
+        shift_right=0,
+        shifts=(4, 27, 2, 27),
+        sram_valid=(0, 0, 1, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    assert not _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "sram_req1_shift_left_zero"
+    )
+
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=1,
+        shift_right=0,
+        shifts=(4, 27, 0, 27),
+        sram_valid=(0, 0, 1, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "sram_req1_shift_left_zero"
+    )
+
+
+def test_mainpipe_invalid_req1_alignment_inputs_are_covered_for_masking():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=0,
+        raw_maps=(0xF0, 0x3, 0x55, 0xAA),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 42)
+    assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", "invalid_req1_masked")
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_maybe_rvc_align", "invalid_req1_masked")
+    ]
+    assert evidence["effective_aligned_masks"][2:] == (0, 0)
+    assert evidence["range_output_matches"]
+
+
+def test_mainpipe_mshr_alignment_requires_complete_request_line_matrix():
+    recorder = _Recorder()
+    cases = (
+        {"mshr_reg": (1, 0, 0, 0)},
+        {"cross0": 1, "mshr_reg": (0, 1, 0, 0)},
+        {"req1_valid": 1, "shift_right": 0, "mshr_reg": (0, 0, 1, 0)},
+        {"req1_valid": 1, "shift_right": 1, "mshr_reg": (0, 0, 1, 0)},
+        {
+            "req1_valid": 1,
+            "cross1": 1,
+            "mshr_reg": (0, 0, 0, 1),
+        },
+    )
+    for cycle, kwargs in enumerate(cases, start=50):
+        _set_mainpipe_alignment_snapshot(
+            recorder,
+            sram_valid=(0, 0, 0, 0),
+            **kwargs,
+        )
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+
+    assert _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "mshr_request_line_alignment"
+    )
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_maybe_rvc_align", "mshr_request_line_alignment")
+    ]
+    assert len(evidence["mshr_alignment_cases_seen"]) == 5
+
+
+def test_mainpipe_mixed_sram_mshr_sources_sample_merge_bin():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        cross0=1,
+        sram_valid=(1, 0, 0, 0),
+        mshr_reg=(0, 1, 0, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 60)
+    assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", "mixed_source_merge")
+
+
+def test_mainpipe_mixed_source_accepts_held_sram_line_after_response_pulse():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        cross0=1,
+        sram_valid=(0, 0, 0, 0),
+        mshr_reg=(0, 1, 0, 0),
+    )
+    # The line-0 SRAM response pulse is over, but MainPipe's DataHoldBypass
+    # still owns the hit and its non-zero WayLookup mask.
+    recorder.env.dut.set(_MAIN + "s1_hits_0_0", 1)
+    recorder.env.dut.set(_MAIN + "s1_wayLookupEntry_0_waymask_0", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 61)
+    assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", "mixed_source_merge")
 
 
 def _set_single_hit(recorder):
@@ -1659,6 +1881,117 @@ def test_waylookup_second_update_requires_a_pre_stall_second_ftq_request():
     assert _hit(recorder, "icache_waylookup_update", "update_second_entry_stall")
 
 
+def test_waylookup_update_priority_tracks_pending_write_until_recovery():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 1,
+        "update_valid": 1,
+        "prefetch_s1_valid": 1,
+        "prefetch_s1_state": 3,
+        "prefetch_s1_soft": 0,
+        "write0_valid": 0,
+        "write0_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+        "write_flag": 0,
+        "write_value": 4,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_signal("update_updated", 1, index=0)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 30)
+    assert not _hit(
+        recorder,
+        "icache_waylookup_update",
+        "update_priority_over_pending_write",
+    )
+    assert recorder._icache_waylookup_cov_state["update_priority_write"] == {
+        "trigger_cycle": 30,
+        "write_ptr_before": (0, 4),
+    }
+
+    recorder.set_waylookup_key("update_valid", 0)
+    recorder.set_waylookup_key("write0_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 31)
+
+    assert _hit(
+        recorder,
+        "icache_waylookup_update",
+        "update_priority_over_pending_write",
+    )
+    evidence = recorder.hit_evidence[
+        ("icache_waylookup_update", "update_priority_over_pending_write")
+    ]
+    assert evidence["priority_cycle"] == 30
+    assert evidence["priority_write_ptr"] == (0, 4)
+
+
+def test_waylookup_update_priority_requires_pending_write_to_survive():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 1,
+        "update_valid": 1,
+        "prefetch_s1_valid": 1,
+        "prefetch_s1_state": 3,
+        "prefetch_s1_soft": 0,
+        "write0_valid": 0,
+        "write0_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_signal("update_updated", 1, index=0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 40)
+
+    recorder.set_waylookup_key("update_valid", 0)
+    recorder.set_waylookup_key("prefetch_s1_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 41)
+    recorder.set_waylookup_key("prefetch_s1_valid", 1)
+    recorder.set_waylookup_key("write0_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 42)
+
+    assert not _hit(
+        recorder,
+        "icache_waylookup_update",
+        "update_priority_over_pending_write",
+    )
+
+
+def test_waylookup_update_priority_accepts_idle_tlb_finish_boundary():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 1,
+        "update_valid": 1,
+        "prefetch_s1_valid": 1,
+        "prefetch_s1_state": 0,
+        "prefetch_s1_tlb_finish": 1,
+        "prefetch_s1_soft": 0,
+        "write0_valid": 0,
+        "write0_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 50)
+
+    recorder.set_waylookup_key("update_valid", 0)
+    recorder.set_waylookup_key("prefetch_s1_state", 3)
+    recorder.set_waylookup_key("write0_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 51)
+
+    assert _hit(
+        recorder,
+        "icache_waylookup_update",
+        "update_priority_over_pending_write",
+    )
+
+
 def test_waylookup_entry_fields_requires_a_normal_write():
     recorder = _Recorder()
     for key, value in {
@@ -1897,12 +2230,34 @@ def test_waylookup_global_flush_requires_a_nonempty_queue():
     assert _hit(recorder, "icache_waylookup_flush", "global_flush_clears_all")
 
 
-def test_waylookup_flush_write_and_update_bins_sample_the_concurrent_condition():
+def test_waylookup_flush_write_tracks_a_resident_accepted_write():
+    recorder = _Recorder()
+    for key, value in {
+        "flush": 0,
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write_flag": 0,
+        "write_value": 7,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 10)
+    assert not _hit(recorder, "icache_waylookup_flush", "flush_wins_write")
+
+    recorder.set_waylookup_key("write0_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 11)
+    recorder.set_waylookup_key("flush", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 12)
+
+    assert _hit(recorder, "icache_waylookup_flush", "flush_wins_write")
+    assert recorder.hit_evidence[
+        ("icache_waylookup_flush", "flush_wins_write")
+    ]["accepted_write_cycle"] == 10
+
+
+def test_waylookup_flush_update_samples_the_concurrent_condition():
     recorder = _Recorder()
     for key, value in {
         "flush": 1,
-        "write0_valid": 1,
-        "write0_ready": 1,
         "update_valid": 1,
         # Pointer reset is deliberately absent: it belongs to the checkpoint.
         "read_flag": 1,
@@ -1914,8 +2269,29 @@ def test_waylookup_flush_write_and_update_bins_sample_the_concurrent_condition()
 
     sample_icache_waylookup_coverage(recorder, recorder.env, 11)
 
-    assert _hit(recorder, "icache_waylookup_flush", "flush_wins_write")
     assert _hit(recorder, "icache_waylookup_flush", "flush_wins_update")
+
+
+def test_waylookup_flush_write_rejects_an_already_consumed_accept():
+    recorder = _Recorder()
+    for key, value in {
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "flush": 0,
+        "to_valid": 0,
+        "to_ready": 1,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 20)
+
+    recorder.set_waylookup_key("write0_valid", 0)
+    recorder.set_waylookup_key("to_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 21)
+    recorder.set_waylookup_key("to_valid", 0)
+    recorder.set_waylookup_key("flush", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 22)
+
+    assert not _hit(recorder, "icache_waylookup_flush", "flush_wins_write")
 
 
 def test_waylookup_flush_recovery_tracks_the_first_later_accepted_write():
@@ -2916,44 +3292,72 @@ def test_prefetch_s2_hit_samples_sram_or_exact_clean_refill_scenarios():
     )
 
 
-def test_prefetch_clean_refill_cancel_requires_exact_s2_match():
+def test_prefetch_clean_refill_cancels_an_exact_unissued_s2_miss():
     recorder = _Recorder()
     for key, value in {
         "s2_valid": 1,
         "s2_double": 0,
+        "s2_exception": 0,
+        "s2_mmio": 0,
+        "s2_sram0": 0,
+        "s2_has_send0": 0,
         "s2_ptag": 0x31,
         "s2_set0": 9,
-        "miss_valid": 1,
-        "miss_ready": 0,
+        # A matching MSHR makes MissUnit ready high in the real RTL.  The bin
+        # is about winning before the first fire, not about backpressure.
+        "miss_valid": 0,
+        "miss_ready": 1,
         "global_flush": 0,
-        "refill_valid": 0,
-    }.items():
-        recorder.set_prefetch_key(key, value)
-    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 28)
-
-    for key, value in {
         "refill_valid": 1,
         "refill_corrupt": 0,
         "refill_vset": 9,
         "refill_paddr": 0x32 << 6,
     }.items():
         recorder.set_prefetch_key(key, value)
-    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 29)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 28)
     assert not _hit(
         recorder,
         "icache_prefetchpipe_s2_miss",
-        "clean_mshr_cancels_backpressured_miss",
+        "clean_mshr_cancels_unissued_miss",
     )
 
-    for key, value in {
-        "refill_paddr": 0x31 << 6,
-    }.items():
-        recorder.set_prefetch_key(key, value)
+    recorder.set_prefetch_key("refill_paddr", 0x31 << 6)
     sample_icache_prefetchpipe_coverage(recorder, recorder.env, 30)
     assert _hit(
         recorder,
         "icache_prefetchpipe_s2_miss",
-        "clean_mshr_cancels_backpressured_miss",
+        "clean_mshr_cancels_unissued_miss",
+    )
+    assert recorder.hit_evidence[
+        ("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_unissued_miss")
+    ]["unissued_clean_refill_ports"] == (0,)
+
+
+def test_prefetch_clean_refill_does_not_cancel_an_already_sent_s2_miss():
+    recorder = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "s2_double": 0,
+        "s2_exception": 0,
+        "s2_mmio": 0,
+        "s2_sram0": 0,
+        "s2_has_send0": 1,
+        "s2_ptag": 0x41,
+        "s2_set0": 11,
+        "global_flush": 0,
+        "refill_valid": 1,
+        "refill_corrupt": 0,
+        "refill_vset": 11,
+        "refill_paddr": 0x41 << 6,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 31)
+
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "clean_mshr_cancels_unissued_miss",
     )
 
 
@@ -3063,6 +3467,30 @@ def test_single_request_entry_bin():
 
     assert _hit(recorder, "icache_mainpipe_s0_entry", "single_request_latched")
     assert not _hit(recorder, "icache_mainpipe_s0_entry", "dual_request_data_read")
+
+
+def test_dual_request_entry_uses_exported_real_two_fetch_valid():
+    for path in (
+        "Frontend_top.Frontend._inner_icache_io_toFtq_fromMainPipe_realTwoFetchValid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+    ):
+        for real_two_fetch in (0, 1):
+            recorder = _Recorder()
+            for key, value in {
+                "from_valid": 1,
+                "data_ready": 1,
+                "s1_ready": 1,
+                "s0_flush": 0,
+            }.items():
+                recorder.set_key(key, value)
+            recorder.env.dut.set(path, real_two_fetch)
+            sample_icache_mainpipe_coverage(recorder, recorder.env, 1)
+            assert _hit(
+                recorder, "icache_mainpipe_s0_entry", "dual_request_data_read"
+            ) == bool(real_two_fetch)
+            assert _hit(
+                recorder, "icache_mainpipe_s0_entry", "single_request_latched"
+            ) == (not real_two_fetch)
 
 
 def test_mainpipe_global_s0_flush_samples_condition_not_checkpoint():
@@ -3592,6 +4020,7 @@ def test_same_cycle_refill_flush_requires_global_flush_and_match():
 
 def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
     for key, value in {
+        "io_flush": 0,
         "s1_fire": 1,
         "req1_valid": 0,
         "cross0": 0,
@@ -3606,7 +4035,6 @@ def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     for key, value in {
         "s1_fire": 0,
-        "s2_valid": 1,
         "io_flush": 0,
     }.items():
         recorder.set_key(key, value)
@@ -3668,7 +4096,7 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
     }.items():
         recorder.set_key(key, value)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
-    recorder.set_key("s1_fire", 0)
+    recorder.set_key("s1_fire", 1)
     recorder.set_key("io_flush", 0)
     _set_mainpipe_meta_source(
         recorder,
@@ -3698,7 +4126,6 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     recorder.set_key("s1_fire", 0)
     recorder.set_key("io_flush", 0)
-    recorder.set_key("s2_valid", 1)
     _set_mainpipe_meta_source(
         recorder,
         line_index=0,
@@ -3714,14 +4141,13 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
 
     recorder = _Recorder()
     for key, value in {
-        "s1_fire": 1,
+        "s1_fire": 0,
         "req1_valid": 0,
     }.items():
         recorder.set_key(key, value)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
     recorder.set_key("s1_fire", 0)
     recorder.set_key("io_flush", 0)
-    recorder.set_key("s2_valid", 0)
     _set_mainpipe_meta_source(
         recorder,
         line_index=0,
@@ -3734,6 +4160,32 @@ def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
         "icache_mainpipe_s2_ecc",
         "meta_code_mismatch_single_way",
     )
+
+
+def test_mainpipe_s2_ecc_does_not_sample_stale_context_without_new_handshake():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert recorder._icache_mainpipe_cov_state["s2_valid_shadow"] is True
+    _set_mainpipe_meta_source(recorder, line_index=0, hitnum=1, mismatch=True)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 42)
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way")
+
+
+def test_mainpipe_s2_ecc_corrupt_observation_uses_exported_aliases():
+    for path in (
+        "Frontend_top.Frontend._inner_icache_io_toIfu_corrupt_0_0",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_corrupt_0_0",
+    ):
+        recorder = _Recorder()
+        _prime_mainpipe_s2(recorder)
+        _set_mainpipe_meta_source(recorder, line_index=0, hitnum=1, mismatch=True)
+        recorder.env.dut.set(path, 1)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+        evidence = recorder.hit_evidence[
+            ("icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way")
+        ]
+        assert evidence["s2_corrupt"] == (1, None, None, None)
 
 
 def test_mainpipe_s2_ecc_rejects_global_flush_context():
@@ -3867,23 +4319,47 @@ def test_mainpipe_data_ecc_mshr_bypass_and_port_miss_bins():
 
 def test_mainpipe_s2_global_and_bpu_flush_bins_are_independent():
     recorder = _Recorder()
+    recorder.set_key("io_flush", 1)
+    recorder.set_key("bpu_valid", 0)
+    recorder.set_key("s1_fire", 0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 48)
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")
+
     for key, value in {
-        "s2_valid": 1,
-        "io_flush": 1,
+        "s1_fire": 1,
+        "io_flush": 0,
         "bpu_valid": 0,
     }.items():
         recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 49)
+    assert recorder._icache_mainpipe_cov_state["s2_valid_shadow"] is True
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")
+
+    recorder.set_key("s1_fire", 0)
+    recorder.set_key("io_flush", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 50)
     assert _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")
     assert not _hit(recorder, "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2")
+    assert recorder._icache_mainpipe_cov_state["s2_valid_shadow"] is False
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_s2_ecc", "global_flush_clears_s2")
+    ]
+    assert evidence["s2_valid_shadow_before"] == 1
+    assert evidence["s2_valid_shadow_after"] == 0
+    assert evidence["s2_valid_shadow_source"] == "s1_fire_hold_until_global_flush"
+    assert evidence["s2_valid_observed"] is None
 
     recorder = _Recorder()
     for key, value in {
-        "s2_valid": 1,
+        "s1_fire": 1,
         "io_flush": 0,
-        "bpu_valid": 1,
+        "bpu_valid": 0,
     }.items():
         recorder.set_key(key, value)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 51)
+    recorder.set_key("s1_fire", 0)
+    recorder.set_key("bpu_valid", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 52)
     assert _hit(recorder, "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2")
     assert not _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")
+    assert recorder._icache_mainpipe_cov_state["s2_valid_shadow"] is True

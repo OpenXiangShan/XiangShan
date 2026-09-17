@@ -3,12 +3,18 @@ import logging
 import random
 from collections import deque
 from dataclasses import replace
+from itertools import islice
 from typing import Callable, Deque, Dict, Optional
 
 from ..agents.backend_agent import BackendAgent
 from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
 from ..support.pc_utils import pc_from_ftq_start, require_matching_foldpc
-from ..model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
+from ..model.backend_runtime import (
+    BackendCycleActions,
+    BackendObservationSnapshot,
+    CfVecCycleSnapshot,
+    CfVecSlotSnapshot,
+)
 from ..model.backend_state import (
     ActiveWrongPathEpisode,
     BackendEvent,
@@ -133,6 +139,8 @@ class BackendModel:
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
         self._last_observation = BackendObservationSnapshot()
+        self._cfvec_cycle_snapshot: Optional[CfVecCycleSnapshot] = None
+        self._cfvec_snapshot_pc_cache: Dict[int, int] = {}
         self._last_correct_cfi_context: Optional[dict] = None
         self._last_committed_correct_cfi_context: Optional[dict] = None
         self._planned_commit_apply: Optional[dict] = None
@@ -2883,6 +2891,8 @@ class BackendModel:
     def begin_cycle(self, cycle: int) -> None:
         self._hardware_reset_active = False
         self.current_cycle = int(cycle)
+        self._cfvec_cycle_snapshot = None
+        self._cfvec_snapshot_pc_cache.clear()
         self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
         self._cycle_start_golden_pc = self.current_golden_pc()
         self._planned_commit_apply = None
@@ -2900,6 +2910,54 @@ class BackendModel:
 
     def current_frontend_observation(self) -> BackendObservationSnapshot:
         return self._last_observation
+
+    def _read_cfvec_slot_signal(self, name: str, slot: int, default: int = 0) -> int:
+        signals = getattr(self.observe_if, str(name), None)
+        try:
+            signal = signals[int(slot)]
+        except (IndexError, TypeError):
+            return int(default)
+        return self._read(signal, int(default))
+
+    def capture_cfvec_snapshot(self) -> CfVecCycleSnapshot:
+        assert self.observe_if is not None
+        slots = []
+        exception_signals = (
+            (1, "cfvec_exception_vec_1"),
+            (2, "cfvec_exception_vec_2"),
+            (12, "cfvec_exception_vec_12"),
+            (19, "cfvec_exception_vec_19"),
+            (20, "cfvec_exception_vec_20"),
+        )
+        for slot in range(8):
+            valid = bool(self._read_cfvec_slot_signal("cfvec_valid", slot))
+            if not valid:
+                slots.append(CfVecSlotSnapshot(slot=slot))
+                continue
+            exception_bits = 0
+            for bit, name in exception_signals:
+                if self._read_cfvec_slot_signal(name, slot):
+                    exception_bits |= 1 << int(bit)
+            slots.append(
+                CfVecSlotSnapshot(
+                    slot=slot,
+                    valid=True,
+                    foldpc=self._read_cfvec_slot_signal("cfvec_foldpc", slot),
+                    instr=self._read_cfvec_slot_signal("cfvec_instr", slot),
+                    is_rvc=bool(self._read_cfvec_slot_signal("cfvec_is_rvc", slot)),
+                    pred_taken=bool(self._read_cfvec_slot_signal("cfvec_pred_taken", slot)),
+                    fixed_taken=bool(self._read_cfvec_slot_signal("cfvec_fixed_taken", slot)),
+                    ftq_flag=self._read_cfvec_slot_signal("cfvec_ftq_ptr_flag", slot),
+                    ftq_value=self._read_cfvec_slot_signal("cfvec_ftq_ptr_value", slot),
+                    ftq_offset=self._read_cfvec_slot_signal("cfvec_ftq_offset", slot),
+                    is_last=bool(self._read_cfvec_slot_signal("cfvec_is_last_in_ftq_entry", slot)),
+                    exception_bits=exception_bits,
+                )
+            )
+        snapshot = CfVecCycleSnapshot(cycle=int(self.current_cycle), slots=tuple(slots))
+        self._cfvec_cycle_snapshot = snapshot
+        self._cfvec_snapshot_pc_cache.clear()
+        return snapshot
 
     def _snapshot_bound_observation(self) -> BackendObservationSnapshot:
         return BackendObservationSnapshot(
@@ -2954,6 +3012,67 @@ class BackendModel:
         self.logger.info("backend can_accept=%d", self.can_accept)
         self._publish("backend.can_accept", {"value": self.can_accept}, level="DEBUG")
 
+    def live_ftq_identities(self) -> tuple[dict, ...]:
+        """Snapshot observed, uncommitted instructions with authoritative FTQ start PCs."""
+        identities = []
+        for entry in self._cfvec_queue:
+            if entry.path_state == PATH_STATE_WRONG or self._ftq_ptr_is_stale_relative_to_commit(entry.ftq_flag, entry.ftq_value):
+                continue
+            key = (int(entry.ftq_flag) << 6) | int(entry.ftq_value)
+            start_pc = self._ftq_start_pc_cache.get(key)
+            if start_pc is None:
+                continue
+            cfi = self._classify_cfi(
+                int(entry.instr), int(entry.pc), bool(entry.pred_taken), bool(entry.is_rvc)
+            )
+            identities.append({
+                "inst_pc": int(entry.pc), "start_pc": int(start_pc),
+                "ftq_flag": int(entry.ftq_flag), "ftq_value": int(entry.ftq_value),
+                "ftq_offset": int(entry.ftq_offset), "is_rvc": int(entry.is_rvc),
+                "instr": int(entry.instr), "is_cfi": cfi is not None,
+                "actual_target": None if cfi is None else int(cfi[2]),
+                "branch_type": None if cfi is None else int(cfi[0]),
+                "ras_action": None if cfi is None else int(cfi[1]),
+                "observed_cycle": int(entry.cycle),
+            })
+        return tuple(identities)
+
+    def queue_directed_resolve(self, identity: dict, *, target: int, branch_type: int = 3,
+                               ras_action: int = 0, taken: bool = True, mispredict: bool = True) -> ResolveEntry:
+        """Queue immediate synthetic predictor training on a currently live identity.
+
+        This is a directed testbench resolve, not proof of a naturally executed
+        branch. The normal backend agent drives the real resolve interface.
+        Delay is deliberately unsupported so a captured identity cannot expire
+        while waiting for a future stimulus window.
+        """
+        self._assert_explicit_injection_allowed("resolve")
+        if self.golden_trace is not None:
+            raise AssertionError("directed predictor training requires a non-golden test")
+        if identity not in self.live_ftq_identities():
+            raise AssertionError("directed resolve identity is stale or lacks authoritative startPc")
+        if int(target) < 0 or int(target) & 1 or not 0 <= int(branch_type) <= 3 or not 0 <= int(ras_action) <= 3:
+            raise ValueError("invalid directed resolve target or CFI attributes")
+        if not bool(identity.get("is_cfi")):
+            raise AssertionError("directed resolve identity is not a decoded CFI")
+        if identity.get("actual_target") is not None and int(target) != int(identity["actual_target"]):
+            raise AssertionError("directed resolve target must match decoded CFI target")
+        branch_type = int(identity.get("branch_type", branch_type))
+        ras_action = int(identity.get("ras_action", ras_action))
+        entry = ResolveEntry(
+            ready_cycle=int(self.current_cycle), queued_cycle=int(self.current_cycle),
+            inst_pc=int(identity["inst_pc"]), pc=int(identity["start_pc"]), target=int(target),
+            taken=bool(taken), mispredict=bool(mispredict),
+            ftq_flag=int(identity["ftq_flag"]), ftq_value=int(identity["ftq_value"]),
+            ftq_offset=int(identity["ftq_offset"]), is_rvc=bool(identity["is_rvc"]),
+            branch_type=int(branch_type), ras_action=int(ras_action), queue_index=None,
+        )
+        self._pending_resolves.append(entry)
+        self._recompute_cfi_budgets_from_pending_resolves()
+        self._publish("backend.directed_resolve_queued", {**identity, "target": int(target),
+                      "branch_type": int(branch_type), "synthetic_training": True})
+        return entry
+
     def set_wfi_req(self, value: int) -> None:
         self.wfi_req = 1 if int(value) else 0
         self.logger.info("backend wfi_req=%d", self.wfi_req)
@@ -2998,16 +3117,6 @@ class BackendModel:
                 return True
         return False
 
-    def _target_observed_after_cycle(self, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        for obs in reversed(self.monitor.observations):
-            if int(obs.cycle) <= int(start_cycle):
-                break
-            if int(obs.pc) == int(target_pc):
-                return True
-        return False
-
     def _target_path_progressed_since(self, target_pc: int, start_cycle: int) -> bool:
         if self.monitor is None:
             return False
@@ -3023,96 +3132,86 @@ class BackendModel:
                 return True
         return False
 
-    def _target_path_progressed_after_cycle(self, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        saw_target = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) <= int(start_cycle):
-                continue
-            if not saw_target:
-                if int(obs.pc) == int(target_pc):
-                    saw_target = True
-                continue
-            if int(obs.pc) != int(target_pc):
-                return True
-        return False
+    def _resolve_target_path_state(
+        self,
+        entry: ResolveEntry,
+    ) -> tuple[bool, bool, bool, bool, bool]:
+        if entry.queue_index is None:
+            return False, False, False, False, False
+        queue_index = int(entry.queue_index)
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
+            raise AssertionError(
+                "pending resolve queue index is out of range: "
+                f"queue_index={queue_index} queue_size={len(self._cfvec_queue)}"
+            )
+        source = self._cfvec_queue[queue_index]
+        identity_mismatches = []
+        for field, actual, expected in (
+            ("pc", source.pc, entry.inst_pc),
+            ("ftq_flag", source.ftq_flag, entry.ftq_flag),
+            ("ftq_value", source.ftq_value, entry.ftq_value),
+            ("ftq_offset", source.ftq_offset, entry.ftq_offset),
+        ):
+            if int(actual) != int(expected):
+                identity_mismatches.append(f"{field}={int(actual)} expected={int(expected)}")
+        if not bool(source.is_cfi):
+            identity_mismatches.append("is_cfi=0 expected=1")
+        if identity_mismatches:
+            raise AssertionError(
+                "pending resolve queue entry identity mismatch: "
+                f"queue_index={queue_index} " + " ".join(identity_mismatches)
+            )
 
-    def _target_observed_after_issue(self, inst_pc: int, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        armed = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if int(obs.pc) == int(target_pc):
-                return True
-        return False
+        golden_target_pc = None
+        golden_successor_pc = None
+        if (
+            int(entry.branch_type) == 3
+            and self.golden_trace is not None
+            and source.golden_index is not None
+        ):
+            golden_index = int(source.golden_index)
+            trace_entries = self.golden_trace.entries
+            if 0 <= golden_index and golden_index + 2 < len(trace_entries):
+                golden_entry = trace_entries[golden_index]
+                if getattr(golden_entry, "target_pc", None) is not None:
+                    golden_target_pc = int(trace_entries[golden_index + 1].pc)
+                    golden_successor_pc = int(trace_entries[golden_index + 2].pc)
 
-    def _target_path_progressed_after_issue(self, inst_pc: int, target_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None:
-            return False
-        armed = False
-        saw_target = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if not saw_target:
-                if int(obs.pc) == int(target_pc):
-                    saw_target = True
-                continue
-            if int(obs.pc) != int(target_pc):
-                return True
-        return False
+        target_pc = int(entry.target)
+        queued_cycle = int(entry.queued_cycle)
+        target_seen_after_issue = False
+        target_path_progressed_after_issue = False
+        target_seen_after_cycle = False
+        target_path_progressed_after_cycle = False
+        golden_target_seen_after_issue = False
+        golden_successor_progressed_after_issue = False
 
-    def _current_golden_cfi_successor_observed_after_issue(self, inst_pc: int, start_cycle: int) -> bool:
-        if self.monitor is None or self.golden_trace is None:
-            return False
-        trace = self.golden_trace
-        start = int(trace.cursor)
-        if start + 1 >= len(trace.entries):
-            return False
-        cur = trace.entries[start]
-        nxt = trace.entries[start + 1]
-        if int(getattr(cur, "target_pc", 0) or 0) == 0:
-            return False
+        for queue_entry in islice(self._cfvec_queue, queue_index + 1, None):
+            pc = int(queue_entry.pc)
+            if not target_seen_after_issue:
+                target_seen_after_issue = pc == target_pc
+            elif pc != target_pc:
+                target_path_progressed_after_issue = True
 
-        armed = False
-        saw_cur = False
-        for obs in self.monitor.observations:
-            if int(obs.cycle) < int(start_cycle):
-                continue
-            if not armed:
-                if int(obs.cycle) > int(start_cycle):
-                    armed = True
-                elif int(obs.pc) == int(inst_pc):
-                    armed = True
-                    continue
-                else:
-                    continue
-            if not saw_cur:
-                if int(obs.pc) == int(cur.pc):
-                    saw_cur = True
-                continue
-            if int(obs.pc) == int(nxt.pc):
-                return True
-        return False
+            if int(queue_entry.cycle) > queued_cycle:
+                if not target_seen_after_cycle:
+                    target_seen_after_cycle = pc == target_pc
+                elif pc != target_pc:
+                    target_path_progressed_after_cycle = True
+
+            if golden_target_pc is not None and golden_successor_pc is not None:
+                if not golden_target_seen_after_issue:
+                    golden_target_seen_after_issue = pc == golden_target_pc
+                elif pc == golden_successor_pc:
+                    golden_successor_progressed_after_issue = True
+
+        return (
+            target_seen_after_issue,
+            target_path_progressed_after_issue,
+            target_seen_after_cycle,
+            target_path_progressed_after_cycle,
+            golden_successor_progressed_after_issue,
+        )
 
     def _queue_redirect_event(
         self,
@@ -3427,15 +3526,16 @@ class BackendModel:
             self._ftq_start_pc_cache[ftq_idx] = start_pc
             self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
 
-    def observed_cfvec_pc(self, slot: int) -> int:
-        """Return the full PC derived from native cfVec and FTQ observations."""
-        assert self.observe_if is not None
-        slot = int(slot)
-        ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0)
-        ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0)
-        ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[slot], 0)
-        is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0))
-        observed_foldpc = self._read(self.observe_if.cfvec_foldpc[slot], 0)
+    def _resolve_cfvec_pc(
+        self,
+        *,
+        slot: int,
+        ftq_flag: int,
+        ftq_value: int,
+        ftq_offset: int,
+        is_rvc: bool,
+        observed_foldpc: int,
+    ) -> int:
         ftq_key = (int(ftq_flag) << 6) | (int(ftq_value) & 0x3F)
         start_pc = self._ftq_start_pc_cache.get(
             ftq_key,
@@ -3456,12 +3556,52 @@ class BackendModel:
                 f"offset={int(ftq_offset)} is_rvc={int(is_rvc)}"
             ) from exc
 
-    def _has_later_cfvec_slot_matching_pc(self, current_slot: int, target_pc: int) -> bool:
+    def observed_cfvec_pc(self, slot: int) -> int:
+        """Return the full PC derived from native cfVec and FTQ observations."""
         assert self.observe_if is not None
+        slot = int(slot)
+        return self._resolve_cfvec_pc(
+            slot=slot,
+            ftq_flag=self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0),
+            ftq_value=self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0),
+            ftq_offset=self._read(self.observe_if.cfvec_ftq_offset[slot], 0),
+            is_rvc=bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0)),
+            observed_foldpc=self._read(self.observe_if.cfvec_foldpc[slot], 0),
+        )
+
+    def observed_cfvec_snapshot_pc(self, snapshot: CfVecCycleSnapshot, slot: int) -> int:
+        if snapshot is not self._cfvec_cycle_snapshot:
+            raise AssertionError("cfVec snapshot is not the active backend cycle snapshot")
+        if int(snapshot.cycle) != int(self.current_cycle):
+            raise AssertionError(
+                f"stale cfVec snapshot: snapshot_cycle={int(snapshot.cycle)} "
+                f"current_cycle={int(self.current_cycle)}"
+            )
+        slot = int(slot)
+        if slot in self._cfvec_snapshot_pc_cache:
+            return int(self._cfvec_snapshot_pc_cache[slot])
+        entry = snapshot.slots[slot]
+        pc = self._resolve_cfvec_pc(
+            slot=slot,
+            ftq_flag=int(entry.ftq_flag),
+            ftq_value=int(entry.ftq_value),
+            ftq_offset=int(entry.ftq_offset),
+            is_rvc=bool(entry.is_rvc),
+            observed_foldpc=int(entry.foldpc),
+        )
+        self._cfvec_snapshot_pc_cache[slot] = int(pc)
+        return int(pc)
+
+    def _has_later_cfvec_slot_matching_pc(
+        self,
+        snapshot: CfVecCycleSnapshot,
+        current_slot: int,
+        target_pc: int,
+    ) -> bool:
         for slot in range(int(current_slot) + 1, 8):
-            if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
+            if not snapshot.slots[slot].valid:
                 continue
-            if self.observed_cfvec_pc(slot) == int(target_pc):
+            if self.observed_cfvec_snapshot_pc(snapshot, slot) == int(target_pc):
                 return True
         return False
 
@@ -3619,12 +3759,21 @@ class BackendModel:
             f"target_pc=0x{int(target_pc):x}"
         )
 
-    def _sample_cfvec(self) -> None:
+    def _sample_cfvec(self, snapshot: Optional[CfVecCycleSnapshot] = None) -> None:
         assert self.observe_if is not None
         if self._skip_cfvec_until_cycle is not None:
             if int(self.current_cycle) <= int(self._skip_cfvec_until_cycle):
                 return
             self._skip_cfvec_until_cycle = None
+        if snapshot is None:
+            snapshot = self._cfvec_cycle_snapshot
+        if snapshot is None or int(snapshot.cycle) != int(self.current_cycle):
+            snapshot = self.capture_cfvec_snapshot()
+        if (
+            snapshot is not self._cfvec_cycle_snapshot
+            or int(snapshot.cycle) != int(self.current_cycle)
+        ):
+            raise AssertionError("BackendModel requires the active cfVec snapshot for the current cycle")
         recovery_first_cfvec_seen = False
         recovery_target_seen_this_cycle = False
 
@@ -3668,20 +3817,18 @@ class BackendModel:
             )
 
         for i in range(8):
-            if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
+            cfvec = snapshot.slots[i]
+            if not cfvec.valid:
                 continue
-            pc = self.observed_cfvec_pc(i)
-            instr = self._read(self.observe_if.cfvec_instr[i], 0)
-            is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[i], 0))
-            pred_taken = bool(self._read(self.observe_if.cfvec_fixed_taken[i], 0))
-            ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[i], 0)
-            ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[i], 0)
-            ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
-            is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
-            exception_bits = 0
-            for bit in (1, 2, 12, 19, 20):
-                if self._read(self.observe_if.cfvec_exception_vec[i][bit], 0) != 0:
-                    exception_bits |= 1 << int(bit)
+            pc = self.observed_cfvec_snapshot_pc(snapshot, i)
+            instr = int(cfvec.instr)
+            is_rvc = bool(cfvec.is_rvc)
+            pred_taken = bool(cfvec.fixed_taken)
+            ftq_flag = int(cfvec.ftq_flag)
+            ftq_value = int(cfvec.ftq_value)
+            ftq_offset = int(cfvec.ftq_offset)
+            is_last = bool(cfvec.is_last)
+            exception_bits = int(cfvec.exception_bits)
 
             recovery_target_pc = self._current_recovery_target_pc()
             if (
@@ -3851,7 +3998,11 @@ class BackendModel:
                 queue_index=int(queue_index),
                 entry=self._cfvec_queue[int(queue_index)],
                 target_pc=int(next_entry.pc),
-                target_visible_immediately=self._has_later_cfvec_slot_matching_pc(i, int(next_entry.pc)),
+                target_visible_immediately=self._has_later_cfvec_slot_matching_pc(
+                    snapshot,
+                    i,
+                    int(next_entry.pc),
+                ),
             ):
                 continue
             if self._current_ftq_entry is not None:
@@ -3889,8 +4040,11 @@ class BackendModel:
             observed_indirect_mispredict = None
             if entry.queue_index is not None:
                 if not (0 <= int(entry.queue_index) < len(self._cfvec_queue)):
-                    to_remove.append(entry)
-                    continue
+                    raise AssertionError(
+                        "pending resolve queue index is out of range: "
+                        f"queue_index={int(entry.queue_index)} "
+                        f"queue_size={len(self._cfvec_queue)}"
+                    )
                 queue_entry = self._cfvec_queue[int(entry.queue_index)]
                 if queue_entry.path_state == PATH_STATE_WRONG:
                     self._cfvec_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_SKIPPED)
@@ -3918,42 +4072,25 @@ class BackendModel:
             target_path_progressed_after_queue = False
             target_seen_after_issue = False
             target_path_progressed_after_issue = False
-            if frontier_pc is not None:
-                target_seen_after_queue = self._target_observed_after_cycle(
-                    int(entry.target),
-                    int(entry.queued_cycle),
-                )
-                if target_seen_after_queue:
-                    target_path_progressed_after_queue = self._target_path_progressed_after_cycle(
-                        int(entry.target),
-                        int(entry.queued_cycle),
-                    )
-                if int(entry.branch_type) != 3:
-                    target_seen_after_issue = self._target_observed_after_issue(
-                        int(entry.inst_pc),
-                        int(entry.target),
-                        int(entry.queued_cycle),
-                    )
-                    if target_seen_after_issue:
-                        target_path_progressed_after_issue = self._target_path_progressed_after_issue(
-                            int(entry.inst_pc),
-                            int(entry.target),
-                            int(entry.queued_cycle),
-                        )
+            golden_successor_progressed_after_issue = False
+            if frontier_pc is not None and entry.queue_index is not None:
+                (
+                    target_seen_after_issue,
+                    target_path_progressed_after_issue,
+                    target_seen_after_queue,
+                    target_path_progressed_after_queue,
+                    golden_successor_progressed_after_issue,
+                ) = self._resolve_target_path_state(entry)
             if effective_mispredict and int(entry.branch_type) != 3 and (
                 target_seen_after_issue or target_path_progressed_after_issue
             ):
                 effective_mispredict = False
-            if effective_mispredict and int(entry.branch_type) == 3 and target_path_progressed_after_queue:
-                effective_mispredict = False
-            elif (
+            if (
                 effective_mispredict
                 and int(entry.branch_type) == 3
-                and self.current_golden_pc() is not None
-                and int(entry.target) != int(self.current_golden_pc())
-                and self._current_golden_cfi_successor_observed_after_issue(
-                    int(entry.inst_pc),
-                    int(entry.queued_cycle),
+                and (
+                    target_path_progressed_after_queue
+                    or golden_successor_progressed_after_issue
                 )
             ):
                 effective_mispredict = False
@@ -4394,14 +4531,15 @@ class BackendModel:
                     drive_from_pc = int(fallback_context.get("pc", drive_from_pc))
                     drive_ftq_offset = int(fallback_context.get("ftq_offset", drive_ftq_offset))
                     drive_is_rvc = int(fallback_context.get("is_rvc", drive_is_rvc))
-            self._assert_redirect_drive_ftq_not_stale(
-                payload_ftq_flag=int(ftq_flag),
-                payload_ftq_value=int(ftq_value),
-                drive_ftq_flag=int(drive_ftq_flag),
-                drive_ftq_value=int(drive_ftq_value),
-                target_pc=int(target_pc),
-                reason=str(reason),
-            )
+            if not bool(payload.get("trap_redirect", False)):
+                self._assert_redirect_drive_ftq_not_stale(
+                    payload_ftq_flag=int(ftq_flag),
+                    payload_ftq_value=int(ftq_value),
+                    drive_ftq_flag=int(drive_ftq_flag),
+                    drive_ftq_value=int(drive_ftq_value),
+                    target_pc=int(target_pc),
+                    reason=str(reason),
+                )
 
         drive_payload = {
             "pc": drive_from_pc,
@@ -4468,7 +4606,9 @@ class BackendModel:
                 )
             return self._plan_redirect_payload(top.payload)
         elif top.kind == "exception":
-            redirect_payload = self._plan_redirect_payload(top.payload)
+            redirect_payload = self._plan_redirect_payload(
+                {**top.payload, "trap_redirect": True}
+            )
             self._emit_event("exception", {"cause": top.payload.get("cause", 0)})
             return redirect_payload
         return None
@@ -4642,8 +4782,22 @@ class BackendModel:
             payload_extra=payload_extra,
         )
 
-    def inject_exception(self, cause: int, tval: int, pc: int, delay_cycles: int = _MIN_BACKEND_DELAY) -> None:
+    def inject_exception(
+        self,
+        cause: int,
+        tval: int,
+        pc: int,
+        delay_cycles: int = _MIN_BACKEND_DELAY,
+        *,
+        satp_flush: int = 0,
+    ) -> None:
         self._assert_explicit_injection_allowed("exception")
+        self._pending_resolves.clear()
+        self._clear_cfvec_queue_state()
+        self.ftq_entries.clear()
+        self._current_ftq_entry = None
+        self._current_ftq_seen_packets.clear()
+        self._last_correct_cfi_context = None
         ready_cycle = self.current_cycle + self._clamp_backend_delay(delay_cycles)
         from_pc = int(pc)
         if self.monitor is not None and self.monitor.observations:
@@ -4657,6 +4811,7 @@ class BackendModel:
                     "reason": "exception",
                     "cause": int(cause),
                     "tval": int(tval),
+                    "satp_flush": int(bool(satp_flush)),
                 },
             )
         )
@@ -4698,7 +4853,7 @@ class BackendModel:
         self._clear_stale_auxiliary_states()
         self._watchdog(observation)
         if self.observe_if is not None:
-            self._sample_cfvec()
+            self._sample_cfvec(self._cfvec_cycle_snapshot)
         ftq_idx_ahead = self._ready_ftq_idx_ahead_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
@@ -4733,13 +4888,13 @@ class BackendModel:
         if self._read(getattr(self.dut, "reset", None)):
             self.on_hardware_reset(cycle)
             agent = self._bound_backend_agent()
-            agent.start_cycle(self.can_accept, 0, 1)
-            agent.drive_commit(None)
+            agent.drive_reset_idle()
             return
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()
         agent.start_cycle(self.can_accept, self.wfi_req, self.backend_empty_for_dut())
         self.consume_backend_observation(self._snapshot_bound_observation())
+        self.capture_cfvec_snapshot()
         actions = self.plan_cycle_actions()
         agent.drive_ftq_idx_ahead(actions.ftq_idx_ahead)
         agent.drive_resolves(actions.resolve_entries)
