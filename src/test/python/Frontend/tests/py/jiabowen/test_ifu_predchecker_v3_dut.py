@@ -364,6 +364,29 @@ def _replace_u32_after_redirect_flush(
     )
 
 
+def _replace_u16_after_redirect_flush(
+    env,
+    address: int,
+    value: int,
+    *,
+    redirect_target: int,
+    reason: str,
+) -> None:
+    """RVC variant of the redirect/fence.i replacement helper."""
+    env.backend_model.set_can_accept(0)
+    env.step(2)
+    assert not env.monitor.get_errors()
+    env.clock_reset.io_fencei.value = 1
+    env.backend_model.inject_redirect(int(redirect_target), str(reason), delay_cycles=0)
+    env.step(3)
+    assert not env.monitor.get_errors()
+    env.memory.write_u16(int(address), int(value))
+    env.step(2)
+    env.clock_reset.io_fencei.value = 0
+    env.step(2)
+    env.backend_model.set_can_accept(1)
+
+
 def test_cross_block_not_taken_training_layout_is_contiguous() -> None:
     payload = _cross_block_not_taken_training_loop()
     assert payload[
@@ -519,33 +542,12 @@ def test_fe_ifu_predchecker_false_taken(env) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_fe_ifu_predchecker_first_block_false_taken_clips_second_fetch(env) -> None:
     """A stale first-block prediction must clip, rather than deliver, block one."""
-
-    _load_and_reset(env, branch_halfword=13, rvi_jal=True)
-    first_start, _second_start = _warm_until_first_taken_two_fetch_window(env)
-    branch_pc = int(first_start) + 26
-
-    # Preserve the trained BPU entry while changing the predicted JAL into a
-    # same-width ordinary instruction. The existing false-taken fixture
-    # establishes this as a legal, monitor-clean stale-prediction sequence.
-    _replace_u32s_after_redirect_flush(
-        env,
-        tuple(
-            (_BASE + block * _BLOCK_BYTES + 26, _ADDI_X0_X0_0)
-            for block in range(_BLOCK_COUNT)
-        ),
-        redirect_target=int(first_start),
-        reason="ifu_predchecker_v3_first_block_clip_second_fetch",
+    # Retain the existing regression node ID while using the fully checked
+    # stimulus: preserve earlier trained blocks and change only block six.
+    from tests.py.jiabowen.test_ifu_first_owner_clip_v3_dut import (
+        _exercise_first_block_false_taken_clip,
     )
-
-    _run_until_bin(
-        env,
-        "ifu_data_slice",
-        "second_block_suppressed",
-        max_cycles=4096,
-        debug_pc=branch_pc,
-    )
-    _assert_owner_bins(env, ("BIN-874",))
-    assert not env.monitor.get_errors()
+    _exercise_first_block_false_taken_clip(env)
 
 
 @pytest.mark.funcov_bins(
@@ -618,6 +620,264 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
             *checked_invalid_owner_bins,
         ),
     )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-921", "BIN-940")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_fe_ifu_predchecker_invalid_taken_half_state_recovery(env) -> None:
+    """Verify checker redirect half-RVI recovery on the current V3 DUT."""
+
+    from env.model.golden_trace import GoldenTrace, TraceEntry
+    from env.support.rvc_decoder import expand_rvc
+
+    _load_and_reset(env)
+    block_start = _BASE
+    branch_pc = block_start + 30
+    _warm_until_prediction(env, branch_pc)
+    recorder = env.functional_coverage
+    proof, paths = {}, {}
+    entries = [TraceEntry(0, branch_pc, _BRANCH_SAME_TARGET, 4,
+                          "branch", True, block_start + 64)]
+    # Fixed ISA oracle for the replacement branch and unchanged training
+    # loop. Predictions / observed DUT PCs never determine this trace.
+    for block in [*range(1, _BLOCK_COUNT), *range(_BLOCK_COUNT)]:
+        start = _BASE + block * 64
+        for halfword in range(15):
+            entries.append(TraceEntry(len(entries), start + 2 * halfword, _CNOP, 2))
+        pc = start + 30
+        target = _BASE + ((block + 1) % _BLOCK_COUNT) * 64
+        entries.append(TraceEntry(len(entries), pc,
+            _BRANCH_SAME_TARGET if block == 0 else _c_j(target - pc),
+            4 if block == 0 else 2, "branch" if block == 0 else "jump", True, target))
+    trace = GoldenTrace(entries)
+    checked_arch, backend_redirects = {}, []
+
+    def read(stem):
+        from env.funcov.py.ifu.compact_funcov import _read_ifu_internal_with_path
+
+        value, path = _read_ifu_internal_with_path(recorder, env.dut, stem)
+        assert value is not None, {"missing_recovery_probe": stem}
+        paths[stem] = path
+        return int(value)
+
+    def canary(stage, cycle, stems):
+        from env.funcov.py.ifu.compact_funcov import _IFU_INTERNAL_PREFIXES
+
+        samples = {}
+        for stem in stems:
+            expected = read(stem)
+            alternatives = {}
+            for prefix in _IFU_INTERNAL_PREFIXES:
+                value = recorder._try_read_dut_signal(env.dut, prefix + stem)
+                if value is not None:
+                    assert int(value) == expected, (stem, prefix, value, expected)
+                    alternatives[prefix + stem] = int(value)
+            samples[stem] = dict(selected_path=paths[stem], value=expected,
+                                 readable_paths=alternatives)
+        proof[stage + "_canary"] = dict(cycle=cycle, samples=samples)
+
+    def observe(cycle, _env):
+        if "delivery" in proof:
+            for entry in env.backend_model._cfvec_queue:
+                if entry.golden_index is None or entry.path_state != "correct":
+                    continue
+                golden = trace.entries[entry.golden_index]
+                expected = expand_rvc(golden.instr) if golden.size == 2 else golden.instr
+                assert (entry.pc, entry.instr) == (golden.pc, expected)
+                checked_arch[entry.golden_index] = (entry.pc, entry.instr)
+        source = proof.get("source")
+        if source is not None and cycle == source["cycle"] + 1:
+            wb = {f: read("io_toFtq_wbRedirect_" + f) for f in (
+                "valid", "bits_target", "bits_pc", "bits_ftqIdx_flag",
+                "bits_ftqIdx_value", "bits_ftqOffset", "bits_canTrain",
+            )}
+            assert wb == dict(valid=1, bits_target=branch_pc + 2, bits_pc=block_start,
+                              bits_ftqIdx_flag=source["ftq"][0], bits_ftqIdx_value=source["ftq"][1],
+                              bits_ftqOffset=16, bits_canTrain=1)
+            assert read("wbFirstEndHalfRvi_valid") == 1
+            assert read("wbFirstEndHalfRvi_bits_pc_addr") << 1 == branch_pc
+            assert read("wbFirstEndHalfRvi_bits_data") == _BRANCH_SAME_TARGET & 0xFFFF
+            proof["writeback"] = dict(cycle=cycle, **wb)
+        if ("writeback" in proof and "s1_canary" not in proof
+                and cycle > proof["writeback"]["cycle"]
+                and read("s1_valid") == 1 and read("s1_fire") == 1
+                and read("s1_flush") == 0
+                and read("s1_prevEndHalfRviInfo_valid") == 1
+                and read("s1_prevEndHalfRviInfo_bits_pc_addr") << 1 == branch_pc
+                and read("s1_fetchBlock_0_startVAddr_addr") << 1 == branch_pc + 2):
+            lane = read("s1_prevIBufEnqPtrDup_dup_0_value") & 3
+            assert read(f"s1_alignedInstrVec_{lane}_data") == _BRANCH_SAME_TARGET
+            assert read(f"s1_alignedInstrPcVec_{lane}_addr") << 1 == branch_pc
+            assert read(f"s1_alignedPdInfoVec_{lane}_brAttribute_branchType") == 1
+            canary("s1", cycle, ["_s1_alignedInstrValid_T",
+                "s1_prevEndHalfRviInfo_bits_data", "s1_prevEndHalfRviInfo_bits_pc_addr",
+                f"s1_alignedInstrPcVec_{lane}_addr", f"s1_baseInstrData_{lane}",
+                f"s1_alignedInstrVec_{lane}_data", f"s1_alignedInstrVec_{lane}_isRvc",
+                f"s1_alignedPdInfoVec_{lane}_brAttribute_branchType"])
+        if read("s2_valid_valid") != 1 or read("s2_flush") != 0:
+            return
+        for slot in range(35):
+            prefix = f"s2_alignedInstrVec_{slot}_"
+            if read(prefix + "valid") != 1 and read(prefix + "invalidTaken") != 1:
+                continue
+            if read(f"s2_alignedInstrPcVec_{slot}_addr") << 1 != branch_pc:
+                continue
+            if read(prefix + "data") != _BRANCH_SAME_TARGET:
+                continue
+            if read(prefix + "invalidTaken") == 1 and "source" not in proof:
+                assert read(prefix + "isPredTaken") == 1
+                assert read(prefix + "valid") == 0
+                assert read(prefix + "blockSel") == read(prefix + "isCrossBlockInstr") == 0
+                proof["source"] = dict(cycle=cycle, slot=slot,
+                    ftq=[read(f"s2_fetchBlock_0_ftqIdx_{f}") for f in ("flag", "value")])
+            elif "writeback" in proof and "delivery" not in proof and read("s2_fire") == 1:
+                from env.support.pc_utils import fold_pc
+
+                assert read(prefix + "valid") == 1 and read(prefix + "invalidTaken") == 0
+                assert read(prefix + "blockSel") == read(prefix + "isCrossBlockInstr") == 0
+                assert read("io_toIBuffer_valid") == read("io_toIBuffer_ready") == 1
+                assert (read("io_toIBuffer_bits_enqEnable") >> slot) & 1
+                assert read(f"io_toIBuffer_bits_instrs_{slot}") == _BRANCH_SAME_TARGET
+                assert read(f"io_toIBuffer_bits_foldpc_{slot}") == fold_pc(branch_pc)
+                assert read(f"io_toIBuffer_bits_isRvc_{slot}") == 0
+                # The saved-half instruction ends at offset 0 of the new
+                # recovery block, unlike the original writeback offset 16.
+                assert read(prefix + "endOffset") == 0
+                assert read(f"io_toIBuffer_bits_instrEndOffset_{slot}_offset") == 0
+                for field, expected in (("isRVC", 0),
+                                        ("brAttribute_branchType", 1),
+                                        ("brAttribute_rasAction", 0)):
+                    assert read(f"s2_alignedPdInfoVec_{slot}_{field}") == expected
+                assert read(f"s2_alignedJumpOffsetVec_{slot}_addr") == 17  # BEQ +34B
+                ftq = [read(f"s2_fetchBlock_0_ftqIdx_{f}") for f in ("flag", "value")]
+                assert [read(f"io_toIBuffer_bits_ftqPtr_{slot}_{f}") for f in ("flag", "value")] == ftq
+                canary("s2", cycle, [prefix + "endOffset",
+                    f"s2_alignedPdInfoVec_{slot}_isRVC",
+                    f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType",
+                    f"s2_alignedPdInfoVec_{slot}_brAttribute_rasAction",
+                    f"s2_alignedJumpOffsetVec_{slot}_addr",
+                    f"io_toIBuffer_bits_instrs_{slot}", f"io_toIBuffer_bits_foldpc_{slot}",
+                    f"io_toIBuffer_bits_ftqPtr_{slot}_value"])
+                proof["delivery"] = dict(cycle=cycle, slot=slot, ftq=ftq,
+                    monitor_start=len(env.monitor.observations))
+                # Attach before this restored S2 window reaches IBuffer.
+                env.backend_model.set_golden_trace(trace)
+
+    def observe_backend_input(cycle, _env):
+        if "delivery" not in proof:
+            return
+        prefix = "io_backend_toFtq_redirect_"
+
+        def port(stem):
+            signal = getattr(env.dut, prefix + stem, None)
+            assert signal is not None, {"missing_backend_probe": prefix + stem}
+            paths[prefix + stem] = prefix + stem
+            return int(signal.value)
+
+        if port("valid") != 1:
+            return
+        record = dict(cycle=cycle, pc=port("bits_pc"), target=port("bits_target"),
+                      ftq=[port("bits_ftqIdx_flag"), port("bits_ftqIdx_value")],
+                      offset=port("bits_ftqOffset"), level=port("bits_level"))
+        assert record["pc"] == branch_pc and record["target"] == block_start + 64
+        assert record["ftq"] == proof["delivery"]["ftq"]
+        assert record["offset"] == 0 and record["level"] == 0
+        backend_redirects.append(record)
+
+    env.register_cycle_observer(observe)
+    env.register_pre_drive_cycle_observer(observe_backend_input)
+    _replace_u32_while_fencei_held(env, branch_pc, _BRANCH_SAME_TARGET)
+    env.backend_model.inject_redirect(
+        block_start,
+        "ifu_predchecker_v3_invalid_taken_half_recovery",
+        delay_cycles=1,
+    )
+
+    _run_until_bin(
+        env,
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_050",
+        max_cycles=512,
+        debug_pc=branch_pc,
+    )
+
+    recorder = env.functional_coverage
+    assert recorder is not None
+    observed = []
+    for _ in range(32):
+        env.step(1)
+        observed.append(
+            {
+                "cycle": int(env.current_cycle),
+                "s0_fire": _read_optional(recorder, _IFU_PREFIX + "s0_fire"),
+                "s1_valid": _read_optional(recorder, _IFU_PREFIX + "s1_valid"),
+                "s1_half_valid": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_prevEndHalfRviInfo_valid"
+                ),
+                "s1_half_pc": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_prevEndHalfRviInfo_bits_pc_addr"
+                ),
+                "s1_half_data": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_prevEndHalfRviInfo_bits_data"
+                ),
+                "s1_ptr": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_prevIBufEnqPtrDup_dup_0_value"
+                ),
+                "s1_lane0_data": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_alignedInstrVec_0_data"
+                ),
+                "s1_lane0_pc": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_alignedInstrPcVec_0_addr"
+                ),
+                "s1_lane0_is_rvc": _read_optional(
+                    recorder, _IFU_PREFIX + "s1_alignedInstrVec_0_isRvc"
+                ),
+                "s1_lanes": [
+                    {
+                        "pc": _read_optional(
+                            recorder, _IFU_PREFIX + f"s1_alignedInstrPcVec_{lane}_addr"
+                        ),
+                        "data": _read_optional(
+                            recorder, _IFU_PREFIX + f"s1_alignedInstrVec_{lane}_data"
+                        ),
+                        "is_rvc": _read_optional(
+                            recorder, _IFU_PREFIX + f"s1_alignedInstrVec_{lane}_isRvc"
+                        ),
+                    }
+                    for lane in range(4)
+                ],
+            }
+        )
+
+    recovery = [item for item in observed if item["s1_half_valid"] == 1]
+    assert recovery, observed
+    assert any(item["s0_fire"] == 1 for item in observed)
+    assert env.functional_coverage.key_hit(
+        "ifu_v3_pipeline_owner_model", "owner_leaf_023"
+    )
+    for _ in range(512):
+        if trace.cursor >= 18 and set(range(18)) <= checked_arch.keys():
+            break
+        env.step(1)
+    recorder.risk_observations.append(dict(event="bin940_independent_delivery_checkpoint",
+        proof=proof, signal_paths=paths, trace_cursor=trace.cursor,
+        checked_arch=checked_arch, backend_redirects=backend_redirects))
+    assert {"source", "writeback", "s1_canary", "s2_canary", "delivery"} <= proof.keys(), proof
+    assert proof["s1_canary"]["cycle"] + 1 == proof["s2_canary"]["cycle"]
+    assert trace.cursor >= 18 and set(range(18)) <= checked_arch.keys()
+    assert len(backend_redirects) == 1, backend_redirects
+    delivered = env.monitor.observations[proof["delivery"]["monitor_start"]:]
+    branch_index = next((i for i, item in enumerate(delivered)
+                         if item.pc == branch_pc and item.instr == _BRANCH_SAME_TARGET), None)
+    assert branch_index is not None and branch_index + 1 < len(delivered)
+    # Speculative fallthrough at PC+4 is legal before backend recovery;
+    # the upper half at PC+2 must never be delivered as an extra instruction.
+    assert all(item.pc != branch_pc + 2 for item in delivered)
+    recovered = [item for item in delivered if item.cycle > backend_redirects[0]["cycle"]]
+    assert [item.pc for item in recovered[:15]] == [block_start + 64 + 2 * i for i in range(15)]
+    assert all(item.instr == _ADDI_X0_X0_0 and item.is_rvc for item in recovered[:15])
+    assert env.functional_coverage.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_042")
     assert not env.monitor.get_errors()
 
 
