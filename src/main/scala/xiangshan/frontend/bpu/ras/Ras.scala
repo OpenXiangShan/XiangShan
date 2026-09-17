@@ -48,6 +48,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val topRetAddr:   GuardedPc       = Output(GuardedPc())
     val redirectMeta: RasRedirectMeta = Output(new RasRedirectMeta)
     val commitMeta:   RasCommitMeta   = Output(new RasCommitMeta)
+    val specRead:     ReadRetAddr     = new ReadRetAddr
   }
 
   val io: RasIO = IO(new RasIO)
@@ -62,16 +63,15 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stack = Module(new RasStack).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
   // io.specIn.valid = s3_fire
-  private val stackNearOverflow = stack.specNearOverflow
-  private val specPush          = io.specIn.valid && io.specIn.bits.attribute.isCall
-  private val specPop           = io.specIn.valid && io.specIn.bits.attribute.isReturn
+  private val specPush = io.specIn.valid && io.specIn.bits.attribute.isCall
+  private val specPop  = io.specIn.valid && io.specIn.bits.attribute.isReturn
 
   private val specIn      = io.specIn.bits
   private val specAlignPc = specIn.startPc & alignMask
-  stack.spec.pushValid := specPush && !stackNearOverflow
-  stack.spec.popValid  := specPop && !stackNearOverflow
+  stack.spec.pushValid := specPush
+  stack.spec.popValid  := specPop
   stack.spec.pushAddr  := GuardedPcInit(specAlignPc + (specIn.cfiPosition << 1.U).asUInt + 2.U)
-  stack.spec.fire      := io.specIn.valid && io.enable
+  stack.spec.fire      := io.specIn.valid
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
@@ -79,15 +79,18 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   redirectMeta.tosr       := stack.meta.tosr
   redirectMeta.tosw       := stack.meta.tosw
   redirectMeta.nos        := stack.meta.nos
+  redirectMeta.topInSpec  := stack.meta.topInSpec
+  redirectMeta.nosInSpec  := stack.meta.nosInSpec
   redirectMeta.topRetAddr := stack.spec.popAddr
 
   private val commitMeta = Wire(new RasCommitMeta)
   commitMeta.ssp  := stack.meta.ssp
   commitMeta.tosw := stack.meta.tosw
 
-  io.redirectMeta := redirectMeta
-  io.commitMeta   := commitMeta
-  io.topRetAddr   := stack.spec.popAddr
+  io.redirectMeta     := redirectMeta
+  io.commitMeta       := commitMeta
+  io.topRetAddr       := stack.spec.popAddr
+  io.specRead.retAddr := stack.specRead.retAddr
 
   private val redirect = RegNextWithEnable(io.redirect)
   // when we mispredict a call, we must redo a push operation
@@ -95,15 +98,15 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stackTOSW    = stack.meta.tosw
   private val redirectTOSW = redirect.bits.meta.ras.tosw
 
-  stack.redirect.valid  := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow) && io.enable
+  stack.redirect.valid  := redirect.valid
   stack.redirect.isCall := redirect.bits.attribute.isCall
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
   stack.redirect.callAddr := redirect.bits.cfiPc.signGuard + 2.U
 
-  private val commitValid    = RegNext(io.commit.valid && io.enable, init = false.B)
-  private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid && io.enable)
+  private val commitValid    = RegNext(io.commit.valid, init = false.B)
+  private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
   private val commitPushAddr = DontCare
   stack.commit.valid     := commitValid
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
@@ -111,6 +114,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.commit.pushAddr  := commitPushAddr
   stack.commit.metaTosw  := commitInfo.meta.ras.tosw
   stack.commit.metaSsp   := commitInfo.meta.ras.ssp
+  stack.specRead.req     := io.specRead.req
 
   XSPerfAccumulate("ras_redirect_recover", redirect.valid)
 
