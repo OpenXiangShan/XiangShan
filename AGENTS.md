@@ -82,6 +82,10 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [ai_doc_file_management_rule.md](AI_DOC/project_management/ai_doc_file_management_rule.md)
 
+当前 `AI_DOC` buglist 缺陷记录与分析规则为：
+
+- [buglist_bug_record_rule.md](AI_DOC/project_management/buglist_bug_record_rule.md)
+
 当前 RTL/Scala 分析知识库维护规则和执行 skill 为：
 
 - [rtl_knowledge_base_management_rule.md](AI_DOC/project_management/rtl_knowledge_base_management_rule.md)
@@ -226,6 +230,12 @@ Flow 首章必须前置解释流程图、功能描述和文字伪代码中的专
 
 后续凡新增或调整 `AI_DOC/project_management` 下的项目规则文件，必须同步在
 本 `AGENTS.md` 中添加或更新对应入口，包含规则文档链接、触发条件和优先阅读要求。
+
+后续在仿真测试中登记或更新 `AI_DOC/buglist` 下的 RM、测试框架或 RTL 缺陷记录时，必须先阅读
+`AI_DOC/project_management/buglist_bug_record_rule.md`。记录前先按类别、版本和 ISO 周扫描已有周文件；
+V2 默认写入 `buglist/rtl/v2` 或 `buglist/rm/v2`，V3 写入对应 `v3` 目录；同周同类只允许一个文件，
+重复现象必须更新原章节。RTL 章节的“RTL 修复方法”必须先给出源码修改具体逻辑，再给出自然语言修改说明；
+RM/测试框架章节必须单独标注责任子类型，且方案至少经过一轮 review。
 
 ## 版本 Profile 路由规则
 

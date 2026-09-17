@@ -36,6 +36,13 @@ AI_DOC/
     source_sv/
     testcase_flow/
     framework_design/
+  buglist/
+    rtl/
+      v2/
+      v3/
+    rm/
+      v2/
+      v3/
   project_management/
   skills/
 ```
@@ -49,6 +56,7 @@ AI_DOC/
 - `AI_DOC/mem_ut_flow_doc`：只放 mem_ut 测试框架 flow 文档，例如 issue、writeback、redirect、replay、sfence、LSQ admission flow。
 - `AI_DOC/web`：只放生成网页、网页资源、可静态打开的 HTML/JS/CSS/模板和网页稿。
 - `AI_DOC/analysis`：放分析类文档，按 `rtl`、`interface`、`source_sv`、`testcase_flow`、`framework_design` 等类别继续拆分。
+- `AI_DOC/buglist`：放仿真测试中经多轮 review 确认的缺陷记录；按 `rtl`/`rm` 类别和 `v2`/`v3` 版本继续拆分，具体格式遵循 `AI_DOC/project_management/buglist_bug_record_rule.md`。
 - `AI_DOC/project_management`：只放项目规则、文档规则、管理规则和长期执行规范，不放具体 feature plan、TODO、review 或源码分析。
 - `AI_DOC/skills`：只放可复用 skill。
 
@@ -122,6 +130,14 @@ AI_DOC/web
 - SystemVerilog 源码函数/字段分析：`AI_DOC/analysis/source_sv`
 - testcase 或场景流程分析：`AI_DOC/analysis/testcase_flow`
 - 测试框架架构或设计原理分析：`AI_DOC/analysis/framework_design`
+
+## 6.1 Buglist 文档入口
+
+Buglist 与一般分析文档分开管理。只有在仿真测试过程中经过多轮 review 确认的 RM、测试框架或 RTL
+缺陷，才进入 `AI_DOC/buglist`；单次观察、尚未确认的猜测和普通源码分析仍放在 `AI_DOC/analysis`。
+类别、版本路由、每周文件唯一性、重复现象处理和章节模板统一遵循：
+
+- `AI_DOC/project_management/buglist_bug_record_rule.md`
 
 分析文档不放入 `plan`，除非它明确包含后续 coding 步骤、验收标准和待执行任务。
 
