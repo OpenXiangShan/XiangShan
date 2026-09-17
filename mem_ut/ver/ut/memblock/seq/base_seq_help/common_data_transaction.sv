@@ -2054,6 +2054,27 @@ class common_data_transaction extends uvm_object;
                 end
                 return 1'b1;
             end
+            // 中文注释：V2 scalar STA feedback 只携带 SQ 与 hit，TLB miss 和跨 16B
+            // misalign replay 都可能持续报告 hit=0。对于同一动态实例、ROB 和 SQ，
+            // late-fault reader 本来只选择最早 record；后续 replay 不能再占用 history 槽位。
+            // 当前 target flush epoch 可以因无关年轻 redirect 前进，但不得倒退到首条
+            // record 之前，否则说明 active STA snapshot 生命周期发生了错误回退。
+            if (tombstone.dynamic_epoch == status.dynamic_epoch &&
+                tombstone.rob_key == rob_key && tombstone.sq_key == sq_key) begin
+                if (target_flush_epoch < tombstone.target_flush_epoch) begin
+                    `uvm_fatal("STA_LATE_TOMBSTONE",
+                               $sformatf("coalesced tombstone flush epoch regressed uid=%0d retained=%0d current=%0d",
+                                         uid, tombstone.target_flush_epoch, target_flush_epoch))
+                end
+                `uvm_info("STA_LATE_TOMBSTONE",
+                          $sformatf("coalesce uid=%0d dynamic_epoch=%0d retained_issue_epoch=%0d retained_replay_seq=%0d current_issue_epoch=%0d current_replay_seq=%0d history=%0d",
+                                    uid, status.dynamic_epoch,
+                                    tombstone.issue_epoch, tombstone.replay_seq,
+                                    issue_epoch, replay_seq,
+                                    status.sta_late_fault_tombstone_q.size()),
+                          UVM_LOW)
+                return 1'b1;
+            end
         end
         if (status.sta_late_fault_tombstone_q.size() >=
             MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX) begin

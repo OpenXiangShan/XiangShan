@@ -142,3 +142,19 @@ UID25: STA hit=0 后可记录 tombstone，迟到 0x8080 fault 被消费
 no:    INT_WB_ATTACH writeback target was not dispatched
 no:    issue queue has pending work but no fire for 60000 iterations
 ```
+
+## 7. 后续容量语义修正（2026-09-15）
+
+本分析记录的“立即 replay + late-fault tombstone”主结论保持有效，但最初实现把每个不同
+`issue_epoch/replay_seq` 都保存在同一 UID history 中。V2 StoreUnit 的 `feedbackSlow.hit=0` 同时表达
+TLB miss 和 cross-16B misalign replay；后者可以在相同 `dynamic_epoch + ROB + SQ` 下多次发生。seed
+`856436350` 因此把 UID15 history 累积到 56 项并触发 framework fatal，而非出现 RTL 无来源输出。
+
+最新权威缺陷记录和修复 plan 为：
+
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/AI_DOC/buglist/rm/v2/rm_buglist_2026-W38_20260914.md`
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/XiangShan/AI_DOC/plan/test_framework/plan/undo/memblock_sta_tombstone_replay_coalescing_plan_20260915.md`
+
+修正后的规则是：同一 stable scope 的后续 replay 保留最早 tombstone，不再扩容；完全相同 identity
+继续严格校验 ROB/SQ/flush，changed replay identity 只允许 target flush epoch 前进。normal raw STA 仍不读取
+history，redirect/reset/terminal/fault 的既有清理仍保持。
