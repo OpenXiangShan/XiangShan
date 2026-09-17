@@ -101,6 +101,20 @@ class TLBFA(
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
   val g = entries.map(_.perm.g)
 
+  private val perfSourcePageSizeIsKnown = Option.when(p(PerfCounterOptionsKey).enablePerfPrint) {
+    // MPT and Bitmap may narrow a larger source mapping without retaining its original page size in the entry.
+    val bitmapCheckDisabled = if (HasBitmapCheck) io.csr.mbmc.BME === 0.U else true.B
+    (!HasMptCheck).B && bitmapCheckDisabled
+  }
+
+  private def isUsableSector4KEntry(entry: TlbSectorEntry): Bool = {
+    val hasUsableSectorSlots = entry.s2xlate === noS2xlate || entry.s2xlate === onlyStage1
+    val isNormal4KPage = entry.level.get === 0.U && entry.n === 0.U
+    val isLeaf = entry.perm.r || entry.perm.w || entry.perm.x
+    perfSourcePageSizeIsKnown.get && hasUsableSectorSlots && isNormal4KPage && entry.perm.v && isLeaf &&
+      !entry.perm.pf && !entry.perm.af
+  }
+
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)
@@ -129,6 +143,29 @@ class TLBFA(
     resp.valid := RegNext(req.valid)
     resp.bits.hit := Cat(hitVecReg).orR
     val reqVpn   = RegNext(vpn)
+
+    if (p(PerfCounterOptionsKey).enablePerfPrint) {
+      // pteidx marks the refill's requested slot; other valididx slots are attached by sector merging.
+      val sector4KHitVec = VecInit(entries.zip(hitVecReg).map { case (entry, hit) =>
+        hit && isUsableSector4KEntry(entry)
+      })
+      val sector4KMultiSlotHitVec = VecInit(entries.zip(sector4KHitVec).map { case (entry, hit) =>
+        hit && PopCount(entry.valididx) > 1.U
+      })
+      val sector4KExtraHitVec = VecInit(entries.zip(sector4KHitVec).map { case (entry, hit) =>
+        hit && !entry.pteidx(reqVpn(sectortlbwidth - 1, 0))
+      })
+      val sector4KExtraOnlyHit = sector4KExtraHitVec.asUInt.orR &&
+        !(hitVecReg.asUInt & ~sector4KExtraHitVec.asUInt).orR
+
+      XSPerfAccumulate(s"port${i}_sector_4k_hit", resp.valid && sector4KHitVec.asUInt.orR)
+      XSPerfAccumulate(
+        s"port${i}_sector_4k_multi_slot_hit",
+        resp.valid && sector4KMultiSlotHitVec.asUInt.orR
+      )
+      XSPerfAccumulate(s"port${i}_sector_4k_extra_only_hit", resp.valid && sector4KExtraOnlyHit)
+    }
+
     val pbmt     = entries.map(_.pbmt)
     val gpbmt    = entries.map(_.g_pbmt)
     val perm     = entries.map(_.perm)
@@ -310,6 +347,26 @@ class TLBFA(
   }
   for (i <- 0 until nWays) {
     XSPerfAccumulate(s"refill${i}", io.w.valid && io.w.bits.wayIdx === i.U)
+  }
+
+  if (p(PerfCounterOptionsKey).enablePerfPrint) {
+    val refillData = io.w.bits.data
+    val refillS1 = refillData.s1
+    val refillPerm = refillS1.entry.perm.get
+    val hasUsableSectorSlots = refillData.s2xlate === noS2xlate || refillData.s2xlate === onlyStage1
+    val isNormal4KPage = refillS1.entry.level.get === 0.U && refillS1.entry.n.get === 0.U
+    val isLeaf = refillPerm.r || refillPerm.w || refillPerm.x
+    val sector4KRefill = io.w.valid && perfSourcePageSizeIsKnown.get && hasUsableSectorSlots && isNormal4KPage &&
+      refillS1.entry.v && isLeaf && !refillS1.pf && !refillS1.af
+    // Under these guards, s1.valididx is exactly the mask written into the TLB entry.
+    val sector4KRefillWidth = PopCount(refillS1.valididx)
+    XSPerfHistogram(
+      "sector_4k_refill_width",
+      sector4KRefillWidth,
+      sector4KRefill,
+      1,
+      tlbcontiguous + 1
+    )
   }
 
   val perfEvents = Seq(
