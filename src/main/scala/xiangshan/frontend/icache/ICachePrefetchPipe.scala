@@ -86,7 +86,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
   private val s0_req              = io.fromFtq.bits.req
   private val s0_ftqIdx           = s0_req(0).ftqIdx
-  private val s0_source           = s0_req(0).source // TODO: support 2 different prefetch source, after mixed prefetch
   private val s0_backendException = s0_req(0).backendException
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
@@ -100,7 +99,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
-  fromBpuS0Flush := s0_source.inStream &&
+  // TODO: do not flush if req(1).source is not inStream
+  fromBpuS0Flush := s0_req.head.source.inStream &&
     (io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx, s0_valid) ||
       io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid))
   s0_flush := io.flush || fromBpuS0Flush || s1_flush
@@ -121,7 +121,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
   private val s1_req              = RegEnable(s0_req, 0.U.asTypeOf(s0_req), s0_fire)
-  private val s1_source           = RegEnable(s0_source, 0.U.asTypeOf(s0_source), s0_fire)
   private val s1_ftqIdx           = RegEnable(s0_ftqIdx, 0.U.asTypeOf(s0_ftqIdx), s0_fire)
   private val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
 
@@ -313,7 +312,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
         // pipeline is not being flushed
         !s1_flush &&
         // enqueue only inStream requests (otherwise is softPrefetch or TODO, which should not affect control flow)
-        s1_source.inStream &&
+        s1_req(i).source.inStream &&
         // first port is always valid, the second port is valid only if we can do 2-prefetch
         (if (i == 0) true.B else s1_twoPrefetchCase.valid)
 
@@ -402,7 +401,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       } // .otherwise { s1_nextState := S1FsmState.metaResend }  // !toMeta.ready
     }
     is(S1FsmState.EnqWay) {
-      when(toWayLookup.head.fire || !s1_source.inStream) {
+      when(toWayLookup.head.fire || !s1_req.head.source.inStream) {
         when(!s2_ready) {
           s1_nextState := S1FsmState.EnterS2
         }.otherwise { // s2_ready
@@ -422,7 +421,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }
 
   /** Stage 1 control */
-  fromBpuS1Flush := s1_source.inStream && io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
+  fromBpuS1Flush := s1_req.head.source.inStream && io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
   s1_flush       := io.flush || fromBpuS1Flush
   // when s1 is flushed, itlb pipeline should also be flushed
   io.itlbFlushPipe := s1_flush
@@ -440,7 +439,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
   private val s2_valid = ValidHold(s1_realFire, s2_fire, s2_flush)
 
-  private val s2_source     = RegEnable(s1_source, 0.U.asTypeOf(s1_source), s1_realFire)
+  private val s2_source     = RegEnable(s1_req.head.source, 0.U.asTypeOf(s1_req.head.source), s1_realFire)
   private val s2_doubleline = RegEnable(s1_readDoubleLine, 0.U.asTypeOf(s1_readDoubleLine), s1_realFire)
   private val s2_pTag       = RegEnable(s1_pTag, 0.U.asTypeOf(s1_pTag), s1_realFire)
   private val s2_exception =
