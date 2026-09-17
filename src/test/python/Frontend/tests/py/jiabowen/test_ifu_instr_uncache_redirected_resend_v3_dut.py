@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from env.support import fold_pc
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -57,7 +58,10 @@ def test_cross_8b_resend_redirect_completes_without_old_delivery(env):
         "owner_state": _owner_state(env),
         "uncache": env.uncache_agent.get_stats(),
     }
-    assert tuple(cross_8b["old_identity"])[2] == (uncache._CROSS_BEAT_PC >> 1)
+    # V3 identity carries the folded PC at the IBuffer/FTQ boundary, rather
+    # than the raw halfword PC.  The sampler deliberately stores that same
+    # folded value so the redirect comparison uses one coordinate system.
+    assert tuple(cross_8b["old_identity"])[2] == fold_pc(uncache._CROSS_BEAT_PC)
     assert (uncache._MMIO_BASE + 8) not in env.uncache_agent.get_stats().get(
         "response_addrs", []
     )
