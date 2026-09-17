@@ -335,7 +335,8 @@ def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     assert recorder.key_hit("two_fetch_pointer_advance", "wrap_step_two")
 
 
-def test_two_fetch_s0_accept_preserves_redirect_owner_before_s1(tmp_path):
+@pytest.mark.parametrize("pc_probe", ["valid", "missing_foldpc", "wrong_foldpc", "missing_aligned_pc"])
+def test_two_fetch_s0_accept_preserves_redirect_owner_before_s1(tmp_path, pc_probe):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("ftq_valid", 1)
     dut.set_key("ftq_ready", 1)
@@ -374,11 +375,24 @@ def test_two_fetch_s0_accept_preserves_redirect_owner_before_s1(tmp_path):
     dut.set_key("to_ibuffer_ready", 1)
     base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     dut.set(base + "enqEnable", 1)
-    dut.set(base + "pc_0_addr", 0x80000100 >> 1)
+    if pc_probe != "missing_aligned_pc":
+        dut.set("Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr", 0x80000100 >> 1)
+    if pc_probe != "missing_foldpc":
+        dut.set(base + "foldpc_0", fold_pc(0x80000100) ^ int(pc_probe == "wrong_foldpc"))
     dut.set(base + "isRvc_0", 1)
     dut.set(base + "ftqPtr_0_flag", 0)
     dut.set(base + "ftqPtr_0_value", 21)
     sample_two_fetch_coverage(recorder, env, 3)
+
+    if pc_probe != "valid":
+        assert recorder._two_fetch_redirect_pending is None
+        assert not recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+        assert any(item.get("event") == "two_fetch_redirect_payload_unverified" for item in recorder.risk_observations)
+        dut.set("Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr", 0x80000100 >> 1)
+        dut.set(base + "foldpc_0", fold_pc(0x80000100))
+        sample_two_fetch_coverage(recorder, env, 4)
+        assert not recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+        return
 
     assert recorder.key_hit(
         "two_fetch_flush_flow", "backend_redirect_drops_inflight"
@@ -439,7 +453,8 @@ def test_two_fetch_redirect_rejects_reused_ftq_tag_at_wrong_pc(tmp_path):
     dut.set_key("to_ibuffer_ready", 1)
     base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     dut.set(base + "enqEnable", 1)
-    dut.set(base + "pc_0_addr", 0x80000104 >> 1)
+    dut.set("Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr", 0x80000104 >> 1)
+    dut.set(base + "foldpc_0", fold_pc(0x80000104))
     dut.set(base + "isRvc_0", 1)
     dut.set(base + "ftqPtr_0_flag", 0)
     dut.set(base + "ftqPtr_0_value", 21)

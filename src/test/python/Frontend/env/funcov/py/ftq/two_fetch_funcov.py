@@ -1486,7 +1486,19 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
     redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
     if redirect_pending is not None and to_ibuffer_valid == 1 and to_ibuffer_ready == 1:
         entries = _tf_ibuffer_entries(recorder)
-        if entries is not None:
+        if not entries or not all(entry["foldpc_matches_pc"] for entry in entries):
+            recorder.risk_observations.append(
+                _tf_evidence(
+                    "two_fetch_redirect_payload_unverified",
+                    cycle=cycle,
+                    target=redirect_pending.get("target"),
+                    reason="missing_payload" if not entries else "foldpc_mismatch",
+                    entries=entries,
+                )
+            )
+            # A later delivery cannot stand in for the unverified first fire.
+            recorder._two_fetch_redirect_pending = None
+        else:
             compressed_tags = []
             for entry in entries:
                 if not compressed_tags or entry["ftq_ptr"] != compressed_tags[-1]:
@@ -1504,6 +1516,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                         "backend_redirect_first_new_delivery",
                         target=int(target),
                         first_pc=first_pc,
+                        entries=entries,
                         old_tags=[list(tag) for tag in sorted(old_tags)],
                         delivered_tags=[list(tag) for tag in compressed_tags],
                         ftq_slot_reused=bool(delivered_old),

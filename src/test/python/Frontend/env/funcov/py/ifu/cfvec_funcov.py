@@ -4,7 +4,10 @@ from typing import Optional
 
 from ..common.dut import _read
 from ..common.fetch_memory import _recover_unavailable_instr
-from .compact_funcov import _sample_instr_compact_coverage
+from .compact_funcov import (
+    _sample_backend_checker_priority, _sample_instr_compact_coverage,
+    _sample_invalid_taken_half_delivery, _sample_frontend_trigger,
+)
 
 
 def initialize_ifu_coverage_state(recorder) -> None:
@@ -269,6 +272,10 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         return
 
     cycle = int(cycle)
+    # Backend delivery is temporarily masked during recovery, but the FTQ
+    # arbitration itself must be observed on exactly those redirect cycles.
+    _sample_backend_checker_priority(recorder, dut, cycle)
+    _sample_invalid_taken_half_delivery(recorder, dut, cycle)
     skip_until = getattr(recorder, "_ifu_redirect_skip_until_cycle", None)
     if _read(recorder, "io_backend_toFtq_redirect_valid", 0) == 1:
         skip_until = max(int(skip_until or cycle), cycle + 1)
@@ -276,6 +283,9 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         recorder._ifu_cacheable_pending_cfi = None
         recorder._ifu_ibuffer_alignment_pending = None
     if skip_until is not None and cycle <= int(skip_until):
+        # Trigger examines held S2/IBuffer identity and flush, not the
+        # temporarily masked backend cfVec. It must see the redirect cycle.
+        _sample_frontend_trigger(recorder, dut, cycle)
         recorder._ifu_last_cfvec = None
         recorder._ifu_ibuffer_alignment_pending = None
         return

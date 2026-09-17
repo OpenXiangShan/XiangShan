@@ -38,6 +38,7 @@ from . import (
     sample_mmio_nc_owner_coverage,
     sample_cfvec_coverage,
 )
+from .py.ifu.compact_funcov import _sample_uncache_half_isolation
 from .py.ftq.sampler import (
     TWO_FETCH_SAMPLER_BIN_KEYS,
     initialize_ftq_coverage_state,
@@ -729,6 +730,11 @@ class FunctionalCoverageRecorder:
             self._uncache_page_tail_requests.clear()
 
     def _clear_transient_sampling_state(self) -> None:
+        self._ifu_frontend_trigger_state = None
+        self._ifu_invalid_taken_half_delivery = None
+        self._ifu_backend_checker_pending = None
+        self._ifu_uncache_half_isolation = None
+        self._ifu_uncache_half_isolation_sample_cycle = None
         self._last_fetch_path = "icache_seq"
         self._last_fetch_cycle = -1
         self._redirected_fetch_path = None
@@ -767,6 +773,11 @@ class FunctionalCoverageRecorder:
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
+        # Keep the cross-path half-RVI producer on the recorder's canonical
+        # cycle clock. cfVec sampling may legitimately return early when no
+        # output lane is valid, while BIN-922's redirect state is observed in
+        # precisely those flush/valid-hole cycles.
+        _sample_uncache_half_isolation(self, dut, cycle)
         sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
         sample_mmio_v3_coverage(self, env, cycle)
         sample_mmio_nc_owner_coverage(self, env, cycle)
@@ -1252,6 +1263,19 @@ class FunctionalCoverageRecorder:
             "checker": _sanitize(checker),
             "recent_events": list(self.events_tail),
             "risk_observations": list(self.risk_observations),
+            "sampler_diagnostics": {
+                "frontend_trigger_config_gap": _sanitize(
+                    getattr(self, "_ifu_frontend_trigger_config_gap", None)
+                ),
+                "exception_metadata": {
+                    "component_witnesses": _sanitize(
+                        getattr(self, "_ifu_exception_metadata_witnesses", {})
+                    ),
+                    "missing_probes": _sanitize(sorted(
+                        getattr(self, "_ifu_exception_metadata_gaps", set())
+                    )),
+                },
+            },
         }
 
     def _summary_rows(self) -> List[dict]:

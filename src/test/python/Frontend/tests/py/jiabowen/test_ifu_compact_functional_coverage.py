@@ -228,6 +228,92 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
     )
 
 
+def test_ifu_owner_address_boundary_requires_low_and_high_in_one_run(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    low_pc = 0x1000
+    high_pc = (1 << 50) - 0x2000
+    entry = lambda pc: [(0, pc, 0x00000013, 0, 1, 0, 1, 0)]
+
+    _set_ifu_output(dut, entry(low_pc), s2_fetch_block_start_pc=low_pc)
+    sample_cfvec_coverage(recorder, env, 1)
+    assert set(recorder._ifu_owner_address_boundary_witnesses) == {"low"}
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
+
+    _set_ifu_output(dut, entry(high_pc), s2_fetch_block_start_pc=high_pc)
+    sample_cfvec_coverage(recorder, env, 2)
+    assert set(recorder._ifu_owner_address_boundary_witnesses) == {"low", "high"}
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
+    hit = recorder.hits[
+        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_002")
+    ]
+    evidence = hit.evidence[-1]
+    assert evidence["producer"] == "ifu_address_boundary_sampler"
+    assert evidence["observations"]["same_recorder_run"] is True
+
+
+def test_ifu_owner_address_boundary_unguards_high_fetch_block_start(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    high_pc = (1 << 50) - 0x2000
+    guarded_pc = (1 << 51) - 0x2000
+    _set_ifu_output(
+        dut,
+        [(0, high_pc, 0x00000013, 0, 1, 0, 1, 0)],
+        s2_fetch_block_start_pc=guarded_pc,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert set(recorder._ifu_owner_address_boundary_witnesses) == {"high"}
+    assert recorder._ifu_owner_address_boundary_witnesses["high"]["start_pc"] == high_pc
+
+
+@pytest.mark.parametrize("region", ("low", "high"))
+def test_ifu_owner_address_boundary_single_region_does_not_hit(tmp_path, region):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    pc = 0x1000 if region == "low" else (1 << 50) - 0x2000
+    _set_ifu_output(
+        dut,
+        [(0, pc, 0x00000013, 0, 1, 0, 1, 0)],
+        s2_fetch_block_start_pc=pc,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert set(recorder._ifu_owner_address_boundary_witnesses) == {region}
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ("foldpc_mismatch", "pc_outside_region", "exception", "uncache", "missing_pc"),
+)
+def test_ifu_owner_address_boundary_rejects_unchecked_delivery(tmp_path, failure):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    pc = 0x1000
+    delivered_pc = 0x4000 if failure == "pc_outside_region" else pc
+    _set_ifu_output(
+        dut,
+        [(0, delivered_pc, 0x00000013, 0, 1, 0, 1, 0)],
+        exception_type=1 if failure == "exception" else 0,
+        s2_req_is_uncache=1 if failure == "uncache" else 0,
+        s2_fetch_block_start_pc=pc,
+    )
+    if failure == "foldpc_mismatch":
+        dut.set(_PREFIX + "io_toIBuffer_bits_foldpc_0", fold_pc(pc) ^ 1)
+    elif failure == "missing_pc":
+        delattr(dut, _PREFIX + "s2_alignedInstrPcVec_0_addr")
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not getattr(recorder, "_ifu_owner_address_boundary_witnesses", {})
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
+    if failure in {"foldpc_mismatch", "pc_outside_region", "missing_pc"}:
+        assert any(
+            item["event"] == "ifu_address_boundary_pc_reconstruction_mismatch"
+            for item in recorder.contract_errors
+        )
+
+
 def _set_ifu_output(
     dut,
     entries,
@@ -356,10 +442,11 @@ def _set_predchecker_request(dut, entries):
     dut.set(_PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_valid", 0)
     for slot in range(36):
         dut.set(_PREFIX + f"predChecker.io_req_bits_instrVec_{slot}_valid", 0)
+        dut.set(_PREFIX + f"predChecker.io_req_bits_instrVec_{slot}_invalidTaken", 0)
     for entry in entries:
         slot = int(entry["slot"])
         prefix = _PREFIX + f"predChecker.io_req_bits_instrVec_{slot}_"
-        dut.set(prefix + "valid", 1)
+        dut.set(prefix + "valid", entry.get("valid", 1))
         dut.set(prefix + "isPredTaken", entry.get("pred_taken", 0))
         dut.set(prefix + "invalidTaken", entry.get("invalid_taken", 0))
         dut.set(prefix + "isRvc", entry.get("is_rvc", 0))
@@ -883,6 +970,237 @@ def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_p
             assert recorder.key_hit("ifu_v3_boundary_owner_model", bin_name)
 
 
+@pytest.mark.parametrize(
+    ("earlier_kind", "later_pred_taken", "reverse", "missing_probe", "expected"),
+    (
+        (2, 1, False, False, True),
+        (3, 1, False, False, True),
+        (1, 1, False, False, False),
+        (2, 0, False, False, False),
+        (2, 1, True, False, False),
+        (2, 1, False, True, False),
+    ),
+)
+def test_bin993_requires_ordered_faults_in_one_complete_request(
+    tmp_path, earlier_kind, later_pred_taken, reverse, missing_probe, expected
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    jal_slot, non_cfi_slot = (2, 0) if reverse else (0, 2)
+    _set_predchecker_request(dut, [
+        {"slot": jal_slot, "branch_type": earlier_kind, "pred_taken": 0},
+        {"slot": non_cfi_slot, "branch_type": 0, "pred_taken": later_pred_taken},
+    ])
+    if missing_probe:
+        delattr(dut, _PREFIX + f"predChecker.io_req_bits_instrVec_{non_cfi_slot}_isPredTaken")
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_095") is expected
+
+
+def test_bin993_does_not_combine_faults_from_different_requests(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [{"slot": 0, "branch_type": 2}])
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_predchecker_request(dut, [{"slot": 2, "branch_type": 0, "pred_taken": 1}])
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_095")
+
+
+@pytest.mark.parametrize(
+    ("earlier_kind", "later_kind", "invalid", "reverse", "missing_probe", "expected"),
+    (
+        (2, 1, 1, False, False, True),
+        (3, 1, 1, False, False, False),
+        (2, 0, 1, False, False, False),
+        (2, 1, 0, False, False, False),
+        (2, 1, 1, True, False, False),
+        (2, 1, 1, False, True, False),
+    ),
+)
+def test_bin989_requires_earlier_jal_and_later_invalid_taken(
+    tmp_path, earlier_kind, later_kind, invalid, reverse, missing_probe, expected
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    jal_slot, invalid_slot = (2, 0) if reverse else (0, 2)
+    _set_predchecker_request(dut, [
+        {"slot": jal_slot, "branch_type": earlier_kind, "pred_taken": 0},
+        {"slot": invalid_slot, "branch_type": later_kind, "pred_taken": 1,
+         "invalid_taken": invalid, "end_offset": 15},
+    ])
+    if missing_probe:
+        delattr(dut, _PREFIX + f"predChecker.io_req_bits_instrVec_{invalid_slot}_invalidTaken")
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091") is expected
+
+
+def test_bin989_does_not_combine_faults_from_different_requests(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [{"slot": 0, "branch_type": 2}])
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_predchecker_request(dut, [
+        {"slot": 2, "branch_type": 1, "pred_taken": 1, "invalid_taken": 1, "end_offset": 15},
+    ])
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091")
+
+
+@pytest.mark.parametrize(
+    ("invalid", "missing_probe", "request_valid", "expected"),
+    ((1, None, 1, True), (0, None, 1, False),
+     (1, "invalidTaken", 1, False), (1, "isPredTaken", 1, False),
+     (1, "valid", 1, False), (1, None, 0, False)),
+)
+def test_bin989_masked_tail_requires_explicit_invalid_marker(
+    tmp_path, invalid, missing_probe, request_valid, expected
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [
+        {"slot": 4, "branch_type": 2, "pred_taken": 0},
+        {"slot": 14, "valid": 0, "branch_type": 0, "pred_taken": 1,
+         "invalid_taken": invalid, "fixed_valid": 0, "end_offset": 16},
+    ])
+    dut.set(_PREFIX + "predChecker.io_req_valid", request_valid)
+    if missing_probe:
+        delattr(dut, _PREFIX + f"predChecker.io_req_bits_instrVec_14_{missing_probe}")
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091") is expected
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_095")
+
+
+def test_masked_jal_without_invalid_marker_cannot_raise_a_fault(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [
+        {"slot": 0, "valid": 0, "branch_type": 2, "pred_taken": 0},
+        {"slot": 14, "valid": 0, "branch_type": 0, "pred_taken": 1,
+         "invalid_taken": 1, "fixed_valid": 0, "end_offset": 16},
+    ])
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_predchecker_v3_fault", "jal_not_taken")
+    assert recorder.key_hit("ifu_predchecker_v3_fault", "invalid_taken")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091")
+
+
+def test_masked_tail_is_not_a_complete_younger_cfi_or_range_sample(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [
+        {"slot": 0, "branch_type": 0},
+        {"slot": 4, "branch_type": 2},
+        {"slot": 14, "valid": 0, "branch_type": 1, "pred_taken": 1,
+         "invalid_taken": 1, "fixed_valid": 0, "end_offset": 16},
+    ])
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_079")
+    assert not recorder.key_hit("ifu_predchecker_v3_range", "fault_inclusive_younger_masked")
+
+
+@pytest.mark.parametrize(
+    ("ras_action", "pred_taken", "reverse", "missing_probe", "expected"),
+    ((0, 0, False, None, True), (2, 0, False, None, True),
+     (1, 0, False, None, False), (0, 1, False, None, False),
+     (0, 0, True, None, False), (0, 0, False, "invalidTaken", False),
+     (0, 0, False, "isPredTaken", False)),
+)
+def test_bin990_requires_non_return_jalr_before_invalid_tail(
+    tmp_path, ras_action, pred_taken, reverse, missing_probe, expected
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    earlier_slot, tail_slot = (14, 4) if reverse else (4, 14)
+    _set_predchecker_request(dut, [
+        {"slot": earlier_slot, "branch_type": 3, "pred_taken": pred_taken,
+         "ras_action": ras_action},
+        {"slot": tail_slot, "valid": 0, "branch_type": 0, "pred_taken": 1,
+         "invalid_taken": 1, "fixed_valid": 0, "end_offset": 16},
+    ])
+    if missing_probe:
+        delattr(dut, _PREFIX + f"predChecker.io_req_bits_instrVec_{tail_slot}_{missing_probe}")
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_092") is expected
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_091")
+
+
+@pytest.mark.parametrize(
+    ("later_valid", "later_pred_taken", "later_kind", "ras_action", "expected"),
+    ((1, 1, 2, 0, True), (1, 1, 1, 0, True), (1, 1, 3, 0, True),
+     (0, 1, 2, 0, False), (1, 0, 2, 0, False), (1, 1, 0, 0, False),
+     (1, 1, 2, 1, False)),
+)
+def test_bin983_requires_later_complete_taken_cfi(
+    tmp_path, later_valid, later_pred_taken, later_kind, ras_action, expected
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [
+        {"slot": 4, "branch_type": 3, "ras_action": ras_action},
+        {"slot": 12, "valid": later_valid, "pred_taken": later_pred_taken,
+         "branch_type": later_kind, "fixed_valid": 0},
+    ])
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_085") is expected
+
+
+@pytest.mark.parametrize("invalid_tail", (False, True))
+def test_jalr_priority_does_not_combine_separate_requests(tmp_path, invalid_tail):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [{"slot": 4, "branch_type": 3}])
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_predchecker_request(dut, [
+        {"slot": 14, "valid": int(not invalid_tail), "pred_taken": 1,
+         "branch_type": 0 if invalid_tail else 2, "invalid_taken": int(invalid_tail)},
+    ])
+    sample_cfvec_coverage(recorder, env, 2)
+    for leaf in ("owner_leaf_085", "owner_leaf_092"):
+        assert not recorder.key_hit("ifu_v3_boundary_owner_model", leaf)
+
+
+@pytest.mark.parametrize("branch_halfword", (13, 15))
+def test_jalr_priority_trace_matches_program_isa(branch_halfword):
+    from tests.py.jiabowen.test_ifu_predchecker_jalr_priority_v3_dut import (
+        _architectural_trace, _AUIPC_X6_ZERO, _JALR_X0_X6_60,
+    )
+    from tests.py.jiabowen.test_ifu_predchecker_v3_dut import (
+        _BASE, _BRANCH_SAME_TARGET, _trained_block_end_loop,
+    )
+
+    program = bytearray(_trained_block_end_loop(branch_halfword, rvi_jal=branch_halfword != 15))
+    for offset, instruction in ((4, _AUIPC_X6_ZERO), (8, _JALR_X0_X6_60)):
+        program[offset:offset + 4] = instruction.to_bytes(4, "little")
+    if branch_halfword == 15:
+        program[30:34] = _BRANCH_SAME_TARGET.to_bytes(4, "little")
+    pc, x6 = _BASE, None
+    for entry in _architectural_trace(branch_halfword).entries:
+        assert entry.pc == pc
+        raw16 = int.from_bytes(program[pc - _BASE:pc - _BASE + 2], "little")
+        size = 2 if raw16 & 3 != 3 else 4
+        raw = int.from_bytes(program[pc - _BASE:pc - _BASE + size], "little")
+        assert (entry.instr, entry.size) == (raw, size)
+        instruction = expand_rvc(raw) if size == 2 else raw
+        opcode = instruction & 0x7F
+        next_pc = pc + size
+        if opcode == 0x17:
+            assert (instruction >> 7) & 31 == 6
+            x6 = pc + (instruction & 0xFFFFF000)
+        elif opcode == 0x67:
+            assert (instruction >> 15) & 31 == 6 and x6 is not None
+            immediate = instruction >> 20
+            if immediate & 0x800:
+                immediate -= 0x1000
+            next_pc = (x6 + immediate) & ~1
+        elif opcode == 0x6F:
+            immediate = (((instruction >> 31) & 1) << 20
+                         | ((instruction >> 12) & 255) << 12
+                         | ((instruction >> 20) & 1) << 11
+                         | ((instruction >> 21) & 1023) << 1)
+            if immediate & (1 << 20):
+                immediate -= 1 << 21
+            next_pc = pc + immediate
+        else:
+            assert instruction == 0x13
+        if opcode in (0x67, 0x6F):
+            assert entry.taken and entry.target_pc == next_pc
+        else:
+            assert not entry.taken and entry.target_pc is None
+        pc = next_pc
+
+
 def test_ifu_predchecker_v3_mixed_owner_leaf_requires_all_categories(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     _set_predchecker_request(
@@ -902,22 +1220,25 @@ def test_ifu_predchecker_v3_mixed_owner_leaf_requires_all_categories(tmp_path):
 
 def test_ifu_exception_metadata_owner_leaf_uses_ibuffer_and_gpa_contract(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
-    _set_ifu_output(
-        dut,
-        [(0, 0x40000000, 0x00000013, 0, 0, 0, 0, 1)],
-        exception_type=5,
-        is_backend_exception=1,
-        has_satp_flush=1,
-        exception_cross_page=1,
-        gp_addr_mem_wen=1,
-        gp_addr_mem_waddr=7,
-        gp_addr=0x12345000,
-        is_for_vs_nonleaf_pte=1,
-        s2_prev_end_is_half_rvi=1,
-    )
-
-    sample_cfvec_coverage(recorder, env, 1)
-
+    # Separately specified components; do not fake a simultaneous HWE + GPF
+    # write + backend fault + satpFlush as the former unit fixture did.
+    for cycle, exception, backend, satp, cross, gp in (
+        (1, 0, 0, 1, 0, 0), (2, 1, 1, 0, 0, 0), (3, 2, 0, 0, 1, 1),
+    ):
+        _set_ifu_output(
+            dut, [(0, 0x40000FFE, 0x13, 0, 0, 0, 7, int(exception != 0))],
+            exception_type=exception, is_backend_exception=backend,
+            has_satp_flush=satp, exception_cross_page=cross,
+            gp_addr_mem_wen=gp, gp_addr_mem_waddr=7, gp_addr=0x12345000,
+            is_for_vs_nonleaf_pte=gp, s2_prev_end_is_half_rvi=cross,
+            s2_prev_end_half_pc=0x40000FFE, s2_prev_end_half_data=0x13,
+            s2_fetch_block_start_pc=0x40001000,
+        )
+        dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", exception)
+        dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+        sample_cfvec_coverage(recorder, env, cycle)
+        if cycle < 3:
+            assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")
 
 
@@ -1718,6 +2039,8 @@ def test_ifu_redirect_priority_and_wb_cleanup_use_observed_dut_signals(tmp_path)
     sample_cfvec_coverage(recorder, env, 3)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_052")
 
+    # Old impossible contract: internal wbRedirect and external candidate
+    # are driven by the same checkFlushWb.valid, not opposite levels.
     dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
     dut.set(_PREFIX + "wbRedirect_valid", 1)
     dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 0)
@@ -1725,8 +2048,157 @@ def test_ifu_redirect_priority_and_wb_cleanup_use_observed_dut_signals(tmp_path)
         dut.set(_PREFIX + name, 1)
     sample_cfvec_coverage(recorder, env, 4)
 
-    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_051")
-    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_051")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
+def _set_backend_checker_collision(dut, *, ahead=0):
+    # Populate runtime probes before recorder path caching, then drive live state.
+    _set_backend_checker_cleanup(dut)
+    for stem in ("io_fromFtq_redirect_valid", "wbRedirect_valid", "io_toFtq_wbRedirect_valid",
+                 "s0_flush", "s1_flush", "s2_flush"):
+        dut.set(_PREFIX + stem, 1)
+    for stem, value in {"ftqIdx_flag": 0, "ftqIdx_value": 5,
+                        "ftqOffset": 1, "target": 0x80000200}.items():
+        dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_" + stem, value)
+    for stem, value in {
+        "backendRedirect_valid": 1, "aheadIdxMatch": ahead,
+        "redirectReg_bits_target": 0x80000400,
+        "resolveQueue_io_backendRedirectPtr_flag": 0,
+        "resolveQueue_io_backendRedirectPtr_value": 1,
+        "backendRedirect_bits_ftqOffset": 3,
+        "redirect_1_valid": 1, "redirect_1_bits_ftqIdx_flag": 0,
+        "redirect_1_bits_ftqIdx_value": 1, "redirect_1_bits_ftqOffset": 3,
+        "io_toBpu_redirect_bits_target_addr": 0x40000200,
+    }.items():
+        dut.set(_FTQ_PREFIX + stem, value)
+    dut.set("io_backend_toFtq_redirect_bits_target", 0x80000400)
+
+
+def _set_backend_checker_cleanup(dut):
+    for stem in ("io_fromFtq_redirect_valid", "wbRedirect_valid", "io_toFtq_wbRedirect_valid",
+                 "s0_flush", "s1_flush", "s2_flush", "s1_valid", "s2_valid_valid",
+                 "s0_prevEndIsHalfRvi", "s1_prevEndHalfRviInfo_valid",
+                 "s1_prevEndHalfRviInfo_bits_data", "s1_prevEndHalfRviInfo_bits_pc_addr",
+                 "s1_prevIBufEnqPtrDup_dup_0_value"):
+        dut.set(_PREFIX + stem, 0)
+    for stem in ("ifuRedirect_valid", "ifuResolve_valid", "backendRedirect_valid"):
+        dut.set(_FTQ_PREFIX + stem, 0)
+
+
+@pytest.mark.parametrize("ahead", (0, 1))
+def test_backend_checker_priority_requires_registered_suppression(tmp_path, ahead):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut, ahead=ahead)
+    sample_cfvec_coverage(recorder, env, 10)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+    _set_backend_checker_cleanup(dut)
+    sample_cfvec_coverage(recorder, env, 11)
+    for group, leaf in (("ifu_v3_pipeline_owner_model", "owner_leaf_051"),
+                        ("ifu_v3_boundary_owner_model", "owner_leaf_097")):
+        assert recorder.key_hit(group, leaf)
+
+
+@pytest.mark.parametrize("stem,value", (
+    ("redirect_1_bits_ftqIdx_flag", 1), ("redirect_1_bits_ftqIdx_value", 5),
+    ("redirect_1_bits_ftqOffset", 1), ("io_toBpu_redirect_bits_target_addr", 0x40000100),
+    ("redirect_1_valid", 0), ("backendRedirect_valid", 0),
+    ("aheadIdxMatch", None), ("redirectReg_bits_target", None),
+))
+def test_backend_checker_priority_rejects_wrong_selection_or_missing_probe(tmp_path, stem, value):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut)
+    if value is None:
+        delattr(dut, _FTQ_PREFIX + stem)
+    else:
+        dut.set(_FTQ_PREFIX + stem, value)
+    sample_cfvec_coverage(recorder, env, 10)
+    _set_backend_checker_cleanup(dut)
+    sample_cfvec_coverage(recorder, env, 11)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
+@pytest.mark.parametrize("stem", (
+    "ifuRedirect_valid", "ifuResolve_valid", "s1_valid", "s2_valid_valid",
+    "s0_prevEndIsHalfRvi", "s1_prevEndHalfRviInfo_valid",
+    "s1_prevEndHalfRviInfo_bits_data", "s1_prevEndHalfRviInfo_bits_pc_addr",
+    "s1_prevIBufEnqPtrDup_dup_0_value",
+))
+def test_backend_checker_priority_rejects_stale_effects(tmp_path, stem):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut)
+    sample_cfvec_coverage(recorder, env, 10)
+    _set_backend_checker_cleanup(dut)
+    prefix = _FTQ_PREFIX if stem.startswith("ifu") else _PREFIX
+    dut.set(prefix + stem, 1)
+    sample_cfvec_coverage(recorder, env, 11)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+    dut.set(prefix + stem, 0)
+    sample_cfvec_coverage(recorder, env, 12)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
+def test_backend_checker_priority_does_not_match_nonadjacent_cleanup(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut)
+    sample_cfvec_coverage(recorder, env, 10)
+    _set_backend_checker_cleanup(dut)
+    sample_cfvec_coverage(recorder, env, 12)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
+@pytest.mark.parametrize("reset_between", (False, True))
+def test_backend_checker_priority_samples_inside_cfvec_recovery_guard(tmp_path, reset_between):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut)
+    dut.set("io_backend_toFtq_redirect_valid", 1)
+    sample_cfvec_coverage(recorder, env, 10)
+    assert recorder._ifu_redirect_skip_until_cycle == 11
+    assert recorder._ifu_backend_checker_pending is not None
+    if reset_between:
+        recorder._clear_transient_sampling_state()
+    _set_backend_checker_cleanup(dut)
+    dut.set("io_backend_toFtq_redirect_valid", 0)
+    sample_cfvec_coverage(recorder, env, 11)
+    for group, leaf in (("ifu_v3_pipeline_owner_model", "owner_leaf_051"),
+                        ("ifu_v3_boundary_owner_model", "owner_leaf_097")):
+        assert recorder.key_hit(group, leaf) is (not reset_between)
+    assert recorder._ifu_last_cfvec is None
+
+
+@pytest.mark.parametrize("omit", ("ahead_target", "checker_identity", "cleanup_pc"))
+def test_backend_checker_priority_missing_identity_or_cleanup_never_defaults_to_hit(tmp_path, omit):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_backend_checker_collision(dut, ahead=1)
+    missing = {
+        "ahead_target": "io_backend_toFtq_redirect_bits_target",
+        "checker_identity": _PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_value",
+        "cleanup_pc": _PREFIX + "s1_prevEndHalfRviInfo_bits_pc_addr",
+    }[omit]
+    delattr(dut, missing)
+    sample_cfvec_coverage(recorder, env, 10)
+    _set_backend_checker_cleanup(dut)
+    if hasattr(dut, missing):
+        delattr(dut, missing)
+    sample_cfvec_coverage(recorder, env, 11)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_051")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
+def test_backend_checker_arbitration_generated_signal_contract():
+    root = Path(__file__).resolve().parents[7]
+    names = {line[len("  - name: "):].strip() for line in
+             (root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml").read_text().splitlines()
+             if line.startswith("  - name: ")}
+    required = {_FTQ_PREFIX + stem for stem in (
+        "backendRedirect_valid", "aheadIdxMatch", "redirectReg_bits_target",
+        "resolveQueue_io_backendRedirectPtr_flag", "resolveQueue_io_backendRedirectPtr_value",
+        "backendRedirect_bits_ftqOffset", "redirect_1_valid", "redirect_1_bits_ftqIdx_flag",
+        "redirect_1_bits_ftqIdx_value", "redirect_1_bits_ftqOffset",
+        "ifuRedirect_valid", "ifuResolve_valid",
+    )}
+    required.add("Frontend_top.Frontend._inner_ftq_io_toBpu_redirect_bits_target_addr")
+    assert required <= names, sorted(required - names)
 
 
 def test_dual_source_writeback_requires_two_observable_fetch_blocks(tmp_path):
@@ -1922,7 +2394,8 @@ def _set_invalid_taken_exception_s1(
     dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_valid", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_exceptionType_value", 0)
-    dut.set(_PREFIX + "io_toIBuffer_bits_pc_0_addr", 0)
+    dut.set(_PREFIX + "s2_alignedInstrPcVec_0_addr", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_foldpc_0", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 0)
     for slot in range(35):
@@ -1960,7 +2433,7 @@ def _set_ibuffer_state(
     dut.set(_IBUFFER_PREFIX + "deqPtrVec_0_flag", deq_pointer[0])
     dut.set(_IBUFFER_PREFIX + "deqPtrVec_0_value", deq_pointer[1])
     dut.set(_IBUFFER_PREFIX + "outputEntries_0_valid", head_valid)
-    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_pc_addr", head_pc >> 1)
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_foldpc", fold_pc(head_pc))
     dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_flag", head_ftq[0])
     dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_value", head_ftq[1])
     dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_instrEndOffset", head_offset)
@@ -2075,6 +2548,10 @@ def test_invalid_taken_fetch_exception_survives_backpressure_until_fire(tmp_path
 
 def test_invalid_taken_fetch_exception_does_not_replace_pending_transaction(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
+    # This test asserts a globally empty risk list; provide the unrelated
+    # trigger config so its intentionally incomplete FakeDut is not a gap.
+    for slot in range(4):
+        _set_frontend_trigger_config(dut, slot)
     _set_invalid_taken_exception_s1(dut, ftq_value=7)
     sample_cfvec_coverage(recorder, env, 1)
 
@@ -2144,6 +2621,51 @@ def test_invalid_taken_fetch_exception_rejects_ibuffer_pointer_mismatch(tmp_path
     )
 
 
+@pytest.mark.parametrize("probe", ["io_toIBuffer_bits_foldpc_0", "s2_alignedInstrPcVec_0_addr"])
+@pytest.mark.parametrize("missing", [False, True])
+def test_invalid_taken_fetch_exception_rejects_unverified_pc(tmp_path, probe, missing):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[(0, 0x80000000, 0x13, 0, 1, 1, 7, 1)])
+    if missing:
+        delattr(dut, _PREFIX + probe)
+        recorder._dut_signal_cache.pop(_PREFIX + probe, None)
+    else:
+        dut.set(_PREFIX + probe, 17)
+    sample_cfvec_coverage(recorder, env, 2)
+    _set_ibuffer_state(dut, num_valid=4, enq_pointer=(0, 12))
+    sample_cfvec_coverage(recorder, env, 3)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert any(item.get("risk") == "ifu_invalid_taken_exception_checkpoint_failed"
+               and not item.get("foldpc_matches_pc", True) for item in recorder.risk_observations)
+
+
+@pytest.mark.parametrize("field", ["foldpc", "ftqPtr_flag", "ftqPtr_value", "instrEndOffset", "inst"])
+def test_invalid_taken_fetch_exception_rejects_changed_old_head(tmp_path, field):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[(0, 0x80000000, 0x13, 0, 1, 1, 7, 1)])
+    sample_cfvec_coverage(recorder, env, 2)
+    _set_ibuffer_state(dut, num_valid=4, enq_pointer=(0, 12))
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_" + field, 17)
+    sample_cfvec_coverage(recorder, env, 3)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert any(item.get("risk") == "ifu_invalid_taken_exception_checkpoint_failed"
+               and not item.get("old_unconsumed_entry_preserved", True) for item in recorder.risk_observations)
+
+
+def test_invalid_taken_fetch_exception_does_not_default_missing_old_head_pc(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    delattr(dut, _IBUFFER_PREFIX + "outputEntries_0_bits_foldpc")
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder._ifu_invalid_taken_exception_pending is None
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert recorder.risk_observations
+
+
 def _set_frontend_trigger_config(
     dut,
     slot,
@@ -2182,6 +2704,7 @@ def _set_frontend_trigger_lane(
     dut.set(_PREFIX + "s2_alignedInstrValid", 1 if valid else 0)
     dut.set(_PREFIX + "s2_alignedInstrPcVec_0_addr", int(pc) >> 1)
     dut.set(_PREFIX + "io_toIBuffer_bits_pc_0_addr", int(pc) >> 1)
+    dut.set(_PREFIX + "io_toIBuffer_bits_foldpc_0", fold_pc(pc))
     # Keep a complete registered S2 transaction available to the trigger
     # producer; trigger-only tests still use the same deterministic payload.
     dut.set(_PREFIX + "s2_alignedInstrVec_0_data", 0x0001)
@@ -2213,7 +2736,20 @@ def _drive_frontend_trigger_update(dut, slot, config):
         dut.set(_PREFIX + f"io_frontendTrigger_tUpdate_bits_tdata_{field}", value)
 
 
-def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_path):
+@pytest.fixture(params=[True, False], ids=["timing-readable", "timing-absent"])
+def trigger_timing_readable(request, monkeypatch):
+    if not request.param:
+        original_set = _FakeDut.set
+
+        def set_without_timing(self, name, value):
+            if not name.endswith("_timing"):
+                original_set(self, name, value)
+
+        monkeypatch.setattr(_FakeDut, "set", set_without_timing)
+    return request.param
+
+
+def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_path, trigger_timing_readable):
     recorder, _env, dut, _memory = _make_recorder(tmp_path)
     for slot in range(4):
         _set_frontend_trigger_config(dut, slot)
@@ -2323,7 +2859,7 @@ def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_p
         dut, pc=target, hits=(1, 1, 0, 0), can_fire=(0, 0, 0, 0), triggered=15
     )
     _sample_frontend_trigger(recorder, dut, 13)
-    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_102")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_102") is trigger_timing_readable
 
     dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
     only_breakpoint = _set_frontend_trigger_config(
@@ -2339,7 +2875,7 @@ def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_p
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_103")
 
 
-def test_frontend_trigger_sampler_checks_s2_transaction_consistency(tmp_path):
+def test_frontend_trigger_sampler_checks_s2_transaction_consistency(tmp_path, trigger_timing_readable):
     recorder, _env, dut, _memory = _make_recorder(tmp_path)
     for slot in range(4):
         _set_frontend_trigger_config(dut, slot)
@@ -2382,10 +2918,11 @@ def test_frontend_trigger_sampler_checks_s2_transaction_consistency(tmp_path):
     assert not mismatch.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_030")
 
 
+@pytest.mark.parametrize("corrupt", ["ftq", "pc", "foldpc"])
 def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flush(
-    tmp_path,
+    tmp_path, trigger_timing_readable, corrupt,
 ):
-    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
     target = 0x80000100
     for slot in range(4):
         _set_frontend_trigger_config(dut, slot)
@@ -2410,7 +2947,12 @@ def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flus
     dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
     dut.set(_PREFIX + "s2_flush", 1)
     dut.set(_PREFIX + "io_toIBuffer_valid", 0)
-    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 8)
+    broken_stem, wrong_value, right_value = {
+        "ftq": ("io_toIBuffer_bits_ftqPtr_0_value", 8, 7),
+        "pc": ("s2_alignedInstrPcVec_0_addr", (target + 2) >> 1, target >> 1),
+        "foldpc": ("io_toIBuffer_bits_foldpc_0", fold_pc(target) ^ 1, fold_pc(target)),
+    }[corrupt]
+    dut.set(_PREFIX + broken_stem, wrong_value)
     _sample_frontend_trigger(recorder, dut, 2)
     assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_105")
 
@@ -2418,12 +2960,14 @@ def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flus
     dut.set(_PREFIX + "s2_flush", 0)
     dut.set(_PREFIX + "io_toIBuffer_valid", 1)
     dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 7)
+    dut.set(_PREFIX + broken_stem, right_value)
     _sample_frontend_trigger(recorder, dut, 3)
 
     dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
     dut.set(_PREFIX + "s2_flush", 1)
     dut.set(_PREFIX + "io_toIBuffer_valid", 0)
-    _sample_frontend_trigger(recorder, dut, 4)
+    recorder._ifu_redirect_skip_until_cycle = 5
+    sample_cfvec_coverage(recorder, env, 4)
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_105")
 
 
@@ -2553,7 +3097,7 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _IBUFFER_PREFIX + "deqPtrVec_0_flag",
         _IBUFFER_PREFIX + "deqPtrVec_0_value",
         _IBUFFER_PREFIX + "outputEntries_0_valid",
-        _IBUFFER_PREFIX + "outputEntries_0_bits_pc_addr",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_foldpc",
         _IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_flag",
         _IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_value",
         _IBUFFER_PREFIX + "outputEntries_0_bits_instrEndOffset",
@@ -2567,12 +3111,15 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
     }
     required |= {
         _PREFIX + f"io_frontendTrigger_tUpdate_bits_tdata_{field}"
-        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+        for field in ("matchType", "select", "action", "chain", "tdata2")
     }
     required |= {
         _TRIGGER_PREFIX + f"tdataVec_{slot}_{field}"
         for slot in range(4)
-        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+        # This checks only the emitted subset, not runtime sampler readiness:
+        # the legacy sampler still requires timing and must visibly reject
+        # this build until its per-feature contract has been reviewed/migrated.
+        for field in ("matchType", "select", "action", "chain", "tdata2")
     }
     required |= {
         _TRIGGER_PREFIX + f"triggerEnableVec_{slot}" for slot in range(4)
@@ -2603,3 +3150,36 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         for index in range(35)
     }
     assert required <= names
+
+
+def test_frontend_trigger_timing_contract_is_hardwired_false():
+    """Bind timing's constant source to the integration route and emitted ABI.
+
+    This is a design/capability contract, never a BIN-1000 runtime witness.
+    """
+    repo_root = Path(__file__).resolve().parents[7]
+    scala = repo_root / "src/main/scala/xiangshan"
+    source = (scala / "Bundle.scala").read_text()
+    match_class = source.split("class MatchTriggerIO(", 1)[1].split("\nclass ", 1)[0]
+    method = match_class.split("def GenTdataDistribute(", 1)[1].split("\n  }", 1)[0]
+    assert "this.timing    := false.B" in method
+    route = {
+        "backend/fu/NewCSR/Debug.scala": "io.out.frontendTrigger.tUpdate.bits.tdata.GenTdataDistribute(tdata1Selected, tdata2Selected)",
+        "backend/fu/NewCSR/NewCSR.scala": "io.status.frontendTrigger := debugMod.io.out.frontendTrigger",
+        "backend/fu/wrapper/CSR.scala": "custom.frontend_trigger := csrMod.io.status.frontendTrigger",
+        "backend/Backend.scala": "io.frontendCsrCtrl := csrio.customCtrl",
+        "XSCore.scala": "frontend.io.csrCtrl <> backend.io.frontendCsrCtrl",
+        "frontend/Frontend.scala": "ifu.io.frontendTrigger := csrCtrl.frontend_trigger",
+    }
+    for file, connection in route.items():
+        assert connection in (scala / file).read_text(), file
+    trigger = (repo_root / "build-frontend/rtl/FrontendTrigger.sv").read_text()
+    assert "tdataVec_0_chain" in trigger and "triggerCanFireVec_1 =" in trigger
+    assert "timing" not in trigger
+    names = {line[len("  - name: "):].strip() for line in
+             (repo_root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml").read_text().splitlines()
+             if line.startswith("  - name: ")}
+    assert not any("frontend_trigger_tUpdate_bits_tdata_timing" in name
+                   or "frontendTrigger_tUpdate_bits_tdata_timing" in name
+                   or ("frontendTrigger." in name and name.endswith("_timing"))
+                   for name in names)

@@ -21,6 +21,7 @@ _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 _INVALID_TAKEN_S2_TIMEOUT_CYCLES = 16
 _INVALID_TAKEN_HOLD_TIMEOUT_CYCLES = 512
 _GUARDED_PC_ADDR_WIDTH = 50
+_OWNER_ADDRESS_BOUNDARY_BYTES = 0x2000
 
 
 def _read_ifu_internal(recorder, dut, stem: str) -> Optional[int]:
@@ -193,7 +194,7 @@ def _read_ibuffer_state(recorder, dut) -> dict[str, Any]:
         _read_ibuffer_internal(recorder, dut, "deqPtrVec_0_value"),
     )
     head_values = (
-        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_pc_addr"),
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_foldpc"),
         _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_ftqPtr_flag"),
         _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_ftqPtr_value"),
         _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_instrEndOffset"),
@@ -210,6 +211,7 @@ def _read_ibuffer_state(recorder, dut) -> dict[str, Any]:
         "deq_pointer": deq_pointer,
         "head_valid": _read_ibuffer_internal(recorder, dut, "outputEntries_0_valid"),
         "head_identity": head_identity,
+        "head_pc_encoding": "foldpc",
         "flush": recorder._read_first_dut_signal(
             dut,
             (
@@ -294,39 +296,51 @@ def _read_ftq_first(recorder, dut, *stems: str) -> Optional[int]:
 
 
 def _read_gpaddr_output(recorder, dut, stem: str) -> Optional[int]:
-    value = _read_ifu_internal(recorder, dut, f"io_toBackend_gpAddrMem_{stem}")
+    return _read_gpaddr_output_with_path(recorder, dut, stem)[0]
+
+
+def _read_gpaddr_output_with_path(recorder, dut, stem: str):
+    value, path = _read_ifu_internal_with_path(recorder, dut, f"io_toBackend_gpAddrMem_{stem}")
     if value is not None:
-        return value
-    return recorder._read_first_dut_signal(
-        dut,
-        (
-            f"Frontend_top.io_backend_fromIfu_gpAddrMem_{stem}",
-            f"Frontend_top.__Vtogcov__io_backend_fromIfu_gpAddrMem_{stem}",
-        ),
-    )
+        return value, path
+    for path in (
+        f"Frontend_top.io_backend_fromIfu_gpAddrMem_{stem}",
+        f"Frontend_top.__Vtogcov__io_backend_fromIfu_gpAddrMem_{stem}",
+    ):
+        value = recorder._try_read_dut_signal(dut, path)
+        if value is not None:
+            return int(value), path
+    return None, None
 
 
 _FRONTEND_TRIGGER_PREFIXES = (
     "Frontend_top.Frontend.inner_ifu.frontendTrigger.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu.frontendTrigger.",
 )
+_FRONTEND_TRIGGER_CONFIG_FIELDS = ("matchType", "select", "timing", "action", "chain", "tdata2")
+_FRONTEND_TRIGGER_PC_FIELDS = ("matchType", "select", "action", "chain", "tdata2")
 
 
 def _read_frontend_trigger(recorder, dut, stem: str) -> Optional[int]:
-    return recorder._read_first_dut_signal(
-        dut,
-        tuple(prefix + str(stem) for prefix in _FRONTEND_TRIGGER_PREFIXES),
-    )
+    for prefix in _FRONTEND_TRIGGER_PREFIXES:
+        path = prefix + str(stem)
+        value = recorder._try_read_dut_signal(dut, path)
+        if value is not None:
+            paths = getattr(recorder, "_ifu_frontend_trigger_signal_paths", {})
+            paths[str(stem)] = path
+            recorder._ifu_frontend_trigger_signal_paths = paths
+            return int(value)
+    return None
 
 
-def _frontend_trigger_config(recorder, dut, slot: int) -> Optional[tuple[int, ...]]:
+def _frontend_trigger_config(recorder, dut, slot: int) -> tuple[Optional[int], ...]:
     values = tuple(
         _read_frontend_trigger(recorder, dut, f"tdataVec_{int(slot)}_{field}")
-        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+        for field in _FRONTEND_TRIGGER_CONFIG_FIELDS
     )
-    if any(value is None for value in values):
-        return None
-    return tuple(int(value) for value in values)
+    # None stays explicitly unknown. Timing-independent leaves use only the
+    # five real fields; BIN-1000 still requires actual timing observations.
+    return values
 
 
 def _frontend_trigger_compare(pc: int, match_type: int, tdata2: int) -> bool:
@@ -361,6 +375,7 @@ def _frontend_trigger_state(recorder) -> dict[str, Any]:
             "s2_transaction_missing": set(),
             "held_trigger": None,
             "marked": set(),
+            "timing_observable": None,
         }
         recorder._ifu_frontend_trigger_state = state
     return state
@@ -379,7 +394,11 @@ def _mark_frontend_trigger_once(
         recorder,
         str(bin_id),
         int(cycle),
-        observations,
+        {**observations,
+         "required_config_fields": list(_FRONTEND_TRIGGER_CONFIG_FIELDS if str(bin_id) == "BIN-1000"
+                                        else _FRONTEND_TRIGGER_PC_FIELDS),
+         "observed_timing": [config[2] for config in (state.get("last_configs") or ())],
+         "trigger_signal_paths": dict(getattr(recorder, "_ifu_frontend_trigger_signal_paths", {}))},
         producer="ifu_frontend_trigger_v3_sampler",
     ):
         state["marked"].add(str(bin_id))
@@ -427,9 +446,65 @@ def _read_frontend_trigger_s2_transaction(recorder, dut, lane: int) -> Optional[
 def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
     state = _frontend_trigger_state(recorder)
     configs = tuple(_frontend_trigger_config(recorder, dut, slot) for slot in range(4))
-    if any(config is None for config in configs):
-        return
-    configs = tuple(config for config in configs if config is not None)
+    missing_required = any(
+        value is None for config in configs for index, value in enumerate(config) if index != 2
+    )
+    timing_observable = tuple(config[2] is not None for config in configs)
+    timing_transition = state.get("timing_observable") is None
+    if state.get("timing_observable") is not None and state.get("timing_observable") != timing_observable:
+        # A capability transition cannot join proofs collected under different
+        # observable contracts. Stable unavailable timing need not suppress
+        # independent PC/config predicates forever.
+        recorder._ifu_frontend_trigger_state = None
+        state = _frontend_trigger_state(recorder)
+    state["timing_observable"] = timing_observable
+    if missing_required or not all(timing_observable):
+        missing = [f"tdataVec_{slot}_{field}"
+                   for slot, config in enumerate(configs)
+                   for field, value in zip(_FRONTEND_TRIGGER_CONFIG_FIELDS, config) if value is None]
+        affected = (["BIN-927", "BIN-928", *[f"BIN-{i}" for i in range(996, 1004)]]
+                    if missing_required else ["BIN-1000"])
+        previous = getattr(recorder, "_ifu_frontend_trigger_config_gap", None)
+        diagnostics = dict(
+            first_cycle=int(cycle) if previous is None else previous["first_cycle"],
+            last_cycle=int(cycle), active=True,
+            rejected_samples=1 if previous is None else previous["rejected_samples"] + 1,
+            missing=missing,
+            attempted_paths={stem: [prefix + stem for prefix in _FRONTEND_TRIGGER_PREFIXES]
+                             for stem in missing},
+            affected_bin_ids=affected,
+            coverage_promotion="none_for_affected_bins", pending_history_discarded=missing_required,
+        )
+        # Preserve capability failures outside the bounded recent-risk tail;
+        # otherwise ordinary later risks can silently erase a permanent gap.
+        recorder._ifu_frontend_trigger_config_gap = diagnostics
+        _record_preclip_witness_risk_once(
+            recorder, cycle, "frontend_trigger_config_probe_missing",
+            missing=missing,
+            attempted_paths={stem: [prefix + stem for prefix in _FRONTEND_TRIGGER_PREFIXES]
+                             for stem in missing},
+            affected_bin_ids=affected,
+            coverage_promotion="none_for_affected_bins", pending_history_discarded=missing_required,
+        )
+        # A sampling gap cannot bridge verified updates, baseline payloads,
+        # held identities or multi-configuration samples from before the gap.
+        # Do not infer constant timing from a missing pin / source comment.
+        if missing_required:
+            recorder._ifu_frontend_trigger_state = None
+            return
+        state["chain_samples"].clear()
+    if not all(timing_observable) and timing_transition:
+        # First observation under an ABI without timing must not inherit
+        # update/held/baseline history constructed by an older contract.
+        state["verified_updates"].clear()
+        state["update_samples"].clear()
+        state["enable_samples"].clear()
+        state["s2_transaction_baselines"].clear()
+        state["held_trigger"] = None
+    elif all(timing_observable):
+        gap = getattr(recorder, "_ifu_frontend_trigger_config_gap", None)
+        if gap is not None:
+            gap["active"] = False
 
     update_valid = _read_ifu_internal(recorder, dut, "io_frontendTrigger_tUpdate_valid")
     update_addr = _read_ifu_internal(recorder, dut, "io_frontendTrigger_tUpdate_bits_addr")
@@ -447,8 +522,8 @@ def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
         non_target_stable = previous is not None and all(
             configs[index] == previous[index] for index in range(4) if index != slot
         )
-        if not any(value is None for value in input_values):
-            input_config = tuple(int(value) for value in input_values)
+        if not any(value is None for index, value in enumerate(input_values) if index != 2):
+            input_config = tuple(None if value is None else int(value) for value in input_values)
             if configs[slot] == input_config and non_target_stable:
                 signature = (slot, *input_config)
                 state["verified_updates"][signature] = {
@@ -474,8 +549,10 @@ def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
         )
         if held is not None and backend_redirect == 1 and output_valid == 0:
             same_identity = all(
-                _read_ifu_output_slot(recorder, dut, "pc", lane["lane"], "_addr")
+                _read_ifu_internal(recorder, dut, f"s2_alignedInstrPcVec_{lane['lane']}_addr")
                 == (int(lane["pc"]) >> 1)
+                and _read_ifu_output_slot(recorder, dut, "foldpc", lane["lane"])
+                == fold_pc(int(lane["pc"]))
                 and _read_ifu_output_slot(
                     recorder, dut, "ftqPtr", lane["lane"], "_flag"
                 )
@@ -504,6 +581,17 @@ def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
                         "old_identity_delivery_suppressed": True,
                     },
                 )
+            else:
+                _record_preclip_witness_risk_once(
+                    recorder, cycle, "frontend_trigger_flush_identity_mismatch",
+                    held_lanes=held.get("lanes", []), backend_redirect=int(backend_redirect),
+                    output_valid=output_valid, coverage_promotion="none",
+                )
+        elif backend_redirect == 1 and output_valid == 0:
+            _record_preclip_witness_risk_once(
+                recorder, cycle, "frontend_trigger_flush_without_held_identity",
+                coverage_promotion="none",
+            )
         state["held_trigger"] = None
         return
 
@@ -754,7 +842,8 @@ def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
             first = configs[0]
             second = configs[1]
             if (
-                first[4] == 1
+                first[2] is not None and second[2] is not None
+                and first[4] == 1
                 and second[4] == 0
                 and lane_observation["hits"][0] == 1
                 and lane_observation["hits"][1] == 1
@@ -985,12 +1074,91 @@ def _decode_pruned_pc(encoded_pc: Optional[int]) -> Optional[int]:
     DUT signal is a halfword address rather than a byte address.
     """
 
-    return None if encoded_pc is None else int(encoded_pc) << 1
+    if encoded_pc is None:
+        return None
+    return (int(encoded_pc) << 1) & ((1 << _GUARDED_PC_ADDR_WIDTH) - 1)
 
 
 def _active_ifu_output_slots(enq_enable: int, valid_mask: int) -> list[int]:
     active_mask = int(enq_enable) & int(valid_mask)
     return [slot for slot in range(_IFU_OUTPUT_SLOT_COUNT) if active_mask & (1 << slot)]
+
+
+def _sample_owner_address_boundary(
+    recorder,
+    dut,
+    cycle: int,
+    records: list[dict[str, Any]],
+    *,
+    exception_type: Optional[int],
+    output_req_is_uncache: Optional[int],
+) -> None:
+    """Check BIN-900 at the two ends of the current 50-bit IFU PC space."""
+
+    if output_req_is_uncache != 0 or exception_type != 0 or not records:
+        return
+    start_pc, start_path = _read_ifu_internal_with_path(
+        recorder, dut, "s2_fetchBlock_0_startVAddr_addr"
+    )
+    start_pc = _decode_pruned_pc(start_pc)
+    if start_pc is None:
+        return
+
+    address_limit = 1 << _GUARDED_PC_ADDR_WIDTH
+    if int(start_pc) < _OWNER_ADDRESS_BOUNDARY_BYTES:
+        region = "low"
+    elif int(start_pc) >= address_limit - _OWNER_ADDRESS_BOUNDARY_BYTES:
+        region = "high"
+    else:
+        return
+
+    def in_region(pc: int) -> bool:
+        if region == "low":
+            return 0 <= int(pc) < _OWNER_ADDRESS_BOUNDARY_BYTES
+        return address_limit - _OWNER_ADDRESS_BOUNDARY_BYTES <= int(pc) < address_limit
+
+    checks = {
+        "all_delivery_pcs_observable": all(item["pc"] is not None for item in records),
+        "all_foldpcs_match_delivery_pc": all(item["foldpc_matches_pc"] for item in records),
+        "all_delivery_pcs_in_region": all(
+            item["pc"] is not None and in_region(int(item["pc"])) for item in records
+        ),
+    }
+    evidence = {
+        "sample_event": "ifu_address_boundary_delivery",
+        "region": region,
+        "address_bits": _GUARDED_PC_ADDR_WIDTH,
+        "boundary_bytes": _OWNER_ADDRESS_BOUNDARY_BYTES,
+        "start_pc": int(start_pc),
+        "start_pc_signal_path": start_path,
+        "slots": records,
+        "checks": checks,
+    }
+    if not all(checks.values()):
+        recorder.record_contract_error(
+            "ifu_address_boundary_pc_reconstruction_mismatch",
+            cycle,
+            evidence,
+        )
+        return
+
+    witnesses = getattr(recorder, "_ifu_owner_address_boundary_witnesses", {})
+    witnesses.setdefault(region, {"cycle": int(cycle), **evidence})
+    recorder._ifu_owner_address_boundary_witnesses = witnesses
+    if set(witnesses) == {"low", "high"}:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-900",
+            cycle,
+            {
+                "event": "ifu_low_high_address_boundary_pc_reconstruction",
+                "address_bits": _GUARDED_PC_ADDR_WIDTH,
+                "boundary_bytes": _OWNER_ADDRESS_BOUNDARY_BYTES,
+                "witnesses": witnesses,
+                "same_recorder_run": True,
+            },
+            producer="ifu_address_boundary_sampler",
+        )
 
 
 def _read_ifu_output_mask(recorder, dut, field: str) -> Optional[int]:
@@ -1147,11 +1315,82 @@ def _sample_ibuffer_backpressure(
     recorder._ifu_ibuffer_hold_pending = None
 
 
+def _sample_backend_checker_priority(recorder, dut, cycle: int) -> None:
+    """FTQ arbitrates an IFU candidate; IFU's outgoing valid need not drop."""
+    pending = getattr(recorder, "_ifu_backend_checker_pending", None)
+    recorder._ifu_backend_checker_pending = None
+    if pending is not None and int(cycle) == int(pending["cycle"]) + 1:
+        cleanup = {
+            "ifu_redirect_valid": _read_ftq_first(recorder, dut, "ifuRedirect_valid"),
+            "ifu_resolve_valid": _read_ftq_first(recorder, dut, "ifuResolve_valid"),
+            **{stem: _read_ifu_internal(recorder, dut, stem) for stem in (
+                "s1_valid", "s2_valid_valid", "s0_prevEndIsHalfRvi",
+                "s1_prevEndHalfRviInfo_valid", "s1_prevEndHalfRviInfo_bits_data",
+                "s1_prevEndHalfRviInfo_bits_pc_addr", "s1_prevIBufEnqPtrDup_dup_0_value",
+            )},
+        }
+        if all(value == 0 for value in cleanup.values()):
+            evidence = {**pending, "check_cycle": int(cycle), "cleanup": cleanup,
+                        "backend_won": True}
+            for bin_id in ("BIN-949", "BIN-995"):
+                mark_owner_v3_checked(recorder, bin_id, cycle, evidence,
+                                      producer="ifu_redirect_priority_sampler")
+
+    if not all(_read_ifu_internal(recorder, dut, stem) == 1 for stem in (
+        "io_fromFtq_redirect_valid", "wbRedirect_valid", "io_toFtq_wbRedirect_valid",
+        "s0_flush", "s1_flush", "s2_flush",
+    )):
+        return
+    if _read_ftq_first(recorder, dut, "backendRedirect_valid") != 1:
+        return
+    # The receiver either bypasses an advance-matched backend redirect or
+    # uses its registered payload. Observe that choice; never infer from age.
+    ahead = _read_ftq_first(recorder, dut, "aheadIdxMatch")
+    if ahead == 0:
+        backend_target = _read_ftq_first(recorder, dut, "redirectReg_bits_target")
+    elif ahead == 1:
+        backend_target = recorder._read_first_dut_signal(dut, (
+            "io_backend_toFtq_redirect_bits_target",
+            "Frontend_top.Frontend.inner_ftq.io_fromBackend_redirect_bits_target",
+        ))
+    else:
+        return
+    fields = {
+        "backend_target": backend_target,
+        "backend_flag": _read_ftq_first(recorder, dut, "resolveQueue_io_backendRedirectPtr_flag"),
+        "backend_value": _read_ftq_first(recorder, dut, "resolveQueue_io_backendRedirectPtr_value"),
+        "backend_offset": _read_ftq_first(recorder, dut, "backendRedirect_bits_ftqOffset"),
+        "selected_valid": _read_ftq_first(recorder, dut, "redirect_1_valid"),
+        "selected_flag": _read_ftq_first(recorder, dut, "redirect_1_bits_ftqIdx_flag"),
+        "selected_value": _read_ftq_first(recorder, dut, "redirect_1_bits_ftqIdx_value"),
+        "selected_offset": _read_ftq_first(recorder, dut, "redirect_1_bits_ftqOffset"),
+        "selected_target_addr": _read_ftq_first(recorder, dut, "io_toBpu_redirect_bits_target_addr"),
+        "checker_flag": _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_bits_ftqIdx_flag"),
+        "checker_value": _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_bits_ftqIdx_value"),
+        "checker_offset": _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_bits_ftqOffset"),
+        "checker_target": _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_bits_target"),
+    }
+    if any(value is None for value in fields.values()):
+        return
+    matches = (
+        fields["selected_valid"] == 1
+        and fields["selected_flag"] == fields["backend_flag"]
+        and fields["selected_value"] == fields["backend_value"]
+        and fields["selected_offset"] == fields["backend_offset"]
+        and int(fields["selected_target_addr"]) << 1 == fields["backend_target"]
+    )
+    if matches:
+        recorder._ifu_backend_checker_pending = {
+            "cycle": int(cycle), "ahead_match": int(ahead), **fields,
+            "backend_redirect": 1, "internal_wb_redirect": 1,
+            "outbound_ifu_redirect": 1, "flushes": [1, 1, 1],
+        }
+
+
 def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
     previous = getattr(recorder, "_ifu_redirect_last_state", None)
     backend_redirect = _read_ifu_internal(recorder, dut, "io_fromFtq_redirect_valid")
     wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
-    outbound_redirect = _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_valid")
     s0_flush = _read_ifu_internal(recorder, dut, "s0_flush")
     s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
     s2_flush = _read_ifu_internal(recorder, dut, "s2_flush")
@@ -1220,22 +1459,6 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
                 producer="ifu_redirect_cleanup_sampler",
             )
         recorder._ifu_redirect_cleanup_pending = None
-
-    if backend_redirect == 1 and wb_redirect == 1 and outbound_redirect == 0:
-        evidence = {
-            "backend_redirect": 1,
-            "internal_wb_redirect": 1,
-            "outbound_ifu_redirect": 0,
-            "backend_won": True,
-        }
-        for bin_id in ("BIN-949", "BIN-995"):
-            mark_owner_v3_checked(
-                recorder,
-                bin_id,
-                cycle,
-                evidence,
-                producer="ifu_redirect_priority_sampler",
-            )
 
     all_stages_flush = s0_flush == 1 and s1_flush == 1 and s2_flush == 1
     if backend_redirect == 1 and all_stages_flush:
@@ -1397,118 +1620,95 @@ def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None
 
 
 def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
-    """Observe the IFU exception metadata contract at the IBuffer boundary.
+    """Accumulate the five separately specified BIN-954 components in one run.
 
-    BIN-954 is intentionally sampled from the V3 output contract rather than
-    inferred from instruction width/CFI classes.  GP address fields are only
-    meaningful when the IFU asserts the corresponding write enable.
+    Each witness is a complete accepted S2 transaction, not a pending bit or
+    a fragment joined to a later request. Completed component witnesses may
+    survive reset (like coverage counters); no in-flight proof is retained.
+    SatpFlush is independent of ExceptionType (Ftq.scala backend flags).
     """
+    values, paths = {}, {}
 
-    to_valid = _read_ifu_internal(recorder, dut, "io_toIBuffer_valid")
-    to_ready = _read_ifu_internal(recorder, dut, "io_toIBuffer_ready")
-    exception_type = _read_ifu_internal(
-        recorder, dut, "io_toIBuffer_bits_exceptionType_value"
-    )
-    is_backend_exception = _read_ifu_internal(
-        recorder, dut, "io_toIBuffer_bits_isBackendException"
-    )
-    has_satp_flush = _read_ifu_internal(
-        recorder, dut, "io_toIBuffer_bits_hasSatpFlush"
-    )
-    exception_cross_page = _read_ifu_internal(
-        recorder, dut, "io_toIBuffer_bits_exceptionCrossPage"
-    )
-    gp_wen = _read_gpaddr_output(recorder, dut, "wen")
-    gp_waddr = _read_gpaddr_output(recorder, dut, "waddr")
-    gpaddr = _read_gpaddr_output(recorder, dut, "wdata_gpaddr")
-    is_for_vs_nonleaf_pte = _read_gpaddr_output(
-        recorder, dut, "wdata_isForVSnonLeafPTE"
-    )
-    meta_backend_exception = _read_ifu_internal(
-        recorder, dut, "s2_icacheMeta_0_isBackendException"
-    )
-    meta_satp_flush = _read_ifu_internal(
-        recorder, dut, "s2_icacheMeta_0_hasSatpFlush"
-    )
-    meta_gpaddr = _read_ifu_internal(recorder, dut, "s2_icacheMeta_0_gpAddr_addr")
-    meta_is_for_vs_nonleaf_pte = _read_ifu_internal(
-        recorder, dut, "s2_icacheMeta_0_isForVSnonLeafPTE"
-    )
-    prev_end_is_half_rvi = _read_ifu_internal(
-        recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
-    )
-    ftq_idx = _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_ftqIdx_value")
-    if None in {
-        to_valid,
-        to_ready,
-        exception_type,
-        is_backend_exception,
-        has_satp_flush,
-        exception_cross_page,
-        gp_wen,
-        gp_waddr,
-        gpaddr,
-        is_for_vs_nonleaf_pte,
-        meta_backend_exception,
-        meta_satp_flush,
-        meta_gpaddr,
-        meta_is_for_vs_nonleaf_pte,
-        prev_end_is_half_rvi,
-        ftq_idx,
-    }:
+    def read(stem, *, gp=False):
+        key = f"gpAddrMem.{stem}" if gp else stem
+        value, path = (_read_gpaddr_output_with_path(recorder, dut, stem) if gp
+                       else _read_ifu_internal_with_path(recorder, dut, stem))
+        if value is None:
+            raise KeyError(key)
+        values[key], paths[key] = int(value), path
+        return int(value)
+
+    def note_gap(component, exc):
+        key = (component, str(exc.args[0]))
+        seen = getattr(recorder, "_ifu_exception_metadata_gaps", set())
+        if key not in seen:
+            recorder.risk_observations.append({
+                "event": "ifu_exception_metadata_missing_probe", "cycle": int(cycle),
+                "component": component, "missing": key[1], "bin_id": "BIN-954",
+            })
+            seen.add(key)
+            recorder._ifu_exception_metadata_gaps = seen
+
+    try:
+        if read("io_toIBuffer_valid") != 1 or read("io_toIBuffer_ready") != 1:
+            return
+        if read("io_toIBuffer_bits_enqEnable") == 0:
+            return
+        ftq = [read("s2_fetchBlock_0_ftqIdx_flag"), read("s2_fetchBlock_0_ftqIdx_value")]
+        start_pc = read("s2_fetchBlock_0_startVAddr_addr") << 1
+        exception = read("io_toIBuffer_bits_exceptionType_value")
+        meta_exception = read("s2_icacheMeta_0_exception_value")
+    except KeyError as exc:
+        note_gap("delivery", exc)
         return
-    if int(to_valid) != 1 or int(to_ready) != 1 or int(exception_type) == 0:
+
+    observed = set()
+    for component, stem in (("backend_exception", "isBackendException"), ("satp_flush", "hasSatpFlush")):
+        try:
+            if read(f"s2_icacheMeta_0_{stem}") == read(f"io_toIBuffer_bits_{stem}") == 1:
+                if component == "satp_flush" or exception == meta_exception in (1, 2, 3):
+                    observed.add(component)
+        except KeyError as exc:
+            note_gap(component, exc)
+
+    if exception == meta_exception and meta_exception in _FETCH_EXCEPTION_VALUES:
+        try:
+            if read("s2_prevEndIsHalfRviInfo_valid") == read("io_toIBuffer_bits_exceptionCrossPage") == 1:
+                half_pc = read("s2_prevEndIsHalfRviInfo_bits_pc_addr") << 1
+                half_data = read("s2_prevEndIsHalfRviInfo_bits_data")
+                if half_pc & 0xFFF == 0xFFE and start_pc == half_pc + 2 and half_data & 3 == 3:
+                    observed.add("cross_page")
+        except KeyError as exc:
+            note_gap("cross_page", exc)
+
+    # GPF has encoding 2. A stale wen/data combination under PF/AF/HWE/Ill
+    # must not count, even if its address accidentally matches an FTQ index.
+    if exception == meta_exception == 2:
+        try:
+            if (read("wen", gp=True) == 1 and read("waddr", gp=True) == ftq[1]
+                    and read("wdata_gpaddr", gp=True) == read("s2_icacheMeta_0_gpAddr_addr") << 1
+                    and read("wdata_isForVSnonLeafPTE", gp=True) == read("s2_icacheMeta_0_isForVSnonLeafPTE")):
+                observed.add("gpaddr")
+                if values["gpAddrMem.wdata_isForVSnonLeafPTE"] == 1:
+                    observed.add("vs_nonleaf_pte")
+        except KeyError as exc:
+            note_gap("gpaddr", exc)
+
+    witnesses = getattr(recorder, "_ifu_exception_metadata_witnesses", {})
+    added = observed - witnesses.keys()
+    if not added:
         return
-    checks = set(getattr(recorder, "_ifu_exception_metadata_checks", set()))
-    observed_checks = set()
-    if int(meta_backend_exception) == 1 and int(is_backend_exception) == 1:
-        observed_checks.add("backend_exception")
-    if int(meta_satp_flush) == 1 and int(has_satp_flush) == 1:
-        observed_checks.add("satp_flush")
-    if int(prev_end_is_half_rvi) == 1 and int(exception_cross_page) == 1:
-        observed_checks.add("cross_page")
-    gp_contract_matches = (
-        int(gp_wen) == 1
-        and int(gp_waddr) == int(ftq_idx)
-        and int(gpaddr) == int(meta_gpaddr) << 1
-        and int(is_for_vs_nonleaf_pte) == int(meta_is_for_vs_nonleaf_pte)
-    )
-    if gp_contract_matches:
-        observed_checks.add("gpaddr")
-        if int(is_for_vs_nonleaf_pte) == 1:
-            observed_checks.add("vs_nonleaf_pte")
-    if not observed_checks:
-        return
-    checks.update(observed_checks)
-    recorder._ifu_exception_metadata_checks = checks
-    evidence = {
-        "event": "ifu_exception_metadata_contract",
-        "exception_type": int(exception_type),
-        "is_backend_exception": int(is_backend_exception),
-        "has_satp_flush": int(has_satp_flush),
-        "exception_cross_page": int(exception_cross_page),
-        "gp_addr_mem_wen": int(gp_wen),
-        "gp_addr_mem_waddr": int(gp_waddr),
-        "gp_addr": int(gpaddr),
-        "is_for_vs_nonleaf_pte": int(is_for_vs_nonleaf_pte),
-        "meta_is_backend_exception": int(meta_backend_exception),
-        "meta_has_satp_flush": int(meta_satp_flush),
-        "meta_gp_addr": int(meta_gpaddr),
-        "meta_is_for_vs_nonleaf_pte": int(meta_is_for_vs_nonleaf_pte),
-        "prev_end_is_half_rvi": int(prev_end_is_half_rvi),
-        "ftq_idx": int(ftq_idx),
-        "observed_checks": sorted(observed_checks),
-        "accumulated_checks": sorted(checks),
-        "ibuffer_delivery": True,
-    }
-    required_checks = {
-        "backend_exception",
-        "satp_flush",
-        "cross_page",
-        "gpaddr",
-        "vs_nonleaf_pte",
-    }
-    if required_checks <= checks:
+    witness = {"cycle": int(cycle), "ftq": ftq, "start_pc": start_pc,
+               "values": dict(values), "signal_paths": dict(paths), "ibuffer_delivery": True}
+    for component in added:
+        witnesses[component] = witness
+    recorder._ifu_exception_metadata_witnesses = witnesses
+    recorder._ifu_exception_metadata_checks = set(witnesses)
+    evidence = {"event": "ifu_exception_metadata_contract", "cycle": int(cycle),
+                "observed_checks": sorted(observed), "accumulated_checks": sorted(witnesses),
+                "component_witnesses": dict(witnesses), "ibuffer_delivery": True}
+    recorder.risk_observations.append(evidence)
+    if {"backend_exception", "satp_flush", "cross_page", "gpaddr", "vs_nonleaf_pte"} <= witnesses.keys():
         mark_owner_v3_checked(
             recorder,
             "BIN-954",
@@ -1564,8 +1764,8 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
                         post_state["enq_pointer"], post_state["deq_pointer"]
                     )
                     old_head_distinct = (
-                        int(pre_state["head_identity"][0]) << 1
-                        != int(pending["output_pc"])
+                        int(pre_state["head_identity"][0])
+                        != fold_pc(int(pending["output_pc"]))
                         or tuple(pre_state["head_identity"][1:3])
                         != tuple(pending["output_ftq_identity"])
                     )
@@ -1722,10 +1922,19 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
                             None
                             if active_slot is None
                             else _decode_pruned_pc(
-                                _read_ifu_output_slot(
-                                    recorder, dut, "pc", active_slot, "_addr"
+                                _read_ifu_internal(
+                                    recorder, dut, f"s2_alignedInstrPcVec_{active_slot}_addr"
                                 )
                             )
+                        )
+                        output_foldpc = (
+                            None if active_slot is None
+                            else _read_ifu_output_slot(recorder, dut, "foldpc", active_slot)
+                        )
+                        foldpc_matches_pc = (
+                            output_pc is not None
+                            and output_foldpc is not None
+                            and int(output_foldpc) == fold_pc(int(output_pc))
                         )
                         output_ftq = (
                             None
@@ -1751,12 +1960,14 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
                             and active_mask.bit_count() == 1
                             and int(exception_mask) == active_mask
                             and output_pc == pending["expected_pc"]
+                            and foldpc_matches_pc
                             and output_ftq == tuple(pending["ftq_identity"])
                         )
                         payload_signature = (
                             int(active_mask),
                             int(exception_mask),
                             output_pc,
+                            output_foldpc,
                             output_ftq,
                             int(values["to_ibuffer_exception"]),
                             int(values["s2_instr_count"]),
@@ -1784,6 +1995,8 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
                                 active_mask=int(active_mask),
                                 exception_mask=int(exception_mask),
                                 output_pc=output_pc,
+                                output_foldpc=output_foldpc,
+                                foldpc_matches_pc=foldpc_matches_pc,
                                 output_ftq_identity=output_ftq,
                             )
                         elif int(values["to_ibuffer_ready"]) == 0:
@@ -1819,6 +2032,8 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
                                         "active_mask": int(active_mask),
                                         "exception_mask": int(exception_mask),
                                         "output_pc": output_pc,
+                                        "output_foldpc": output_foldpc,
+                                        "foldpc_matches_pc": foldpc_matches_pc,
                                         "output_ftq_identity": output_ftq,
                                         "exception_won": True,
                                         "single_instruction_delivered": True,
@@ -2346,6 +2561,24 @@ def _sample_predchecker_wb_half_rvi_selection(recorder, dut, cycle: int) -> None
             evidence,
             producer="ifu_predchecker_wb_half_rvi_sampler",
         )
+        recorder._ifu_predchecker_wb_half_rvi_recovery = {
+            "redirect_cycle": int(cycle),
+            "s0_fire_seen": False,
+            "s0_fire_cycle": None,
+            "selected_half_record": selected_half,
+            "selected_half_pc_addr": int(
+                values[f"{selected_half}_bits_pc_addr"]
+            ),
+            "selected_half_data": int(values[f"{selected_half}_bits_data"]),
+            "signal_paths": {name: paths.get(name) for name in sorted(paths)},
+        }
+        # BIN-940 additionally requires the restored instruction to reach a
+        # real S2/IBuffer transfer, without an intervening cancellation.
+        recorder._ifu_invalid_taken_half_delivery = {
+            "redirect_cycle": int(cycle), "phase": "s0",
+            "last_cycle": int(cycle), "redirect": evidence,
+            "signal_paths": dict(paths),
+        }
     else:
         mismatch_evidence = dict(evidence)
         mismatch_evidence["source_event"] = mismatch_evidence.pop("event")
@@ -2355,6 +2588,341 @@ def _sample_predchecker_wb_half_rvi_selection(recorder, dut, cycle: int) -> None
             "ifu_predchecker_wb_half_rvi_selection_mismatch",
             **mismatch_evidence,
         )
+
+
+def _sample_predchecker_wb_half_rvi_recovery(recorder, dut, cycle: int) -> None:
+    """Check that a checker redirect's saved half-RVI is consumed by S1.
+
+    The V3 valid bit is updated only when the following S0 transaction fires;
+    observing the writeback record alone therefore cannot prove BIN-921.
+    Keep the redirect payload pending until a subsequent S0/S1 transaction
+    reconstructs the same instruction at the saved PC.
+    """
+
+    pending = getattr(recorder, "_ifu_predchecker_wb_half_rvi_recovery", None)
+    if pending is None or int(cycle) <= int(pending["redirect_cycle"]):
+        return
+
+    if int(cycle) - int(pending["redirect_cycle"]) > 64:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_recovery_timeout",
+            redirect_cycle=int(pending["redirect_cycle"]),
+            signal_paths=pending.get("signal_paths", {}),
+        )
+        recorder._ifu_predchecker_wb_half_rvi_recovery = None
+        return
+
+    s0_fire, s0_fire_path = _read_ifu_internal_with_path(recorder, dut, "s0_fire")
+    s1_valid, s1_valid_path = _read_ifu_internal_with_path(recorder, dut, "s1_valid")
+    if s0_fire is None or s1_valid is None:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_recovery_probe_missing",
+            missing=[
+                name
+                for name, value in (("s0_fire", s0_fire), ("s1_valid", s1_valid))
+                if value is None
+            ],
+            signal_paths={"s0_fire": s0_fire_path, "s1_valid": s1_valid_path},
+        )
+        return
+
+    if not pending["s0_fire_seen"]:
+        if int(s0_fire) == 1:
+            pending["s0_fire_seen"] = True
+        return
+    if int(s1_valid) != 1:
+        return
+
+    fields = {
+        "s1_prevEndHalfRviInfo_valid": None,
+        "s1_prevIBufEnqPtrDup_dup_0_value": None,
+        "s1_reqIsUncache": None,
+    }
+    paths = dict(pending.get("signal_paths", {}))
+    for field in fields:
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        fields[field] = value
+        paths[field] = path
+    missing = sorted(name for name, value in fields.items() if value is None)
+    if missing:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_recovery_probe_missing",
+            missing=missing,
+            signal_paths=paths,
+        )
+        return
+    if int(fields["s1_reqIsUncache"]) != 0:
+        return
+    if int(fields["s1_prevEndHalfRviInfo_valid"]) != 1:
+        return
+
+    lane = int(fields["s1_prevIBufEnqPtrDup_dup_0_value"]) & 0x3
+    lane_fields = {
+        "pc_addr": f"s1_alignedInstrPcVec_{lane}_addr",
+        "data": f"s1_alignedInstrVec_{lane}_data",
+        "is_rvc": f"s1_alignedInstrVec_{lane}_isRvc",
+    }
+    lane_values = {}
+    for name, field in lane_fields.items():
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        lane_values[name] = value
+        paths[field] = path
+    missing = sorted(name for name, value in lane_values.items() if value is None)
+    if missing:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_recovery_lane_probe_missing",
+            lane=lane,
+            missing=missing,
+            signal_paths=paths,
+        )
+        return
+
+    reconstructed = (
+        int(lane_values["pc_addr"]) == int(pending["selected_half_pc_addr"])
+        and (int(lane_values["data"]) & 0xFFFF) == int(pending["selected_half_data"])
+        and int(lane_values["is_rvc"]) == 0
+    )
+    evidence = {
+        "event": "ifu_predchecker_wb_half_rvi_recovered",
+        "redirect_cycle": int(pending["redirect_cycle"]),
+        "recovery_cycle": int(cycle),
+        "s0_fire_cycle": int(pending["s0_fire_cycle"]),
+        "selected_half_record": pending["selected_half_record"],
+        "selected_half_pc": _decode_pruned_pc(pending["selected_half_pc_addr"]),
+        "selected_half_data": int(pending["selected_half_data"]),
+        "s1_prev_end_half_valid": int(fields["s1_prevEndHalfRviInfo_valid"]),
+        "s1_prev_ibuf_ptr": int(fields["s1_prevIBufEnqPtrDup_dup_0_value"]),
+        "lane": lane,
+        "reconstructed_pc": _decode_pruned_pc(lane_values["pc_addr"]),
+        "reconstructed_data": int(lane_values["data"]),
+        "reconstructed_is_rvc": int(lane_values["is_rvc"]),
+        "reconstructed": bool(reconstructed),
+        "signal_paths": paths,
+    }
+    if reconstructed:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-921",
+            cycle,
+            evidence,
+            producer="ifu_predchecker_wb_half_rvi_recovery_sampler",
+        )
+        recorder._ifu_predchecker_wb_half_rvi_recovery = None
+    else:
+        _record_predchecker_wb_half_rvi_observation_once(
+            recorder,
+            cycle,
+            "ifu_predchecker_wb_half_rvi_recovery_mismatch",
+            **evidence,
+        )
+
+
+def _sample_invalid_taken_half_delivery(recorder, dut, cycle: int) -> None:
+    """BIN-940: one checked invalidTaken writeback through restored delivery.
+
+    Called before the backend recovery guard so cancellation cannot disappear
+    during skipped cfVec sampling. Missing probes and broken cycle continuity
+    invalidate the pending proof; no reset/default value is a witness.
+    """
+    pending = getattr(recorder, "_ifu_invalid_taken_half_delivery", None)
+    if pending is None or cycle <= pending["redirect_cycle"]:
+        return
+    paths = pending["signal_paths"]
+
+    def read(stem):
+        value, path = _read_ifu_internal_with_path(recorder, dut, stem)
+        paths[stem] = path
+        if value is None:
+            raise KeyError(stem)
+        return int(value)
+
+    def require(condition, reason):
+        if not condition:
+            raise ValueError(reason)
+
+    def read_predecode(stage, lane):
+        # Generated Ifu.sv registers S1 instruction.isRvc directly into
+        # S2 pdInfo.isRVC; the duplicate S1 pdInfo width wire is optimized out.
+        width = (f"s1_alignedInstrVec_{lane}_isRvc" if stage == "s1"
+                 else f"s2_alignedPdInfoVec_{lane}_isRVC")
+        return {"isRVC": read(width), "brAttribute_branchType":
+                read(f"{stage}_alignedPdInfoVec_{lane}_brAttribute_branchType")}
+
+    try:
+        require(cycle == pending["last_cycle"] + 1, "sampling_gap")
+        pending["last_cycle"] = int(cycle)
+        require(cycle - pending["redirect_cycle"] <= 128, "recovery_timeout")
+        require(read("io_fromFtq_redirect_valid") == 0, "backend_cancellation")
+        require(read("uncacheRedirect_valid") == 0, "uncache_cancellation")
+        require(read("wbRedirect_valid") == 0, "new_checker_cancellation")
+        saved = pending["redirect"]
+        pc = int(saved["selected_half_pc"])
+        low = int(saved["selected_half_data"])
+        require(low & 3 == 3, "saved_half_not_rvi")
+        require(saved["outbound_target"] == pc + 2, "nonsequential_half_target")
+        if pending["phase"] == "s0":
+            require(read("s0_flush") == 0, "s0_flush")
+            if read("s0_fire") != 1:
+                return
+            pending.update(phase="s1", s0_cycle=int(cycle))
+            return
+        if pending["phase"] == "s1":
+            require(read("s1_valid") == 1 and read("s1_flush") == 0, "s1_invalid_or_flushed")
+            require(read("s1_reqIsUncache") == 0, "s1_uncache")
+            require(read("s1_prevEndHalfRviInfo_valid") == 1, "half_not_retained")
+            require(_decode_pruned_pc(read("s1_prevEndHalfRviInfo_bits_pc_addr")) == pc,
+                    "saved_pc_changed")
+            require(read("s1_prevEndHalfRviInfo_bits_data") == low, "saved_data_changed")
+            lane = read("s1_prevIBufEnqPtrDup_dup_0_value") & 3
+            require(_decode_pruned_pc(read(f"s1_alignedInstrPcVec_{lane}_addr")) == pc,
+                    "s1_pc_mismatch")
+            instruction = ((read(f"s1_baseInstrData_{lane}") & 0xFFFF) << 16) | low
+            require(read(f"s1_alignedInstrVec_{lane}_data") == instruction, "s1_stitch_mismatch")
+            require(read(f"s1_alignedInstrVec_{lane}_isRvc") == 0, "s1_width_mismatch")
+            require(read("s1_fetchBlock_0_valid") == 1, "s1_source_invalid")
+            require(_decode_pruned_pc(read("s1_fetchBlock_0_startVAddr_addr")) == pc + 2,
+                    "s1_recovery_target_mismatch")
+            predecode = read_predecode("s1", lane)
+            branch_type = _decode_branch_type(instruction)
+            # The emitted vector is the actual source of aligned valid,
+            # not a default for an absent s1_alignedPdInfoVec_*_valid wire.
+            require((read("_s1_alignedInstrValid_T") >> lane) & 1 == 1,
+                    "s1_predecode_invalid")
+            require(predecode["isRVC"] == 0
+                    and predecode["brAttribute_branchType"] == branch_type,
+                    "s1_predecode_mismatch")
+            context = dict(lane=lane, instruction=instruction,
+                           predecode=predecode,
+                           ftq=[read(f"s1_fetchBlock_0_ftqIdx_{f}") for f in ("flag", "value")])
+            require(pending.get("s1", context) == context, "s1_stall_payload_changed")
+            pending["s1"] = context
+            if read("s1_fire") == 1:
+                pending.update(phase="s2", s1_cycle=int(cycle))
+            return
+        require(read("s2_valid_valid") == 1 and read("s2_flush") == 0, "s2_invalid_or_flushed")
+        require(read("s2_reqIsUncache") == 0, "s2_uncache")
+        lane, instruction, ftq = (pending["s1"][k] for k in ("lane", "instruction", "ftq"))
+        prefix = f"s2_alignedInstrVec_{lane}_"
+        require(read(prefix + "valid") == 1 and read(prefix + "invalidTaken") == 0,
+                "s2_incomplete_instruction")
+        require(read(prefix + "blockSel") == 0 and read(prefix + "isCrossBlockInstr") == 0,
+                "recovery_owner_mismatch")
+        require(_decode_pruned_pc(read(f"s2_alignedInstrPcVec_{lane}_addr")) == pc,
+                "s2_pc_mismatch")
+        require(read(prefix + "data") == instruction and read(prefix + "isRvc") == 0,
+                "s2_instruction_mismatch")
+        require([read(f"s2_fetchBlock_0_ftqIdx_{f}") for f in ("flag", "value")] == ftq,
+                "s2_ftq_mismatch")
+        require(_decode_pruned_pc(read("s2_fetchBlock_0_startVAddr_addr")) == pc + 2,
+                "s2_recovery_target_mismatch")
+        require(read_predecode("s2", lane) == pending["s1"]["predecode"],
+                "s2_registered_predecode_mismatch")
+        branch_type = pending["s1"]["predecode"]["brAttribute_branchType"]
+        ras = read(f"s2_alignedPdInfoVec_{lane}_brAttribute_rasAction")
+        if branch_type in (0, 1):
+            require(ras == 0, "s2_ras_mismatch")
+        offset = _decode_cfi_offset(instruction, branch_type)
+        jump_offset = read(f"s2_alignedJumpOffsetVec_{lane}_addr")
+        if offset is not None:
+            require(jump_offset == ((offset >> 1) & ((1 << _GUARDED_PC_ADDR_WIDTH) - 1)),
+                    "s2_jump_offset_mismatch")
+        # Ifu.scala's saved-half stitch explicitly assigns endOffset=0:
+        # the upper half starts the recovery fetch block. This is not the
+        # physical cacheline halfword index or the original redirect offset.
+        end_offset = 0
+        require(read(prefix + "endOffset") == end_offset, "s2_end_offset_mismatch")
+        require(read("io_toIBuffer_valid") == 1, "output_invalid")
+        for stem in ("s2_fixedInstrValid", "io_toIBuffer_bits_enqEnable", "io_toIBuffer_bits_valid"):
+            require((read(stem) >> lane) & 1 == 1, "restored_instruction_masked")
+        require(read(f"io_toIBuffer_bits_instrs_{lane}") == instruction, "output_bits_mismatch")
+        require(read(f"io_toIBuffer_bits_foldpc_{lane}") == fold_pc(pc), "output_pc_mismatch")
+        require(read(f"io_toIBuffer_bits_isRvc_{lane}") == 0, "output_width_mismatch")
+        require(read(f"io_toIBuffer_bits_instrEndOffset_{lane}_offset") == end_offset,
+                "output_offset_mismatch")
+        require([read(f"io_toIBuffer_bits_ftqPtr_{lane}_{f}") for f in ("flag", "value")] == ftq,
+                "output_owner_mismatch")
+        if read("s2_fire") != 1:
+            return
+        require(read("io_toIBuffer_ready") == 1, "output_not_accepted")
+        mark_owner_v3_checked(recorder, "BIN-940", cycle, {
+            "event": "ifu_invalid_taken_half_restored_delivery", "redirect": saved,
+            "redirect_cycle": pending["redirect_cycle"], "s0_cycle": pending["s0_cycle"],
+            "s1_cycle": pending["s1_cycle"], "delivery_cycle": int(cycle),
+            "pc": pc, "instruction": instruction, "lane": lane, "ftq": ftq,
+            "predecode": dict(pending["s1"]["predecode"], ras_action=ras,
+                              jump_offset_addr=jump_offset),
+            "end_offset": end_offset, "signal_paths": dict(paths),
+        }, producer="ifu_invalid_taken_half_delivery_sampler")
+        recorder._ifu_invalid_taken_half_delivery = None
+    except (KeyError, ValueError) as error:
+        _record_preclip_witness_risk_once(recorder, cycle, "ifu_invalid_taken_half_delivery_rejected",
+            reason=str(error), phase=pending["phase"], redirect_cycle=pending["redirect_cycle"],
+            signal_paths=dict(paths))
+        recorder._ifu_invalid_taken_half_delivery = None
+
+
+def _check_second_owner_writeback(recorder, dut, cycle, pending, checked_redirect):
+    """BIN-947 needs a real FTQ write, not merely a PredChecker output."""
+    paths = dict(pending.get("source_signal_paths", {}))
+    fields = (
+        "wbValid", "io_toFtq_wbRedirect_valid", "io_toFtq_wbRedirect_bits_ftqIdx_flag",
+        "io_toFtq_wbRedirect_bits_ftqIdx_value", "io_toFtq_wbRedirect_bits_pc",
+        "io_toFtq_wbRedirect_bits_target", "io_toFtq_wbRedirect_bits_ftqOffset",
+        "io_toFtq_wbRedirect_bits_isRVC", "io_toFtq_wbRedirect_bits_taken",
+        "io_toFtq_wbRedirect_bits_attribute_branchType",
+        "io_toFtq_wbRedirect_bits_attribute_rasAction",
+        *(f"wbAlignFetchBlock_{b}_{field}" for b in range(2)
+          for field in ("ftqIdx_flag", "ftqIdx_value", "startVAddr_addr")),
+    )
+    values = {}
+    for field in fields:
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        values[field] = value
+        if path is not None:
+            paths[field] = path
+    blocks = pending.get("source_blocks", [])
+    missing = [k for k, v in values.items() if v is None]
+    source_ok = (len(blocks) == 2 and all(None not in b.values() and b["valid"] == 1 for b in blocks)
+                 and pending.get("source_active") is True)
+    expected = {}
+    if source_ok:
+        selected = blocks[1]
+        observed = checked_redirect["observed"]
+        expected = {
+            "wbValid": 1, "io_toFtq_wbRedirect_valid": 1,
+            "io_toFtq_wbRedirect_bits_ftqIdx_flag": selected["ftqIdx_flag"],
+            "io_toFtq_wbRedirect_bits_ftqIdx_value": selected["ftqIdx_value"],
+            "io_toFtq_wbRedirect_bits_pc": _decode_pruned_pc(selected["startVAddr_addr"]),
+            "io_toFtq_wbRedirect_bits_target": _decode_pruned_pc(checked_redirect["expected_target"]),
+            "io_toFtq_wbRedirect_bits_ftqOffset": observed["end_offset"],
+            "io_toFtq_wbRedirect_bits_isRVC": observed["is_rvc"],
+            "io_toFtq_wbRedirect_bits_taken": observed["taken"],
+            "io_toFtq_wbRedirect_bits_attribute_branchType": observed["branch_type"],
+            "io_toFtq_wbRedirect_bits_attribute_rasAction": observed["ras_action"],
+            **{f"wbAlignFetchBlock_{b}_{field}": value
+               for b, block in enumerate(blocks) for field, value in block.items()
+               if field != "valid"},
+        }
+    accepted = (source_ok and not missing and int(cycle) == pending["cycle"] + 1
+                and (blocks[0]["ftqIdx_flag"], blocks[0]["ftqIdx_value"])
+                != (blocks[1]["ftqIdx_flag"], blocks[1]["ftqIdx_value"])
+                and all(value is not None and values[key] == value for key, value in expected.items()))
+    evidence = dict(checked_redirect, request_cycle=pending["cycle"], writeback_cycle=int(cycle),
+                    source_blocks=blocks, writeback=values, expected_writeback=expected,
+                    missing_probes=missing, signal_paths=paths, checkpoint_passed=bool(accepted))
+    if accepted:
+        mark_owner_v3_checked(recorder, "BIN-947", cycle, evidence,
+                              producer="ifu_second_owner_writeback_sampler")
+    else:
+        _record_preclip_witness_risk_once(recorder, cycle, "ifu_second_owner_writeback_rejected", **evidence)
 
 
 def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
@@ -2406,6 +2974,15 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             },
         )
     _sample_predchecker_wb_half_rvi_selection(recorder, dut, cycle)
+    recovery_pending = getattr(
+        recorder, "_ifu_predchecker_wb_half_rvi_recovery", None
+    )
+    if recovery_pending is not None and not recovery_pending["s0_fire_seen"]:
+        s0_fire = _read_ifu_internal(recorder, dut, "s0_fire")
+        if s0_fire == 1:
+            recovery_pending["s0_fire_seen"] = True
+            recovery_pending["s0_fire_cycle"] = int(cycle)
+    _sample_predchecker_wb_half_rvi_recovery(recorder, dut, cycle)
     if (
         pending is not None
         and pending["fault"] is None
@@ -2550,13 +3127,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     producer="ifu_predchecker_v3_sampler",
                 )
             elif effective_owner == 1:
-                mark_owner_v3_checked(
-                    recorder,
-                    "BIN-947",
-                    cycle,
-                    checked_redirect,
-                    producer="ifu_predchecker_v3_sampler",
-                )
+                _check_second_owner_writeback(recorder, dut, cycle, pending, checked_redirect)
         if (
             pending["fault"] == "not_cfi_taken"
             and target_matches
@@ -2593,19 +3164,22 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         valid = _read_predchecker_or_ifu(
             recorder, dut, prefix + "valid", f"s2_alignedInstrVec_{slot}_valid"
         )
-        if valid != 1:
+        invalid_taken = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            prefix + "invalidTaken",
+            f"s2_alignedInstrVec_{slot}_invalidTaken",
+        )
+        # IFU removes the incomplete tail RVI from instrValid but retains its
+        # invalidTaken marker. PredChecker includes that marker in remaskFault
+        # independently of instrValid; ordinary CFI faults remain valid-gated.
+        if valid not in (0, 1) or (valid == 0 and invalid_taken != 1):
             continue
         pred_taken = _read_predchecker_or_ifu(
             recorder,
             dut,
             prefix + "isPredTaken",
             f"s2_alignedInstrVec_{slot}_isPredTaken",
-        )
-        invalid_taken = _read_predchecker_or_ifu(
-            recorder,
-            dut,
-            prefix + "invalidTaken",
-            f"s2_alignedInstrVec_{slot}_invalidTaken",
         )
         is_rvc = _read_predchecker_or_ifu(
             recorder, dut, prefix + "isRvc", f"s2_alignedInstrVec_{slot}_isRvc"
@@ -2677,19 +3251,20 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         }:
             continue
         fault = None
-        if int(branch_type) == 2 and int(pred_taken) == 0:
+        if valid == 1 and int(branch_type) == 2 and int(pred_taken) == 0:
             fault = "jal_not_taken"
-        elif int(branch_type) == 3 and not (int(ras_action) & 1) and int(pred_taken) == 0:
+        elif valid == 1 and int(branch_type) == 3 and not (int(ras_action) & 1) and int(pred_taken) == 0:
             fault = "jalr_not_taken"
-        elif int(ras_action) & 1 and int(pred_taken) == 0:
+        elif valid == 1 and int(ras_action) & 1 and int(pred_taken) == 0:
             fault = "ret_not_taken"
-        elif int(branch_type) == 0 and int(pred_taken) == 1:
+        elif valid == 1 and int(branch_type) == 0 and int(pred_taken) == 1:
             fault = "not_cfi_taken"
         elif int(invalid_taken) == 1:
             fault = "invalid_taken"
         entries.append(
             {
                 "slot": int(slot),
+                "valid": int(valid),
                 "fault": fault,
                 "pred_taken": int(pred_taken),
                 "invalid_taken": int(invalid_taken),
@@ -2853,23 +3428,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 fault_evidence,
                 producer="ifu_predchecker_v3_sampler",
             )
-        half_state_valid = _read_ifu_internal(
-            recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
-        )
-        if half_state_valid == 1:
-            mark_owner_v3_checked(
-                recorder,
-                "BIN-940",
-                cycle,
-                {
-                    **fault_evidence,
-                    "invalid_taken": True,
-                    "rvi_end_offset": 15,
-                    "half_state_valid": True,
-                    "s2_prev_end_is_half_rvi": int(half_state_valid),
-                },
-                producer="ifu_predchecker_v3_sampler",
-            )
+        # A same-cycle half-valid bit does not prove invalidTaken recovery.
+        # BIN-940 is emitted only by the causal restored-delivery sampler.
 
     fault_kinds = getattr(recorder, "_ifu_owner_fault_kinds", set())
     for entry in faults:
@@ -2915,6 +3475,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         entry
         for entry in entries
         if entry["slot"] > first["slot"]
+        and entry["valid"] == 1
         and entry["pred_taken"] == 1
         and entry["branch_type"] in {1, 2, 3}
     ]
@@ -2983,8 +3544,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         entry["fault"] == "not_cfi_taken" for entry in younger_faults
     ):
         mark_owner_v3_checked(recorder, "BIN-993", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-    younger = [entry for entry in entries if entry["slot"] > first["slot"]]
-    older = [entry for entry in entries if entry["slot"] < first["slot"]]
+    younger = [entry for entry in entries if entry["valid"] == 1 and entry["slot"] > first["slot"]]
+    older = [entry for entry in entries if entry["valid"] == 1 and entry["slot"] < first["slot"]]
     fixed_range_checked = (
         bool(older)
         and bool(younger)
@@ -3035,7 +3596,166 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 fault_evidence,
                 producer="ifu_predchecker_v3_sampler",
             )
-    recorder._ifu_predchecker_v3_pending = {**first, "cycle": int(cycle)}
+    pending = {**first, "cycle": int(cycle)}
+    if first["effective_owner"] == 1:
+        source_paths, blocks = {}, []
+        for block in range(2):
+            values = {}
+            for field in ("valid", "ftqIdx_flag", "ftqIdx_value", "startVAddr_addr"):
+                stem = f"s2_fetchBlock_{block}_{field}"
+                values[field], path = _read_ifu_internal_with_path(recorder, dut, stem)
+                if path is not None:
+                    source_paths[stem] = path
+            blocks.append(values)
+        active = {}
+        for stem in ("s2_valid_valid", "s2_flush", "s2_reqIsUncache"):
+            active[stem], path = _read_ifu_internal_with_path(recorder, dut, stem)
+            if path is not None:
+                source_paths[stem] = path
+        pending.update(source_blocks=blocks, source_signal_paths=source_paths,
+                       source_active=active == {"s2_valid_valid": 1, "s2_flush": 0, "s2_reqIsUncache": 0})
+    recorder._ifu_predchecker_v3_pending = pending
+
+
+def _sample_uncache_half_isolation(recorder, dut, cycle: int) -> None:
+    """BIN-922: a saved uncache half is killed before unrelated cacheable S1.
+
+    Natural NC-to-cacheable cross-page completion legitimately consumes the
+    saved half. This producer covers backend cancellation instead, retaining
+    the old PC/data through the second-page transaction and the flush. The
+    directed checker separately checks recovery delivery and late response drain.
+    """
+    if getattr(recorder, "_ifu_uncache_half_isolation_sample_cycle", None) == int(cycle):
+        return
+    recorder._ifu_uncache_half_isolation_sample_cycle = int(cycle)
+    pending = getattr(recorder, "_ifu_uncache_half_isolation", None)
+    paths = {} if pending is None else pending["signal_paths"]
+
+    def read(stem):
+        value, path = _read_ifu_internal_with_path(recorder, dut, stem)
+        paths[stem] = path
+        if value is None:
+            raise KeyError(stem)
+        return int(value)
+
+    def reject(reason, **details):
+        _record_preclip_witness_risk_once(
+            recorder, cycle, "ifu_uncache_half_isolation_rejected",
+            reason=reason, signal_paths=dict(paths), **details,
+        )
+        recorder._ifu_uncache_half_isolation = None
+
+    try:
+        redirect, redirect_path = _read_ifu_internal_with_path(
+            recorder, dut, "uncacheRedirect_valid"
+        )
+        paths["uncacheRedirect_valid"] = redirect_path
+        # FakeDut/model tests and older generated packages may not expose any
+        # of this optional producer's signals. Stay silent in that case;
+        # once the anchor exists, every missing/mismatched field is visible as
+        # a fail-closed risk observation.
+        if pending is None and redirect is None:
+            return
+        if redirect is None:
+            reject("missing_probe", missing="uncacheRedirect_valid")
+            return
+        if pending is None and redirect != 1:
+            return
+        backend = read("io_fromFtq_redirect_valid")
+        wb = read("wbRedirect_valid")
+        if pending is None:
+            if backend or wb or read("uncacheNeedResend") != 1:
+                return
+            if read("s2_valid_valid") != 1 or read("s2_reqIsUncache") != 1:
+                return
+            pc = read("uncachePc_addr")
+            # This semantic response port drives uncacheRedirect.halfRviInfo
+            # directly in current generated Ifu.sv (the bundle is optimized).
+            data = read("uncacheUnit.__Vtogcov__io_resp_bits_uncacheData") & 0xFFFF
+            if (pc << 1) & 0xFFF != 0xFFE or data & 3 != 3:
+                return
+            recorder._ifu_uncache_half_isolation = dict(
+                phase="saved", source_cycle=int(cycle), half_pc_addr=pc,
+                half_data=data, signal_paths=paths,
+            )
+            return
+        if int(cycle) - pending["source_cycle"] > 512:
+            reject("timeout", phase=pending["phase"])
+            return
+        if wb or redirect:
+            reject("intervening_redirect")
+            return
+        phase = pending["phase"]
+        if phase == "saved":
+            if backend or read("s0_prevEndIsHalfRvi") != 1 or (
+                read("s1_prevEndHalfRviInfo_bits_pc_addr") != pending["half_pc_addr"]
+                or read("s1_prevEndHalfRviInfo_bits_data") != pending["half_data"]
+            ):
+                reject("saved_payload_mismatch")
+                return
+            pending.update(phase="backend", saved_cycle=int(cycle))
+        elif phase == "backend" and backend:
+            expected = {
+                "s2_valid_valid": 1, "s2_reqIsUncache": 1,
+                "s2_prevEndIsHalfRviInfo_valid": 1,
+                "s2_prevEndIsHalfRviInfo_bits_pc_addr": pending["half_pc_addr"],
+                "s2_prevEndIsHalfRviInfo_bits_data": pending["half_data"],
+                "s2_fetchBlock_0_startVAddr_addr": pending["half_pc_addr"] + 1,
+                "s0_flush": 1, "s1_flush": 1, "s2_flush": 1,
+                "io_toIBuffer_valid": 0,
+            }
+            observed = {stem: read(stem) for stem in expected}
+            if observed != expected:
+                reject("cancelled_transaction_mismatch", observed=observed)
+                return
+            pending.update(phase="clear", redirect_cycle=int(cycle),
+                           cancelled_transaction=observed,
+                           cancelled_ftq=[read("s2_fetchBlock_0_ftqIdx_flag"),
+                                          read("s2_fetchBlock_0_ftqIdx_value")])
+        elif phase != "backend" and backend:
+            reject("second_backend_redirect")
+        elif phase == "clear":
+            expected = (
+                "s0_prevEndIsHalfRvi", "s1_prevEndHalfRviInfo_bits_pc_addr",
+                "s1_prevEndHalfRviInfo_bits_data", "s1_valid", "s2_valid_valid",
+                "io_toIBuffer_valid",
+            )
+            if any(read(stem) != 0 for stem in expected):
+                reject("state_not_isolated")
+                return
+            pending["phase"] = "s0"
+        elif phase == "s0" and read("s0_fire"):
+            if read("s0_prevEndIsHalfRvi") != 0:
+                reject("stale_s0_half")
+                return
+            pending.update(phase="s1", s0_cycle=int(cycle))
+        elif phase == "s1":
+            if (read("s1_valid") != 1 or read("s1_flush") != 0
+                    or read("s1_reqIsUncache") != 0
+                    or read("s1_prevEndHalfRviInfo_valid") != 0):
+                reject("recovery_not_clean_cacheable")
+                return
+            if read("s1_fire") != 1:
+                return
+            lane = read("s1_prevIBufEnqPtrDup_dup_0_value") & 3
+            start = read("s1_fetchBlock_0_startVAddr_addr")
+            pc = read(f"s1_alignedInstrPcVec_{lane}_addr")
+            if pc != start or pc in (pending["half_pc_addr"], pending["half_pc_addr"] + 1):
+                reject("recovery_pc_mismatch")
+                return
+            mark_owner_v3_checked(
+                recorder, "BIN-922", cycle,
+                {**pending, "event": "ifu_uncache_half_isolated_by_backend",
+                 "recovery_cycle": int(cycle), "recovery_pc": pc << 1,
+                 "recovery_instruction": read(f"s1_alignedInstrVec_{lane}_data"),
+                 "recovery_ftq": [read("s1_fetchBlock_0_ftqIdx_flag"),
+                                  read("s1_fetchBlock_0_ftqIdx_value")],
+                 "recovery_half_valid": 0, "signal_paths": dict(paths)},
+                producer="ifu_uncache_half_isolation_sampler",
+            )
+            recorder._ifu_uncache_half_isolation = None
+    except KeyError as exc:
+        reject("missing_probe", missing=str(exc.args[0]))
 
 
 def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
@@ -3051,6 +3771,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     _sample_frontend_trigger(recorder, dut, cycle)
     _sample_ftq_training_mask(recorder, dut, cycle)
     _sample_exception_metadata(recorder, dut, cycle)
+    _sample_uncache_half_isolation(recorder, dut, cycle)
 
     wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
     uncache_redirect = _read_ifu_internal(recorder, dut, "uncacheRedirect_valid")
@@ -3131,6 +3852,15 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         "valid_mask": int(valid_mask),
         "exception_type": exception_type,
     }
+
+    _sample_owner_address_boundary(
+        recorder,
+        dut,
+        cycle,
+        records,
+        exception_type=exception_type,
+        output_req_is_uncache=output_req_is_uncache,
+    )
 
     if (
         output_req_is_uncache == 0
@@ -3588,11 +4318,14 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         item["slot"] for item in internal_records if item["effective_owner"] == 1
     ]
     second_block_suppression_candidate = (
-        fetch1_valid == 1
+        fetch0_valid == 1
+        and fetch1_valid == 1
         and s2_fire == 1
         and s2_req_is_uncache == 0
         and first_source
+        and len(first_source) == len(internal_records)
         and not active_second_slots
+        and all(not (int(enq_enable) & (1 << slot)) for slot in preclip_second_slots)
     )
     if second_block_suppression_candidate and preclip_probe_missing:
         _record_preclip_witness_risk_once(
@@ -3658,25 +4391,6 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 "range_clip_checkpoint": "preclip_block_one_to_fired_block_zero",
             },
         )
-    if (
-        fetch1_valid == 1
-        and s2_fire == 1
-        and s2_req_is_uncache == 0
-        and preclip_second_slots
-        and first_source
-        and not active_second_slots
-    ):
-        recorder.mark(
-            "ifu_data_slice",
-            "second_block_suppressed",
-            cycle,
-            {
-                **evidence,
-                "preclip_second_slots": preclip_second_slots,
-                "delivered_second_slots": active_second_slots,
-            },
-        )
-
     if (
         align_shift_num is not None
         and instr_count is not None
