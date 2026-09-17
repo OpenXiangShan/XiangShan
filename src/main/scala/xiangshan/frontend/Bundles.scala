@@ -60,6 +60,9 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)
   val topdownReasons: FrontendTopDownBundle = Output(new FrontendTopDownBundle())
+
+  // return address read out of the RAS for the FTQ-stored spec read request
+  val specRead: GuardedPc = Output(GuardedPc())
 }
 
 class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
@@ -69,7 +72,6 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val bpuPtr:           FtqPtr                = Output(new FtqPtr)
   val needChangeTarget: Bool                  = Output(Bool())
   val specReadReq:      RasSpecReadReq        = Output(new RasSpecReadReq)
-  val specRetAddr:      GuardedPc             = Output(GuardedPc())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
