@@ -88,7 +88,7 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   io.prefetchReq.ready      := prefetchDemux.io.in.ready || prefetchHit
 
   // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
-  // vSetIdx is vAddr(untagBits, blockOffBits); alias = vSetIdx high AliasTagBits -> FlitREQ.alias
+  // vSetIdx is vAddr(untagBits, blockOffBits); TagAlias = vSetIdx high AliasTagBits -> FlitREQ.TagAlias
   private def aliasFromVSetIdx(vSetIdx: UInt): UInt =
     AliasTagBits.map(w => vSetIdx.head(w)).getOrElse(0.U(2.W))
 

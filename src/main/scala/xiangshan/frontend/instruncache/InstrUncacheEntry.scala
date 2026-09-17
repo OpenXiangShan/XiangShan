@@ -21,7 +21,7 @@ import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.WfiReqBundle
-import xiangshan.cache.InstrUncacheCCHI
+import xiangshan.cache.{FlitDnDAT64, InstrUncacheCCHI}
 import xiangshan.frontend.ifu.PreDecodeHelper
 
 // One miss entry deals with one mmio request

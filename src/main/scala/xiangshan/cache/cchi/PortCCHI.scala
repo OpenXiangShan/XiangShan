@@ -94,6 +94,7 @@ object DCacheCCHI {
       evt.SrcID := Params.srcId
       evt.TgtID := Params.tgtId
       evt.NS := false.B
+      evt.MemAttr := false.B
       evt.WayValid := false.B
       evt.Way := 0.U
       evt.TraceTag := 0.U(1.W)
@@ -117,7 +118,7 @@ object DCacheCCHI {
       fillReq(req, expCompData = !fullOverwrite)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.alias := alias(1, 0)
+      req.TagAlias := alias(1, 0)
       // fullOverwrite: whole-line store miss → MakeUnique (NtoT/BtoT grow unused)
       // growParam NtoB: load miss from Invalid → ReadShared; else NtoT/BtoT → ReadUnique
       req.Opcode := Mux(fullOverwrite, CCHIOpcode.MakeUnique.U,
@@ -128,7 +129,7 @@ object DCacheCCHI {
       fillReq(req, expCompData = false.B)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.alias := 0.U(2.W)
+      req.TagAlias := 0.U(2.W)
       req.Opcode := Mux(cmoOpcode === 1.U, CCHIOpcode.CleanInvalid.U,
         Mux(cmoOpcode === 2.U, CCHIOpcode.MakeInvalid.U, CCHIOpcode.CleanShared.U))
     }
@@ -225,7 +226,7 @@ object ICacheCCHI {
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
       req.Addr := addr(47, 0)
-      req.alias := alias(1, 0)
+      req.TagAlias := alias(1, 0)
       req.NS := false.B
       req.Order := 0.U
       req.MemAttr := Params.memAttr
@@ -259,7 +260,7 @@ object PtwCCHI {
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
       req.Addr := addr(47, 0)
-      req.alias := 0.U(2.W)
+      req.TagAlias := 0.U(2.W)
       req.NS := false.B
       req.Order := 0.U
       req.MemAttr := Params.memAttr
@@ -321,7 +322,7 @@ object UncacheCCHI {
       fillReq(req, memBackTypeMM, pageTypeNC, lgSize, isRead = true.B)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.alias := 0.U(2.W)
+      req.TagAlias := 0.U(2.W)
       req.Opcode := CCHIOpcode.ReadNoSnp.U
     }
 
@@ -330,7 +331,7 @@ object UncacheCCHI {
       fillReq(req, memBackTypeMM, pageTypeNC, lgSize, isRead = false.B)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.alias := 0.U(2.W)
+      req.TagAlias := 0.U(2.W)
       req.Opcode := CCHIOpcode.WriteNoSnpPtl.U
     }
 
@@ -396,7 +397,7 @@ object InstrUncacheCCHI {
       fillReq(req, memBackTypeMM, pageTypeNC, lgSize)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.alias := 0.U(2.W)
+      req.TagAlias := 0.U(2.W)
       req.Opcode := CCHIOpcode.ReadNoSnp.U
     }
   }
