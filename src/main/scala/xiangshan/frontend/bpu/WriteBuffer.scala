@@ -183,10 +183,12 @@ class WriteBuffer[T <: WriteReqBundle](
       val notUsefulVec = dirty(portIdx).map(!_)
       val notUseful    = notUsefulVec.reduce(_ || _)
       val notUsefulIdx = PriorityEncoder(notUsefulVec)
+      val plruWay      = replacerWay(portIdx)
+      val plruWayDirty = dirty(portIdx)(plruWay)
       val victim = Mux(
         victimSameSetIdx(portIdx).valid,
         victimSameSetIdx(portIdx).bits,
-        Mux(notUseful, notUsefulIdx, replacerWay(portIdx))
+        Mux(!plruWayDirty, plruWay, Mux(notUseful, notUsefulIdx, plruWay))
       )
       // if this write port !hit need to write a new entry
       when(!hit) {
