@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `7735268244088acb4e66f30bf367570764e7177a` |
+| 核验 commit | `1567628320ef77e1de1a3ae7a7c7057423e842b4` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
-| 权威源码 | `StoreUnit.scala`、`StoreMisalignBuffer.scala`、`StorePipe.scala`、`MainPipe.scala`、`Sbuffer.scala`、`IssueQueue.scala` |
-| 最后核验日期 | `2026-08-09` |
+| 权威源码 | `StoreUnit.scala`、`StoreMisalignBuffer.scala`、`StorePipe.scala`、`MainPipe.scala`、`Sbuffer.scala`、`IssueQueue.scala`；实际临时 DUT 同时核对 `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/test-rtl/build/rtl/StoreUnit.sv` 与 `StoreMisalignBuffer.sv` |
+| 最后核验日期 | `2026-09-15` |
 
 ## Flow 范围
 
@@ -56,6 +56,60 @@ AMO/SC 的独立反馈语义泛化为普通 STA replay。Hybrid Unit 的 store f
 2. cache line 在 B 状态，store 需要 B-to-T 权限提升，而该 set 中 B-to-T 占用过多，`s2_grow_perm_fail=1`。
 
 这两项只重送 SBuffer entry，不重新执行原始指令的地址计算和 DTLB 请求。
+
+## 跨 16B store 不存在“第三次必成功”保证
+
+对当前 V2 的普通、cacheable、标量跨 16B 非对齐 store，典型的时间顺序可以是“第一次 TLB miss、第二次因
+misalign 资格不足返回 `hit=0`、第三次成功”，但这只是满足全部前置条件时的一个最短示例，**不是 RTL 的固定
+重发次数协议**。
+
+当前源码把两个独立条件 OR 到 `s2_misalignNeedReplay`：
+
+```scala
+s0_misalignNeedReplay := cross16Byte &&
+  !(uop.sqIdx === sqCommitPtr ||
+    (uop.robIdx === sqCommitRobIdx && uop.uopIdx === sqCommitUopIdx))
+
+s2_misalignNeedReplay := s1_toMisalignBufferValid &&
+  (!io.misalign_enq.req.ready || s1_misalignNeedReplay)
+
+feedbackSlow.hit := tlbHit && !s2_misalignNeedReplay
+```
+
+这里的 `sqCommitPtr` 与 `sqCommitRobIdx/sqCommitUopIdx` 是 StoreQueue/ROB 给出的当前 commit 边界。跨 16B
+硬件拆分在该 store 尚未到达允许边界前不能进入 MAB，避免投机地启动两个子 store 的后续处理。与此同时，MAB
+只有一个当前 parent 保存槽；当已有 MAB 请求尚未完成或未被 redirect 清理时，`io.misalign_enq.req.ready=0`。
+
+因此每次原始 STA IQ 重发后都必须重新满足以下条件：
+
+```text
+DTLB 本次响应命中
+且 store 已匹配 SQ commit pointer，或匹配 SQ commit ROB/uop 边界
+且 StoreMisalignBuffer 当前 ready
+```
+
+只要其中任一条件不满足，`feedbackSlow.hit` 仍为 0，STA IQ 将再次把该 entry 从 issued 变回可发射状态。RTL
+没有 retry counter，也没有“第三次强制成功”的兜底分支。完整 core 中，较老指令持续提交会使 commit 边界最终前进，MAB
+也会在处理完旧 parent 后恢复 ready，所以合法无阻塞场景通常能前进；若 commit sideband 停滞、MAB 被长期占用、TLB
+再次 miss 或发生 redirect，则可以有第四次及更多次 STA IQ replay。
+
+一次 MAB enqueue 成功后，原始 STA IQ 的 replay 生命周期结束，但不等于整个 store 已完成。MAB 将 parent 拆为
+low/high 两个对齐 child，并逐个送回 StoreUnit：
+
+```text
+child TLB miss
+  -> StoreUnit.misalign_stout.need_rep=1
+  -> MAB 从 s_resp 回到 s_req，重送同一 child
+  -> 不产生原始 STA IQ 的 feedbackSlow
+
+child 正常响应
+  -> MAB 清除该 child 的 unSent 标记，推进到下一个 child
+  -> 两个 child 完成后进入 parent writeback / SQ 协同路径
+```
+
+故必须区分两类“还会重发”：MAB 接收前的 `s2_misalignNeedReplay` 会重发原始 STA IQ；MAB 接收后的
+`need_rep` 只在 MAB 内重送 child。后者同样没有固定次数保证，并会在 exception、NC/MMIO 特殊结果或 redirect
+时转向异常/取消路径，而不是保证正常完成。
 
 ## 主流程图
 
@@ -248,12 +302,18 @@ Hybrid Unit 的标量 store fast feedback 直接使用 `!s2_tlb_miss`。因此�
 - `src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:1582-1590`、`src/main/scala/xiangshan/mem/MemBlock.scala:1761`：MainPipe replay response 经 DCache store interface 接到 SBuffer。
 - `src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:637-758`：SBuffer 收到 replay 后设置 `w_timeout` 并等待重送。
 - `src/main/scala/xiangshan/mem/pipeline/HybridUnit.scala:1044-1066`：Hybrid store 的 feedback 边界。
+- `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:176-187,430-437,512-533`：当前 V2 的 cross16 commit-boundary 条件、MAB ready 条件、`s2_misalignNeedReplay`、STA feedback 与 MAB child `need_rep` 分层。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreMisalignBuffer.scala:130-197,233-307,532-574`：单 parent MAB 的 ready、状态机、child response 后的 retry 和 child 推进规则。
+- `src/main/scala/xiangshan/backend/issue/IssueQueue.scala:1109-1118,1203-1212`：`feedbackSlow.hit=0` 被映射为 `RespType.block`。
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/test-rtl/build/rtl/StoreUnit.sv:761-779,1407,1451`：当前临时 DUT 的 `s1_misalignNeedReplay`、`s2_misalignNeedReplay`、MAB request valid 与 feedback hit 等价实现。
+- `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/test-rtl/build/rtl/StoreMisalignBuffer.sv:453-470,518-526,1454-1456`：当前临时 DUT 的 child retry 分支、MAB 状态入口与 enqueue ready 实现。
 
 ## 知识修订记录
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
 | 2026-08-09 | `7735268244088acb4e66f30bf367570764e7177a` | 首次建立，无同版本长期 flow 旧结论 | 区分 STA IQ replay、MAB 内部 retry 和 SBuffer-DCache retry；明确 TLB hit 后普通 STA IQ 的额外直接 replay 只来自 MAB nack/commit 边界 | 用户要求结合 V2 Scala 分析 store TLB hit 后的 replay 条件 | V2 StoreUnit、StoreMisalignBuffer、IssueQueue、SBuffer、DCache MainPipe |
+| 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | 容易把“TLB miss 后一次 MAB replay”理解为第三次必成功。 | 明确 `s2_misalignNeedReplay` 每次按 commit-boundary 与 MAB ready 重新计算，没有固定 retry 次数；MAB 接收后 child `need_rep` 转为 MAB 内部重送，不再重发原 STA IQ。 | 用户要求追踪 V2 真实 RTL 中跨 16B store 的多次重发语义，并核对当前临时 RTL。 | V2 StoreUnit、StoreMisalignBuffer、STA IQ feedback 与验证环境 replay 建模。 |
 
 ## 待确认项
 

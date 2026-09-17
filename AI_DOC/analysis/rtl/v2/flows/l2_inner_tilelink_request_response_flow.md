@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `6a1b2d947e3d9629d5b9b3fb238b31f245251463` |
+| 核验 commit | `1567628320ef77e1de1a3ae7a7c7057423e842b4` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan/cache/dcache`、`src/main/scala/xiangshan/frontend/icache`、`src/main/scala/xiangshan/cache/mmu`、`src/main/scala/xiangshan/L2Top.scala`、`coupledL2/src/main/scala/coupledL2`、`rocket-chip/src/main/scala/tilelink` |
-| 最后核验日期 | `2026-08-10` |
+| 最后核验日期 | `2026-09-15` |
 
 ## Flow 范围
 
@@ -566,6 +566,38 @@ DCache 收到 `CBOAck` 后，CMOUnit 使用自己寄存的 request address 构�
 | `denied/corrupt` | 对应 CBO 处理期间累积的错误状态 |
 | beat/E | 单拍，不等待 E |
 
+### 5.3.1 CBOAck 错误来源与 BEU 边界
+
+`CBOAck.denied/corrupt` 是 L2 MSHR 对整笔 CBO 生命周期的累计结果，不只代表某一级 cache SRAM：
+
+```text
+L1 Probe/回写本地 tag/data error
+  -> DCache 自身 error/BEU
+  -> C ProbeAck/ProbeAckData.corrupt
+  -> L2 MSHR denied/corrupt
+
+L2 directory/data SRAM 本地 ECC
+  -> CoupledL2 MainPipe l2Error/BEU
+  -> L2 task/MSHR denied/corrupt
+
+下游 CHI CMO completion 的 NDERR
+  -> L2 MSHR denied
+  -> CBOAck denied/corrupt
+  -X-> CoupledL2 本地 l2Error/BEU
+
+累计结果 -> GrantBuffer -> D CBOAck -> DCache CMOUnit -> StoreQueue
+```
+
+L1/L2 本地 ECC 可能同时产生 BEU 和错误 `CBOAck`，两者不是重复接口：BEU 报告 cache 硬件故障，
+`CBOAck` 则给发起 CBO 返回带 owner 的事务完成结果。尤其是 CoupledL2 的 `io.error` 只由本地
+directory/data ECC 的 `l2Error_s5` 产生；MSHR 从 CHI `RXRSP.Comp.respErr=NDERR` 累积的 `denied`
+不会进入该输出。因此不能用“故障 cache 会报 BEU”作为丢弃 `CBOAck.denied/corrupt` 的理由。
+
+当前核验 commit 的 StoreQueue 把 CMO error 读取放在不相关的 non-NC Uncache response 门控下，导致
+本条 CBO 以空异常向量完成；后续 V2 上游提交 `7aa145db8f` 已将它修复为在 `cmoOpResp.fire` 时执行
+`denied -> storeAccessFault`、`corrupt && !denied -> hardwareError`。这说明 CBOAck error 的正常终点
+同时包含对应 cache 的可选诊断 sideband，以及发起指令的精确 exception，不可只保留前者。
+
 ### 5.4 cbo.zero 不返回 CBOAck
 
 `cbo.zero` 的内部编码为 3，但 StoreQueue 的 `deqCanDoCbo` 只选择 clean/flush/inval。
@@ -871,12 +903,17 @@ source/opcode/param/data beat/CBO completion 的功能关联也必须先正确�
 - `GrantBuffer` 在 `denied` 时也会把 `corrupt` 置位。错误注入模式应保持同一 multibeat
   transaction 的字段一致，并明确错误出现在整笔还是单 beat。
 - CBO 的 `denied/corrupt` 通过 `CBOAck` 传给 CMOUnit；即使失败也必须完成当前 CMO FSM，
-  不能静默丢弃回复导致 StoreQueue 永久等待。
+  不能静默丢弃回复导致 StoreQueue 永久等待。L1/L2 本地 ECC 可能并行上报 BEU，但 CHI transaction
+  error 不进入 CoupledL2 的本地 ECC error 输出，且 BEU 不能替代当前 CBO 的精确异常归属。
 - L2 可以对 A/B/C/D/E 任一 channel 施加 backpressure。模型不得假设 request valid 看到后
   就已接受，所有 transaction 建立和 beat 计数都必须以 `fire` 为准。
 
 ## 关联 Agent 和 Flow
 
+- [StoreQueue 特性与端到端 flow](storequeue_feature_flow.md)：`CBOAck -> CMOResp` 后的精确异常、
+  writeback 与当前基线缺陷边界。
+- [DCache agent](../../../interface/v2/agents/dcache_agent.md)：L1 A/B/C/D/E 字段、CBO context 与
+  responder 建模合同。
 - [DCache-L2 refill hint 与 L2 flush done flow](dcache_l2_refill_hint_and_flush_done_flow.md)：
   `GrantData` 的 hint、critical half 和 sideband flush 边界。
 - `mem_ut/ver/ut/memblock/rule/memblock_latest_dut_adapt_rule.md`：独立 MemBlock 端口适配规则。
@@ -935,6 +972,8 @@ CoupledL2 permission promotion 必须从 V3 源码单独确认，不能直接复
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:984-1028`：CBO request 仅在 `s_req` 发出，response 在 `s_resp` 消费，未形成多笔 CBO 队列。
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MainPipe.scala:164-256,424-433,637-682`：Get/Acquire/CBO 分类、Probe/MSHR 条件和 direct D response。
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:163-181,255-299,352-449,525-559,730-752,1052-1058`：permission promotion、CHI/CBO 行为、CBO completion 和最终 D task。
+- `coupledL2/src/main/scala/coupledL2/SinkC.scala:67-83,150-160`、`coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:1101-1120,1145-1211,1248-1254`：L1 C response、CHI response error 和 L2 DS error 向 CBO MSHR 的累计。
+- `coupledL2/src/main/scala/coupledL2/tl2chi/MainPipe.scala:221-223,751-852,1032-1036`、`coupledL2/src/main/scala/coupledL2/CoupledL2.scala:502-516`、`src/main/scala/xiangshan/L2Top.scala:377-378`：CoupledL2 BEU 只承载本地 directory/data ECC，不承载 MSHR 的下游 transaction error。
 - `coupledL2/src/main/scala/coupledL2/GrantBuffer.scala:85-98,158-232,265-290`：D source/sink/size、两拍数据、inflight Grant 和 E ack。
 - `coupledL2/src/main/scala/coupledL2/SourceB.scala:41-64`：Probe 只发给 supportsProbe DCache client，B source 使用 DCache range 起点。
 - `src/main/scala/xiangshan/frontend/icache/ICache.scala:571-606`、`src/main/scala/xiangshan/frontend/icache/ICacheMissUnit.scala:160-170,329-349`：ICache source 和 Get/AccessAckData 数据接收。
@@ -959,6 +998,7 @@ CoupledL2 permission promotion 必须从 V3 源码单独确认，不能直接复
 | 2026-07-30 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已说明 Uncache 绕过 CoupledL2，但未说明独立 MemBlock 顶层 `auto_inner_buffers_out_*` 与 mem_ut `sbuffer_agent` 的对应关系 | 明确 `sbuffer_agent` 实际是外部 Uncache TL-UL port responder；区分 SBuffer -> DCache 内部 drain、DCache C writeback 与 Uncache A store 两个外部写生效点 | 用户指出 sbuffer 接口即 Uncache 通道，要求结合 V2 源码确认 | V2 MemBlock、SBuffer、DCache、Uncache、mem_ut memory responder |
 | 2026-07-30 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已分别描述 A/D opcode、GrantAck、Probe/C 和完整 L2 model 所需状态，但没有从 DCache 侧集中说明 D 后仍等待 E 的闭环，也未明确对照当前 mem_ut 轻量 responder | 增加 DCache A/D/E、B/C、Release、CBO 生命周期；明确轻量 responder 的已实现行为与完整 directory/model 的功能边界 | 用户要求基于 V2 Scala 汇总 DCache 与 L2 的全部交互及测试模型处理原则 | V2 DCache、CoupledL2、mem_ut DCache responder |
 | 2026-07-17 | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` | 旧 hint flow 只按 D opcode 粗分 Grant、AccessAckData、CBOAck 和非 DCache source | 建立 client/source、权限 cap、CBO 请求关联、beat/E 生命周期及完整 L2 model 状态合同 | 用户要求结合 Scala 为完整 L2 cache model 准备长期知识 | V2 DCache、ICache、PTW、Uncache、CoupledL2 内侧 TileLink |
+| 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | CBOAck 只描述为 MSHR 累积错误，未区分各错误源与 BEU 的覆盖边界。 | 明确 L1/L2 本地 ECC 可独立报 BEU 并继续形成错误 CBOAck；CHI `NDERR` 只累计到 MSHR/CBOAck，不进入 L2 本地 ECC BEU。CBOAck 仍是发起指令的精确事务结果，不能由 BEU 替代。 | 用户提出 CMO 各阶段错误均由故障 cache 自行报 BEU、SQ 无需处理，要求追踪 Probe/L2/CHI/CBOAck 全链路。 | CoupledL2 MSHR/MainPipe/SinkC、DCache CMOUnit、StoreQueue 与 BEU。 |
 
 ## 待确认项
 
