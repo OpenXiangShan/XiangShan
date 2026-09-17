@@ -1063,10 +1063,10 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
     stream_bit_vec_array.io.l3_prefetch_req.valid && stream_pf_ctrl.enable && streamEnable
   pf_queue_filter.io.l3_prefetch_req.bits := stream_bit_vec_array.io.l3_prefetch_req.bits
 
-  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && io.enable
+  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && io.enable && !l2PfqBusy
   io.l1_req.bits := pf_queue_filter.io.l1_req.bits
 
-  pf_queue_filter.io.l1_req.ready := io.l1_req.ready
+  pf_queue_filter.io.l1_req.ready := io.l1_req.ready && !l2PfqBusy
   pf_queue_filter.io.tlb_req <> io.tlb_req
   pf_queue_filter.io.pmp_resp := io.pmp_resp
   pf_queue_filter.io.enable := io.enable
@@ -1075,12 +1075,19 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
   val l2_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l2_pf_addr.bits.addr)).reduce(_ || _)
-  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable
+  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable && !l2PfqBusy
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
-  pf_queue_filter.io.l2_pf_addr.ready := io.l2_req.ready
+  pf_queue_filter.io.l2_pf_addr.ready := io.l2_req.ready && !l2PfqBusy
 
   val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits.addr)).reduce(_ || _)
-  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable
+  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable && !l2PfqBusy
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
-  pf_queue_filter.io.l3_pf_addr.ready := io.l3_req.ready
+  pf_queue_filter.io.l3_pf_addr.ready := io.l3_req.ready && !l2PfqBusy
+
+  XSPerfAccumulate("l1_pf_hold_by_l2pfq", pf_queue_filter.io.l1_req.valid && io.enable && l2PfqBusy)
+  XSPerfAccumulate("l2_pf_hold_by_l2pfq", pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable && l2PfqBusy)
+  XSPerfAccumulate("l3_pf_hold_by_l2pfq", pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable && l2PfqBusy)
+  XSPerfAccumulate("l1_pf_issue_fire", io.l1_req.fire)
+  XSPerfAccumulate("l2_pf_issue_fire", io.l2_req.fire)
+  XSPerfAccumulate("l3_pf_issue_fire", io.l3_req.fire)
 }
