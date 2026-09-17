@@ -104,6 +104,7 @@ class LoadPipeBundle(
   val mshrId = Option.when(param.replayFromToLRQ)(UInt(log2Up(cfg.nMissEntries).W)) // valid when `handledByMSHR` is HIGH
   val replayQueueIdx = Option.when(param.replayFromToLRQ)(UInt(log2Up(LoadQueueReplaySize+1).W)) // valid when `entrance` is replay
   val cause = Option.when(param.replayFromToLRQ)(Vec(LoadReplayCauses.allCauses, Bool()))
+  val specialModeRequest = Bool()
   val fastReplayNukeFirst = Option.when(param.hasS2PreProcess)(Bool())// When stld_nuke and storeset hit occur simultaneously, stld_nuke should be handled first.
 
   val handledByMSHR = Option.when(param.replayToLRQ)(Bool())
@@ -176,6 +177,7 @@ class LoadPipeBundle(
     uncacheReplay.get := false.B
     ncReplay.get := false.B
     lrqAmbReplay.foreach(_ := false.B)
+    specialModeRequest := false.B
   }
   def DontCareVectorFields(): Unit = {
     elemIdx.get := 0.U

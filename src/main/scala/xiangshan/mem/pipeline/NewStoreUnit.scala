@@ -223,7 +223,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.debug.pc := uop.pc
   io.tlbReq.bits.debug.robIdx := uop.robIdx
   io.tlbReq.bits.debug.isFirstIssue := sink.bits.isFirstIssue
-  io.tlbReqKill := false.B
+  io.tlbReqKill := false.B // will be assigned in S1
 
   io.dcacheReq.valid := pipeIn.fire
   io.dcacheReq.bits.cmd := MemoryOpConstants.M_PFW
@@ -256,6 +256,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp))
+    val tlbReqKill = Output(Bool())
 
     // DCache request: paddr and s1 kill signal
     val dcachePAddr = Output(UInt(PAddrBits.W))
@@ -490,6 +491,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
   io.tlbResp.ready := true.B
+  io.tlbReqKill := kill
   io.dcachePAddr := paddr
   io.dcacheKill := killDCache
 
@@ -905,9 +907,9 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s0.io.prefetchReq <> io.prefetchReq
   s0.io.sqAddrReadyPtr := io.sqAddrReadyPtr
   io.tlb.req <> s0.io.tlbReq
-  io.tlb.req_kill := s0.io.tlbReqKill
   io.dcache.req <> s0.io.dcacheReq
   // s1
+  io.tlb.req_kill := s1.io.tlbReqKill
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger
   s1.io.tlbResp <> io.tlb.resp
