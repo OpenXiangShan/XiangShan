@@ -1,6 +1,18 @@
-////////////////////////////////////////////////////////////
-// iommu_atd_ddtc_micro_tlb
-////////////////////////////////////////////////////////////
+/***************************************************************************************
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+*
+* OpenIOMMU is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 module iommu_atd_dtc_micro_tlb #( //{{{
     parameter   CACHE_TYPE                  = 0, // 0:DDTC, 1:PDTC
     parameter   TLB_QIDX_WIDTH              = iommu_atd_cache_pkg::DDTC_TLB_QIDX_WIDTH,

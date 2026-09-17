@@ -1,3 +1,18 @@
+/***************************************************************************************
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+*
+* OpenIOMMU is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 module iommu_atd_ptc_mtlb_upd_cabin_wrap #(
     parameter   CACHE_TYPE                  = 0, // 0:DDTC, 1:PDTC
     parameter type          UPDATE_REQ_TYPE             = iommu_atd_cache_pkg::s2ptc_update_req_t,

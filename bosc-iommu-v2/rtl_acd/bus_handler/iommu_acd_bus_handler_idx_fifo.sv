@@ -1,112 +1,18 @@
-// ////////////////////////////////////////////////////////////////////
-// // iommu_acd_bus_handler_idx_queue
-// ////////////////////////////////////////////////////////////////////
-// module iommu_acd_bus_handler_idx_queue #( //{{{
-//     parameter  IDX_WIDTH        = 3,
-//     parameter  DEPTH            = 2**IDX_WIDTH,
-//     parameter  SPARE_PARA       = 0
-// )(
-//     input  logic                    clk                 ,
-//     input  logic                    rstn                ,
-// 
-//     input  logic                    push                ,
-//     input  logic [IDX_WIDTH-1:0]    widx                ,
-//     output logic                    wfull               ,
-// 
-//     input  logic [DEPTH-1:0]        pop                 ,
-//     input  logic [IDX_WIDTH-1:0]    ridx[DEPTH-1:0]     ,
-//     output logic                    rempty              ,
-// 
-//     output logic [IDX_WIDTH-1:0]    idx                 ,
-// 
-//     input  logic                    spare_in             
-// );
-// //=== Declare === {{{
-//     typedef logic [IDX_WIDTH-1:0]   buf_idx_t;
-//     buf_idx_t [DEPTH-1:0]           fifo;
-//     buf_idx_t                       push_idx;
-//     buf_idx_t                       push_ptr;
-//     logic                           push_en;
-// 
-//     typedef struct packed {
-//         buf_idx_t idx;
-//         logic     v;
-//     } idxfifo_t;
-//     
-//     idxfifo_t [DEPTH-1:0]           idxfifo;
-//     idxfifo_t [DEPTH-1:0]           idxfifo_n;
-// 
-//     logic [DEPTH-1:0]               pop_idx_match_list;
-//     logic [IDX_WIDTH-1:0]           pop_idx_match_cnt_list[DEPTH-1:0];
-// //}}}
-// 
-// //=== Main Code === {{{
-//     assign rempty = 'd0;
-//     assign wfull  = 'd0;
-//     assign idx = idxfifo[0].v ? idxfifo[0].idx : 'b0;
-// 
-//     always@(*) begin
-//         push_idx = 'd0;
-//         push_ptr = 'd0;
-//         push_en  = 'd0;
-//         for(int unsigned i=0; i<DEPTH; i++) begin
-//             if(push) begin
-//                 if(idxfifo[DEPTH-1-i].v==1'b0) begin
-//                     push_idx = widx;
-//                     push_ptr = 7-i;
-//                     push_en  = 1'b1;
-//                 end
-//             end
-//         end
-//     end
-// 
-//     always@(*) begin
-//         if(push_ptr=='d0 && push_en=='d1) begin
-//             idxfifo_n[0] = {push_idx, 1'b1};
-//         end
-//         else if(pop_idx_match_list[0]=='b1) begin
-//             idxfifo_n[0] = {idxfifo[0].idx, 1'b0};
-//         end
-//         else begin
-//             idxfifo_n[0] = idxfifo[0];
-//         end
-//     
-//         for(int unsigned k=1; k<DEPTH; k++) begin
-//             logic [DEPTH-1:0]               pop_idx_match_list_sr;
-//             buf_idx_t                       tmp_ptr;
-//             pop_idx_match_list_sr = pop_idx_match_list >> (8-k);
-//             tmp_ptr = k - pop_idx_match_cnt_list[k];
-//             if(k==push_ptr && push_en==1'b1)        // fresh push to this cell
-//                 idxfifo_n[tmp_ptr] = {push_idx, 1'b1};
-//             else
-//                 idxfifo_n[tmp_ptr] = idxfifo[k];
-//         end
-//     end
-// 
-//     always@(posedge clk or negedge rstn)begin
-//         if(~rstn) begin
-//             for(int unsigned kn=0; kn<DEPTH; kn++) begin
-//                 idxfifo[kn] <= {{IDX_WIDTH{1'b0}}, 1'b0};
-//             end
-//         end
-//         else begin
-//             idxfifo <= idxfifo_n;
-//         end
-//     end
-// 
-// genvar ki;
-// generate
-//     for(ki=0; ki<DEPTH; ki++) begin
-//         pop_idx_match     U_pop_idx_match    (pop, ridx,          idxfifo[ki].idx,   pop_idx_match_list[ki]);
-//         pop_idx_match_cnt U_pop_idx_match_cnt(pop_idx_match_list, ki[IDX_WIDTH-1:0], pop_idx_match_cnt_list[ki]);
-//     end
-// endgenerate
-// //}}}
-// 
-// endmodule
-// //}}}
+/***************************************************************************************
+* Copyright (c) 2024 Beijing Institute of Open Source Chip (BOSC)
+*
+* OpenIOMMU is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
 
-///////////////////////////////////////////////////
 module pop_idx_match #( //{{{
     parameter  IDX_WIDTH        = 3,
     parameter  DEPTH            = 2**IDX_WIDTH,
