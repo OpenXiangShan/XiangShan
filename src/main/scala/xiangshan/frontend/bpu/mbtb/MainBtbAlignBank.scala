@@ -109,7 +109,8 @@ class MainBtbAlignBank(
   // this align bank. Each entry carries the originating internal-bank index.
   private val victimBtb         = Module(new VictimBtb)
   private val victimBtbReplacer = Module(new VictimBtbReplacer)
-  victimBtbReplacer.io.valids := VecInit(victimBtb.io.read.resp.entries.map(_.entry.valid))
+  private val vbtbValidMask     = VecInit(victimBtb.io.read.resp.entries.map(_.entry.valid))
+  victimBtbReplacer.io.valids := vbtbValidMask
 
   io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
@@ -218,15 +219,15 @@ class MainBtbAlignBank(
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   // Only the positions are needed in s2 for MainBtb/VBTB duplicate detection.
-  private val s2_rawPositions     = RegEnable(VecInit(s1_rawEntries.map(_.position)), s1_fire)
-  private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
-  private val s2_vbtbPositions    = RegEnable(VecInit(s1_vbtbEntries.map(_.entry.position)), s1_fire)
-  private val s2_vbtbHitMask      = RegEnable(s1_vbtbHitMask, s1_fire)
-  private val s2_rawHitMask       = RegEnable(s1_rawHitMask, s1_fire)
-  private val s2_predictions      = RegEnable(s1_predictions, s1_fire)
-  private val s2_vbtbSelectOH     = RegEnable(s1_vbtbSelectOH, s1_fire)
-  private val s2_vbtbSelectEntry  = RegEnable(s1_vbtbSelectEntry, s1_fire)
-  private val s2_vbtbPrediction   = RegEnable(s1_vbtbPrediction, s1_fire)
+  private val s2_rawPositions    = RegEnable(VecInit(s1_rawEntries.map(_.position)), s1_fire)
+  private val s2_rawCounters     = RegEnable(s1_rawCounters, s1_fire)
+  private val s2_vbtbPositions   = RegEnable(VecInit(s1_vbtbEntries.map(_.entry.position)), s1_fire)
+  private val s2_vbtbHitMask     = RegEnable(s1_vbtbHitMask, s1_fire)
+  private val s2_rawHitMask      = RegEnable(s1_rawHitMask, s1_fire)
+  private val s2_predictions     = RegEnable(s1_predictions, s1_fire)
+  private val s2_vbtbSelectOH    = RegEnable(s1_vbtbSelectOH, s1_fire)
+  private val s2_vbtbSelectEntry = RegEnable(s1_vbtbSelectEntry, s1_fire)
+  private val s2_vbtbPrediction  = RegEnable(s1_vbtbPrediction, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startPc)
 
@@ -516,6 +517,33 @@ class MainBtbAlignBank(
   io.trace.wayIdx    := PriorityEncoder(t1_entryWayMask.asUInt)
   io.trace.entry     := t1_entry
   XSPerfHistogram("multihit_count", PopCount(s2_multiHitMask), s2_fire, 0, NumWay)
+
+  // VBTB performance counters. These are kept at align-bank scope so that
+  // each counter corresponds to one fully-associative VBTB instance.
+  private val vbtbPredReq = s2_fire && io.enable
+  XSPerfAccumulate("vbtb_pred_req", vbtbPredReq)
+  XSPerfAccumulate("vbtb_pred_hit", vbtbPredReq && s2_vbtbSelected)
+  XSPerfAccumulate("vbtb_pred_miss", vbtbPredReq && !s2_vbtbSelected)
+  XSPerfHistogram(
+    "vbtb_pred_hit_count",
+    PopCount(s2_vbtbHitMask),
+    vbtbPredReq,
+    0,
+    NumVictimBtbWays + 1
+  )
+  XSPerfHistogram("vbtb_occupancy", PopCount(vbtbValidMask), true.B, 0, NumVictimBtbWays + 1)
+
+  XSPerfAccumulate("vbtb_train_hit", t1_fire && t1_mispredictInfo.valid && t1_vbtbHit)
+  XSPerfAccumulate("vbtb_train_miss", t1_fire && t1_mispredictInfo.valid && !t1_vbtbHit)
+  XSPerfAccumulate("vbtb_entry_update", t1_fire && t1_vbtbEntryNeedWrite)
+  XSPerfAccumulate("vbtb_counter_update", t1_fire && t1_vbtbCounterNeedWrite)
+
+  XSPerfAccumulate("vbtb_snapshot_write", writeEvicted)
+  XSPerfAccumulate("vbtb_snapshot_evicted_reuse", snapshotValid && evictedValid && evictedHit)
+  XSPerfAccumulate("vbtb_snapshot_incoming_flush", flushIncoming)
+  XSPerfAccumulate("vbtb_mainbtb_duplicate_flush", s2_fire && s2_vbtbMultiHitMask.asUInt.orR)
+  XSPerfAccumulate("vbtb_replacer_pred_touch", victimBtbReplacer.io.predTouch.valid)
+  XSPerfAccumulate("vbtb_replacer_train_touch", victimBtbReplacer.io.trainTouch.valid)
 
   XSPerfSeqAccumulate(
     "", // no common prefix is needed
