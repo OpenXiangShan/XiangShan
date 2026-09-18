@@ -708,6 +708,7 @@ class CtrlBlockImp(
   enqRob.canAccept := rob.io.enq.canAccept
   enqRob.canAcceptForDispatch := rob.io.enq.canAcceptForDispatch
   enqRob.isEmpty := rob.io.enq.isEmpty
+  enqRob.boundaryInterruptPending := rob.io.enq.boundaryInterruptPending
   enqRob.resp := rob.io.enq.resp
   enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
@@ -717,6 +718,7 @@ class CtrlBlockImp(
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
   dispatch.io.enqRob.canAcceptForDispatch := enqRob.canAcceptForDispatch
   dispatch.io.enqRob.isEmpty := enqRob.isEmpty && !enqRob.req.map(_.valid).reduce(_ || _)
+  dispatch.io.enqRob.boundaryInterruptPending := enqRob.boundaryInterruptPending
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
