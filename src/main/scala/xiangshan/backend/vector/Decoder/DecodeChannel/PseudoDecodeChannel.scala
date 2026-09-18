@@ -26,6 +26,7 @@ import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.HasXSParameter
 
 import scala.collection.SeqMap
 import scala.language.implicitConversions
@@ -33,7 +34,7 @@ import scala.language.implicitConversions
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
-)(implicit val p: Parameters) extends Module with HasVectorSettings {
+)(implicit val p: Parameters) extends Module with HasVectorSettings with HasXSParameter {
   import PseudoDecodeChannel._
 
   @public
