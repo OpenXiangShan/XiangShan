@@ -99,6 +99,15 @@ MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RTL_INCLUDE ?=
 
+# External OpenIOMMU file list. The file list is passed only when the
+# elaboration switch is enabled; its paths are relative to the submodule root.
+IOMMU_FILELIST := $(abspath OpenIOMMU/iommu_wrap.f)
+ifeq ($(WITH_IOMMU),1)
+IOMMU_RTL_INCLUDE := $(IOMMU_FILELIST)
+else
+IOMMU_RTL_INCLUDE :=
+endif
+
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
 endif
@@ -371,7 +380,8 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
@@ -381,7 +391,8 @@ gsim: sim-chirrtl
 
 # vcs simulation
 simv: sim-verilog
-	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
