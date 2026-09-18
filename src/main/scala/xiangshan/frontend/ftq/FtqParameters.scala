@@ -40,7 +40,7 @@ trait HasFtqParameters extends HasFrontendParameters {
 }
 
 case class FtqPrefetchQueueParameters(
-    Size: Int = 16,
+    Size: Int = 8,
     // when distanceBetween(pfPtr, fetchPtr), prefer 1-fdip over 2- or 1-queued
     PreferFdipDistance: Int = 2
 ) {}

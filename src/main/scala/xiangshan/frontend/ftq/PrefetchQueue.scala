@@ -69,19 +69,21 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
 
   private val enqPtr = RegInit(PrefetchQueuePtr(false.B, 0.U))
   private val deqPtr = RegInit(PrefetchQueuePtr(false.B, 0.U))
-  private val full   = distanceBetween(enqPtr, deqPtr) >= (Size - EnqueueNum).U
+
+  private val numAvailable = Size.U - distanceBetween(enqPtr, deqPtr)
 
   /* *** enqueue *** */
   io.enq.zipWithIndex.foreach { case (enqPort, i) =>
-    enqPort.ready := !full
-    val enqIdx = (enqPtr + PopCount(io.enq.take(i).map(_.valid))).value
-    when(enqPort.valid && !full) {
+    val numEnqueued = PopCount(io.enq.take(i).map(_.valid)) // number of valid ports before this port
+    enqPort.ready := numEnqueued < numAvailable
+    val enqIdx = (enqPtr + numEnqueued).value
+    when(enqPort.fire) {
       mem(enqIdx).valid := true.B
       mem(enqIdx).bits  := enqPort.bits
     }
   }
-  when(!full && io.enq.map(_.valid).reduce(_ || _)) { // gate using valid.orR to save some power, may be bad for timing
-    enqPtr := enqPtr + PopCount(io.enq.map(_.valid))
+  when(io.enq.map(_.fire).reduce(_ || _)) { // gate using valid.orR to save some power, may be bad for timing
+    enqPtr := enqPtr + PopCount(io.enq.map(_.fire))
   }
 
   /* *** dequeue *** */
