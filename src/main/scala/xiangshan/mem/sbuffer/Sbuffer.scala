@@ -236,6 +236,11 @@ class Sbuffer(implicit p: Parameters)
   val data = dataModule.io.dataOut
   val mask = dataModule.io.maskOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
+  // Per-entry age from line allocation to the first request accepted by DCache.
+  // The pending bit is cleared after the first request, so later retries do not
+  // contribute another sample for the same Sbuffer entry.
+  val allocToDcacheAge = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
+  val allocToDcachePending = RegInit(VecInit(Seq.fill(StoreBufferSize)(false.B)))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
@@ -452,6 +457,8 @@ class Sbuffer(implicit p: Parameters)
       when(insertVec(entryIdx)){
         stateVec(entryIdx).state_valid := true.B
         stateVec(entryIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
+        allocToDcacheAge(entryIdx) := 0.U
+        allocToDcachePending(entryIdx) := true.B
         when(sameBlockInflightMask.orR){
           waitInflightMask(entryIdx) := sameBlockInflightMask
         }
@@ -708,6 +715,21 @@ class Sbuffer(implicit p: Parameters)
   val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, sbuffer_out_s0_fire)
   val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
   val sbuffer_out_s1_evictionVTag = RegEnable(vtag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
+
+  // Keep counting while the entry is waiting in the Sbuffer pipeline. The
+  // sample is taken only when the first DCache request actually fires.
+  for (entryIdx <- 0 until StoreBufferSize) {
+    when (allocToDcachePending(entryIdx) && stateVec(entryIdx).state_valid &&
+      allocToDcacheAge(entryIdx) =/= EvictCycles.U) {
+      allocToDcacheAge(entryIdx) := allocToDcacheAge(entryIdx) + 1.U
+    }
+  }
+  val allocToDcacheSample = sbuffer_out_s1_fire &&
+    allocToDcachePending(sbuffer_out_s1_evictionIdx)
+  val allocToDcacheLatency = allocToDcacheAge(sbuffer_out_s1_evictionIdx)
+  when (allocToDcacheSample) {
+    allocToDcachePending(sbuffer_out_s1_evictionIdx) := false.B
+  }
 
   io.dcache.req.valid := sbuffer_out_s1_valid && !blockDcacheWrite
   io.dcache.req.bits := DontCare
@@ -1031,6 +1053,13 @@ class Sbuffer(implicit p: Parameters)
 
   val perf_valid_entry_count = RegNext(PopCount(VecInit(stateVec.map(s => !s.isInvalid())).asUInt))
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
+  // Distribution of allocation-to-first-DCache-request latency. Multiple
+  // ranges retain cycle-level detail for short waits while covering timeout-
+  // scale waits with coarser buckets.
+  XSPerfHistogram("sbuffer_alloc_to_dcache_latency", allocToDcacheLatency, allocToDcacheSample, 0, 128, 4, true, true)
+  XSPerfHistogram("sbuffer_alloc_to_dcache_latency", allocToDcacheLatency, allocToDcacheSample, 128, 512, 16, true, true)
+  XSPerfHistogram("sbuffer_alloc_to_dcache_latency", allocToDcacheLatency, allocToDcacheSample, 512, 4096, 64, true, true)
+  XSPerfHistogram("sbuffer_alloc_to_dcache_latency", allocToDcacheLatency, allocToDcacheSample, 4096, 65536, 4096, true, false)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.req.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.req.map(_.fire)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire_vecinvalid", PopCount(VecInit(io.in.req.map(data => data.fire && !data.bits.vecValid)).asUInt))
