@@ -159,6 +159,11 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
 
   when(io.deq.fire) {
     deqPtr := deqPtr + selectedPrefetch.numQueued
+    (0 until MaxPrefetchReqNum).foreach { i=>
+      when (i.U < selectedPrefetch.numQueued) {
+        mem((deqPtr + i.U).value).valid := false.B
+      }
+    }
   }
 
   /* *** sanity check & perf *** */
