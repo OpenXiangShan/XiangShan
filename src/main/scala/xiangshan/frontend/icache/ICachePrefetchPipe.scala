@@ -90,7 +90,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
   assert(
-    !s0_valid ||
+    !s0_valid || !s0_twoPrefetchCase.valid ||
       !(!s0_req(0).source.inStream && s0_req(1).source.inStream),
     "req(1) can be inStream only when req(0) is inStream"
   )
