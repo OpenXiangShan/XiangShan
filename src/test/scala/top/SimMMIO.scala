@@ -68,7 +68,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
   val iopmpApbRange = AddressSet(0x40100000L, 0xffff)
   val iommuApbRange = AddressSet(0x40200000L, 0xffff)
-  private val enableIommu = !DifftestModule.isGSIM
+  private val enableIommu = !ArgParser.isGSIM
   val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ Seq(
     soc.UARTLiteRange,
     soc.UART16550Range,

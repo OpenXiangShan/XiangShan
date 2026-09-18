@@ -30,6 +30,7 @@ import utility._
 import device.IMSICBusType
 
 object ArgParser {
+  @volatile var isGSIM: Boolean = false
   // TODO: add more explainations
   val usage =
     """
@@ -255,6 +256,10 @@ object ArgParser {
       }
     }
     val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
+    isGSIM = args.sliding(2).exists {
+      case Array("--difftest-config", cfg) => cfg.contains("G")
+      case _ => false
+    }
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
         enableDebug = here(DebugOptionsKey).EnableDebug,
