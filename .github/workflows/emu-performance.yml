@@ -7,6 +7,8 @@ on:
     branches: [ kunminghu-v3 ]
   pull_request:
     branches: [ kunminghu-v3 ]
+  merge_group:
+    branches: [ kunminghu-v3 ]
 
 env:
   # Set common environment variables for all jobs
