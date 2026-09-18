@@ -985,13 +985,13 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val xbar1ToXbar0Buf = connectThroughTimingCut(xbar1to2(0), xbar1to2(1), "imsic_xbar1_to_xbar0_buf")
   imsic_l4(3) := xbar1to2(2)
   val xbar2ToXbar1Buf = connectThroughTimingCut(xbar1to2(1), xbar1to2(2), "imsic_xbar2_to_xbar1_buf")
-  imsic_l4(4) :*= xbar1to2(3)
+  val xbar3ToImsic4Buf = connectThroughBuffer(imsic_l4(4), xbar1to2(3), "imsic_xbar3_to_l4_4_buf", star = true)
   imsic_l4(5) :*= xbar1to2(3)
-  imsic_l4(7) :*= xbar1to2(5)
+  val xbar5ToImsic7Buf = connectThroughBuffer(imsic_l4(7), xbar1to2(5), "imsic_xbar5_to_l4_7_buf", star = true)
   imsic_l4(8) :*= xbar1to2(5)
-  imsic_l4(10) :*= xbar1to2(7)
+  val xbar7ToImsic10Buf = connectThroughBuffer(imsic_l4(10), xbar1to2(7), "imsic_xbar7_to_l4_10_buf", star = true)
   imsic_l4(11) :*= xbar1to2(7)
-  imsic_l4(13) :*= xbar1to2(9)
+  val xbar9ToImsic13Buf = connectThroughBuffer(imsic_l4(13), xbar1to2(9), "imsic_xbar9_to_l4_13_buf", star = true)
   imsic_l4(14) :*= xbar1to2(9)
   //  icx0->cx1->cx2   cx3->cx4,cx5->cx6,cx7->cx8, cx9->cx10
   val xbar4ToXbar3Buf = connectThroughTimingCut(xbar1to2(3), xbar1to2(4), "imsic_xbar4_to_xbar3_buf")
@@ -1059,6 +1059,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     xbar10ToXbar9Buf.setTimingCutReset(xbar10ToXbar9RouteReset)
     val xbar9RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(9).module, xbar10ToXbar9RouteReset)
     val imsic15RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(15).module, xbar10RouteReset)
+    xbar9ToImsic13Buf.module.reset := xbar9RouteReset
     val imsic13RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(13).module, xbar9RouteReset)
     val imsic14RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(14).module, xbar9RouteReset)
 
@@ -1066,6 +1067,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     xbar8ToXbar7Buf.setTimingCutReset(xbar8ToXbar7RouteReset)
     val xbar7RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(7).module, xbar8ToXbar7RouteReset)
     val imsic12RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(12).module, xbar8RouteReset)
+    xbar7ToImsic10Buf.module.reset := xbar7RouteReset
     val imsic10RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(10).module, xbar7RouteReset)
     val imsic11RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(11).module, xbar7RouteReset)
 
@@ -1073,6 +1075,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     xbar6ToXbar5Buf.setTimingCutReset(xbar6ToXbar5RouteReset)
     val xbar5RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(5).module, xbar6ToXbar5RouteReset)
     val imsic9RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(9).module, xbar6RouteReset)
+    xbar5ToImsic7Buf.module.reset := xbar5RouteReset
     val imsic7RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(7).module, xbar5RouteReset)
     val imsic8RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(8).module, xbar5RouteReset)
 
@@ -1080,6 +1083,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     xbar4ToXbar3Buf.setTimingCutReset(xbar4ToXbar3RouteReset)
     val xbar3RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(3).module, xbar4ToXbar3RouteReset)
     val imsic6RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(6).module, xbar4RouteReset)
+    xbar3ToImsic4Buf.module.reset := xbar3RouteReset
     val imsic4RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(4).module, xbar3RouteReset)
     val imsic5RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(5).module, xbar3RouteReset)
 
