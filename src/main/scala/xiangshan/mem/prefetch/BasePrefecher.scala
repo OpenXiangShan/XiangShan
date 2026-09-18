@@ -70,9 +70,12 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   }
 }
 
-class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
+class L2PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParameters {
   val addr = UInt(PAddrBits.W)
   val source = UInt(MemReqSource.reqSourceBits.W)
+  // byte mask of the target cache line, only meaningful for the store prefetch
+  // (source == MemReqSource.Prefetch2L2Store), other sources leave it as 0
+  val mask = UInt(dcacheParameters.blockBytes.W)
 }
 
 class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq

@@ -861,6 +861,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U
     ))
+    l2_pf_req_arb.io.in(i).bits.req.mask := 0.U
     l2_pf_req_arb.io.in(i).bits.debug_vaddr := l2_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
@@ -920,6 +921,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L3Stride.id.U,
       L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L3Stream.id.U
     ))
+    l3_pf_req_arb.io.in(i).bits.mask := 0.U
   }
 
   // s1: send out to l3 and update sent_vec

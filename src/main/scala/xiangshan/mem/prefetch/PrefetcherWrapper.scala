@@ -90,6 +90,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     // replenish information
     val fromDCache = Flipped(new DCacheToPrefetchIO)
     val fromOOO = Flipped(new OOOToPrefetchIO)
+    // store prefetch requests from sbuffer, they are only forwarded to L2
+    val fromStoreBuffer = Flipped(DecoupledIO(new StorePrefetchToL2Req()))
     // train
     val trainSource = Flipped(new TrainSourceIO)
     // tlb
@@ -122,7 +124,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   /* prefetch arbiter */
   val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
-  val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
+  // the store prefetch from sbuffer is the last input, so it has the lowest priority
+  val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum + 1))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
   val l3_pf_arb = Module(new Arbiter(new L3PrefetchReq, prefetcherNum))
 
@@ -305,6 +308,16 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   })
 
   /**
+   * store prefetch from sbuffer to l2 cache
+   * it is only forwarded to l2, the request is merged in the L2 store prefetch buffer
+   */
+  l2_pf_arb.io.in(prefetcherNum).valid := io.fromStoreBuffer.valid
+  l2_pf_arb.io.in(prefetcherNum).bits.addr := io.fromStoreBuffer.bits.addr
+  l2_pf_arb.io.in(prefetcherNum).bits.source := MemReqSource.Prefetch2L2Store.id.U
+  l2_pf_arb.io.in(prefetcherNum).bits.mask := io.fromStoreBuffer.bits.mask
+  io.fromStoreBuffer.ready := l2_pf_arb.io.in(prefetcherNum).ready
+
+  /**
    * load prefetch to l1 Dcache
    * stride
    */
@@ -325,11 +338,13 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
+  io.l1_pf_to_l2.mask := l2_pf_req.bits.mask
   io.l1_pf_to_l2.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
 
   io.l1_pf_to_l3.addr_valid := l3_pf_req.valid
   io.l1_pf_to_l3.addr := l3_pf_req.bits.addr
   io.l1_pf_to_l3.pf_source := l3_pf_req.bits.source
+  io.l1_pf_to_l3.mask := 0.U
   io.l1_pf_to_l3.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)
@@ -339,6 +354,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2StreamStride", clock, reset) 
   }.elsewhen(l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U) {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2SMS", clock, reset)
+  }.elsewhen(l2_pf_req.bits.source === MemReqSource.Prefetch2L2Store.id.U) {
+    l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2Store", clock, reset)
   }.otherwise {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2Unknown", clock, reset)
   }

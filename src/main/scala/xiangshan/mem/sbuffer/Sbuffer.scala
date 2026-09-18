@@ -205,6 +205,8 @@ class Sbuffer(implicit p: Parameters)
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val store_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq)) // to dcache
+    // store prefetch forwarded to L2 (committed store -> L2 prefetch channel)
+    val store_prefetch_to_l2 = DecoupledIO(new StorePrefetchToL2Req)
     val memSetPattenDetected = Input(Bool())
     val force_write = Input(Bool())
     val diffStore = Input(new DiffStoreIO)
@@ -213,7 +215,19 @@ class Sbuffer(implicit p: Parameters)
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
   val prefetcher = Module(new StorePfWrapper())
+  val storePrefetchToL2Gen = Module(new StorePrefetchToL2Gen())
   val writeReq = dataModule.io.writeReq
+
+  // committed store -> store prefetch requests for L2
+  for (i <- 0 until EnsbufferWidth) {
+    storePrefetchToL2Gen.io.enq(i).valid := io.in.req(i).fire
+    storePrefetchToL2Gen.io.enq(i).addr := io.in.req(i).bits.addr
+    storePrefetchToL2Gen.io.enq(i).mask := io.in.req(i).bits.mask
+    storePrefetchToL2Gen.io.enq(i).wline := io.in.req(i).bits.wline
+    storePrefetchToL2Gen.io.enq(i).prefetch := io.in.req(i).bits.prefetch
+    storePrefetchToL2Gen.io.enq(i).vecValid := io.in.req(i).bits.vecValid
+  }
+  io.store_prefetch_to_l2 <> storePrefetchToL2Gen.io.out
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))

@@ -768,13 +768,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     prefetcher.io.pmp_resp(i) := pmp_check(k).resp
   }
   l1_pf_req <> prefetcher.io.l1_pf_to_l1
+  // store prefetch from sbuffer, only forwarded to L2 by the prefetcher wrapper
+  prefetcher.io.fromStoreBuffer <> sbuffer.io.store_prefetch_to_l2
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l2.pf_source)
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.mask := prefetcher.io.l1_pf_to_l2.mask)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l2.pf_en)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l3.pf_source)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.mask := prefetcher.io.l1_pf_to_l3.mask)
   outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l3.pf_en)
   XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
   XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))

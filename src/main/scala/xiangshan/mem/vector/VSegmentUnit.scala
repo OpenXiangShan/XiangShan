@@ -771,6 +771,8 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   sbufferOut.bits.cmd              := MemoryOpConstants.M_XWR
   sbufferOut.bits.id               := DontCare
   sbufferOut.bits.addr             := sbufferPaddr
+  sbufferOut.bits.wline            := false.B // vector stores never write a whole line as cbo.zero does
+  sbufferOut.bits.prefetch         := false.B // vector stores are never hardware prefetch stores
 
   NewPipelineConnect(
     sbufferOut, io.sbuffer, io.sbuffer.fire,
@@ -1014,4 +1016,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
-

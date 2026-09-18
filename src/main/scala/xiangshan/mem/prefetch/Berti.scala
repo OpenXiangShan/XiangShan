@@ -1002,6 +1002,7 @@ extends DCacheModule {
   io.l2_req.valid := l2PfIdxArb.io.out.valid && entries(l2PfIdxGlobal).target === PrefetchTarget.L2.id.U
   io.l2_req.bits.addr := entries(l2PfIdxGlobal).getPrefetchPA
   io.l2_req.bits.source := MemReqSource.Prefetch2L2Berti.id.U
+  io.l2_req.bits.mask := 0.U
   when(l2PfIdxArb.io.out.fire) {
     valids(l2PfIdxGlobal) := false.B
   }
