@@ -86,10 +86,11 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     val snpt = Input(new SnapshotPort)
     val diffRatBase = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
-    val debug_vl = if (backendParams.debugEn) reg_t match {
+    // committed vl mapping; the CSR reads vl through it when the difftest RAT buffer is not built
+    val debug_vl = reg_t match {
       case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
       case _ => None
-    } else None
+    }
   })
 
   // speculative rename table
@@ -216,8 +217,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val debug_vec_rat = Option.when(backendParams.debugEn)(Vec(VecStdLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
     val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
 
-    // for difftest
-    val diff_vl_rat  = Option.when(backendParams.basicDebugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
+    // committed vl mapping, for difftest and the CSR's vl read
+    val diff_vl_rat  = Some(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I, 0))
@@ -341,7 +342,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
 
   // debug read ports for difftest
   io.debug_vl_rat.foreach(_ := vlRat.io.debug_rdata.get)
-  io.diff_vl_rat.foreach(_ := diffRatBuffer.get.io.diffRat.vlRat)
+  // without the difftest RAT buffer, the committed vl mapping is vlRat's architectural copy
+  io.diff_vl_rat.foreach(_ := diffRatBuffer.map(_.io.diffRat.vlRat).getOrElse(
+    VecInit(Seq.fill(VlLogicRegs)(vlRat.io.debug_vl.get))))
   vlRat.io.readPorts <> io.vlReadPorts
   vlRat.io.redirect := io.redirect
   vlRat.io.snpt := io.snpt

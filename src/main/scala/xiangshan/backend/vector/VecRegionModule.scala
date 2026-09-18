@@ -96,8 +96,9 @@ class VecRegionImp(
   val vlWen   = Wire(Vec(numVlWritePort, Bool()))
   val vlWaddr = Wire(Vec(numVlWritePort, UInt(VlPhyRegIdxWidth.W)))
   val vlWdata = Wire(Vec(numVlWritePort, UInt(vlWidth.W)))
-  val vlDiffReadAddr: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(VlPhyRegIdxWidth.W))))
-  val vlDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(vlWidth.W))))
+  // vl read port for the CSR (csrio.vpu.vl) and difftest
+  val vlDiffReadAddr: Option[Vec[UInt]] = Some(Wire(Vec(1, UInt(VlPhyRegIdxWidth.W))))
+  val vlDiffReadData: Option[Vec[UInt]] = Some(Wire(Vec(1, UInt(vlWidth.W))))
 
   VfRegFile("VfRegFile", VfPhyRegs, 1, vpRaddr, vpRdata, Seq(vpWen), vpWaddr, vpWdata,
     debugAllRData = vpDiffReadData
@@ -530,7 +531,7 @@ object VecRegionModule {
 
     val vlWb0WakeUp = Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams))
 
-    val diff = Option.when(backendParams.basicDebugEn)(new DiffIn)
+    val diff = Some(new DiffIn)
   }
 
   class FromMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
@@ -611,7 +612,7 @@ object VecRegionModule {
 
     val toVecExcpMod = new VprfToExcpMod(maxMergeNumPerCycle * 2)
 
-    val diff = Option.when(backendParams.basicDebugEn)(new DiffOut)
+    val diff = Some(new DiffOut)
   }
 
   class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {

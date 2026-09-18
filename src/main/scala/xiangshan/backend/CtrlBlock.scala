@@ -1058,7 +1058,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val lsdqFull  = Bool()
     }
   })
-  val diff_vl_rat  = if (params.basicDebugEn) Some(Vec(1, Output(UInt(PhyRegIdxWidth.W)))) else None
+  // committed vl mapping, for difftest and the CSR's vl read
+  val diff_vl_rat  = Some(Vec(1, Output(UInt(PhyRegIdxWidth.W))))
 
   val sqCanAccept = Input(Bool())
   val lqCanAccept = Input(Bool())
