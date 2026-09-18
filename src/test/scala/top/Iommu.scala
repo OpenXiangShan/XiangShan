@@ -11,7 +11,7 @@ import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 
-/** Raw port description of bosc-iommu-v2/iommu_wrap.sv. */
+/** Raw port description of OpenIOMMU/iommu_wrap.sv. */
 private class IommuWrapIO extends Bundle {
   val iommu_clk = Input(Clock())
   val iommu_rstn = Input(Bool())
