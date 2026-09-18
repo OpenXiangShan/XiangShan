@@ -60,7 +60,7 @@ case class XSCoreParameters
   HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
   HasBpuFlush: Boolean = true,
-  HasBpuFlushDefault: Boolean = false,
+  HasBpuFlushDefault: Boolean = true,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
