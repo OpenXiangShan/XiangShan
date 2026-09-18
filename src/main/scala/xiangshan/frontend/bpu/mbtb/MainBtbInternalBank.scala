@@ -169,8 +169,14 @@ class MainBtbInternalBank(
   //   when the old entry read response is available.
   private val snapshotDataValid = snapshotValid.zip(snapshotValidNext).map { case (v, n) => !n && v }
 
-  private val snapshotReq  = Reg(Vec(NumWay, new MainBtbEntrySramWriteReq))
-  private val snapshotResp = Reg(Vec(NumWay, new MainBtbEntry))
+  private val snapshotReq = VecInit(entryWriteBuffer.io.read.zipWithIndex.map { case (bufRead, i) =>
+    RegEnable(bufRead.bits, !snapshotValid(i) && pendingValid(i) && !read.req.valid)
+  })
+  // The entry SRAM has one-cycle read latency with holdRead behavior, so each old entry is
+  // captured on the cycle indicated by the valid-rise edge of snapshotValid.
+  private val snapshotResp = VecInit(entrySrams.zipWithIndex.map { case (sram, i) =>
+    RegEnable(sram.io.r.resp.data.head, snapshotDataValid(i))
+  })
   private val snapshotEligible = VecInit(snapshotValid.zip(snapshotValidNext).zip(snapshotVbtbDone).map {
     case ((valid, dataReady), vbtbDone) => valid && dataReady && !vbtbDone
   })
@@ -193,37 +199,29 @@ class MainBtbInternalBank(
     case (writeValid, writeReady) => writeValid && writeReady
   })
 
-  Seq.tabulate(NumWay) { i =>
-    switch(snapshotValid(i)) {
-      is(false.B) {
-        // Start a snapshot only for a pending miss write and only when the entry SRAM is not
-        // serving a normal prediction read. The SRAM read issued below uses the pending set
-        // index and captures the entry that will be evicted from this way.
-        when(pendingValid(i) && !read.req.valid) {
-          snapshotValid(i)    := true.B
-          snapshotVbtbDone(i) := false.B
-          snapshotReq(i)      := entryWriteBuffer.io.read(i).bits
-        }
+  for (i <- 0 until NumWay) {
+    when(!snapshotValid(i)) {
+      // Start a snapshot only for a pending miss write and only when the entry SRAM is not
+      // serving a normal prediction read. The SRAM read issued below uses the pending set
+      // index and captures the entry that will be evicted from this way.
+      when(pendingValid(i) && !read.req.valid) {
+        snapshotValid(i)    := true.B
+        snapshotVbtbDone(i) := false.B
       }
-      is(true.B) {
-        // The VBTB may accept the snapshot before the MainBtb SRAM can accept its incoming
-        // entry. Remember that completion to prevent a duplicate VBTB transfer, then retain
-        // the snapshot until the SRAM write is actually accepted.
-        when(snapshotGrantOH(i) && !snapshotSramFire(i)) {
-          snapshotVbtbDone(i) := true.B
-        }
-        when(snapshotSramFire(i)) {
-          snapshotValid(i)    := false.B
-          snapshotVbtbDone(i) := false.B
-        }
+    }.otherwise {
+      // The VBTB may accept the snapshot before the MainBtb SRAM can accept its incoming
+      // entry. Remember that completion to prevent a duplicate VBTB transfer, then retain
+      // the snapshot until the SRAM write is actually accepted.
+      when(snapshotGrantOH(i) && !snapshotSramFire(i)) {
+        snapshotVbtbDone(i) := true.B
       }
-    }
-    // The entry SRAM has one-cycle read latency with holdRead behavior, so the old entry is
-    // captured on the cycle indicated by the valid-rise edge of snapshotValid.
-    when(snapshotDataValid(i)) {
-      snapshotResp(i) := entrySrams(i).io.r.resp.data.head
+      when(snapshotSramFire(i)) {
+        snapshotValid(i)    := false.B
+        snapshotVbtbDone(i) := false.B
+      }
     }
   }
+
   snapshot.resp.valid         := snapshotWayArbiter.io.out.valid
   snapshot.resp.bits.setIdx   := Mux1H(snapshotSelectOH, snapshotReq.map(_.setIdx))
   snapshot.resp.bits.incoming := Mux1H(snapshotSelectOH, snapshotReq.map(_.entry))

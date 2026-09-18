@@ -1,6 +1,5 @@
-// Copyright (c) 2024-2025 Beijing Institute of Open Source Chip (BOSC)
-// Copyright (c) 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2020-2021 Peng Cheng Laboratory
+// Copyright (c) 2026 Beijing Institute of Open Source Chip (BOSC)
+// Copyright (c) 2026 Institute of Computing Technology, Chinese Academy of Sciences
 //
 // XiangShan is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -25,7 +24,7 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
     val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
     val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
     val valids:     Vec[Bool]   = Input(Vec(NumVictimBtbWays, Bool()))
-    val victim:     UInt        = Output(UInt(log2Up(NumVictimBtbWays).W))
+    val victimMask: UInt        = Output(UInt(NumVictimBtbWays.W))
   }
 
   val io: VictimBtbReplacerIO = IO(new VictimBtbReplacerIO)
@@ -39,8 +38,9 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   private val invalidMask = VecInit(io.valids.map(!_)).asUInt
 
-  io.victim := PriorityMux(Seq(
-    invalidMask.orR -> PriorityEncoder(invalidMask),
-    true.B          -> replacer.way
-  ))
+  io.victimMask := Mux(
+    invalidMask.orR,
+    PriorityEncoderOH(invalidMask),
+    UIntToOH(replacer.way)
+  )
 }

@@ -92,26 +92,19 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** s1 ***
    * just wait alignBanks
    */
-  io.s1_positions := VecInit(alignBanks.flatMap(bank =>
-    VecInit(bank.io.read.mbtbResp.positions ++ Seq(bank.io.read.vbtbResp.position))
-  ))
+  io.s1_positions := VecInit(alignBanks.flatMap(_.io.read.s1_positions))
 
   // we don't care about the order of alignBanks' responses,
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
-  io.result := VecInit(alignBanks.flatMap(bank =>
-    VecInit(bank.io.read.mbtbResp.predictions ++ Seq(bank.io.read.vbtbResp.prediction))
-  ))
+  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions))
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
-  io.meta.entries := VecInit(alignBanks.map(bank =>
-    VecInit(bank.io.read.mbtbResp.metas ++ Seq(bank.io.read.vbtbResp.meta))
-  ))
+  io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  private val s3_fire = io.stageCtrl.s3_fire && io.enable
   // io.result is flattened, so use each align bank's last result as its VBTB taken feedback.
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.s3_vbtbTaken := io.s3_takenMask(i * (NumWay + 1) + NumWay)
@@ -185,16 +178,17 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   /* *** statistics *** */
   private val s2_fire                    = io.stageCtrl.s2_fire && io.enable
-  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.mbtbResp.predictions.map(_.valid)))
+  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
+  private val pref_pred_miss             = s2_fire && perf_s2HitMask.reduce(!_ && !_)
 
   XSPerfAccumulate("total_train", t1_fire)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
-  XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
+  XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumBtbResultEntries + 1)
   XSPerfAccumulate("train_has_mispredict", t1_fire && t1_mispredictInfo.valid)
   XSPerfAccumulate("train_hit_mispredict", t1_fire && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
-  XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
+  XSPerfAccumulate("pred_miss", pref_pred_miss)
 
-  XSPerfRolling("rolling_mbtb_pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_), 10000, clock, reset)
+  XSPerfRolling("rolling_mbtb_pred_miss", pref_pred_miss, 10000, clock, reset)
 
 }
