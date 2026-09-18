@@ -161,6 +161,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     // spec sp and ctr should always be maintained
     when(topEntry.retAddr === retAddr && currSctr < StackCounterMax.U) {
       sctr := currSctr + 1.U
+      ssp  := currSsp
     }.otherwise {
       ssp  := ptrInc(currSsp)
       sctr := 0.U
@@ -184,6 +185,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     // spec sp and ctr should always be maintained
     when(currSctr > 0.U) {
       sctr := currSctr - 1.U
+      ssp  := currSsp
     }.elsewhen(tosrInRange(currTopNos, currTosw, currNosInSpec)) {
       // in range, use inflight data
       ssp  := ptrDec(currSsp)
