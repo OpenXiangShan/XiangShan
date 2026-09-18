@@ -91,7 +91,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val diffRatCommitRobIdx = Option.when(backendParams.basicDebugEn)(Input(Valid(new RobPtr)))
     val diffRatCommitRobIdxVec =
       Option.when(backendParams.basicDebugEn)(Input(Vec(CommitWidth, Valid(new RobPtr))))
-    val diff_vl_rat      = Option.when(backendParams.basicDebugEn)(Output(Vec(VlLogicRegs, UInt(PhyRegIdxWidth.W))))
+    // committed vl mapping, for difftest and the CSR's vl read
+    val diff_vl_rat      = Some(Output(Vec(VlLogicRegs, UInt(PhyRegIdxWidth.W))))
     val ratSnpt = Input(new SnapshotPort)
     // perf only
     val debugDispatchAllFire = OptionWrapper(backendParams.debugEn, Input(Bool()))
