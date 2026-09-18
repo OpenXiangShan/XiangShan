@@ -38,6 +38,13 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
       }
     }
 
+    class Fdip extends Bundle {
+      // wired from ftq entryQueue(pfPtr(0..MaxPrefetchReqNum-1)) to provide FDIP prefetch
+      val entries: Vec[Valid[FtqEntry]] = Vec(MaxPrefetchReqNum, Valid(new FtqEntry))
+      // current distanceBetween(pfPtr, fetchPtr)
+      val distance: UInt = Input(UInt(log2Ceil(FtqSize).W))
+    }
+
     class Dequeue extends Bundle {
       val req:             Vec[FtqPrefetchReq] = Vec(MaxPrefetchReqNum, new FtqPrefetchReq)
       val twoPrefetchCase: TwoPrefetchCase     = new TwoPrefetchCase
@@ -50,8 +57,7 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
     // convenient aliases
     def enqFromSw: Seq[DecoupledIO[Enqueue]] = enq.slice(0, EnqueueSwNum)
 
-    // wired from ftq entryQueue to provide FDIP prefetch
-    val fromEntryQueue: Vec[Valid[FtqEntry]] = Vec(MaxPrefetchReqNum, Flipped(Valid(new FtqEntry)))
+    val fdip: Fdip = Input(new Fdip)
 
     // dequeue, directly to ICache
     val deq: DecoupledIO[Dequeue] = DecoupledIO(new Dequeue)
@@ -119,7 +125,7 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
     req.valid := entry.valid
     req
   }
-  private val fdipPrefetch = PrefetchGroup(VecInit(io.fromEntryQueue.map(genFdipPrefetch)), "fdip")
+  private val fdipPrefetch = PrefetchGroup(VecInit(io.fdip.entries.map(genFdipPrefetch)), "fdip")
 
   private def genQueuedPrefetch(entry: Valid[PrefetchQueueEntry]): Valid[FtqPrefetchReq] = {
     val req = Wire(Valid(new FtqPrefetchReq))
@@ -138,18 +144,17 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   private val mixedPrefetch = PrefetchGroup(VecInit(fdipPrefetch.req.head, queuedPrefetch.req.head), "mixed")
 
   // select prefetch source:
-  // 2-fdip > 1-fdip + 1-queued(software etc.) > 1-fdip > 2 or 1-queued
-//  private val selectedPrefetch = MuxCase(
-//    queuedPrefetch,
-//    Seq(
-//      fdipPrefetch.has2  -> fdipPrefetch,
-//      mixedPrefetch.has2 -> mixedPrefetch,
-//      fdipPrefetch.has1  -> fdipPrefetch
-//    )
-//  )
-  // NOTE: the above version can be bad at timing, a simplified version will be:
-  // 2-fdip > 1-fdip + 1-queued or 1-fdip, no 2-queued is allowed
-  private val selectedPrefetch = Mux(fdipPrefetch.has2, fdipPrefetch, mixedPrefetch)
+  private val selectedPrefetch = MuxCase(
+    // no fdip available, fall back to queued
+    queuedPrefetch,
+    Seq(
+      // 2-fdip > 1-fdip + 1-queued(software etc.)
+      fdipPrefetch.has2  -> fdipPrefetch,
+      mixedPrefetch.has2 -> mixedPrefetch,
+      // when distanceBetween(pfPtr, fetchPtr) <= X, prefer 1-fdip over 2- or 1-queued
+      (fdipPrefetch.has1 && io.fdip.distance <= PreferFdipDistance.U) -> fdipPrefetch
+    )
+  )
 
   // send back to Ftq when has at least 1 prefetch req
   io.deq.valid                := selectedPrefetch.has1
@@ -169,7 +174,7 @@ class PrefetchQueue(implicit p: Parameters) extends FtqModule
   /* *** sanity check & perf *** */
   XSError(deqPtr > enqPtr, "Dequeue pointer exceeds enqueue pointer in FtqPrefetchQueue")
 
-  XSPerfAccumulate("full", full)
+  XSPerfAccumulate("full", isFull(enqPtr, deqPtr))
   XSPerfAccumulate("drop", PopCount(io.enq.map(port => port.valid && !port.ready)))
   XSPerfAccumulate("enq_total", PopCount(io.enq.map(_.fire)))
   XSPerfAccumulate("enq_sw", PopCount(io.enqFromSw.map(_.fire)))

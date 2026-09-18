@@ -260,7 +260,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     qPort.bits  := ioPort.bits // NOTE this ":=" is overloaded, we cannot use qPort := ioPort on a whole
   }
 
-  prefetchQueue.io.fromEntryQueue.zipWithIndex.foreach { case (qPort, i) =>
+  prefetchQueue.io.fdip.entries.zipWithIndex.foreach { case (qPort, i) =>
     qPort.bits := entryQueue(pfPtr(i).value)
     if (i == 0) {
       qPort.valid := bpuPtr(0) > pfPtr(0) && !redirect.valid
@@ -276,6 +276,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
         !(hasBackendFlag && (backendFlagPtr === pfPtr(0) || backendFlagPtr === pfPtr(1)))
     }
   }
+  prefetchQueue.io.fdip.distance := distanceBetween(pfPtr(0), fetchPtr(0))
 
   when(io.toICache.toPrefetch.fire) {
     pfPtr := pfPtr + prefetchQueue.io.deq.bits.numFdip
