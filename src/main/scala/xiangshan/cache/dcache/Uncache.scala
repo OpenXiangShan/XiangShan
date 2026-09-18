@@ -259,7 +259,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     req,
     false.B,
     "UncacheSkidBuffer",
-    !(io.flush.valid || do_uarch_drain)
+    !do_uarch_drain
   )
 
   val q0_entry = Wire(new UncacheEntry)
