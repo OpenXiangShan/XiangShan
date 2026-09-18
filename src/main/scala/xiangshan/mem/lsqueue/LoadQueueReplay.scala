@@ -264,6 +264,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    // Global stuck-recovery mode for loads that remain at the ROB head.
+    val specialMode = Output(Bool())
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
@@ -783,6 +785,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     replay_req(i).bits.vecTriggerMask.get := DontCare
     replay_req(i).bits.hasROBEntry := true.B
     replay_req(i).bits.missDbUpdated := s1_missDbUpdated
+    replay_req(i).bits.specialModeRequest := false.B
 
     XSError(replay_req(i).fire && !allocated(s1_replayIdx(i)), p"LoadQueueReplay: why replay an invalid entry ${s1_replayIdx(i)} ?")
   }
@@ -937,6 +940,16 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         blocking(enqIndex) := !ffProducerReadyNow
       }
 
+      // A younger request entering LRQ while special mode is active was
+      // deliberately killed in LoadUnit and must not wait for a normal
+      // TLB wakeup. The request marker is carried through the LoadUnit pipeline, so
+      // no per-entry specialReplay state is needed here.
+      when (enq.bits.specialModeRequest &&
+            enq.bits.uop.robIdx =/= io.robHeadPtr &&
+            replayInfo.cause(LoadReplayCauses.C_TM)) {
+        blocking(enqIndex) := false.B
+      }
+
       // extra info
       replayCarryReg(enqIndex) := replayInfo.rep_carry
       replacementUpdated(enqIndex) := enq.bits.replacementUpdated
@@ -1017,6 +1030,41 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
   io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
   io.replayAllocate := allocated.asUInt.orR
+
+  // Enter special mode after an aligned ROB-head request is written to the replay queue and
+  // the head remains in place for 2048 cycles. The mode is released by ROB-head movement.
+  private val specialCounterWidth = 12
+  private val specialThreshold = 2048
+  val specialCounter = RegInit(0.U(specialCounterWidth.W))
+  val specialModeReg = RegInit(false.B)
+  val specialRobIdx = Reg(new RobPtr)
+  val lastRobHeadPtr = RegNext(io.robHeadPtr)
+  val robHeadMoved = io.robHeadPtr =/= lastRobHeadPtr
+  val specialTrigger = io.enq.map { enq =>
+    enq.fire &&
+      !enq.bits.uop.robIdx.needFlush(io.redirect) &&
+      enq.bits.specialModeEligible &&
+      enq.bits.uop.robIdx === io.robHeadPtr
+  }.reduce(_ || _)
+
+  when (robHeadMoved) {
+    specialCounter := 0.U
+    specialModeReg := false.B
+  }.elsewhen (!specialModeReg) {
+    // An eligible S4 replay written by the LoadUnit starts the observation window.
+    // Once started, count every cycle until the ROB head moves.
+    when (specialTrigger || specialCounter =/= 0.U) {
+      when (specialCounter === (specialThreshold - 1).U) {
+        specialModeReg := true.B
+        specialRobIdx := io.robHeadPtr
+      }.otherwise {
+        specialCounter := specialCounter + 1.U
+      }
+    }
+  }
+  io.specialMode := RegNext(specialModeReg && io.robHeadPtr === specialRobIdx, false.B)
+  val specialModeEnter = specialModeReg && !RegNext(specialModeReg, false.B)
+  XSPerfAccumulate("replay_special_mode_enter", specialModeEnter)
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt

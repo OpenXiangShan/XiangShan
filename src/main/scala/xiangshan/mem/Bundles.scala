@@ -63,6 +63,8 @@ object Bundles {
     val memBackTypeMM = Bool()
     val isHyper = Bool()
     val isForVSnonLeafPTE = Bool()
+    val specialModeEligible = Bool()
+    val specialModeRequest = Bool()
     val isvec = Bool()
     val isLastElem = Bool()
     val is128bit = Bool()
