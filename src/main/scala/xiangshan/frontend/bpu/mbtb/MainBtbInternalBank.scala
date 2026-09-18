@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
+import utils.EnumUInt
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.WriteBuffer
 
@@ -146,99 +147,72 @@ class MainBtbInternalBank(
   private val pendingReady  = entrySrams.map(way => way.io.w.req.ready && !way.io.r.req.valid)
   private val pendingSetIdx = entryWriteBuffer.io.read.map(_.bits.setIdx)
 
-  // Snapshot state is used only for entry writes that missed in MainBtb. A hit write updates
-  // an existing way directly and does not evict another BTB entry. A miss write, however,
-  // replaces the selected way, so this bank must first read the old entry and later report
-  // both the incoming and evicted entries to the VictimBtb write path.
-  //
-  // There is one snapshot slot per way:
-  // - snapshotValid(i) means way i has a miss write waiting for the old entry read and the
-  //   later MainBtb write-back of the incoming entry.
-  // - snapshotReq(i) keeps the buffered incoming write request.
-  // - snapshotResp(i) keeps the old MainBtb entry returned by the entry SRAM read.
-  // - snapshotVbtbDone(i) means the shared VBTB has accepted this snapshot and only the
-  //   incoming MainBtb SRAM write remains to be completed.
-  //
-  // VBTB eligibility intentionally does not depend on MainBtb SRAM write readiness. This
-  // prevents the SRAM read/write control path from propagating through the snapshot arbiters
-  // into the shared VBTB replacement logic.
-  private val snapshotValid     = RegInit(VecInit.fill(NumWay)(false.B))
-  private val snapshotValidNext = RegNext(snapshotValid, init = VecInit.fill(NumWay)(false.B))
-  private val snapshotVbtbDone  = RegInit(VecInit.fill(NumWay)(false.B))
-  // snapshotDataValid fires one cycle after snapshotValid rises,
-  //   when the old entry read response is available.
-  private val snapshotDataValid = snapshotValid.zip(snapshotValidNext).map { case (v, n) => !n && v }
-
-  private val snapshotReq  = Reg(Vec(NumWay, new MainBtbEntrySramWriteReq))
-  private val snapshotResp = Reg(Vec(NumWay, new MainBtbEntry))
-  private val snapshotEligible = VecInit(snapshotValid.zip(snapshotValidNext).zip(snapshotVbtbDone).map {
-    case ((valid, dataReady), vbtbDone) => valid && dataReady && !vbtbDone
-  })
-  private val snapshotWayArbiter = Module(new RRArbiter(UInt(log2Up(NumWay).W), NumWay, initLastGrant = true))
-  snapshotWayArbiter.io.in.zipWithIndex.foreach { case (in, i) =>
-    in.valid := snapshotEligible(i)
-    in.bits  := i.U
+  // A miss write replaces the selected MainBtb way. Before overwriting it, capture the old
+  // entry and keep the incoming entry until the snapshot has been accepted by the VBTB.
+  // There is one independent snapshot slot per way, while the VBTB output is arbitrated
+  // across all ways.
+  object SnapshotState extends EnumUInt(4) {
+    def Idle:      UInt = 0.U(width.W)
+    def ReadSram:  UInt = 1.U(width.W)
+    def SendVbtb:  UInt = 2.U(width.W)
+    def WriteSram: UInt = 3.U(width.W)
   }
-  snapshotWayArbiter.io.out.ready := snapshot.resp.ready
-  private val snapshotSelectOH = UIntToOH(snapshotWayArbiter.io.chosen, NumWay) &
-    Fill(NumWay, snapshotWayArbiter.io.out.valid)
-  private val snapshotGrantOH = VecInit(snapshotWayArbiter.io.in.map(_.fire))
-  // A snapshot writes MainBtb either together with its VBTB transfer or later, after the
-  // VBTB transfer has already completed. pendingReady terminates at snapshotSramFire and the
-  // state registers below; it does not affect snapshot eligibility or response payloads.
-  private val snapshotSramWrite = VecInit(snapshotGrantOH.zip(snapshotVbtbDone).map {
-    case (vbtbFire, vbtbDone) => vbtbFire || vbtbDone
-  })
-  private val snapshotSramFire = VecInit(snapshotSramWrite.zip(pendingReady).map {
-    case (writeValid, writeReady) => writeValid && writeReady
-  })
+  private val snapshotState      = RegInit(VecInit.fill(NumWay)(SnapshotState.Idle))
+  private val snapshotResp       = RegInit(VecInit.fill(NumWay)(0.U.asTypeOf(new MainBtbSnapshotResp)))
+  private val snapshotWayArbiter = Module(new RRArbiter(new MainBtbSnapshotResp, NumWay, initLastGrant = true))
 
-  Seq.tabulate(NumWay) { i =>
-    switch(snapshotValid(i)) {
-      is(false.B) {
-        // Start a snapshot only for a pending miss write and only when the entry SRAM is not
-        // serving a normal prediction read. The SRAM read issued below uses the pending set
-        // index and captures the entry that will be evicted from this way.
+  snapshotState.zipWithIndex.foreach { case (state, i) =>
+    switch(state) {
+      is(SnapshotState.Idle) {
         when(pendingValid(i) && !read.req.valid) {
-          snapshotValid(i)    := true.B
-          snapshotVbtbDone(i) := false.B
-          snapshotReq(i)      := entryWriteBuffer.io.read(i).bits
+          state                    := SnapshotState.ReadSram
+          snapshotResp(i).setIdx   := entryWriteBuffer.io.read(i).bits.setIdx
+          snapshotResp(i).incoming := entryWriteBuffer.io.read(i).bits.entry
         }
       }
-      is(true.B) {
-        // The VBTB may accept the snapshot before the MainBtb SRAM can accept its incoming
-        // entry. Remember that completion to prevent a duplicate VBTB transfer, then retain
-        // the snapshot until the SRAM write is actually accepted.
-        when(snapshotGrantOH(i) && !snapshotSramFire(i)) {
-          snapshotVbtbDone(i) := true.B
-        }
-        when(snapshotSramFire(i)) {
-          snapshotValid(i)    := false.B
-          snapshotVbtbDone(i) := false.B
+      is(SnapshotState.ReadSram) {
+        state                   := SnapshotState.SendVbtb
+        snapshotResp(i).evicted := entrySrams(i).io.r.resp.data.head
+      }
+      is(SnapshotState.SendVbtb) {
+        // Do not overwrite MainBtb until VBTB accepts this snapshot.
+        when(snapshotWayArbiter.io.in(i).fire) {
+          state := Mux(pendingReady(i), SnapshotState.Idle, SnapshotState.WriteSram)
         }
       }
-    }
-    // The entry SRAM has one-cycle read latency with holdRead behavior, so the old entry is
-    // captured on the cycle indicated by the valid-rise edge of snapshotValid.
-    when(snapshotDataValid(i)) {
-      snapshotResp(i) := entrySrams(i).io.r.resp.data.head
+      is(SnapshotState.WriteSram) {
+        when(pendingReady(i)) {
+          state := SnapshotState.Idle
+        }
+      }
     }
   }
-  snapshot.resp.valid         := snapshotWayArbiter.io.out.valid
-  snapshot.resp.bits.setIdx   := Mux1H(snapshotSelectOH, snapshotReq.map(_.setIdx))
-  snapshot.resp.bits.incoming := Mux1H(snapshotSelectOH, snapshotReq.map(_.entry))
-  snapshot.resp.bits.evicted  := Mux1H(snapshotSelectOH, snapshotResp)
 
-  /* *** sram -> io *** */
-  entrySrams.zipWithIndex.foreach { case (s, i) =>
-    // Entry SRAM reads are shared by normal prediction reads and snapshot reads. Prediction
-    // reads have priority; snapshot reads are issued only when a pending miss write has not
-    // already entered the snapshot state.
-    s.io.r.req.valid       := read.req.valid || (pendingValid(i) && !snapshotValid(i))
-    s.io.r.req.bits.setIdx := Mux(read.req.valid, read.req.bits.setIdx, pendingSetIdx(i))
+  snapshotWayArbiter.io.in.zipWithIndex.foreach { case (in, i) =>
+    in.valid := snapshotState(i) === SnapshotState.SendVbtb
+    in.bits  := snapshotResp(i)
   }
-  counterSram.io.r.req.valid       := read.req.valid
-  counterSram.io.r.req.bits.setIdx := read.req.bits.setIdx
+
+  snapshot.resp <> snapshotWayArbiter.io.out
+
+  (entrySrams zip entryWriteBuffer.io.read).zipWithIndex.foreach { case ((way, bufRead), i) =>
+    way.io.r.req.valid       := read.req.valid || (pendingValid(i) && snapshotState(i) === SnapshotState.Idle)
+    way.io.r.req.bits.setIdx := Mux(read.req.valid, read.req.bits.setIdx, pendingSetIdx(i))
+    // Hit writes update the selected way directly. A miss write is issued in the same cycle
+    // as the VBTB handshake when possible, or in WriteSram after the VBTB handshake.
+    when(snapshotState(i) === SnapshotState.Idle) {
+      way.io.w.req.valid        := hitValid(i) && !way.io.r.req.valid
+      way.io.w.req.bits.data(0) := bufRead.bits.entry
+      way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
+      bufRead.ready             := Mux(bufRead.bits.hit, pendingReady(i), !read.req.valid)
+    }.otherwise {
+      way.io.w.req.valid := (snapshotWayArbiter.io.in(i).fire ||
+        snapshotState(i) === SnapshotState.WriteSram) && !way.io.r.req.valid
+      way.io.w.req.bits.data(0) := snapshotResp(i).incoming
+      way.io.w.req.bits.setIdx  := snapshotResp(i).setIdx
+      bufRead.ready             := false.B
+    }
+  }
 
   // each entry sram template has 1 way, so here we only read data.head
   read.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
@@ -246,27 +220,10 @@ class MainBtbInternalBank(
 
   /* *** writeBuffer -> sram *** */
   // entry
-  (entrySrams zip entryWriteBuffer.io.read).zipWithIndex.foreach { case ((way, bufRead), i) =>
-    // Hit writes can update the selected way directly. Miss writes are held in snapshotReq;
-    // they are written when the snapshot wins arbitration, or in a later cycle if the VBTB
-    // transfer completed before this single-ported SRAM became available. Reads block writes.
-    way.io.w.req.valid := Mux(
-      snapshotValid(i),
-      snapshotSramWrite(i),
-      hitValid(i)
-    ) && !way.io.r.req.valid
-    way.io.w.req.bits.data(0) := Mux(snapshotValid(i), snapshotReq(i).entry, bufRead.bits.entry)
-    way.io.w.req.bits.setIdx  := Mux(snapshotValid(i), snapshotReq(i).setIdx, bufRead.bits.setIdx)
-    bufRead.ready := Mux(
-      !snapshotValid(i),
-      // A hit write leaves the write buffer when its direct SRAM write can proceed. A miss
-      // write leaves the write buffer as soon as the snapshot read is accepted; the request
-      // is then owned by snapshotReq until the incoming entry is written back.
-      Mux(bufRead.bits.hit, pendingReady(i), !read.req.valid),
-      false.B
-    )
-  }
+
   // counter
+  counterSram.io.r.req.valid            := read.req.valid
+  counterSram.io.r.req.bits.setIdx      := read.req.bits.setIdx
   counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
   counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
   counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
