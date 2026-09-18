@@ -40,13 +40,17 @@ trait HasFtqParameters extends HasFrontendParameters {
 }
 
 case class FtqPrefetchQueueParameters(
-    Size: Int = 16
+    Size: Int = 16,
+    // when distanceBetween(pfPtr, fetchPtr), prefer 1-fdip over 2- or 1-queued
+    PreferFdipDistance: Int = 2
 ) {}
 
 trait HasFtqPrefetchQueueParameters extends HasFtqParameters {
   def pqParameters: FtqPrefetchQueueParameters = ftqParameters.pqParameters
 
   def Size: Int = pqParameters.Size
+
+  def PreferFdipDistance: Int = pqParameters.PreferFdipDistance
 
   def EnqueueSwNum: Int = backendParams.LduCnt // every load unit may send software prefetch.i request to pq
   def EnqueueNum:   Int = EnqueueSwNum         // TODO: more prefetch source
