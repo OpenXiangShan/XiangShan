@@ -30,6 +30,7 @@ import utility._
 import device.IMSICBusType
 
 object ArgParser {
+  @volatile var enableIommu: Boolean = false
   @volatile var isGSIM: Boolean = false
   // TODO: add more explainations
   val usage =
@@ -41,6 +42,7 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
+      |--with-iommu
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
@@ -103,6 +105,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
           }), tail)
+        case "--with-iommu" :: tail =>
+          enableIommu = true
+          nextOption(config, tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableChiselDB = true)
@@ -260,6 +265,7 @@ object ArgParser {
       case Array("--difftest-config", cfg) => cfg.contains("G")
       case _ => false
     }
+    enableIommu = false
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
         enableDebug = here(DebugOptionsKey).EnableDebug,

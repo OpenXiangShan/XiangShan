@@ -101,6 +101,7 @@ RTL_INCLUDE ?=
 
 # External OpenIOMMU file list. Its paths are relative to the submodule root.
 IOMMU_FILELIST := $(abspath OpenIOMMU/iommu_wrap.f)
+IOMMU_RTL_INCLUDE :=
 
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
@@ -184,6 +185,19 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# OpenIOMMU is enabled only for the configuration that provides the BOSC
+# lightweight integration. Keep the RTL filelist and its feature macro in
+# sync so other XiangShan configurations do not consume this external RTL.
+ifeq ($(WITH_IOMMU),1)
+ifeq ($(CONFIG),DefaultConfig)
+IOMMU_RTL_INCLUDE := $(IOMMU_FILELIST)
+override SIM_ARGS += --with-iommu
+override SIM_VFLAGS += +define+CONFIG_RISCV_IOMMU_BOSC_V2_LITE
+else
+$(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
+endif
 endif
 
 # SimAXIMem size in GB (for sim-verilog only)
@@ -371,7 +385,7 @@ reformat:
 # verilator simulation
 emu-mk: sim-verilog
 	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_FILELIST)"
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)" SIM_VFLAGS="$(SIM_VFLAGS)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
@@ -382,7 +396,7 @@ gsim: sim-chirrtl
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_FILELIST)"
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)" SIM_VFLAGS="$(SIM_VFLAGS)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
