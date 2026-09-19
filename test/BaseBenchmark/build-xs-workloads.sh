@@ -2,13 +2,18 @@
 
 set -uo pipefail
 
-export AM_HOME=/home/liuquanchen/projects/xs-env/nexus-am
-export LINUX_GNU_TOOLCHAIN=1
-OUTPUT_DIR=/home/liuquanchen/projects/xs-env/XiangShan/ready-to-run
-build_failed=0
 GREEN=$'\033[1;32m'
 RED=$'\033[1;31m'
 RESET=$'\033[0m'
+
+if [[ -z "${AM_HOME:-}" || -z "${NOOP_HOME:-}" ]]; then
+  printf '%sERROR%s: AM_HOME 或 NOOP_HOME 未设置，请先在 xs-env 根目录执行 source env.sh\n' "$RED" "$RESET" >&2
+  exit 1
+fi
+
+export LINUX_GNU_TOOLCHAIN=1
+OUTPUT_DIR="$NOOP_HOME/test/BaseBenchmark/program"
+build_failed=0
 mkdir -p "$OUTPUT_DIR"
 
 echo "========== 开始构建 coremark =========="
