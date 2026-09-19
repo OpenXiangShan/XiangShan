@@ -2,13 +2,18 @@
 
 set -uo pipefail
 
-export NOOP_HOME=/home/liuquanchen/projects/xs-env/XiangShan
-WORKLOAD_DIR="$NOOP_HOME/ready-to-run"
-LOG_DIR="$NOOP_HOME/TestLog/BaseBenchmark"
-run_failed=0
 GREEN=$'\033[1;32m'
 RED=$'\033[1;31m'
 RESET=$'\033[0m'
+
+if [[ -z "${NOOP_HOME:-}" ]]; then
+  printf '%sERROR%s: NOOP_HOME 未设置，请先在 xs-env 根目录执行 source env.sh\n' "$RED" "$RESET" >&2
+  exit 1
+fi
+
+WORKLOAD_DIR="$NOOP_HOME/test/BaseBenchmark/program"
+LOG_DIR="$NOOP_HOME/test/BaseBenchmark/log"
+run_failed=0
 mkdir -p "$LOG_DIR"
 
 echo "========== 开始执行 coremark =========="
