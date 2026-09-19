@@ -48,7 +48,10 @@ class MemXbar(implicit p: Parameters) extends LazyModule
   val devNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "device_node",
-      id = IdRange(0, 1 << 14),
+      // IOMMU translated traffic and page-table walks are merged by an AXI
+      // crossbar before reaching this port.  Preserve its full 17-bit ID so
+      // responses can be routed back to the originating IOMMU master.
+      id = IdRange(0, 1 << 17),
       aligned = true
     ))
   )))
