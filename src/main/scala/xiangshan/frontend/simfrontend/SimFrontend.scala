@@ -245,8 +245,7 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
 
     cfVec.bits.isRvc := fetchOut.preDecode(1)
 
-    cfVec.bits.fixedTaken := fetchOut.preDecode(6)
-    cfVec.bits.predTaken  := fetchOut.preDecode(6)
+    cfVec.bits.predTaken := fetchOut.preDecode(6)
 
     cfVec.bits.ftqPtr.value := fetchOut.preDecode(12, 7)
     cfVec.bits.ftqPtr.flag  := fetchOut.preDecode(13)

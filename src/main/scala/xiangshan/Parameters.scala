@@ -458,20 +458,20 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "FEX0",
-          Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg),
+          Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg),
           Seq(FpWB(port = 0, 0), IntWB(port = 3, 1)),
           Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0))),
         ),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX3", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX3", Seq(FaluCfg, FmulCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
     ),
       numPregs = fpPreg.numEntries,
       numDeqOutside = 0,
@@ -486,7 +486,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VimacCfg, VmoveCfg, VfcvtCfg, VfmaCfg),
+          Seq(VialuCfg, VimacCfg, VmoveCfg, VfcvtCfg, VfmacCfg),
           Seq(VfWB(port = 3, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0))),
           vlRD = VlRD(0, 0),
@@ -497,7 +497,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
-          Seq(VialuCfg, VfmaCfg, VfdivCfg, VidivCfg),
+          Seq(VialuCfg, VidivCfg, VfmacCfg, VfdivCfg),
           Seq(VfWB(port = 4, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0))),
           vlRD = VlRD(1, 0),
@@ -508,7 +508,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX2",
-          Seq(VialuCfg, VfmaCfg),
+          Seq(VialuCfg),
           Seq(VfWB(port = 5, 0)),
           Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0))),
           vlRD = VlRD(2, 0),
@@ -519,7 +519,7 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX3",
-          Seq(VialuCfg, VfmaCfg),
+          Seq(VialuCfg),
           Seq(VfWB(port = 6, 0)),
           Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0))),
           vlRD = VlRD(3, 0),

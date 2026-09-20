@@ -55,6 +55,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     // DCache request
     val dcacheReq = DecoupledIO(new DcacheStoreRequestIO)
 
+    val sqDeqPtr = Input(new SqPtr)
     val sqAddrReadyPtr = Input(new SqPtr)
   })
 
@@ -102,6 +103,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.isFirstIssue := stin.isFirstIssue
   scalarIssue.bits.ssid.get := stinUop.ssid
   scalarIssue.bits.storeSetHit.get := stinUop.storeSetHit
+  scalarIssue.bits.illegalIssue := DontCare
   scalarIssue.bits.DontCareUnalign()
 
   // 2. hardware prefetch requests
@@ -118,6 +120,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   prefetchReq.bits.size := MemorySize.QB.U
   prefetchReq.bits.mask := Fill(VLEN/8, 1.U(1.W))
   prefetchReq.bits.isFirstIssue := true.B
+  prefetchReq.bits.illegalIssue := DontCare
 
   // sources arbitration
   arbiter(sources, sink, Some("RequestSources"))
@@ -133,6 +136,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
+  sink.bits.illegalIssue := !sink.bits.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
 
   /**
     * Pipeline connect
@@ -285,9 +289,6 @@ class StoreUnitS1(param: ExeUnitParams)(
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
 
-    // physical storeQueue deqPtr
-    val sqDeqPtr = Input(new SqPtr)
-
     val debugInfo = Output(new DebugLsInfoBundle)
   })
 
@@ -317,7 +318,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val cross4KPage = in.cross4KPage.get
   val cross16Byte = isUnalignTail || isUnalignHead
-  val illegalIssue = pipeIn.valid && !in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
+  val illegalIssue = pipeIn.valid && in.illegalIssue
   // Younger cross-page unalign head need to be killed
   val youngCrossHead = pipeIn.valid && isScalar && isUnalignHead && cross4KPage && !in.isAddrReadyHead.get
 
@@ -382,6 +383,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch
   val nukeQueryReq = Wire(new StoreNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
+  nukeQueryReq.sqIdx := uop.sqIdx
   nukeQueryReq.paddr := paddr
   nukeQueryReq.mask := mask
   nukeQueryReq.matchType := Mux(isCbo, StLdNukeMatchType.CacheLine, StLdNukeMatchType.Normal)
@@ -494,7 +496,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.dcacheKill := killDCache
 
   io.updateLFST.valid := updateLFSTValid
-  io.updateLFST.bits.robIdx := robIdx
+  io.updateLFST.bits.sqIdx := uop.sqIdx
   io.updateLFST.bits.ssid := ssid
   io.updateLFST.bits.storeSetHit := storeSetHit
 
@@ -903,6 +905,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s0.io.redirect := io.redirect
   s0.io.stin <> io.stin
   s0.io.prefetchReq <> io.prefetchReq
+  s0.io.sqDeqPtr := io.sqDeqPtr
   s0.io.sqAddrReadyPtr := io.sqAddrReadyPtr
   io.tlb.req <> s0.io.tlbReq
   io.tlb.req_kill := s0.io.tlbReqKill
@@ -911,7 +914,6 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger
   s1.io.tlbResp <> io.tlb.resp
-  s1.io.sqDeqPtr := io.sqDeqPtr
   io.dcache.s1_paddr := s1.io.dcachePAddr
   io.dcache.s1_kill := s1.io.dcacheKill
   io.updateLFST := s1.io.updateLFST

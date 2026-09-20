@@ -97,7 +97,7 @@ object Bundles {
     val loadWaitStrict = Bool()
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
-    val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+    val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
 
     val debug_robIdx = OptionWrapper(debugEn, new RobPtr)
   }
@@ -316,6 +316,9 @@ object Bundles {
   class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
     //  robIdx: Requestor's (a store instruction) rob index for match logic.
     val robIdx = new RobPtr
+
+    // sqIdx: Requestor's full store queue pointer for precise MDP matching.
+    val sqIdx = new SqPtr
 
     //  paddr: requestor's (a store instruction) physical address for match logic.
     val paddr  = UInt(PAddrBits.W)

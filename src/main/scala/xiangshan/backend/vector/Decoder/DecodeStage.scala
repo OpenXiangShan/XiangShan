@@ -100,7 +100,6 @@ class DecodeStageImp(
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := inMopBits.trigger
         ctrl.isRVC            := inMopBits.isRVC
-        ctrl.fixedTaken       := inMopBits.fixedTaken
         ctrl.predTaken        := inMopBits.predTaken
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
         ctrl.ftqPtr           := inMopBits.ftqPtr
@@ -135,7 +134,6 @@ class DecodeStageImp(
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger
         bits.isRVC := mopInfo.isRVC
-        bits.fixedTaken := mopInfo.fixedTaken
         bits.predTaken := mopInfo.predTaken
         bits.crossPageIPFFix := mopInfo.crossPageIPFFix
         bits.ftqPtr := mopInfo.ftqPtr

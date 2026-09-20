@@ -217,6 +217,56 @@ jobs:
             --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
             --ci linux-hello-smp-new 2> /dev/null
 
+  # ZhuJiang L3 functional test
+  # Only CoreMark is run, so compile and execute stay in one job instead of a
+  # compile-once/run-many workflow like emu-basics / emu-performance.
+  emu-zhujiang:
+    name: EMU - ZhuJiang
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    timeout-minutes: 900
+    continue-on-error: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build ZhuJiang EMU
+        run: |
+          # Same emu compile flow as EMU Basics Test.
+          # --llc ZhuJiang selects L3; --num-cores 1 selects single-core RTL.
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 8 --num-cores 1 --llc ZhuJiang \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: ZhuJiang Test - CoreMark
+        id: coremark
+        shell: bash
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 8 \
+            --ci coremark \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/zhujiang_coremark.log
+          echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## EMU - ZhuJiang summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Testcase | IPC |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| coremark | ${{ steps.coremark.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
+
   # SIMV basics test
   simv-basics:
     name: SIMV - Basics

@@ -168,9 +168,8 @@ case class FuConfig (
       vialu,
       vimac,
       vidiv,
-      vfalu,
+      vfmac,
       vmove,
-      vfma,
       vfdiv,
       vfcvt,
       vsha256ms,
@@ -203,8 +202,7 @@ case class FuConfig (
     fuType,
     FuType.vialu,
     FuType.vimac,
-    FuType.vfalu,
-    FuType.vfma,
+    FuType.vfmac,
     FuType.vfdiv,
     FuType.vfcvt,
     FuType.vidiv,
@@ -291,7 +289,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(3),
   )
 
   val I2vCfg: FuConfig = FuConfig (
@@ -673,32 +671,9 @@ object FuConfig {
     readVType = true,
   )
 
-  val VfaluCfg = FuConfig (
-    name = "vfalu",
-    fuType = FuType.vfalu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
-    ),
-    piped = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = CertainLatency(1),
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    exceptionOut = Seq(illegalInstr),
-    needSrcFrm = true,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VfmaCfg = FuConfig (
-    name = "vfma",
-    fuType = FuType.vfma,
+  val VfmacCfg = FuConfig (
+    name = "vfmac",
+    fuType = FuType.vfmac,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
@@ -807,7 +782,7 @@ object FuConfig {
   val FaluCfg = FuConfig(
     name = "falu",
     fuType = FuType.falu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FAlu(cfg)(p).suggestName("Falu")),
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
@@ -819,17 +794,17 @@ object FuConfig {
     needSrcFrm = true,
   )
 
-  val FmacCfg = FuConfig(
-    name = "fmac",
-    fuType = FuType.fmac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("Fmac")),
+  val FmulCfg = FuConfig(
+    name = "fmul",
+    fuType = FuType.fmul,
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData(), FpData()),
     ),
     piped = true,
     writeFpRf = true,
     writeFflags = true,
-    latency = CertainLatency(3),
+    latency = CertainLatency(value = 2),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -860,7 +835,9 @@ object FuConfig {
     writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(2, extraValue = 1),
+    // TODO, f2f 2cycle, f2i 3cycle
+    // latency = CertainLatency(2, extraValue = 1),
+    latency = CertainLatency(3),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -880,9 +857,10 @@ object FuConfig {
   def allConfigs = Seq(
     NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
-    FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VialuCfg, VimacCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, HyldaCfg, HystaCfg
+    FaluCfg, FmulCfg, FcvtCfg, FdivCfg,
+    VialuCfg, VimacCfg, VidivCfg, VmoveCfg,
+    VfmacCfg, VfdivCfg, VfcvtCfg,
+    HyldaCfg, HystaCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(

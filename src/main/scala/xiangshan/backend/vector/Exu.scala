@@ -94,7 +94,12 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   fus.foreach {
     case fu =>
-      val effectiveFrm = ex.head.bits.ctrl.frm.map(instFrm =>
+      // `frm` must be paired with the uop entering the pipe, i.e. `ex0Next`: that is the stage a FU
+      // latches its operands from. `ex.head` is the *registered* stage, so resolving DYN from it
+      // would hand the FU the rm of the previous uop (garbage for a non-FP uop), which a DYN-only
+      // op such as vfmul.vv would then use as its rounding mode. Same convention as the scalar FPU,
+      // where `io.frm` is valid together with the uop on `io.in`.
+      val effectiveFrm = inEx.bits.ctrl.frm.map(instFrm =>
         Mux(instFrm === VecFrm.DYN, in.frm.get, instFrm)
       )
       fu.in.flush := in.flush
@@ -121,22 +126,31 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       )
   }
 
+  // Every release slot is the ex stage its own uop occupies at its release cycle (see
+  // VFMacWrapper), so both the merge and the writeback can use the slot's own context.
+  val resultContexts = ex.indices.map { i =>
+    val context = Wire(chiselTypeOf(ex(i).bits))
+    context := ex(i).bits
+    context
+  }
+
   mgus.zipWithIndex.foreach {
     case (mgu, i) =>
-      val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
-      val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
+      val context = resultContexts(i)
+      val vl = context.data.vl.get.suggestName(s"ex${i}_vl")
+      val vdIdx = context.ctrl.uopIdx // Todo: may by wrong for some kind of uops
       val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOHEx(i))(3, 0) // 4 bits 0~8
       val end = elemIdxMapElemE8Idx(vl, eewOHEx(i))
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
-      val isWholeVMove = FuType.FuTypeOrR(ex(i).bits.ctrl.fuType, Seq(FuType.vmove)) &&
-        Opcode.VMoveOpcodes.isNR(ex(i).bits.ctrl.opcode)
+      val isWholeVMove = FuType.FuTypeOrR(context.ctrl.fuType, Seq(FuType.vmove)) &&
+        Opcode.VMoveOpcodes.isNR(context.ctrl.opcode)
 
       mgu.in.valid := ex(i).valid
-      mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
-      mgu.in.ctrl.vta := ex(i).bits.ctrl.vtype.get.vta
-      mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
+      mgu.in.ctrl.vma := context.ctrl.vtype.get.vma
+      mgu.in.ctrl.vta := context.ctrl.vtype.get.vta
+      mgu.in.data.mask := Fill(vlenb, context.ctrl.vm.get) | context.data.v0.get // Todo: use vlenb v0
       // since vstart is always 0 for vector arith instruction, begin is always 0
       mgu.in.data.begin := 0.U
       mgu.in.data.end := Mux(
@@ -148,7 +162,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
           (vdIdx < vlMapVdIdx) -> vlenb.U,
         )),
       )
-      mgu.in.data.oldVd := ex(i).bits.data.src(2).toByteVec
+      mgu.in.data.oldVd := context.data.src(2).toByteVec
       mgu.in.data.vd := vd.toByteVec
   }
 
@@ -273,19 +287,20 @@ object Exu {
       sink.vlWen       .foreach(x => x := this.ctrl.vlWen.get)
       sink.flushPipe   .foreach(x => x := this.ctrl.flushPipe.get)
       sink.fflagsWen   .foreach(x => x := this.ctrl.fflagsWen.get)
+      sink.frm         .foreach(x => x := this.ctrl.frm.get)
       sink.sqIdx       .foreach(x => x := this.ctrl.sqIdx.get)
       sink.vtype       .foreach(x => x := this.ctrl.vtype.get)
       sink.oldVType    .foreach(x => x := this.ctrl.oldVType.get)
       sink.vm          .foreach(x => x := this.ctrl.vm.get)
+      sink.frm         .foreach(x => x := this.ctrl.frm.get)
     }
 
     def <#=:(sink: Func.InData): Unit = {
-      sink.src                         := this.data.src
+      sink.src.zip(this.data.src).foreach(x => x._1 := x._2)
       sink.vl          .foreach(x => x := this.data.vl.get)
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)
       sink.imm                         := this.data.imm.getOrElse(0.U)
-      sink.vfma       .foreach(x => x := this.data.vfma.get)
     }
 
     def <#=:(sink: Func.InUop) : Unit = {
@@ -422,7 +437,6 @@ object Exu {
     val vl  = Option.when(param.readVlRf)(Vl())
     val imm = Option.when(param.needImm)(UInt(param.immWidth.W))
     val pc  = Option.when(param.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma = Option.when(param.fuConfigs.exists(_.fuType == FuType.vfma))(new Func.VFMacInfo)
   }
 
   class InBypassCtrl(val param: ExuParam)(implicit p: Parameters) extends XSBundle {

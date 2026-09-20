@@ -109,7 +109,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -143,7 +142,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -236,7 +234,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -375,7 +372,6 @@ object Bundles {
     def numSrc = backendParams.numSrc
     // from frontend
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -412,7 +408,7 @@ object Bundles {
     val rasAction = BranchAttribute.RasAction()
     // for mdp
     val storeSetHit = Bool()
-    val waitForRobIdx = new RobPtr
+    val waitSqIdx = new SqPtr
     val loadWaitBit = Bool()
     val loadWaitStrict = Bool()
     val ssid = UInt(SSIDWidth.W)
@@ -443,7 +439,6 @@ object Bundles {
     def numSrc = params.numSrc
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtr)(UInt(FetchBlockInstOffsetWidth.W))
@@ -478,7 +473,7 @@ object Bundles {
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit       = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
-    val waitForRobIdx     = Option.when(params.isLdAddrIQ)(new RobPtr)
+    val waitSqIdx         = Option.when(params.isLdAddrIQ)(new SqPtr)
     val loadWaitBit       = Option.when(params.isLdAddrIQ)(Bool())
     val loadWaitStrict    = Option.when(params.isLdAddrIQ)(Bool())
     val ssid              = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
@@ -501,7 +496,6 @@ object Bundles {
 
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     // from decode
     val fuOpType = Opcode()
@@ -518,7 +512,7 @@ object Bundles {
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit    = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
-    val waitForRobIdx  = Option.when(params.isLdAddrIQ)(new RobPtr)
+    val waitSqIdx      = Option.when(params.isLdAddrIQ)(new SqPtr)
     val loadWaitBit    = Option.when(params.isLdAddrIQ)(Bool())
     val loadWaitStrict = Option.when(params.isLdAddrIQ)(Bool())
     val ssid           = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(UInt(SSIDWidth.W))
@@ -531,7 +525,6 @@ object Bundles {
     def numSrc = params.numSrc
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     // from decode
     val fuOpType = FuOpType()
@@ -551,7 +544,7 @@ object Bundles {
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     // for mdp
     val storeSetHit    = Option.when(params.issueBlockParam.isLdAddrIQ || params.issueBlockParam.isStAddrIQ)(Bool())
-    val waitForRobIdx  = Option.when(params.issueBlockParam.isLdAddrIQ)(new RobPtr)
+    val waitSqIdx      = Option.when(params.issueBlockParam.isLdAddrIQ)(new SqPtr)
     val loadWaitBit    = Option.when(params.issueBlockParam.isLdAddrIQ)(Bool())
     val loadWaitStrict = Option.when(params.issueBlockParam.isLdAddrIQ)(Bool())
     val ssid           = Option.when(params.issueBlockParam.isLdAddrIQ || params.issueBlockParam.isStAddrIQ)(UInt(SSIDWidth.W))
@@ -609,7 +602,6 @@ object Bundles {
     val hasException    = Bool()
     val trigger         = TriggerAction()
     val isRVC           = Bool()
-    val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
@@ -670,7 +662,7 @@ object Bundles {
     val perfDebugInfo   = new PerfDebugInfo
     val debug_seqNum    = InstSeqNum()
     val storeSetHit     = Bool() // inst has been allocated an store set
-    val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
+    val waitSqIdx       = new SqPtr // store set predicted previous store sqIdx
     // Load wait is needed
     // load inst will not be executed until former store (predicted by mdp) addr calcuated
     val loadWaitBit     = Bool()
@@ -739,7 +731,7 @@ object Bundles {
   }
 
   class StoreUnitToLFST(implicit p: Parameters) extends XSBundle {
-    val robIdx = new RobPtr
+    val sqIdx = new SqPtr
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
   }
@@ -947,7 +939,6 @@ object Bundles {
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val isRVC          = Option.when(exuParams.needIsRVC)(Bool())
-    val fixedTaken     = Option.when(exuParams.needTaken)(Bool())
     val predTaken      = Option.when(exuParams.needTaken)(Bool())
     val fuOpType       = FuOpType()
     val selImm         = Option.when(exuParams.needImm)(SelImm())
@@ -961,7 +952,7 @@ object Bundles {
     val fflagsWen = Option.when(exuParams.writeFflags)(Bool())
     val rasAction = Option.when(exuParams.needRasAction)(BranchAttribute.RasAction())
     val storeSetHit    = Option.when(exuParams.hasLoadExu || exuParams.hasStoreAddrExu)(Bool())
-    val waitForRobIdx  = Option.when(iqParams.isLdAddrIQ)(new RobPtr)
+    val waitSqIdx      = Option.when(iqParams.isLdAddrIQ)(new SqPtr)
     val loadWaitBit    = Option.when(iqParams.isLdAddrIQ)(Bool())
     val loadWaitStrict = Option.when(iqParams.isLdAddrIQ)(Bool())
     val ssid           = Option.when(iqParams.isLdAddrIQ || iqParams.isStAddrIQ)(UInt(SSIDWidth.W))
@@ -1014,7 +1005,6 @@ object Bundles {
       // fields not carried in Og0InUop are explicitly cleared here
       this.rfRen.foreach(_.foreach(_ := false.B))
       this.isRVC.foreach(_ := false.B)
-      this.fixedTaken.foreach(_ := false.B)
       this.predTaken.foreach(_ := false.B)
       this.fuOpType := 0.U
       this.selImm.foreach(_ := 0.U)
@@ -1026,7 +1016,7 @@ object Bundles {
       this.fflagsWen.foreach(_ := false.B)
       this.rasAction.foreach(_ := 0.U)
       this.storeSetHit.foreach(_ := false.B)
-      this.waitForRobIdx.foreach(_ := 0.U.asTypeOf(new RobPtr))
+      this.waitSqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
       this.loadWaitBit.foreach(_ := false.B)
       this.loadWaitStrict.foreach(_ := false.B)
       this.ssid.foreach(_ := 0.U)
@@ -1041,7 +1031,6 @@ object Bundles {
 
     def fromIssueDeqOg1PayloadBundle(source: IssueQueueDeqOg1Payload): Unit = {
       this.isRVC.foreach(_ := source.isRVC.get)
-      this.fixedTaken.foreach(_ := source.fixedTaken.get)
       this.predTaken.foreach(_ := source.predTaken.get)
 
       this.fuOpType := source.fuOpType
@@ -1058,7 +1047,7 @@ object Bundles {
       this.rasAction.foreach(_ := source.rasAction.get)
 
       this.storeSetHit.foreach(_ := source.storeSetHit.get)
-      this.waitForRobIdx.foreach(_ := source.waitForRobIdx.get)
+      this.waitSqIdx.foreach(_ := source.waitSqIdx.get)
       this.loadWaitBit.foreach(_ := source.loadWaitBit.get)
       this.loadWaitStrict.foreach(_ := source.loadWaitStrict.get)
       this.ssid.foreach(_ := source.ssid.get)
@@ -1181,7 +1170,7 @@ object Bundles {
     val ftqOffset     = if (params.needFtqPtrOffset) Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new PredictInfo) else None
     val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
-    val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
+    val waitSqIdx      = OptionWrapper(params.hasLoadExu, new SqPtr) // store set predicted previous store sqIdx
     val storeSetHit    = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, Bool()) // inst has been allocated an store set
     val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
     val ssid           = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, UInt(SSIDWidth.W))
@@ -1212,7 +1201,6 @@ object Bundles {
 
     def fromIssueOg1PayloadBundle(source: EntryOg1Payload): Unit = {
       this.isRVC         .foreach(_ := source.isRVC.get)
-      this.predictInfo.foreach(_.fixedTaken := source.fixedTaken.get)
       this.predictInfo.foreach(_.predTaken  := source.predTaken.get)
       this.fuOpType                 := source.fuOpType
       this.imm                      := source.imm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
@@ -1225,7 +1213,7 @@ object Bundles {
       this.frm           .foreach(_ := source.frm.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
       this.storeSetHit   .foreach(_ := source.storeSetHit.get)
-      this.waitForRobIdx .foreach(_ := source.waitForRobIdx.get)
+      this.waitSqIdx     .foreach(_ := source.waitSqIdx.get)
       this.loadWaitBit   .foreach(_ := source.loadWaitBit.get)
       this.loadWaitStrict.foreach(_ := source.loadWaitStrict.get)
       this.ssid          .foreach(_ := source.ssid.get)
@@ -1252,7 +1240,7 @@ object Bundles {
       uop.flushPipe      := this.flushPipe.getOrElse(false.B)
       uop.pc             := this.pc.getOrElse(0.U)
       uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
-      uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
+      uop.waitSqIdx      := this.waitSqIdx.getOrElse(0.U.asTypeOf(new SqPtr))
       uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)
       uop.loadWaitStrict := this.loadWaitStrict.getOrElse(false.B)
       uop.ssid           := this.ssid.getOrElse(0.U(SSIDWidth.W))
@@ -1272,7 +1260,6 @@ object Bundles {
 
   class PredictInfo(implicit p: Parameters) extends XSBundle {
     val target = UInt(VAddrData().dataWidth.W)
-    val fixedTaken = Bool()
     val predTaken = Bool()
   }
 
@@ -1337,7 +1324,7 @@ object Bundles {
     val iqIdx          = UInt(log2Up(params.issueBlockParam.numEntries).W)
     val isFirstIssue   = Bool()
     val loadWaitBit    = Option.when(params.hasLoadExu)(Bool())
-    val waitForRobIdx  = Option.when(params.hasLoadExu)(new RobPtr) // store set predicted previous store robIdx
+    val waitSqIdx      = Option.when(params.hasLoadExu)(new SqPtr) // store set predicted previous store sqIdx
     val storeSetHit    = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(Bool())     // inst has been allocated an store set
     val loadWaitStrict = Option.when(params.hasLoadExu)(Bool())     // load inst will not be executed until ALL former store addr calcuated
     val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
@@ -1353,8 +1340,13 @@ object Bundles {
     val I2FDataOut   = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
     val I2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
     val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
-    val F2IDataOut   = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
-    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(new Bundle {
+      val valid = Bool()
+      val pdest = UInt(FpPhyRegIdxWidth.W)
+      val data = UInt(XLEN.W)
+    }))
+    val busyTableF2I = Option.when(params.isIntSchd)(Input(UInt(3.W)))
+    val busyTableI2F = Option.when(params.isIntSchd)(Output(UInt(3.W)))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput

@@ -474,8 +474,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
         )
 
       when(beforeKnownMispredict) {
-        curPerfMeta.isCfi(newBranchInfo.cfiPosition)   := true.B
-        curPerfMeta.cfiAttr(newBranchInfo.cfiPosition) := newBranchInfo.attribute
+        curPerfMeta.isCfi := (lastPerfMeta.isCfi.asUInt | curOH).asBools
+        curPerfMeta.cfiAttr := VecInit(lastPerfMeta.cfiAttr.zipWithIndex.map { case (attr, idx) =>
+          Mux(curOH(idx), newBranchInfo.attribute, attr)
+        })
         when(branch.bits.mispredict) {
           curPerfMeta.mispredict           := true.B
           curPerfMeta.mispredictBranchInfo := newBranchInfo

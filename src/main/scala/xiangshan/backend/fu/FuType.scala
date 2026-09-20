@@ -28,7 +28,7 @@ object FuType extends ChiselOHEnum {
 
   // fp
   val falu = addType(name = "falu")
-  val fmac = addType(name = "fmac")
+  val fmul = addType(name = "fmul")
   val fcvt = addType(name = "fcvt")
   val fDivSqrt = addType(name = "fDivSqrt")
   val fcmp = addType(name = "fcmp")
@@ -45,8 +45,7 @@ object FuType extends ChiselOHEnum {
   val vimac = addType(name = "vimac")
   val vidiv = addType(name = "vidiv")
 
-  val vfalu = addType(name = "vfalu")
-  val vfma = addType(name = "vfma")
+  val vfmac = addType(name = "vfmac")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
 
@@ -108,10 +107,10 @@ object FuType extends ChiselOHEnum {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
+  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vialu, vimac, vidiv)
-  val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val vecOPF = Seq(vfmac, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
@@ -159,6 +158,12 @@ object FuType extends ChiselOHEnum {
 
   def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
 
+  def isFmul(fuType: UInt): Bool = FuTypeOrR(fuType, fmul)
+
+  def isFalu(fuType: UInt): Bool = FuTypeOrR(fuType, falu)
+
+  def isFdiv(fuType: UInt): Bool = FuTypeOrR(fuType, fDivSqrt)
+
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
   def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
@@ -168,8 +173,6 @@ object FuType extends ChiselOHEnum {
   def isVIAlu(fuType: UInt): Bool = FuTypeOrR(fuType, vialu)
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
-
-  def isVecOPFFma(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
 
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
@@ -188,7 +191,7 @@ object FuType extends ChiselOHEnum {
     div -> "div",
     fence -> "fence",
     bku -> "bku",
-    fmac -> "fmac",
+    fmul -> "fmul",
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",
@@ -196,9 +199,8 @@ object FuType extends ChiselOHEnum {
     vialu -> "vialu",
     vimac -> "vimac",
     vidiv -> "vidiv",
-    vfalu -> "vfalu",
+    vfmac -> "vfmac",
     vmove -> "vmove",
-    vfma -> "vfma",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
   )

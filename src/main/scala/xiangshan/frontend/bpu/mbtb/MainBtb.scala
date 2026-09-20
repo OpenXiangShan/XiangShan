@@ -54,20 +54,16 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.trainReady := true.B
 
-  private val s0_fire, s1_fire, s2_fire, s3_fire, t0_fire = Wire(Bool())
   alignBanks.foreach { b =>
-    b.io.stageCtrl.s0_fire := s0_fire
-    b.io.stageCtrl.s1_fire := s1_fire
-    b.io.stageCtrl.s2_fire := s2_fire
-    b.io.stageCtrl.s3_fire := s3_fire
-    b.io.stageCtrl.t0_fire := t0_fire
+    b.io.stageCtrl := io.stageCtrl
+    b.io.enable    := io.enable
   }
 
   /* *** s0 ***
    * calculate per-bank startPc and posHigherBits
    * send read request to alignBanks
    */
-  s0_fire := io.stageCtrl.s0_fire && io.enable
+  // predict pipeline is in the alignBank, so no top-level s0_fire etc..
   private val s0_startPc = io.startPc
   // rotate read addresses according to the first align bank index
   // e.g. if NumAlignBanks = 4, startPc locates in alignBank 1,
@@ -95,15 +91,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** s1 ***
    * just wait alignBanks
    */
-  s1_fire := io.stageCtrl.s1_fire && io.enable
-
   io.s1_positions := VecInit(alignBanks.flatMap(_.io.read.s1_positions))
-
-  /* *** s2 ***
-   * receive read response from alignBanks
-   * send out prediction result and meta info
-   */
-  s2_fire := io.stageCtrl.s2_fire && io.enable
 
   // we don't care about the order of alignBanks' responses,
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
@@ -113,20 +101,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
-  /* *** s3 ***
-   * touch replacer using final takenMask (mbtb + tage + sc)
-   */
-  s3_fire := io.enable && io.stageCtrl.s3_fire
-  // io.result is flattened, so is s3_takenMask from Bpu top, here we need to slice it back to alignBank structure
-  alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.s3_takenMask := io.s3_takenMask.slice(i * NumWay, (i + 1) * NumWay)
-  }
-
   /* *** t0 ***
    * receive training data
    * send startPc to alignBank for replacer state reading
    */
-  t0_fire := io.stageCtrl.t0_fire && io.enable
+  private val t0_fire  = io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
 
   private val t0_startPc    = t0_train.startPc
@@ -140,7 +119,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
+  private val t1_fire  = RegNext(t0_fire, init = false.B)
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
@@ -186,6 +165,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   )
 
   /* *** statistics *** */
+  private val s2_fire                    = io.stageCtrl.s2_fire && io.enable
   private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
 
