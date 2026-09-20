@@ -1119,8 +1119,10 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     )
 
     assert not (frontend_root / "env/coverage_def.py").exists()
-    assert "TB_ENABLE_TOFFEE_FUNCOV" in fixture_source
+    assert "FrontendFuncovSampleHub.from_pilot_csv" in fixture_source
     assert "ToffeeCoverageSink.from_registry" in fixture_source
+    assert "FunctionalCoverageRecorder" not in fixture_source
+    assert "TB_ENABLE_TOFFEE_FUNCOV" not in fixture_source
     assert "get_coverage_groups" not in fixture_source
     assert "bpu_basic_pred_type" not in sampler_source
     assert "bpu_basic_pred_type" not in recorder_source
@@ -1130,7 +1132,6 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
     assert len(recorder.definitions) == 573
     assert all(item.coverpoint for item in recorder.definitions)
-    assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
     assert "TB_ENABLE_TOFFEE_LINE_COVERAGE" in fixture_source
     assert not (frontend_root / "docs/frontend_bt_functional_coverage_pilot.csv").exists()

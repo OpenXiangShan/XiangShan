@@ -290,20 +290,26 @@ def test_toffee_evidence_skips_serialization_without_active_hits() -> None:
     assert sink._hit_details == {}
 
 
-def test_formal_fixture_separates_toffee_funcov_from_legacy_audit() -> None:
+def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     from pathlib import Path
 
     source = (
         Path(__file__).resolve().parents[3] / "env" / "runtime" / "fixtures.py"
     ).read_text(encoding="utf-8")
     assert 'funcov_dir / f"{tag}.toffee.funcov.json"' in source
-    assert 'funcov_dir.parent / "audit" / "legacy-funcov"' in source
-    assert 'metadata["execution"]["legacy_funcov_audit_path"]' in source
-    assert '"TB_ENABLE_TOFFEE_FUNCOV", default="1"' in source
-    assert '"TB_ENABLE_FUNCOV_AUDIT", default="0"' in source
-    assert "FrontendFuncovSampleHub" in source
-    assert "audit_recorder=legacy_recorder" in source
-    assert "legacy_recorder.write_artifacts()" in source
+    assert "FrontendFuncovSampleHub.from_pilot_csv" in source
+    assert "ToffeeCoverageSink.from_registry" in source
+    assert "create_toffee_runtime(" in source
+    assert "audit_recorder=None" in source
+    assert '"mode": "formal"' in source
+    # B1 removed legacy fallback / audit / pilot wiring from the formal fixture.
+    assert "FunctionalCoverageRecorder" not in source
+    assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
+    assert "TB_ENABLE_FUNCOV_AUDIT" not in source
+    assert "TB_ENABLE_TOFFEE_FUNCOV_PILOT" not in source
+    assert 'funcov_dir.parent / "audit" / "legacy-funcov"' not in source
+    assert 'metadata["execution"]["legacy_funcov_audit_path"]' not in source
+    assert "legacy_recorder" not in source
     assert "runtime_context.write_artifacts()" not in source
     assert 'execution["line_coverage_path"] = str(Path(coverage).resolve())' in source
     assert 'execution["waveform_path"] = str(Path(waveform).resolve())' in source

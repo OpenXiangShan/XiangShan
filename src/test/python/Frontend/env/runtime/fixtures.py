@@ -34,7 +34,7 @@ from ..api import api_Frontend_load_program
 from .artifact_provenance import file_sha256
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from ..support.env_config import DEFAULT_ENV_CONFIG
-from ..funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from ..funcov.recorder import default_pilot_csv_path
 from ..funcov.sample_hub import FrontendFuncovSampleHub
 from ..core.frontend_env import FrontendEnv
 from ..support.logging_utils import configure_env_logging
@@ -579,31 +579,16 @@ def env(dut, request):
     functional_coverage_enabled = _is_enabled(
         "TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"
     )
-    toffee_funcov_pilot_enabled = functional_coverage_enabled and _is_enabled(
-        "TB_ENABLE_TOFFEE_FUNCOV_PILOT", default="0"
-    )
-    toffee_funcov_enabled = functional_coverage_enabled and _is_enabled(
-        "TB_ENABLE_TOFFEE_FUNCOV", default="1"
-    )
-    toffee_funcov_active = toffee_funcov_pilot_enabled or toffee_funcov_enabled
-    funcov_audit_enabled = toffee_funcov_enabled and _is_enabled(
-        "TB_ENABLE_FUNCOV_AUDIT", default="0"
-    )
-    toffee_artifact_path = (
-        funcov_dir / f"{tag}.toffee.funcov.json"
-        if toffee_funcov_enabled
-        else funcov_dir.parent / "toffee" / f"{tag}.toffee.funcov.json"
-    )
+    # Formal path is always SampleHub + Toffee when functional coverage is on.
+    # Legacy fallback / audit / pilot switches were removed in Step B1.
+    toffee_artifact_path = funcov_dir / f"{tag}.toffee.funcov.json"
     runtime_context = None
-    legacy_recorder = None
+    toffee_sink = None
+    toffee_direct_models = []
+    metadata = None
     if functional_coverage_enabled:
         targets = _funcov_targets(request)
-        recorder_type = (
-            FrontendFuncovSampleHub
-            if toffee_funcov_enabled
-            else FunctionalCoverageRecorder
-        )
-        runtime_context = recorder_type.from_pilot_csv(
+        runtime_context = FrontendFuncovSampleHub.from_pilot_csv(
             default_pilot_csv_path(),
             testcase_name=request.node.name if request is not None else "frontend",
             artifact_tag=tag,
@@ -614,20 +599,6 @@ def env(dut, request):
             target_tp_ids=targets["tp_ids"],
             target_testcases=targets["testcases"],
         )
-        if funcov_audit_enabled:
-            legacy_recorder = FunctionalCoverageRecorder.from_pilot_csv(
-                default_pilot_csv_path(),
-                testcase_name=request.node.name if request is not None else "frontend",
-                artifact_tag=tag,
-                output_dir=funcov_dir.parent / "audit" / "legacy-funcov",
-                waveform_path=waveform,
-                line_coverage_path=coverage,
-                target_bin_ids=targets["bin_ids"],
-                target_tp_ids=targets["tp_ids"],
-                target_testcases=targets["testcases"],
-            )
-        elif not toffee_funcov_enabled:
-            legacy_recorder = runtime_context
     tb = FrontendEnv(
         dut,
         event_sink=(
@@ -641,59 +612,39 @@ def env(dut, request):
     tb.waveform_path = str(waveform)
     tb.line_coverage_path = str(coverage)
     tb.functional_coverage = runtime_context
-    toffee_funcov_pilot = None
-    toffee_direct_models = []
-    if toffee_funcov_active and runtime_context is None:
-        raise RuntimeError(
-            "Toffee functional coverage requires functional coverage"
-        )
     if runtime_context is not None:
+        from env.funcov.toffee_bridge import ToffeeCoverageSink
+        from env.funcov.toffee_runtime import create_toffee_runtime
+
         runtime_context.attach(tb)
-        if legacy_recorder is not None and legacy_recorder is not runtime_context:
-            legacy_recorder.attach(tb)
         if runtime_context.sampler_domain_enabled("icache"):
             from env.funcov.py.icache.signal_contract import validate_target_probes
 
             validate_target_probes(runtime_context)
-        if toffee_funcov_active:
-            from env.funcov.toffee_bridge import ToffeeCoverageSink
 
-            toffee_funcov_pilot = ToffeeCoverageSink.from_registry(
-                default_pilot_csv_path()
-            )
-            runtime_context.attach_toffee_sink(toffee_funcov_pilot)
-            tb.toffee_functional_coverage = toffee_funcov_pilot
-            tb.toffee_functional_coverage_pilot = toffee_funcov_pilot
-            toffee_funcov_pilot.configure_artifact_path(toffee_artifact_path)
-            if legacy_recorder is not None:
-                toffee_funcov_pilot.attach_audit_backend(
-                    legacy_recorder, toffee_artifact_path
-                )
-            if toffee_funcov_enabled:
-                from env.funcov.toffee_runtime import create_toffee_runtime
+        toffee_sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+        runtime_context.attach_toffee_sink(toffee_sink)
+        tb.toffee_functional_coverage = toffee_sink
+        toffee_sink.configure_artifact_path(toffee_artifact_path)
 
-                runtime = create_toffee_runtime(
-                    runtime_context,
-                    toffee_funcov_pilot,
-                    audit_recorder=legacy_recorder,
-                )
-                toffee_direct_models.extend(runtime.cycle_models)
-                for model in runtime.event_models:
-                    runtime_context.attach_toffee_event_model(model)
-                runtime_context.attach_toffee_owner_model(runtime.owner_model)
-                runtime_context.attach_toffee_uncache_model(runtime.uncache_model)
-                tb.functional_coverage = toffee_funcov_pilot
-                if funcov_audit_enabled:
-                    tb.functional_coverage_audit = legacy_recorder
+        runtime = create_toffee_runtime(
+            runtime_context,
+            toffee_sink,
+            audit_recorder=None,
+        )
+        toffee_direct_models.extend(runtime.cycle_models)
+        for model in runtime.event_models:
+            runtime_context.attach_toffee_event_model(model)
+        runtime_context.attach_toffee_owner_model(runtime.owner_model)
+        runtime_context.attach_toffee_uncache_model(runtime.uncache_model)
+        tb.functional_coverage = toffee_sink
 
         def sample_functional_coverage(cycle):
             runtime_context.on_cycle(cycle, tb)
-            if toffee_funcov_pilot is not None:
-                toffee_funcov_pilot.on_cycle(cycle)
+            toffee_sink.on_cycle(cycle)
             for model in toffee_direct_models:
                 model.on_cycle(cycle)
-            if toffee_funcov_pilot is not None:
-                toffee_funcov_pilot.flush_cycle(cycle)
+            toffee_sink.flush_cycle(cycle)
 
         dut.StepRis(sample_functional_coverage)
     tb.initialize(
@@ -702,35 +653,14 @@ def env(dut, request):
         reset_cycles=20,
     )
     yield tb
-    if runtime_context is not None:
+    if runtime_context is not None and toffee_sink is not None:
         metadata = _funcov_run_metadata(request, tb)
-        metadata["execution"]["funcov_path"] = str(
-            (
-                toffee_artifact_path
-                if toffee_funcov_enabled
-                else runtime_context.raw_path()
-            ).resolve()
-        )
-        if legacy_recorder is not None and legacy_recorder is not runtime_context:
-            metadata["execution"]["legacy_funcov_audit_path"] = str(
-                legacy_recorder.raw_path().resolve()
-            )
-        if legacy_recorder is not None:
-            legacy_recorder.set_run_metadata(
-                outcome=metadata["outcome"],
-                exit_code=metadata["exit_code"],
-                checker=metadata["checker"],
-                run_id=metadata["run_id"],
-                extra=metadata["execution"],
-            )
-            legacy_recorder.write_artifacts()
-    if toffee_funcov_pilot is not None:
-        toffee_funcov_pilot.flush_pending()
+        metadata["execution"]["funcov_path"] = str(toffee_artifact_path.resolve())
+        toffee_sink.flush_pending()
         if request.config.getoption("--toffee-report"):
             from toffee_test.reporter import set_func_coverage
 
-            set_func_coverage(request, toffee_funcov_pilot.cov_groups)
-        mode = "formal" if toffee_funcov_enabled else "diagnostic"
+            set_func_coverage(request, toffee_sink.cov_groups)
         execution = dict(metadata.get("execution") or {})
         execution["line_coverage_path"] = str(Path(coverage).resolve())
         execution["waveform_path"] = str(Path(waveform).resolve())
@@ -739,7 +669,7 @@ def env(dut, request):
         except Exception:
             monitor_stats = {}
         toffee_metadata = {
-            "mode": mode,
+            "mode": "formal",
             "artifact_tag": runtime_context.artifact_tag,
             "testcase_name": runtime_context.testcase_name,
             "source_csv": runtime_context.source_csv,
@@ -763,25 +693,10 @@ def env(dut, request):
             "errors": [],
             "provenance": runtime_context.provenance,
         }
-        toffee_funcov_pilot.write_artifact(
+        toffee_sink.write_artifact(
             toffee_artifact_path,
             metadata=toffee_metadata,
         )
-        if legacy_recorder is not None:
-            comparison = toffee_funcov_pilot.compare_legacy(legacy_recorder)
-            toffee_funcov_pilot.write_audit_comparison(
-                funcov_dir.parent / "audit" / "toffee-compare" / f"{tag}.json",
-                legacy_recorder,
-            )
-            differences = comparison["covered_mismatches"]
-            if differences:
-                details = ", ".join(
-                    f"{key} legacy={counts['legacy']} toffee={counts['toffee']}"
-                    for key, counts in sorted(differences.items())
-                )
-                raise AssertionError(
-                    f"Toffee funcov covered-state mismatch: {details}"
-                )
 
 
 @pytest.fixture(scope="function")
