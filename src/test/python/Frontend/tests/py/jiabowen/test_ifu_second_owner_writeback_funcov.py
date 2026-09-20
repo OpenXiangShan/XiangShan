@@ -9,7 +9,7 @@ from tests.py.jiabowen.test_ifu_compact_functional_coverage import (
 
 
 def _drive(recorder, dut, *, raw_owner, cross):
-    for stem, value in {"s2_valid_valid": 1, "s2_flush": 0, "s2_reqIsUncache": 0}.items():
+    for stem, value in {"s2_valid_valid": 1, "s2_flush": 0, "s2_useUncacheFetch": 0}.items():
         dut.set(_PREFIX + stem, value)
     for b in range(2):
         for stem, value in dict(valid=1, ftqIdx_flag=0, ftqIdx_value=10 + b,

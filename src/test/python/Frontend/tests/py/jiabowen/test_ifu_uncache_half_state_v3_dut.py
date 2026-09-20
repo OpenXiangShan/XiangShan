@@ -56,18 +56,18 @@ def test_nc_half_rvi_backend_redirect_to_cacheable_isolates_old_state(env):
             "uncacheUnit.__Vtogcov__io_resp_bits_uncacheData",
             "io_fromFtq_redirect_valid", "wbRedirect_valid",
             "s0_fire", "s0_prevEndIsHalfRvi", "s1_valid", "s1_fire", "s1_flush",
-            "s1_reqIsUncache", "s1_prevEndHalfRviInfo_valid",
+            "s1_useUncacheFetch", "s1_prevEndHalfRviInfo_valid",
             "s1_prevEndHalfRviInfo_bits_pc_addr", "s1_prevEndHalfRviInfo_bits_data",
             "s1_fetchBlock_0_startVAddr_addr", "s1_fetchBlock_0_ftqIdx_flag",
             "s1_fetchBlock_0_ftqIdx_value", "s1_prevIBufEnqPtrDup_dup_0_value",
-            "s2_valid_valid", "s2_reqIsUncache", "s2_prevEndIsHalfRviInfo_valid",
+            "s2_valid_valid", "s2_useUncacheFetch", "s2_prevEndIsHalfRviInfo_valid",
             "s2_prevEndIsHalfRviInfo_bits_pc_addr", "s2_prevEndIsHalfRviInfo_bits_data",
             "io_toIBuffer_valid", "io_toIBuffer_ready", "s2_fire",
         )}
         lane = state["s1_prevIBufEnqPtrDup_dup_0_value"] & 3
         state.update(cycle=cycle, lane=lane, instr=read(f"s1_alignedInstrVec_{lane}_data"),
                      pc=read(f"s1_alignedInstrPcVec_{lane}_addr") << 1)
-        if state["s2_fire"] and not state["s2_reqIsUncache"]:
+        if state["s2_fire"] and not state["s2_useUncacheFetch"]:
             # The recovery pointer is zero after backend redirect. Check the
             # first lane's registered identity and actual enqueue payload.
             state["delivery"] = {stem: read(stem) for stem in (
@@ -105,7 +105,7 @@ def test_nc_half_rvi_backend_redirect_to_cacheable_isolates_old_state(env):
     first_s0 = next(s for s in history if s["cycle"] > redirect["cycle"] and s["s0_fire"])
     first_s1 = next(s for s in history if s["cycle"] == first_s0["cycle"] + 1)
     assert first_s0["s0_prevEndIsHalfRvi"] == 0
-    assert first_s1["s1_valid"] == 1 and first_s1["s1_reqIsUncache"] == 0
+    assert first_s1["s1_valid"] == 1 and first_s1["s1_useUncacheFetch"] == 0
     assert first_s1["s1_prevEndHalfRviInfo_valid"] == 0
     assert first_s1["pc"] == target and first_s1["instr"] == new_instr, first_s1
     first_s2 = next(s for s in history if s["cycle"] > first_s1["cycle"] and "delivery" in s)

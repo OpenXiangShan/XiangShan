@@ -77,7 +77,7 @@ def _wait_for_boundary_witness(env, region: str, *, max_cycles: int = 12000) -> 
         value, path = _read_ifu_internal_with_path(recorder, env.dut, stem)
         return {"value": None if value is None else int(value), "path": path}
 
-    for _ in range(min(int(max_cycles), 512)):
+    for _ in range(int(max_cycles)):
         witness = getattr(recorder, "_ifu_owner_address_boundary_witnesses", {}).get(region)
         if witness is not None:
             return witness

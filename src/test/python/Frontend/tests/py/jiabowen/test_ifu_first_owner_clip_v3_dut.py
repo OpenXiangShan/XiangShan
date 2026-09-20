@@ -214,7 +214,7 @@ def _exercise_first_block_false_taken_clip(env):
         enq = read("io_toIBuffer_bits_enqEnable")
         assert [b["pc"] << 1 for b in blocks] == [first_start, second_start]
         assert (blocks[0]["flag"], blocks[0]["index"]) != (blocks[1]["flag"], blocks[1]["index"])
-        assert read("s2_reqIsUncache") == 0 and read("io_toIBuffer_valid") == 1
+        assert read("s2_useUncacheFetch") == 0 and read("io_toIBuffer_valid") == 1
         assert read("io_toIBuffer_bits_exceptionType_value") == 0
         assert fault["invalid"] == 0 and fault["offset"] == 14 and fault["rvc"] == 0
         first = _assert_clip_masks(slots, fault["slot"], fixed=fixed, enq=enq,

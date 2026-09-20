@@ -74,15 +74,11 @@ def _read_req_uncache(
     recorder,
     dut,
     *,
-    req_stem: str,
     valid_stem: str,
     pmp_mmio_stem: str,
     pbmt_stem: str,
 ) -> Optional[int]:
-    """Read reqIsUncache or reconstruct its retained RTL expression."""
-    direct = _read_ifu(recorder, dut, req_stem)
-    if direct is not None:
-        return direct
+    """Reconstruct the removed reqIsUncache classification from metadata."""
     valid = _read_ifu(recorder, dut, valid_stem)
     pmp_mmio = _read_ifu(recorder, dut, pmp_mmio_stem)
     pbmt = _read_ifu(recorder, dut, pbmt_stem)
@@ -218,7 +214,6 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "s1_req_uncache": _read_req_uncache(
             recorder,
             dut,
-            req_stem="s1_reqIsUncache",
             valid_stem="s1_valid",
             pmp_mmio_stem="s1_icacheMetaIn_0_pmpMmio",
             pbmt_stem="s1_icacheMetaIn_0_itlbPbmt",
@@ -233,7 +228,6 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "s2_req_uncache": _read_req_uncache(
             recorder,
             dut,
-            req_stem="s2_reqIsUncache",
             valid_stem="s2_valid_valid",
             pmp_mmio_stem="s2_icacheMeta_0_pmpMmio",
             pbmt_stem="s2_icacheMeta_0_itlbPbmt",
@@ -459,7 +453,6 @@ def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "s2_req_uncache": _read_req_uncache(
             recorder,
             dut,
-            req_stem="s2_reqIsUncache",
             valid_stem="s2_valid_valid",
             pmp_mmio_stem="s2_icacheMeta_0_pmpMmio",
             pbmt_stem="s2_icacheMeta_0_itlbPbmt",

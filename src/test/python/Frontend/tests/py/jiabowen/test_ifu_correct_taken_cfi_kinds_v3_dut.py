@@ -188,7 +188,7 @@ def test_ifu_correct_taken_jal_jalr_ret_accumulate_in_one_run(env) -> None:
             })
             record.update(last_seen_cycle=cycle, last_mispredict=bool(entry.mispredict),
                           golden_frontier=env.backend_model.current_golden_pc(),
-                          target_progressed=env.backend_model._target_path_progressed_after_cycle(
+                          target_progressed=env.backend_model._target_path_progressed_since(
                               entry.target, entry.queued_cycle))
         for channel in range(3):
             def port(stem):

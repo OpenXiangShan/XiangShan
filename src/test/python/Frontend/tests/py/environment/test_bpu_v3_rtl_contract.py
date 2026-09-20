@@ -347,8 +347,9 @@ def test_existing_waylookup_producer_uses_the_current_top_fencei_alias() -> None
     candidates = ICACHE_WAYLOOKUP_SIGNALS["fencei"]
 
     assert candidates == (
-        "Frontend_top.io_fencei",
-        "Frontend_top.__Vtogcov__io_fencei",
+        "Frontend_top.Frontend.inner_icache_io_fencei_REG",
+        "Frontend_top.Frontend.__Vtogcov__inner_icache_io_fencei_REG",
+        "Frontend_top.Frontend.inner_icache.io_fencei",
     )
     assert any(name in registered for name in candidates)
 
@@ -356,9 +357,10 @@ def test_existing_waylookup_producer_uses_the_current_top_fencei_alias() -> None
 def test_bpu_all_not_taken_differences_are_guarded_by_s3_taken() -> None:
     source = _read(_FRONTEND / "bpu/Bpu.scala")
 
-    assert "val cfiPositionDiff = s3_taken &&" in source
-    assert "val attributeDiff   = s3_taken &&" in source
-    assert "false.B, // fall-through" in source
+    assert "val cfiPositionDiff = s2_taken &&" in source
+    assert "val attributeDiff   = s2_taken &&" in source
+    assert "val takenDiff            = s3_taken =/= s3_s2Prediction.taken" in source
+    assert "false.B" in source
     assert "(s3_taken && s3_useRas)" in source
     assert "(s3_taken && s3_useIttage)" in source
     assert "s3_taken                   -> Mux1H" in source
@@ -416,7 +418,7 @@ def test_bpu_target_diff_splits_btb_lower_from_ittage_and_ras_full_target() -> N
     abtb_parameters = _read(_FRONTEND / "bpu/abtb/Parameters.scala")
     mbtb_parameters = _read(_FRONTEND / "bpu/mbtb/Parameters.scala")
 
-    assert "_.bits.targetLower =/= s3_s1Prediction.targetLower" in source
+    assert "entry.bits.targetLower =/= s3_s1Prediction.targetLower" in source
     assert "ittage.io.prediction.target =/= s3_s1Prediction.target" in source
     assert "ras.io.topRetAddr =/= s3_s1Prediction.target" in source
     assert "(s3_taken && s3_useRas)    -> s3_rasTargetDiff" in source

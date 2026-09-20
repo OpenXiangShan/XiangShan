@@ -52,7 +52,7 @@ def _set_common_signals(dut):
     dut.set(_IFU + "s2_icacheMeta_0_pmpMmio", 1)
     dut.set(_IFU + "s2_icacheMeta_0_itlbPbmt", 0)
     dut.set(_IFU + "s2_icacheMeta_0_exception_value", 0)
-    dut.set(_IFU + "s2_reqIsUncache", 1)
+    dut.set(_IFU + "s2_useUncacheFetch", 1)
     dut.set(_IFU + "io_toIBuffer_valid", 0)
     dut.set(_IFU + "io_toIBuffer_ready", 1)
     dut.set(_IFU + "io_toIBuffer_bits_enqEnable", 1)

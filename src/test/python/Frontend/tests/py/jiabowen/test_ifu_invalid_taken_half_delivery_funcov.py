@@ -30,7 +30,7 @@ def _fixture(tmp_path):
     _sample_predchecker_wb_half_rvi_selection(recorder, dut, 10)
     assert recorder._ifu_invalid_taken_half_delivery is not None
     for stem in ("io_fromFtq_redirect_valid", "uncacheRedirect_valid", "wbRedirect_valid",
-                 "s0_flush", "s1_flush", "s2_flush", "s1_reqIsUncache", "s2_reqIsUncache"):
+                 "s0_flush", "s1_flush", "s2_flush", "s1_useUncacheFetch", "s2_useUncacheFetch"):
         dut.set(_PREFIX + stem, 0)
     dut.set(_PREFIX + "s0_fire", 1)
     _sample_invalid_taken_half_delivery(recorder, dut, 11)

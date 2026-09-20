@@ -113,8 +113,16 @@ _SIGNALS = {
     "s1_flush": (f"{_IFU_PREFIX}s1_flush", f"{_IFU_PREFIX}__Vtogcov__s1_flush"),
     "s1_fire": (f"{_IFU_PREFIX}s1_fire", f"{_IFU_PREFIX}__Vtogcov__s1_fire"),
     "s1_req_uncache": (
-        f"{_IFU_PREFIX}s1_reqIsUncache",
-        f"{_IFU_PREFIX}__Vtogcov__s1_reqIsUncache",
+        f"{_IFU_PREFIX}s1_useUncacheFetch",
+        f"{_IFU_PREFIX}__Vtogcov__s1_useUncacheFetch",
+    ),
+    "s1_pmp_mmio": (
+        f"{_IFU_PREFIX}s1_icacheMetaIn_0_pmpMmio",
+        f"{_IFU_PREFIX}__Vtogcov__s1_icacheMetaIn_0_pmpMmio",
+    ),
+    "s1_pbmt": (
+        f"{_IFU_PREFIX}s1_icacheMetaIn_0_itlbPbmt",
+        f"{_IFU_PREFIX}__Vtogcov__s1_icacheMetaIn_0_itlbPbmt",
     ),
     "s1_exception": (
         f"{_IFU_PREFIX}s1_icacheMeta_0_exception_value",
@@ -302,6 +310,18 @@ def reset_ifu_cacheable_pipeline_state(recorder) -> None:
 
 
 def _read_signal(recorder, key: str) -> Optional[int]:
+    if key == "s1_req_uncache":
+        valid = _read_first(recorder, _SIGNALS["s1_valid"])
+        pmp_mmio = _read_first(recorder, _SIGNALS["s1_pmp_mmio"])
+        pbmt = _read_first(recorder, _SIGNALS["s1_pbmt"])
+        if None not in {valid, pmp_mmio, pbmt}:
+            return int(
+                int(valid) == 1
+                and (int(pmp_mmio) == 1 or int(pbmt) in {1, 2})
+            )
+        # Unit fixtures and older packages may expose only the current
+        # control-path predicate.  Current generated DUTs take the exact
+        # request classification from the metadata above, including faults.
     value = _read_first(recorder, _SIGNALS[key])
     return None if value is None else int(value)
 
@@ -2524,19 +2544,6 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
             recorder.mark("ifu_cacheable_flush", "wb_redirect_blocks", cycle, flush_evidence)
         if bpu_s3_flush == 1 and s0_flush_bpu == 1:
             recorder.mark("ifu_cacheable_flush", "bpu_match_blocks", cycle, flush_evidence)
-            if source is not None and source["blocks"][1].get("valid") == 1:
-                mark_owner_v3_checked(
-                    recorder,
-                    "BIN-901",
-                    cycle,
-                    {
-                        **flush_evidence,
-                        "window_identity": "block0_ftq_idx",
-                        "window_blocks": 2,
-                        "whole_window_fired": False,
-                    },
-                    producer="ifu_cacheable_bpu_window_sampler",
-                )
 
     if not flush_blocks:
         _arm_backend_flush_causality(

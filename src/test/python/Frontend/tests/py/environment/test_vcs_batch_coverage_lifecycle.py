@@ -48,6 +48,9 @@ def test_vcs_batch_reuses_dut_and_finalizes_one_run_coverage(monkeypatch, tmp_pa
     monkeypatch.setenv("TB_RUN_ID", "short_vcs_suite")
     monkeypatch.setenv("TB_ARTIFACT_DIR", str(tmp_path))
     monkeypatch.setenv("TB_ENABLE_CASE_LOG", "0")
+    source_vdb = tmp_path / "pylib-vcs" / "Frontend" / "Frontend.vdb"
+    source_vdb.mkdir(parents=True)
+    monkeypatch.setattr(fixtures, "frontend_pylib_path", lambda: tmp_path / "pylib-vcs")
 
     first = fixtures.create_dut(_request("test_first"))
     second = fixtures.create_dut(_request("test_second"))

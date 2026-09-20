@@ -42,6 +42,29 @@ def _read_ifu_internal_with_path(
     return None, None
 
 
+def _read_ifu_request_is_uncache(recorder, dut, stage: str) -> Optional[int]:
+    """Reconstruct the removed reqIsUncache predicate from current metadata.
+
+    Unlike useUncacheFetch, request classification remains true when an
+    uncacheable request carries a fetch exception.  That distinction is
+    required before promoting cacheable exception evidence.
+    """
+    stage = str(stage)
+    valid_stem = "s1_valid" if stage == "s1" else "s2_valid_valid"
+    meta_stem = "s1_icacheMetaIn_0" if stage == "s1" else "s2_icacheMeta_0"
+    valid = _read_ifu_internal(recorder, dut, valid_stem)
+    pmp_mmio = _read_ifu_internal(recorder, dut, f"{meta_stem}_pmpMmio")
+    pbmt = _read_ifu_internal(recorder, dut, f"{meta_stem}_itlbPbmt")
+    if None not in {valid, pmp_mmio, pbmt}:
+        return int(
+            int(valid) == 1
+            and (int(pmp_mmio) == 1 or int(pbmt) in {1, 2})
+        )
+    # This fallback keeps focused model tests useful without weakening the
+    # generated-DUT path, whose metadata signals are contract-checked.
+    return _read_ifu_internal(recorder, dut, f"{stage}_useUncacheFetch")
+
+
 def _record_cfi_offset_risk_once(
     recorder,
     cycle: int,
@@ -1841,7 +1864,7 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
             values = {
                 "s2_valid": _read_ifu_internal(recorder, dut, "s2_valid_valid"),
                 "s2_flush": _read_ifu_internal(recorder, dut, "s2_flush"),
-                "s2_req_is_uncache": _read_ifu_internal(recorder, dut, "s2_reqIsUncache"),
+                "s2_req_is_uncache": _read_ifu_request_is_uncache(recorder, dut, "s2"),
                 "s2_ftq_flag": _read_ifu_internal(
                     recorder, dut, "s2_fetchBlock_0_ftqIdx_flag"
                 ),
@@ -2146,7 +2169,7 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
     s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
     s1_fire = _read_ifu_internal(recorder, dut, "s1_fire")
     s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
-    s1_req_is_uncache = _read_ifu_internal(recorder, dut, "s1_reqIsUncache")
+    s1_req_is_uncache = _read_ifu_request_is_uncache(recorder, dut, "s1")
     total_end_is_half_rvi = _read_ifu_internal(
         recorder, dut, "s1_totalEndIsHalfRvi"
     )
@@ -2640,7 +2663,7 @@ def _sample_predchecker_wb_half_rvi_recovery(recorder, dut, cycle: int) -> None:
     fields = {
         "s1_prevEndHalfRviInfo_valid": None,
         "s1_prevIBufEnqPtrDup_dup_0_value": None,
-        "s1_reqIsUncache": None,
+        "s1_useUncacheFetch": None,
     }
     paths = dict(pending.get("signal_paths", {}))
     for field in fields:
@@ -2657,7 +2680,7 @@ def _sample_predchecker_wb_half_rvi_recovery(recorder, dut, cycle: int) -> None:
             signal_paths=paths,
         )
         return
-    if int(fields["s1_reqIsUncache"]) != 0:
+    if int(fields["s1_useUncacheFetch"]) != 0:
         return
     if int(fields["s1_prevEndHalfRviInfo_valid"]) != 1:
         return
@@ -2776,7 +2799,7 @@ def _sample_invalid_taken_half_delivery(recorder, dut, cycle: int) -> None:
             return
         if pending["phase"] == "s1":
             require(read("s1_valid") == 1 and read("s1_flush") == 0, "s1_invalid_or_flushed")
-            require(read("s1_reqIsUncache") == 0, "s1_uncache")
+            require(read("s1_useUncacheFetch") == 0, "s1_uncache")
             require(read("s1_prevEndHalfRviInfo_valid") == 1, "half_not_retained")
             require(_decode_pruned_pc(read("s1_prevEndHalfRviInfo_bits_pc_addr")) == pc,
                     "saved_pc_changed")
@@ -2808,7 +2831,7 @@ def _sample_invalid_taken_half_delivery(recorder, dut, cycle: int) -> None:
                 pending.update(phase="s2", s1_cycle=int(cycle))
             return
         require(read("s2_valid_valid") == 1 and read("s2_flush") == 0, "s2_invalid_or_flushed")
-        require(read("s2_reqIsUncache") == 0, "s2_uncache")
+        require(read("s2_useUncacheFetch") == 0, "s2_uncache")
         lane, instruction, ftq = (pending["s1"][k] for k in ("lane", "instruction", "ftq"))
         prefix = f"s2_alignedInstrVec_{lane}_"
         require(read(prefix + "valid") == 1 and read(prefix + "invalidTaken") == 0,
@@ -3467,9 +3490,6 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         mark_owner_v3_checked(recorder, "BIN-985", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
     if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 1:
         mark_owner_v3_checked(recorder, "BIN-986", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-    if first["fault"] == "not_cfi_taken" and first["invalid_taken"] == 1:
-        mark_owner_v3_checked(recorder, "BIN-987", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-
     younger_faults = [entry for entry in faults if entry["slot"] > first["slot"]]
     younger_taken_cfi = [
         entry
@@ -3492,6 +3512,11 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             and entry["block_sel"] == 0
             and entry["is_cross_block_instr"] == 1
             and entry["effective_owner"] == 1
+            and entry["end_offset"] == 0
+            # GuardedPc.addr is expressed in halfwords.  A 32-bit
+            # instruction starting in halfword 15 is the only legal
+            # position-15 instruction that ends in the following block.
+            and (entry["pc_addr"] & 0xF) == 15
             for entry in younger_taken_cfi
         ):
             mark_owner_v3_checked(
@@ -3501,14 +3526,6 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 fault_evidence,
                 producer="ifu_predchecker_v3_sampler",
             )
-    if first["fault"] == "jal_not_taken" and first["invalid_taken"] == 1:
-        mark_owner_v3_checked(
-            recorder,
-            "BIN-979",
-            cycle,
-            fault_evidence,
-            producer="ifu_predchecker_v3_sampler",
-        )
     if first["fault"] == "jalr_not_taken" and any(
         entry["fault"] in {"jal_not_taken", "jalr_not_taken"}
         for entry in younger_faults
@@ -3524,14 +3541,6 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         mark_owner_v3_checked(
             recorder,
             "BIN-983",
-            cycle,
-            fault_evidence,
-            producer="ifu_predchecker_v3_sampler",
-        )
-    if first["fault"] == "jalr_not_taken" and first["invalid_taken"] == 1:
-        mark_owner_v3_checked(
-            recorder,
-            "BIN-984",
             cycle,
             fault_evidence,
             producer="ifu_predchecker_v3_sampler",
@@ -3608,12 +3617,12 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     source_paths[stem] = path
             blocks.append(values)
         active = {}
-        for stem in ("s2_valid_valid", "s2_flush", "s2_reqIsUncache"):
+        for stem in ("s2_valid_valid", "s2_flush", "s2_useUncacheFetch"):
             active[stem], path = _read_ifu_internal_with_path(recorder, dut, stem)
             if path is not None:
                 source_paths[stem] = path
         pending.update(source_blocks=blocks, source_signal_paths=source_paths,
-                       source_active=active == {"s2_valid_valid": 1, "s2_flush": 0, "s2_reqIsUncache": 0})
+                       source_active=active == {"s2_valid_valid": 1, "s2_flush": 0, "s2_useUncacheFetch": 0})
     recorder._ifu_predchecker_v3_pending = pending
 
 
@@ -3666,7 +3675,7 @@ def _sample_uncache_half_isolation(recorder, dut, cycle: int) -> None:
         if pending is None:
             if backend or wb or read("uncacheNeedResend") != 1:
                 return
-            if read("s2_valid_valid") != 1 or read("s2_reqIsUncache") != 1:
+            if read("s2_valid_valid") != 1 or read("s2_useUncacheFetch") != 1:
                 return
             pc = read("uncachePc_addr")
             # This semantic response port drives uncacheRedirect.halfRviInfo
@@ -3696,7 +3705,7 @@ def _sample_uncache_half_isolation(recorder, dut, cycle: int) -> None:
             pending.update(phase="backend", saved_cycle=int(cycle))
         elif phase == "backend" and backend:
             expected = {
-                "s2_valid_valid": 1, "s2_reqIsUncache": 1,
+                "s2_valid_valid": 1, "s2_useUncacheFetch": 1,
                 "s2_prevEndIsHalfRviInfo_valid": 1,
                 "s2_prevEndIsHalfRviInfo_bits_pc_addr": pending["half_pc_addr"],
                 "s2_prevEndIsHalfRviInfo_bits_data": pending["half_data"],
@@ -3731,7 +3740,7 @@ def _sample_uncache_half_isolation(recorder, dut, cycle: int) -> None:
             pending.update(phase="s1", s0_cycle=int(cycle))
         elif phase == "s1":
             if (read("s1_valid") != 1 or read("s1_flush") != 0
-                    or read("s1_reqIsUncache") != 0
+                    or read("s1_useUncacheFetch") != 0
                     or read("s1_prevEndHalfRviInfo_valid") != 0):
                 reject("recovery_not_clean_cacheable")
                 return
@@ -3806,7 +3815,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         return
 
     exception_type = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_exceptionType_value")
-    output_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
+    output_req_is_uncache = _read_ifu_request_is_uncache(recorder, dut, "s2")
     records: list[dict[str, Any]] = []
     for slot in slots:
         folded_pc = _read_ifu_output_slot(recorder, dut, "foldpc", slot)
@@ -3951,7 +3960,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     align_shift_num = _read_ifu_internal(recorder, dut, "s2_alignShiftNum")
     instr_count = _read_ifu_internal(recorder, dut, "s2_instrCount")
     s2_fire = _read_ifu_internal(recorder, dut, "s2_fire")
-    s2_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
+    s2_req_is_uncache = _read_ifu_request_is_uncache(recorder, dut, "s2")
     if (
         s2_fire == 1
         and s2_req_is_uncache == 0

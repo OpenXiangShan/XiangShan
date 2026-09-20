@@ -25,8 +25,8 @@ BPU_V3_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
         _BPU + "__Vtogcov__s3_valid",
     ),
     "s3_s1_prediction_taken": (
-        _BPU + "s3_s1Prediction_taken",
-        _BPU + "__Vtogcov__s3_s1Prediction_taken",
+        _BPU + "s2_s1Prediction_taken",
+        _BPU + "__Vtogcov__s2_s1Prediction_taken",
     ),
     "s3_override": (
         _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
@@ -97,36 +97,36 @@ BPU_TARGET_DIFF_SIGNAL_GROUPS: dict[str, tuple[str, ...]] = {
     "s3_valid": BPU_V3_SIGNAL_GROUPS["s3_valid"],
     "s3_taken": (_BPU + "__Vtogcov__s3_taken",),
     "s1_taken": (
-        _BPU + "s3_s1Prediction_taken",
-        _BPU + "__Vtogcov__s3_s1Prediction_taken",
+        _BPU + "s2_s1Prediction_taken",
+        _BPU + "__Vtogcov__s2_s1Prediction_taken",
     ),
     "s1_cfi_position": (
-        _BPU + "s3_s1Prediction_cfiPosition",
-        _BPU + "__Vtogcov__s3_s1Prediction_cfiPosition",
+        _BPU + "s2_s1Prediction_cfiPosition",
+        _BPU + "__Vtogcov__s2_s1Prediction_cfiPosition",
     ),
     "s1_branch_type": (
-        _BPU + "s3_s1Prediction_attribute_branchType",
-        _BPU + "__Vtogcov__s3_s1Prediction_attribute_branchType",
+        _BPU + "s2_s1Prediction_attribute_branchType",
+        _BPU + "__Vtogcov__s2_s1Prediction_attribute_branchType",
     ),
     "s1_ras_action": (
-        _BPU + "s3_s1Prediction_attribute_rasAction",
-        _BPU + "__Vtogcov__s3_s1Prediction_attribute_rasAction",
+        _BPU + "s2_s1Prediction_attribute_rasAction",
+        _BPU + "__Vtogcov__s2_s1Prediction_attribute_rasAction",
     ),
     "s1_target": (
-        _BPU + "s3_s1Prediction_target_addr",
-        _BPU + "__Vtogcov__s3_s1Prediction_target_addr",
+        _BPU + "s2_s1Prediction_target_addr",
+        _BPU + "__Vtogcov__s2_s1Prediction_target_addr",
     ),
     "s3_cfi_position": (
-        _BPU + "s3_firstTakenBranch_bits_cfiPosition",
-        _BPU + "__Vtogcov__s3_firstTakenBranch_bits_cfiPosition",
+        _BPU + "s3_prediction_cfiPosition",
+        _BPU + "__Vtogcov__s3_prediction_cfiPosition",
     ),
     "s3_branch_type": (
-        _BPU + "s3_firstTakenBranch_bits_attribute_branchType",
-        _BPU + "__Vtogcov__s3_firstTakenBranch_bits_attribute_branchType",
+        _BPU + "s3_prediction_attribute_branchType",
+        _BPU + "__Vtogcov__s3_prediction_attribute_branchType",
     ),
     "s3_ras_action": (
-        _BPU + "s3_firstTakenBranch_bits_attribute_rasAction",
-        _BPU + "__Vtogcov__s3_firstTakenBranch_bits_attribute_rasAction",
+        _BPU + "s3_prediction_attribute_rasAction",
+        _BPU + "__Vtogcov__s3_prediction_attribute_rasAction",
     ),
     "s3_target": (
         _BPU + "s3_prediction_target_addr",

@@ -187,7 +187,7 @@ def _sample_result_backpressure(recorder, dut, cycle: int) -> None:
     to_valid = _read_ifu(recorder, dut, "io_toIBuffer_valid")
     to_ready = _read_ifu(recorder, dut, "io_toIBuffer_ready")
     resp_valid = _read_uncache_unit(recorder, dut, "io_resp_valid")
-    req_uncache = _read_ifu(recorder, dut, "s2_reqIsUncache")
+    req_uncache = _read_ifu(recorder, dut, "s2_useUncacheFetch")
     pmp_mmio = _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio")
     if not (
         resp_valid == 1

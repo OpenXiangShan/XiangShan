@@ -41,7 +41,7 @@ def test_first_owner_clipping_marks_once_per_accepted_transaction(tmp_path):
 
 @pytest.mark.parametrize("stem,value", [
     ("io_toIBuffer_ready", 0), ("io_toIBuffer_valid", 0),
-    ("s2_fire", 0), ("s2_reqIsUncache", 1),
+    ("s2_fire", 0), ("s2_useUncacheFetch", 1),
     ("s2_fetchBlock_0_valid", 0), ("s2_fetchBlock_1_valid", 0),
     ("s2_fetchBlock_1_valid", None),
     ("s2_alignedInstrVec_2_valid", 0),

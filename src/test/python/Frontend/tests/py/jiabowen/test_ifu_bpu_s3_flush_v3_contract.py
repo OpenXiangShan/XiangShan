@@ -12,7 +12,7 @@ from env.runtime.pylib import frontend_offset_path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[7]
-_EXPECTED_SOURCE = "d8ed879b51ad33e70aa18358159612ff1689d354"
+_EXPECTED_SOURCE = "8724911fd6d94c1b953b6ab646584845da9c7fc5"
 _EXPECTED_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
 _REQUIRED_IFU_KEYS = (
     "req_valid",

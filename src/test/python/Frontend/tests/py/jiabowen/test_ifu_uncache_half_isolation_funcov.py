@@ -11,7 +11,7 @@ def _samples():
     initial = dict(
         uncacheRedirect_valid=1, uncacheNeedResend=1, uncachePc_addr=old_pc,
         io_fromFtq_redirect_valid=0, wbRedirect_valid=0,
-        s2_valid_valid=1, s2_reqIsUncache=1,
+        s2_valid_valid=1, s2_useUncacheFetch=1,
     )
     initial["uncacheUnit.__Vtogcov__io_resp_bits_uncacheData"] = 0x313
     saved = dict(uncacheRedirect_valid=0, s0_prevEndIsHalfRvi=1,
@@ -29,7 +29,7 @@ def _samples():
                    s1_prevEndHalfRviInfo_bits_pc_addr=0,
                    s1_prevEndHalfRviInfo_bits_data=0, s1_valid=0, s2_valid_valid=0)
     fired = dict(s0_fire=1)
-    recovered = dict(s0_fire=0, s1_valid=1, s1_flush=0, s1_reqIsUncache=0,
+    recovered = dict(s0_fire=0, s1_valid=1, s1_flush=0, s1_useUncacheFetch=0,
                      s1_prevEndHalfRviInfo_valid=0, s1_fire=1,
                      s1_prevIBufEnqPtrDup_dup_0_value=0,
                      s1_fetchBlock_0_startVAddr_addr=0x80003000 >> 1,
@@ -77,7 +77,7 @@ def test_uncache_half_isolation_matches_saved_pc_data_through_backend_recovery(t
     (5, "io_fromFtq_redirect_valid", 1),
     (6, "s1_prevEndHalfRviInfo_valid", 1),
     (6, "s1_alignedInstrPcVec_0_addr", 0x80000FFE >> 1),
-    (6, "s1_reqIsUncache", 1),
+    (6, "s1_useUncacheFetch", 1),
 ])
 def test_uncache_half_isolation_rejects_wrong_or_interrupted_transaction(tmp_path, mutate):
     recorder, _env, dut, _memory = _make_recorder(tmp_path)

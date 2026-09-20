@@ -75,8 +75,14 @@ _BIN906_SIGNALS = {
     "s1_ready": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_ready"),
     "s1_fire": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_fire"),
     "s1_flush": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_flush"),
-    "s1_req_uncache": _aliases(
-        "Frontend_top.Frontend.inner_ifu.s1_reqIsUncache"
+    "s1_use_uncache": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_useUncacheFetch"
+    ),
+    "s1_pmp_mmio": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
+    ),
+    "s1_pbmt": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
     ),
     "s1_input_exception": _aliases(
         "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_exception_value"
@@ -186,6 +192,10 @@ def _sample_bin906_pipeline(env) -> dict:
         name: _require_read(env, aliases) for name, aliases in _BIN906_SIGNALS.items()
     }
     sample["cycle"] = int(env.current_cycle)
+    sample["s1_req_uncache"] = int(
+        sample["s1_valid"] == 1
+        and (sample["s1_pmp_mmio"] == 1 or sample["s1_pbmt"] in {1, 2})
+    )
     instr_end_mask = sum(
         _require_read(
             env,
