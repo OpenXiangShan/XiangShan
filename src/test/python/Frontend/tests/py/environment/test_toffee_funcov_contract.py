@@ -302,7 +302,6 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "create_toffee_runtime(" in source
     assert "audit_recorder=None" in source
     assert '"mode": "formal"' in source
-    # B1 removed legacy fallback / audit / pilot wiring from the formal fixture.
     assert "FunctionalCoverageRecorder" not in source
     assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
     assert "TB_ENABLE_FUNCOV_AUDIT" not in source

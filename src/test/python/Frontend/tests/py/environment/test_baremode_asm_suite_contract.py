@@ -29,14 +29,14 @@ def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> No
     assert 'TB_SUITE_DATE must use YYYYMMDD' in suite_source
     assert 'TB_SUITE_TIME must use HHMMSS' in suite_source
     assert "tools/backannotate_funcov.py" in suite_source
-    assert "tools/merge_funcov.py" in suite_source
     assert "tools/merge_toffee_funcov.py" in suite_source
     assert ".toffee.funcov.json" in suite_source
-    assert 'toffee_funcov_enabled="${TB_ENABLE_TOFFEE_FUNCOV:-1}"' in suite_source
+    assert "tools/merge_funcov.py" not in suite_source
+    assert "TB_ENABLE_TOFFEE_FUNCOV" not in suite_source
+    assert "${SUITE_ID}_observed" not in suite_source
     assert "--artifact-gate-only" in suite_source
     assert "artifact_gate_audit.json" in suite_source
     assert "code_coverage_summary.json" in suite_source
-    assert "${SUITE_ID}_observed" in suite_source
     assert 'raw coverage summary skipped: TB_RUN_DUT=0' in suite_source
 
     suite_script = frontend_root / "scripts/run_baremode_asm_suite.sh"

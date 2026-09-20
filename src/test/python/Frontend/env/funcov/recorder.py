@@ -1135,8 +1135,7 @@ class FunctionalCoverageRecorder(FrontendFuncovSampleHub):
     """Legacy hit ledger and artifact writer.
 
     Formal Toffee runs use :class:`FrontendFuncovSampleHub` directly.  This
-    subclass remains for optional audit and ``TB_ENABLE_TOFFEE_FUNCOV=0``
-    fallback until the independent deletion change.
+    subclass keeps the old JSON ledger API for remaining diagnostic callers.
     """
 
     def __init__(self, *args, **kwargs) -> None:

@@ -580,7 +580,6 @@ def env(dut, request):
         "TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"
     )
     # Formal path is always SampleHub + Toffee when functional coverage is on.
-    # Legacy fallback / audit / pilot switches were removed in Step B1.
     toffee_artifact_path = funcov_dir / f"{tag}.toffee.funcov.json"
     runtime_context = None
     toffee_sink = None

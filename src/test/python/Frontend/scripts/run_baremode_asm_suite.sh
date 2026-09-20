@@ -168,15 +168,10 @@ echo
 if [[ "${TB_RUN_DUT}" != "0" ]]; then
   suite_report_dir="${SUITE_ARTIFACT_DIR}/report"
   funcov_artifacts=()
-  toffee_funcov_enabled="${TB_ENABLE_TOFFEE_FUNCOV:-1}"
   for case_path in "${CASES[@]}"; do
     stem="$(basename "${case_path}")"
     stem="${stem%.*}"
-    if [[ "${toffee_funcov_enabled}" == "0" ]]; then
-      funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.funcov.json"
-    else
-      funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.toffee.funcov.json"
-    fi
+    funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.toffee.funcov.json"
     if [[ ! -f "${funcov_path}" ]]; then
       echo "[frontend-suite][error] missing functional coverage artifact: ${funcov_path}" >&2
       exit 2
@@ -191,25 +186,16 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
     merge_args+=(--artifact "${funcov_path}")
   done
 
-  if [[ "${toffee_funcov_enabled}" == "0" ]]; then
-    echo "[frontend-suite] legacy observed functional coverage aggregate (diagnostic only):"
-    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_funcov.py" \
-      --output-dir "${suite_report_dir}/funcov" \
-      --artifact-tag "${SUITE_ID}_observed" \
-      --run-id "${SUITE_ID}" \
-      "${merge_args[@]}"
-  else
-    echo "[frontend-suite] Toffee functional coverage per-case gate audit:"
-    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
-      --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
-      --artifact-gate-only \
-      --audit-json "${suite_report_dir}/funcov/artifact_gate_audit.json" \
-      "${gate_args[@]}"
-    echo "[frontend-suite] Toffee functional coverage aggregate:"
-    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
-      --output "${suite_report_dir}/funcov/${SUITE_ID}.toffee.funcov.json" \
-      "${merge_args[@]}"
-  fi
+  echo "[frontend-suite] Toffee functional coverage per-case gate audit:"
+  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
+    --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
+    --artifact-gate-only \
+    --audit-json "${suite_report_dir}/funcov/artifact_gate_audit.json" \
+    "${gate_args[@]}"
+  echo "[frontend-suite] Toffee functional coverage aggregate:"
+  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
+    --output "${suite_report_dir}/funcov/${SUITE_ID}.toffee.funcov.json" \
+    "${merge_args[@]}"
 
   echo "[frontend-suite] raw coverage summary:"
   "${PYTHON:-python3}" "${FRONTEND_DIR}/scripts/report_raw_code_coverage.py" \
