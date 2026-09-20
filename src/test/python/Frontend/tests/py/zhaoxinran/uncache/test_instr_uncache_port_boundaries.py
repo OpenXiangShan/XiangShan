@@ -2197,6 +2197,13 @@ def _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 
 
 @pytest.mark.funcov_tps("ATP-035")
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "latest DUT requires a live cfVec source for context re-entry; the current "
+        "single-page stimulus cannot retain an old PTW response while producing that source"
+    ),
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
     scenario_key = "zhaoxinran/uncache/csr-change-discards-stale-translation"

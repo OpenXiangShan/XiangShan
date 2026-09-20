@@ -446,7 +446,11 @@ def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
     first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
     assert uncache._wait_for_request_addr(env, first_beat, max_cycles=12000)
     assert uncache._wait_for_monitor_exception(env, max_cycles=12000)
-    assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2
+    # Both declared page translations have already completed by the time the
+    # second-page PMP fault is reported.  Waiting for one more response after
+    # that fault lets unrelated post-fault frontend traffic enter the still
+    # armed oracle and obscures the completed target transaction.
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 2
 
     matching = [
         sample
