@@ -75,7 +75,6 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
-  redirectMeta.sctr       := stack.meta.sctr
   redirectMeta.tosr       := stack.meta.tosr
   redirectMeta.tosw       := stack.meta.tosw
   redirectMeta.nos        := stack.meta.nos
@@ -122,14 +121,13 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val specFire  = io.specIn.valid
   XSDebug(specFire, "----------------RAS----------------\n")
   XSDebug(specFire, " TopRegister: 0x%x\n", stack.spec.popAddr.toUInt)
-  XSDebug(specFire, "  index       addr           ctr           nos (spec part)\n")
+  XSDebug(specFire, "  index       addr           nos (spec part)\n")
   for (i <- 0 until SpecQueueSize) {
     XSDebug(
       specFire,
-      "  (%d)   0x%x      %d       %d",
+      "  (%d)   0x%x      %d",
       i.U,
       specDebug.specQueue(i).retAddr.toUInt,
-      specDebug.specQueue(i).ctr,
       specDebug.specNos(i).value
     )
     XSDebug(specFire && i.U === stack.meta.tosw.value, "   <----TOSW")
@@ -137,14 +135,13 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     XSDebug(specFire && i.U === specDebug.bos.value, "   <----BOS")
     XSDebug(specFire, "\n")
   }
-  XSDebug(specFire, "  index       addr           ctr   (committed part)\n")
+  XSDebug(specFire, "  index       addr   (committed part)\n")
   for (i <- 0 until CommitStackSize) {
     XSDebug(
       specFire,
-      "  (%d)   0x%x      %d",
+      "  (%d)   0x%x",
       i.U,
-      specDebug.commitStack(i).retAddr.toUInt,
-      specDebug.commitStack(i).ctr
+      specDebug.commitStack(i).retAddr.toUInt
     )
   }
 }
