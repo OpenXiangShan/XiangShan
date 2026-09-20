@@ -101,6 +101,7 @@ RTL_INCLUDE ?=
 
 # External OpenIOMMU file list. Its paths are relative to the submodule root.
 IOMMU_FILELIST := $(abspath OpenIOMMU/iommu_wrap.f)
+IOMMU_CONFIG_FILELIST := $(abspath scripts/OpenIOMMUConfig.f)
 IOMMU_RTL_INCLUDE :=
 
 ifeq ($(CHISEL_TARGET),systemverilog)
@@ -192,9 +193,8 @@ endif
 # sync so other XiangShan configurations do not consume this external RTL.
 ifeq ($(WITH_IOMMU),1)
 ifeq ($(CONFIG),DefaultConfig)
-IOMMU_RTL_INCLUDE := $(IOMMU_FILELIST)
+IOMMU_RTL_INCLUDE := $(IOMMU_CONFIG_FILELIST) $(IOMMU_FILELIST)
 override SIM_ARGS += --with-iommu
-override SIM_VFLAGS += +define+CONFIG_RISCV_IOMMU_BOSC_V2_LITE
 else
 $(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
 endif
@@ -385,7 +385,7 @@ reformat:
 # verilator simulation
 emu-mk: sim-verilog
 	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)" SIM_VFLAGS="$(SIM_VFLAGS)"
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
@@ -396,7 +396,7 @@ gsim: sim-chirrtl
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)" SIM_VFLAGS="$(SIM_VFLAGS)"
+		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
