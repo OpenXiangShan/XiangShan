@@ -52,7 +52,7 @@ object RasPtr {
 }
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:       UInt   = UInt(log2Up(CommitStackSize).W)
+  val ssp:       UInt   = UInt(StackPtrWidth.W)
   val tosw:      RasPtr = new RasPtr
   val tosr:      RasPtr = new RasPtr
   val nos:       RasPtr = new RasPtr
@@ -85,13 +85,13 @@ class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
 }
 
 class RasCommitMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
+  val ssp:  UInt   = UInt(StackPtrWidth.W)
   val tosw: RasPtr = new RasPtr
 }
 
 class RasSpecReadReq(implicit p: Parameters) extends RasBundle {
   val tosr:       RasPtr = new RasPtr
-  val ssp:        UInt   = UInt(log2Up(CommitStackSize).W)
+  val ssp:        UInt   = UInt(StackPtrWidth.W)
   val tosrInSpec: Bool   = Bool()
 }
 

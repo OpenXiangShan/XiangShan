@@ -29,4 +29,15 @@ trait HasRasParameters extends HasBpuParameters {
   def CommitStackSize: Int = rasParameters.CommitStackSize
   def SpecQueueSize:   Int = rasParameters.SpecQueueSize
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
+  require(isPow2(CommitStackSize), "CommitStackSize must be a power of 2")
+
+  // Address width used to index the committed stack.
+  def CommitStackAddrWidth: Int = log2Up(CommitStackSize)
+
+  // Width of the committed-stack occupancy counter (0..CommitStackSize).
+  def CommitDepthWidth: Int = log2Up(CommitStackSize + 1)
+
+  // Width of the stack pointers. One bit wider than the maximum logical stack depth so
+  // that `ssp - nsp` (net in-flight) can be sign-interpreted without wrapping.
+  def StackPtrWidth: Int = log2Up(CommitStackSize + SpecQueueSize) + 1
 }
