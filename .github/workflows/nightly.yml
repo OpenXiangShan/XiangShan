@@ -84,6 +84,9 @@ jobs:
         run: |
           echo "### :bar_chart: Diff with previous run" >> $GITHUB_STEP_SUMMARY
 
+          echo "NOTE: This report is not maintained."
+          echo "NOTE: Consider using https://dashboard.xiangshan.cc to view nightly diff results." >> $GITHUB_STEP_SUMMARY
+
           CURR_SCORE_FILE="${{ needs.run.outputs.SCORE_FILE }}"
           PREV_SCORE_FILE="$PREV_DIR/$(basename ${{ needs.run.outputs.SCORE_FILE }})"
 
