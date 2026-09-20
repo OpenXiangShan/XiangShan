@@ -29,6 +29,28 @@ import xiangshan.mem.prefetch._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 import xiangshan.mem.L1PrefetchReq
 
+class MainPipePrefetchRefillDB(implicit p: Parameters) extends DCacheBundle {
+  val paddr = UInt(PAddrBits.W)
+  val idx = UInt(idxBits.W)
+  val way_en = UInt(nWays.W)
+  val pf_source = UInt(L1PfSourceBits.W)
+  val refill_latency = UInt(LATENCY_WIDTH.W)
+  val is_new_block = Bool()
+}
+
+class MainPipeReplacementDB(implicit p: Parameters) extends DCacheBundle {
+  val old_paddr = UInt(PAddrBits.W)
+  val new_paddr = UInt(PAddrBits.W)
+  val idx = UInt(idxBits.W)
+  val way_en = UInt(nWays.W)
+}
+
+class MainPipeInvalidationDB(implicit p: Parameters) extends DCacheBundle {
+  val paddr = UInt(PAddrBits.W)
+  val idx = UInt(idxBits.W)
+  val way_en = UInt(nWays.W)
+}
+
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
@@ -1018,6 +1040,64 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_flag_write.bits.idx := s3_idx
   io.prefetch_flag_write.bits.way_en := s3_way_en
   io.prefetch_flag_write.bits.source := s3_req.pf_source
+
+  val refillTrace = Wire(new MainPipePrefetchRefillDB)
+  refillTrace.paddr := get_block_addr(s3_req.addr)
+  refillTrace.idx := s3_idx
+  refillTrace.way_en := s3_way_en
+  refillTrace.pf_source := s3_req.pf_source
+  refillTrace.refill_latency := s3_refill_latency
+  refillTrace.is_new_block := s3_need_replacement
+  val refillTraceTable = ChiselDB.createTable(
+    s"MainPipePrefetchRefillTrace_hart${p(XSCoreParamsKey).HartId}",
+    new MainPipePrefetchRefillDB,
+    basicDB = true
+  )
+  refillTraceTable.log(
+    data = refillTrace,
+    en = io.prefetch_flag_write.valid && isFromL1Prefetch(s3_req.pf_source),
+    site = "MainPipe",
+    clock = clock,
+    reset = reset
+  )
+
+  val oldBlockPaddr = get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr)))
+  val realReplacement = io.prefetch_flag_write.valid && s3_need_replacement && s3_coh.isValid()
+  val replacementTrace = Wire(new MainPipeReplacementDB)
+  replacementTrace.old_paddr := oldBlockPaddr
+  replacementTrace.new_paddr := get_block_addr(s3_req.addr)
+  replacementTrace.idx := s3_idx
+  replacementTrace.way_en := s3_way_en
+  val replacementTraceTable = ChiselDB.createTable(
+    s"MainPipeReplacementTrace_hart${p(XSCoreParamsKey).HartId}",
+    new MainPipeReplacementDB,
+    basicDB = true
+  )
+  replacementTraceTable.log(
+    data = replacementTrace,
+    en = realReplacement,
+    site = "MainPipe",
+    clock = clock,
+    reset = reset
+  )
+
+  val probeInvalidate = s3_fire && probe_update_meta && !s3_probe_new_coh.isValid()
+  val invalidationTrace = Wire(new MainPipeInvalidationDB)
+  invalidationTrace.paddr := oldBlockPaddr
+  invalidationTrace.idx := s3_idx
+  invalidationTrace.way_en := s3_way_en
+  val invalidationTraceTable = ChiselDB.createTable(
+    s"MainPipeInvalidationTrace_hart${p(XSCoreParamsKey).HartId}",
+    new MainPipeInvalidationDB,
+    basicDB = true
+  )
+  invalidationTraceTable.log(
+    data = invalidationTrace,
+    en = probeInvalidate,
+    site = "MainPipe",
+    clock = clock,
+    reset = reset
+  )
 
   io.latency_flag_write.valid := s3_fire && s3_req.miss
   io.latency_flag_write.bits.idx := s3_idx

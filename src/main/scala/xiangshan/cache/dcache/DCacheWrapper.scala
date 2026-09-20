@@ -1451,6 +1451,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   clear_flag(0) := false.B
   for (i <- 1 until LoadPipelineWidth) {
     val conflictWithEarlier = (0 until i).map { j =>
+      ldu(i).io.prefetch_flag_write.valid &&
+      ldu(j).io.prefetch_flag_write.valid &&
       (ldu(i).io.prefetch_flag_write.bits.idx === ldu(j).io.prefetch_flag_write.bits.idx) &&
       (ldu(i).io.prefetch_flag_write.bits.way_en === ldu(j).io.prefetch_flag_write.bits.way_en)
     }.reduce(_ || _)
@@ -1458,6 +1460,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   for (w <- 0 until LoadPipelineWidth) {
+    ldu(w).io.prefetch_hit_conflict := clear_flag(w)
     prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_stat
   }
   prefetcherMonitor.io.maininfo := mainPipe.io.prefetch_stat

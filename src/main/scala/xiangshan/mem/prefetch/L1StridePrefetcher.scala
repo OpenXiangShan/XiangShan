@@ -314,6 +314,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val strideLearn = Wire(new StrideLearn())
   strideLearn.stat := s1_stat
   strideLearn.pc := RegEnable(s0_pc, s0_valid)
-  val strideLearnDb = ChiselDB.createTable(s"StrideLearnTable${p(XSCoreParamsKey).HartId}", new StrideLearn, basicDB = true)
+  val strideLearnDb = ChiselDB.createTable(s"StrideLearnTable${p(XSCoreParamsKey).HartId}", new StrideLearn, basicDB = false)
   strideLearnDb.log(data = strideLearn, en = s1_update, clock = clock, reset = reset)
 }

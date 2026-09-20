@@ -425,7 +425,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   accessLog.currVA := a1_stat_access_currVA
   accessLog.lastVA := a1_stat_access_lastVA
   accessLog.pc := a1_pc
-  val accessLogDb = ChiselDB.createTable(s"${_name}_accessLog${p(XSCoreParamsKey).HartId}", new AccessLogDb, basicDB = true)
+  val accessLogDb = ChiselDB.createTable(s"${_name}_accessLog${p(XSCoreParamsKey).HartId}", new AccessLogDb, basicDB = false)
   accessLogDb.log(data = accessLog, en = a1_valid, clock = clock, reset = reset)
 
   class SearchLogDb extends Bundle {
@@ -882,7 +882,7 @@ extends DCacheModule {
     XSPerfAccumulate(s"src_req_fire_${partName}_alloc", e0_fire && !e0_update)
 
     // Debug DB logging per part
-    val srcTable = ChiselDB.createTable(s"${name}_${partName}SourcePrefetch${p(XSCoreParamsKey).HartId}", new SourcePrefetchReq, basicDB = true)
+    val srcTable = ChiselDB.createTable(s"${name}_${partName}SourcePrefetch${p(XSCoreParamsKey).HartId}", new SourcePrefetchReq, basicDB = false)
     srcTable.log(data = e0_src, en = e0_fire, clock = clock, reset = reset)
   }
   
