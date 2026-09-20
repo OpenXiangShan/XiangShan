@@ -283,7 +283,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
       0.U
     )
     imli    := r0_newImli
-    s0_imli := r0_newImli
+    s0_imli := Mux(s0_fire, r0_newImli, imli)
   }.elsewhen(s3_override) {
     val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, Mux(s3_imli.andR, s3_imli, s3_imli + 1.U), 0.U)
     imli    := s3_newImli
@@ -322,7 +322,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   initCommonHR.predStartPc.get := io.s0_startPc.get
 
   when(r0_valid) {
-    enqPtr                            := writePtr + 1.U
+    when(enqEnable) {
+      enqPtr := writePtr + 1.U
+    }.otherwise {
+      enqPtr := writePtr
+    }
     recoverPtr                        := writePtr - 1.U
     predPtr                           := writePtr - 1.U
     histQueue(writePtr.value)         := initCommonHR // The queue value during redirect is used for diff
@@ -380,7 +384,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val writeToPredDist   = distanceBetween(writePtr, predPtr)
   private val predToRecoverDist = distanceBetween(predPtr, recoverPtr)
   XSError(
-    enqEnable && (writeToPredDist > 3.U || predToRecoverDist > 2.U),
+    enqEnable && (writeToPredDist > 3.U),
     "The predPtr exceeds the correct range"
   )
   XSError(
