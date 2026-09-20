@@ -677,6 +677,7 @@ object FuConfig {
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
