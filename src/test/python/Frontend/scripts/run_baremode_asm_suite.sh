@@ -168,10 +168,15 @@ echo
 if [[ "${TB_RUN_DUT}" != "0" ]]; then
   suite_report_dir="${SUITE_ARTIFACT_DIR}/report"
   funcov_artifacts=()
+  toffee_funcov_enabled="${TB_ENABLE_TOFFEE_FUNCOV:-1}"
   for case_path in "${CASES[@]}"; do
     stem="$(basename "${case_path}")"
     stem="${stem%.*}"
-    funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.funcov.json"
+    if [[ "${toffee_funcov_enabled}" == "0" ]]; then
+      funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.funcov.json"
+    else
+      funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.toffee.funcov.json"
+    fi
     if [[ ! -f "${funcov_path}" ]]; then
       echo "[frontend-suite][error] missing functional coverage artifact: ${funcov_path}" >&2
       exit 2
@@ -179,34 +184,32 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
     funcov_artifacts+=("${funcov_path}")
   done
   mkdir -p "${suite_report_dir}/funcov"
-  backannotate_args=()
+  gate_args=()
   merge_args=()
   for funcov_path in "${funcov_artifacts[@]}"; do
-    backannotate_args+=(--artifact "${funcov_path}")
+    gate_args+=(--artifact "${funcov_path}")
     merge_args+=(--artifact "${funcov_path}")
   done
 
-  # The canonical testpoint sheet currently has complete one-to-one mappings
-  # only for BIN-4 (IFU) and BIN-5 (2-fetch).  Earlier BIN ranges remain
-  # historical/incomplete model rows, so auditing all prefixes would reject a
-  # valid assembly regression before it reaches the observed-coverage report.
-  for funcov_bin_prefix in BIN-4 BIN-5; do
-    echo "[frontend-suite] functional coverage gate audit (${funcov_bin_prefix}):"
+  if [[ "${toffee_funcov_enabled}" == "0" ]]; then
+    echo "[frontend-suite] legacy observed functional coverage aggregate (diagnostic only):"
+    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_funcov.py" \
+      --output-dir "${suite_report_dir}/funcov" \
+      --artifact-tag "${SUITE_ID}_observed" \
+      --run-id "${SUITE_ID}" \
+      "${merge_args[@]}"
+  else
+    echo "[frontend-suite] Toffee functional coverage per-case gate audit:"
     "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
       --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
-      --testpoints "${FRONTEND_DIR}/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv" \
-      --bin-prefix "${funcov_bin_prefix}" \
-      --check \
-      --audit-json "${suite_report_dir}/funcov/backannotation_audit_${funcov_bin_prefix}.json" \
-      "${backannotate_args[@]}"
-  done
-
-  echo "[frontend-suite] observed functional coverage aggregate (diagnostic only):"
-  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_funcov.py" \
-    --output-dir "${suite_report_dir}/funcov" \
-    --artifact-tag "${SUITE_ID}_observed" \
-    --run-id "${SUITE_ID}" \
-    "${merge_args[@]}"
+      --artifact-gate-only \
+      --audit-json "${suite_report_dir}/funcov/artifact_gate_audit.json" \
+      "${gate_args[@]}"
+    echo "[frontend-suite] Toffee functional coverage aggregate:"
+    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
+      --output "${suite_report_dir}/funcov/${SUITE_ID}.toffee.funcov.json" \
+      "${merge_args[@]}"
+  fi
 
   echo "[frontend-suite] raw coverage summary:"
   "${PYTHON:-python3}" "${FRONTEND_DIR}/scripts/report_raw_code_coverage.py" \

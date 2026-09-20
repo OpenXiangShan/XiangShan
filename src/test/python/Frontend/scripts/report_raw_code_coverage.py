@@ -236,6 +236,89 @@ def _funcov_candidates(dat_files: list[Path], data_dir: Path) -> list[Path]:
     return sorted(candidates)
 
 
+def _is_audit_legacy_sidecar(path: Path) -> bool:
+    return "audit/legacy-funcov" in path.as_posix()
+
+
+def _is_toffee_sidecar_name(path: Path) -> bool:
+    return path.name.endswith(".toffee.funcov.json")
+
+
+def _normalize_funcov_sidecar(raw: dict, *, sidecar_path: Path) -> dict:
+    """Project Toffee schema v1 into the legacy validation view when needed."""
+    if not isinstance(raw, dict):
+        raise CoverageProvenanceError(f"sidecar root is not an object: {sidecar_path}")
+    if raw.get("artifact_schema_version") == 2:
+        return raw
+    if int(raw.get("schema_version") or 0) != 1:
+        raise CoverageProvenanceError(f"unsupported funcov sidecar schema: {sidecar_path}")
+    metadata = raw.get("metadata")
+    if not isinstance(metadata, dict):
+        raise CoverageProvenanceError(f"toffee sidecar lacks metadata: {sidecar_path}")
+    mode = str(metadata.get("mode") or "").strip().lower()
+    if mode not in {"formal", "diagnostic"}:
+        raise CoverageProvenanceError(f"toffee sidecar has unsupported mode: {sidecar_path}")
+    execution = metadata.get("execution")
+    if not isinstance(execution, dict):
+        raise CoverageProvenanceError(f"toffee sidecar lacks execution metadata: {sidecar_path}")
+    run = metadata.get("run")
+    if not isinstance(run, dict):
+        raise CoverageProvenanceError(f"toffee sidecar lacks run metadata: {sidecar_path}")
+    provenance = metadata.get("provenance")
+    if not isinstance(provenance, dict):
+        raise CoverageProvenanceError(f"toffee sidecar lacks provenance: {sidecar_path}")
+    stats = metadata.get("stats")
+    if not isinstance(stats, dict):
+        raise CoverageProvenanceError(f"toffee sidecar lacks stats: {sidecar_path}")
+    testcase_nodeid = str(
+        run.get("testcase_nodeid") or execution.get("testcase_nodeid") or ""
+    ).strip()
+    projected_run = {
+        "run_id": run.get("run_id"),
+        "testcase_nodeid": testcase_nodeid,
+        "pytest_outcome": run.get("outcome"),
+        "exit_code": run.get("exit_code"),
+        "checker": run.get("checker"),
+    }
+    return {
+        "artifact_schema_version": 2,
+        "schema_source": "toffee",
+        "line_coverage_path": execution.get("line_coverage_path"),
+        "waveform_path": execution.get("waveform_path"),
+        "provenance": provenance,
+        "run": projected_run,
+        "stats": stats,
+        "errors": metadata.get("errors", []),
+        "metadata": metadata,
+    }
+
+
+def _select_sidecar_matches(
+    matches: list[tuple[Path, dict]],
+) -> list[tuple[Path, dict]]:
+    if len(matches) <= 1:
+        return matches
+    toffee_matches = [
+        item
+        for item in matches
+        if item[1].get("schema_source") == "toffee" or _is_toffee_sidecar_name(item[0])
+    ]
+    if toffee_matches:
+        non_audit = [
+            item for item in toffee_matches if not _is_audit_legacy_sidecar(item[0])
+        ]
+        selected = non_audit or toffee_matches
+        if len(selected) == 1:
+            return selected
+        return selected
+    non_audit_legacy = [
+        item for item in matches if not _is_audit_legacy_sidecar(item[0])
+    ]
+    if len(non_audit_legacy) == 1:
+        return non_audit_legacy
+    return matches
+
+
 def _compatibility_signature(provenance: dict) -> str:
     payload = {field: provenance.get(field) for field in COMPATIBILITY_FIELDS}
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -293,7 +376,12 @@ def _index_funcov_sidecars(
         if not isinstance(raw, dict):
             malformed[str(sidecar)] = "sidecar root is not an object"
             continue
-        coverage_raw = str(raw.get("line_coverage_path") or "").strip()
+        try:
+            normalized = _normalize_funcov_sidecar(raw, sidecar_path=sidecar)
+        except CoverageProvenanceError as exc:
+            malformed[str(sidecar)] = str(exc)
+            continue
+        coverage_raw = str(normalized.get("line_coverage_path") or "").strip()
         if not coverage_raw:
             malformed[str(sidecar)] = "sidecar lacks line_coverage_path"
             continue
@@ -302,7 +390,7 @@ def _index_funcov_sidecars(
         except (OSError, RuntimeError) as exc:
             malformed[str(sidecar)] = f"invalid line_coverage_path ({type(exc).__name__})"
             continue
-        by_coverage[coverage_path].append((sidecar, raw))
+        by_coverage[coverage_path].append((sidecar, normalized))
     return by_coverage, malformed
 
 
@@ -346,13 +434,13 @@ def validate_dat_provenance(
         except OSError as exc:
             raise CoverageProvenanceError(f"cannot stat .dat: {dat_path}") from exc
 
-        matches = by_coverage.get(str(dat_path), [])
+        matches = _select_sidecar_matches(by_coverage.get(str(dat_path), []))
         if len(matches) != 1:
             detail = "missing" if not matches else f"ambiguous ({len(matches)} sidecars)"
             raise CoverageProvenanceError(f"{detail} funcov sidecar for .dat: {dat_path}")
         sidecar_path, raw = matches[0]
         if raw.get("artifact_schema_version") != 2:
-            raise CoverageProvenanceError(f"legacy funcov sidecar: {sidecar_path}")
+            raise CoverageProvenanceError(f"unsupported funcov sidecar schema: {sidecar_path}")
         provenance = raw.get("provenance")
         if not isinstance(provenance, dict):
             raise CoverageProvenanceError(f"sidecar lacks provenance: {sidecar_path}")

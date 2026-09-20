@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Back-annotate functional-coverage evidence into the testpoint CSV.
+"""Audit functional-coverage evidence against the canonical testpoint mapping.
 
 The tool deliberately treats model/FakeDut artifacts as modeling evidence only.
-Only an artifact with real DUT runtime statistics can move a leaf to HIT;
-CLOSED remains an explicit human-acceptance state.
+The public CLI is read-only: dynamic HIT/status/evidence belongs to canonical
+Toffee run artifacts and is never written back to the testpoint CSV.
 """
 
 from __future__ import annotations
@@ -540,6 +540,98 @@ def artifact_kind(raw: Any) -> str:
         return "model"
 
 
+def normalize_artifact(raw: Any, *, artifact_path: Path | None = None) -> Any:
+    """Project canonical Toffee schema v1 into the existing gate view."""
+    if not isinstance(raw, dict) or raw.get("artifact_schema_version") == 2:
+        return raw
+    if raw.get("schema_version") != 1:
+        return raw
+
+    metadata = raw.get("metadata")
+    coverage = raw.get("coverage")
+    if not isinstance(metadata, dict) or not isinstance(coverage, dict):
+        return raw
+    execution = metadata.get("execution")
+    run = metadata.get("run")
+    stats = metadata.get("stats")
+    provenance = metadata.get("provenance")
+    definitions = metadata.get("definitions")
+    coverage_targets = metadata.get("coverage_targets")
+    if not all(
+        isinstance(item, dict)
+        for item in (execution, run, stats, provenance, coverage_targets)
+    ) or not isinstance(definitions, list):
+        return raw
+
+    bin_ids = raw.get("bin_ids")
+    hit_details = raw.get("hit_details") or {}
+    groups = coverage.get("groups")
+    if (
+        not isinstance(bin_ids, dict)
+        or not isinstance(hit_details, dict)
+        or not isinstance(groups, list)
+    ):
+        return raw
+
+    hits: dict[str, dict[str, Any]] = {}
+    try:
+        for group in groups:
+            group_name = str(group["name"])
+            for point in group["points"]:
+                point_name = str(point["name"])
+                for item in point["bins"]:
+                    bin_name = str(item["name"])
+                    key = f"{group_name}::{point_name}::{bin_name}"
+                    detail = hit_details.get(key) or {}
+                    hits[key] = {
+                        "bin_id": str(bin_ids[key]),
+                        "coverpoint": point_name,
+                        "hits": int(item["hints"]),
+                        "first_cycle": detail.get("first_cycle"),
+                        "last_cycle": detail.get("last_cycle"),
+                        "evidence": list(detail.get("evidence") or []),
+                    }
+    except (KeyError, TypeError, ValueError):
+        return raw
+
+    normalized_run = dict(execution)
+    normalized_run.update(
+        {
+            "run_id": run.get("run_id"),
+            "pytest_outcome": run.get("outcome"),
+            "exit_code": run.get("exit_code"),
+            "checker": run.get("checker"),
+        }
+    )
+    if not str(normalized_run.get("funcov_path") or "").strip() and artifact_path:
+        normalized_run["funcov_path"] = str(Path(artifact_path).resolve())
+
+    checker = run.get("checker") if isinstance(run.get("checker"), dict) else {}
+    return {
+        "artifact_schema_version": 2,
+        "schema_source": "toffee",
+        "toffee_mode": str(metadata.get("mode") or ""),
+        "testcase_name": str(metadata.get("testcase_name") or ""),
+        "artifact_tag": str(metadata.get("artifact_tag") or ""),
+        "source_csv": metadata.get("source_csv"),
+        "waveform_path": execution.get("waveform_path"),
+        "line_coverage_path": execution.get("line_coverage_path"),
+        "coverage_targets": coverage_targets,
+        "provenance": provenance,
+        "definitions": definitions,
+        "hits": hits,
+        "summary": raw.get("summary"),
+        "stats": stats,
+        "errors": metadata.get("errors", []),
+        "run": normalized_run,
+        "outcome": {
+            "status": run.get("outcome"),
+            "exit_code": run.get("exit_code"),
+        },
+        "checker": checker,
+    }
+
+
 def _as_int(value):
     try:
         return int(value)
@@ -591,7 +683,7 @@ def _normalized_outcome(raw: dict) -> tuple[str | None, int | None]:
     return status, exit_code
 
 
-def evaluate_artifact(raw: Any) -> dict:
+def evaluate_artifact(raw: Any, *, require_targets: bool = True) -> dict:
     """Return the evidence gate decision for one funcov JSON artifact.
 
     A positive functional bin is not enough to establish a DUT hit.  The run
@@ -621,13 +713,18 @@ def evaluate_artifact(raw: Any) -> dict:
         return {"kind": "model", "eligible": False, "reasons": ["no_dut_cycles"]}
 
     reasons: list[str] = []
+    if raw.get("schema_source") == "toffee" and str(
+        raw.get("toffee_mode") or ""
+    ).strip().lower() != "formal":
+        reasons.append("toffee_mode_not_formal")
     if _as_int(raw.get("artifact_schema_version")) != 2:
         reasons.append("legacy_or_missing_schema")
 
     coverage_targets = raw.get("coverage_targets")
     if not isinstance(coverage_targets, dict):
-        reasons.append("missing_coverage_targets")
-    else:
+        if require_targets:
+            reasons.append("missing_coverage_targets")
+    elif require_targets:
         target_bin_ids = coverage_targets.get("bin_ids")
         if not isinstance(target_bin_ids, list) or not target_bin_ids:
             reasons.append("missing_coverage_targets:bin_ids")
@@ -941,6 +1038,7 @@ def load_artifacts(paths: Iterable[Path]) -> list[tuple[Path, dict, str]]:
                 "_artifact_errors": ["artifact_root_not_object"],
                 "_artifact_root_type": type(raw).__name__,
             }
+        raw = normalize_artifact(raw, artifact_path=path)
         artifacts.append((path, raw, artifact_kind(raw)))
     return artifacts
 
@@ -1053,14 +1151,18 @@ def _dut_evidence_entry(raw: dict, tag: str, hit_count: int) -> str:
     return ",".join(fields)
 
 
-def build_artifact_audit(artifacts: Iterable[tuple[Path, dict, str]]) -> list[dict]:
+def build_artifact_audit(
+    artifacts: Iterable[tuple[Path, dict, str]],
+    *,
+    require_targets: bool = True,
+) -> list[dict]:
     """Create a diagnostic summary for funcov artifacts without changing CSVs."""
     rows: list[dict] = []
     for path, raw, kind in artifacts:
         hits = _as_mapping(raw.get("hits"))
         targets = _artifact_targets(raw)
         gate = (
-            evaluate_artifact(raw)
+            evaluate_artifact(raw, require_targets=require_targets)
             if kind in {"dut", "invalid"}
             else {"eligible": False, "reasons": ["model_artifact"]}
         )
@@ -1327,7 +1429,9 @@ def main() -> int:
     parser.add_argument("--level1", help="only update this inherited first-level testpoint")
     parser.add_argument("--level2", help="only update this inherited second-level testpoint")
     parser.add_argument(
-        "--check", action="store_true", help="validate only; do not write"
+        "--check",
+        action="store_true",
+        help="deprecated compatibility option; the CLI is always read-only",
     )
     parser.add_argument(
         "--allow-testpoint-structure-errors",
@@ -1340,6 +1444,11 @@ def main() -> int:
         help="validate global pilot identifiers only",
     )
     parser.add_argument(
+        "--artifact-gate-only",
+        action="store_true",
+        help="validate artifact signoff gates without reading or updating testpoint CSV",
+    )
+    parser.add_argument(
         "--audit-json",
         type=Path,
         help="write per-artifact DUT gate/target diagnostics to this JSON file",
@@ -1350,22 +1459,41 @@ def main() -> int:
     if args.schema_check:
         print(" ".join(f"{key}={value}" for key, value in sorted(schema.items())))
         return 0
-    if args.testpoints is None:
-        parser.error("--testpoints is required unless --schema-check is used")
-
-    pilot = load_pilot(args.pilot, bin_prefix=args.bin_prefix)
     artifacts = load_artifacts(args.artifact)
+    audit = build_artifact_audit(
+        artifacts, require_targets=not args.artifact_gate_only
+    )
     if args.audit_json is not None:
         args.audit_json.parent.mkdir(parents=True, exist_ok=True)
         args.audit_json.write_text(
-            json.dumps(build_artifact_audit(artifacts), ensure_ascii=False, indent=2),
+            json.dumps(audit, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+    if args.artifact_gate_only:
+        rejected = [item for item in audit if not item["eligible"]]
+        print(
+            f"artifacts={len(audit)} "
+            f"eligible={len(audit) - len(rejected)} rejected={len(rejected)}"
+        )
+        if rejected:
+            for item in rejected:
+                print(
+                    f"artifact rejected: {item['path']}: {','.join(item['reasons'])}",
+                    file=sys.stderr,
+                )
+            return 2
+        return 0
+    if args.testpoints is None:
+        parser.error(
+            "--testpoints is required unless --schema-check or --artifact-gate-only is used"
+        )
+
+    pilot = load_pilot(args.pilot, bin_prefix=args.bin_prefix)
     counts = backannotate(
         args.testpoints,
         pilot,
         artifacts,
-        apply=not args.check,
+        apply=False,
         bin_prefix=args.bin_prefix,
         allow_testpoint_structure_errors=args.allow_testpoint_structure_errors,
         hierarchy_filters={
