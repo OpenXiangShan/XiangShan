@@ -952,6 +952,10 @@ def test_cacheable_flush_causes_block_old_s0_return(tmp_path, cause, bin_name):
     assert recorder.key_hit("ifu_cacheable_flush", bin_name)
     assert recorder.key_hit("ifu_cacheable_flush", "flush_wins_fire")
     assert not recorder.key_hit("ifu_cacheable_ingress", "accepted")
+    if cause == "bpu_match":
+        assert not recorder.key_hit(
+            "ifu_v3_pipeline_owner_model", "owner_leaf_003"
+        )
 
 
 def test_backend_redirect_closes_held_response_on_ifu_routed_cycle(tmp_path):

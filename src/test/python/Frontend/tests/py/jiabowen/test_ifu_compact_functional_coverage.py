@@ -202,7 +202,7 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
 
     for cycle, bin_id in enumerate(("BIN-814", "BIN-815"), start=6):
         _mark_source_bin(recorder, bin_id, cycle)
-    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_054")
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_054")
 
     for cycle, bin_id in enumerate(
         ("BIN-807", "BIN-808", "BIN-828", "BIN-866", "BIN-812", "BIN-814", "BIN-883", "BIN-884", "BIN-432", "BIN-886", "BIN-897"),
@@ -381,7 +381,7 @@ def _set_ifu_output(
     dut.set(_PREFIX + "s2_alignShiftNum", int(prev_ibuf_enq_ptr) & 0x3)
     dut.set(_PREFIX + "s2_instrCount", len(entries) if instr_count is None else instr_count)
     dut.set(_PREFIX + "s2_fire", 1)
-    dut.set(_PREFIX + "s2_reqIsUncache", s2_req_is_uncache)
+    dut.set(_PREFIX + "s2_useUncacheFetch", s2_req_is_uncache)
     dut.set(
         _PREFIX + "s2_prevEndIsHalfRviInfo_valid", s2_prev_end_is_half_rvi
     )
@@ -894,7 +894,14 @@ def test_ifu_predchecker_v3_younger_cross_bin_requires_explicit_effective_owner(
 ):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
 
-    def sample_younger(cycle, *, block_sel, is_cross_block_instr, end_offset):
+    def sample_younger(
+        cycle,
+        *,
+        block_sel,
+        is_cross_block_instr,
+        end_offset,
+        pc_addr=0x4000000F,
+    ):
         _set_predchecker_request(
             dut,
             [
@@ -907,6 +914,7 @@ def test_ifu_predchecker_v3_younger_cross_bin_requires_explicit_effective_owner(
                     "block_sel": block_sel,
                     "is_cross_block_instr": is_cross_block_instr,
                     "end_offset": end_offset,
+                    "pc_addr": pc_addr,
                 },
             ],
         )
@@ -919,7 +927,16 @@ def test_ifu_predchecker_v3_younger_cross_bin_requires_explicit_effective_owner(
     sample_younger(2, block_sel=1, is_cross_block_instr=1, end_offset=0)
     assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
 
-    sample_younger(3, block_sel=0, is_cross_block_instr=1, end_offset=0)
+    sample_younger(
+        3,
+        block_sel=0,
+        is_cross_block_instr=1,
+        end_offset=0,
+        pc_addr=0x4000000E,
+    )
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
+
+    sample_younger(4, block_sel=0, is_cross_block_instr=1, end_offset=0)
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
 
 
@@ -936,13 +953,10 @@ def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_p
                         "is_rvc": 0,
                         "is_cross_block_instr": 1,
                         "end_offset": 0,
+                        "pc_addr": 0x4000000F,
                     },
             ],
             ("owner_leaf_079", "owner_leaf_080"),
-        ),
-        (
-            [{"slot": 0, "branch_type": 2, "invalid_taken": 1}],
-            ("owner_leaf_081",),
         ),
         (
             [
@@ -958,16 +972,60 @@ def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_p
             ],
             ("owner_leaf_085",),
         ),
-        (
-            [{"slot": 0, "branch_type": 3, "invalid_taken": 1}],
-            ("owner_leaf_086",),
-        ),
     )
     for cycle, (entries, expected_bins) in enumerate(scenarios, start=1):
         _set_predchecker_request(dut, entries)
         sample_cfvec_coverage(recorder, env, cycle)
         for bin_name in expected_bins:
             assert recorder.key_hit("ifu_v3_boundary_owner_model", bin_name)
+
+
+@pytest.mark.parametrize(("branch_type", "owner_leaf"), ((2, "owner_leaf_081"), (3, "owner_leaf_086")))
+def test_jal_or_jalr_not_taken_cannot_share_a_slot_with_invalid_taken(
+    tmp_path, branch_type, owner_leaf
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+
+    # IFU creates invalidTaken only for a predicted-taken tail.  JAL/JALR
+    # not-taken faults require the same slot's isPredTaken to be false, so the
+    # two raw conditions cannot coexist in a real PredChecker request.
+    _set_predchecker_request(dut, [
+        {
+            "slot": 0,
+            "branch_type": branch_type,
+            "pred_taken": 0,
+            "invalid_taken": 1,
+        }
+    ])
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
+
+
+@pytest.mark.parametrize(
+    ("valid", "pred_taken", "invalid_taken"),
+    (
+        (1, 1, 0),
+        (0, 1, 1),
+        (1, 0, 0),
+    ),
+)
+def test_bin987_realizable_inputs_cannot_combine_not_cfi_and_invalid_taken(
+    tmp_path, valid, pred_taken, invalid_taken
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(dut, [
+        {
+            "slot": 0,
+            "valid": valid,
+            "branch_type": 0,
+            "pred_taken": pred_taken,
+            "invalid_taken": invalid_taken,
+            "is_rvc": 0,
+            "end_offset": 15,
+        }
+    ])
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_089")
 
 
 @pytest.mark.parametrize(
@@ -1546,7 +1604,7 @@ def test_ifu_instr_boundary_tail_half_is_sampled_on_cacheable_s1_fire(tmp_path):
     dut.set(_PREFIX + "s1_valid", 1)
     dut.set(_PREFIX + "s1_fire", 1)
     dut.set(_PREFIX + "s1_flush", 0)
-    dut.set(_PREFIX + "s1_reqIsUncache", 0)
+    dut.set(_PREFIX + "s1_useUncacheFetch", 0)
     dut.set(_PREFIX + "s1_totalEndIsHalfRvi", 1)
     dut.set(_PREFIX + "s1_totalEndHalfRvi_bits_pc_addr", 0x4000001F)
     dut.set(_PREFIX + "s1_totalEndHalfRvi_bits_data", 0xABCD)
@@ -2384,7 +2442,7 @@ def _set_invalid_taken_exception_s1(
     _set_ibuffer_state(dut)
     dut.set(_PREFIX + "s2_valid_valid", 0)
     dut.set(_PREFIX + "s2_flush", 0)
-    dut.set(_PREFIX + "s2_reqIsUncache", 0)
+    dut.set(_PREFIX + "s2_useUncacheFetch", 0)
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 0)
     dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", 0)
@@ -2459,7 +2517,7 @@ def _set_invalid_taken_exception_s2(
     dut.set(_PREFIX + "s1_valid", 0)
     dut.set(_PREFIX + "s2_valid_valid", 1)
     dut.set(_PREFIX + "s2_flush", 0)
-    dut.set(_PREFIX + "s2_reqIsUncache", 0)
+    dut.set(_PREFIX + "s2_useUncacheFetch", 0)
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", ftq_flag)
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", ftq_value)
     dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", exception_type)
@@ -3004,7 +3062,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_fetchBlock_0_startVAddr_addr",
         _PREFIX + "s1_fire",
         _PREFIX + "s1_flush",
-        _PREFIX + "s1_reqIsUncache",
+        _PREFIX + "s1_useUncacheFetch",
+        _PREFIX + "s1_icacheMetaIn_0_pmpMmio",
+        _PREFIX + "s1_icacheMetaIn_0_itlbPbmt",
         _PREFIX + "s1_totalEndIsHalfRvi",
         _PREFIX + "s1_totalEndHalfRvi_bits_pc_addr",
         _PREFIX + "s1_totalEndHalfRvi_bits_data",
@@ -3023,7 +3083,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_flag",
         "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_value",
         _PREFIX + "s2_fire",
-        _PREFIX + "s2_reqIsUncache",
+        _PREFIX + "s2_useUncacheFetch",
+        _PREFIX + "s2_icacheMeta_0_pmpMmio",
+        _PREFIX + "s2_icacheMeta_0_itlbPbmt",
         _PREFIX + "s2_flush",
         _PREFIX + "s2_alignShiftNum",
         _PREFIX + "s2_prevEndIsHalfRviInfo_valid",

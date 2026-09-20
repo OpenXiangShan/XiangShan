@@ -107,9 +107,14 @@ IFU_V3_FORBIDDEN_OWNER_TERMS = {
 }
 MODELED_RUNTIME_PRODUCER_GAP_BIN_IDS = frozenset(
     {
+        "BIN-901",
         "BIN-951",
+        "BIN-952",
         "BIN-955",
         "BIN-956",
+        "BIN-979",
+        "BIN-984",
+        "BIN-987",
     }
 )
 

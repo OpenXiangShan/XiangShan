@@ -211,7 +211,22 @@ def _redirect_to_target(env) -> None:
 @pytest.mark.parametrize("timing_mismatch", [
     pytest.param(False, id="current-pc-contract", marks=pytest.mark.funcov_bins(
         "BIN-927", "BIN-928", "BIN-996", "BIN-997", "BIN-998", "BIN-999", "BIN-1001", "BIN-1002")),
-    pytest.param(True, id="legacy-timing-contract", marks=pytest.mark.funcov_bins("BIN-1000")),
+    pytest.param(
+        True,
+        id="legacy-timing-contract",
+        marks=(
+            pytest.mark.funcov_bins("BIN-1000"),
+            pytest.mark.funcov_closure_pending,
+            pytest.mark.xfail(
+                strict=True,
+                raises=AssertionError,
+                reason=(
+                    "current Frontend DUT has no tUpdate.tdata.timing input; "
+                    "retain the exact timing-chain scenario for design review"
+                ),
+            ),
+        ),
+    ),
 ])
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_frontend_trigger_config_compare_chain_action_and_lane_alignment(env, timing_mismatch) -> None:

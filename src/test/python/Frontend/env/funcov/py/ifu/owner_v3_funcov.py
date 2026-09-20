@@ -75,7 +75,6 @@ OWNER_V3_SOURCE_RULES = (
     OwnerV3SourceRule("BIN-933", ("BIN-832", "BIN-842", "BIN-898")),
     OwnerV3SourceRule("BIN-942", ("BIN-432",)),
     OwnerV3SourceRule("BIN-944", ("BIN-836",)),
-    OwnerV3SourceRule("BIN-952", ("BIN-814", "BIN-815")),
     OwnerV3SourceRule("BIN-961", ("BIN-874",)),
     OwnerV3SourceRule("BIN-962", ("BIN-432",)),
     OwnerV3SourceRule("BIN-964", ("BIN-878",)),
