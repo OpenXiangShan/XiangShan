@@ -16,20 +16,17 @@
 package xiangshan.frontend.bpu.ras
 
 import chisel3.util._
-import xiangshan.frontend.HasFrontendParameters
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class RasParameters(
-    CommitStackSize:   Int = 16, // Size of the RAS stack
-    StackCounterWidth: Int = 3   // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+    CommitStackSize: Int = 16, // Size of the RAS stack
+    SpecQueueSize:   Int = 64  // Size of the RAS speculative queue
 ) {}
 
 trait HasRasParameters extends HasBpuParameters {
   def rasParameters: RasParameters = bpuParameters.rasParameters
 
-  def CommitStackSize:   Int = rasParameters.CommitStackSize
-  def SpecQueueSize:     Int = frontendParameters.ftqParameters.CommitQueueSize
-  def StackCounterWidth: Int = rasParameters.StackCounterWidth
-  def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
+  def CommitStackSize: Int = rasParameters.CommitStackSize
+  def SpecQueueSize:   Int = rasParameters.SpecQueueSize
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
 }
