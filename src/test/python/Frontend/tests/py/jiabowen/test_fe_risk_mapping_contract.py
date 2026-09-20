@@ -11,22 +11,14 @@ gap the contract is intended to expose.
 from __future__ import annotations
 
 import csv
-import json
 import re
 from pathlib import Path
 
 import pytest
 
-from tools.backannotate_funcov import evaluate_artifact
-
-
 _REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
-_DUT_ENTRY_RE = re.compile(r"(?:^|; )(DUT:[^;]+)")
-_DUT_TAG_RE = re.compile(r"^DUT:([^:;,]+)")
-_RUN_ID_TOKEN_RE = re.compile(r"(?:^|,)run_id=([^,;]+)")
-_WAVEFORM_TOKEN_RE = re.compile(r"(?:waveform|(?:^|[\s=/])[^;\s]+\.(?:fst|vcd|fsdb))", re.I)
 
 
 def _frontend_root() -> Path:
@@ -38,7 +30,7 @@ def _canonical_paths() -> tuple[Path, Path, Path]:
     return (
         root / "docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv",
         root / "docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv",
-        root / "data",
+        root.parents[3] / "build-frontend/artifacts",
     )
 
 
@@ -117,16 +109,29 @@ def _artifact_candidates(data_dir: Path, tag: str, run_id: str = "") -> list[Pat
     if not run_id:
         return []
     run_component = Path(run_id).name
-    exact = data_dir / "runs" / run_component / "funcov" / f"{tag}.funcov.json"
+    exact = (
+        data_dir
+        / run_component
+        / "funcov"
+        / f"{tag}.toffee.funcov.json"
+    )
     if exact.is_file():
         return [exact]
-    return sorted((data_dir / "runs" / run_component / "funcov").glob(f"{tag}*.funcov.json"))
+    return sorted(
+        (data_dir / run_component / "funcov").glob(
+            f"{tag}*.toffee.funcov.json"
+        )
+    )
 
 
 def test_artifact_candidates_use_the_evidence_run_id(tmp_path):
     tag = "case_a_test_bin_trace"
-    stale = tmp_path / "runs" / "stale-run" / "funcov" / f"{tag}.funcov.json"
-    current = tmp_path / "runs" / "current-run" / "funcov" / f"{tag}.funcov.json"
+    stale = (
+        tmp_path / "stale-run" / "funcov" / f"{tag}.toffee.funcov.json"
+    )
+    current = (
+        tmp_path / "current-run" / "funcov" / f"{tag}.toffee.funcov.json"
+    )
     stale.parent.mkdir(parents=True)
     current.parent.mkdir(parents=True)
     stale.write_text("{}", encoding="utf-8")
@@ -134,65 +139,6 @@ def test_artifact_candidates_use_the_evidence_run_id(tmp_path):
 
     assert _artifact_candidates(tmp_path, tag, "current-run") == [current]
     assert _artifact_candidates(tmp_path, tag) == []
-
-
-def _hit_evidence_gaps(
-    testpoint_rows: list[dict[str, str]], data_dir: Path, active: set[str]
-) -> list[str]:
-    gaps: list[str] = []
-    for line, row in enumerate(testpoint_rows, start=2):
-        if str(row.get("status") or "").strip() != "HIT":
-            continue
-        match = _REFERENCE_RE.fullmatch(str(row.get("coverage") or "").strip())
-        if match is None or match.group(4) not in active:
-            continue
-        bin_id = match.group(4)
-        evidence = str(row.get("evidence") or "").strip()
-        dut_entries = _DUT_ENTRY_RE.findall(evidence)
-        if not dut_entries:
-            gaps.append(f"{bin_id} line {line}: no DUT:<artifact> evidence")
-            continue
-        if "monitor_errors=0" not in evidence:
-            gaps.append(f"{bin_id} line {line}: evidence lacks monitor_errors=0")
-        if _WAVEFORM_TOKEN_RE.search(evidence) is None:
-            gaps.append(f"{bin_id} line {line}: evidence lacks waveform/path")
-
-        for entry in dut_entries:
-            tag_match = _DUT_TAG_RE.search(entry)
-            if tag_match is None:
-                gaps.append(f"{bin_id} line {line}: malformed DUT evidence {entry!r}")
-                continue
-            tag = tag_match.group(1)
-            run_match = _RUN_ID_TOKEN_RE.search(entry)
-            run_id = run_match.group(1).strip() if run_match is not None else ""
-            if not run_id:
-                gaps.append(f"{bin_id} line {line}: {tag} evidence lacks run_id")
-                continue
-            candidates = _artifact_candidates(data_dir, tag, run_id)
-            if not candidates:
-                gaps.append(f"{bin_id} line {line}: DUT artifact {tag!r} not found")
-                continue
-            # Any artifact named in the evidence must be a clean, cycle-bearing
-            # run.  A failed run with a positive bin hit is never DUT evidence.
-            for artifact_path in candidates[:1]:
-                try:
-                    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    gaps.append(f"{bin_id} line {line}: cannot read {artifact_path.name}: {exc}")
-                    continue
-                monitor = ((artifact.get("stats") or {}).get("monitor") or {})
-                errors = artifact.get("errors") or []
-                gate = evaluate_artifact(artifact)
-                if not gate["eligible"]:
-                    gaps.append(
-                        f"{bin_id} line {line}: {tag} rejected by DUT gate: "
-                        + ",".join(gate["reasons"])
-                    )
-                if int(monitor.get("cycles_total", 0) or 0) <= 0:
-                    gaps.append(f"{bin_id} line {line}: {tag} has no DUT cycles")
-                if errors or int(monitor.get("error_count", 0) or 0) != 0:
-                    gaps.append(f"{bin_id} line {line}: {tag} contains monitor errors")
-    return gaps
 
 
 def test_fe_risk_hit_evidence_is_auditable_dut():

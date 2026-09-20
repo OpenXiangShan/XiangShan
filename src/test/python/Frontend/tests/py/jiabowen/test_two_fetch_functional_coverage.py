@@ -1119,7 +1119,8 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     )
 
     assert not (frontend_root / "env/coverage_def.py").exists()
-    assert "TB_ENABLE_TOFFEE_FUNCOV" not in fixture_source
+    assert "TB_ENABLE_TOFFEE_FUNCOV" in fixture_source
+    assert "ToffeeCoverageSink.from_registry" in fixture_source
     assert "get_coverage_groups" not in fixture_source
     assert "bpu_basic_pred_type" not in sampler_source
     assert "bpu_basic_pred_type" not in recorder_source
@@ -1347,6 +1348,224 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     assert summary["overall"]["line"] == {"hit": 1, "total": 1, "pct": 100.0}
     assert summary["overall"]["branch"] == {"hit": 0, "total": 1, "pct": 0.0}
     assert summary["scopes"]["all"]["source_lines"] == 2
+
+
+def _raw_coverage_harness(tmp_path):
+    run_root = tmp_path / "run"
+    data_dir = run_root / "coverage"
+    funcov_dir = run_root / "funcov"
+    source_root = tmp_path / "build-frontend"
+    output_path = tmp_path / "report" / "code_coverage_summary.json"
+    frontend_root = _frontend_root()
+    data_dir.mkdir(parents=True)
+    funcov_dir.mkdir(parents=True)
+    pylib = source_root / "pylib-verilator" / "Frontend"
+    rtl = source_root / "rtl"
+    pylib.mkdir(parents=True)
+    rtl.mkdir(parents=True)
+    (pylib / "libUTFrontend.so").write_bytes(b"dut-model")
+    (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
+    (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+    (rtl / "Frontend.sv").write_text("module Frontend;\nendmodule\n", encoding="utf-8")
+    write_frontend_build_manifest(
+        source_root / "frontend_build_manifest.verilator.json",
+        build_root=source_root,
+        dut_source_sha="a" * 40,
+        source_tree_dirty=False,
+        build_config="frontend-test",
+        build_command="make frontend",
+        simulator="verilator",
+    )
+    manifest = load_frontend_build_manifest(source_root, simulator="verilator")
+    manifest_path = source_root / "frontend_build_manifest.verilator.json"
+    sampler_sha256 = current_funcov_sampler_sha256()
+    verification_env_sha256 = current_verification_environment_sha256()
+    (run_root / "waveforms").mkdir(parents=True, exist_ok=True)
+    waveform_path = run_root / "waveforms" / "case.fst"
+    waveform_path.write_bytes(b"fst")
+    dat_path = data_dir / "case.dat"
+    dat_path.write_text(
+        "C \x01f\x02Frontend.sv\x01t\x02line\x01x\x021\x02 1\n"
+        "C \x01f\x02Frontend.sv\x01t\x02branch\x01x\x022\x02 0\n",
+        encoding="utf-8",
+    )
+    provenance = {
+        "dut_source_sha": "a" * 40,
+        "dut_build_sha256": manifest["dut_build_sha256"],
+        "dut_python_extension_sha256": manifest["dut_python_extension_sha256"],
+        "generated_rtl_sha256": manifest["generated_rtl_sha256"],
+        "registry_sha256": hashlib.sha256(default_pilot_csv_path().read_bytes()).hexdigest(),
+        "definitions_sha256": hashlib.sha256(b"[]").hexdigest(),
+        "sampler_sha256": sampler_sha256,
+        "sampler_domains": ["all"],
+        "verification_env_sha256": verification_env_sha256,
+        "signal_contract_sha256": manifest["signal_contract_sha256"],
+        "build_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        "simulator": "verilator",
+        "implementation_sha": "a" * 40,
+        "design_baseline_sha": "a" * 40,
+        "source_sha_override": False,
+        "source_delta_sha256": hashlib.sha256(b"").hexdigest(),
+        "source_delta_files": [],
+        "source_delta_policy": "none",
+        "compatibility_signature": hashlib.sha256(
+            json.dumps(
+                {
+                    "simulator": "verilator",
+                    "dut_source_sha": "a" * 40,
+                    "implementation_sha": "a" * 40,
+                    "design_baseline_sha": "a" * 40,
+                    "source_sha_override": False,
+                    "source_delta_sha256": hashlib.sha256(b"").hexdigest(),
+                    "source_delta_files": [],
+                    "source_delta_policy": "none",
+                    "dut_build_sha256": manifest["dut_build_sha256"],
+                    "dut_python_extension_sha256": manifest["dut_python_extension_sha256"],
+                    "generated_rtl_sha256": manifest["generated_rtl_sha256"],
+                    "registry_sha256": hashlib.sha256(
+                        default_pilot_csv_path().read_bytes()
+                    ).hexdigest(),
+                    "sampler_sha256": sampler_sha256,
+                    "sampler_domains": ["all"],
+                    "verification_env_sha256": verification_env_sha256,
+                    "signal_contract_sha256": manifest["signal_contract_sha256"],
+                    "build_config": "frontend-test",
+                    "toolchain": "python-test",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+        "build_manifest_status": "valid",
+        "build_manifest_reasons": [],
+        "build_config": "frontend-test",
+        "toolchain": "python-test",
+    }
+    return {
+        "run_root": run_root,
+        "data_dir": data_dir,
+        "funcov_dir": funcov_dir,
+        "source_root": source_root,
+        "output_path": output_path,
+        "frontend_root": frontend_root,
+        "waveform_path": waveform_path,
+        "dat_path": dat_path,
+        "provenance": provenance,
+    }
+
+
+def _run_raw_code_coverage_report(harness):
+    return subprocess.run(
+        [
+            sys.executable,
+            str(harness["frontend_root"] / "scripts/report_raw_code_coverage.py"),
+            "--data-dir",
+            str(harness["data_dir"]),
+            "--source-root",
+            str(harness["source_root"]),
+            "--run-id",
+            "unit-codecov-toffee",
+            "--json-output",
+            str(harness["output_path"]),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _write_toffee_sidecar(harness, *, incomplete=None):
+    incomplete = set(incomplete or ())
+    run_meta = {
+        "run_id": "unit-codecov-toffee",
+        "outcome": "passed",
+        "exit_code": 0,
+        "checker": {"status": "pass", "error_count": 0, "errors": []},
+        "testcase_nodeid": "tests/test_case.py::test_case",
+    }
+    execution = {
+        "testcase_nodeid": "tests/test_case.py::test_case",
+        "line_coverage_path": str(harness["dat_path"]),
+        "waveform_path": str(harness["waveform_path"]),
+    }
+    stats = {"monitor": {"cycles_total": 1, "error_count": 0, "errors": []}}
+    if "testcase_nodeid" in incomplete:
+        run_meta.pop("testcase_nodeid", None)
+        execution.pop("testcase_nodeid", None)
+    if "waveform_path" in incomplete:
+        execution.pop("waveform_path", None)
+    if "monitor" in incomplete:
+        stats = {}
+    payload = {
+        "schema_version": 1,
+        "collector": {"toffee-test": "test", "pytoffee": "test"},
+        "metadata": {
+            "mode": "formal",
+            "run": run_meta,
+            "execution": execution,
+            "stats": stats,
+            "errors": [],
+            "provenance": harness["provenance"],
+        },
+        "summary": {},
+        "bin_ids": {},
+        "coverage": {"groups": []},
+    }
+    path = harness["funcov_dir"] / "case.toffee.funcov.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_raw_code_coverage_report_accepts_toffee_formal_sidecar(tmp_path):
+    harness = _raw_coverage_harness(tmp_path)
+    sidecar = _write_toffee_sidecar(harness)
+    result = _run_raw_code_coverage_report(harness)
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(harness["output_path"].read_text(encoding="utf-8"))
+    assert summary["provenance"]["dat_files"][0]["funcov_path"] == str(sidecar.resolve())
+    assert summary["overall"]["line"] == {"hit": 1, "total": 1, "pct": 100.0}
+
+
+def test_raw_code_coverage_report_rejects_incomplete_toffee_sidecar(tmp_path):
+    harness = _raw_coverage_harness(tmp_path)
+    _write_toffee_sidecar(harness, incomplete={"testcase_nodeid", "waveform_path", "monitor"})
+    result = _run_raw_code_coverage_report(harness)
+    assert result.returncode == 2
+    assert (
+        "sidecar lacks testcase_nodeid" in result.stderr
+        or "funcov sidecar" in result.stderr
+        or "toffee sidecar" in result.stderr
+    )
+
+
+def test_raw_code_coverage_report_prefers_toffee_over_audit_legacy(tmp_path):
+    harness = _raw_coverage_harness(tmp_path)
+    toffee_path = _write_toffee_sidecar(harness)
+    audit_dir = harness["run_root"] / "audit" / "legacy-funcov"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "case.funcov.json").write_text(
+        json.dumps(
+            {
+                "artifact_schema_version": 2,
+                "artifact_tag": "unit_codecov_audit",
+                "source_csv": str(default_pilot_csv_path()),
+                "definitions": [],
+                "waveform_path": str(harness["waveform_path"]),
+                "line_coverage_path": str(harness["dat_path"]),
+                "provenance": harness["provenance"],
+                "run": _eligible_run("unit-codecov-toffee", outcome="passed", exit_code=0),
+                "stats": {"monitor": {"cycles_total": 1, "error_count": 0}},
+                "errors": [],
+                "hits": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = _run_raw_code_coverage_report(harness)
+    assert result.returncode == 0, result.stderr
+    summary = json.loads(harness["output_path"].read_text(encoding="utf-8"))
+    assert summary["provenance"]["dat_files"][0]["funcov_path"] == str(toffee_path.resolve())
 
 
 def test_effective_run_id_honors_explicit_value_after_default_generation(monkeypatch):

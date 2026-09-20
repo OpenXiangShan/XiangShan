@@ -24,11 +24,14 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
 )
 from env.funcov.py.icache.icache_missunit_funcov import _ICACHE, _MISS, _TOP
 from env.funcov.py.icache.icache_hitmiss_funcov import (
+    ICACHE_HITMISS_COVERPOINTS,
     _MAIN as _HITMISS_MAIN,
     _MISS as _HITMISS_MISS,
     _PREFETCH_META_VALIDS as _HITMISS_PREFETCH_META_VALIDS,
     _SIGNALS as _HITMISS_SIGNALS,
 )
+from env.funcov.py.icache.icache_hitmiss_toffee import ICacheHitMissToffeeCoverage
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 
 
 class _Signal:
@@ -55,8 +58,17 @@ class _Recorder:
                 return int(signal.value)
         return None
 
-    def mark(self, group, bin_name, cycle, evidence, *, coverpoint=None):
-        del cycle
+    def mark(
+        self,
+        group,
+        bin_name,
+        cycle,
+        evidence,
+        *,
+        coverpoint=None,
+        forward_to_toffee=True,
+    ):
+        del cycle, forward_to_toffee
         self.hits.add((group, coverpoint, bin_name))
         self.hit_evidence[(group, bin_name)] = dict(evidence)
 
@@ -360,6 +372,23 @@ def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
 def test_icache_hitmiss_sampler_contract_has_one_key_per_leaf():
     assert len(ICACHE_HITMISS_SAMPLER_BIN_KEYS) == 10
     assert len(set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)) == 10
+
+
+def test_icache_hitmiss_toffee_model_preserves_the_sampler_contract():
+    runtime = _Recorder()
+    model = ICacheHitMissToffeeCoverage(runtime)
+
+    report_keys = {
+        (group["name"], point["name"], item["name"])
+        for group in model.report()
+        for point in group["points"]
+        for item in point["bins"]
+    }
+    expected_keys = {
+        (group, ICACHE_HITMISS_COVERPOINTS[group], bin_name)
+        for group, bin_name in ICACHE_HITMISS_SAMPLER_BIN_KEYS
+    }
+    assert report_keys == expected_keys
 
 
 def _set_mainpipe_single_bank_range(recorder, *, offset: int, mask: list[int]) -> None:
@@ -820,6 +849,96 @@ def _set_single_hit(recorder):
     recorder.set_hitmiss_key("sram_valid_req1_cross", 0)
     recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_0_0", 1)
     recorder.env.dut.set(_HITMISS_MAIN + "s1_wayLookupEntry_0_waymask_0", 1)
+
+
+def test_icache_hitmiss_toffee_model_collects_stateful_sampler_hits() -> None:
+    runtime = _Recorder()
+    model = ICacheHitMissToffeeCoverage(runtime)
+    _set_single_hit(runtime)
+    runtime.set_hitmiss_key("req0_start", 0x1000)
+    model.sample(40)
+
+    runtime.set_hitmiss_key("s1_valid", 0)
+    runtime.set_hitmiss_key("s1_fire", 0)
+    model.sample(41)
+
+    runtime.set_hitmiss_key("s1_valid", 1)
+    runtime.set_hitmiss_key("s1_fire", 1)
+    runtime.set_hitmiss_key("req0_start", 0x1002)
+    model.sample(42)
+
+    report = {group["name"]: group for group in model.report()}
+    hit_bins = {
+        item["name"]: item["hints"]
+        for item in report["icache_hit_path"]["points"][0]["bins"]
+    }
+    assert hit_bins["continuous_same_line_sram_hit"] == 1
+    assert runtime.hits == set()
+
+    legacy_hits = {
+        key: SimpleNamespace(hits=count)
+        for key, count in model.hit_counts().items()
+        if count
+    }
+    legacy = SimpleNamespace(hits=legacy_hits)
+    assert model.compare_legacy_counts(legacy) == {}
+
+    key = (
+        "icache_hit_path",
+        ICACHE_HITMISS_COVERPOINTS["icache_hit_path"],
+        "continuous_same_line_sram_hit",
+    )
+    legacy.hits[key].hits += 1
+    assert model.compare_legacy_counts(legacy) == {key: (2, 1)}
+
+
+def test_icache_hitmiss_toffee_model_can_audit_without_forwarding_legacy_marks() -> None:
+    runtime = _Recorder()
+    sink = ToffeeCoverageSink(_point_definitions_for_hitmiss())
+    audit = _Recorder()
+    direct = ICacheHitMissToffeeCoverage(runtime, sink=sink, audit_recorder=audit)
+    _set_single_hit(runtime)
+    runtime.set_hitmiss_key("req0_start", 0x1000)
+    direct.sample(40)
+    runtime.set_hitmiss_key("s1_valid", 0)
+    runtime.set_hitmiss_key("s1_fire", 0)
+    direct.sample(41)
+    runtime.set_hitmiss_key("s1_valid", 1)
+    runtime.set_hitmiss_key("s1_fire", 1)
+    runtime.set_hitmiss_key("req0_start", 0x1002)
+    direct.sample(42)
+
+    assert runtime.hits == set()
+    assert audit.hits
+    assert "icache_hit_path" in sink._native_group_names
+    assert sink.hit_counts()[
+        "icache_hit_path",
+        "hit_behavior",
+        "continuous_same_line_sram_hit",
+    ] == 1
+    # Native path samples CovGroups directly; flush must not re-sample them.
+    before = sink.hit_counts()[
+        "icache_hit_path",
+        "hit_behavior",
+        "continuous_same_line_sram_hit",
+    ]
+    sink.flush_cycle(42)
+    assert (
+        sink.hit_counts()[
+            "icache_hit_path",
+            "hit_behavior",
+            "continuous_same_line_sram_hit",
+        ]
+        == before
+    )
+
+
+def _point_definitions_for_hitmiss():
+    definitions = {}
+    for group_name, bin_name in sorted(ICACHE_HITMISS_SAMPLER_BIN_KEYS):
+        point_name = ICACHE_HITMISS_COVERPOINTS[group_name]
+        definitions.setdefault((group_name, point_name), []).append(bin_name)
+    return {key: tuple(value) for key, value in definitions.items()}
 
 
 def test_hitmiss_hit_path_leaves_use_dut_hit_and_protection_conditions():
