@@ -14,8 +14,14 @@ env:
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   CKPT_JSON: /nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json
-#  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json
+  # temporarily disabled due to known issue, enable these when a weekly 1.0c regression test passes
+#  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json
+# CKPT_JSON_SPEC17: /nfs/share/checkpoints_profiles/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json
+  # random checkpoints number, per CKPT_JSON
+  FUZZ_NUM: 5
+  # filtering/sorting checkpoints based on ETA, to avoid long-running jobs
   PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile
+  ETA_THRESHOLD: 30000 # do not run checkpoints longer than this, in seconds, see PROFILE_PATH/xxx.json for ETA
 
 jobs:
   changes:
@@ -81,7 +87,16 @@ jobs:
       - name: Select checkpoint
         id: select
         run: |
-          SELECTED=$(python3 ${GITHUB_WORKSPACE}/.github/workflows/ckpt_select.py)
+          SELECTED=$(python3 ${GITHUB_WORKSPACE}/.github/workflows/ckpt_select.py \
+            --profile "${PROFILE_PATH}" \
+            --eta-threshold "${ETA_THRESHOLD}" \
+            --weighted ":${CKPT_JSON}" \
+            --weighted "legacy-:${CKPT_JSON_LEGACY}" \
+            --random "fuzz-:${FUZZ_NUM}:${CKPT_JSON}" \
+            --random "fuzz-legacy-:${FUZZ_NUM}:${CKPT_JSON_LEGACY}" \
+            --random "fuzz-spec17-:${FUZZ_NUM}:${CKPT_JSON_SPEC17}" \
+            --random "fuzz-xscc-:${FUZZ_NUM}:${CKPT_JSON_XSCC}" \
+          )
           echo "${SELECTED}" | jq .
           echo "SELECTED=${SELECTED}" >> "$GITHUB_OUTPUT"
 
