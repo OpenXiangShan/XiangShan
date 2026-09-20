@@ -20,8 +20,7 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class RasParameters(
     CommitStackSize:   Int = 16, // Size of the RAS stack
-    SpecQueueSize:     Int = 64, // Size of the RAS speculative queue
-    StackCounterWidth: Int = 3   // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+    SpecQueueSize:     Int = 64 // Size of the RAS speculative queue
 ) {
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
 }
@@ -31,8 +30,6 @@ trait HasRasParameters extends HasBpuParameters {
 
   def CommitStackSize:   Int = rasParameters.CommitStackSize
   def SpecQueueSize:     Int = rasParameters.SpecQueueSize
-  def StackCounterWidth: Int = rasParameters.StackCounterWidth
-  def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
 
   // A single FTQ entry drives at most one RAS spec op (BPU S3), so the number of
   // outstanding speculative pushes is bounded by FtqSize. SpecQueueSize must be at
