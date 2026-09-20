@@ -35,7 +35,7 @@ from .artifact_provenance import file_sha256
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from ..support.env_config import DEFAULT_ENV_CONFIG
 from ..funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
-from ..funcov.runtime_context import FrontendFuncovRuntimeContext
+from ..funcov.sample_hub import FrontendFuncovSampleHub
 from ..core.frontend_env import FrontendEnv
 from ..support.logging_utils import configure_env_logging
 
@@ -599,7 +599,7 @@ def env(dut, request):
     if functional_coverage_enabled:
         targets = _funcov_targets(request)
         recorder_type = (
-            FrontendFuncovRuntimeContext
+            FrontendFuncovSampleHub
             if toffee_funcov_enabled
             else FunctionalCoverageRecorder
         )

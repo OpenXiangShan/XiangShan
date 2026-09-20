@@ -300,7 +300,7 @@ def test_formal_fixture_separates_toffee_funcov_from_legacy_audit() -> None:
     assert 'metadata["execution"]["legacy_funcov_audit_path"]' in source
     assert '"TB_ENABLE_TOFFEE_FUNCOV", default="1"' in source
     assert '"TB_ENABLE_FUNCOV_AUDIT", default="0"' in source
-    assert "FrontendFuncovRuntimeContext" in source
+    assert "FrontendFuncovSampleHub" in source
     assert "audit_recorder=legacy_recorder" in source
     assert "legacy_recorder.write_artifacts()" in source
     assert "runtime_context.write_artifacts()" not in source
@@ -477,9 +477,14 @@ def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
 
 
 def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None:
+    from env.funcov.sample_hub import FrontendFuncovSampleHub
     from env.funcov.runtime_context import FrontendFuncovRuntimeContext
 
-    context = FrontendFuncovRuntimeContext.from_pilot_csv(
+    assert FrontendFuncovRuntimeContext is FrontendFuncovSampleHub
+    assert not issubclass(FrontendFuncovSampleHub, FunctionalCoverageRecorder)
+    assert issubclass(FunctionalCoverageRecorder, FrontendFuncovSampleHub)
+
+    context = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="formal-context",
         artifact_tag="formal-context",
@@ -488,6 +493,15 @@ def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None
 
     with pytest.raises(RuntimeError, match="cannot write legacy funcov artifacts"):
         context.write_artifacts()
+
+    legacy = FunctionalCoverageRecorder.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name="legacy-context",
+        artifact_tag="legacy-context",
+        output_dir=tmp_path / "legacy",
+    )
+    written = legacy.write_artifacts()
+    assert Path(written["raw_path"]).is_file()
 
 
 def test_toffee_mainpipe_model_contains_all_54_bins() -> None:
@@ -845,7 +859,9 @@ def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> No
 
 
 def test_native_source_derivation_uses_toffee_hints_not_legacy_hits(tmp_path) -> None:
-    context = FrontendFuncovRuntimeContext.from_pilot_csv(
+    from env.funcov.sample_hub import FrontendFuncovSampleHub
+
+    context = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-owner-derivation",
         artifact_tag="runtime-owner-derivation",

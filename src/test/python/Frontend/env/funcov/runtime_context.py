@@ -1,20 +1,8 @@
 from __future__ import annotations
 
-from .recorder import FunctionalCoverageRecorder
+from .sample_hub import FrontendFuncovSampleHub
 
+# Compatibility alias for the first SampleHub extraction cut.
+FrontendFuncovRuntimeContext = FrontendFuncovSampleHub
 
-class FrontendFuncovRuntimeContext(FunctionalCoverageRecorder):
-    """Shared state/snapshot context for the canonical Toffee runtime.
-
-    The class temporarily inherits the established state implementation while
-    fixture ownership is split from the legacy artifact recorder.  Formal
-    Toffee runs must never write legacy artifacts through this object.
-    """
-
-    def write_artifacts(self) -> dict:
-        raise RuntimeError(
-            "FrontendFuncovRuntimeContext cannot write legacy funcov artifacts"
-        )
-
-
-__all__ = ["FrontendFuncovRuntimeContext"]
+__all__ = ["FrontendFuncovRuntimeContext", "FrontendFuncovSampleHub"]

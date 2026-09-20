@@ -297,7 +297,15 @@ class CoverageHit:
     evidence: List[dict] = field(default_factory=list)
 
 
-class FunctionalCoverageRecorder:
+class FrontendFuncovSampleHub:
+    """Shared sampling hub for native Toffee funcov.
+
+    Owns registry definitions, cycle snapshot, cross-cycle state, and event
+    routing used by evaluate/native CovGroup sampling.  This class is not the
+    legacy hit-ledger writer; formal runs must not treat it as a signoff
+    artifact backend.
+    """
+
     def __init__(
         self,
         definitions: Iterable[CoverageBinDef],
@@ -568,7 +576,7 @@ class FunctionalCoverageRecorder:
         target_bin_ids: Optional[Iterable[Any]] = None,
         target_tp_ids: Optional[Iterable[Any]] = None,
         target_testcases: Optional[Iterable[Any]] = None,
-    ) -> "FunctionalCoverageRecorder":
+    ) -> "FrontendFuncovSampleHub":
         defs: List[CoverageBinDef] = []
         with Path(csv_path).open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
@@ -1021,6 +1029,11 @@ class FunctionalCoverageRecorder:
         return int(raw_fetch) & 0xFFFFFFFF
 
     def write_artifacts(self) -> dict:
+        raise RuntimeError(
+            "FrontendFuncovSampleHub cannot write legacy funcov artifacts"
+        )
+
+    def _write_legacy_artifacts(self) -> dict:
         raw = self._raw_dict()
         raw_path = self.raw_path()
         summary_path = self.summary_path()
@@ -1076,7 +1089,7 @@ class FunctionalCoverageRecorder:
         *,
         artifact_tag: str,
         output_dir: Path,
-    ) -> "FunctionalCoverageRecorder":
+    ) -> "FrontendFuncovSampleHub":
         raw_list = [Path(p) for p in raw_paths]
         if not raw_list:
             raise ValueError("merge_raw_files requires at least one raw coverage json")
@@ -1443,3 +1456,15 @@ class FunctionalCoverageRecorder:
                 }
             )
         return rows
+
+
+class FunctionalCoverageRecorder(FrontendFuncovSampleHub):
+    """Legacy hit ledger and artifact writer.
+
+    Formal Toffee runs use :class:`FrontendFuncovSampleHub` directly.  This
+    subclass remains for optional audit and ``TB_ENABLE_TOFFEE_FUNCOV=0``
+    fallback until the independent deletion change.
+    """
+
+    def write_artifacts(self) -> dict:
+        return self._write_legacy_artifacts()
