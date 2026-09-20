@@ -41,6 +41,11 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
+  class RobMemStateUpdate(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val interruptSafe = Bool()
+  }
+
   class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
     val ldest = UInt(LogicRegsWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)

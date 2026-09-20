@@ -27,6 +27,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.backend.rob.RobBundles.RobMemStateUpdate
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.mmu._
@@ -562,6 +563,9 @@ class StoreUnitS2(param: ExeUnitParams)(
     // Prefetch Train
     val prefetchTrainHint = Output(Bool())
     val prefetchTrain = ValidIO(new TrainReqBundle())
+
+    // Early ROB interrupt-safety classification.
+    val robMemStateUpdate = ValidIO(new RobMemStateUpdate)
   })
 
   val pipeIn = io_pipeIn.get
@@ -626,6 +630,12 @@ class StoreUnitS2(param: ExeUnitParams)(
   val af = afInaccessible || afVectorUncache || afCboUncache || afUnalignMMIO
   val am = !align && isScalar && isNC && !pmpInaccessible
   val hasException = in.hasException.get || af || am
+
+  val robMemStateUpdateValid = fire && isScalar && !isHwPrefetch && !isCbo && !cross16Byte &&
+    tlbHit && !isUncache && !hasException
+  io.robMemStateUpdate.valid := robMemStateUpdateValid
+  io.robMemStateUpdate.bits.robIdx := robIdx
+  io.robMemStateUpdate.bits.interruptSafe := true.B
 
   // DCache
   val cacheMiss = io.dcacheResp.fire && io.dcacheResp.bits.miss
@@ -869,6 +879,8 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle())
+  // Early ROB interrupt-safety classification.
+  val robMemStateUpdate = ValidIO(new RobMemStateUpdate)
   val sqDeqPtr = Input(new SqPtr)
   val sqAddrReadyPtr = Input(new SqPtr)
   // Feedback to RS in s2, for store issue control
@@ -931,6 +943,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   io.dcache.s2_kill := s2.io.dcacheKill
   io.dcache.s2_pc := s2.io.dcachePC
   io.toSqAddrRe := s2.io.toSqAddrRe
+  io.robMemStateUpdate := s2.io.robMemStateUpdate
   io.prefetchTrainHintS2 := s2.io.prefetchTrainHint
   io.prefetchTrain.valid := RegNext(s2.io.prefetchTrain.valid) // for better timing
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)

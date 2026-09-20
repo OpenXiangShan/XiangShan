@@ -30,6 +30,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.rob.RobBundles.RobMemStateUpdate
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.backend.vector.VecIssueQueue.BypassDelay
@@ -848,6 +849,9 @@ class LoadUnitS2(param: ExeUnitParams)(
     // TODO: this bundle is tooooooo big, define a smaller one
     val prefetchTrain = ValidIO(new TrainReqBundle)
 
+    // Early ROB interrupt-safety classification.
+    val robMemStateUpdate = ValidIO(new RobMemStateUpdate)
+
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
 
@@ -921,6 +925,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
   val isUncache = isNC || isMMIO
+  val isScalar = accessType.isScalar()
   val isVector  = accessType.isVector()
 
   // load access fault
@@ -1137,6 +1142,12 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val shouldWakeup = !shouldReplay && !isUncache && !exception && !isSwPrefetch
   val shouldWriteback = shouldWakeup || exception || matchInvalid || isSwPrefetch
+
+  val robMemStateUpdateValid = pipeIn.fire && !kill && isScalar && !isPrefetch && !isUnalign &&
+    tlbHit && !isUncache && !isUncacheReplay && !exception
+  io.robMemStateUpdate.valid := robMemStateUpdateValid
+  io.robMemStateUpdate.bits.robIdx := robIdx
+  io.robMemStateUpdate.bits.interruptSafe := true.B
 
   /**
     * Pipeline connect
@@ -2028,6 +2039,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle)
+  // Early ROB interrupt-safety classification.
+  val robMemStateUpdate = ValidIO(new RobMemStateUpdate)
   // Software instruction prefetch
   val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
   // CSR control signals and load trigger
@@ -2140,6 +2153,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.prefetchTrainHintS2 := s2.io.prefetchTrain.valid
   io.prefetchTrain.valid := GatedValidRegNext(s2.io.prefetchTrain.valid)
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)
+  io.robMemStateUpdate := s2.io.robMemStateUpdate
   s2.io.csrCtrl := io.csrCtrl
   s2.io.stdDataWrite := io.stdDataWrite
 

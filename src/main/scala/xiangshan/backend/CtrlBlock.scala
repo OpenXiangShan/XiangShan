@@ -32,6 +32,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{RatReadPort, Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.RobBundles.RobMemStateUpdate
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
@@ -863,6 +864,7 @@ class CtrlBlockImp(
   rob.io.exuWriteback := delayedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
+  rob.io.memStateUpdate := io.fromMem.robMemStateUpdate
   rob.io.readGPAMemData := gpaMem.io.exceptionReadData
   rob.io.fromVecExcpMod.busy := io.fromVecExcpMod.busy
 
@@ -1005,6 +1007,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {
     val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, sqIdx
+    val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
     val violation = Flipped(ValidIO(new Redirect))
     val mdpTrain = Flipped(ValidIO(new Redirect))
   }

@@ -38,6 +38,7 @@ import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.{CSRConst, SdtrigExt}
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
+import xiangshan.backend.rob.RobBundles.RobMemStateUpdate
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
@@ -219,6 +220,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val sbIsEmpty = Output(Bool())
 
   val mdpTrain = ValidIO(new Redirect)
+
+  val robMemStateUpdate = Vec(LduCnt + StaCnt, ValidIO(new RobMemStateUpdate))
 
   val lsTopdownInfo = Vec(LdExuCnt, Output(new LsTopdownInfo))
 
@@ -512,6 +515,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val newLoadUnits = Seq.tabulate(LduCnt)(i => Module(new NewLoadUnit(ldaParams(i))))
   val storeUnits = Seq.tabulate(StaCnt)(i => Module(new NewStoreUnit(staParams(i))))
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
+
+  io.mem_to_ooo.robMemStateUpdate.zip(newLoadUnits.map(_.io.robMemStateUpdate) ++ storeUnits.map(_.io.robMemStateUpdate)).foreach {
+    case (sink, source) => sink := source
+  }
 
   val stdDataWriteNow = stdExeUnits.map(_.io.sqData)
   val stdDataWritePrev = stdDataWriteNow.map { now =>

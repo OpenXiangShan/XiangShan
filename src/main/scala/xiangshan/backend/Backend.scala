@@ -43,6 +43,7 @@ import xiangshan.backend.fu.{FenceIO, FuConfig, PerfCounterIO}
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
+import xiangshan.backend.rob.RobBundles.RobMemStateUpdate
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.backend.vector.{Exu, VecIssueQueue, VecRegionImp, VecRegionModule}
 import xiangshan.frontend.ftq.FtqPtr
@@ -222,6 +223,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromWB.wbData.zip(wbDataPathToCtrlBlock.sortBy(_.bits.params.exuIdx)).map(x => x._1 := x._2)
   ctrlBlock.io.fromWB.delayedOldestExuRedirect := intRegion.io.wbDataPathToCtrlBlock.delayedOldestExuRedirect.get
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
+  ctrlBlock.io.fromMem.robMemStateUpdate := io.mem.robMemStateUpdate
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
   ctrlBlock.io.fromMem.mdpTrain <> io.mem.mdpTrain
   ctrlBlock.io.fromMemToLsqEnqCtrl := io.mem.toLsqEnqCtrl
@@ -719,6 +721,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
     )
   )
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new StoreUnitToLFST)))
+  val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
 
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val mdpTrain        = Flipped(ValidIO(new Redirect))

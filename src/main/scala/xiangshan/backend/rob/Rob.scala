@@ -75,6 +75,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
+    val memStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
       val blockCommit = Input(Bool())
@@ -1187,6 +1188,33 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
                              !FuType.isVset(io.enq.req(i).bits.fuType) &&
                              !FuType.isAMO(io.enq.req(i).bits.fuType)
       robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
+    }
+  }
+
+  // Memory operations become interrupt-safe after their address is classified as
+  // scalar, cacheable, and free of currently visible exceptions. A later
+  // exception writeback has priority and clears the early classification.
+  for (i <- 0 until RobSize) {
+    val enqThisRob = canEnqueue.zip(allocatePtrVec).map { case (valid, ptr) =>
+      valid && ptr.value === i.U
+    }.reduce(_ || _)
+    val memSafeSet = io.memStateUpdate.map { update =>
+      update.valid && update.bits.robIdx.value === i.U &&
+        !update.bits.robIdx.needFlush(io.redirect) && update.bits.interruptSafe
+    }.reduce(_ || _)
+    val exceptionClear = exceptionWBs.map { wb =>
+      wb.valid && wb.bits.robIdx.value === i.U &&
+        !wb.bits.robIdx.needFlush(io.redirect) &&
+        (wb.bits.exceptionVec.orR || wb.bits.flushPipe.getOrElse(false.B) ||
+          wb.bits.trigger.map(TriggerAction.isDmode).getOrElse(false.B))
+    }.reduceOption(_ || _).getOrElse(false.B)
+
+    when (robEntries(i).valid && !enqThisRob) {
+      when (exceptionClear) {
+        robEntries(i).interrupt_safe := false.B
+      }.elsewhen (memSafeSet) {
+        robEntries(i).interrupt_safe := true.B
+      }
     }
   }
 
