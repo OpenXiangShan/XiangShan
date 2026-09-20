@@ -762,7 +762,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.unalignTail.valid := unalignTailInjectValid
   io.unalignTail.bits := unalignTail
 
-  io.prefetchTrainHint := pipeIn.valid && !kill && in.isFirstIssue()
+  io.prefetchTrainHint := pipeIn.valid && !kill && in.isFirstIssue() && !isSwInstrPrefetch
 
   io.swInstrPrefetch.valid := pipeIn.valid && isSwInstrPrefetch
   io.swInstrPrefetch.bits.vaddr := vaddr
