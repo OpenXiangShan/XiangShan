@@ -27,6 +27,7 @@ import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
+import utility.XSPerfAccumulate
 
 class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module with HasXSParameter {
   override def desiredName: String = param.name
@@ -70,10 +71,17 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
   )
   dontTouch(exFadd)
   val fmulToFadd = fus.find(_.cfg.isFmul).get.out.FmulToFadd.get
+  val fmul1Src3Wait = ex(1).bits.bypassCtrl.fmaSrc3Wait.get
+  val fmul1Src3Port = ex(1).bits.bypassCtrl.bypassSource(2).idx(log2Ceil(backendParams.getFpRfWriteSize) - 1, 0)
+  // An M4-issued consumer reaches fmul1 alongside the producer's wb0Next.
+  // Issuing one cycle later instead uses wb0; ordinary issues retain src2S1.
+  val fmul1Src3 = Mux(fmul1Src3Wait === 2.U, in.fpWb0Next(fmul1Src3Port),
+    Mux(fmul1Src3Wait === 1.U, in.fpWb0(fmul1Src3Port), fmulToFadd.src2))
+  XSPerfAccumulate("fma_src3_fmul1_bypass", fmulToFadd.valid && fmul1Src3Wait =/= 0.U)
   exFadd(0).valid := fmulToFadd.valid || inEx.valid && FuType.isFalu(inEx.bits.ctrl.fuType)
   when(fmulToFadd.valid){
     exFadd(0).bits.data.src(0) := fmulToFadd.fpA
-    exFadd(0).bits.data.src(1) := fmulToFadd.src2
+    exFadd(0).bits.data.src(1) := fmul1Src3
     exFadd(0).bits.ctrl := ex(1).ctrl
     exFadd(0).bits.fuSel := VecInit(param.fuConfigs.map(_.isFAlu.B))
     exFadd(0).bits.ctrl.latency := 1.U

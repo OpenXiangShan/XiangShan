@@ -37,7 +37,7 @@ import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.backend.vector.{ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, Enq, WakeUpBundle}
 import xiangshan.backend.fu.vector.Bundles.Vxrm
-import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
+import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
 import xiangshan.backend.float.FltWbDataPath
 import xiangshan.backend.vector.Exu
 import xiangshan.backend.datapath.RdConfig._
@@ -164,6 +164,17 @@ class FltRegionImp(
   val writeFpRfIssueParams = backendParams.allIssueParams.filter(_.writeFpRf)
   assert(writeFpRfIssueParams.size == fpWbM2WakeupOBeforeArbiter.size)
   val fpWbM2WakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams)))
+  // The vector uses global FP write-port indices. Only scalar FMA pipes
+  // produce M4 in this experiment; all other ports remain inactive.
+  val fpWbM4WakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams)))
+  for ((wake, port) <- fpWbM4WakeUp.zipWithIndex) {
+    val sources = issuePipes.flatten.filter(_.param.getFpWriteCfg.exists(_.port == port)).map(_.out.fpWbM4Wakeup)
+    wake := 0.U.asTypeOf(wake)
+    if (sources.nonEmpty) {
+      wake := Mux1H(sources.map(w => w.wen -> w))
+      assert(PopCount(sources.map(_.wen)) <= 1.U, "Multiple FMA M4 wakeups on one FP write port")
+    }
+  }
   val fpWbM2WakeUpIs1Lat = Wire(Vec(backendParams.getFpRfWriteSize, Bool()))
   fpWbM2WakeUpIs1Lat := fpWbM2WakeUpThisRegionIs1Lat ++ Seq.fill(fpWbM2WakeUpIs1Lat.size - fpWbM2WakeUpThisRegionIs1Lat.size)(false.B)
   for (wbPortIdx <- 0 until backendParams.getFpRfWriteSize) {
@@ -194,6 +205,7 @@ class FltRegionImp(
       iq.in.resps.ex0 := issuePipes(i).map(_.out.ex0Resp)
       iq.in.resps.ex0RespFailLat1 := ex0RespFailLat1
       iq.in.wakeup.fpWbM2Vec := fpWbM2WakeUp
+      iq.in.wakeup.fpWbM4Vec := fpWbM4WakeUp
       iq.in.wakeup.fpWbM2D1Vec := fpWbM2D1Vec
       iq.in.ldCancel := ldCancelToIQ
   }
@@ -206,6 +218,7 @@ class FltRegionImp(
       pipe.in.is0WtFail := false.B // Todo
       pipe.in.ldCancel := in.fromMem.ldCancel
       pipe.in.ex0RespFailLat1 := ex0RespFailLat1
+      pipe.in.fpWbM2Vec := fpWbM2WakeUp
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.fpWb0Next := fpWbDataPath.out.wb0Next.map(_.data)
       pipe.in.fpWb0 := fpWbDataPath.out.wb0.map(_.data)

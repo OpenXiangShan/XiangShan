@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.PerfCCT
+import utility.{PerfCCT, XSPerfAccumulate}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -17,7 +17,7 @@ import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.backend.vector.ExuParam
 import xiangshan.backend.vector.fu.VecFuConfig
-import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
+import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
 import xiangshan.backend.float.FltIssueQueue.FltRespBundle
 import xiangshan.backend.vector.Exu
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
@@ -25,6 +25,7 @@ import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, RespBundle, WakeUpBu
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, LoadCancelIO, Redirect, XSBundle}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
+import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
 class FltIssuePipe(
   override val wrapper: FltIssuePipe.LazyMod
@@ -109,13 +110,23 @@ class FltIssuePipe(
   println(s"ldWBPort = $ldWBPort")
   val fltExuWBPort = param.backendParams.getFltRegionParam.issueParams.map(_.fpWbPortIds.head)
   println(s"fltExuWBPort = $fltExuWBPort")
+  private def src3M2Confirmed(uop: VecIssueQueue.Deq): Bool = {
+    val wake = in.fpWbM2Vec(uop.bypassSource(2).idx(log2Ceil(backendParams.getFpRfWriteSize) - 1, 0))
+    wake.wen && wake.pdest === uop.psrc(2)
+  }
+  // M4 is two cycles ahead of M2. A consumer issued at M4 reaches is1
+  // when M2 is due; one issued a cycle later reaches is0 on that cycle.
+  val is0FmaM4Cancel = is0.valid && is0.bits.fmaSrc3Wait.get === 1.U && !src3M2Confirmed(is0.bits)
+  val is1FmaM4Cancel = is1.valid && is1.bits.fmaSrc3Wait.get === 2.U && !src3M2Confirmed(is1.bits)
+  XSPerfAccumulate("fma_src3_cancel_is0", is0FmaM4Cancel)
+  XSPerfAccumulate("fma_src3_cancel_is1", is1FmaM4Cancel)
   is0Resp.srcCancel.zipWithIndex.map { case (srcCancel, srcIdx) =>
     srcCancel := fltExuWBPort.zip(in.ex0RespFailLat1).map { case (wbIdx, ex0RespFail) =>
       is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay0 && ex0RespFail
     }.reduce(_ || _) ||
     is0.valid && ldWBPort.zip(ldCancelVecRegNext).map { case (wbIdx, ldCancel) =>
       is0.bits.bypassSource(srcIdx).idx === wbIdx.U && is0.bits.bypassDelay(srcIdx) === BypassDelay.delay2 && ldCancel
-    }.reduce(_ || _)
+    }.reduce(_ || _) || (if (srcIdx == 2) is0FmaM4Cancel else false.B)
   }
   is1RespSrcCancelNext.zipWithIndex.map { case (srcCancel, srcIdx) =>
     srcCancel := is0.valid && ldWBPort.zip(ldCancelVec).map { case (wbIdx, ldCancel) =>
@@ -125,7 +136,7 @@ class FltIssuePipe(
   ex0RespSrcCancelNext.zipWithIndex.map { case (srcCancel, srcIdx) =>
     srcCancel := is1.valid && ldWBPort.zip(ldCancelVec).map { case (wbIdx, ldCancel) =>
       is1.bits.bypassSource(srcIdx).idx === wbIdx.U && is1.bits.bypassDelay(srcIdx) === BypassDelay.delay0 && ldCancel
-    }.reduce(_ || _)
+    }.reduce(_ || _) || (if (srcIdx == 2) is1FmaM4Cancel else false.B)
   }
 
   is0.valid := is0Next.valid && !is0FlushNext
@@ -144,7 +155,8 @@ class FltIssuePipe(
 
   out.is0FpRdAddr.zip(is0FpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
-      val readRf = is1Next.bits.bypassDelay(srcIdx) >= BypassDelay.delay2
+      val lateSrc3 = if (srcIdx == 2) is1Next.bits.fmaSrc3Wait.get =/= 0.U else false.B
+      val readRf = is1Next.bits.bypassDelay(srcIdx) >= BypassDelay.delay2 && !lateSrc3
       readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx) && readRf
       readBundle.addr := is1Next.bits.psrc(srcIdx)
       readBundle.robIdx := is1Next.bits.robIdx
@@ -228,6 +240,13 @@ class FltIssuePipe(
   private val ex0F2IWakeupValid: Bool =
     ex0.valid && !ex0Flush && ex0FixedLatGpWen && ex0.bits.ctrl.latency === 3.U
 
+  // Combinational at is1: registering here would lose one of the two
+  // additional cycles over the existing (registered) ex0 M2 wakeup.
+  out.fpWbM4Wakeup.wen := ex0Next.valid && is1.bits.fpWen &&
+    FuType.isFmul(is1.bits.fuType) && FMacOpcode.isOP3(is1.bits.opcode)
+  out.fpWbM4Wakeup.pdest := is1.bits.pdest
+  XSPerfAccumulate("fma_m4_wakeup", out.fpWbM4Wakeup.wen)
+
   private val nonFixedLatWakeUp = Wire(new FltWakeUpBundle(backendParams.fpPregParams))
   if (exu.out.outFuWakeUp.isEmpty) {
     nonFixedLatWakeUp := 0.U.asTypeOf(nonFixedLatWakeUp)
@@ -293,6 +312,7 @@ object FltIssuePipe {
     val is0WtFail = Bool()
     val ldCancel = Vec(backendParams.LdExuCnt, Input(new LoadCancelIO))
     val ex0RespFailLat1 = Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())
+    val fpWbM2Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
     val is1FpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.fpPregParams)
     val fpWb0Next = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
@@ -309,6 +329,7 @@ object FltIssuePipe {
     val ex0RespFailLat1Next = Bool()
     val is0FpRdAddr: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.fpPregParams)
     val fpWbM2Wakeup = new FltWakeUpBundle(backendParams.fpPregParams)
+    val fpWbM4Wakeup = new FltEarlyWakeUpBundle(backendParams.fpPregParams)
     val fpWbM2WakeupIs1Lat = Bool()
     val wakeupF2I = Option.when(param.needGpWen)(new FltWakeUpBundle(backendParams.gpPregParams))
     val busyTableF2I = Option.when(param.needGpWen)(UInt(3.W)) // f2i latency = 3

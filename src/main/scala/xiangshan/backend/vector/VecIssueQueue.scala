@@ -1018,6 +1018,9 @@ object VecIssueQueue {
     val bypassDelay  = Vec(exuParam.numRegSrc, BypassDelay())
     val bypassSource = Vec(exuParam.numRegSrc, new BypassSource)
 
+    // 2: issued with M4, 1: issued one cycle after M4, 0: ordinary issue.
+    val fmaSrc3Wait = Option.when(exuParam.isFltExeUnit)(UInt(2.W))
+
     val gpWen        = Bool()
     val fpWen        = Bool()
     val vpWen        = Bool()
@@ -1066,6 +1069,7 @@ object VecIssueQueue {
 
       this.bypassDelay := entry.status.srcStatus.map(_.bypassDelay)
       this.bypassSource := entry.status.srcStatus.map(_.bypassSource)
+      this.fmaSrc3Wait.foreach(_ := entry.status.fmaSrc3Wait.get)
 
       this.gpWen := entry.payload.gpWen.getOrElse(false.B)
       this.fpWen := entry.payload.fpWen.getOrElse(false.B)
@@ -1132,6 +1136,10 @@ object VecIssueQueue {
     val issuedTimer = IssuedTimer()
     val deqPortIdx  = UInt(1.W)
 
+    // M4 installs 2; the following cycle decrements to 1. At 1, M2 is due.
+    // Keep this in the entry so enqueue-to-fast-entry transfers preserve it.
+    val fmaSrc3Wait = Option.when(param.inFltRegion)(UInt(2.W))
+
     def srcReady: Bool = VecInit(srcStatus.map(_.srcState)).asUInt.andR &&
       srcStatusV0.map(_.srcState).getOrElse(true.B) &&
       srcStatusVl.map(_.srcState).getOrElse(true.B)
@@ -1185,6 +1193,7 @@ object VecIssueQueue {
       this.firstIssue := true.B
       this.issuedTimer := IssuedTimer.init
       this.deqPortIdx := 0.U // Todo
+      this.fmaSrc3Wait.foreach(_ := 0.U)
     }
   }
 
