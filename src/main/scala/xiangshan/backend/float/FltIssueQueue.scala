@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.{PerfCCT, SelectOne}
+import utility.{PerfCCT, SelectOne, XSPerfAccumulate}
 import utils.NamedUInt
 import xiangshan._
 import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
@@ -23,6 +23,7 @@ import xiangshan.backend.vector.ExuParam
 import xiangshan.backend.vector.VecRegionModule
 import xiangshan.backend.vector.VecIssueQueue.{Entry, Enq, Deq, Status, SrcStatus, BypassDelay, RespBundle, WakeUpBundle}
 import xiangshan.mem.SqPtr
+import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
 
 class FltIssueQueue(
@@ -116,6 +117,28 @@ class FltIssueQueue(
   private val enqEntrySrcCancel = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Bool())))
   private val fastEntrySrcCancel = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Bool())))
   private val entrySrcCancel = enqEntrySrcCancel ++ fastEntrySrcCancel
+
+  private val entryFmaM4Matches = entries.map { entry =>
+    val src = entry.bits.status.srcStatus(2)
+    in.wakeup.fpWbM4Vec.map(w => w.wen && w.pdest === src.psrc)
+  }
+  private val entryFmaM4Wake = VecInit(entries.zip(entryFmaM4Matches).map { case (entry, matches) =>
+    val src = entry.bits.status.srcStatus(2)
+    entry.valid && !entry.bits.status.robIdx.needFlush(in.flush) &&
+      FuType.isFmul(entry.bits.payload.fuType) && FMacOpcode.isOP3(entry.bits.payload.opcode) &&
+      src.fpRen && !src.srcState && matches.reduce(_ || _)
+  })
+  private val entryFmaM2Confirm = VecInit(entries.map { entry =>
+    val src = entry.bits.status.srcStatus(2)
+    val wake = in.wakeup.fpWbM2Vec(src.bypassSource.idx(log2Ceil(backendParams.getFpRfWriteSize) - 1, 0))
+    wake.wen && wake.pdest === src.psrc
+  })
+  private val entryFmaM4Cancel = VecInit(entries.zip(entryFmaM2Confirm).map { case (entry, confirmed) =>
+    entry.valid && entry.bits.status.fmaSrc3Wait.get === 1.U && !confirmed
+  })
+
+  XSPerfAccumulate("fma_src3_m4_wakeup", PopCount(entryFmaM4Wake))
+  XSPerfAccumulate("fma_src3_m4_cancel", PopCount(entryFmaM4Cancel))
   private val enqEntryCanIssue = VecInit(enqEntries.zipWithIndex.map {
     case (ety, enqIdx) =>
       entryCanIssueWithWakeUp(
@@ -158,12 +181,12 @@ class FltIssueQueue(
   private val fltExuWBPort = param.backendParams.getFltRegionParam.issueParams.map(_.fpWbPortIds.head)
   private val ldCancel = in.ldCancel.map(_.ld2Cancel)
   private val entriesKeepNext = enqEntriesKeepNext ++ fastEntriesKeepNext
-  for ((cancel, entry, srcCancel) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel)) {
+  for (((cancel, entry, srcCancel), entryIdx) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel).zipWithIndex) {
     cancel := Mux1H(Seq(
       in.resps.is0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
       in.resps.is1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
       in.resps.ex0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U),
-      ))
+      )) || entryFmaM4Cancel(entryIdx)
     srcCancel.zipWithIndex.map { case (srccancel, srcidx) =>
       val issuedSrcCancel =
         in.resps.is0(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U ||
@@ -176,7 +199,8 @@ class FltIssueQueue(
       val notIssuedSrcCancelByFltExu = !entry.bits.status.issued && fltExuWBPort.zip(in.resps.ex0RespFailLat1).map { case (idx, fltExuCancel) =>
         srcStatus.bypassSource.idx === idx.U && srcStatus.bypassDelay === BypassDelay.delay0 && fltExuCancel
       }.reduce(_ || _)
-      srccancel := issuedSrcCancel || notIssuedSrcCancelByLoad || notIssuedSrcCancelByFltExu
+      srccancel := issuedSrcCancel || notIssuedSrcCancelByLoad || notIssuedSrcCancelByFltExu ||
+        (if (srcidx == 2) entryFmaM4Cancel(entryIdx) else false.B)
       dontTouch(issuedSrcCancel)
       dontTouch(notIssuedSrcCancelByLoad)
       dontTouch(notIssuedSrcCancelByFltExu)
@@ -404,7 +428,12 @@ class FltIssueQueue(
   for ((deq: ValidIO[Deq], valid, deqEty) <- out.deq lazyZip deqValidVec lazyZip deqEntries) {
     deq.valid := valid
     deq.bits.fromEntry(deqEty)
+    when(deq.valid && deq.bits.fmaSrc3Wait.get =/= 0.U) {
+      assert(FuType.isFmul(deq.bits.fuType) && FMacOpcode.isOP3(deq.bits.opcode) && deq.bits.fpRen(2))
+    }
   }
+  XSPerfAccumulate("fma_src3_issue_m4", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 2.U)))
+  XSPerfAccumulate("fma_src3_issue_m4_d1", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 1.U)))
 
   private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
   private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
@@ -485,8 +514,9 @@ class FltIssueQueue(
     val scalarD1WakeUp: Bool = fpD1WakeUp
     val delayWakeUp: Bool = scalarD1WakeUp
     val srcCancel: Bool = entrySrcCancel(entryIdx)(srcIdx)
+    val earlyWake = if (srcIdx == 2) entryFmaM4Wake(entryIdx) && !srcCancel else false.B
 
-    statusNext.srcState := Mux(wakeUp || scalarD1WakeUp, true.B, Mux(srcCancel, false.B, status.srcState))
+    statusNext.srcState := Mux(wakeUp || scalarD1WakeUp, true.B, Mux(srcCancel, false.B, status.srcState || earlyWake))
 
     when (!wakeUp && !delayWakeUp) {
       if (isKeep) {
@@ -526,6 +556,12 @@ class FltIssueQueue(
           fpWbM2D1WakeUpVec.zip(in.wakeup.fpWbM2D1Vec.map(_.loadDependency)),
         ).reduce(_ ++ _).map { case (wakeUpMath, loadDependency) => wakeUpMath -> loadDependency }
       )
+    }
+    when(earlyWake && !wakeUp && !delayWakeUp) {
+      // Ordinary bypass/cancel logic must not interpret M4 as an M2 wakeup.
+      statusNext.bypassDelay := BypassDelay.delay3
+      statusNext.bypassSource.idx := OHToUInt(VecInit(entryFmaM4Matches(entryIdx)))
+      statusNext.loadDependency.foreach(_ := 0.U.asTypeOf(statusNext.loadDependency.get))
     }
   }
 
@@ -575,6 +611,16 @@ class FltIssueQueue(
         )
     }
 
+    val src3NormalWake = (fpWbM2WakeUpMatchVec(2) ++ fpWbM2D1WakeUpMatchVec(2)).reduce(_ || _)
+    val src3Wait = statusSource.fmaSrc3Wait.get
+    statusSink.fmaSrc3Wait.get := Mux(src3Wait =/= 0.U, src3Wait - 1.U, 0.U)
+    when(entryFmaM4Wake(entryIdx) && !entrySrcCancel(entryIdx)(2)) {
+      statusSink.fmaSrc3Wait.get := 2.U
+    }
+    when(src3NormalWake || entrySrcCancel(entryIdx)(2)) {
+      statusSink.fmaSrc3Wait.get := 0.U
+    }
+
     statusSink.issued := Mux1H(Seq(
       deqSel -> true.B,
       cancel -> false.B,
@@ -603,7 +649,8 @@ class FltIssueQueue(
     val srcReadyOrWake = VecInit(status.srcStatus.zipWithIndex.map {
       case (srcStatus, srcIdx) =>
         val fpWake = fpWbM2WakeUpMatchVec(srcIdx).map(_ && srcStatus.fpRen).foldLeft(false.B)(_ || _)
-        Mux(fpWake, true.B, Mux(entrySrcCancel(entryIdx)(srcIdx), false.B, srcStatus.srcState))
+        val earlyWake = if (srcIdx == 2) entryFmaM4Wake(entryIdx) else false.B
+        Mux(fpWake, true.B, Mux(entrySrcCancel(entryIdx)(srcIdx), false.B, srcStatus.srcState || earlyWake))
     }).asUInt.andR
 
     val srcCanIssue = srcReadyOrWake
@@ -765,6 +812,7 @@ object FltIssueQueue {
   }
 
   class InWakeUp(implicit p: Parameters, param: IssueParam) extends XSBundle {
+    val fpWbM4Vec = Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams))
     val fpWbM2Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
     val fpWbM2D1Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
   }
@@ -903,6 +951,11 @@ object FltIssueQueue {
       enqPolicy.canEnq := canEnq
       enqPolicy.enqSelOHVec
     }
+  }
+
+  class FltEarlyWakeUpBundle(val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
+    val wen = Bool()
+    val pdest = UInt(pregParams.addrWidth.W)
   }
 
   class FltWakeUpBundle(val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
