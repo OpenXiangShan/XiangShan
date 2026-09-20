@@ -331,7 +331,6 @@ class FrontendFuncovSampleHub:
             raise ValueError("duplicate functional coverage group/bin definition")
         if len(self.definition_by_bin_id) != len(defs):
             raise ValueError("duplicate functional coverage Bin_ID definition")
-        self.hits: Dict[Tuple[str, str, str], CoverageHit] = {}
         self.testcase_name = str(testcase_name)
         self.artifact_tag = str(artifact_tag)
         self.sampler_domains = _configured_sampler_domains()
@@ -631,20 +630,6 @@ class FrontendFuncovSampleHub:
     def attach_toffee_uncache_model(self, model) -> None:
         self.toffee_uncache_model = model
 
-    def raw_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.json"
-
-    def summary_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.summary.csv"
-
-    def unhit_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.unhit.csv"
-
-    def key_hit(self, coverage_group: str, bin_name: str, *, coverpoint: Optional[str] = None) -> bool:
-        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
-        hit = self.hits.get(key)
-        return bool(hit and hit.hits > 0)
-
     def sampler_domain_enabled(self, domain: str) -> bool:
         return "all" in self.sampler_domains or str(domain).strip().lower() in self.sampler_domains
 
@@ -679,19 +664,18 @@ class FrontendFuncovSampleHub:
         forward_to_toffee: bool = True,
         derive_owner: bool = True,
     ) -> bool:
+        """Route a coverage observation without maintaining a legacy hit ledger.
+
+        Formal SampleHub runs treat this as sampling/event plumbing for owner
+        derivation and optional transitional toffee forwarding.  Legacy hit
+        accumulation lives only on :class:`FunctionalCoverageRecorder`.
+        """
         key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         if key not in self.definition_by_key:
             raise KeyError(
                 "functional coverage sampler attempted an unmodeled bin: "
                 f"{key[0]}::{key[1]}::{key[2]}"
             )
-        hit = self.hits.setdefault(key, CoverageHit())
-        hit.hits += 1
-        hit.last_cycle = int(cycle)
-        if hit.first_cycle is None:
-            hit.first_cycle = int(cycle)
-        if evidence is not None and len(hit.evidence) < 8:
-            hit.evidence.append(_sanitize(evidence))
         if forward_to_toffee and self.toffee_sink is not None:
             self.toffee_sink.mark(
                 coverage_group,
@@ -1033,6 +1017,183 @@ class FrontendFuncovSampleHub:
             "FrontendFuncovSampleHub cannot write legacy funcov artifacts"
         )
 
+    def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        addr = int(payload.get("address", 0))
+        self._last_uncache_was_nc = bool(self._uncache_active_nc)
+        self._uncache_active_nc = False
+
+        for page, tail in self._uncache_page_tail_requests.items():
+            if addr == int(page) + 0x1000:
+                tail["next_page_requested"] = True
+        if addr & 0xFFF == 0xFF8:
+            self._uncache_page_tail_requests[addr & ~0xFFF] = {
+                "request_addr": addr,
+                "request_cycle": cycle,
+                "next_page_requested": False,
+            }
+
+    def _sample_uncache_cycle_state(self, dut, cycle: int, env, *, mark_target=None) -> None:
+        mark_target = self if mark_target is None else mark_target
+        pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
+        )
+        pmp_mmio = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
+        )
+        state = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
+        )
+        latched_pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
+        )
+        active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
+        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_toIBuf_decodeCanAccept")
+        if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
+            self._uncache_active_nc = True
+        if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
+            mark_target.mark(
+                "uncache_ordering",
+                "pbmt_nc_pmp_mmio_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
+            mark_target.mark(
+                "uncache_ordering",
+                "pbmt_io_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
+            mark_target.mark(
+                "uncache_ordering",
+                "pbmt_nc_non_mmio_no_commit_gate",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
+            )
+
+    def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
+        """Capture alignment/ownership facts without turning them into hits."""
+        valid = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
+            ),
+        )
+        enq = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
+            ),
+        )
+        if valid is None or enq is None:
+            return
+
+        masks: list[int] = []
+        for index in range(35):
+            value = self._read_first_dut_signal(
+                dut,
+                (
+                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
+                ),
+            )
+            if value is None:
+                break
+            masks.append(int(value) & 1)
+        if not masks:
+            return
+
+        enq_bits = int(enq)
+        mask_bits = sum(bit << index for index, bit in enumerate(masks))
+        invalid_mask = mask_bits & ~enq_bits
+        self.risk_observations.append(
+            {
+                "cycle": int(cycle),
+                "risk": "ibuffer_exception_mask_enq_alignment",
+                "valid": int(valid),
+                "enq_enable": enq_bits,
+                "exception_mask": mask_bits,
+                "mask_without_enq": int(invalid_mask),
+                "aligned": invalid_mask == 0,
+            }
+        )
+
+    @staticmethod
+    def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
+        size = max(1, int(size))
+        modulo = size * 2
+        newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
+        older = (int(older_flag) & 1) * size + (int(older_value) % size)
+        return (newer - older) % modulo
+
+
+class FunctionalCoverageRecorder(FrontendFuncovSampleHub):
+    """Legacy hit ledger and artifact writer.
+
+    Formal Toffee runs use :class:`FrontendFuncovSampleHub` directly.  This
+    subclass remains for optional audit and ``TB_ENABLE_TOFFEE_FUNCOV=0``
+    fallback until the independent deletion change.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.hits: Dict[Tuple[str, str, str], CoverageHit] = {}
+
+    def raw_path(self) -> Path:
+        return self.output_dir / f"{self.artifact_tag}.funcov.json"
+
+    def summary_path(self) -> Path:
+        return self.output_dir / f"{self.artifact_tag}.funcov.summary.csv"
+
+    def unhit_path(self) -> Path:
+        return self.output_dir / f"{self.artifact_tag}.funcov.unhit.csv"
+
+    def key_hit(self, coverage_group: str, bin_name: str, *, coverpoint: Optional[str] = None) -> bool:
+        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
+        hit = self.hits.get(key)
+        return bool(hit and hit.hits > 0)
+
+    def mark(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        cycle: int,
+        evidence: Optional[dict] = None,
+        *,
+        coverpoint: Optional[str] = None,
+        forward_to_toffee: bool = True,
+        derive_owner: bool = True,
+    ) -> bool:
+        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
+        if key not in self.definition_by_key:
+            raise KeyError(
+                "functional coverage sampler attempted an unmodeled bin: "
+                f"{key[0]}::{key[1]}::{key[2]}"
+            )
+        hit = self.hits.setdefault(key, CoverageHit())
+        hit.hits += 1
+        hit.last_cycle = int(cycle)
+        if hit.first_cycle is None:
+            hit.first_cycle = int(cycle)
+        if evidence is not None and len(hit.evidence) < 8:
+            hit.evidence.append(_sanitize(evidence))
+        return super().mark(
+            coverage_group,
+            bin_name,
+            cycle,
+            evidence,
+            coverpoint=coverpoint,
+            forward_to_toffee=forward_to_toffee,
+            derive_owner=derive_owner,
+        )
+
+    def write_artifacts(self) -> dict:
+        return self._write_legacy_artifacts()
+
     def _write_legacy_artifacts(self) -> dict:
         raw = self._raw_dict()
         raw_path = self.raw_path()
@@ -1089,7 +1250,7 @@ class FrontendFuncovSampleHub:
         *,
         artifact_tag: str,
         output_dir: Path,
-    ) -> "FrontendFuncovSampleHub":
+    ) -> "FunctionalCoverageRecorder":
         raw_list = [Path(p) for p in raw_paths]
         if not raw_list:
             raise ValueError("merge_raw_files requires at least one raw coverage json")
@@ -1219,119 +1380,6 @@ class FrontendFuncovSampleHub:
                     target.evidence.append(item)
         return merged
 
-    def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        addr = int(payload.get("address", 0))
-        self._last_uncache_was_nc = bool(self._uncache_active_nc)
-        self._uncache_active_nc = False
-
-        for page, tail in self._uncache_page_tail_requests.items():
-            if addr == int(page) + 0x1000:
-                tail["next_page_requested"] = True
-        if addr & 0xFFF == 0xFF8:
-            self._uncache_page_tail_requests[addr & ~0xFFF] = {
-                "request_addr": addr,
-                "request_cycle": cycle,
-                "next_page_requested": False,
-            }
-
-    def _sample_uncache_cycle_state(self, dut, cycle: int, env, *, mark_target=None) -> None:
-        mark_target = self if mark_target is None else mark_target
-        pbmt = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
-        )
-        pmp_mmio = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
-        )
-        state = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
-        )
-        latched_pbmt = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
-        )
-        active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
-        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_toIBuf_decodeCanAccept")
-        if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
-            self._uncache_active_nc = True
-        if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
-            mark_target.mark(
-                "uncache_ordering",
-                "pbmt_nc_pmp_mmio_wait_commit",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
-            )
-        if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
-            mark_target.mark(
-                "uncache_ordering",
-                "pbmt_io_wait_commit",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
-            )
-        if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
-            mark_target.mark(
-                "uncache_ordering",
-                "pbmt_nc_non_mmio_no_commit_gate",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
-            )
-
-    def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
-        """Capture alignment/ownership facts without turning them into hits."""
-        valid = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
-                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_valid",
-            ),
-        )
-        enq = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
-                "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable",
-            ),
-        )
-        if valid is None or enq is None:
-            return
-
-        masks: list[int] = []
-        for index in range(35):
-            value = self._read_first_dut_signal(
-                dut,
-                (
-                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
-                ),
-            )
-            if value is None:
-                break
-            masks.append(int(value) & 1)
-        if not masks:
-            return
-
-        enq_bits = int(enq)
-        mask_bits = sum(bit << index for index, bit in enumerate(masks))
-        invalid_mask = mask_bits & ~enq_bits
-        self.risk_observations.append(
-            {
-                "cycle": int(cycle),
-                "risk": "ibuffer_exception_mask_enq_alignment",
-                "valid": int(valid),
-                "enq_enable": enq_bits,
-                "exception_mask": mask_bits,
-                "mask_without_enq": int(invalid_mask),
-                "aligned": invalid_mask == 0,
-            }
-        )
-
-    @staticmethod
-    def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
-        size = max(1, int(size))
-        modulo = size * 2
-        newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
-        older = (int(older_flag) & 1) * size + (int(older_value) % size)
-        return (newer - older) % modulo
-
     def _raw_dict(self) -> dict:
         stats = {}
         errors: List[dict] = []
@@ -1456,15 +1504,3 @@ class FrontendFuncovSampleHub:
                 }
             )
         return rows
-
-
-class FunctionalCoverageRecorder(FrontendFuncovSampleHub):
-    """Legacy hit ledger and artifact writer.
-
-    Formal Toffee runs use :class:`FrontendFuncovSampleHub` directly.  This
-    subclass remains for optional audit and ``TB_ENABLE_TOFFEE_FUNCOV=0``
-    fallback until the independent deletion change.
-    """
-
-    def write_artifacts(self) -> dict:
-        return self._write_legacy_artifacts()

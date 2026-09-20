@@ -10,6 +10,7 @@ from toffee.funcov import CovGroup
 from env.funcov.recorder import default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.funcov.recorder import FunctionalCoverageRecorder
+from env.funcov.sample_hub import FrontendFuncovSampleHub
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     ICACHE_HITMISS_COVERPOINTS,
     ICACHE_HITMISS_SAMPLER_BIN_KEYS,
@@ -212,7 +213,7 @@ def test_toffee_funcov_artifact_has_compact_summary_and_stable_bin_ids(tmp_path)
 
 
 def test_toffee_artifact_normalizes_to_frontend_gate_schema(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="case",
         artifact_tag="case",
@@ -233,11 +234,11 @@ def test_toffee_artifact_normalizes_to_frontend_gate_schema(tmp_path) -> None:
     artifact_path = tmp_path / "case.toffee.funcov.json"
     metadata = {
         "mode": "formal",
-        "artifact_tag": recorder.artifact_tag,
-        "testcase_name": recorder.testcase_name,
-        "source_csv": recorder.source_csv,
-        "coverage_targets": recorder.coverage_targets,
-        "definitions": [vars(item) for item in recorder.definitions],
+        "artifact_tag": hub.artifact_tag,
+        "testcase_name": hub.testcase_name,
+        "source_csv": hub.source_csv,
+        "coverage_targets": hub.coverage_targets,
+        "definitions": [vars(item) for item in hub.definitions],
         "run": {
             "outcome": "passed",
             "exit_code": 0,
@@ -252,7 +253,7 @@ def test_toffee_artifact_normalizes_to_frontend_gate_schema(tmp_path) -> None:
         },
         "stats": {"monitor": {"cycles_total": 4, "error_count": 0}},
         "errors": [],
-        "provenance": recorder.provenance,
+        "provenance": hub.provenance,
     }
     sink.write_artifact(artifact_path, metadata=metadata)
 
@@ -330,22 +331,22 @@ class _CountingDut:
 
 
 def test_recorder_cycle_snapshot_reads_each_dut_value_once() -> None:
-    recorder = FunctionalCoverageRecorder.__new__(FunctionalCoverageRecorder)
-    recorder._dut_signal_cache = {}
-    recorder._missing_dut_signals = set()
-    recorder._cycle_snapshot_cycle = None
-    recorder._cycle_snapshot_values = {}
+    hub = FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub)
+    hub._dut_signal_cache = {}
+    hub._missing_dut_signals = set()
+    hub._cycle_snapshot_cycle = None
+    hub._cycle_snapshot_values = {}
     signal = _CountingSignal(7)
     dut = _CountingDut(signal)
 
-    recorder.begin_cycle_snapshot(12)
-    assert recorder._try_read_dut_signal(dut, "shared_signal") == 7
-    assert recorder._try_read_dut_signal(dut, "shared_signal") == 7
-    assert recorder._read_first_dut_signal(dut, ("shared_signal",)) == 7
+    hub.begin_cycle_snapshot(12)
+    assert hub._try_read_dut_signal(dut, "shared_signal") == 7
+    assert hub._try_read_dut_signal(dut, "shared_signal") == 7
+    assert hub._read_first_dut_signal(dut, ("shared_signal",)) == 7
     assert signal.reads == 1
 
-    recorder.begin_cycle_snapshot(13)
-    assert recorder._try_read_dut_signal(dut, "shared_signal") == 7
+    hub.begin_cycle_snapshot(13)
+    assert hub._try_read_dut_signal(dut, "shared_signal") == 7
     assert signal.reads == 2
 
 
@@ -412,7 +413,7 @@ class _AutoCountingDut:
 
 
 def test_direct_runtime_cycle_models_read_each_dut_signal_at_most_once(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-read-once",
         artifact_tag="runtime-read-once",
@@ -428,12 +429,12 @@ def test_direct_runtime_cycle_models_read_each_dut_signal_at_most_once(tmp_path)
             "page_table": None,
         },
     )()
-    recorder.env = env
+    hub.env = env
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
 
-    recorder.begin_cycle_snapshot(21)
-    recorder._read_dut_signal(dut, "reset", 0)
+    hub.begin_cycle_snapshot(21)
+    hub._read_dut_signal(dut, "reset", 0)
     for model in runtime.cycle_models:
         model.on_cycle(21)
     sink.flush_cycle(21)
@@ -447,18 +448,18 @@ def test_direct_runtime_cycle_models_read_each_dut_signal_at_most_once(tmp_path)
 
 
 def test_direct_runtime_rejects_dut_reads_without_cycle_snapshot(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-no-snapshot",
         artifact_tag="runtime-no-snapshot",
         output_dir=tmp_path,
     )
     dut = _AutoCountingDut()
-    recorder.env = type("Env", (), {"dut": dut})()
-    create_toffee_runtime(recorder, ToffeeCoverageSink.from_registry(default_pilot_csv_path()))
+    hub.env = type("Env", (), {"dut": dut})()
+    create_toffee_runtime(hub, ToffeeCoverageSink.from_registry(default_pilot_csv_path()))
 
     with pytest.raises(RuntimeError, match="active cycle snapshot"):
-        recorder._try_read_dut_signal(dut, "reset")
+        hub._try_read_dut_signal(dut, "reset")
 
 
 def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
@@ -477,7 +478,6 @@ def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
 
 
 def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None:
-    from env.funcov.sample_hub import FrontendFuncovSampleHub
     from env.funcov.runtime_context import FrontendFuncovRuntimeContext
 
     assert FrontendFuncovRuntimeContext is FrontendFuncovSampleHub
@@ -651,15 +651,15 @@ def test_toffee_remaining_ifu_models_contain_all_124_bins() -> None:
 
 
 def test_all_573_bins_are_native_installed(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-all-native",
         artifact_tag="runtime-all-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     native_bins = {
         (group["name"], point["name"], item["name"])
         for group in sink.report()
@@ -761,15 +761,15 @@ def test_backannotation_cli_is_read_only() -> None:
 
 
 def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-contract",
         artifact_tag="runtime-contract",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     keys = []
     for model in runtime.cycle_models:
         keys.extend(model.hit_counts())
@@ -780,15 +780,15 @@ def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
 
 
 def test_direct_runtime_defaults_to_no_audit_transfer(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-no-audit",
         artifact_tag="runtime-no-audit",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     # All direct domains are now native CovGroup models.
     assert runtime.cycle_models
     assert all(getattr(model, "_audit_recorder", None) is None for model in runtime.cycle_models)
@@ -815,15 +815,15 @@ def test_direct_runtime_defaults_to_no_audit_transfer(tmp_path) -> None:
 
 
 def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-cross-domain",
         artifact_tag="runtime-cross-domain",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     cfvec = next(
         model
         for model in runtime.cycle_models
@@ -859,8 +859,6 @@ def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> No
 
 
 def test_native_source_derivation_uses_toffee_hints_not_legacy_hits(tmp_path) -> None:
-    from env.funcov.sample_hub import FrontendFuncovSampleHub
-
     context = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-owner-derivation",
@@ -879,21 +877,21 @@ def test_native_source_derivation_uses_toffee_hints_not_legacy_hits(tmp_path) ->
         evidence={"event": "canonical-source"},
     )
 
-    assert context.hits == {}
+    assert not hasattr(context, "hits")
     assert sink.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_001")
     assert sink.hit_count_by_bin_id("BIN-899") == 1
 
 
 def test_hitmiss_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-hitmiss-native",
         artifact_tag="runtime-hitmiss-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     hitmiss = next(
         item
         for item in runtime.cycle_models
@@ -934,15 +932,15 @@ def test_hitmiss_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
 
 
 def test_mainpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-mainpipe-native",
         artifact_tag="runtime-mainpipe-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     mainpipe = next(
         item
         for item in runtime.cycle_models
@@ -983,15 +981,15 @@ def test_mainpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
 
 
 def test_prefetchpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-prefetch-native",
         artifact_tag="runtime-prefetch-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     prefetch = next(
         item
         for item in runtime.cycle_models
@@ -1032,15 +1030,15 @@ def test_prefetchpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path)
 
 
 def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-missunit-native",
         artifact_tag="runtime-missunit-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     missunit = next(
         item
         for item in runtime.cycle_models
@@ -1081,15 +1079,15 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
 
 
 def test_waylookup_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-waylookup-native",
         artifact_tag="runtime-waylookup-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     waylookup = next(
         item
         for item in runtime.cycle_models
@@ -1130,15 +1128,15 @@ def test_waylookup_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
 
 
 def test_two_fetch_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-two-fetch-native",
         artifact_tag="runtime-two-fetch-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     two_fetch = next(
         item
         for item in runtime.cycle_models
@@ -1178,15 +1176,15 @@ def test_two_fetch_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
     )
 
 def test_uncache_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> None:
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="runtime-uncache-native",
         artifact_tag="runtime-uncache-native",
         output_dir=tmp_path,
     )
-    recorder.env = type("Env", (), {"dut": object()})()
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    runtime = create_toffee_runtime(recorder, sink)
+    runtime = create_toffee_runtime(hub, sink)
     uncache = next(
         item
         for item in runtime.cycle_models
