@@ -614,6 +614,60 @@ class dispatch_monitor_event_adapter extends uvm_object;
         return detail;
     endfunction:describe_std_value_only_candidates
 
+    // STD raw只携带ROB value。active redirect期间，若两个可能flag下存在的
+    // active owner全部属于被flush范围，则该raw无需先恢复完整key即可判定为迟到事件。
+    function bit std_raw_covered_by_active_redirect(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw
+    );
+        bit active_owner_seen;
+        bit uncovered_owner_seen;
+
+        if (!data.active_redirect.valid) begin
+            return 1'b0;
+        end
+        active_owner_seen = 1'b0;
+        uncovered_owner_seen = 1'b0;
+        for (int unsigned flag_idx = 0; flag_idx < 2; flag_idx++) begin
+            memblock_rob_key_t rob_key;
+            memblock_uid_t uid;
+
+            rob_key.flag = flag_idx[0];
+            rob_key.value = raw.rob_value;
+            if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
+                continue;
+            end
+            active_owner_seen = 1'b1;
+            if (!rob_order_util::rob_need_flush(rob_key, data.active_redirect)) begin
+                uncovered_owner_seen = 1'b1;
+            end
+        end
+        return active_owner_seen && !uncovered_owner_seen;
+    endfunction:std_raw_covered_by_active_redirect
+
+    function bit std_raw_owned_by_fault(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw
+    );
+        for (int unsigned flag_idx = 0; flag_idx < 2; flag_idx++) begin
+            memblock_rob_key_t rob_key;
+            memblock_uid_t uid;
+
+            rob_key.flag = flag_idx[0];
+            rob_key.value = raw.rob_value;
+            if (data.lookup_active_uid_by_rob(rob_key, uid)) begin
+                status_transaction status;
+                status = data.get_status(uid);
+                if (status.fault || status.exception_pending || status.issue_killed ||
+                    status.flushed || status.redirect_pending) begin
+                    `uvm_info("DISP_MON_ADAPT",
+                              $sformatf("drop stale STD raw owned by fault uid=%0d rob=%0d/%0d port=%0d",
+                                        uid, rob_key.flag, rob_key.value, raw.port_id), UVM_LOW)
+                    return 1'b1;
+                end
+            end
+        end
+        return 1'b0;
+    endfunction:std_raw_owned_by_fault
+
     function void resolve_std_uid_by_rob_value_only(
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
         ref memblock_wb_event_t wb_event
@@ -867,6 +921,16 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_STD;
+                if (std_raw_covered_by_active_redirect(raw)) begin
+                    `uvm_info("DISP_MON_ADAPT",
+                              $sformatf("drop STD raw covered by active redirect rob_value=%0d port=%0d",
+                                        raw.rob_value, raw.port_id),
+                              UVM_LOW)
+                    return 1'b0;
+                end
+                if (std_raw_owned_by_fault(raw)) begin
+                    return 1'b0;
+                end
                 resolve_std_uid_by_rob_value_only(raw, wb_event);
             end
             default: `uvm_fatal("DISP_MON_ADAPT", "invalid V2 int-WB source kind")

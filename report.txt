@@ -1,0 +1,104 @@
+Time:128840000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128845000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128850000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128855000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128860000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128865000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128870000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128875000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128880000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128885000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128890000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128895000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0
+Time:128900000
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/allocated_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/committed_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/completed_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/addrvalid_49	1
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/datavalid_49	0
+top_tb/U_MEMBLOCK/inner_lsq/storeQueue/deqPtrExt_0_value	110001
+top_tb/U_MEMBLOCK/io_mem_to_ooo_sqDeq	0

@@ -23,6 +23,8 @@
 | `allocated` | entry 已分配，仍属于当前动态指令。它只表示槽位所有权，不表示地址、数据或 ROB 授权已到达。 | `allocated(i)`。 | dispatch 后为 1；正常物理出队或 redirect cancel 后清零。 |
 | `addrvalid` / `datavalid` | 地址侧或数据侧已经写入 SQ 的就绪位。二者均为 1 才构成普通 scalar store 的 `allvalid`。 | `addrvalid(i)`、`datavalid(i)`、`allvalid(i)`。 | STA 和 STD 可乱序抵达；load forwarding 因此必须单独检查两者。 |
 | `committed` | SQ 从 ROB 的 `pendingPtr` 顺序水位得到“这项可以进入下游完成”的许可。它不是直接等同于某一拍 `scommit`。 | `committed(i)`、`cmtPtrExt`。 | 普通 cacheable store 需先有此许可才可进入 DataBuffer。 |
+| 架构 commit | ROB 对无异常、满足完成条件的队头 entry 发出的正常退休动作；它会产生 `commitValid`、`scommit`、`pendingst` 等 sideband。 | ROB `io.commits.isCommit/commitValid`、`io.lsq.scommit/pendingst`。 | fault entry 在队头产生 exception redirect 时，不属于这类正常退休。 |
+| `pendingPtr` | ROB 每拍发布给 LSQ 的延迟 dequeue/head 位置，用于让 LSQ/SQ 知道哪些 entry 已到达顺序完成水位。它独立于同拍是否存在正常架构 commit。 | ROB `io.lsq.pendingPtr := RegNext(deqPtr)`。 | fault 停在 ROB head 时可仍发布该 fault 的 ROB key，而 `scommit=0`。 |
 | `completed` | entry 已完成 SQ 所需的下游交接或特殊事务响应，因此可以由 `deqPtrExt` 物理释放。它不是架构层的 ROB commit。 | `completed(i)`、`sqDeqCnt`。 | SBuffer 接收普通 store、NC 得到 ack/response、MMIO writeback 后都会置位。 |
 | `rdataPtrExt` | SQ 当前从地址/数据 RAM 取数、准备构造 DataBuffer 或 Uncache 请求的读调度指针。 | `rdataPtrExt`。 | 它可以因 DataBuffer 接收、NC 完成或 MMIO writeback 前移；不等同于实际释放指针。 |
 | `deqPtrExt` | SQ 物理释放指针。只跨过从队头开始连续满足 `allocated && completed` 的 entry。 | `deqPtrExt`、`sqDeqCnt`、`io.sqDeq`。 | 前一项未完成时，后一项即使已完成也不能越过它出队。 |
@@ -535,6 +537,51 @@ when(isCommit && nc(ptr) && hasException(ptr)) {
    因而“entry 已 committed”与“同一拍 ROB 发出 scommit”不是等价命题。
 6. 已 committed 的 NC exception 直接置 completed，不发普通 NC request；普通 NC 必须等它自己的
    Uncache ack/response 才能 completed。
+
+#### 6.1 fault head 的架构异常、`pendingPtr` 与 SQ `committed` 不是同一概念
+
+源码位置：`Rob.scala:635-685,765-853`；`StoreQueue.scala:1131-1169,1483-1494`。
+
+抽象功能描述：ROB 在 fault 到达队头时产生精确 exception redirect，阻止这条 fault 走正常架构退休；但 ROB
+仍持续把延迟 `deqPtr` 发布为 LSQ `pendingPtr`。StoreQueue 因此可以把该 ROB key 覆盖范围内、S2 信息已稳定的
+SQ entry 标为内部 `committed`，随后按异常 drain 或其他物理完成路径释放。这种 SQ `committed` 不表示 fault store
+写入架构内存，也不表示 ROB 已产生正常 `scommit`。
+
+关键逻辑：
+
+```scala
+// Rob.scala
+io.flushOut.valid := (state === s_idle) && deqPtrEntryValid &&
+  (intrEnable || deqCanException || deqCanFlushPipe) && !lastCycleFlush
+io.commits.isCommit := state === s_idle && !blockCommit
+io.lsq.scommit := RegNext(Mux(io.commits.isCommit, PopCount(stCommitVec), 0.U))
+io.lsq.pendingPtr := RegNext(deqPtr)
+
+// StoreQueue.scala
+when (allocated(ptr) &&
+      isNotAfter(uop(ptr).robIdx, GatedRegNext(io.rob.pendingPtr)) &&
+      !needCancel(ptr) && (!waitStoreS2(ptr) || isVec(ptr))) {
+  committed(ptr) := true.B
+}
+needCancel(i) := allocated(i) && !committed(i) && uop(i).robIdx.needFlush(io.brqRedirect)
+```
+
+文字伪代码：
+
+```text
+1. fault 到达 ROB 队头时，ROB 以 `flushOut.valid` 产生异常 redirect；该路径不是正常 `commitValid` 退休。
+2. `scommit` 只从正常 `io.commits.isCommit && commitValid` 的 store lane 统计；fault exception 时它可以为 0。
+3. `pendingPtr` 不以 `commitValid` 或 `scommit` 为条件，而是直接由延迟 `deqPtr` 发布。因此 fault 仍处 ROB head
+   时，LSQ 可观察到该 fault 的 ROB key。
+4. StoreQueue 使用 pendingPtr 作为内部顺序水位。若 SQ entry 已分配、S2 已稳定且未在同拍被 cancel，它可置
+   `committed=1`；这只意味着该物理 SQ entry 不再允许 redirect cancel。
+5. redirect 的 `needCancel` 明确排除 committed entry。故已 committed 的 fault SQ 必须通过异常 drain 形成
+   `completed -> sqDeq`，而不是被重新发射、伪造 STD 或由测试框架直接释放。
+```
+
+UID517 的适用说明：该场景中 `pendingPtr=ROB 1/150` 覆盖 SQ49 后，SQ49 可合法成为 `committed`，即使同一
+fault 没有正常架构 commit、`scommit=0`。其架构结果仍是 exception redirect；SQ `committed` 仅保留物理资源
+收敛责任。
 ```
 
 ### 7. 普通 cacheable drain：DataBuffer、SBuffer、完成与物理出队
@@ -1195,6 +1242,7 @@ NC 跨16B 边界不得直接外推到 V3。
 | 2026-09-14 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | `io.sbuffer(i).fire && sqNeedDeq && !wline` 只写成“非 wline 才完成”，未拆解 `wline` 的来源、有效门控和 CBO 专用完成链。 | 明确 `wline` 来自 CBO 的 `wlineflag -> rlineflag -> DataBuffer`，对外实际值为 `raw_wline && vecValid`；普通/跨 16B 高片段经通用 fire 完成，而有效 CBO.zero 必须等待 SBuffer flush 后的 `cboZeroStout.fire`。 | 用户追问该条件中的 `io.sbuffer(i).bits.wline` 的硬件语义。 | SQ completion、CBO.zero、DataBuffer/SBuffer checker 与异常 no-write drain。 |
 | 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | “vector MMIO/NC 未实现”容易被理解为 vector 访问这些属性时没有行为。 | 明确 cacheable vector store 走 `VSSplit -> StoreUnit -> StoreQueue -> DataBuffer/SBuffer -> DCache`；vector 访问实际 MMIO/NC 地址时由 StoreUnit S2 置 `storeAccessFault`，不进入正常 vector Uncache request/response/writeback。`vecmmioStout.valid` 固定 0，`ncState` 要求 `!isVec`；SQ 侧通过 vector exception/feedback、no-write drain 或 NC direct-complete 清理 bookkeeping。 | 用户要求将 vector MMIO/NC 支持范围和异常收敛语义整合到 feature flow。 | vector store、StoreUnit S2 属性判定、StoreQueue、VSMergeBuffer、Uncache 排除边界。 |
 | 2026-09-15 | `1567628320ef77e1de1a3ae7a7c7057423e842b4` | CMO error 段把 SQ 没有专用 `Uncache.busError` 误写成所有 CMO denied/corrupt 都不会形成任何 BEU，未区分本地 cache ECC 与事务 response。 | 明确 L1/L2 本地 ECC 可由故障 cache 独立上报 BEU，但 `CBOAck` 还承载本条 CBO 的精确事务结果；CHI `NDERR` 不进入 L2 本地 ECC BEU。当前 SQ 漏在 `cmoOpResp.fire` 捕获错误仍是功能 bug，并由后续 V2 上游 `#6554` 的源码修复和动态 reproducer 进一步确认。 | 用户提出“各 cache 已报 BEU，所以 SQ 无需处理 CMO response error”的反向判断，要求复核完整 Probe/L2/CHI/BEU 路径。 | DCache CMOUnit、CoupledL2 CBO MSHR、L1/L2 BEU、StoreQueue 精确异常和 stale sideband watcher。 |
+| 2026-09-20 | `d9f0f5757f6f95d6c8a8810109a16aff9eb7fa86` | 原 flow 只描述普通分支以 `allvalid || hasException` 支持 scalar exception drain，未单列 cross-16B priority branch 的差异。 | 明确跨 16B priority branch 仍硬要求 scalar `allvalid`，会使已 `committed && hasException && datavalid=0` 的 cacheable cross-16B store 无法进入 DataBuffer，造成 `completed/sqDeq` 永久停滞；该问题不同于 NC cross16 读指针双计数跳项。 | UID517 波形和两轮独立 Scala/FSDB review 确认 cross16、exception、committed、DataBuffer valid 和 SQ pointer 的闭环。 | StoreQueue cross16 exception drain、ROB fault redirect、DataBuffer/SBuffer、SQ resource release。 |
 
 ## 待确认项
 

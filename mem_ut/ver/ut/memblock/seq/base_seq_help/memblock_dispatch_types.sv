@@ -330,6 +330,46 @@ typedef bit [MEMBLOCK_ROB_VALUE_W:0] memblock_rob_map_key_t;
 typedef bit [MEMBLOCK_LQ_VALUE_W:0]  memblock_lq_map_key_t;
 typedef bit [MEMBLOCK_SQ_VALUE_W:0]  memblock_sq_map_key_t;
 
+// 中文注释：redirect 删除 active LQ/SQ owner 前保存的单代旧实例身份。
+// 写入：redirect active UID 扫描；清除：迟到 deq 消费或剩余 cancel 应用完成。
+// 作用：active map 已删除后，仍可把 RTL 流水线中的迟到 deq 归属到旧 dynamic epoch。
+typedef struct {
+    bit            valid;
+    memblock_uid_t uid;
+    int unsigned   old_dynamic_epoch;
+    int unsigned   redirect_epoch;
+    int unsigned   cancel_record_id;
+} memblock_redirect_deleted_owner_t;
+
+typedef enum bit {
+    // 当前 active map 中仍存在的普通 LQ/SQ owner。
+    MEMBLOCK_DEQ_OWNER_LIVE = 1'b0,
+    // 当前单代 redirect 临时表中保存的旧动态实例 owner。
+    MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED = 1'b1
+} memblock_deq_owner_kind_e;
+
+// 中文注释：LQ deq 预检冻结项。预检写入，联合提交只消费该快照，
+// 避免 LQ/SQ 两侧预检完成前公共 map 变化造成部分提交。
+typedef struct {
+    memblock_lq_key_t         key;
+    memblock_deq_owner_kind_e owner_kind;
+    memblock_uid_t            uid;
+    int unsigned              old_dynamic_epoch;
+    int unsigned              redirect_epoch;
+    int unsigned              cancel_record_id;
+} memblock_lq_deq_apply_item_t;
+
+// 中文注释：SQ deq 预检冻结项；语义与 LQ apply item 相同，但保留
+// SQ 自身的完整 flag/value key，避免两种物理指针宽度被混用。
+typedef struct {
+    memblock_sq_key_t         key;
+    memblock_deq_owner_kind_e owner_kind;
+    memblock_uid_t            uid;
+    int unsigned              old_dynamic_epoch;
+    int unsigned              redirect_epoch;
+    int unsigned              cancel_record_id;
+} memblock_sq_deq_apply_item_t;
+
 typedef struct packed {
     bit                valid;
     bit                flush_itself;
@@ -807,6 +847,32 @@ typedef struct {
 } memblock_cancel_reconcile_t;
 
 typedef memblock_cancel_reconcile_t memblock_lsq_cancel_record_t;
+
+// A fault LSQ resource is held until the DUT makes its final reclaim path
+// observable.  It intentionally has one owner because fault recovery is
+// serialized by the commit head.
+typedef enum bit [2:0] {
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_NONE = 3'd0,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_LQ_CANCEL_PENDING = 3'd1,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_CANDIDATE = 3'd2,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_WAIT_SQ_DEQ = 3'd3,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED_WAIT_RECORD_APPLY = 3'd4,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED = 3'd5,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_LATE_DEQ = 3'd6,
+    MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_DEQED = 3'd7
+} memblock_fault_lsq_disposition_e;
+
+typedef struct {
+    bit                                 valid;
+    memblock_uid_t                      uid;
+    int unsigned                        dynamic_epoch;
+    bit                                 is_lq;
+    memblock_lq_key_t                   lq_key;
+    memblock_sq_key_t                   sq_key;
+    int unsigned                        redirect_epoch;
+    int unsigned                        cancel_record_id;
+    memblock_fault_lsq_disposition_e    disposition;
+} memblock_fault_redirect_resource_t;
 
 typedef struct {
     bit                         valid;

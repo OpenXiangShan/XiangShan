@@ -40,6 +40,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     extern function void apply_pending_lsq_cancels();
     extern task wait_for_main_table();
     extern function bit admission_blocked_by_flush();
+    extern function bit lsq_allocating_admission_blocked();
     extern function bit next_uid_needs_lsq_admission(output memblock_uid_t uid,
                                                      output main_control_transaction main_tr,
                                                      output memblock_op_behavior_t behavior);
@@ -260,6 +261,12 @@ function void memblock_lsqenq_dispatch_base_sequence::apply_pending_lsq_cancels(
         if (!data.cancel_record_q[idx].software_count_finalized) begin
             break;
         end
+        // fault SQ cancel count is decided by the target DUT snapshot.  Do
+        // not apply a provisional zero-count record before that observation.
+        if (data.fault_sq_candidate_snapshot_pending(
+                data.cancel_record_q[idx].redirect_epoch)) begin
+            break;
+        end
         lq_count = data.cancel_record_q[idx].software_cancel_lq_count;
         sq_count = data.cancel_record_q[idx].software_cancel_sq_count;
         redirect_epoch = data.cancel_record_q[idx].redirect_epoch;
@@ -312,6 +319,14 @@ function bit memblock_lsqenq_dispatch_base_sequence::admission_blocked_by_flush(
     ensure_helpers();
     return data.issue_blocked_by_global_flush();
 endfunction:admission_blocked_by_flush
+
+// 中文注释：只阻止需要分配物理 LQ/SQ key 的新 launch。control、non-LSQ
+// admission 和已经 launch 的 pending sample 保持原有 flush/epoch 语义。
+function bit memblock_lsqenq_dispatch_base_sequence::lsq_allocating_admission_blocked();
+    ensure_helpers();
+    return admission_blocked_by_flush() ||
+           data.redirect_deleted_owner_window_pending();
+endfunction:lsq_allocating_admission_blocked
 
 function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admission(output memblock_uid_t uid,
                                                                              output main_control_transaction main_tr,
@@ -408,6 +423,9 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
         end
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         if (behavior.need_alloc == 2'b00) begin
+            break;
+        end
+        if (lsq_allocating_admission_blocked()) begin
             break;
         end
         if (behavior.num_ls_elem != memblock_num_ls_elem_t'(1)) begin

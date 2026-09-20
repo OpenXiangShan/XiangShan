@@ -148,7 +148,8 @@ class exception_redirect_replay_handler extends uvm_object;
         bit timed_out;
 
         ensure_data();
-        if (data.active_redirect.valid) begin
+        if (data.active_redirect.valid ||
+            data.redirect_deleted_owner_window_pending()) begin
             // active redirect期间route/issue整体冻结，PTW wait replay保持等待，避免先置replay_pending再被flush清掉。
             return;
         end
@@ -244,6 +245,11 @@ class exception_redirect_replay_handler extends uvm_object;
         service_ptw_wait_replay();
         advance_active_redirect();
         if (data.active_redirect.valid) begin
+            return;
+        end
+        // 中文注释：单代旧 owner 窗口内不能启动第二 redirect 或恢复 replay。
+        // 事件仍留在公共 queue/fault token 中，窗口清理后按原优先级继续。
+        if (data.redirect_deleted_owner_window_pending()) begin
             return;
         end
 

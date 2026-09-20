@@ -206,6 +206,10 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     end
     monitor_adapter.drain_lsq_timing_sidebands();
     collect_monitor_event_batch();
+    // 中文注释：本拍 raw deq 必须先获得旧 owner 匹配机会；窗口到期、
+    // provisional cancel finalize 和第二 redirect 放行只能发生在其后。
+    data.service_redirect_deleted_owner_window(
+        memblock_sync_pkg::peek_current_dut_global_sample());
     exception_redirect_replay_task();
     // redirect scan 可能在 exception handler 中刚刚 finalize software count；
     // 再 drain 一次可收集处理期间到达的 sideband；同一 service tick 只在此处

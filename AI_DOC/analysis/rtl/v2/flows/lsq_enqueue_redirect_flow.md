@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `a58ea2ee3aacd29cd536a72c1418811008613ef3` |
+| 核验 commit | `d9f0f5757f6f95d6c8a8810109a16aff9eb7fa86` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-09-08` |
+| 最后核验日期 | `2026-09-17` |
 
 ## Flow 范围
 
@@ -22,6 +22,12 @@ LSQ 入队判断；它在 ROB 头产生 `flushAfter` redirect 后，才通过公
 间接阻止或取消更年轻的 LSQ 入队。`flushPipe` 的生产和 ROB 处理详见
 [Memory flushPipe flow](memory_flush_pipe_flow.md)。
 
+本文区分完整Core与standalone `MemBlock`两个入口。完整Core由
+`NewDispatch/LsqEnqCtrl`产生`enqLsq`；当前生成的`MemBlock`顶层直接把外部六路
+`io_ooo_to_mem_enqLsq_*`输入连接到`LsqWrapper`，没有导出`ready/canAccept/resp`，也没有在
+`MemBlock`内实例化`LsqEnqCtrl`。standalone driver承担完整Core上游原本保证的容量、index和
+redirect恢复时序合同。
+
 ## 核心结论
 
 一笔 Load/Store 真正写入 LQ/SQ，需要依次满足：
@@ -29,6 +35,18 @@ LSQ 入队判断；它在 ROB 头产生 `flushAfter` redirect 后，才通过公
 1. `NewDispatch` 对应 `fromRename(i).fire`，并根据指令类型生成非零 `needAlloc`。
 2. `LsqEnqCtrl` 的 `do_enq = enq.valid && !redirect.valid && enq.canAccept`。
 3. 下一拍到达实际 LQ/SQ 时，请求 `valid` 且该 uop 的 `robIdx.needFlush(redirect)` 为假。
+
+以上三层描述完整Core路径。对standalone `MemBlock`，步骤1和2已经由外部测试框架替代：
+顶层`req.valid/needAlloc/payload`直接进入`LsqWrapper`，但步骤3仍由
+`VirtualLoadQueue/StoreQueue`执行。因此顶层无ready并不表示redirect后任意拍的valid都会被
+合法接收。
+
+生成Verilog中，外部`io_redirect_valid`先寄存为
+`inner_redirect_next_valid_last_REG`，下一拍才送入`LsqWrapper`。该内部redirect有效拍，新的同
+anchor或更年轻ROB enqueue被`enqCancel`屏蔽；后续`lastCycleRedirect`锁存cancel count，
+`lastLastCycleRedirect`再回退enqueue pointer。standalone在这段窗口强行发送不会得到ready
+反压：请求要么被cancel，要么与尚未完成恢复的pointer更新冲突。测试框架必须等待既有
+redirect/cancel闭环恢复软件pointer后，再以恢复后的连续key重新入队。
 
 `redirect.valid` 有三重作用：在 `LsqEnqCtrl` 阻止新请求越过寄存边界，在 LQ/SQ
 取消同拍属于 flush 范围的请求，并将已经分配但未提交的更年轻 entry 失效后回退
@@ -573,6 +591,7 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 | 2026-08-18 | `4ce3563a01254700ed5828797f288bafcc2b491c` | 已说明 segment/MOU 不进入普通 LSQ，但没有把共享 `req.valid`、`needAlloc` 和 queue 侧 `allocated` 的三层关系写清楚，也未列出非访存 vector uop。 | 增加 `req.valid` 与物理 entry 的区分，列出 vector arithmetic/vset、segment、FOF data/tail 的完整分类和源码条件。 | 用户追问哪些向量类型不进入 LSQ。 | V2 NewDispatch、LsqEnqCtrl、LsqWrapper、LQ/SQ、VSegmentUnit、VfofBuffer。 |
 | 2026-08-21 | `4ce3563a01254700ed5828797f288bafcc2b491c` | vector store fault 只按 feedback、`sqDeq` 和 redirect cancel 描述，未说明宏指令尾 `lastUop` 对异常后 SBuffer 写入的影响。 | 增加 `lastUop -> vecLastFlow -> vecExceptionFlag` 的 StoreQueue 收尾链，明确它是同一 `robIdx` 后续 vector-store 写入抑制边界，不替代 deq/cancel 规则。 | 用户追问 FOF 之外的 `lastUop` 影响。 | V2 LsqEnq、StoreQueue、SBuffer、vector store fault。 |
 | 2026-09-08 | `a58ea2ee3aacd29cd536a72c1418811008613ef3` | 现有 flow 覆盖 LSQ admission/redirect，但未按实际 Scala/Verilog 层级区分核心策略模块、数据支撑模块和集成 wrapper。 | 补充 `LsqEnqCtrl`、LQ/SQ 主体及 RAR/RAW/Replay/Uncache 的职责分类，明确 `LsqWrapper`/`LoadQueue` 是集成为主但含少量跨模块控制，且两类 MisalignBuffer 与 LSQ 并列而非内部子模块。 | 用户要求结合 Scala 与 Verilog 分析 LSQ 内部模块边界和核心特性。 | V2 NewDispatch、MemBlock、LsqWrapper、LoadQueue、StoreQueue 及生成 RTL。 |
+| 2026-09-17 | `d9f0f5757f6f95d6c8a8810109a16aff9eb7fa86` | redirect恢复主要按完整Core的`LsqEnqCtrl.canAccept`描述，容易被误读为standalone MemBlock顶层也导出ready，或反向误读为无ready即可任意拍入队。 | 增加standalone边界：MemBlock顶层无ready并直连LsqWrapper，但内部redirect延迟、`enqCancel`、cancel count和pointer回退仍生效；driver必须按恢复窗口发送。 | 用户要求直接查看生成Verilog接口，确认redirect后T1能否复用旧key入队发射。 | V2 MemBlock顶层、LsqWrapper、VirtualLoadQueue、StoreQueue、lsqenq agent。 |
 
 ## 待确认项
 

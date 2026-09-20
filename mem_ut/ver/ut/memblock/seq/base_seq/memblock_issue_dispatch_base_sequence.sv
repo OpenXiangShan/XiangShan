@@ -95,6 +95,21 @@ task memblock_issue_dispatch_base_sequence::drive_dispatch_issue_loop();
             idle_count++;
             if (no_progress_warn_cycles != 0 &&
                 (idle_count % no_progress_warn_cycles) == 0) begin
+                if (data.std_issue_q.size() != 0) begin
+                    status_transaction status;
+                    memblock_issue_q_item_t item;
+
+                    item = data.std_issue_q[0];
+                    status = data.get_status(item.uid);
+                    `uvm_info(get_type_name(),
+                              $sformatf("blocked STD queue head uid=%0d replay=%0d dyn_epoch=%0d ready=%0d status(active/enq/ready/fault/exc/killed/queued/dispatched)=%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d",
+                                        item.uid, item.replay_seq,
+                                        item.dynamic_epoch, item.ready_cycle,
+                                        status.active, status.enq, status.issue_ready,
+                                        status.fault, status.exception_pending,
+                                        status.issue_killed, status.queued_std,
+                                        status.std_dispatched), UVM_LOW)
+                end
                 `uvm_error(get_type_name(),
                            $sformatf("issue queue has pending work but no fire for %0d issue-loop iterations: iteration=%0d terminal_done_uid=%0d main_trans_num=%0d load_q=%0d sta_q=%0d std_q=%0d",
                                      idle_count,

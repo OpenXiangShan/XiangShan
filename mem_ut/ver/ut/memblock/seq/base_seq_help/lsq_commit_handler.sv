@@ -127,6 +127,9 @@ class lsq_commit_handler extends uvm_object;
             `uvm_fatal("LSQ_COMMIT",
                        "real-dispatch fault recovery requires MEMBLOCK_REDIRECT_SEQ_EN=1")
         end
+        if (data.redirect_deleted_owner_window_pending()) begin
+            return 1'b0;
+        end
         if (data.active_redirect.valid || data.has_pending_redirect_drive() ||
             data.issue_blocked_by_global_flush() || has_pending_monitor_redirect()) begin
             return 1'b0;
@@ -153,11 +156,47 @@ class lsq_commit_handler extends uvm_object;
 
     // fault terminal 已确定后的统一收口。该函数不创建 redirect；调用者已经完成仲裁。
     function void finish_fault_head_terminal();
+        if (data.fault_redirect_resource_matches(fault_head_uid,
+                                                 fault_head_dynamic_epoch)) begin
+            data.complete_fault_redirect_resource(fault_head_uid);
+        end
         commit_cursor_uid = fault_head_uid + 1;
         clear_fault_head_token();
         modeled_head_valid = 1'b0;
         rebase_framework_head_from_commit_cursor();
     endfunction:finish_fault_head_terminal
+
+    // 抽象职责：已有redirect覆盖fault head且其LQ/SQ owner均已释放后，清除旧
+    // recovery gate并完成异常terminal。该路径只收口软件状态，不生成新的DUT
+    // redirect/deq，也不把fault UID重新路由。
+    function bit force_fault_head_terminal_after_redirect();
+        status_transaction status;
+
+        ensure_handles();
+        if (!fault_head_waiting || data.active_redirect.valid ||
+            data.issue_blocked_by_global_flush()) begin
+            return 1'b0;
+        end
+        status = data.get_status(fault_head_uid);
+        if (!status.active || status.dynamic_epoch != fault_head_dynamic_epoch ||
+            !status.rob_commit || status.active_lq_mapped || status.active_sq_mapped) begin
+            return 1'b0;
+        end
+        if (data.fault_redirect_resource_blocks_retire(fault_head_uid)) begin
+            return 1'b0;
+        end
+        data.quiesce_fault_uid_pending_work(fault_head_uid);
+        status.replay_pending  = 1'b0;
+        status.redirect_pending = 1'b0;
+        status.flushed          = 1'b0;
+        status.issue_killed     = 1'b0;
+        data.consume_fault_retire(fault_head_uid);
+        `uvm_info("LSQ_COMMIT",
+                  $sformatf("force fault terminal uid=%0d after covered redirect",
+                            fault_head_uid),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:force_fault_head_terminal_after_redirect
 
     function void ensure_modeled_rob_deq_ptr_initialized();
         ensure_handles();
@@ -355,10 +394,32 @@ class lsq_commit_handler extends uvm_object;
     endfunction:select_rob_commit_batch
 
     function bit select_fault_head_candidate(output memblock_uid_t uid);
+        status_transaction status;
+        memblock_uid_t resolved_uid;
+        memblock_rob_key_t status_rob_key;
+        bit map_hit;
         uid = 0;
         ensure_handles();
         ensure_modeled_rob_deq_ptr_initialized();
         if (data.issue_blocked_by_global_flush() || fault_head_waiting) begin
+            if (commit_cursor_uid < data.main_trans_num) begin
+                status = data.get_status(commit_cursor_uid);
+                if (status.fault || status.exception_pending || status.load_fault ||
+                    status.sta_fault || status.std_fault) begin
+                    `uvm_info("LSQ_COMMIT_DIAG",
+                              $sformatf("fault selector gated cursor=%0d fault_waiting=%0d active_redirect=%0d flush_in_progress=%0d freeze_ack=%0d pending_drive=%0d sync_flush=%0d owner_window=%0d status active=%0d rob_commit=%0d replay=%0d redirect=%0d flushed=%0d killed=%0d epoch=%0d",
+                                        commit_cursor_uid, fault_head_waiting,
+                                        data.active_redirect.valid, data.flush_in_progress,
+                                        data.issue_freeze_ack, data.has_pending_redirect_drive(),
+                                        memblock_sync_pkg::dispatch_flush_in_progress,
+                                        data.redirect_deleted_owner_window_pending(),
+                                        status.active, status.rob_commit,
+                                        status.replay_pending, status.redirect_pending,
+                                        status.flushed, status.issue_killed,
+                                        status.dynamic_epoch),
+                              UVM_LOW)
+                end
+            end
             return 1'b0;
         end
         rebase_framework_head_from_commit_cursor();
@@ -366,10 +427,39 @@ class lsq_commit_handler extends uvm_object;
             return 1'b0;
         end
         uid = commit_cursor_uid;
+        status = data.get_status(uid);
+        status_rob_key = status.get_rob_key();
         if (!uid_is_fault_terminal_candidate(uid)) begin
+            if (status.fault || status.exception_pending || status.load_fault ||
+                status.sta_fault || status.std_fault) begin
+                `uvm_info("LSQ_COMMIT_DIAG",
+                          $sformatf("fault selector rejected uid=%0d active=%0d enq=%0d issue_ready=%0d wb=%0d fault/exc/load/sta/std=%0d/%0d/%0d/%0d/%0d rob_commit=%0d replay=%0d redirect=%0d flushed=%0d killed=%0d terminal=%0d epoch=%0d cursor=%0d modeled_valid=%0d modeled_rob=%0d/%0d active_redirect=%0d flush=%0d owner_window=%0d",
+                                    uid, status.active, status.enq, status.issue_ready,
+                                    status.writeback, status.fault, status.exception_pending,
+                                    status.load_fault, status.sta_fault, status.std_fault,
+                                    status.rob_commit, status.replay_pending,
+                                    status.redirect_pending, status.flushed, status.issue_killed,
+                                    status.terminal_done, status.dynamic_epoch,
+                                    commit_cursor_uid, modeled_head_valid,
+                                    modeled_rob_deq_ptr.flag, modeled_rob_deq_ptr.value,
+                                    data.active_redirect.valid, data.flush_in_progress,
+                                    data.redirect_deleted_owner_window_pending()),
+                          UVM_LOW)
+            end
             return 1'b0;
         end
+        map_hit = data.lookup_active_uid_by_rob(modeled_rob_deq_ptr, resolved_uid);
         if (!resolve_sideband_head_uid(uid) || uid != commit_cursor_uid) begin
+            `uvm_info("LSQ_COMMIT_DIAG",
+                      $sformatf("fault selector head mismatch uid=%0d resolved=%0d map_hit=%0d map_uid=%0d cursor=%0d modeled=%0d/%0d status_rob=%0d/%0d active=%0d terminal=%0d flushed=%0d killed=%0d active_redirect=%0d flush=%0d owner_window=%0d",
+                                uid, uid, map_hit, resolved_uid, commit_cursor_uid,
+                                modeled_rob_deq_ptr.flag, modeled_rob_deq_ptr.value,
+                                status_rob_key.flag, status_rob_key.value,
+                                status.active, status.terminal_done, status.flushed,
+                                status.issue_killed, data.active_redirect.valid,
+                                data.flush_in_progress,
+                                data.redirect_deleted_owner_window_pending()),
+                      UVM_LOW)
             return 1'b0;
         end
         return data.get_status(uid).get_rob_key() == modeled_rob_deq_ptr;
@@ -659,6 +749,9 @@ class lsq_commit_handler extends uvm_object;
         status = data.get_status(uid);
         status.rob_commit = 1'b1;
         status.last_event_cycle = $time;
+        // fault commit是该动态实例停止发射的稳定边界。只清掉尚未fire的
+        // issue/replay工作，LQ/SQ owner仍由fault exception release路径处理。
+        data.quiesce_fault_uid_pending_work(uid);
         fault_head_waiting = 1'b1;
         fault_head_uid = uid;
         fault_head_dynamic_epoch = status.dynamic_epoch;
@@ -672,6 +765,7 @@ class lsq_commit_handler extends uvm_object;
 
     function bit sync_modeled_head_after_fault_terminal();
         status_transaction status;
+        bit                terminal_ready;
 
         ensure_modeled_rob_deq_ptr_initialized();
         if (!fault_head_waiting) begin
@@ -691,15 +785,33 @@ class lsq_commit_handler extends uvm_object;
             rebase_framework_head_from_commit_cursor();
             return 1'b0;
         end
-        if (!status.terminal_done || !status.lsq_deq || status.active || status.success ||
-            !status.fault || status.active_lq_mapped || status.active_sq_mapped) begin
-            return 1'b0;
+        // Fault entry的LQ/SQ deq可能与active redirect重叠。deq handler会先释放
+        // mapping，但按统一规则暂不retire；redirect解除后由fault token补做终态收口。
+        if (status.active && !status.active_lq_mapped &&
+            !status.active_sq_mapped && !data.active_redirect.valid &&
+            !data.issue_blocked_by_global_flush()) begin
+            data.try_retire_committed_uid(fault_head_uid);
+            status = data.get_status(fault_head_uid);
+        end
+        terminal_ready = status.terminal_done && status.lsq_deq &&
+                         !status.active && !status.success && status.fault &&
+                         !status.active_lq_mapped && !status.active_sq_mapped;
+
+        // 当前fault已经由自己的redirect或更老redirect覆盖，且异常资源和
+        // terminal状态均已收口时，不能再被其它年轻redirect token饿死。先
+        // 完成当前fault token并推进commit cursor，后续redirect继续按原规则仲裁。
+        if (terminal_ready && fault_head_redirect_covered) begin
+            finish_fault_head_terminal();
+            return 1'b1;
         end
 
         if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
             // software-only fault sequence 没有 redirect responder/monitor，保持旧 terminal rebase。
-            finish_fault_head_terminal();
-            return 1'b1;
+            if (terminal_ready) begin
+                finish_fault_head_terminal();
+                return 1'b1;
+            end
+            return 1'b0;
         end
         if (has_pending_monitor_redirect()) begin
             // 让 recovery handler 先仲裁真实 monitor redirect，避免并发分配 cancel record。
@@ -716,14 +828,30 @@ class lsq_commit_handler extends uvm_object;
         end
         if (fault_head_redirect_covered) begin
             // 已完成的覆盖 redirect 已负责年轻 UID 的 cancel/reissue，fault 本身仍只做 terminal skip。
-            finish_fault_head_terminal();
-            return 1'b1;
+            void'(force_fault_head_terminal_after_redirect());
+            status = data.get_status(fault_head_uid);
+            if (status.active && !status.active_lq_mapped &&
+                !status.active_sq_mapped && !data.active_redirect.valid &&
+                !data.issue_blocked_by_global_flush()) begin
+                data.try_retire_committed_uid(fault_head_uid);
+                status = data.get_status(fault_head_uid);
+            end
+            terminal_ready = status.terminal_done && status.lsq_deq &&
+                             !status.active && !status.success && status.fault &&
+                             !status.active_lq_mapped && !status.active_sq_mapped;
+            if (terminal_ready) begin
+                finish_fault_head_terminal();
+                return 1'b1;
+            end
+            return 1'b0;
         end
         if (!request_fault_head_redirect()) begin
             return 1'b0;
         end
-        finish_fault_head_terminal();
-        return 1'b1;
+        // Fault UID可能仍持有LQ/SQ owner。保持token到redirect扫描把该UID按
+        // exception terminal回收；禁止在此处提前推进cursor或把fault UID重发。
+        fault_head_redirect_covered = 1'b1;
+        return 1'b0;
     endfunction:sync_modeled_head_after_fault_terminal
 
     function memblock_lq_key_t lq_deq_start_key(input memblock_lq_key_t deq_ptr,
@@ -747,13 +875,18 @@ class lsq_commit_handler extends uvm_object;
     function bit preflight_dut_lq_deq(input int unsigned count,
                                       input memblock_lq_key_t deq_ptr,
                                       input bit ptr_is_next,
-                                      output memblock_uid_t deq_uids[$]);
+                                      output memblock_lq_deq_apply_item_t items[$]);
         memblock_lq_key_t start_key;
 
         ensure_handles();
-        deq_uids.delete();
+        items.delete();
         if (count == 0) begin
             return 1'b1;
+        end
+        if (count > (MEMBLOCK_LQ_SIZE - lsq_ctrl.lq_free_count)) begin
+            report_deq_mismatch($sformatf("DUT lqDeq count=%0d exceeds software allocated count=%0d",
+                                          count, MEMBLOCK_LQ_SIZE - lsq_ctrl.lq_free_count));
+            return 1'b0;
         end
         start_key = lq_deq_start_key(deq_ptr, count, ptr_is_next);
         if (start_key != lsq_ctrl.lq_deq_ptr) begin
@@ -769,14 +902,36 @@ class lsq_commit_handler extends uvm_object;
             memblock_lq_key_t key;
             memblock_uid_t    uid;
             status_transaction status;
+            memblock_redirect_deleted_owner_t deleted_owner;
+            memblock_lq_deq_apply_item_t item;
+            bit active_hit;
+            bit deleted_hit;
             bit uid_seen;
 
             key = lsq_ctrl_model::advance_lq_key(start_key, idx);
-            if (data.lookup_active_uid_by_lq(key, uid)) begin
+            active_hit = data.lookup_active_uid_by_lq(key, uid);
+            deleted_hit = data.lookup_redirect_deleted_lq_owner(key, deleted_owner);
+            if (active_hit && deleted_hit) begin
+                report_deq_mismatch($sformatf("DUT lqDeq key=%0d/%0d has both live and redirect-deleted owners",
+                                              key.flag, key.value));
+                items.delete();
+                return 1'b0;
+            end
+            item = '{
+                key: '{default:'0},
+                owner_kind: MEMBLOCK_DEQ_OWNER_LIVE,
+                uid: '0,
+                old_dynamic_epoch: 0,
+                redirect_epoch: 0,
+                cancel_record_id: 0
+            };
+            item.key = key;
+            if (active_hit) begin
                 status = data.get_status(uid);
                 uid_seen = 1'b0;
-                foreach (deq_uids[seen_idx]) begin
-                    if (deq_uids[seen_idx] == uid) begin
+                foreach (items[seen_idx]) begin
+                    if (items[seen_idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE &&
+                        items[seen_idx].uid == uid) begin
                         uid_seen = 1'b1;
                     end
                 end
@@ -787,12 +942,15 @@ class lsq_commit_handler extends uvm_object;
                                                   status.active, status.active_lq_mapped,
                                                   status.lqIdx_flag, status.lqIdx_value,
                                                   uid_seen));
-                    deq_uids.delete();
+                    items.delete();
                     return 1'b0;
                 end
-                deq_uids.push_back(uid);
+                item.owner_kind = MEMBLOCK_DEQ_OWNER_LIVE;
+                item.uid = uid;
+                item.old_dynamic_epoch = status.dynamic_epoch;
+                items.push_back(item);
                 `uvm_info("LSQ_COMMIT",
-                          $sformatf("dut lqDeq accept idx=%0d/%0d uid=%0d lq=%0d/%0d ptr_next=%0d",
+                          $sformatf("dut lqDeq preflight live idx=%0d/%0d uid=%0d lq=%0d/%0d ptr_next=%0d",
                                     idx + 1,
                                     count,
                                     uid,
@@ -800,10 +958,23 @@ class lsq_commit_handler extends uvm_object;
                                     key.value,
                                     ptr_is_next),
                           UVM_LOW)
+            end else if (deleted_hit) begin
+                item.owner_kind = MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED;
+                item.uid = deleted_owner.uid;
+                item.old_dynamic_epoch = deleted_owner.old_dynamic_epoch;
+                item.redirect_epoch = deleted_owner.redirect_epoch;
+                item.cancel_record_id = deleted_owner.cancel_record_id;
+                items.push_back(item);
+                `uvm_info("LSQ_COMMIT",
+                          $sformatf("dut lqDeq preflight redirect-deleted idx=%0d/%0d uid=%0d epoch=%0d lq=%0d/%0d",
+                                    idx + 1, count, deleted_owner.uid,
+                                    deleted_owner.old_dynamic_epoch,
+                                    key.flag, key.value),
+                          UVM_LOW)
             end else begin
                 report_deq_mismatch($sformatf("stale DUT lqDeq count=%0d key flag=%0d value=%0d has no active uid",
                                               count, key.flag, key.value));
-                deq_uids.delete();
+                items.delete();
                 return 1'b0;
             end
         end
@@ -811,25 +982,27 @@ class lsq_commit_handler extends uvm_object;
     endfunction:preflight_dut_lq_deq
 
     function void commit_dut_lq_deq(input int unsigned count,
-                                    input memblock_uid_t deq_uids[$]);
+                                    input memblock_lq_deq_apply_item_t items[$]);
         if (count == 0) begin
             return;
         end
-        if (deq_uids.size() != count) begin
+        if (items.size() != count) begin
             `uvm_fatal("LSQ_COMMIT", "LQ deq commit list size does not match count")
         end
         lsq_ctrl.release_lq(count);
-        foreach (deq_uids[idx]) begin
-            data.release_uid_lq_mapping(deq_uids[idx]);
+        foreach (items[idx]) begin
+            if (items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.release_uid_lq_mapping(items[idx].uid);
+            end
         end
     endfunction:commit_dut_lq_deq
 
     function bit preflight_dut_sq_deq_from_start(input int unsigned count,
                                                  input memblock_sq_key_t start_key,
                                                  input bit ptr_is_next,
-                                                 output memblock_uid_t deq_uids[$]);
+                                                 output memblock_sq_deq_apply_item_t items[$]);
         ensure_handles();
-        deq_uids.delete();
+        items.delete();
         if (count == 0) begin
             return 1'b1;
         end
@@ -837,6 +1010,11 @@ class lsq_commit_handler extends uvm_object;
             `uvm_fatal("LSQ_COMMIT",
                        $sformatf("sqDeq count=%0d exceeds EnsbufferWidth=%0d",
                                  count, MEMBLOCK_DUT_ENSBUFFER_WIDTH))
+        end
+        if (count > (MEMBLOCK_SQ_SIZE - lsq_ctrl.sq_free_count)) begin
+            report_deq_mismatch($sformatf("DUT sqDeq count=%0d exceeds software allocated count=%0d",
+                                          count, MEMBLOCK_SQ_SIZE - lsq_ctrl.sq_free_count));
+            return 1'b0;
         end
         if (start_key != lsq_ctrl.sq_deq_ptr) begin
             report_deq_mismatch($sformatf("DUT sqDeq start flag=%0d value=%0d mismatches software SQ head flag=%0d value=%0d count=%0d",
@@ -851,14 +1029,36 @@ class lsq_commit_handler extends uvm_object;
             memblock_sq_key_t key;
             memblock_uid_t    uid;
             status_transaction status;
+            memblock_redirect_deleted_owner_t deleted_owner;
+            memblock_sq_deq_apply_item_t item;
+            bit active_hit;
+            bit deleted_hit;
             bit uid_seen;
 
             key = lsq_ctrl_model::advance_sq_key(start_key, idx);
-            if (data.lookup_active_uid_by_sq(key, uid)) begin
+            active_hit = data.lookup_active_uid_by_sq(key, uid);
+            deleted_hit = data.lookup_redirect_deleted_sq_owner(key, deleted_owner);
+            if (active_hit && deleted_hit) begin
+                report_deq_mismatch($sformatf("DUT sqDeq key=%0d/%0d has both live and redirect-deleted owners",
+                                              key.flag, key.value));
+                items.delete();
+                return 1'b0;
+            end
+            item = '{
+                key: '{default:'0},
+                owner_kind: MEMBLOCK_DEQ_OWNER_LIVE,
+                uid: '0,
+                old_dynamic_epoch: 0,
+                redirect_epoch: 0,
+                cancel_record_id: 0
+            };
+            item.key = key;
+            if (active_hit) begin
                 status = data.get_status(uid);
                 uid_seen = 1'b0;
-                foreach (deq_uids[seen_idx]) begin
-                    if (deq_uids[seen_idx] == uid) begin
+                foreach (items[seen_idx]) begin
+                    if (items[seen_idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE &&
+                        items[seen_idx].uid == uid) begin
                         uid_seen = 1'b1;
                     end
                 end
@@ -869,12 +1069,15 @@ class lsq_commit_handler extends uvm_object;
                                                   status.active, status.active_sq_mapped,
                                                   status.sqIdx_flag, status.sqIdx_value,
                                                   uid_seen));
-                    deq_uids.delete();
+                    items.delete();
                     return 1'b0;
                 end
-                deq_uids.push_back(uid);
+                item.owner_kind = MEMBLOCK_DEQ_OWNER_LIVE;
+                item.uid = uid;
+                item.old_dynamic_epoch = status.dynamic_epoch;
+                items.push_back(item);
                 `uvm_info("LSQ_COMMIT",
-                          $sformatf("dut sqDeq accept idx=%0d/%0d uid=%0d sq=%0d/%0d ptr_next=%0d",
+                          $sformatf("dut sqDeq preflight live idx=%0d/%0d uid=%0d sq=%0d/%0d ptr_next=%0d",
                                     idx + 1,
                                     count,
                                     uid,
@@ -882,10 +1085,23 @@ class lsq_commit_handler extends uvm_object;
                                     key.value,
                                     ptr_is_next),
                           UVM_LOW)
+            end else if (deleted_hit) begin
+                item.owner_kind = MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED;
+                item.uid = deleted_owner.uid;
+                item.old_dynamic_epoch = deleted_owner.old_dynamic_epoch;
+                item.redirect_epoch = deleted_owner.redirect_epoch;
+                item.cancel_record_id = deleted_owner.cancel_record_id;
+                items.push_back(item);
+                `uvm_info("LSQ_COMMIT",
+                          $sformatf("dut sqDeq preflight redirect-deleted idx=%0d/%0d uid=%0d epoch=%0d sq=%0d/%0d",
+                                    idx + 1, count, deleted_owner.uid,
+                                    deleted_owner.old_dynamic_epoch,
+                                    key.flag, key.value),
+                          UVM_LOW)
             end else begin
                 report_deq_mismatch($sformatf("stale DUT sqDeq count=%0d key flag=%0d value=%0d has no active uid",
                                               count, key.flag, key.value));
-                deq_uids.delete();
+                items.delete();
                 return 1'b0;
             end
         end
@@ -895,52 +1111,65 @@ class lsq_commit_handler extends uvm_object;
     function bit preflight_dut_sq_deq(input int unsigned count,
                                       input memblock_sq_key_t deq_ptr,
                                       input bit ptr_is_next,
-                                      output memblock_uid_t deq_uids[$]);
+                                      output memblock_sq_deq_apply_item_t items[$]);
         memblock_sq_key_t start_key;
 
         if (count == 0 || count > MEMBLOCK_DUT_ENSBUFFER_WIDTH) begin
-            return preflight_dut_sq_deq_from_start(count, deq_ptr, ptr_is_next, deq_uids);
+            return preflight_dut_sq_deq_from_start(count, deq_ptr, ptr_is_next, items);
         end
         start_key = sq_deq_start_key(deq_ptr, count, ptr_is_next);
-        return preflight_dut_sq_deq_from_start(count, start_key, ptr_is_next, deq_uids);
+        return preflight_dut_sq_deq_from_start(count, start_key, ptr_is_next, items);
     endfunction:preflight_dut_sq_deq
 
     function bit preflight_dut_sq_deq_count_only(input int unsigned count,
-                                                 output memblock_uid_t deq_uids[$]);
+                                                 output memblock_sq_deq_apply_item_t items[$]);
         ensure_handles();
         // 中文注释：V2 sqDeq raw 只携带 entry count；软件 SQ deq head 是
         // 唯一起点，capability 宏不参与 count 宽度或起点推导。
         return preflight_dut_sq_deq_from_start(count,
                                                lsq_ctrl.sq_deq_ptr,
                                                1'b0,
-                                               deq_uids);
+                                               items);
     endfunction:preflight_dut_sq_deq_count_only
 
     function void commit_dut_sq_deq(input int unsigned count,
-                                    input memblock_uid_t deq_uids[$]);
+                                    input memblock_sq_deq_apply_item_t items[$]);
         if (count == 0) begin
             return;
         end
-        if (deq_uids.size() != count) begin
+        if (items.size() != count) begin
             `uvm_fatal("LSQ_COMMIT", "SQ deq commit list size does not match count")
         end
         lsq_ctrl.release_sq(count);
-        foreach (deq_uids[idx]) begin
-            data.release_uid_sq_mapping(deq_uids[idx]);
+        foreach (items[idx]) begin
+            if (items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.release_uid_sq_mapping(items[idx].uid);
+            end
         end
     endfunction:commit_dut_sq_deq
 
     function void apply_dut_lq_deq(input int unsigned count,
                                    input memblock_lq_key_t deq_ptr,
                                    input bit ptr_is_next = 1'b1);
-        memblock_uid_t deq_uids[$];
+        memblock_lq_deq_apply_item_t lq_items[$];
+        memblock_sq_deq_apply_item_t sq_items[$];
+        int unsigned deleted_lq_count;
+        int unsigned deleted_sq_count;
 
-        if (!preflight_dut_lq_deq(count, deq_ptr, ptr_is_next, deq_uids)) begin
+        if (!preflight_dut_lq_deq(count, deq_ptr, ptr_is_next, lq_items) ||
+            !data.preflight_redirect_deleted_deq(lq_items, sq_items,
+                                                 deleted_lq_count,
+                                                 deleted_sq_count)) begin
             return;
         end
-        commit_dut_lq_deq(count, deq_uids);
-        foreach (deq_uids[idx]) begin
-            data.try_retire_committed_uid(deq_uids[idx]);
+        commit_dut_lq_deq(count, lq_items);
+        data.commit_redirect_deleted_deq(lq_items, sq_items,
+                                         deleted_lq_count,
+                                         deleted_sq_count);
+        foreach (lq_items[idx]) begin
+            if (lq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.try_retire_committed_uid(lq_items[idx].uid);
+            end
         end
         sync_modeled_head_after_fault_terminal();
     endfunction:apply_dut_lq_deq
@@ -948,37 +1177,61 @@ class lsq_commit_handler extends uvm_object;
     function void apply_dut_sq_deq(input int unsigned count,
                                    input memblock_sq_key_t deq_ptr,
                                    input bit ptr_is_next = 1'b1);
-        memblock_uid_t deq_uids[$];
+        memblock_lq_deq_apply_item_t lq_items[$];
+        memblock_sq_deq_apply_item_t sq_items[$];
+        int unsigned deleted_lq_count;
+        int unsigned deleted_sq_count;
 
         if (MEMBLOCK_DUT_HAS_SQ_DEQ_PTR) begin
-            if (!preflight_dut_sq_deq(count, deq_ptr, ptr_is_next, deq_uids)) begin
+            if (!preflight_dut_sq_deq(count, deq_ptr, ptr_is_next, sq_items)) begin
                 return;
             end
         end else begin
-            if (!preflight_dut_sq_deq_count_only(count, deq_uids)) begin
+            if (!preflight_dut_sq_deq_count_only(count, sq_items)) begin
                 return;
             end
         end
-        commit_dut_sq_deq(count, deq_uids);
-        foreach (deq_uids[idx]) begin
-            data.try_retire_committed_uid(deq_uids[idx]);
+        if (!data.preflight_redirect_deleted_deq(lq_items, sq_items,
+                                                 deleted_lq_count,
+                                                 deleted_sq_count)) begin
+            return;
+        end
+        commit_dut_sq_deq(count, sq_items);
+        data.commit_redirect_deleted_deq(lq_items, sq_items,
+                                         deleted_lq_count,
+                                         deleted_sq_count);
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.try_retire_committed_uid(sq_items[idx].uid);
+            end
         end
         sync_modeled_head_after_fault_terminal();
     endfunction:apply_dut_sq_deq
 
     function void apply_dut_sq_deq_count_only(input int unsigned count);
-        memblock_uid_t deq_uids[$];
+        memblock_lq_deq_apply_item_t lq_items[$];
+        memblock_sq_deq_apply_item_t sq_items[$];
+        int unsigned deleted_lq_count;
+        int unsigned deleted_sq_count;
 
         ensure_handles();
         if (count == 0) begin
             return;
         end
-        if (!preflight_dut_sq_deq_count_only(count, deq_uids)) begin
+        if (!preflight_dut_sq_deq_count_only(count, sq_items) ||
+            !data.preflight_redirect_deleted_deq(lq_items, sq_items,
+                                                 deleted_lq_count,
+                                                 deleted_sq_count)) begin
             return;
         end
-        commit_dut_sq_deq(count, deq_uids);
-        foreach (deq_uids[idx]) begin
-            data.try_retire_committed_uid(deq_uids[idx]);
+        commit_dut_sq_deq(count, sq_items);
+        data.commit_redirect_deleted_deq(lq_items, sq_items,
+                                         deleted_lq_count,
+                                         deleted_sq_count);
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.try_retire_committed_uid(sq_items[idx].uid);
+            end
         end
         sync_modeled_head_after_fault_terminal();
     endfunction:apply_dut_sq_deq_count_only
@@ -986,10 +1239,12 @@ class lsq_commit_handler extends uvm_object;
     // 返回值表示 full raw 的 LQ/SQ 预检和提交是否完成。resync 模式下 mismatch
     // 只返回失败，调用者必须保留 raw 队首并在后续 service tick 重试。
     function bit apply_raw_ctrl_deq(input memblock_sync_pkg::dispatch_raw_ctrl_t raw);
-        memblock_uid_t lq_uids[$];
-        memblock_uid_t sq_uids[$];
+        memblock_lq_deq_apply_item_t lq_items[$];
+        memblock_sq_deq_apply_item_t sq_items[$];
         memblock_lq_key_t lq_ptr;
         memblock_sq_key_t sq_ptr;
+        int unsigned deleted_lq_count;
+        int unsigned deleted_sq_count;
 
         ensure_handles();
         data.update_sb_is_empty(raw);
@@ -1010,27 +1265,40 @@ class lsq_commit_handler extends uvm_object;
 
         // 中文注释：同一 ctrl raw 的 LQ/SQ release 先联合预检；任一侧失败时
         // 不允许另一侧先推进 pointer/free count，避免 deferred raw 部分成功。
-        if (!preflight_dut_lq_deq(raw.lq_deq, lq_ptr, 1'b1, lq_uids)) begin
+        if (!preflight_dut_lq_deq(raw.lq_deq, lq_ptr, 1'b1, lq_items)) begin
             return 1'b0;
         end
         if (MEMBLOCK_DUT_HAS_SQ_DEQ_PTR) begin
-            if (!preflight_dut_sq_deq(raw.sq_deq, sq_ptr, 1'b1, sq_uids)) begin
+            if (!preflight_dut_sq_deq(raw.sq_deq, sq_ptr, 1'b1, sq_items)) begin
                 return 1'b0;
             end
         end else begin
             // 中文注释：full raw 仍先联合预检 LQ/SQ；V2 SQ 侧显式按 count-only
             // 语义从软件 head 解析 owner，不能调用会立即提交的独立 wrapper。
-            if (!preflight_dut_sq_deq_count_only(raw.sq_deq, sq_uids)) begin
+            if (!preflight_dut_sq_deq_count_only(raw.sq_deq, sq_items)) begin
                 return 1'b0;
             end
         end
-        commit_dut_lq_deq(raw.lq_deq, lq_uids);
-        commit_dut_sq_deq(raw.sq_deq, sq_uids);
-        foreach (lq_uids[idx]) begin
-            data.try_retire_committed_uid(lq_uids[idx]);
+        if (!data.preflight_redirect_deleted_deq(lq_items, sq_items,
+                                                 deleted_lq_count,
+                                                 deleted_sq_count)) begin
+            report_deq_mismatch("DUT deq redirect-deleted provenance preflight failed");
+            return 1'b0;
         end
-        foreach (sq_uids[idx]) begin
-            data.try_retire_committed_uid(sq_uids[idx]);
+        commit_dut_lq_deq(raw.lq_deq, lq_items);
+        commit_dut_sq_deq(raw.sq_deq, sq_items);
+        data.commit_redirect_deleted_deq(lq_items, sq_items,
+                                         deleted_lq_count,
+                                         deleted_sq_count);
+        foreach (lq_items[idx]) begin
+            if (lq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.try_retire_committed_uid(lq_items[idx].uid);
+            end
+        end
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                data.try_retire_committed_uid(sq_items[idx].uid);
+            end
         end
         sync_modeled_head_after_fault_terminal();
         return 1'b1;

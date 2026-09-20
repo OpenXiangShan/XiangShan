@@ -132,10 +132,24 @@ class common_data_transaction extends uvm_object;
     memblock_lsq_cancel_record_t cancel_record_q[$];
     memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot_history_q[$];
     memblock_sync_pkg::dispatch_raw_redirect_anchor_t redirect_anchor_history_q[$];
+    // Fault redirect has one commit-head owner.  Its terminal path is not
+    // inferred from map deletion: it must be proven by cancel apply or deq.
+    memblock_fault_redirect_resource_t fault_redirect_resource;
 
     memblock_uid_t uid_by_active_rob[memblock_rob_map_key_t];
     memblock_uid_t uid_by_lq[memblock_lq_map_key_t];
     memblock_uid_t uid_by_sq[memblock_sq_map_key_t];
+
+    // 中文注释：单代 redirect 删除 owner 的固定保护窗口。redirect scan 在删除
+    // active map 前写入；迟到 deq 消费或剩余 cancel 应用完成后清除。
+    // 窗口有效期间禁止新的 LSQ allocating admission 和下一次 redirect。
+    localparam int unsigned MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES = 4;
+    memblock_redirect_deleted_owner_t redirect_deleted_lq_owner_by_key[memblock_lq_map_key_t];
+    memblock_redirect_deleted_owner_t redirect_deleted_sq_owner_by_key[memblock_sq_map_key_t];
+    bit              redirect_deleted_owner_window_active;
+    int unsigned     redirect_deleted_owner_epoch;
+    int unsigned     redirect_deleted_owner_record_id;
+    longint unsigned redirect_deleted_owner_expire_sample;
 
     // 中文注释：控制标记只允许存在一个静态屏障。它在 control admission 时建立，
     // 在该 UID terminal_done 后由 control service 解除；普通 LSQ admission 不得越过它。
@@ -212,6 +226,12 @@ class common_data_transaction extends uvm_object;
         redirect_freeze_cycle = 0;
         global_issue_epoch  = 0;
         issue_freeze_ack    = 1'b0;
+        redirect_deleted_lq_owner_by_key.delete();
+        redirect_deleted_sq_owner_by_key.delete();
+        redirect_deleted_owner_window_active = 1'b0;
+        redirect_deleted_owner_epoch = 0;
+        redirect_deleted_owner_record_id = 0;
+        redirect_deleted_owner_expire_sample = 0;
         flushsb_req_q.delete();
         attached_flushsb_req = '{default:'0};
         attached_flushsb_req_valid = 1'b0;
@@ -237,6 +257,7 @@ class common_data_transaction extends uvm_object;
         cancel_reconcile_lq_nonzero_match_count = 0;
         cancel_reconcile_sq_nonzero_match_count = 0;
         cancel_record_q.delete();
+        fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
@@ -318,6 +339,12 @@ class common_data_transaction extends uvm_object;
         redirect_freeze_cycle = 0;
         global_issue_epoch  = 0;
         issue_freeze_ack    = 1'b0;
+        redirect_deleted_lq_owner_by_key.delete();
+        redirect_deleted_sq_owner_by_key.delete();
+        redirect_deleted_owner_window_active = 1'b0;
+        redirect_deleted_owner_epoch = 0;
+        redirect_deleted_owner_record_id = 0;
+        redirect_deleted_owner_expire_sample = 0;
         flushsb_req_q.delete();
         attached_flushsb_req = '{default:'0};
         attached_flushsb_req_valid = 1'b0;
@@ -343,6 +370,7 @@ class common_data_transaction extends uvm_object;
         cancel_reconcile_lq_nonzero_match_count = 0;
         cancel_reconcile_sq_nonzero_match_count = 0;
         cancel_record_q.delete();
+        fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
         main_table_by_uid = new[main_trans_num_i];
@@ -1130,6 +1158,9 @@ class common_data_transaction extends uvm_object;
                uid_by_active_rob.num() == 0 &&
                uid_by_lq.num() == 0 &&
                uid_by_sq.num() == 0 &&
+               !redirect_deleted_owner_window_active &&
+               redirect_deleted_lq_owner_by_key.num() == 0 &&
+               redirect_deleted_sq_owner_by_key.num() == 0 &&
                !active_control_barrier_valid &&
                !has_pending_redirect_drive() &&
                !flush_in_progress &&
@@ -2257,6 +2288,10 @@ class common_data_transaction extends uvm_object;
         status.pass              = 1'b0;
         status.success           = 1'b0;
         status.terminal_done     = 1'b0;
+        // A fault can arrive while an older dispatch candidate is still queued.
+        // Clear every target for this dynamic instance immediately; otherwise a
+        // stale STD item remains permanently non-eligible after the fault.
+        quiesce_fault_uid_pending_work(uid);
         if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
             release_ptw_wait_replay(uid);
             status.clear_sta_late_fault_tombstones();
@@ -2573,6 +2608,183 @@ class common_data_transaction extends uvm_object;
         end
     endfunction:check_cancel_pending_aggregate
 
+    function bit fault_redirect_resource_matches(input memblock_uid_t uid,
+                                                 input int unsigned dynamic_epoch);
+        return fault_redirect_resource.valid &&
+               fault_redirect_resource.uid == uid &&
+               fault_redirect_resource.dynamic_epoch == dynamic_epoch;
+    endfunction:fault_redirect_resource_matches
+
+    function bit fault_redirect_resource_terminal_ready(input memblock_uid_t uid);
+        if (!fault_redirect_resource_matches(uid, get_status(uid).dynamic_epoch)) begin
+            return 1'b0;
+        end
+        return fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED ||
+               fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_LATE_DEQ ||
+               fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_DEQED;
+    endfunction:fault_redirect_resource_terminal_ready
+
+    function bit fault_redirect_resource_blocks_retire(input memblock_uid_t uid);
+        return fault_redirect_resource_matches(uid, get_status(uid).dynamic_epoch) &&
+               !fault_redirect_resource_terminal_ready(uid);
+    endfunction:fault_redirect_resource_blocks_retire
+
+    function bit fault_sq_candidate_snapshot_pending(input int unsigned redirect_epoch);
+        return fault_redirect_resource.valid && !fault_redirect_resource.is_lq &&
+               fault_redirect_resource.redirect_epoch == redirect_epoch &&
+               fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_CANDIDATE;
+    endfunction:fault_sq_candidate_snapshot_pending
+
+    function void complete_fault_redirect_resource(input memblock_uid_t uid);
+        if (!fault_redirect_resource_matches(uid, get_status(uid).dynamic_epoch)) begin
+            `uvm_fatal("LSQ_CANCEL", $sformatf("fault resource completion mismatch uid=%0d", uid))
+        end
+        if (!fault_redirect_resource_terminal_ready(uid)) begin
+            `uvm_fatal("LSQ_CANCEL", $sformatf("fault resource uid=%0d is not terminal disposition=%0d",
+                                                  uid, fault_redirect_resource.disposition))
+        end
+        fault_redirect_resource = '{default:'0};
+    endfunction:complete_fault_redirect_resource
+
+    function void detach_fault_sq_mapping(input memblock_uid_t uid);
+        status_transaction status;
+        memblock_sq_key_t sq_key;
+        memblock_sq_map_key_t sq_map_key;
+
+        status = get_status(uid);
+        if (!status.active_sq_mapped) begin
+            return;
+        end
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        sq_map_key = rob_order_util::sq_to_map_key(sq_key);
+        if (!uid_by_sq.exists(sq_map_key) || uid_by_sq[sq_map_key] != uid) begin
+            `uvm_fatal("LSQ_CANCEL", $sformatf("fault SQ detach mapping mismatch uid=%0d", uid))
+        end
+        uid_by_sq.delete(sq_map_key);
+        status.active_sq_mapped = 1'b0;
+        status.lsq_deq = !status.active_lq_mapped && !status.active_sq_mapped;
+    endfunction:detach_fault_sq_mapping
+
+    function void arm_fault_redirect_resource_candidate(input memblock_uid_t uid,
+                                                        input int unsigned redirect_epoch,
+                                                        input int unsigned record_id);
+        status_transaction status;
+        if (fault_redirect_resource.valid) begin
+            if (!fault_redirect_resource_matches(uid, get_status(uid).dynamic_epoch)) begin
+                `uvm_fatal("LSQ_CANCEL", $sformatf("second fault resource candidate uid=%0d existing_uid=%0d",
+                                                     uid, fault_redirect_resource.uid))
+            end
+            if (fault_redirect_resource.redirect_epoch != redirect_epoch ||
+                fault_redirect_resource.cancel_record_id != record_id) begin
+                `uvm_fatal("LSQ_CANCEL", $sformatf("fault resource uid=%0d changed cancel record", uid))
+            end
+            return;
+        end
+        status = get_status(uid);
+        fault_redirect_resource = '{default:'0};
+        fault_redirect_resource.valid = 1'b1;
+        fault_redirect_resource.uid = uid;
+        fault_redirect_resource.dynamic_epoch = status.dynamic_epoch;
+        fault_redirect_resource.redirect_epoch = redirect_epoch;
+        fault_redirect_resource.cancel_record_id = record_id;
+        if (status.active_sq_mapped) begin
+            fault_redirect_resource.is_lq = 1'b0;
+            fault_redirect_resource.sq_key.flag = status.sqIdx_flag;
+            fault_redirect_resource.sq_key.value = status.sqIdx_value;
+            fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_CANDIDATE;
+        end else if (status.active_lq_mapped) begin
+            fault_redirect_resource.is_lq = 1'b1;
+            fault_redirect_resource.lq_key.flag = status.lqIdx_flag;
+            fault_redirect_resource.lq_key.value = status.lqIdx_value;
+            fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_LQ_CANCEL_PENDING;
+        end else begin
+            fault_redirect_resource.valid = 1'b0;
+        end
+        if (fault_redirect_resource.valid) begin
+            `uvm_info("LSQ_CANCEL",
+                      $sformatf("arm fault resource uid=%0d epoch=%0d record=%0d side=%s key=%0d/%0d",
+                                uid, status.dynamic_epoch, record_id,
+                                fault_redirect_resource.is_lq ? "LQ" : "SQ",
+                                fault_redirect_resource.is_lq ? fault_redirect_resource.lq_key.flag : fault_redirect_resource.sq_key.flag,
+                                fault_redirect_resource.is_lq ? fault_redirect_resource.lq_key.value : fault_redirect_resource.sq_key.value),
+                      UVM_LOW)
+        end
+    endfunction:arm_fault_redirect_resource_candidate
+
+    function void resolve_fault_sq_candidate_from_snapshot(input int record_idx,
+                                                            input memblock_sync_pkg::dispatch_raw_cancel_snapshot_t snapshot);
+        int unsigned ordinary_sq_count;
+        if (!fault_redirect_resource.valid || fault_redirect_resource.is_lq ||
+            fault_redirect_resource.cancel_record_id != cancel_record_q[record_idx].cancel_record_id) begin
+            return;
+        end
+        ordinary_sq_count = cancel_record_q[record_idx].software_cancel_sq_count;
+        case (fault_redirect_resource.disposition)
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_CANDIDATE: begin
+                if (snapshot.sq_cancel_count == ordinary_sq_count + 1) begin
+                    cancel_record_q[record_idx].software_cancel_sq_count++;
+                    pending_sq_cancel_count++;
+                    detach_fault_sq_mapping(fault_redirect_resource.uid);
+                    fault_redirect_resource.disposition =
+                        MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED_WAIT_RECORD_APPLY;
+                    `uvm_info("LSQ_CANCEL",
+                              $sformatf("fault SQ snapshot->cancel uid=%0d record=%0d ordinary=%0d dut=%0d",
+                                        fault_redirect_resource.uid,
+                                        fault_redirect_resource.cancel_record_id,
+                                        ordinary_sq_count, snapshot.sq_cancel_count), UVM_LOW)
+                end else if (snapshot.sq_cancel_count == ordinary_sq_count) begin
+                    fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_WAIT_SQ_DEQ;
+                    `uvm_info("LSQ_CANCEL",
+                              $sformatf("fault SQ snapshot->wait_deq uid=%0d record=%0d ordinary=%0d",
+                                        fault_redirect_resource.uid,
+                                        fault_redirect_resource.cancel_record_id,
+                                        ordinary_sq_count), UVM_LOW)
+                end else begin
+                    `uvm_fatal("LSQ_CANCEL_RECONCILE",
+                               $sformatf("fault SQ candidate delta invalid record=%0d ordinary=%0d dut=%0d",
+                                         cancel_record_q[record_idx].cancel_record_id,
+                                         ordinary_sq_count, snapshot.sq_cancel_count))
+                end
+            end
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_DEQED,
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_WAIT_SQ_DEQ: begin
+                if (snapshot.sq_cancel_count != ordinary_sq_count) begin
+                    `uvm_fatal("LSQ_CANCEL_RECONCILE",
+                               $sformatf("fault SQ deq path has unexpected cancel record=%0d ordinary=%0d dut=%0d",
+                                         cancel_record_q[record_idx].cancel_record_id,
+                                         ordinary_sq_count, snapshot.sq_cancel_count))
+                end
+            end
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED_WAIT_RECORD_APPLY,
+            MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED: begin
+                if (snapshot.sq_cancel_count != ordinary_sq_count) begin
+                    `uvm_fatal("LSQ_CANCEL_RECONCILE",
+                               $sformatf("fault SQ cancel path changed after attribution record=%0d ordinary=%0d dut=%0d",
+                                         cancel_record_q[record_idx].cancel_record_id,
+                                         ordinary_sq_count, snapshot.sq_cancel_count))
+                end
+            end
+            default: begin
+                `uvm_fatal("LSQ_CANCEL_RECONCILE", "invalid fault SQ candidate disposition")
+            end
+        endcase
+    endfunction:resolve_fault_sq_candidate_from_snapshot
+
+    function void note_fault_sq_deq(input memblock_uid_t uid,
+                                    input memblock_sq_key_t key);
+        if (!fault_redirect_resource.valid || fault_redirect_resource.is_lq ||
+            fault_redirect_resource.uid != uid || fault_redirect_resource.sq_key != key) begin
+            return;
+        end
+        if (fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED ||
+            fault_redirect_resource.disposition == MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED_WAIT_RECORD_APPLY) begin
+            `uvm_fatal("LSQ_CANCEL", $sformatf("sqDeq arrived after fault SQ cancel uid=%0d", uid))
+        end
+        fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_SQ_DEQED;
+        `uvm_info("LSQ_CANCEL", $sformatf("fault SQ deq uid=%0d", uid), UVM_LOW)
+    endfunction:note_fault_sq_deq
+
     function void note_lsq_cancel_for_uid(input memblock_uid_t uid,
                                           input int unsigned redirect_epoch);
         status_transaction status;
@@ -2773,6 +2985,17 @@ class common_data_transaction extends uvm_object;
                cancel_record_q[0].valid &&
                cancel_record_q[0].software_applied &&
                cancel_record_q[0].observed_valid) begin
+            if (fault_redirect_resource.valid &&
+                fault_redirect_resource.cancel_record_id == cancel_record_q[0].cancel_record_id) begin
+                break;
+            end
+            // 中文注释：窗口 service 仍需用关联 record 判断 cancel apply 完成。
+            // 在临时 owner 清理前禁止 reconcile 提前 pop，避免跨 sequence 查空。
+            if (redirect_deleted_owner_window_active &&
+                cancel_record_q[0].cancel_record_id ==
+                    redirect_deleted_owner_record_id) begin
+                break;
+            end
             void'(cancel_record_q.pop_front());
         end
         check_cancel_pending_aggregate();
@@ -2802,8 +3025,9 @@ class common_data_transaction extends uvm_object;
             record_idx = find_oldest_observation_pending_record_index();
             if (record_idx < 0) begin
                 // 中文注释：只要仍有 record，队首 snapshot 就可能属于尚未到达的
-                // redirect anchor；此时保留整个有界队列等待绑定，不能误作 baseline 消费。
-                if (cancel_record_q.size() != 0) begin
+                // redirect anchor；仅在存在未锚定 record 时保留。已 observed 的 pinned
+                // fault record 不能阻止后续周期性 baseline snapshot 被消费。
+                if (find_oldest_unanchored_cancel_record_index() >= 0) begin
                     break;
                 end
                 check_cancel_baseline_snapshot(snapshot);
@@ -2827,6 +3051,7 @@ class common_data_transaction extends uvm_object;
             if (!cancel_record_q[record_idx].software_count_finalized) begin
                 break;
             end
+            resolve_fault_sq_candidate_from_snapshot(record_idx, snapshot);
             if (snapshot.lq_cancel_count !=
                     cancel_record_q[record_idx].software_cancel_lq_count ||
                 snapshot.sq_cancel_count !=
@@ -2931,8 +3156,326 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("LSQ_CANCEL", $sformatf("cancel epoch=%0d is not ready or already applied", redirect_epoch))
         end
         cancel_record_q[record_idx].software_applied = 1'b1;
+        if (fault_redirect_resource.valid &&
+            fault_redirect_resource.cancel_record_id == cancel_record_q[record_idx].cancel_record_id &&
+            fault_redirect_resource.disposition ==
+                MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED_WAIT_RECORD_APPLY) begin
+            fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED;
+        end
+        if (fault_redirect_resource.valid &&
+            fault_redirect_resource.cancel_record_id == cancel_record_q[record_idx].cancel_record_id &&
+            fault_redirect_resource.disposition ==
+                MEMBLOCK_FAULT_LSQ_DISPOSITION_LQ_CANCEL_PENDING) begin
+            fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_CANCEL_APPLIED;
+        end
         check_cancel_pending_aggregate();
     endfunction:mark_cancel_record_applied
+
+    function bit redirect_deleted_owner_window_pending();
+        return redirect_deleted_owner_window_active;
+    endfunction:redirect_deleted_owner_window_pending
+
+    // 中文注释：redirect 删除 active map 前冻结旧动态实例的物理 LSQ 身份。
+    // 本函数不修改 cancel count 或资源 pointer；后续 note/retire 保持原职责。
+    function void capture_redirect_deleted_owner(input memblock_uid_t uid,
+                                                  input int unsigned redirect_epoch);
+        status_transaction status;
+        int record_idx;
+        memblock_redirect_deleted_owner_t owner;
+
+        check_uid(uid, "capture_redirect_deleted_owner");
+        if (redirect_deleted_owner_window_active) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "capture attempted while previous owner window is active")
+        end
+        record_idx = find_cancel_record_index(redirect_epoch);
+        if (record_idx < 0 || !active_cancel_record_id_valid ||
+            cancel_record_q[record_idx].cancel_record_id != active_cancel_record_id ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            cancel_record_q[record_idx].software_count_finalized) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       $sformatf("uid=%0d redirect epoch=%0d has no open anchored cancel record",
+                                 uid, redirect_epoch))
+        end
+        status = get_status(uid);
+        owner = '{default:'0};
+        owner.valid = 1'b1;
+        owner.uid = uid;
+        owner.old_dynamic_epoch = status.dynamic_epoch;
+        owner.redirect_epoch = redirect_epoch;
+        owner.cancel_record_id = cancel_record_q[record_idx].cancel_record_id;
+        if (status.active_lq_mapped) begin
+            memblock_lq_key_t lq_key;
+            memblock_lq_map_key_t map_key;
+
+            lq_key.flag = status.lqIdx_flag;
+            lq_key.value = status.lqIdx_value;
+            map_key = rob_order_util::lq_to_map_key(lq_key);
+            if (redirect_deleted_lq_owner_by_key.exists(map_key)) begin
+                `uvm_fatal("REDIRECT_DELETED_OWNER",
+                           $sformatf("duplicate redirect-deleted LQ key=%0d/%0d",
+                                     lq_key.flag, lq_key.value))
+            end
+            redirect_deleted_lq_owner_by_key[map_key] = owner;
+        end
+        if (status.active_sq_mapped) begin
+            memblock_sq_key_t sq_key;
+            memblock_sq_map_key_t map_key;
+
+            sq_key.flag = status.sqIdx_flag;
+            sq_key.value = status.sqIdx_value;
+            map_key = rob_order_util::sq_to_map_key(sq_key);
+            if (redirect_deleted_sq_owner_by_key.exists(map_key)) begin
+                `uvm_fatal("REDIRECT_DELETED_OWNER",
+                           $sformatf("duplicate redirect-deleted SQ key=%0d/%0d",
+                                     sq_key.flag, sq_key.value))
+            end
+            redirect_deleted_sq_owner_by_key[map_key] = owner;
+        end
+    endfunction:capture_redirect_deleted_owner
+
+    function bit lookup_redirect_deleted_lq_owner(
+        input memblock_lq_key_t key,
+        output memblock_redirect_deleted_owner_t owner);
+        memblock_lq_map_key_t map_key;
+
+        owner = '{default:'0};
+        if (!redirect_deleted_owner_window_active) begin
+            return 1'b0;
+        end
+        map_key = rob_order_util::lq_to_map_key(key);
+        if (!redirect_deleted_lq_owner_by_key.exists(map_key)) begin
+            return 1'b0;
+        end
+        owner = redirect_deleted_lq_owner_by_key[map_key];
+        return owner.valid &&
+               owner.redirect_epoch == redirect_deleted_owner_epoch &&
+               owner.cancel_record_id == redirect_deleted_owner_record_id;
+    endfunction:lookup_redirect_deleted_lq_owner
+
+    function bit lookup_redirect_deleted_sq_owner(
+        input memblock_sq_key_t key,
+        output memblock_redirect_deleted_owner_t owner);
+        memblock_sq_map_key_t map_key;
+
+        owner = '{default:'0};
+        if (!redirect_deleted_owner_window_active) begin
+            return 1'b0;
+        end
+        map_key = rob_order_util::sq_to_map_key(key);
+        if (!redirect_deleted_sq_owner_by_key.exists(map_key)) begin
+            return 1'b0;
+        end
+        owner = redirect_deleted_sq_owner_by_key[map_key];
+        return owner.valid &&
+               owner.redirect_epoch == redirect_deleted_owner_epoch &&
+               owner.cancel_record_id == redirect_deleted_owner_record_id;
+    endfunction:lookup_redirect_deleted_sq_owner
+
+    function void start_redirect_deleted_owner_window(input int record_idx);
+        if (redirect_deleted_owner_window_active ||
+            (redirect_deleted_lq_owner_by_key.num() == 0 &&
+             redirect_deleted_sq_owner_by_key.num() == 0)) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "start window requires idle state and at least one saved owner")
+        end
+        if (record_idx < 0 || record_idx >= cancel_record_q.size() ||
+            !cancel_record_q[record_idx].valid ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            !cancel_record_q[record_idx].active_scan_done ||
+            cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "start window got an invalid cancel record lifecycle")
+        end
+        redirect_deleted_owner_window_active = 1'b1;
+        redirect_deleted_owner_epoch = cancel_record_q[record_idx].redirect_epoch;
+        redirect_deleted_owner_record_id = cancel_record_q[record_idx].cancel_record_id;
+        redirect_deleted_owner_expire_sample =
+            cancel_record_q[record_idx].redirect_sample_seq +
+            MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES;
+    endfunction:start_redirect_deleted_owner_window
+
+    function bit preflight_redirect_deleted_deq(
+        input memblock_lq_deq_apply_item_t lq_items[$],
+        input memblock_sq_deq_apply_item_t sq_items[$],
+        output int unsigned deleted_lq_count,
+        output int unsigned deleted_sq_count);
+        int record_idx;
+
+        deleted_lq_count = 0;
+        deleted_sq_count = 0;
+        foreach (lq_items[idx]) begin
+            if (lq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED) begin
+                memblock_redirect_deleted_owner_t owner;
+                if (!lookup_redirect_deleted_lq_owner(lq_items[idx].key, owner) ||
+                    owner.uid != lq_items[idx].uid ||
+                    owner.old_dynamic_epoch != lq_items[idx].old_dynamic_epoch ||
+                    owner.redirect_epoch != lq_items[idx].redirect_epoch ||
+                    owner.cancel_record_id != lq_items[idx].cancel_record_id) begin
+                    return 1'b0;
+                end
+                deleted_lq_count++;
+            end
+        end
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED) begin
+                memblock_redirect_deleted_owner_t owner;
+                if (!lookup_redirect_deleted_sq_owner(sq_items[idx].key, owner) ||
+                    owner.uid != sq_items[idx].uid ||
+                    owner.old_dynamic_epoch != sq_items[idx].old_dynamic_epoch ||
+                    owner.redirect_epoch != sq_items[idx].redirect_epoch ||
+                    owner.cancel_record_id != sq_items[idx].cancel_record_id) begin
+                    return 1'b0;
+                end
+                deleted_sq_count++;
+            end
+        end
+        if (deleted_lq_count == 0 && deleted_sq_count == 0) begin
+            return 1'b1;
+        end
+        if (!redirect_deleted_owner_window_active) begin
+            return 1'b0;
+        end
+        record_idx = find_cancel_record_index_by_id(redirect_deleted_owner_record_id);
+        if (record_idx < 0 ||
+            cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied ||
+            cancel_record_q[record_idx].software_cancel_lq_count < deleted_lq_count ||
+            cancel_record_q[record_idx].software_cancel_sq_count < deleted_sq_count ||
+            pending_lq_cancel_count < deleted_lq_count ||
+            pending_sq_cancel_count < deleted_sq_count) begin
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:preflight_redirect_deleted_deq
+
+    // 中文注释：只在 LQ/SQ 联合预检和资源容量检查全部成功后提交。
+    // 此阶段不重新选择 provenance，保证同一 raw 不发生部分成功。
+    function void commit_redirect_deleted_deq(
+        input memblock_lq_deq_apply_item_t lq_items[$],
+        input memblock_sq_deq_apply_item_t sq_items[$],
+        input int unsigned deleted_lq_count,
+        input int unsigned deleted_sq_count);
+        int record_idx;
+
+        // Live fault SQ deq has already released its active map in the caller.
+        // Record its provenance even when this raw does not include a deleted owner.
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_LIVE) begin
+                note_fault_sq_deq(sq_items[idx].uid, sq_items[idx].key);
+            end
+        end
+        if (deleted_lq_count == 0 && deleted_sq_count == 0) begin
+            return;
+        end
+        record_idx = find_cancel_record_index_by_id(redirect_deleted_owner_record_id);
+        if (record_idx < 0 || cancel_record_q[record_idx].software_count_finalized ||
+            cancel_record_q[record_idx].software_applied) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "commit redirect-deleted deq lost its provisional cancel record")
+        end
+        cancel_record_q[record_idx].software_cancel_lq_count -= deleted_lq_count;
+        cancel_record_q[record_idx].software_cancel_sq_count -= deleted_sq_count;
+        pending_lq_cancel_count -= deleted_lq_count;
+        pending_sq_cancel_count -= deleted_sq_count;
+        foreach (lq_items[idx]) begin
+            if (lq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED) begin
+                redirect_deleted_lq_owner_by_key.delete(
+                    rob_order_util::lq_to_map_key(lq_items[idx].key));
+                if (fault_redirect_resource.valid && fault_redirect_resource.is_lq &&
+                    fault_redirect_resource.uid == lq_items[idx].uid &&
+                    fault_redirect_resource.dynamic_epoch == lq_items[idx].old_dynamic_epoch &&
+                    fault_redirect_resource.cancel_record_id == lq_items[idx].cancel_record_id &&
+                    fault_redirect_resource.lq_key == lq_items[idx].key) begin
+                    fault_redirect_resource.disposition = MEMBLOCK_FAULT_LSQ_DISPOSITION_LATE_DEQ;
+                end
+            end
+        end
+        foreach (sq_items[idx]) begin
+            if (sq_items[idx].owner_kind == MEMBLOCK_DEQ_OWNER_REDIRECT_DELETED) begin
+                redirect_deleted_sq_owner_by_key.delete(
+                    rob_order_util::sq_to_map_key(sq_items[idx].key));
+            end
+        end
+        check_cancel_pending_aggregate();
+    endfunction:commit_redirect_deleted_deq
+
+    function void service_redirect_deleted_owner_window(
+        input longint unsigned current_sample);
+        int record_idx;
+
+        if (!redirect_deleted_owner_window_active) begin
+            return;
+        end
+        record_idx = find_cancel_record_index_by_id(redirect_deleted_owner_record_id);
+        if (record_idx < 0 || !cancel_record_q[record_idx].valid) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "active owner window lost its cancel record")
+        end
+        if (!cancel_record_q[record_idx].software_count_finalized &&
+            current_sample >= redirect_deleted_owner_expire_sample) begin
+            if (memblock_sync_pkg::deferred_raw_ctrl_q.size() != 0) begin
+                return;
+            end
+            cancel_record_q[record_idx].software_count_finalized = 1'b1;
+            check_cancel_pending_aggregate();
+        end
+        if (!cancel_record_q[record_idx].software_count_finalized ||
+            !cancel_record_q[record_idx].software_applied) begin
+            return;
+        end
+        redirect_deleted_lq_owner_by_key.delete();
+        redirect_deleted_sq_owner_by_key.delete();
+        redirect_deleted_owner_window_active = 1'b0;
+        redirect_deleted_owner_epoch = 0;
+        redirect_deleted_owner_record_id = 0;
+        redirect_deleted_owner_expire_sample = 0;
+        cleanup_completed_cancel_records();
+    endfunction:service_redirect_deleted_owner_window
+
+    // Fault ROB head已经完成异常提交后仍可能持有RTL中的committed LQ/SQ entry。
+    // Redirect只flush年轻实例；该head保持active owner，等待正常deq完成异常终态。
+    function void preserve_fault_uid_during_redirect(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect);
+        status_transaction status;
+
+        if (!redirect.valid) begin
+            `uvm_fatal("COMMON_DATA",
+                       "preserve_fault_uid_during_redirect requires valid redirect")
+        end
+        status = get_status(uid);
+        if (!status.active || !status.rob_commit || status.terminal_done ||
+            status.get_rob_key() != redirect.rob_key ||
+            (!status.fault && !status.exception_pending &&
+             !status.load_fault && !status.sta_fault && !status.std_fault)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("uid=%0d is not the active committed fault at redirect head",
+                                 uid))
+        end
+        // fault head不走普通年轻UID的reissue路径，但其尚未发射的 sibling
+        // issue item同样不能在exception后继续留在scheduler中。
+        quiesce_fault_uid_pending_work(uid);
+        begin
+            int record_idx;
+            record_idx = find_cancel_record_index_by_id(active_cancel_record_id);
+            if (record_idx >= 0) begin
+                if (status.active_lq_mapped) begin
+                    capture_redirect_deleted_owner(uid, cancel_record_q[record_idx].redirect_epoch);
+                    note_lsq_cancel_for_uid(uid, cancel_record_q[record_idx].redirect_epoch);
+                end
+                arm_fault_redirect_resource_candidate(uid,
+                                                      cancel_record_q[record_idx].redirect_epoch,
+                                                      cancel_record_q[record_idx].cancel_record_id);
+                if (status.active_lq_mapped) begin
+                    // Delete only the live map.  The saved redirect-deleted owner
+                    // retains the old physical identity until cancel/deq resolves.
+                    release_uid_lq_mapping(uid);
+                end
+            end
+        end
+    endfunction:preserve_fault_uid_during_redirect
 
     function void prepare_uid_for_redirect_reissue(input memblock_uid_t uid,
                                                    input memblock_redirect_payload_t redirect);
@@ -2951,8 +3494,9 @@ class common_data_transaction extends uvm_object;
                        $sformatf("redirect tries to flush already terminal_done uid=%0d", uid))
         end
 
-        // 中文伪代码：在 retire_active_uid 清除 mapping 前登记软件 cancel，
-        // 否则 scan 只能看到已经释放的 active_lq/sq 标志。
+        // 中文注释：先冻结旧 owner，再登记 provisional cancel；retire 删除
+        // active map 后，迟到 deq 只能从这份单代身份恢复。
+        capture_redirect_deleted_owner(uid, memblock_sync_pkg::dispatch_flush_epoch);
         note_lsq_cancel_for_uid(uid, memblock_sync_pkg::dispatch_flush_epoch);
         cancel_waiting_uid_tlb_record_for_uid(uid, "redirect_flush");
         // redirect命中的旧动态实例不再等待writeback/commit；清queue/map后等待同uid重新admission。
@@ -2974,6 +3518,12 @@ class common_data_transaction extends uvm_object;
     function void request_redirect_flush(input memblock_redirect_payload_t redirect);
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "request_redirect_flush requires valid redirect")
+        end
+        if (redirect_deleted_owner_window_active ||
+            redirect_deleted_lq_owner_by_key.num() != 0 ||
+            redirect_deleted_sq_owner_by_key.num() != 0) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       "new redirect attempted before single-generation owner window was cleared")
         end
         if (active_redirect.valid || active_cancel_record_id_valid) begin
             `uvm_fatal("COMMON_DATA", "request_redirect_flush called while another redirect is active")
@@ -3139,9 +3689,24 @@ class common_data_transaction extends uvm_object;
         for (memblock_uid_t uid = begin_uid; uid < end_uid; uid++) begin
             status_transaction status;
             memblock_rob_key_t rob_key;
+            bit terminal_fault_head;
 
             status = get_status(uid);
+            terminal_fault_head = status.active && status.rob_commit &&
+                                  !status.terminal_done &&
+                                  status.get_rob_key() == redirect.rob_key &&
+                                  (status.fault || status.exception_pending ||
+                                   status.load_fault || status.sta_fault ||
+                                   status.std_fault);
+            if (terminal_fault_head) begin
+                preserve_fault_uid_during_redirect(uid, redirect);
+                continue;
+            end
             if (status.terminal_done || (!status.active && !status.writeback && !status.pass)) begin
+                // redirect scan是清理旧动态实例的事件边界。inactive/terminal UID
+                // 不会再被重新路由；若其旧issue item因前一轮redirect竞态残留，
+                // 必须在这里一并删除，否则scheduler会长期看到不可发射的pending work。
+                remove_uid_from_issue_queues(uid);
                 continue;
             end
             rob_key = status.get_rob_key();
@@ -3171,9 +3736,14 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("LSQ_CANCEL", "finalized software cancel count exceeds LSQ capacity")
         end
         cancel_record_q[record_idx].active_scan_done = 1'b1;
-        cancel_record_q[record_idx].software_count_finalized = 1'b1;
         cancel_record_q[record_idx].state_flush_applied_service_cycle =
             memblock_sync_pkg::get_dispatch_service_cycle();
+        if (redirect_deleted_lq_owner_by_key.num() != 0 ||
+            redirect_deleted_sq_owner_by_key.num() != 0) begin
+            start_redirect_deleted_owner_window(record_idx);
+        end else begin
+            cancel_record_q[record_idx].software_count_finalized = 1'b1;
+        end
         active_cancel_record_id_valid = 1'b0;
         active_cancel_record_id = 0;
         check_cancel_pending_aggregate();
@@ -3632,6 +4202,7 @@ class common_data_transaction extends uvm_object;
             !status.load_fault && !status.sta_fault && !status.std_fault) begin
             `uvm_fatal("COMMON_DATA", $sformatf("consume_fault_retire called for non-fault uid=%0d", uid))
         end
+        quiesce_fault_uid_pending_work(uid);
         status.exception_pending = 1'b0;
         set_status_field(uid, MEMBLOCK_STATUS_SUCCESS, 1'b0);
         set_status_field(uid, MEMBLOCK_STATUS_TERMINAL_DONE, 1'b1);
@@ -3741,6 +4312,9 @@ class common_data_transaction extends uvm_object;
         end
         if (status.fault || status.exception_pending ||
             status.load_fault || status.sta_fault || status.std_fault) begin
+            if (fault_redirect_resource_blocks_retire(uid)) begin
+                return;
+            end
             consume_fault_retire(uid);
             return;
         end
@@ -6411,6 +6985,42 @@ class common_data_transaction extends uvm_object;
         end
     endfunction:remove_uid_from_issue_queues
 
+    // 抽象职责：fault UID进入异常提交边界后，撤销该动态实例尚未真正发射的
+    // issue/replay工作，但保留其LQ/SQ owner、fault证据和“不重发”语义。该helper
+    // 可在commit、fault redirect和terminal retire三个边界幂等调用；它不修改LSQ
+    // cancel计数、owner map或dynamic_epoch。
+    function void quiesce_fault_uid_pending_work(input memblock_uid_t uid);
+        status_transaction status;
+        int unsigned issue_q_before;
+        int unsigned issue_q_after;
+
+        check_uid(uid, "quiesce_fault_uid_pending_work");
+        status = get_status(uid);
+        if (!status.fault && !status.exception_pending &&
+            !status.load_fault && !status.sta_fault && !status.std_fault) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("quiesce_fault_uid_pending_work got non-fault uid=%0d", uid))
+        end
+        issue_q_before = load_issue_q.size() + sta_issue_q.size() + std_issue_q.size();
+        remove_uid_from_issue_queues(uid);
+        release_ptw_wait_replay(uid);
+        status.replay_pending      = 1'b0;
+        status.replay_target_load  = 1'b0;
+        status.replay_target_sta   = 1'b0;
+        status.replay_target_std   = 1'b0;
+        issue_q_after = load_issue_q.size() + sta_issue_q.size() + std_issue_q.size();
+        if (issue_q_before != issue_q_after) begin
+            `uvm_info("COMMON_DATA",
+                      $sformatf("quiesce fault uid=%0d removed pending issue items=%0d load_q=%0d sta_q=%0d std_q=%0d",
+                                uid,
+                                issue_q_before - issue_q_after,
+                                load_issue_q.size(),
+                                sta_issue_q.size(),
+                                std_issue_q.size()),
+                      UVM_LOW)
+        end
+    endfunction:quiesce_fault_uid_pending_work
+
     function void push_ptw_wait_replay(input memblock_uid_t uid,
                                        input memblock_issue_target_e target,
                                        input int unsigned issue_epoch,
@@ -6832,6 +7442,15 @@ class common_data_transaction extends uvm_object;
         end
         if (uid_by_active_rob.num() != 0 || uid_by_lq.num() != 0 || uid_by_sq.num() != 0) begin
             `uvm_error("COMMON_DATA", "active ROB/LQ/SQ mapping is not empty at end_test_check")
+        end
+        if (redirect_deleted_owner_window_active ||
+            redirect_deleted_lq_owner_by_key.num() != 0 ||
+            redirect_deleted_sq_owner_by_key.num() != 0) begin
+            `uvm_error("COMMON_DATA",
+                       $sformatf("redirect-deleted owner window is not drained: active=%0d lq=%0d sq=%0d",
+                                 redirect_deleted_owner_window_active,
+                                 redirect_deleted_lq_owner_by_key.num(),
+                                 redirect_deleted_sq_owner_by_key.num()))
         end
         if (load_issue_q.size() != 0 || sta_issue_q.size() != 0 || std_issue_q.size() != 0) begin
             `uvm_error("COMMON_DATA", "issue queues are not empty at end_test_check")
