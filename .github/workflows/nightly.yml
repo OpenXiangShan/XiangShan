@@ -4,6 +4,11 @@ on:
     # run at 15:33 UTC (23:33 UTC+8)
     - cron: '33 15 * * *'
 
+env:
+  FUZZ_NUM: 20 # per json file
+  CKPT_BASE: /nfs/share/checkpoints_profiles
+  CKPT_BASE_LEGACY: /nfs/share/checkpoints_profiles/legacy
+
 jobs:
   run:
     name: Run Performance Test
@@ -11,6 +16,48 @@ jobs:
     with:
       test_branch: kunminghu-v3
       benchmark_type: spec06-rva23-novec-gcc16-0.3c
+      servers: all
+
+  select:
+    name: Select random checkpoints
+    runs-on: perf
+    outputs:
+      RESULT_PATH: ${{ steps.select.outputs.RESULT_PATH }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select random checkpoints
+        id: select
+        run: |
+          # NOTE: make sure the following does not contain the default nightly 0.3c checkpoints
+          RESULT_LIST=$(python3 $GITHUB_WORKSPACE/.github/workflows/ckpt_select.py \
+            --output list \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0-int.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_gcc16_rv64gcb_260819/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec06_xscc_rva23_novec_260911/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec17_rate_gcc16_rva23_novec_260904/json/checkpoints_all.json" \
+            --random ":${FUZZ_NUM}:${CKPT_BASE}/spec26_gcc15_rv64gc_base_260517/json/checkpoints_all.json" \
+          )
+          # copy-pasted from perf-template.yml, is there a better way to do this?
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}-DefaultConfig"
+          # save list
+          RESULT_PATH="${SPEC_DIR}/fuzz.f"
+          mkdir -p "${SPEC_DIR}"
+          echo "${RESULT_LIST}" > "${RESULT_PATH}"
+          echo "RESULT_PATH=${RESULT_PATH}" >> "$GITHUB_OUTPUT"
+
+  run-fuzz:
+    needs: select
+    name: Run Fuzz Test
+    uses: ./.github/workflows/perf-template.yml
+    with:
+      test_branch: kunminghu-v3
+      benchmark_type: custom
+      json_path: ${{ needs.select.outputs.RESULT_PATH }}
       servers: all
 
   report:
