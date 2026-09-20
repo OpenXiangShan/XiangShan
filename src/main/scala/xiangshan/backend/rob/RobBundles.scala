@@ -298,6 +298,7 @@ class RobLsqIO(implicit p: Parameters) extends XSBundle {
   val commit = Output(Bool())
   val pendingPtr = Output(new RobPtr)
   val pendingPtrNext = Output(new RobPtr)
+  val interruptPending = Output(Bool())
 
   val mmioBusy = Input(Bool())
 }

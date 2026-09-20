@@ -1007,7 +1007,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {
     val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, sqIdx
-    val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
+    val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt + 1, ValidIO(new RobMemStateUpdate)))
     val violation = Flipped(ValidIO(new Redirect))
     val mdpTrain = Flipped(ValidIO(new Redirect))
   }

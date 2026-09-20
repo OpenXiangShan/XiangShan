@@ -189,6 +189,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
+    val interruptPending = Input(Bool())
   }
 
   val isStoreException = Input(Bool())
@@ -221,7 +222,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
 
   val mdpTrain = ValidIO(new Redirect)
 
-  val robMemStateUpdate = Vec(LduCnt + StaCnt, ValidIO(new RobMemStateUpdate))
+  val robMemStateUpdate = Vec(LduCnt + StaCnt + 1, ValidIO(new RobMemStateUpdate))
 
   val lsTopdownInfo = Vec(LdExuCnt, Output(new LsTopdownInfo))
 
@@ -516,7 +517,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val storeUnits = Seq.tabulate(StaCnt)(i => Module(new NewStoreUnit(staParams(i))))
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
 
-  io.mem_to_ooo.robMemStateUpdate.zip(newLoadUnits.map(_.io.robMemStateUpdate) ++ storeUnits.map(_.io.robMemStateUpdate)).foreach {
+  io.mem_to_ooo.robMemStateUpdate.take(LduCnt + StaCnt)
+    .zip(newLoadUnits.map(_.io.robMemStateUpdate) ++ storeUnits.map(_.io.robMemStateUpdate)).foreach {
     case (sink, source) => sink := source
   }
 
@@ -1057,6 +1059,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit
   lsq.io.rob.pendingPtr          := io.ooo_to_mem.lsqio.pendingPtr
   lsq.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
+  lsq.io.rob.interruptPending    := io.ooo_to_mem.lsqio.interruptPending
+  io.mem_to_ooo.robMemStateUpdate.last.valid := lsq.io.storePreCommit.valid
+  io.mem_to_ooo.robMemStateUpdate.last.bits.robIdx := lsq.io.storePreCommit.bits
+  io.mem_to_ooo.robMemStateUpdate.last.bits.interruptSafe := false.B
 
   //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq

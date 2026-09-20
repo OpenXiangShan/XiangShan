@@ -131,6 +131,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val sqCanAccept = Output(Bool())
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
+    val storePreCommit = ValidIO(new RobPtr)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -208,6 +209,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.writeToSbuffer                <> io.sbuffer
   storeQueue.io.writeBack                     <> io.mmioStout
   storeQueue.io.fromRob.robHeadPtr            := io.rob.pendingPtr
+  storeQueue.io.fromRob.interruptPending      := io.rob.interruptPending
+  io.storePreCommit                           := storeQueue.io.preCommitRobIdx
   storeQueue.io.exceptionInfo                 <> io.stExceptionInfo
   storeQueue.io.sqEmpty                       <> io.sqEmpty
   storeQueue.io.sqFull                        <> io.sqFull
@@ -236,6 +239,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.rob.lcommit         := io.rob.lcommit
   loadQueue.io.rob.scommit         := io.rob.scommit
   loadQueue.io.rob.commit          := io.rob.commit
+  loadQueue.io.rob.interruptPending := io.rob.interruptPending
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay

@@ -721,7 +721,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
     )
   )
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new StoreUnitToLFST)))
-  val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
+  val robMemStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt + 1, ValidIO(new RobMemStateUpdate)))
 
   val memoryViolation = Flipped(ValidIO(new Redirect))
   val mdpTrain        = Flipped(ValidIO(new Redirect))

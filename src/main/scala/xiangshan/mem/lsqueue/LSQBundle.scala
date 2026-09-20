@@ -206,12 +206,15 @@ class StoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends Me
   val exceptionInfo      = ValidIO(new MemExceptionInfo)// to exceptionInfoGen, only for mmio/cbo writeback exception gen
   val sqDeq              = ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)) // to backend, dispatch
   val sqDeqPtr           = Output(new SqPtr) // to store unit
+  val preCommitRobIdx    = ValidIO(new RobPtr)
   val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO)) // for store difftest
   val physicalUpperSqIdx = Output(new SqPtr)
 }
 
 class PhysicalStoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends MemBlockBundle {
   val hartId             = Input(UInt(hartIdLen.W)) // for mulit Core Difftest
+  val interruptPending   = Input(Bool())
+  val redirectPending    = Input(Bool())
   val storeDataIn        = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
   val fromStoreUnit      = new StaIO // from storeUnit
   val writeToSbuffer     = new SbufferWriteIO // write committed store to sbuffer
@@ -234,6 +237,7 @@ class PhysicalStoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) ex
   val sqDeq              = ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W))
   // to store unit
   val sqDeqPtr           = Output(new SqPtr)
+  val preCommitRobIdx    = ValidIO(new RobPtr)
   val physicalUpperSqIdx = Output(new SqPtr)
   // for store difftest
   val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
@@ -285,6 +289,7 @@ class VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr: MultiFlagCircularQueu
 
 class ROBToVirtualStoreQueueIO(implicit p: Parameters) extends XSBundle {
   val robHeadPtr         = Input(new RobPtr)
+  val interruptPending   = Input(Bool())
 }
 
 class ToLsqEnqCtrl(hasStore: Boolean, hasLoad: Boolean) (implicit p: Parameters) extends XSBundle {

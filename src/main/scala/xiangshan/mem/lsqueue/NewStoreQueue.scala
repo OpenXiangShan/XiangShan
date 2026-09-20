@@ -107,6 +107,7 @@ object DataQueuePtr {
 class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   class UopInfo(implicit p: Parameters) extends MemBlockBundle {
     val uopIdx           = UopIdx()
+    val robIdx           = new RobPtr
   }
   val uop                      = new UopInfo
 
@@ -1971,11 +1972,14 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
   /************************************************ commit logic ******************************************************/
 
   /*
-  * If store have interrupt, do not to commit !!!!!!!!!
-  * At present don't have this situation.
+  * A store pre-committed before ROB retirement can no longer be canceled by an
+  * interrupt that flushes the ROB head. Block that path once an interrupt is
+  * pending and keep it blocked through redirect recovery.
   * if is MMIO/NC/CBO, don't committed.
   * */
   val commitVec = WireDefault(VecInit(Seq.fill(PhysicalStoreQueueCommitSize)(false.B))) // default is false.B
+  val preCommitVec = WireDefault(VecInit(Seq.fill(PhysicalStoreQueueCommitSize)(false.B)))
+  val allowPreCommit = !io.interruptPending && !io.redirectPending
 
   for (i <- 0 until PhysicalStoreQueueCommitSize) {
     val ptr = commitPtrExt(i).value
@@ -1987,20 +1991,27 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     * [2]. activate Vector Store Commit:    (isRobHead || hasRetired) && noException && allValid --> move cmtPtr, set committed
     * [3]. inactivate Vector Store Commit:  vecInactive  --> move cmtPtr, set committed
     * */
-    when((commitPtrExt(i).isBefore(virtualStoreQueuePreCommitPtr.bits) && virtualStoreQueuePreCommitPtr.valid ||
-      commitPtrExt(i).isBefore(virtualStoreQueueRetiredPtr)) && commitPtrExt(i) =/= physicalQueueUpper &&
+    val canPreCommit = commitPtrExt(i).isBefore(virtualStoreQueuePreCommitPtr.bits) &&
+      virtualStoreQueuePreCommitPtr.valid && allowPreCommit
+    val hasRetired = commitPtrExt(i).isBefore(virtualStoreQueueRetiredPtr)
+    when((canPreCommit || hasRetired) && commitPtrExt(i) =/= physicalQueueUpper &&
       !ctrlEntries(ptr).hasException && !ctrlEntries(ptr).waitStoreS2 && ctrlEntries(ptr).allValid ||
       ctrlEntries(ptr).vecInactive) {
       if(i == 0) {
-        commitVec(i)               := true.B
+        commitVec(i) := true.B
       }
       else {
-        commitVec(i)               := commitVec(i - 1)
+        commitVec(i) := commitVec(i - 1)
       }
     } // commitVec default is false.B
-
+    preCommitVec(i) := commitVec(i) && canPreCommit && !hasRetired && !ctrlEntries(ptr).vecInactive
     ctrlEntries(ptr).committed   := commitVec(i) || ctrlEntries(ptr).committed
   }
+
+  io.preCommitRobIdx.valid := preCommitVec.asUInt.orR
+  io.preCommitRobIdx.bits := PriorityMux(preCommitVec.zip(commitPtrExt.map { ptr =>
+    dataEntries(ptr.value).uop.robIdx
+  }))
 
   val commitCount = PopCount(commitVec)
   commitPtrExt       := commitPtrExt.map(_ + commitCount)
@@ -2134,6 +2145,8 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
 
   virtualStoreQueue.io.hartId := io.hartId
   physicalQueue.io.hartId := io.hartId
+  physicalQueue.io.interruptPending := io.fromRob.interruptPending
+  physicalQueue.io.redirectPending := io.redirect.valid || virtualStoreQueue.io.sqRecoverStall
 
   io.toUncacheBuffer <> physicalQueue.io.toUncacheBuffer
   io.toDCache        <> physicalQueue.io.toDCache
@@ -2153,6 +2166,7 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
   io.forward         <> physicalQueue.io.forward
   io.wfi             <> physicalQueue.io.wfi
   io.exceptionInfo   := physicalQueue.io.exceptionInfo
+  io.preCommitRobIdx := physicalQueue.io.preCommitRobIdx
 
   virtualStoreQueue.io.redirect   <> io.redirect
   virtualStoreQueue.io.fromRob    <> io.fromRob

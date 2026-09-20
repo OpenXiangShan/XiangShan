@@ -75,7 +75,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
-    val memStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt, ValidIO(new RobMemStateUpdate)))
+    val memStateUpdate = Flipped(Vec(params.LduCnt + params.StaCnt + 1, ValidIO(new RobMemStateUpdate)))
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
       val blockCommit = Input(Bool())
@@ -889,6 +889,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.lsq.commit := RegNext(io.commits.isCommit && io.commits.commitValid(0))
   io.lsq.pendingPtr := RegNext(deqPtr)
   io.lsq.pendingPtrNext := RegNext(deqPtrVec_next.head)
+  io.lsq.interruptPending := intrBitSetReg
 
   /**
    * state changes
@@ -1202,6 +1203,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       update.valid && update.bits.robIdx.value === i.U &&
         !update.bits.robIdx.needFlush(io.redirect) && update.bits.interruptSafe
     }.reduce(_ || _)
+    val memSafeClear = io.memStateUpdate.map { update =>
+      update.valid && update.bits.robIdx.value === i.U &&
+        !update.bits.robIdx.needFlush(io.redirect) && !update.bits.interruptSafe
+    }.reduce(_ || _)
     val exceptionClear = exceptionWBs.map { wb =>
       wb.valid && wb.bits.robIdx.value === i.U &&
         !wb.bits.robIdx.needFlush(io.redirect) &&
@@ -1210,7 +1215,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }.reduceOption(_ || _).getOrElse(false.B)
 
     when (robEntries(i).valid && !enqThisRob) {
-      when (exceptionClear) {
+      when (exceptionClear || memSafeClear) {
         robEntries(i).interrupt_safe := false.B
       }.elsewhen (memSafeSet) {
         robEntries(i).interrupt_safe := true.B
