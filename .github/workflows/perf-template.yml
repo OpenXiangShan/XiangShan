@@ -319,7 +319,7 @@ jobs:
 
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
           echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
+          TOTAL_SCORE=$(grep "SPEC\(rate\)\?[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
           INT_SCORE=$(grep "SPECint\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
           FP_SCORE=$(grep "SPECfp\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
