@@ -417,18 +417,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.in.fromIntRegion.is0GpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read gp
   vecRegion.in.fromIntRegion.is1GpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read gp
 
-  vecRegion.in.fromFltRegion.fpWbWakeUp zip fpRegion.out.fpWb foreach {
-    case (sink, source) =>
-      sink.wen := source.wen
-      sink.pdest := source.pdest
-      sink.delay := VecIssueQueue.BypassDelay.delay1
-  }
-
-  vecRegion.in.fromFltRegion.is0FpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read fp
-  vecRegion.in.fromFltRegion.is1FpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read fp
-
   vecRegion.in.fromFltRegion := fpRegion.out.toVecRegion
-  fpRegion.in.fromVecRegion.fromVecFpRdAddr := vecRegion.out.toFltRegion.is1FpRdAddrNext
+  fpRegion.in.fromVecRegion.is1RdAddrNext := vecRegion.out.toFltRegion.is1RdAddrNext
 
   val intRegionExuOutWriteFp = intRegion.io.exuOut.flatten.filter(_.bits.params.writeFpRf)
   fpRegion.in.fromIntRegion.fpWbNext.flatten lazyZip intRegionExuOutWriteFp foreach {
@@ -453,8 +443,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency := 0.U.asTypeOf(fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency)
   fpRegion.fromIntIQ <> intRegion.io.intIQOut.get
   fpRegion.in.fromIntRegion.fromIntIQDeqOg1Payload <> intRegion.io.intIQDeqOg1PayloadOut.get
-  fpRegion.in.fromVecRegion.fpWbM3Wakeup := vecRegion.out.toFltRegion.fpWbM3Wakeup
-  fpRegion.in.fromVecRegion.fpWbNext := vecRegion.out.toFltRegion.fpWbNext
+  fpRegion.in.fromVecRegion := vecRegion.out.toFltRegion
   intRegion.io.cross.F2IDataIn.get.valid := fpRegion.out.toIntRegion.intWbNext.head.head.wen
   intRegion.io.cross.F2IDataIn.get.pdest := fpRegion.out.toIntRegion.intWbNext.head.head.pdest
   intRegion.io.cross.F2IDataIn.get.data := fpRegion.out.toIntRegion.intWbNext.head.head.data
@@ -508,6 +497,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.in.fromCSR.vxrm := csrio.vpu.vxrm
 
   vecRegion.in.vlWb0WakeUp := vecRegion.out.vlWb0WakeUp
+
+  /**
+   * Connection of [[vecRegion]] end
+   */
 
   ctrlBlock.io.toDataPath.pcToDataPathIO <> intRegion.io.fromPcTargetMem.get
 
