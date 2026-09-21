@@ -43,7 +43,7 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
 
   val ENABLE_DECR_MODE = true
   val ENABLE_STRICT_ACTIVE_DETECTION = true
-  val USE_STREAM_FIXED_DEPTH = true
+  val USE_STREAM_FIXED_DEPTH = false
 
   // constraints
   require((DEPTH_BYTES >= REGION_SIZE) && ((DEPTH_BYTES % REGION_SIZE) == 0) && ((DEPTH_BYTES / REGION_SIZE) > 0))
