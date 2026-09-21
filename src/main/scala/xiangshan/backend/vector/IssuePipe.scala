@@ -15,7 +15,7 @@ import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
-import xiangshan.mem.StoreQueueDataWrite
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 
 class IssuePipe(
@@ -248,6 +248,8 @@ class IssuePipe(
   exu.in.vpWb1 := in.vpWb1
   exu.in.gpWb0 := in.gpWb0
   exu.in.fpWb0 := in.fpWb0
+  require(exu.in.sqDeqPtr.isDefined == in.sqDeqPtr.isDefined)
+  exu.in.sqDeqPtr.foreach(_ := in.sqDeqPtr.get)
 
   out.gpWbNext.foreach(_ := exu.out.uop.bits.toGpRf.get)
   out.fpWbNext.foreach(_ := exu.out.uop.bits.toFpRf.get)
@@ -255,6 +257,8 @@ class IssuePipe(
   out.v0WbNext.foreach(_ := exu.out.uop.bits.toV0Rf.get)
   out.robWbNext.valid := exu.out.uop.valid
   out.robWbNext.bits := exu.out.uop.bits.toRob
+  require(out.ex0VStdSuccess.isDefined == exu.out.ex0VStdSuccess.isDefined)
+  out.ex0VStdSuccess.foreach(_ := exu.out.ex0VStdSuccess.get)
   out.sqWbNext.foreach { sink =>
     sink.valid := exu.out.uop.valid
     sink.bits := exu.out.uop.bits.toSQ.get
@@ -339,6 +343,7 @@ object IssuePipe {
 
     val frm = Option.when(param.readFrm)(Frm())
     val vxrm = Option.when(param.readVxrm)(Vxrm())
+    val sqDeqPtr = Option.when(param.hasVStd)(new SqPtr)
   }
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
@@ -361,6 +366,7 @@ object IssuePipe {
     val v0WbNext: Option[Exu.ToRf] = Option.when(param.v0WB != null)(new Exu.ToRf(param.v0WB, backendParams.v0PregParams))
     val vlWb0Next: Option[Exu.ToRf] = Option.when(param.vlWB != null)(new Exu.ToRf(param.vlWB, backendParams.vlPregParams))
     val robWbNext: ValidIO[Exu.ToRob] = ValidIO(new Exu.ToRob(param))
+    val ex0VStdSuccess: Option[Bool] = Option.when(param.hasVStd)(Bool())
     val sqWbNext: Option[ValidIO[StoreQueueDataWrite]] = Option.when(param.hasVStd)(ValidIO(new StoreQueueDataWrite))
   }
 

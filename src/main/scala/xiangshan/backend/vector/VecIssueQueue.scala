@@ -188,11 +188,29 @@ class VecIssueQueue(
   private val fastEntryCancel = Wire(Vec(param.numFastEntry, Bool()))
   private val entryCancel: Seq[Bool] = enqEntryCancel ++ fastEntryCancel
 
+  /**
+    * For the vstd issue queue, an entry is not released when it is issued: it waits for
+    * ex0VStdSuccess. Matching uses the issued timer the same way as is0/is1.
+    */
+  private val vstdRespMatch: Seq[Bool] = if (param.hasVStd) {
+    entries.map { entry =>
+      entry.bits.status.issued &&
+        entry.bits.status.issuedTimer === IssuedTimer.maxValue
+    }
+  } else {
+    Seq.fill(entries.size)(false.B)
+  }
+
   for ((cancel, entry) <- entryCancel.zip(entries)) {
     cancel := Mux1H(Seq(
       in.resps.is0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
       in.resps.is1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
     ))
+  }
+  if (param.hasVStd) {
+    entryCancel.zip(vstdRespMatch).foreach { case (cancel, matchResp) =>
+      cancel := matchResp && !in.resps.ex0VStdSuccess.get
+    }
   }
 
   private val enqEntrySuccess = Wire(Vec(param.numEnq, Bool()))
@@ -204,6 +222,11 @@ class VecIssueQueue(
       in.resps.is0(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
       in.resps.is1(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
     ))
+  }
+  if (param.hasVStd) {
+    entrySuccess.zip(vstdRespMatch).foreach { case (success, matchResp) =>
+      success := matchResp && in.resps.ex0VStdSuccess.get
+    }
   }
 
   private val fastEntryEmptySel: Vec[ValidIO[UInt]] = EnqPolicy((~fastEntryValid).asUInt, param.numEnq)
@@ -1134,6 +1157,7 @@ object VecIssueQueue {
   class InResp(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val is0 = Vec(param.numDeq, new RespBundle)
     val is1 = Vec(param.numDeq, new RespBundle)
+    val ex0VStdSuccess = Option.when(param.hasVStd)(Bool())
   }
 
   class InWakeUp(implicit p: Parameters, param: IssueParam) extends XSBundle {
@@ -1304,7 +1328,7 @@ object VecIssueQueue {
     val srcState    = SrcState()
     val bypassDelay = BypassDelay()
   }
-  
+
   class RespBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val fail = Bool()
     val success = Bool()
@@ -1383,10 +1407,10 @@ object VecIssueQueue {
       enqOH.bits := selOH.asUInt
     }
   }
-  
+
   private val busyTableConflictLatencyOffset = 4
   private val busyTableInsertLatencyOffset = busyTableConflictLatencyOffset - 1
-  
+
 
   object EnqPolicy {
     def apply(canEnq: UInt, numEnq: Int): Vec[ValidIO[UInt]] = {
