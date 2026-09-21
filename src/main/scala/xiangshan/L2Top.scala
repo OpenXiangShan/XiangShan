@@ -75,7 +75,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
-  val l1_xbar = TLXbar()
+  val l1_l2_fabric = LazyModule(new CustomL1L2Fabric())
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableL2) None else Some(TLIdentityNode())
@@ -90,7 +90,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
-  val xbar_l2_buffer = TLBuffer()
 
   val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
   val l1d_logger = Seq.tabulate(numMemChannelsFromDcache)(i =>
@@ -143,11 +142,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   // l2 to l2_binder, then to memory_port
   l2cache match {
     case Some(l2) =>
-      l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
+      l2_binder.get :*= l2.node :*= l1_l2_fabric.node :=* misc_l2_pmu
       l2.managerNode := TLXbar() :=* l2_binder.get
       l2.mmioNode := mmio_port
     case None =>
-      memory_port.get := l1_xbar
+      memory_port.get := l1_l2_fabric.node
   }
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
