@@ -51,6 +51,8 @@ import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
 import xscache.common.DirtyField
 
+case object EnableIommuKey extends Field[Boolean](false)
+
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
   case DebugOptionsKey => DebugOptions()

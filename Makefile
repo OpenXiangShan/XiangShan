@@ -66,10 +66,16 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+IOMMU_ENABLED := $(WITH_IOMMU)
+
 # GSIM reads CHIRRTL directly, so Verilog is not needed for these goals.
 # An explicit CHISEL_TARGET on the command line still takes precedence.
 ifneq ($(filter sim-chirrtl gsim,$(GOALS)),)
 CHISEL_TARGET ?= chirrtl
+ifeq ($(WITH_IOMMU),1)
+$(info WITH_IOMMU=1 is ignored for GSIM/CHIRRTL)
+endif
+IOMMU_ENABLED := 0
 endif
 CHISEL_TARGET ?= systemverilog
 
@@ -98,11 +104,6 @@ OBJCACHE ?=
 MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
 RTL_INCLUDE ?=
-
-# External OpenIOMMU file list. Its paths are relative to the submodule root.
-IOMMU_FILELIST := $(abspath OpenIOMMU/iommu_wrap.f)
-IOMMU_CONFIG_FILELIST := $(abspath scripts/OpenIOMMUConfig.f)
-IOMMU_RTL_INCLUDE :=
 
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
@@ -189,11 +190,9 @@ override SIM_ARGS += --with-dramsim3
 endif
 
 # OpenIOMMU is enabled only for the configuration that provides the BOSC
-# lightweight integration. Keep the RTL filelist and its feature macro in
-# sync so other XiangShan configurations do not consume this external RTL.
-ifeq ($(WITH_IOMMU),1)
+# lightweight integration. GSIM forces the effective option off above.
+ifeq ($(IOMMU_ENABLED),1)
 ifeq ($(CONFIG),DefaultConfig)
-IOMMU_RTL_INCLUDE := $(IOMMU_CONFIG_FILELIST) $(IOMMU_FILELIST)
 override SIM_ARGS += --with-iommu
 else
 $(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
@@ -385,18 +384,19 @@ reformat:
 # verilator simulation
 emu-mk: sim-verilog
 	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
+		DESIGN_DIR=$(abspath .) WITH_IOMMU=$(IOMMU_ENABLED) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
 gsim: sim-chirrtl
-	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu GSIM=1 WITH_IOMMU=0 SIM_TOP=SimTop \
+		DESIGN_DIR=$(abspath .) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		RTL_INCLUDE="$(RTL_INCLUDE) $(IOMMU_RTL_INCLUDE)"
+		DESIGN_DIR=$(abspath .) WITH_IOMMU=$(IOMMU_ENABLED) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)

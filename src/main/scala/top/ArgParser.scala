@@ -30,8 +30,6 @@ import utility._
 import device.IMSICBusType
 
 object ArgParser {
-  @volatile var enableIommu: Boolean = false
-  @volatile var isGSIM: Boolean = false
   // TODO: add more explainations
   val usage =
     """
@@ -106,8 +104,9 @@ object ArgParser {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
           }), tail)
         case "--with-iommu" :: tail =>
-          enableIommu = true
-          nextOption(config, tail)
+          nextOption(config.alter((site, here, up) => {
+            case EnableIommuKey => true
+          }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableChiselDB = true)
@@ -261,11 +260,6 @@ object ArgParser {
       }
     }
     val (newArgs, firtoolOptions) = DifftestModule.parseArgs(args)
-    isGSIM = args.sliding(2).exists {
-      case Array("--difftest-config", cfg) => cfg.contains("G")
-      case _ => false
-    }
-    enableIommu = false
     val config = nextOption(default, newArgs.toList).alter((site, here, up) => {
       case LogUtilsOptionsKey => LogUtilsOptions(
         enableDebug = here(DebugOptionsKey).EnableDebug,
