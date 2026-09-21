@@ -15,11 +15,23 @@
 
 package xiangshan.frontend.instruncache
 
+import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4MasterParameters, AXI4MasterPortParameters}
+import freechips.rocketchip.diplomacy.IdRange
 import freechips.rocketchip.diplomacy.LazyModule
 import org.chipsalliance.cde.config.Parameters
+import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 
 class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncacheParameters {
   override def shouldBeInlined: Boolean = false
+
+  val axiNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    masters = Seq(AXI4MasterParameters(
+      name = "instrUncache",
+      id = IdRange(0, nMmioAxiIdEnd),
+      maxFlight = Some(1)
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+  )))
 
   lazy val module: InstrUncacheImp = new InstrUncacheImp(this)
 }
