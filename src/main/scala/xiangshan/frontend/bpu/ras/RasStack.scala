@@ -315,20 +315,33 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.meta.nosInSpec := topNosEntry.inSpec
   io.meta.ssp       := ssp
 
-  // The stack is empty iff
-  //   (1) the top is not in the spec queue, and
-  //   (2) the committed stack has been consumed.
-  // The committed depth is `commitDepth + (ssp - nsp)`:
-  //   * `ssp - nsp` is the net in-flight push/pop effect; it is <= 0 whenever the top is
-  //     not in the spec queue (negative while a return is in flight but not yet committed);
-  //   * `nsp - ssp` committed entries have then already been consumed speculatively, so the
-  //     available committed depth is reduced by that.
-  // `<= 0` also covers underflow.
-  private val topInSpecQueue   = tosrInRange(tosr, tosw, topInSpec)
-  private val inFlight         = ssp.asSInt - nsp.asSInt
-  private val speculativeDepth = commitDepth.zext.asSInt + inFlight
-  private val empty            = !topInSpecQueue && speculativeDepth <= 0.S
-  io.topRetAddrValid := !empty
+  // The stack is empty iff the top is not in the spec queue and the committed stack has been
+  // fully consumed. `ssp - nsp` is the net in-flight effect; with `StackPtrWidth` wide enough
+  // it is reconstructed exactly by a signed subtraction, so no modular-wrap disambiguation is
+  // needed.
+  private def resolvedEmpty(
+      currSsp:    UInt,
+      currTosr:   RasPtr,
+      currTosw:   RasPtr,
+      currInSpec: Bool
+  ): Bool = {
+    val speculativeDepth = commitDepth.zext.asSInt + (currSsp.asSInt - nsp.asSInt)
+    !tosrInRange(currTosr, currTosw, currInSpec) && speculativeDepth <= 0.S
+  }
+
+  private val rasIsEmpty = RegInit(true.B)
+  when(io.redirect.valid) {
+    rasIsEmpty := Mux(
+      io.redirect.isCall,
+      false.B,
+      resolvedEmpty(io.redirect.meta.ssp, io.redirect.meta.tosr, io.redirect.meta.tosw, io.redirect.meta.topInSpec)
+    )
+  }.elsewhen(io.spec.pushValid) {
+    rasIsEmpty := false.B
+  }.otherwise {
+    rasIsEmpty := resolvedEmpty(ssp, tosr, tosw, topInSpec)
+  }
+  io.topRetAddrValid := !rasIsEmpty
 
   when(io.commit.popValid) {
     val nspUpdate = Wire(UInt(StackPtrWidth.W))

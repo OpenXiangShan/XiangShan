@@ -37,7 +37,9 @@ trait HasRasParameters extends HasBpuParameters {
   // Width of the committed-stack occupancy counter (0..CommitStackSize).
   def CommitDepthWidth: Int = log2Up(CommitStackSize + 1)
 
-  // Width of the stack pointers. One bit wider than the maximum logical stack depth so
-  // that `ssp - nsp` (net in-flight) can be sign-interpreted without wrapping.
-  def StackPtrWidth: Int = log2Up(CommitStackSize + SpecQueueSize) + 1
+  // Width of the stack pointers. Large enough that `ssp - nsp` (net in-flight) can be
+  // sign-interpreted across the whole operating range without modular aliasing, so emptiness
+  // detection needs no extra disambiguation bit. The only aliased endpoint (a fully saturated
+  // +SpecQueueSize push window) always has its top inside the spec queue and is masked there.
+  def StackPtrWidth: Int = log2Up(CommitStackSize + SpecQueueSize)
 }
