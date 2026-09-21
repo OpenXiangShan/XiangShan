@@ -4,7 +4,8 @@ from env.funcov.py.ifu.mmio_v3_funcov import (
     MMIO_V3_CHECKED_EVENT_TYPE,
     sample_mmio_v3_coverage,
 )
-from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 
 
 _IFU = "Frontend_top.Frontend.inner_ifu."
@@ -32,13 +33,15 @@ def _make_recorder(tmp_path):
         monitor=SimpleNamespace(observations=[]),
         memory=SimpleNamespace(mmio_ranges=[(0x10001000, 0x10003000)]),
     )
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    recorder = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="ifu_mmio_v3_unit",
         artifact_tag="ifu_mmio_v3_unit",
         output_dir=tmp_path,
     )
     recorder.attach(env)
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    recorder.attach_toffee_sink(sink)
     return recorder, env, dut
 
 

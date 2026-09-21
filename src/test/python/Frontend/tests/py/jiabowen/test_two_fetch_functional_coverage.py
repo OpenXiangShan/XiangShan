@@ -53,12 +53,13 @@ from env.funcov.py.icache import (
 from env.runtime.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
 from env.funcov.recorder import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
-    FunctionalCoverageRecorder,
+    FrontendFuncovSampleHub,
     current_funcov_sampler_sha256,
     current_verification_environment_sha256,
     default_pilot_csv_path,
     funcov_sampler_paths,
 )
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.runtime.pylib import frontend_offset_path
 from tools.backannotate_funcov import (
     PilotBin,
@@ -290,7 +291,7 @@ def _make_recorder(tmp_path, *, target_bin_ids=None, target_tp_ids=None, target_
         memory=_Memory(),
         observed_cfvec_pc=lambda slot: int(dut.cfvec_pcs[int(slot)]),
     )
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="two_fetch_unit",
         artifact_tag="two_fetch_unit",
@@ -299,8 +300,10 @@ def _make_recorder(tmp_path, *, target_bin_ids=None, target_tp_ids=None, target_
         target_tp_ids=target_tp_ids,
         target_testcases=target_testcases,
     )
-    recorder.attach(env)
-    return recorder, env, dut
+    hub.attach(env)
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    hub.attach_toffee_sink(sink)
+    return hub, env, dut
 
 
 def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
@@ -399,8 +402,9 @@ def test_two_fetch_s0_accept_preserves_redirect_owner_before_s1(tmp_path, pc_pro
     assert recorder.key_hit(
         "two_fetch_flush_flow", "backend_redirect_drops_inflight"
     )
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-540"].key]
-    assert hit.evidence[-1]["ftq_slot_reused"] is True
+    detail = recorder.hit_detail_by_bin_id("BIN-540")
+    assert detail is not None
+    assert detail["evidence"][-1]["ftq_slot_reused"] is True
     assert not any(
         item.get("event") == "two_fetch_redirect_old_tag_delivery"
         for item in recorder.risk_observations
@@ -697,10 +701,11 @@ def test_two_fetch_cross_block_rvi_keeps_raw_selector_and_uses_effective_owner(t
 
     assert recorder.key_hit("two_fetch_ifu_source", "blocksel_switch")
     assert recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-529"].key]
-    assert hit.evidence[-1]["raw_block_sel"] == 0
-    assert hit.evidence[-1]["is_cross_block_instr"] == 1
-    assert hit.evidence[-1]["effective_owner"] == 1
+    detail = recorder.hit_detail_by_bin_id("BIN-529")
+    assert detail is not None
+    assert detail["evidence"][-1]["raw_block_sel"] == 0
+    assert detail["evidence"][-1]["is_cross_block_instr"] == 1
+    assert detail["evidence"][-1]["effective_owner"] == 1
 
 
 def test_two_fetch_cross_block_rvi_rejects_ownerized_raw_selector(tmp_path):
@@ -1111,7 +1116,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     fixture_source = (frontend_root / "env/runtime/fixtures.py").read_text(encoding="utf-8")
     sampler_source = (frontend_root / "env/funcov/__init__.py").read_text(encoding="utf-8")
     recorder_source = (frontend_root / "env/funcov/recorder.py").read_text(encoding="utf-8")
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="contract",
         artifact_tag="contract",
@@ -1130,8 +1135,8 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 573
-    assert all(item.coverpoint for item in recorder.definitions)
+    assert len(hub.definitions) == 573
+    assert all(item.coverpoint for item in hub.definitions)
     assert "set_line_coverage" in fixture_source
     assert "TB_ENABLE_TOFFEE_LINE_COVERAGE" in fixture_source
     assert not (frontend_root / "docs/frontend_bt_functional_coverage_pilot.csv").exists()
@@ -1585,68 +1590,6 @@ def test_effective_run_id_honors_explicit_value_after_default_generation(monkeyp
         fixtures_module._DEFAULT_RUN_ID = previous_default
 
 
-def test_funcov_artifact_uses_coverpoint_key_and_strict_merge_signature(tmp_path):
-    recorder, _env, _dut = _make_recorder(tmp_path)
-    assert recorder.mark(
-        "two_fetch_ftq_eligibility",
-        "eligible_dual",
-        12,
-        {"event": "unit"},
-    )
-    paths = recorder.write_artifacts()
-
-    raw_path = Path(paths["raw_path"])
-    raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    key = "two_fetch_ftq_eligibility::request_eligibility::eligible_dual"
-    assert raw["artifact_schema_version"] == 2
-    assert raw["hits"][key]["hits"] == 1
-    assert raw["hits"][key]["coverpoint"] == "request_eligibility"
-    assert raw["provenance"]["compatibility_signature"]
-
-    merged = FunctionalCoverageRecorder.merge_raw_files(
-        [raw_path, raw_path],
-        artifact_tag="merged",
-        output_dir=tmp_path / "merged",
-    )
-    assert merged.hits[
-        ("two_fetch_ftq_eligibility", "request_eligibility", "eligible_dual")
-    ].hits == 2
-
-    incompatible_path = tmp_path / "incompatible.funcov.json"
-    incompatible = dict(raw)
-    incompatible["provenance"] = dict(raw["provenance"])
-    incompatible["provenance"]["compatibility_signature"] = "different-version"
-    incompatible_path.write_text(json.dumps(incompatible), encoding="utf-8")
-    with pytest.raises(ValueError, match="incompatible functional coverage artifacts"):
-        FunctionalCoverageRecorder.merge_raw_files(
-            [raw_path, incompatible_path],
-            artifact_tag="rejected",
-            output_dir=tmp_path / "rejected",
-        )
-
-    stale_fields_path = tmp_path / "stale-fields.funcov.json"
-    stale_fields = json.loads(raw_path.read_text(encoding="utf-8"))
-    stale_fields["provenance"]["toolchain"] = "python-tampered"
-    stale_fields_path.write_text(json.dumps(stale_fields), encoding="utf-8")
-    with pytest.raises(ValueError, match="signature does not match its provenance"):
-        FunctionalCoverageRecorder.merge_raw_files(
-            [stale_fields_path],
-            artifact_tag="rejected-stale-fields",
-            output_dir=tmp_path / "rejected-stale-fields",
-        )
-
-    stale_definitions_path = tmp_path / "stale-definitions.funcov.json"
-    stale_definitions = json.loads(raw_path.read_text(encoding="utf-8"))
-    stale_definitions["definitions"][0]["hit_rule"] = "tampered rule"
-    stale_definitions_path.write_text(json.dumps(stale_definitions), encoding="utf-8")
-    with pytest.raises(ValueError, match="definitions do not match provenance"):
-        FunctionalCoverageRecorder.merge_raw_files(
-            [stale_definitions_path],
-            artifact_tag="rejected-stale-definitions",
-            output_dir=tmp_path / "rejected-stale-definitions",
-        )
-
-
 def test_funcov_artifact_records_explicit_targets(tmp_path):
     recorder, _env, _dut = _make_recorder(
         tmp_path,
@@ -1660,12 +1603,6 @@ def test_funcov_artifact_records_explicit_targets(tmp_path):
         "tp_ids": ["TP-001"],
         "testcases": [],
     }
-
-    raw = json.loads(Path(recorder.write_artifacts()["raw_path"]).read_text(encoding="utf-8"))
-    assert raw["coverage_targets"]["bin_ids"] == ["BIN-501"]
-    assert raw["coverage_targets"]["hit_keys"] == [
-        "two_fetch_ftq_eligibility::request_eligibility::eligible_dual"
-    ]
 
     with pytest.raises(ValueError, match="unknown functional coverage target Bin_ID"):
         _make_recorder(tmp_path / "bad_target", target_bin_ids=["BIN-9999"])
@@ -2553,50 +2490,6 @@ def test_backannotation_rejects_tampered_definitions(tmp_path):
 
     assert audit["eligible"] is False
     assert "definitions_sha256_mismatch" in audit["reasons"]
-
-
-def test_funcov_merge_rejects_unknown_coverpoint_key(tmp_path):
-    recorder, _env, _dut = _make_recorder(tmp_path)
-    raw_path = Path(recorder.write_artifacts()["raw_path"])
-    raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    raw["hits"] = {
-        "two_fetch_ftq_eligibility::wrong_point::eligible_dual": {
-            "hits": 1,
-            "first_cycle": 1,
-            "last_cycle": 1,
-            "evidence": [],
-        }
-    }
-    raw_path.write_text(json.dumps(raw), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="unknown functional coverage hit key"):
-        FunctionalCoverageRecorder.merge_raw_files(
-            [raw_path],
-            artifact_tag="rejected",
-            output_dir=tmp_path / "rejected",
-        )
-
-
-def test_funcov_merge_rejects_legacy_group_bin_key(tmp_path):
-    recorder, _env, _dut = _make_recorder(tmp_path)
-    raw_path = Path(recorder.write_artifacts()["raw_path"])
-    raw = json.loads(raw_path.read_text(encoding="utf-8"))
-    raw["hits"] = {
-        "two_fetch_ftq_eligibility::eligible_dual": {
-            "hits": 1,
-            "first_cycle": 1,
-            "last_cycle": 1,
-            "evidence": [],
-        }
-    }
-    raw_path.write_text(json.dumps(raw), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="invalid functional coverage hit key"):
-        FunctionalCoverageRecorder.merge_raw_files(
-            [raw_path],
-            artifact_tag="rejected",
-            output_dir=tmp_path / "rejected",
-        )
 
 
 def test_backannotation_tool_distinguishes_model_dut_and_manual_close(tmp_path):

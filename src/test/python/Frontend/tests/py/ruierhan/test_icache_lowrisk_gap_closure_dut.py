@@ -485,16 +485,20 @@ def _mixed_source_hit_evidence(env) -> dict:
     group = "icache_mainpipe_maybe_rvc_align"
     name = "mixed_source_merge"
     definition = env.functional_coverage.definition_by_group_bin[(group, name)]
-    hit = env.functional_coverage.hits.get(definition.key)
-    assert hit is not None and hit.hits > 0, {
+    detail = env.functional_coverage.hit_detail(
+        definition.coverage_group,
+        definition.bin_name,
+        coverpoint=definition.coverpoint,
+    )
+    assert detail is not None, {
         "reason": "BIN-1139 was not marked by the functional-coverage sampler",
         "coverage_key": definition.key,
     }
-    assert hit.evidence, {
+    assert detail["evidence"], {
         "reason": "BIN-1139 hit has no sampler evidence",
         "coverage_key": definition.key,
     }
-    evidence = hit.evidence[-1]
+    evidence = detail["evidence"][-1]
     assert tuple(evidence.get("mshr_source_lines", ())) and tuple(
         evidence.get("sram_source_lines", ())
     ), {"reason": "BIN-1139 hit evidence omitted source-line classification", "evidence": evidence}

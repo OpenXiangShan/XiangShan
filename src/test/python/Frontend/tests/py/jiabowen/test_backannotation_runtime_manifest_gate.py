@@ -10,7 +10,7 @@ from env.runtime.artifact_provenance import (
     load_frontend_build_manifest,
     write_frontend_build_manifest,
 )
-from env.funcov.recorder import CoverageBinDef, FunctionalCoverageRecorder
+from env.funcov.recorder import CoverageBinDef, FrontendFuncovSampleHub
 from tools import backannotate_funcov
 
 
@@ -175,14 +175,13 @@ def test_funcov_artifact_records_absolute_manifest_path(tmp_path, monkeypatch):
         priority="P2",
         suggested_testcase="unit",
     )
-    recorder = FunctionalCoverageRecorder(
+    hub = FrontendFuncovSampleHub(
         [definition],
         testcase_name="unit",
         artifact_tag="unit",
         output_dir=tmp_path / "funcov",
     )
-    raw_path = Path(recorder.write_artifacts()["raw_path"])
-    provenance = json.loads(raw_path.read_text(encoding="utf-8"))["provenance"]
+    provenance = hub.provenance
 
     assert seen["manifest_path"].is_absolute()
     assert Path(provenance["build_manifest_path"]).is_absolute()

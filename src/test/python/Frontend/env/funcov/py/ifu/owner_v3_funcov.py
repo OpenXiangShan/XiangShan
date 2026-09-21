@@ -128,15 +128,12 @@ def derive_owner_v3_from_source(
     evidence: dict[str, Any] | None,
 ) -> None:
     hit_count_by_bin_id = getattr(recorder, "hit_count_by_bin_id", None)
+    if not callable(hit_count_by_bin_id):
+        return
     for rule in _OWNER_V3_SOURCE_RULES_BY_TRIGGER.get(str(source_bin_id), ()):
         source_hits = {}
         for required_bin_id in rule.source_bin_ids:
-            if callable(hit_count_by_bin_id):
-                hit_count = int(hit_count_by_bin_id(required_bin_id))
-            else:
-                definition = recorder.definition_by_bin_id.get(required_bin_id)
-                hit = None if definition is None else recorder.hits.get(definition.key)
-                hit_count = 0 if hit is None else int(hit.hits)
+            hit_count = int(hit_count_by_bin_id(required_bin_id))
             if hit_count <= 0:
                 break
             source_hits[required_bin_id] = hit_count

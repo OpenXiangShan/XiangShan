@@ -15,7 +15,8 @@ from env.funcov.py.ifu.cacheable_pipeline_funcov import (
     _req_signal_names,
     sample_ifu_cacheable_pipeline_coverage,
 )
-from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 
 
 _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
@@ -41,13 +42,15 @@ class _FakeDut:
 def _make_recorder(tmp_path):
     dut = _FakeDut()
     env = SimpleNamespace(dut=dut)
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    recorder = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="ifu_cacheable_pipeline_unit",
         artifact_tag="ifu_cacheable_pipeline_unit",
         output_dir=tmp_path,
     )
     recorder.attach(env)
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    recorder.attach_toffee_sink(sink)
     for candidates in _SIGNALS.values():
         dut.set(candidates[0], 0)
     for candidates in _UPSTREAM_SIGNALS.values():
@@ -383,8 +386,9 @@ def test_bin907_requires_same_transaction_exception_truncation(tmp_path):
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-907"].key]
-    observations = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail_by_bin_id("BIN-907")
+    assert detail is not None
+    observations = detail["evidence"][-1]["observations"]
     assert observations["raw_candidate_count"] == 2
     assert observations["instr_count"] == 1
     assert observations["checks"] == {
@@ -397,7 +401,7 @@ def test_bin907_requires_same_transaction_exception_truncation(tmp_path):
         "exception_mask_matches_active": True,
         "output_ftq_matches": True,
     }
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 @pytest.mark.parametrize("alias", _BIN907_SIGNALS["to_ibuffer_valid"][1:])
@@ -410,7 +414,7 @@ def test_bin907_accepts_exported_ibuffer_valid_alias(tmp_path, alias):
     dut.set(alias, 1)
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 def test_bin907_missing_later_data_probe_is_visible_and_fail_closed(tmp_path):
@@ -424,7 +428,7 @@ def test_bin907_missing_later_data_probe_is_visible_and_fail_closed(tmp_path):
     assert any(
         error.get("event") == "ifu_bin907_probe_unobservable"
         and "s1_later_data" in error.get("missing", [])
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -436,7 +440,7 @@ def test_bin907_requires_multiple_raw_pretruncation_candidates(tmp_path):
 
     assert recorder._ifu_bin907_pending is None
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 def test_bin907_missing_raw_candidate_probe_is_visible_and_fail_closed(tmp_path):
@@ -450,7 +454,7 @@ def test_bin907_missing_raw_candidate_probe_is_visible_and_fail_closed(tmp_path)
     assert any(
         error.get("event") == "ifu_bin907_probe_unobservable"
         and "s1_instr_end_mask_0" in error.get("missing", [])
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -474,7 +478,7 @@ def test_bin907_rejects_identity_mismatch(
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
     assert any(
         error.get("event") == expected_event
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -489,7 +493,7 @@ def test_bin907_rejects_younger_output(tmp_path):
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
     assert any(
         error.get("event") == "ifu_bin907_delivery_mismatch"
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -509,7 +513,7 @@ def test_bin907_timeout_is_visible_and_fail_closed(tmp_path):
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
     assert any(
         error.get("event") == "ifu_bin907_transaction_timeout"
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -704,8 +708,9 @@ def test_line0_tl_fault_requires_matching_s0_source_before_s1_stall(tmp_path):
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 4)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-906"].key]
-    observations = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail_by_bin_id("BIN-906")
+    assert detail is not None
+    observations = detail["evidence"][-1]["observations"]
     assert observations["fault_source"] == "tl_denied"
     assert observations["source_signal_paths"] == {
         "line0_tl_corrupt": _LATE_FAULT_SIGNALS["line0_tl_corrupt"][0],
@@ -973,8 +978,9 @@ def test_backend_redirect_closes_held_response_on_ifu_routed_cycle(tmp_path):
 
     assert recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
     assert recorder.key_hit("ifu_cacheable_flush", "flush_wins_fire")
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-812"].key]
-    evidence = hit.evidence[-1]
+    detail = recorder.hit_detail_by_bin_id("BIN-812")
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["event"] == "ifu_s0_backend_redirect_blocks_aggregate_response"
     assert evidence["redirect_cycle"] == 1
     assert evidence["flush_cycle"] == 2
@@ -1102,7 +1108,7 @@ def test_cacheable_aggregate_transaction_keeps_registered_s1_s2_fields(tmp_path)
     assert passes[0]["s1_cycle"] == 2
     assert passes[0]["s2"]["slots"][0]["effective_owner"] == 0
     assert passes[0]["semantics"]["s2_expected"][0]["end_offset"] == 1
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 def test_cacheable_s1_alignment_rejects_wrong_independent_index(tmp_path):
@@ -1123,12 +1129,10 @@ def test_cacheable_s1_alignment_rejects_wrong_independent_index(tmp_path):
         and item["mismatches"][0]["observed"]["index"] == 1
         for item in recorder.risk_observations
     )
-    raw = recorder._raw_dict()
-    assert raw["checker"]["status"] == "fail"
     assert any(
         error.get("kind") == "FUNCOV_CONTRACT_ERROR"
         and error.get("event") == "ifu_s1_alignment_semantic_mismatch"
-        for error in raw["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -1335,7 +1339,7 @@ def test_cacheable_s1_s2_flush_is_diagnostic_not_contract_error(tmp_path):
         item.get("event") == "ifu_s1_s2_transaction_flushed"
         for item in recorder.risk_observations
     )
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 def test_cacheable_s1_s2_transaction_missing_cross_probe_is_visible(tmp_path):
@@ -1392,7 +1396,7 @@ def test_cacheable_lane34_structural_cross_and_deferred_s1_pc_pass_at_s2(
     assert passes[0]["s2"]["slots"][-1]["observation_modes"] == {
         "is_cross_block_instr": "rtl_structural_zero"
     }
-    assert recorder._raw_dict()["errors"] == []
+    assert not recorder.contract_errors
 
 
 @pytest.mark.parametrize(
@@ -1439,7 +1443,7 @@ def test_cacheable_lane34_fallback_requires_exact_tail_shape(tmp_path):
     delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrPcVec_34_addr")
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
 
-    errors = recorder._raw_dict()["errors"]
+    errors = recorder.contract_errors
     assert any(
         error.get("event") == "ifu_s1_s2_transaction_probe_unobservable"
         and "s1_alignedInstrVec_34_isCrossBlockInstr" in error.get("missing", [])
@@ -1472,7 +1476,7 @@ def test_cacheable_lane34_s2_pc_must_be_observed_and_correct(tmp_path, failure):
         item.get("event") == "ifu_s1_s2_registered_transaction_pass"
         for item in recorder.risk_observations
     )
-    errors = recorder._raw_dict()["errors"]
+    errors = recorder.contract_errors
     expected_event = (
         "ifu_s1_s2_transaction_probe_unobservable"
         if failure == "missing"
@@ -1543,7 +1547,7 @@ def test_cacheable_s2_registered_predecode_semantic_mismatch_is_error(
     assert any(
         error.get("kind") == "FUNCOV_CONTRACT_ERROR"
         and error.get("event") == "ifu_s2_registered_semantic_mismatch"
-        for error in recorder._raw_dict()["errors"]
+        for error in recorder.contract_errors
     )
 
 
@@ -1568,7 +1572,7 @@ def test_cacheable_s2_missing_predecode_probe_is_visible_error(tmp_path):
     )
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
 
-    errors = recorder._raw_dict()["errors"]
+    errors = recorder.contract_errors
     assert any(
         error.get("event") == "ifu_s1_s2_transaction_probe_unobservable"
         and any("rasAction" in name for name in error.get("missing", []))

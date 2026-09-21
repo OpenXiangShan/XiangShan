@@ -10,7 +10,7 @@ from ..core.transactions import IFUFetchTransaction
 
 def _fetch_path_from_pc(pc: int) -> str:
     # Keep this bridge deliberately simple for the first bare-mode sample. The
-    # full path taxonomy remains owned by FunctionalCoverageRecorder.
+    # full path taxonomy remains owned by the Frontend funcov sampling host.
     return "mmio_uncache" if int(pc) < 0x80000000 else "icache_seq"
 
 

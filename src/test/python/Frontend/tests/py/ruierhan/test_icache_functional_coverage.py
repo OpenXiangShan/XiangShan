@@ -874,22 +874,13 @@ def test_icache_hitmiss_toffee_model_collects_stateful_sampler_hits() -> None:
     }
     assert hit_bins["continuous_same_line_sram_hit"] == 1
     assert runtime.hits == set()
-
-    legacy_hits = {
-        key: SimpleNamespace(hits=count)
-        for key, count in model.hit_counts().items()
-        if count
-    }
-    legacy = SimpleNamespace(hits=legacy_hits)
-    assert model.compare_legacy_counts(legacy) == {}
-
-    key = (
-        "icache_hit_path",
-        ICACHE_HITMISS_COVERPOINTS["icache_hit_path"],
-        "continuous_same_line_sram_hit",
-    )
-    legacy.hits[key].hits += 1
-    assert model.compare_legacy_counts(legacy) == {key: (2, 1)}
+    assert model.hit_counts()[
+        (
+            "icache_hit_path",
+            ICACHE_HITMISS_COVERPOINTS["icache_hit_path"],
+            "continuous_same_line_sram_hit",
+        )
+    ] == 1
 
 
 def test_icache_hitmiss_toffee_model_can_audit_without_forwarding_legacy_marks() -> None:

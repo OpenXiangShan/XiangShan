@@ -13,7 +13,8 @@ from env.funcov.py.ifu.compact_funcov import (
     _sample_frontend_trigger,
     _sample_reset_release_state,
 )
-from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.support.pc_utils import fold_pc
 from env.support.rvc_decoder import expand_rvc
 
@@ -64,13 +65,15 @@ def _make_recorder(tmp_path):
     dut = _FakeDut()
     memory = _Memory()
     env = SimpleNamespace(dut=dut, memory=memory)
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    recorder = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="ifu_compact_unit",
         artifact_tag="ifu_compact_unit",
         output_dir=tmp_path,
     )
     recorder.attach(env)
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    recorder.attach_toffee_sink(sink)
     return recorder, env, dut, memory
 
 
@@ -109,9 +112,13 @@ def test_reset_release_owner_leaf_requires_complete_visible_zero_state(tmp_path)
     _sample_reset_release_state(recorder, dut, 7)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_055")
-    evidence = recorder.hits[
-        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_055")
-    ].evidence[-1]
+    detail = recorder.hit_detail(
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_055",
+        coverpoint="verified_leaf_event",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["producer"] == "ifu_reset_release_sampler"
     assert evidence["observations"]["reset_release_cycle"] == 7
 
@@ -633,10 +640,13 @@ def test_bin948_uses_raw_block_select_for_wb_half_and_effective_owner_for_ftq(
     assert selected_half == expected_half
     assert effective_owner == expected_owner
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_050")
-    hit = recorder.hits[
-        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_050")
-    ]
-    evidence = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail(
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_050",
+        coverpoint="verified_leaf_event",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]["observations"]
     assert evidence["raw_block_sel"] == raw_block_sel
     assert evidence["effective_owner"] == expected_owner
     assert evidence["selected_half_record"] == expected_half
@@ -1876,11 +1886,16 @@ def test_ifu_cfi_offset_requires_current_s2_probe_and_exact_value(tmp_path):
     correct_dut.set(_PREFIX + "s2_alignedJumpOffsetVec_0_addr", 0)
     sample_cfvec_coverage(correct, correct_env, 1)
     assert correct.key_hit("ifu_predecode", "cfi_offset_correct")
-    hit = correct.hits[("ifu_predecode", "decode_coherence", "cfi_offset_correct")]
-    assert hit.evidence[-1]["signal_path"].endswith(
+    detail = correct.hit_detail(
+        "ifu_predecode",
+        "cfi_offset_correct",
+        coverpoint="decode_coherence",
+    )
+    assert detail is not None
+    assert detail["evidence"][-1]["signal_path"].endswith(
         "s2_alignedJumpOffsetVec_0_addr"
     )
-    assert hit.evidence[-1]["observed_byte_offset"] == 0
+    assert detail["evidence"][-1]["observed_byte_offset"] == 0
 
     negative, negative_env, negative_dut, negative_memory = _make_recorder(
         tmp_path / "negative"
@@ -1894,11 +1909,14 @@ def test_ifu_cfi_offset_requires_current_s2_probe_and_exact_value(tmp_path):
     )
     sample_cfvec_coverage(negative, negative_env, 1)
     assert negative.key_hit("ifu_predecode", "cfi_offset_correct")
-    negative_hit = negative.hits[
-        ("ifu_predecode", "decode_coherence", "cfi_offset_correct")
-    ]
-    assert negative_hit.evidence[-1]["decoded_byte_offset"] == -4
-    assert negative_hit.evidence[-1]["observed_byte_offset"] == -4
+    negative_detail = negative.hit_detail(
+        "ifu_predecode",
+        "cfi_offset_correct",
+        coverpoint="decode_coherence",
+    )
+    assert negative_detail is not None
+    assert negative_detail["evidence"][-1]["decoded_byte_offset"] == -4
+    assert negative_detail["evidence"][-1]["observed_byte_offset"] == -4
 
 
 def test_ifu_cross_block_rvi_uses_second_effective_owner_with_raw_block_zero(tmp_path):
@@ -2350,10 +2368,10 @@ def test_second_block_suppression_requires_preclip_block_one_witness(tmp_path):
     assert recorder.key_hit("ifu_data_slice", "second_block_suppressed")
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
-    definition = recorder.definition_by_bin_id["BIN-874"]
-    hit = recorder.hits[definition.key]
+    detail = recorder.hit_detail_by_bin_id("BIN-874")
+    assert detail is not None
     preclip_evidence = [
-        item for item in hit.evidence if "preclip_second_block_slots" in item
+        item for item in detail["evidence"] if "preclip_second_block_slots" in item
     ]
     assert preclip_evidence[-1]["preclip_second_block_slots"] == [2]
     assert preclip_evidence[-1]["preclip_signal_paths"]["2"] == {
@@ -2543,9 +2561,14 @@ def test_invalid_taken_fetch_exception_requires_same_transaction_delivery(tmp_pa
     sample_cfvec_coverage(recorder, env, 4)
 
     assert recorder.key_hit("ifu_invalid_taken_exception", "observed")
-    hit = recorder.hits[("ifu_invalid_taken_exception", "stimulus_cross", "observed")]
-    assert hit.evidence[-1]["old_unconsumed_entry_preserved"]
-    assert hit.evidence[-1]["ibuffer_pointer_update_correct"]
+    detail = recorder.hit_detail(
+        "ifu_invalid_taken_exception",
+        "observed",
+        coverpoint="stimulus_cross",
+    )
+    assert detail is not None
+    assert detail["evidence"][-1]["old_unconsumed_entry_preserved"]
+    assert detail["evidence"][-1]["ibuffer_pointer_update_correct"]
 
 
 def test_invalid_taken_fetch_exception_rejects_bad_count_and_younger_delivery(tmp_path):

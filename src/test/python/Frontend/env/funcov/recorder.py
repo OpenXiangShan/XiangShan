@@ -289,14 +289,6 @@ class CoverageBinDef:
         return (self.coverage_group, self.bin_name)
 
 
-@dataclass
-class CoverageHit:
-    hits: int = 0
-    first_cycle: Optional[int] = None
-    last_cycle: Optional[int] = None
-    evidence: List[dict] = field(default_factory=list)
-
-
 class FrontendFuncovSampleHub:
     """Shared sampling hub for native Toffee funcov.
 
@@ -617,6 +609,55 @@ class FrontendFuncovSampleHub:
 
     def attach_toffee_sink(self, sink) -> None:
         self.toffee_sink = sink
+        # DUT helpers query definitions/state through tb.functional_coverage (sink).
+        if hasattr(sink, "attach_sample_hub"):
+            sink.attach_sample_hub(self)
+        sink.definitions = self.definitions
+        sink.definition_by_key = self.definition_by_key
+        sink.definition_by_bin_id = self.definition_by_bin_id
+        sink.definition_by_group_bin = self.definition_by_group_bin
+
+    def hit_count_by_bin_id(self, bin_id: str) -> int:
+        if self.toffee_sink is None:
+            return 0
+        return int(self.toffee_sink.hit_count_by_bin_id(bin_id))
+
+    def key_hit(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        *,
+        coverpoint: Optional[str] = None,
+    ) -> bool:
+        if self.toffee_sink is None:
+            return False
+        return bool(
+            self.toffee_sink.key_hit(
+                coverage_group,
+                bin_name,
+                coverpoint=coverpoint,
+            )
+        )
+
+    def hit_detail(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        *,
+        coverpoint: Optional[str] = None,
+    ):
+        if self.toffee_sink is None:
+            return None
+        return self.toffee_sink.hit_detail(
+            coverage_group,
+            bin_name,
+            coverpoint=coverpoint,
+        )
+
+    def hit_detail_by_bin_id(self, bin_id: str):
+        if self.toffee_sink is None:
+            return None
+        return self.toffee_sink.hit_detail_by_bin_id(bin_id)
 
     def enable_toffee_direct_domain(self, domain: str) -> None:
         self.toffee_direct_domains.add(str(domain).strip().lower())
@@ -664,12 +705,7 @@ class FrontendFuncovSampleHub:
         forward_to_toffee: bool = True,
         derive_owner: bool = True,
     ) -> bool:
-        """Route a coverage observation without maintaining a legacy hit ledger.
-
-        Formal SampleHub runs treat this as sampling/event plumbing for owner
-        derivation and optional transitional toffee forwarding.  Legacy hit
-        accumulation lives only on :class:`FunctionalCoverageRecorder`.
-        """
+        """Route a coverage observation into the attached Toffee sink and owner derivation."""
         key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         if key not in self.definition_by_key:
             raise KeyError(
@@ -1129,377 +1165,3 @@ class FrontendFuncovSampleHub:
         newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
         older = (int(older_flag) & 1) * size + (int(older_value) % size)
         return (newer - older) % modulo
-
-
-class FunctionalCoverageRecorder(FrontendFuncovSampleHub):
-    """Legacy hit ledger and artifact writer.
-
-    Formal Toffee runs use :class:`FrontendFuncovSampleHub` directly.  This
-    subclass keeps the old JSON ledger API for remaining diagnostic callers.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.hits: Dict[Tuple[str, str, str], CoverageHit] = {}
-
-    def raw_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.json"
-
-    def summary_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.summary.csv"
-
-    def unhit_path(self) -> Path:
-        return self.output_dir / f"{self.artifact_tag}.funcov.unhit.csv"
-
-    def key_hit(self, coverage_group: str, bin_name: str, *, coverpoint: Optional[str] = None) -> bool:
-        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
-        hit = self.hits.get(key)
-        return bool(hit and hit.hits > 0)
-
-    def mark(
-        self,
-        coverage_group: str,
-        bin_name: str,
-        cycle: int,
-        evidence: Optional[dict] = None,
-        *,
-        coverpoint: Optional[str] = None,
-        forward_to_toffee: bool = True,
-        derive_owner: bool = True,
-    ) -> bool:
-        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
-        if key not in self.definition_by_key:
-            raise KeyError(
-                "functional coverage sampler attempted an unmodeled bin: "
-                f"{key[0]}::{key[1]}::{key[2]}"
-            )
-        hit = self.hits.setdefault(key, CoverageHit())
-        hit.hits += 1
-        hit.last_cycle = int(cycle)
-        if hit.first_cycle is None:
-            hit.first_cycle = int(cycle)
-        if evidence is not None and len(hit.evidence) < 8:
-            hit.evidence.append(_sanitize(evidence))
-        return super().mark(
-            coverage_group,
-            bin_name,
-            cycle,
-            evidence,
-            coverpoint=coverpoint,
-            forward_to_toffee=forward_to_toffee,
-            derive_owner=derive_owner,
-        )
-
-    def write_artifacts(self) -> dict:
-        return self._write_legacy_artifacts()
-
-    def _write_legacy_artifacts(self) -> dict:
-        raw = self._raw_dict()
-        raw_path = self.raw_path()
-        summary_path = self.summary_path()
-        unhit_path = self.unhit_path()
-
-        raw_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        with summary_path.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "Coverage_Group",
-                    "Coverpoint",
-                    "Total_Bins",
-                    "Hit_Bins",
-                    "Coverage_Pct",
-                    "Hit_Bin_Names",
-                    "Unhit_Bin_Names",
-                ],
-            )
-            writer.writeheader()
-            for row in self._summary_rows():
-                writer.writerow(row)
-
-        with unhit_path.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "Bin_ID",
-                    "Coverage_Group",
-                    "Coverpoint",
-                    "Bin_Name",
-                    "Priority",
-                    "Stage",
-                    "Mapped_Path",
-                    "Suggested_Testcase",
-                ],
-            )
-            writer.writeheader()
-            for row in self._unhit_rows():
-                writer.writerow(row)
-
-        return {
-            "raw_path": str(raw_path),
-            "summary_path": str(summary_path),
-            "unhit_path": str(unhit_path),
-        }
-
-    @classmethod
-    def merge_raw_files(
-        cls,
-        raw_paths: Iterable[Path],
-        *,
-        artifact_tag: str,
-        output_dir: Path,
-    ) -> "FunctionalCoverageRecorder":
-        raw_list = [Path(p) for p in raw_paths]
-        if not raw_list:
-            raise ValueError("merge_raw_files requires at least one raw coverage json")
-
-        raw_artifacts: list[tuple[Path, dict]] = []
-        compatibility_signature: Optional[str] = None
-        first_definitions: Optional[list] = None
-        for raw_path in raw_list:
-            try:
-                with raw_path.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, json.JSONDecodeError) as exc:
-                raise ValueError(
-                    f"invalid functional coverage artifact {raw_path}: {type(exc).__name__}"
-                ) from exc
-            if not isinstance(data, dict):
-                raise ValueError(f"invalid functional coverage artifact root: {raw_path}")
-            if data.get("artifact_schema_version") != 2:
-                raise ValueError(f"legacy functional coverage artifact cannot be merged: {raw_path}")
-
-            provenance = data.get("provenance")
-            if not isinstance(provenance, dict):
-                raise ValueError(f"functional coverage artifact lacks provenance: {raw_path}")
-            missing_fields = [
-                field
-                for field in COMPATIBILITY_FIELDS
-                if provenance.get(field) is None or str(provenance.get(field)).strip() == ""
-            ]
-            if missing_fields:
-                raise ValueError(
-                    "functional coverage artifact lacks compatibility fields: "
-                    f"{raw_path}: {missing_fields}"
-                )
-            recorded_signature = str(provenance.get("compatibility_signature") or "").strip().lower()
-            expected_signature = _json_sha256(
-                {field: provenance[field] for field in COMPATIBILITY_FIELDS}
-            )
-            if recorded_signature != expected_signature:
-                raise ValueError(
-                    "incompatible functional coverage artifacts: "
-                    f"{raw_path} signature does not match its provenance"
-                )
-            if compatibility_signature is None:
-                compatibility_signature = recorded_signature
-            elif recorded_signature != compatibility_signature:
-                raise ValueError(
-                    "incompatible functional coverage artifacts: "
-                    f"{raw_path} has signature {recorded_signature!r}, "
-                    f"expected {compatibility_signature!r}"
-                )
-
-            definitions = data.get("definitions")
-            if not isinstance(definitions, list):
-                raise ValueError(f"functional coverage artifact lacks definitions: {raw_path}")
-            recorded_definitions_sha256 = str(
-                provenance.get("definitions_sha256") or ""
-            ).strip().lower()
-            expected_definitions_sha256 = _json_sha256(definitions)
-            if recorded_definitions_sha256 != expected_definitions_sha256:
-                raise ValueError(
-                    "incompatible functional coverage artifacts: "
-                    f"{raw_path} definitions do not match provenance"
-                )
-            if first_definitions is None:
-                first_definitions = definitions
-            elif definitions != first_definitions:
-                raise ValueError(
-                    "incompatible functional coverage artifacts: "
-                    f"{raw_path} definitions differ from {raw_list[0]}"
-                )
-            raw_artifacts.append((raw_path, data))
-
-        first = raw_artifacts[0][1]
-        first_provenance = first["provenance"]
-
-        defs = [
-            CoverageBinDef(
-                bin_id=item["bin_id"],
-                stage=item["stage"],
-                coverage_type=item["coverage_type"],
-                coverage_group=item["coverage_group"],
-                coverpoint=item.get("coverpoint", ""),
-                bin_name=item["bin_name"],
-                mapped_path=item["mapped_path"],
-                sample_event=item["sample_event"],
-                observe_object=item["observe_object"],
-                hit_rule=item["hit_rule"],
-                priority=item["priority"],
-                suggested_testcase=item["suggested_testcase"],
-            )
-            for item in first["definitions"]
-        ]
-
-        merged = cls(
-            defs,
-            testcase_name="merged",
-            artifact_tag=artifact_tag,
-            output_dir=output_dir,
-            source_csv=Path(first["source_csv"]) if first.get("source_csv") else None,
-        )
-        merged.provenance = dict(first_provenance)
-        for raw_path, data in raw_artifacts:
-            hits = data.get("hits")
-            if not isinstance(hits, dict):
-                raise ValueError(f"functional coverage artifact has invalid hits: {raw_path}")
-            for key_str, hit in hits.items():
-                if not isinstance(hit, dict):
-                    raise ValueError(f"invalid functional coverage hit record: {raw_path}:{key_str}")
-                parts = key_str.split("::")
-                if len(parts) != 3:
-                    raise ValueError(f"invalid functional coverage hit key: {key_str}")
-                group, coverpoint, bin_name = parts
-                key = (group, coverpoint, bin_name)
-                if key not in merged.definition_by_key:
-                    raise ValueError(f"unknown functional coverage hit key: {key_str}")
-                target = merged.hits.setdefault(key, CoverageHit())
-                target.hits += int(hit.get("hits", 0))
-                first_cycle = hit.get("first_cycle")
-                if first_cycle is not None:
-                    target.first_cycle = first_cycle if target.first_cycle is None else min(int(target.first_cycle), int(first_cycle))
-                last_cycle = hit.get("last_cycle")
-                if last_cycle is not None:
-                    target.last_cycle = last_cycle if target.last_cycle is None else max(int(target.last_cycle), int(last_cycle))
-                for item in hit.get("evidence", []):
-                    if len(target.evidence) >= 8:
-                        break
-                    target.evidence.append(item)
-        return merged
-
-    def _raw_dict(self) -> dict:
-        stats = {}
-        errors: List[dict] = []
-        if self.env is not None:
-            try:
-                stats = _sanitize(self.env.get_stats())
-            except Exception:
-                stats = {}
-            try:
-                errors = _sanitize(self.env.get_errors())
-            except Exception:
-                errors = []
-
-        artifact_errors = [*errors, *list(self.contract_errors)]
-
-        run = dict(self.run_metadata)
-        checker = dict(run.get("checker") or {})
-        monitor = (stats.get("monitor") or {}) if isinstance(stats, dict) else {}
-        if checker.get("status") in {None, "", "unknown"}:
-            checker_errors = len(artifact_errors) + int(monitor.get("error_count", 0) or 0)
-            checker = {
-                "status": "pass" if checker_errors == 0 else "fail",
-                "error_count": checker_errors,
-                "errors": artifact_errors[:32],
-            }
-        run["checker"] = _sanitize(checker)
-        run["pytest_outcome"] = str(run.get("pytest_outcome") or "unknown").lower()
-        run["exit_code"] = self._optional_int(run.get("exit_code"))
-
-        return {
-            "artifact_schema_version": 2,
-            "testcase_name": self.testcase_name,
-            "artifact_tag": self.artifact_tag,
-            "source_csv": self.source_csv,
-            "waveform_path": self.waveform_path,
-            "line_coverage_path": self.line_coverage_path,
-            "coverage_targets": self.coverage_targets,
-            "provenance": self.provenance,
-            "definitions": [asdict(d) for d in self.definitions],
-            "hits": {
-                f"{group}::{coverpoint}::{bin_name}": {
-                    "bin_id": self.definition_by_key[(group, coverpoint, bin_name)].bin_id,
-                    "coverpoint": coverpoint,
-                    "hits": hit.hits,
-                    "first_cycle": hit.first_cycle,
-                    "last_cycle": hit.last_cycle,
-                    "evidence": hit.evidence,
-                }
-                for (group, coverpoint, bin_name), hit in sorted(self.hits.items())
-            },
-            "summary": self._summary_rows(),
-            "unhit": self._unhit_rows(),
-            "stats": stats,
-            "errors": artifact_errors,
-            "run": _sanitize(run),
-            "outcome": {
-                "status": run["pytest_outcome"],
-                "exit_code": run["exit_code"],
-            },
-            "checker": _sanitize(checker),
-            "recent_events": list(self.events_tail),
-            "risk_observations": list(self.risk_observations),
-            "sampler_diagnostics": {
-                "frontend_trigger_config_gap": _sanitize(
-                    getattr(self, "_ifu_frontend_trigger_config_gap", None)
-                ),
-                "exception_metadata": {
-                    "component_witnesses": _sanitize(
-                        getattr(self, "_ifu_exception_metadata_witnesses", {})
-                    ),
-                    "missing_probes": _sanitize(sorted(
-                        getattr(self, "_ifu_exception_metadata_gaps", set())
-                    )),
-                },
-            },
-        }
-
-    def _summary_rows(self) -> List[dict]:
-        grouped: Dict[Tuple[str, str], List[CoverageBinDef]] = {}
-        for item in self.definitions:
-            grouped.setdefault((item.coverage_group, item.coverpoint), []).append(item)
-
-        rows: List[dict] = []
-        for coverage_group, coverpoint in sorted(grouped):
-            defs = grouped[(coverage_group, coverpoint)]
-            hit_defs = [
-                d
-                for d in defs
-                if self.key_hit(d.coverage_group, d.bin_name, coverpoint=d.coverpoint)
-            ]
-            total = len(defs)
-            hit_count = len(hit_defs)
-            pct = 0.0 if total == 0 else (100.0 * hit_count / float(total))
-            rows.append(
-                {
-                    "Coverage_Group": coverage_group,
-                    "Coverpoint": coverpoint,
-                    "Total_Bins": total,
-                    "Hit_Bins": hit_count,
-                    "Coverage_Pct": f"{pct:.2f}",
-                    "Hit_Bin_Names": ",".join(d.bin_name for d in hit_defs),
-                    "Unhit_Bin_Names": ",".join(d.bin_name for d in defs if d not in hit_defs),
-                }
-            )
-        return rows
-
-    def _unhit_rows(self) -> List[dict]:
-        rows: List[dict] = []
-        for item in self.definitions:
-            if self.key_hit(item.coverage_group, item.bin_name, coverpoint=item.coverpoint):
-                continue
-            rows.append(
-                {
-                    "Bin_ID": item.bin_id,
-                    "Coverage_Group": item.coverage_group,
-                    "Coverpoint": item.coverpoint,
-                    "Bin_Name": item.bin_name,
-                    "Priority": item.priority,
-                    "Stage": item.stage,
-                    "Mapped_Path": item.mapped_path,
-                    "Suggested_Testcase": item.suggested_testcase,
-                }
-            )
-        return rows

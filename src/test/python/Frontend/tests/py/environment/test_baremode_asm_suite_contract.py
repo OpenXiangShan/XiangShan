@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
 
 
 def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> No
     ).stdout.splitlines()
     active_testcases = {
         item.suggested_testcase
-        for item in FunctionalCoverageRecorder.from_pilot_csv(
+        for item in FrontendFuncovSampleHub.from_pilot_csv(
             default_pilot_csv_path(),
             testcase_name="runner-contract",
             artifact_tag="runner-contract",

@@ -556,14 +556,13 @@ def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) 
         [("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_unissued_miss")],
         max_cycles=4000,
     )
-    hit = _recorder(env).hits[
-        (
-            "icache_prefetchpipe_s2_miss",
-            "miss_behavior",
-            "clean_mshr_cancels_unissued_miss",
-        )
-    ]
-    evidence = hit.evidence[0]
+    detail = _recorder(env).hit_detail(
+        "icache_prefetchpipe_s2_miss",
+        "clean_mshr_cancels_unissued_miss",
+        coverpoint="miss_behavior",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][0]
     matched_ports = tuple(int(port) for port in evidence["unissued_clean_refill_ports"])
     assert matched_ports
     for port in matched_ports:

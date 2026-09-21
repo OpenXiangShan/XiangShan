@@ -106,7 +106,6 @@ def test_two_fetch_mmio_window_suppresses_second_icache_response(env) -> None:
     uncache._force_redirect_to(env, start_va)
 
     definition = recorder.definition_by_bin_id[_BIN_ID]
-    target_key = definition.key
     upstream_observations: list[dict[str, int | None]] = []
     for _ in range(12000):
         env.step(1)
@@ -144,8 +143,13 @@ def test_two_fetch_mmio_window_suppresses_second_icache_response(env) -> None:
         "monitor_errors": env.monitor.get_errors(),
         "upstream_observations": upstream_observations,
     }
-    hit = recorder.hits[target_key]
-    evidence = hit.evidence[-1]
+    detail = recorder.hit_detail(
+        definition.coverage_group,
+        definition.bin_name,
+        coverpoint=definition.coverpoint,
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["first_mmio"] == 1
     assert evidence["second_mmio"] == 1
     assert evidence["real_two_fetch"] == 0

@@ -9,7 +9,6 @@ import pytest
 from toffee.funcov import CovGroup
 from env.funcov.recorder import default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
-from env.funcov.recorder import FunctionalCoverageRecorder
 from env.funcov.sample_hub import FrontendFuncovSampleHub
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     ICACHE_HITMISS_COVERPOINTS,
@@ -118,7 +117,7 @@ def test_toffee_funcov_report_preserves_group_point_bin_names() -> None:
 
 def test_toffee_sink_key_hit_uses_toffee_hints(tmp_path) -> None:
     sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
-    sink.attach_audit_backend(object(), tmp_path / "case.toffee.funcov.json")
+    sink.configure_artifact_path(tmp_path / "case.toffee.funcov.json")
     assert not sink.key_hit("group", "bin")
     sink.mark("group", "bin", cycle=1, coverpoint="point")
     assert sink.key_hit("group", "bin")
@@ -138,28 +137,6 @@ def test_toffee_sink_samples_each_group_once_per_cycle() -> None:
     assert {item["name"]: item["hints"] for item in report["points"][0]["bins"]} == {
         "first": 1,
         "second": 1,
-    }
-
-
-def test_toffee_audit_separates_covered_mismatch_from_count_difference() -> None:
-    from types import SimpleNamespace
-
-    sink = ToffeeCoverageSink({("group", "point"): ("bin", "other")})
-    sink.mark("group", "bin", cycle=1, coverpoint="point")
-    sink.flush_cycle(1)
-    legacy = SimpleNamespace(
-        hits={
-            ("group", "point", "bin"): SimpleNamespace(hits=8),
-            ("group", "point", "other"): SimpleNamespace(hits=1),
-        }
-    )
-
-    comparison = sink.compare_legacy(legacy)
-    assert comparison["count_differences"] == {
-        "group::point::bin": {"legacy": 8, "toffee": 1}
-    }
-    assert comparison["covered_mismatches"] == {
-        "group::point::other": {"legacy": 1, "toffee": 0}
     }
 
 
@@ -486,8 +463,6 @@ def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None
     from env.funcov.runtime_context import FrontendFuncovRuntimeContext
 
     assert FrontendFuncovRuntimeContext is FrontendFuncovSampleHub
-    assert not issubclass(FrontendFuncovSampleHub, FunctionalCoverageRecorder)
-    assert issubclass(FunctionalCoverageRecorder, FrontendFuncovSampleHub)
 
     context = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
@@ -498,15 +473,6 @@ def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None
 
     with pytest.raises(RuntimeError, match="cannot write legacy funcov artifacts"):
         context.write_artifacts()
-
-    legacy = FunctionalCoverageRecorder.from_pilot_csv(
-        default_pilot_csv_path(),
-        testcase_name="legacy-context",
-        artifact_tag="legacy-context",
-        output_dir=tmp_path / "legacy",
-    )
-    written = legacy.write_artifacts()
-    assert Path(written["raw_path"]).is_file()
 
 
 def test_toffee_mainpipe_model_contains_all_54_bins() -> None:

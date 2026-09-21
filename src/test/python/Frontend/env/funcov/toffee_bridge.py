@@ -31,8 +31,8 @@ class ToffeeCoverageSink:
         *,
         bin_ids: Mapping[tuple[str, str, str], str] | None = None,
     ) -> None:
-        self._audit_backend = None
         self._artifact_path: Path | None = None
+        self._sample_hub = None
         self.cov_groups: list[CovGroup] = []
         self._groups: dict[str, CovGroup] = {}
         self._point_targets: dict[tuple[str, str], _PointPulse] = {}
@@ -79,15 +79,20 @@ class ToffeeCoverageSink:
             self._groups[group_name] = group
             self.cov_groups.append(group)
 
-    def attach_audit_backend(self, audit_backend, artifact_path: Path) -> None:
-        self._audit_backend = audit_backend
-        self._artifact_path = Path(artifact_path)
-
     def configure_artifact_path(self, artifact_path: Path) -> None:
         self._artifact_path = Path(artifact_path)
 
+    def attach_sample_hub(self, sample_hub) -> None:
+        self._sample_hub = sample_hub
+
     def attach_owner_model(self, owner_model) -> None:
         self._owner_model = owner_model
+
+    def __getattr__(self, name: str):
+        hub = self.__dict__.get("_sample_hub")
+        if hub is None:
+            raise AttributeError(name)
+        return getattr(hub, name)
 
     def install_native_groups(self, groups: Iterable[CovGroup], *, model=None) -> None:
         """Replace pulse-bridge groups with already-sampled native CovGroups."""
@@ -166,12 +171,6 @@ class ToffeeCoverageSink:
                 audit_recorder.mark(group_name, bin_name, cycle, evidence, **kwargs)
         return True
 
-    def __getattr__(self, name):
-        audit_backend = self.__dict__.get("_audit_backend")
-        if audit_backend is None:
-            raise AttributeError(name)
-        return getattr(audit_backend, name)
-
     @classmethod
     def from_registry(cls, csv_path: Path) -> "ToffeeCoverageSink":
         points: dict[tuple[str, str], list[str]] = {}
@@ -198,7 +197,6 @@ class ToffeeCoverageSink:
         *,
         coverpoint: str | None = None,
     ) -> bool:
-        del evidence
         cycle = int(cycle)
         if self._pending_cycle is not None and cycle != self._pending_cycle:
             self.flush_cycle(self._pending_cycle)
@@ -232,7 +230,35 @@ class ToffeeCoverageSink:
 
         target.active_bins.add(bin_name)
         self._dirty_groups.add(group_name)
+        self._record_mark_detail(
+            (group_name, point_name, bin_name),
+            cycle,
+            evidence,
+        )
         return True
+
+    def _record_mark_detail(
+        self,
+        key: tuple[str, str, str],
+        cycle: int,
+        evidence: Mapping[str, Any] | None,
+    ) -> None:
+        if key not in self.bin_ids:
+            return
+        detail = self._hit_details.setdefault(
+            key,
+            {
+                "bin_id": self.bin_ids[key],
+                "first_cycle": int(cycle),
+                "last_cycle": int(cycle),
+                "evidence": [],
+            },
+        )
+        detail["last_cycle"] = int(cycle)
+        if isinstance(evidence, Mapping) and len(detail["evidence"]) < 8:
+            detail["evidence"].append(
+                json.loads(json.dumps(dict(evidence), ensure_ascii=False, default=str))
+            )
 
     def on_cycle(self, cycle: int) -> None:
         """Keep a common callback contract for cycle-driven Toffee sinks."""
@@ -275,11 +301,55 @@ class ToffeeCoverageSink:
             raise KeyError(f"unknown Toffee coverage bin: {group_name}::{bin_name}")
         return point_name
 
+    def pending_hit_keys(self) -> set[tuple[str, str, str]]:
+        pending: set[tuple[str, str, str]] = set()
+        for (group_name, point_name), target in self._point_targets.items():
+            if group_name in self._native_group_names:
+                continue
+            for bin_name in target.active_bins:
+                pending.add((group_name, point_name, str(bin_name)))
+        return pending
+
+    def _flushed_hint_count(self, key: tuple[str, str, str]) -> int:
+        group_name, point_name, bin_name = key
+        group = self._groups.get(group_name)
+        if group is None:
+            return 0
+        point = group.cover_point(point_name)
+        return int(point["hints"].get(bin_name, 0))
+
     def hit_count_by_bin_id(self, bin_id: str) -> int:
         key = self._key_by_bin_id.get(str(bin_id))
         if key is None:
             return 0
-        return int(self.hit_counts().get(key, 0))
+        count = self._flushed_hint_count(key)
+        if key in self.pending_hit_keys():
+            count += 1
+        return count
+
+    def hit_detail(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        *,
+        coverpoint: str | None = None,
+    ) -> dict[str, Any] | None:
+        group_name = str(coverage_group)
+        bin_name = str(bin_name)
+        point_name = (
+            self._point_by_group_bin.get((group_name, bin_name))
+            if coverpoint is None
+            else str(coverpoint)
+        )
+        if point_name is None:
+            return None
+        return self._hit_details.get((group_name, point_name, bin_name))
+
+    def hit_detail_by_bin_id(self, bin_id: str) -> dict[str, Any] | None:
+        key = self._key_by_bin_id.get(str(bin_id))
+        if key is None:
+            return None
+        return self._hit_details.get(key)
 
     def record_native_hits(
         self,
@@ -341,7 +411,6 @@ class ToffeeCoverageSink:
         *,
         coverpoint: str | None = None,
     ) -> bool:
-        self.flush_pending()
         group_name = str(coverage_group)
         bin_name = str(bin_name)
         point_name = (
@@ -351,6 +420,10 @@ class ToffeeCoverageSink:
         )
         if point_name is None:
             return False
+        key = (group_name, point_name, bin_name)
+        if key in self.pending_hit_keys():
+            return True
+        self.flush_pending()
         point = self._groups[group_name].cover_point(point_name)
         return int(point["hints"].get(bin_name, 0)) > 0
 
@@ -417,41 +490,4 @@ class ToffeeCoverageSink:
         )
         return output
 
-    def compare_legacy_counts(self, recorder) -> dict[tuple[str, str, str], tuple[int, int]]:
-        differences = {}
-        for key, toffee_count in self.hit_counts().items():
-            legacy_hit = recorder.hits.get(key)
-            legacy_count = 0 if legacy_hit is None else int(legacy_hit.hits)
-            if legacy_count != toffee_count:
-                differences[key] = (legacy_count, toffee_count)
-        return differences
-
-    def compare_legacy(self, recorder) -> dict[str, dict[str, dict[str, int]]]:
-        covered_mismatches = {}
-        count_differences = {}
-        for key, toffee_count in self.hit_counts().items():
-            legacy_hit = recorder.hits.get(key)
-            legacy_count = 0 if legacy_hit is None else int(legacy_hit.hits)
-            if bool(legacy_count) != bool(toffee_count):
-                covered_mismatches["::".join(key)] = {
-                    "legacy": legacy_count,
-                    "toffee": toffee_count,
-                }
-            elif legacy_count != toffee_count:
-                count_differences["::".join(key)] = {
-                    "legacy": legacy_count,
-                    "toffee": toffee_count,
-                }
-        return {
-            "covered_mismatches": covered_mismatches,
-            "count_differences": count_differences,
-        }
-
-    def write_audit_comparison(self, path: Path, recorder) -> Path:
-        output = Path(path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(
-            json.dumps(self.compare_legacy(recorder), indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return output
+    

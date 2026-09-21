@@ -784,8 +784,9 @@ def test_icache_trained_two_fetch_asymmetric_line_refill(
     )
     recorder = getattr(env, "functional_coverage", None)
     assert recorder is not None
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-887"].key]
-    evidence = hit.evidence[-1]
+    detail = recorder.hit_detail_by_bin_id("BIN-887")
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["source_valids"] == [1, 1]
     assert evidence["source_tags"] == evidence["wb_tags"]
     assert len(evidence["source_tags"]) == 2
@@ -943,8 +944,9 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
         "stalled_identity": stalled_identity,
         "delivery": delivery,
     }
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-906"].key]
-    observations = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail_by_bin_id("BIN-906")
+    assert detail is not None
+    observations = detail["evidence"][-1]["observations"]
     assert observations["fault_source"] == "tl_denied"
     assert tuple(observations["ftq_identity"]) == stalled_identity
     assert observations["s1_req_is_uncache"] == 0
@@ -959,8 +961,9 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
         "truncation": truncation,
         "delivery": delivery,
     }
-    bin907_hit = recorder.hits[recorder.definition_by_bin_id["BIN-907"].key]
-    bin907_observations = bin907_hit.evidence[-1]["observations"]
+    bin907_detail = recorder.hit_detail_by_bin_id("BIN-907")
+    assert bin907_detail is not None
+    bin907_observations = bin907_detail["evidence"][-1]["observations"]
     assert truncation["s1_spec_instr_count"] == 1
     assert bin907_observations["raw_candidate_count"] > 1
     assert bin907_observations["instr_count"] == 1

@@ -121,14 +121,4 @@ class ICacheHitMissToffeeCoverage:
             for item in point["bins"]
         }
 
-    def compare_legacy_counts(self, recorder) -> dict[tuple[str, str, str], tuple[int, int]]:
-        differences = {}
-        for key, toffee_count in self.hit_counts().items():
-            legacy_hit = recorder.hits.get(key)
-            legacy_count = 0 if legacy_hit is None else int(legacy_hit.hits)
-            if legacy_count != toffee_count:
-                differences[key] = (legacy_count, toffee_count)
-        return differences
-
-
 __all__ = ["ICacheHitMissToffeeCoverage"]

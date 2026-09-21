@@ -527,8 +527,9 @@ def test_two_fetch_second_block_taken_uses_unified_compacted_index(env):
         "icache": env.icache_agent.get_stats(),
         "backend": env.backend_model.get_stats(),
     }
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-918"].key]
-    observations = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail_by_bin_id("BIN-918")
+    assert detail is not None
+    observations = detail["evidence"][-1]["observations"]
     assert observations["selected_block"] == 1
     assert observations["block_valid"] == [1, 1]
     assert observations["taken_valid"] == [0, 1]
@@ -972,8 +973,9 @@ def test_backend_redirect_blocks_held_icache_response(env):
             recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
             and recorder.key_hit("ifu_cacheable_flush", "flush_wins_fire")
         ):
-            hit = recorder.hits[recorder.definition_by_bin_id["BIN-812"].key]
-            witness = dict(hit.evidence[-1])
+            detail = recorder.hit_detail_by_bin_id("BIN-812")
+            assert detail is not None
+            witness = dict(detail["evidence"][-1])
             break
     assert witness is not None, {
         "reason": "backend redirect did not suppress the held aggregate response",
