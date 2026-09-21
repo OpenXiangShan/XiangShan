@@ -17,23 +17,23 @@ package xiangshan.frontend.instruncache
 
 import chisel3._
 import chisel3.util._
-import oceanus.compactchi._
+import freechips.rocketchip.amba.axi4.{AXI4BundleAR, AXI4BundleParameters, AXI4BundleR}
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.WfiReqBundle
-import xiangshan.cache.{FlitDnDAT64, InstrUncacheCCHI}
 import xiangshan.frontend.ifu.PreDecodeHelper
 
 // One miss entry deals with one mmio request
-class InstrUncacheEntry(implicit p: Parameters) extends InstrUncacheModule with PreDecodeHelper {
+class InstrUncacheEntry(axiParams: AXI4BundleParameters)(implicit p: Parameters)
+    extends InstrUncacheModule with PreDecodeHelper {
   class InstrUncacheEntryIO(implicit p: Parameters) extends InstrUncacheBundle {
-    val id: UInt = Input(UInt(log2Up(nMmioEntry).W))
+    val id: UInt = Input(UInt(axiParams.idBits.W))
     // client requests
     val req:  DecoupledIO[InstrUncacheReq]  = Flipped(DecoupledIO(new InstrUncacheReq))
     val resp: DecoupledIO[InstrUncacheResp] = DecoupledIO(new InstrUncacheResp)
 
-    val readReq:  DecoupledIO[FlitREQ]      = Decoupled(new FlitREQ)
-    val compData: DecoupledIO[FlitDnDAT64]  = Flipped(Decoupled(new FlitDnDAT64))
+    val ar: DecoupledIO[AXI4BundleAR] = Decoupled(new AXI4BundleAR(axiParams))
+    val r:  DecoupledIO[AXI4BundleR]  = Flipped(Decoupled(new AXI4BundleR(axiParams)))
 
     val flush: Bool         = Input(Bool())
     val wfi:   WfiReqBundle = Flipped(new WfiReqBundle)
@@ -74,13 +74,13 @@ class InstrUncacheEntry(implicit p: Parameters) extends InstrUncacheModule with 
 
   private val readAddr = Cat(Mux(resending, resendAddr, alignedAddr), 0.U(log2Ceil(MmioBusBytes).W))
 
-  // send CHI read request
+  // send AXI AR
   // if there is a pending wfi request, we should not send new requests to L2
-  io.readReq.valid := state === State.RefillReq && !io.wfi.wfiReq
-  io.readReq.bits := 0.U.asTypeOf(io.readReq.bits)
-  when(io.readReq.valid) {
-    InstrUncacheCCHI.Tx.readReq(
-      io.readReq.bits,
+  io.ar.valid := state === State.RefillReq && !io.wfi.wfiReq
+  io.ar.bits := 0.U.asTypeOf(io.ar.bits)
+  when(io.ar.valid) {
+    fillAxiAddr(
+      io.ar.bits,
       io.id,
       readAddr,
       log2Ceil(MmioBusBytes).U,
@@ -89,8 +89,8 @@ class InstrUncacheEntry(implicit p: Parameters) extends InstrUncacheModule with 
     )
   }
 
-  // receive CHI CompData response
-  io.compData.ready := state === State.RefillResp
+  // receive AXI R
+  io.r.ready := state === State.RefillResp
 
   // we are safe to enter wfi if we have no pending response from L2
   io.wfi.wfiSafe := state =/= State.RefillResp
@@ -117,45 +117,45 @@ class InstrUncacheEntry(implicit p: Parameters) extends InstrUncacheModule with 
     }
 
     is(State.RefillReq) {
-      when(io.readReq.fire) {
+      when(io.ar.fire) {
         state := State.RefillResp
       }
     }
 
     is(State.RefillResp) {
-      when(io.compData.fire) {
+      when(io.r.fire) {
         // we request size <= mmio bus width, so we should be able to get full response in one beat
-        assert(CCHIOpcode.CompData.is(io.compData.bits.Opcode, io.compData.valid))
+        assert(io.r.bits.last, "InstrUncacheEntry: AXI R last must be set for a single-beat AR")
 
         val shiftedBusData = Mux1H(
           UIntToOH(reqReg.addr(2, 1)),
           Seq(
-            io.compData.bits.Data(31, 0),
-            io.compData.bits.Data(47, 16),
-            io.compData.bits.Data(63, 32),
-            Cat(0.U(16.W), io.compData.bits.Data(63, 48))
+            io.r.bits.data(31, 0),
+            io.r.bits.data(47, 16),
+            io.r.bits.data(63, 32),
+            Cat(0.U(16.W), io.r.bits.data(63, 48))
           )
         )
 
         // if crossing bus boundary, but not page boundary, we can automatically re-send request, except:
         // 1. if has exception, we need to raise an exception anyway, so no need to resend request
-        val respCorrupt = InstrUncacheCCHI.Rx.corrupt(io.compData.bits.RespErr)
+        val respErr = axiDenied(io.r.bits.resp)
         // 2. if response is rvc, we need only 2B, so no need to resend request
         val respIsRvc = isRVC(shiftedBusData)
         // 3. also, if we are already resending, we should not resend again
-        val needResend = crossBusBoundary && !crossPageBoundary && !respCorrupt && !respIsRvc && !resending
+        val needResend = crossBusBoundary && !crossPageBoundary && !respErr && !respIsRvc && !resending
 
         state     := Mux(needResend, State.RefillReq, State.SendResp)
         resending := needResend
 
         when(resending) {
-          respDataReg(1) := io.compData.bits.Data(15, 0)
+          respDataReg(1) := io.r.bits.data(15, 0)
         }.otherwise {
           respDataReg(0) := shiftedBusData(15, 0)
           respDataReg(1) := shiftedBusData(31, 16)
         }
-        respCorruptReg := respCorrupt
-        respDeniedReg  := InstrUncacheCCHI.Rx.denied(io.compData.bits.RespErr)
+        respCorruptReg := respErr
+        respDeniedReg  := respErr
       }
     }
 

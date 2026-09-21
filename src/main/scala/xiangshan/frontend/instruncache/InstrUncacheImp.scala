@@ -17,11 +17,10 @@ package xiangshan.frontend.instruncache
 
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.amba.axi4.AXI4BundleAR
 import freechips.rocketchip.diplomacy.LazyModuleImp
-import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.WfiReqBundle
-import xiangshan.cache.CCHIType3Port
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 
@@ -33,10 +32,11 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
     val toIfu:   InstrUncacheToIfuIO = new InstrUncacheToIfuIO
     val flush:   Bool                = Input(Bool())
     val wfi:     WfiReqBundle        = Flipped(new WfiReqBundle)
-    val cchi:    CCHIType3Port       = new CCHIType3Port
   }
 
   val io: InstrUncacheIO = IO(new InstrUncacheIO)
+
+  private val (axi, _) = wrapper.axiNode.out.head
 
   private val respArbiter = Module(new Arbiter(new InstrUncacheResp, nMmioEntry))
 
@@ -46,16 +46,18 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   private val entryAllocIdx = Wire(UInt(log2Up(nMmioEntry).W))
   private val reqReady      = WireInit(false.B)
 
-  // assign default values to output signals (read-only: no upDAT)
-  io.cchi.upDAT.valid := false.B
-  io.cchi.upDAT.bits  := DontCare
-  io.cchi.dnRSP.ready := true.B
-  io.cchi.dnDAT.ready := true.B
+  // read-only: tie off write channels
+  axi.aw.valid := false.B
+  axi.aw.bits  := DontCare
+  axi.w.valid  := false.B
+  axi.w.bits   := DontCare
+  axi.b.ready  := true.B
+  axi.r.ready  := true.B
 
   private val entries = (0 until nMmioEntry).map { i =>
-    val entry = Module(new InstrUncacheEntry)
+    val entry = Module(new InstrUncacheEntry(axi.params))
 
-    entry.io.id    := i.U(log2Up(nMmioEntry).W)
+    entry.io.id    := i.U(axi.params.idBits.W)
     entry.io.flush := io.flush
     entry.io.wfi.wfiReq := io.wfi.wfiReq
 
@@ -69,11 +71,11 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
     // entry resp
     respArbiter.io.in(i) <> entry.io.resp
 
-    // route CompData to entry by TxnID (same role as TL source)
-    entry.io.compData.valid := false.B
-    entry.io.compData.bits  := DontCare
-    when(io.cchi.dnDAT.valid && io.cchi.dnDAT.bits.TxnID === i.U) {
-      entry.io.compData <> io.cchi.dnDAT
+    // route R to entry by AXI id
+    entry.io.r.valid := false.B
+    entry.io.r.bits  := DontCare
+    when(axi.r.valid && axi.r.bits.id === i.U(axi.params.idBits.W)) {
+      entry.io.r <> axi.r
     }
     entry
   }
@@ -83,11 +85,13 @@ class InstrUncacheImp(wrapper: InstrUncache) extends LazyModuleImp(wrapper)
   req.ready := reqReady
   resp <> respArbiter.io.out
 
-  private val readReqArb = Module(new Arbiter(new FlitREQ, nMmioEntry))
-  (readReqArb.io.in zip entries.map(_.io.readReq)).foreach { case (in, readReq) =>
-    in <> readReq
+  private val arArb = Module(new Arbiter(new AXI4BundleAR(axi.params), nMmioEntry))
+  (arArb.io.in zip entries.map(_.io.ar)).foreach { case (in, ar) =>
+    in <> ar
   }
-  io.cchi.upREQ <> readReqArb.io.out
+  axi.ar.valid := arArb.io.out.valid
+  axi.ar.bits  := arArb.io.out.bits
+  arArb.io.out.ready := axi.ar.ready
 
   // we are safe to enter wfi if all entries have no pending response from L2
   io.wfi.wfiSafe := entries.map(_.io.wfi.wfiSafe).reduce(_ && _)

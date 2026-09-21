@@ -64,7 +64,6 @@ import xiangshan.cache.mmu.VectorTlbPtwIO
 import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.ftq.Ftq
 import xiangshan.frontend.ibuffer.IBuffer
-import xiangshan.cache.CCHIType3Port
 import xiangshan.cache.CCHIType4Port
 import xiangshan.frontend.icache.ICache
 import xiangshan.frontend.ifu.Ifu
@@ -83,8 +82,6 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
   // Compact CHI Type 4 (ICache miss refill); not connected to L2 in phase 2.1
   val icache_cchi: CCHIType4Port = new CCHIType4Port
-  // Compact CHI Type 3 (InstrUncache MMIO/NC fetch); not connected to L2 in phase 2.3b
-  val i_mmio_cchi: CCHIType3Port = new CCHIType3Port
 
   // ctrl
   val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
@@ -269,7 +266,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   instrUncache.io.fromIfu <> ifu.io.toUncache
   ifu.io.fromUncache <> instrUncache.io.toIfu
   instrUncache.io.flush := false.B
-  io.i_mmio_cchi <> instrUncache.io.cchi
 
   private val errorReg = RegNext(icache.io.error)
   io.error <> RegNext(errorReg.bits.toL1BusErrorUnitInfo(errorReg.valid))
