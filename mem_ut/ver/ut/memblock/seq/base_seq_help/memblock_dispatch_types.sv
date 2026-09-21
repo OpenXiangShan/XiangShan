@@ -330,6 +330,17 @@ typedef bit [MEMBLOCK_ROB_VALUE_W:0] memblock_rob_map_key_t;
 typedef bit [MEMBLOCK_LQ_VALUE_W:0]  memblock_lq_map_key_t;
 typedef bit [MEMBLOCK_SQ_VALUE_W:0]  memblock_sq_map_key_t;
 
+// 中文注释：fault redirect/terminal 删除已 fire STD 的 active ROB owner 前保存的
+// 短时身份。STD raw 只携带 ROB value，adapter 用 flag=0/1 分别查询该记录；它只
+// 用于丢弃 redirect 前的流水线残留，绝不重建 issue/writeback 或 LSQ 资源状态。
+typedef struct {
+    bit                 valid;
+    memblock_uid_t      uid;
+    int unsigned        dynamic_epoch;
+    int unsigned        redirect_epoch;
+    longint unsigned    expire_service_sample;
+} memblock_std_late_raw_tombstone_t;
+
 // 中文注释：redirect 删除 active LQ/SQ owner 前保存的单代旧实例身份。
 // 写入：redirect active UID 扫描；清除：迟到 deq 消费或剩余 cancel 应用完成。
 // 作用：active map 已删除后，仍可把 RTL 流水线中的迟到 deq 归属到旧 dynamic epoch。

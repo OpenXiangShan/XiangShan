@@ -369,6 +369,7 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - 先运行 `git status`
 - 如果工作区存在任何修改、暂存或未跟踪文件，停止并反馈用户先选择本地提交所有修改或执行 `git stash`
 - 工作区干净后才按当前版本 profile 选择上游分支并依次运行 `git fetch`、`git rebase FETCH_HEAD`
+- rebase 成功后、生成 RTL 前必须在仓库根目录运行 `make init`，使所有 submodule 回到当前主仓 `HEAD` 锁定的 gitlink revision；若仍显示 submodule 脏状态，停止并报告，不得直接生成 RTL
 - rebase 成功后参考 `AI_DOC/memblock_rtl生成规则.md` 重新生成 memblock RTL
 - RTL 刷新成功后参考 `memblock_latest_dut_adapt_rule.md` 检查并同步 DUT 交接 interface 与对应 agent 字段
 

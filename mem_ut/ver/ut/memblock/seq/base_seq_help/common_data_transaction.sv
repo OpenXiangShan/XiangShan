@@ -139,6 +139,9 @@ class common_data_transaction extends uvm_object;
     memblock_uid_t uid_by_active_rob[memblock_rob_map_key_t];
     memblock_uid_t uid_by_lq[memblock_lq_map_key_t];
     memblock_uid_t uid_by_sq[memblock_sq_map_key_t];
+    // 中文注释：key 为完整 {rob_flag,rob_value}。记录只在 active owner 删除后的
+    // 固定短窗口内存在，不能替代 active ROB owner 或 redirect-deleted LQ/SQ owner。
+    memblock_std_late_raw_tombstone_t std_late_raw_tombstone_by_rob[memblock_rob_map_key_t];
 
     // 中文注释：单代 redirect 删除 owner 的固定保护窗口。redirect scan 在删除
     // active map 前写入；迟到 deq 消费或剩余 cancel 应用完成后清除。
@@ -228,6 +231,7 @@ class common_data_transaction extends uvm_object;
         issue_freeze_ack    = 1'b0;
         redirect_deleted_lq_owner_by_key.delete();
         redirect_deleted_sq_owner_by_key.delete();
+        std_late_raw_tombstone_by_rob.delete();
         redirect_deleted_owner_window_active = 1'b0;
         redirect_deleted_owner_epoch = 0;
         redirect_deleted_owner_record_id = 0;
@@ -341,6 +345,7 @@ class common_data_transaction extends uvm_object;
         issue_freeze_ack    = 1'b0;
         redirect_deleted_lq_owner_by_key.delete();
         redirect_deleted_sq_owner_by_key.delete();
+        std_late_raw_tombstone_by_rob.delete();
         redirect_deleted_owner_window_active = 1'b0;
         redirect_deleted_owner_epoch = 0;
         redirect_deleted_owner_record_id = 0;
@@ -2288,10 +2293,9 @@ class common_data_transaction extends uvm_object;
         status.pass              = 1'b0;
         status.success           = 1'b0;
         status.terminal_done     = 1'b0;
-        // A fault can arrive while an older dispatch candidate is still queued.
-        // Clear every target for this dynamic instance immediately; otherwise a
-        // stale STD item remains permanently non-eligible after the fault.
-        quiesce_fault_uid_pending_work(uid);
+        // STA 与 STD 在真实 V2 后端独立 issue。STA fault 到达还不是 STD IQ
+        // flush 边界：只撤销 LOAD/STA/replay，保留未 fire STD 到 fault redirect 生效。
+        quiesce_fault_uid_pending_work(uid, 1'b0);
         if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
             release_ptw_wait_replay(uid);
             status.clear_sta_late_fault_tombstones();
@@ -4120,6 +4124,89 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:lookup_active_uid_by_sq
 
+    // 抽象职责：在 fault STD 的 active ROB owner 即将删除前，保存一个固定四
+    // service-sample 的 value-only raw 归属证明。该记录不拥有 issue、LSQ 或终态状态。
+    function void capture_std_late_raw_tombstone(input memblock_uid_t uid);
+        status_transaction                 status;
+        memblock_rob_key_t                 rob_key;
+        memblock_rob_map_key_t             rob_map_key;
+        memblock_std_late_raw_tombstone_t  tombstone;
+
+        check_uid(uid, "capture_std_late_raw_tombstone");
+        status = get_status(uid);
+        if (!status.active || !status.std_dispatched ||
+            !(status.fault || status.exception_pending || status.sta_fault)) begin
+            return;
+        end
+        rob_key = status.get_rob_key();
+        rob_map_key = rob_order_util::rob_to_map_key(rob_key);
+        if (std_late_raw_tombstone_by_rob.exists(rob_map_key)) begin
+            tombstone = std_late_raw_tombstone_by_rob[rob_map_key];
+            if (!tombstone.valid || tombstone.uid != uid ||
+                tombstone.dynamic_epoch != status.dynamic_epoch) begin
+                `uvm_fatal("STD_LATE_TOMBSTONE",
+                           $sformatf("ROB tombstone collision rob=%0d/%0d old_uid=%0d old_epoch=%0d uid=%0d epoch=%0d",
+                                     rob_key.flag, rob_key.value, tombstone.uid,
+                                     tombstone.dynamic_epoch, uid, status.dynamic_epoch))
+            end
+            return;
+        end
+        tombstone = '{default:'0};
+        tombstone.valid = 1'b1;
+        tombstone.uid = uid;
+        tombstone.dynamic_epoch = status.dynamic_epoch;
+        tombstone.redirect_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+        tombstone.expire_service_sample =
+            memblock_sync_pkg::get_dispatch_service_cycle() +
+            MEMBLOCK_REDIRECT_DELETED_OWNER_HOLD_SAMPLES;
+        std_late_raw_tombstone_by_rob[rob_map_key] = tombstone;
+        `uvm_info("STD_LATE_TOMBSTONE",
+                  $sformatf("capture uid=%0d epoch=%0d rob=%0d/%0d redirect_epoch=%0d expire_sample=%0d",
+                            uid, tombstone.dynamic_epoch, rob_key.flag, rob_key.value,
+                            tombstone.redirect_epoch, tombstone.expire_service_sample),
+                  UVM_LOW)
+    endfunction:capture_std_late_raw_tombstone
+
+    // 抽象职责：维护短时 STD raw 归属表。仅删除已过期记录，不读取 main table，
+    // 因而可放在每个 dispatch service sample 的中频收尾路径。
+    function void service_std_late_raw_tombstones();
+        memblock_rob_map_key_t             rob_map_key;
+        memblock_std_late_raw_tombstone_t  tombstone;
+
+        foreach (std_late_raw_tombstone_by_rob[rob_map_key]) begin
+            tombstone = std_late_raw_tombstone_by_rob[rob_map_key];
+            if (!tombstone.valid ||
+                memblock_sync_pkg::get_dispatch_service_cycle() >=
+                tombstone.expire_service_sample) begin
+                std_late_raw_tombstone_by_rob.delete(rob_map_key);
+            end
+        end
+    endfunction:service_std_late_raw_tombstones
+
+    // 抽象职责：为 adapter 查询完整 ROB key 是否属于已删除 fault STD 的短时
+    // pipeline 残留。过期记录立即清除；命中不改变 status、issue 或物理资源。
+    function bit read_std_late_raw_tombstone(
+        input memblock_rob_key_t rob_key,
+        output memblock_std_late_raw_tombstone_t tombstone
+    );
+        memblock_rob_map_key_t rob_map_key;
+
+        tombstone = '{default:'0};
+        rob_map_key = rob_order_util::rob_to_map_key(rob_key);
+        if (!std_late_raw_tombstone_by_rob.exists(rob_map_key)) begin
+            return 1'b0;
+        end
+        tombstone = std_late_raw_tombstone_by_rob[rob_map_key];
+        if (!tombstone.valid ||
+            memblock_sync_pkg::get_dispatch_service_cycle() >=
+            tombstone.expire_service_sample) begin
+            std_late_raw_tombstone_by_rob.delete(rob_map_key);
+            tombstone = '{default:'0};
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:read_std_late_raw_tombstone
+
     function memblock_uid_t get_active_uid_by_rob(input memblock_rob_key_t rob_key);
         memblock_uid_t uid;
 
@@ -4142,6 +4229,9 @@ class common_data_transaction extends uvm_object;
         if (!status.active) begin
             `uvm_fatal("COMMON_DATA", $sformatf("retire_active_uid got inactive uid=%0d", uid))
         end
+        // 已 fire 的 fault STD 在 owner 删除后仍可能从 DUT pipeline 迟到一拍。
+        // 必须在 active ROB map 删除前保存短时身份；正常 owner 始终优先于该记录。
+        capture_std_late_raw_tombstone(uid);
         remove_uid_from_issue_queues(uid);
         release_ptw_wait_replay(uid);
         status.clear_sta_late_fault_tombstones();
@@ -6989,7 +7079,8 @@ class common_data_transaction extends uvm_object;
     // issue/replay工作，但保留其LQ/SQ owner、fault证据和“不重发”语义。该helper
     // 可在commit、fault redirect和terminal retire三个边界幂等调用；它不修改LSQ
     // cancel计数、owner map或dynamic_epoch。
-    function void quiesce_fault_uid_pending_work(input memblock_uid_t uid);
+    function void quiesce_fault_uid_pending_work(input memblock_uid_t uid,
+                                                  input bit quiesce_std = 1'b1);
         status_transaction status;
         int unsigned issue_q_before;
         int unsigned issue_q_after;
@@ -7002,7 +7093,14 @@ class common_data_transaction extends uvm_object;
                        $sformatf("quiesce_fault_uid_pending_work got non-fault uid=%0d", uid))
         end
         issue_q_before = load_issue_q.size() + sta_issue_q.size() + std_issue_q.size();
-        remove_uid_from_issue_queues(uid);
+        delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_LOAD, uid, 0, 1'b0);
+        delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_STA, uid, 0, 1'b0);
+        status.queued_load = 1'b0;
+        status.queued_sta  = 1'b0;
+        if (quiesce_std) begin
+            delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_STD, uid, 0, 1'b0);
+            status.queued_std = 1'b0;
+        end
         release_ptw_wait_replay(uid);
         status.replay_pending      = 1'b0;
         status.replay_target_load  = 1'b0;
@@ -7011,8 +7109,9 @@ class common_data_transaction extends uvm_object;
         issue_q_after = load_issue_q.size() + sta_issue_q.size() + std_issue_q.size();
         if (issue_q_before != issue_q_after) begin
             `uvm_info("COMMON_DATA",
-                      $sformatf("quiesce fault uid=%0d removed pending issue items=%0d load_q=%0d sta_q=%0d std_q=%0d",
+                      $sformatf("quiesce fault uid=%0d quiesce_std=%0d removed pending issue items=%0d load_q=%0d sta_q=%0d std_q=%0d",
                                 uid,
+                                quiesce_std,
                                 issue_q_before - issue_q_after,
                                 load_issue_q.size(),
                                 sta_issue_q.size(),

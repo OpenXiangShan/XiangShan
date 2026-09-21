@@ -185,7 +185,7 @@ class lsq_commit_handler extends uvm_object;
         if (data.fault_redirect_resource_blocks_retire(fault_head_uid)) begin
             return 1'b0;
         end
-        data.quiesce_fault_uid_pending_work(fault_head_uid);
+        data.quiesce_fault_uid_pending_work(fault_head_uid, 1'b0);
         status.replay_pending  = 1'b0;
         status.redirect_pending = 1'b0;
         status.flushed          = 1'b0;
@@ -749,9 +749,9 @@ class lsq_commit_handler extends uvm_object;
         status = data.get_status(uid);
         status.rob_commit = 1'b1;
         status.last_event_cycle = $time;
-        // fault commit是该动态实例停止发射的稳定边界。只清掉尚未fire的
-        // issue/replay工作，LQ/SQ owner仍由fault exception release路径处理。
-        data.quiesce_fault_uid_pending_work(uid);
+        // fault commit 固化 RM 对比时机，但不是 DUT STD IQ 的 redirect flush
+        // 边界；保留尚未 fire 的 STD，直到 fault redirect 真正生效。
+        data.quiesce_fault_uid_pending_work(uid, 1'b0);
         fault_head_waiting = 1'b1;
         fault_head_uid = uid;
         fault_head_dynamic_epoch = status.dynamic_epoch;

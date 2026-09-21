@@ -602,6 +602,9 @@ task memblock_dispatch_base_sequence::collect_monitor_event_batch();
     // 中文注释：semantic batch 已完成 redirect-first/feedback 处理后，才释放本拍
     // ctrl/deq 对应的 LQ/SQ mapping；失败的队首 raw 保留到后续 service tick 重试。
     monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);
+    // STD late tombstone 只保存短时 redirect 前流水线残留的身份；每个 service
+    // sample 清理有限关联表，避免 ROB wrap 后旧 key 长期遮蔽新实例。
+    data.service_std_late_raw_tombstones();
 endtask:collect_monitor_event_batch
 
 task memblock_dispatch_base_sequence::exception_redirect_replay_task();

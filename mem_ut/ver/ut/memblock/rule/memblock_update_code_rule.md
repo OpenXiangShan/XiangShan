@@ -52,6 +52,22 @@ git rebase FETCH_HEAD
 
 执行顺序不能调换。不要用 `git pull` 替代上述两步。
 
+## rebase 后 submodule 同步
+
+`git rebase FETCH_HEAD` 成功后、生成 RTL 前，必须在仓库根目录执行：
+
+```bash
+make init
+```
+
+该命令会执行 `git submodule update --init`，将各 submodule checkout 到 rebase 后主仓
+`HEAD` 记录的 gitlink revision。它用于恢复主仓与 `coupledL2`、`difftest`、
+`ready-to-run` 及其必要嵌套依赖的可复现组合。
+
+不得把普通 `make init` 误认为“追踪 submodule 远端最新 master”；它只同步主仓锁定版本。
+若 `make init` 失败或执行后 `git status --short` 仍显示 submodule 脏状态，必须停止 RTL
+生成，保留现场并报告 submodule 路径、主仓期望 gitlink 与实际 checkout revision。
+
 ## rebase 后 RTL 刷新
 
 `git rebase FETCH_HEAD` 成功后，必须参考：

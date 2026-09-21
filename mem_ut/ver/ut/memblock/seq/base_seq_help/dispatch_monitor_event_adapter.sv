@@ -668,6 +668,68 @@ class dispatch_monitor_event_adapter extends uvm_object;
         return 1'b0;
     endfunction:std_raw_owned_by_fault
 
+    // 抽象职责：normal STD owner 不存在时，确认 value-only raw 是否属于已删除
+    // fault STD 的短时流水线残留。先 probe 两个 active ROB flag，保证 live owner
+    // 永远优先；tombstone 仅消费 raw，不回写 status 或 LSQ 资源。
+    function bit try_drop_std_raw_by_tombstone(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        input memblock_wb_event_t template_event
+    );
+        memblock_wb_event_t                   template_event;
+        memblock_wb_event_t                   candidate0;
+        memblock_wb_event_t                   candidate1;
+        memblock_std_late_raw_tombstone_t     tombstone0;
+        memblock_std_late_raw_tombstone_t     tombstone1;
+        memblock_uid_t                        uid0;
+        memblock_uid_t                        uid1;
+        memblock_rob_key_t                    rob_key0;
+        memblock_rob_key_t                    rob_key1;
+        bit                                   live0;
+        bit                                   live1;
+        bit                                   tombstone_hit0;
+        bit                                   tombstone_hit1;
+
+        live0 = probe_std_candidate(template_event, 1'b0, raw.rob_value,
+                                    1'b1, raw.sample_flush_epoch,
+                                    uid0, candidate0);
+        live1 = probe_std_candidate(template_event, 1'b1, raw.rob_value,
+                                    1'b1, raw.sample_flush_epoch,
+                                    uid1, candidate1);
+        if (live0 || live1) begin
+            return 1'b0;
+        end
+        rob_key0.flag = 1'b0;
+        rob_key0.value = raw.rob_value;
+        rob_key1.flag = 1'b1;
+        rob_key1.value = raw.rob_value;
+        tombstone_hit0 = data.read_std_late_raw_tombstone(rob_key0, tombstone0);
+        tombstone_hit1 = data.read_std_late_raw_tombstone(rob_key1, tombstone1);
+        if (tombstone_hit0 && tombstone_hit1) begin
+            `uvm_fatal("INT_WB_STD_KEY",
+                       $sformatf("STD ROB value=%0d has two late tombstone candidates uid0=%0d uid1=%0d",
+                                 raw.rob_value, tombstone0.uid, tombstone1.uid))
+        end
+        if (!tombstone_hit0 && !tombstone_hit1) begin
+            return 1'b0;
+        end
+        if (tombstone_hit0) begin
+            `uvm_info("DISP_MON_ADAPT",
+                      $sformatf("drop late STD raw tombstone uid=%0d dynamic_epoch=%0d rob=%0d/%0d redirect_epoch=%0d port=%0d",
+                                tombstone0.uid, tombstone0.dynamic_epoch,
+                                rob_key0.flag, rob_key0.value,
+                                tombstone0.redirect_epoch, raw.port_id),
+                      UVM_LOW)
+        end else begin
+            `uvm_info("DISP_MON_ADAPT",
+                      $sformatf("drop late STD raw tombstone uid=%0d dynamic_epoch=%0d rob=%0d/%0d redirect_epoch=%0d port=%0d",
+                                tombstone1.uid, tombstone1.dynamic_epoch,
+                                rob_key1.flag, rob_key1.value,
+                                tombstone1.redirect_epoch, raw.port_id),
+                      UVM_LOW)
+        end
+        return 1'b1;
+    endfunction:try_drop_std_raw_by_tombstone
+
     function void resolve_std_uid_by_rob_value_only(
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
         ref memblock_wb_event_t wb_event
@@ -929,6 +991,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
                     return 1'b0;
                 end
                 if (std_raw_owned_by_fault(raw)) begin
+                    return 1'b0;
+                end
+                if (try_drop_std_raw_by_tombstone(raw, wb_event)) begin
                     return 1'b0;
                 end
                 resolve_std_uid_by_rob_value_only(raw, wb_event);

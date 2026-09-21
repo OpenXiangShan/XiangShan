@@ -288,8 +288,14 @@ class issue_queue_scheduler extends uvm_object;
         if (!status.active || !status.enq || !status.issue_ready) begin
             return 1'b0;
         end
-        if (status.flushed || status.redirect_pending || status.exception_pending ||
-            status.issue_killed) begin
+        if (status.flushed || status.redirect_pending || status.issue_killed) begin
+            return 1'b0;
+        end
+        // 真实 V2 的 STA/STD 分属独立 IQ。STA fault 已观测但 fault redirect
+        // 尚未生效时，仅同一 store 的未发 STD 仍可能合法 fire；其它 target
+        // 继续被 exception_pending 阻塞。
+        if (status.exception_pending &&
+            !(item.target == MEMBLOCK_ISSUE_TARGET_STD && status.sta_fault)) begin
             return 1'b0;
         end
         if (!data.target_replay_seq_match(status, item.target, item.replay_seq) ||
@@ -299,7 +305,14 @@ class issue_queue_scheduler extends uvm_object;
         case (item.target)
             MEMBLOCK_ISSUE_TARGET_LOAD: return !status.load_dispatched && !status.writeback && !status.pass;
             MEMBLOCK_ISSUE_TARGET_STA:  return !status.sta_dispatched;
-            MEMBLOCK_ISSUE_TARGET_STD:  return !status.std_dispatched;
+            MEMBLOCK_ISSUE_TARGET_STD:  return !status.std_dispatched &&
+                                               status.queued_std &&
+                                               !status.std_writeback &&
+                                               !status.std_fault &&
+                                               status.active_sq_mapped &&
+                                               item.has_sqIdx &&
+                                               item.sq_key.flag == status.sqIdx_flag &&
+                                               item.sq_key.value == status.sqIdx_value;
             default: return 1'b0;
         endcase
     endfunction:is_issue_item_state_eligible
