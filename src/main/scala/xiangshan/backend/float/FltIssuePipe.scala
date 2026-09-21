@@ -240,12 +240,18 @@ class FltIssuePipe(
   private val ex0F2IWakeupValid: Bool =
     ex0.valid && !ex0Flush && ex0FixedLatGpWen && ex0.bits.ctrl.latency === 3.U
 
-  // Combinational at is1: registering here would lose one of the two
-  // additional cycles over the existing (registered) ex0 M2 wakeup.
-  out.fpWbM4Wakeup.wen := ex0Next.valid && is1.bits.fpWen &&
+  // M4 is combinational from the stage where each operation is four cycles
+  // from writeback. The older is1 FMA wins if both candidates target this
+  // pipe's single M4 output in the same cycle.
+  private val fmaM4WakeupValid = ex0Next.valid && is1.bits.fpWen &&
     FuType.isFmul(is1.bits.fuType) && FMacOpcode.isOP3(is1.bits.opcode)
-  out.fpWbM4Wakeup.pdest := is1.bits.pdest
-  XSPerfAccumulate("fma_m4_wakeup", out.fpWbM4Wakeup.wen)
+  private val fmulM4WakeupValid = is1Next.valid && is0.bits.fpWen && is0.bits.latency === 2.U &&
+    FuType.isFmul(is0.bits.fuType) && FMacOpcode.isFmul(is0.bits.opcode)
+  out.fpWbM4Wakeup.wen := fmaM4WakeupValid || fmulM4WakeupValid
+  out.fpWbM4Wakeup.pdest := Mux(fmaM4WakeupValid, is1.bits.pdest, is0.bits.pdest)
+  XSPerfAccumulate("fma_m4_wakeup", fmaM4WakeupValid)
+  XSPerfAccumulate("fmul_m4_wakeup", fmulM4WakeupValid && !fmaM4WakeupValid)
+  XSPerfAccumulate("fmul_m4_wakeup_arb_lost", fmulM4WakeupValid && fmaM4WakeupValid)
 
   private val nonFixedLatWakeUp = Wire(new FltWakeUpBundle(backendParams.fpPregParams))
   if (exu.out.outFuWakeUp.isEmpty) {
