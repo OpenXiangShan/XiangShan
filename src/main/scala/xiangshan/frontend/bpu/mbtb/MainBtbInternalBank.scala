@@ -126,14 +126,11 @@ class MainBtbInternalBank(
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
 
-  private val counterWriteBuffer = Module(new WriteBuffer(
+  private val counterWriteBuffer = Module(new Queue(
     new MainBtbCounterSramWriteReq,
-    numEntries = WriteBufferSize,
-    numPorts = 1,
-    numWays = NumWay,
-    hasWayMask = true,
-    hasReadBypass = true,
-    nameSuffix = s"mbtbCounterAlign${alignIdx}_Bank${bankIdx}"
+    WriteBufferSize,
+    pipe = true,
+    flow = true
   ))
 
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
@@ -144,23 +141,14 @@ class MainBtbInternalBank(
     sram.io.r.req.valid       := read.req.valid
     sram.io.r.req.bits.setIdx := read.req.bits.setIdx
   }
-  entryWriteBuffer.io.readBypass.get.req.valid   := read.req.valid
-  entryWriteBuffer.io.readBypass.get.req.bits    := read.req.bits.setIdx
-  counterWriteBuffer.io.readBypass.get.req.valid := read.req.valid
-  counterWriteBuffer.io.readBypass.get.req.bits  := read.req.bits.setIdx
-  private val entryWriteBufferResp   = entryWriteBuffer.io.readBypass.get.resp
-  private val counterWriteBufferResp = counterWriteBuffer.io.readBypass.get.resp.head
+  entryWriteBuffer.io.readBypass.get.req.valid := read.req.valid
+  entryWriteBuffer.io.readBypass.get.req.bits  := read.req.bits.setIdx
+  private val entryWriteBufferResp = entryWriteBuffer.io.readBypass.get.resp
   // each entry sram template has 1 way, so here we only read data.head
   read.resp.entries := VecInit(entrySrams.zip(entryWriteBufferResp).map { case (sram, bufferResp) =>
     Mux(bufferResp.valid, bufferResp.bits.entry, sram.io.r.resp.data.head)
   })
-  read.resp.counters := VecInit(counterSram.io.r.resp.data.zipWithIndex.map { case (sramCounter, wayIdx) =>
-    Mux(
-      counterWriteBufferResp.valid && counterWriteBufferResp.bits.wayMask.get(wayIdx),
-      counterWriteBufferResp.bits.wayData.get(wayIdx).asTypeOf(TakenCounter()),
-      sramCounter
-    )
-  })
+  read.resp.counters := counterSram.io.r.resp.data
 
   /* *** writeBuffer -> sram *** */
   // entry
@@ -171,12 +159,11 @@ class MainBtbInternalBank(
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
   // counter
-  counterSram.io.w.req.valid := counterWriteBuffer.io.read.head.valid && !counterSram.io.r.req.valid
-  counterSram.io.w.req.bits.data :=
-    VecInit(counterWriteBuffer.io.read.head.bits.wayData.get.map(_.asTypeOf(TakenCounter())))
-  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.read.head.bits.setIdx
-  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.read.head.bits.wayMask.get.asUInt
-  counterWriteBuffer.io.read.head.ready := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
+  counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
+  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
+  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
+  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
+  counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
 
   /* *** io -> writeBuffer *** */
   // entry
@@ -208,10 +195,10 @@ class MainBtbInternalBank(
     )
   }
   // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.write.head.valid            := writeCounter.req.valid
-  counterWriteBuffer.io.write.head.bits.setIdx      := writeCounter.req.bits.setIdx
-  counterWriteBuffer.io.write.head.bits.wayMask.get := VecInit(writeCounter.req.bits.wayMask.asBools)
-  counterWriteBuffer.io.write.head.bits.wayData.get := VecInit(writeCounter.req.bits.counters.map(_.asUInt))
+  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid
+  counterWriteBuffer.io.enq.bits.setIdx   := writeCounter.req.bits.setIdx
+  counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
+  counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters
 
   private val perfEntryOverwrite = entryWriteBuffer.io.overwrite.reduce(_ || _)
 
@@ -222,8 +209,8 @@ class MainBtbInternalBank(
   )
 
   XSPerfAccumulate(
-    "counter_writebuffer_overwrite",
-    counterWriteBuffer.io.overwrite.head
+    "counter_writebuffer_drop_write",
+    !counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
   )
   XSPerfAccumulate(
     "entry_writebuffer_overwrite",

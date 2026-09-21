@@ -64,10 +64,10 @@ class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle wi
   }
 }
 
-class MainBtbCounterSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx:           UInt              = UInt(SetIdxLen.W)
-  override val wayMask: Option[Vec[Bool]] = Some(Vec(NumWay, Bool()))
-  override val wayData: Option[Vec[UInt]] = Some(Vec(NumWay, UInt(TakenCntWidth.W)))
+class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx:   UInt                 = UInt(SetIdxLen.W)
+  val wayMask:  UInt                 = UInt(NumWay.W)
+  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
