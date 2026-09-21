@@ -33,7 +33,6 @@ import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
-import xiangshan.cache.CCHIType3Port
 import xiangshan.cache.CCHIType4Port
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
@@ -67,7 +66,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
     // Compact CHI Type 4 (ReadOnce + CompData)
     val cchi: CCHIType4Port = new CCHIType4Port
-    val ctrl_cchi: Option[CCHIType3Port] = Option.when(EnableCtrlUnit)(Flipped(new CCHIType3Port))
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -110,14 +108,12 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
 
-  private val chiCtrlUnit = if (EnableCtrlUnit) Some(outer.ctrlUnitOpt.get.module) else None
-  private val eccEnable = if (EnableCtrlUnit) chiCtrlUnit.get.io.eccEnable else true.B
-
-  io.ctrl_cchi.foreach(_ <> chiCtrlUnit.get.io.cchi)
+  private val axiCtrlUnit = if (EnableCtrlUnit) Some(outer.ctrlUnitOpt.get.module) else None
+  private val eccEnable = if (EnableCtrlUnit) axiCtrlUnit.get.io.eccEnable else true.B
 
   // dataArray io
   if (EnableCtrlUnit) {
-    val ctrlUnit = chiCtrlUnit.get
+    val ctrlUnit = axiCtrlUnit.get
     when(ctrlUnit.io.injecting) {
       dataArray.io.write <> ctrlUnit.io.dataWrite
       missUnit.io.dataWrite.req.ready := false.B
@@ -134,7 +130,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   metaArray.io.flushAll := io.fencei
   metaArray.io.flush <> mainPipe.io.metaFlush
   if (EnableCtrlUnit) {
-    val ctrlUnit = chiCtrlUnit.get
+    val ctrlUnit = axiCtrlUnit.get
     when(ctrlUnit.io.injecting) {
       metaArray.io.write <> ctrlUnit.io.metaWrite
       metaArray.io.read <> ctrlUnit.io.metaRead
