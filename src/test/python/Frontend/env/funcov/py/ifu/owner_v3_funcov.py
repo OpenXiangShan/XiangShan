@@ -127,14 +127,19 @@ def derive_owner_v3_from_source(
     cycle: int,
     evidence: dict[str, Any] | None,
 ) -> None:
+    hit_count_by_bin_id = getattr(recorder, "hit_count_by_bin_id", None)
     for rule in _OWNER_V3_SOURCE_RULES_BY_TRIGGER.get(str(source_bin_id), ()):
         source_hits = {}
         for required_bin_id in rule.source_bin_ids:
-            definition = recorder.definition_by_bin_id.get(required_bin_id)
-            hit = None if definition is None else recorder.hits.get(definition.key)
-            if hit is None or hit.hits <= 0:
+            if callable(hit_count_by_bin_id):
+                hit_count = int(hit_count_by_bin_id(required_bin_id))
+            else:
+                definition = recorder.definition_by_bin_id.get(required_bin_id)
+                hit = None if definition is None else recorder.hits.get(definition.key)
+                hit_count = 0 if hit is None else int(hit.hits)
+            if hit_count <= 0:
                 break
-            source_hits[required_bin_id] = int(hit.hits)
+            source_hits[required_bin_id] = hit_count
         else:
             mark_owner_v3_checked(
                 recorder,

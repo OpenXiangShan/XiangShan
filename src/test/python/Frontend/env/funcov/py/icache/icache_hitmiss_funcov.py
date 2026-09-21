@@ -479,7 +479,10 @@ def _same_cache_key(
     )
 
 
-def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
+def evaluate_icache_hitmiss_coverage(
+    recorder, env, cycle: int
+) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Update hit/miss history and return same-cycle flags/evidence without marking."""
     del env
     state = getattr(recorder, "_icache_hitmiss_cov_state", None)
     if state is None:
@@ -496,6 +499,7 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
     evidence["mshr"] = mshrs
     line_valids = _line_valids(snapshot)
     line_hits = _line_hits(snapshot)
+    flags = {bin_name: False for _, bin_name in ICACHE_HITMISS_SAMPLER_BIN_KEYS}
     if (
         _on(snapshot["s1_fire"])
         or _on(snapshot["sram_valid"])
@@ -544,25 +548,8 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
                 or current_hit["cross"]
                 or previous_hit["cross"]
             )
-            sequence_evidence = dict(evidence)
-            sequence_evidence["previous_clean_hit"] = previous_hit
-            sequence_evidence["current_clean_hit"] = current_hit
-            _mark(
-                recorder,
-                "icache_hit_path",
-                "continuous_same_line_sram_hit",
-                cycle,
-                same_line_different_offset,
-                sequence_evidence,
-            )
-            _mark(
-                recorder,
-                "icache_hit_path",
-                "continuous_cross_line_sram_hit",
-                cycle,
-                crossed_cacheline,
-                sequence_evidence,
-            )
+            flags["continuous_same_line_sram_hit"] = bool(same_line_different_offset)
+            flags["continuous_cross_line_sram_hit"] = bool(crossed_cacheline)
         state["last_clean_hit"] = current_hit
     elif _on(snapshot["s1_valid"]) and (
         _on(snapshot["itlb_exception"])
@@ -572,7 +559,7 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
     ):
         state["last_clean_hit"] = None
 
-    independent = (
+    flags["dual_request_independent_hit"] = bool(
         _on(snapshot["s1_valid"])
         and _on(snapshot["req1_valid"])
         and all(hit == valid for hit, valid in zip(line_hits, line_valids))
@@ -584,22 +571,11 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         and _off(snapshot["s1_flush"])
         and _off(snapshot["fencei"])
     )
-    _mark(recorder, "icache_hit_path", "dual_request_independent_hit", cycle, independent, evidence)
-    _mark(
-        recorder,
-        "icache_hit_path",
-        "hit_itlb_exception",
-        cycle,
-        _on(snapshot["s1_valid"]) and line_hits[0] and _on(snapshot["itlb_exception"]),
-        evidence,
+    flags["hit_itlb_exception"] = bool(
+        _on(snapshot["s1_valid"]) and line_hits[0] and _on(snapshot["itlb_exception"])
     )
-    _mark(
-        recorder,
-        "icache_hit_path",
-        "hit_pmp_exception",
-        cycle,
-        _on(snapshot["s1_valid"]) and line_hits[0] and _on(snapshot["pmp_instr"]),
-        evidence,
+    flags["hit_pmp_exception"] = bool(
+        _on(snapshot["s1_valid"]) and line_hits[0] and _on(snapshot["pmp_instr"])
     )
 
     fetch_valid = _on(snapshot["fetch_valid"])
@@ -616,13 +592,8 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
             or int(snapshot["fetch_vset"]) != int(snapshot["prefetch_vset"])
         )
     )
-    _mark(
-        recorder,
-        "icache_miss_path",
-        "fetch_hit_prefetch_miss_concurrent",
-        cycle,
-        fetch_valid and fetch_hit and prefetch_valid and not prefetch_hit and different_key,
-        evidence,
+    flags["fetch_hit_prefetch_miss_concurrent"] = bool(
+        fetch_valid and fetch_hit and prefetch_valid and not prefetch_hit and different_key
     )
 
     clean_refill_key = _clean_fetch_refill(snapshot, mshrs)
@@ -632,11 +603,7 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         snapshot["prefetch_s2_ptag"], snapshot["prefetch_s2_vset"]
     )
     prefetch_refill_cycle = state["refilled_keys"].get(prefetch_key)
-    _mark(
-        recorder,
-        "icache_miss_path",
-        "fetch_refill_prefetch_hit",
-        cycle,
+    flags["fetch_refill_prefetch_hit"] = bool(
         _on(snapshot["prefetch_s2_valid"])
         and _on(snapshot["prefetch_s2_fire"])
         and _off(snapshot["prefetch_s2_exception"])
@@ -646,17 +613,17 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         and _off(snapshot["global_flush"])
         and _off(snapshot["fencei"])
         and prefetch_refill_cycle is not None
-        and prefetch_refill_cycle < cycle,
-        evidence,
+        and prefetch_refill_cycle < cycle
     )
 
     fetch_key = None
     if snapshot["fetch_paddr"] is not None and snapshot["fetch_vset"] is not None:
         fetch_key = (int(snapshot["fetch_paddr"]), int(snapshot["fetch_vset"]))
-    merge = fetch_valid and fetch_hit and any(
-        _same_key(item, *(fetch_key or (None, None))) for item in mshrs
+    flags["continuous_fetch_miss_merge"] = bool(
+        fetch_valid
+        and fetch_hit
+        and any(_same_key(item, *(fetch_key or (None, None))) for item in mshrs)
     )
-    _mark(recorder, "icache_miss_path", "continuous_fetch_miss_merge", cycle, merge, evidence)
 
     fetch_miss_signature = _fetch_miss_signature(snapshot)
     full_set_cycle = state["full_set_miss_signatures"].get(fetch_miss_signature)
@@ -689,16 +656,9 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         and _off(snapshot["fencei"])
     )
     plru_condition = fetch_plru_condition or prefetch_plru_condition
+    flags["plru_victim_on_miss"] = bool(plru_condition)
     evidence["plru_request_kind"] = (
         "fetch" if fetch_plru_condition else "prefetch" if prefetch_plru_condition else None
-    )
-    _mark(
-        recorder,
-        "icache_miss_path",
-        "plru_victim_on_miss",
-        cycle,
-        plru_condition,
-        evidence,
     )
     if plru_condition:
         consumed_signature = (
@@ -743,7 +703,7 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         pending_refill_hit["key"] if pending_refill_hit is not None else None
     )
     pending_refill_cycle = state["refilled_keys"].get(pending_key)
-    refill_then_hit = (
+    flags["refill_then_fetch_hit"] = bool(
         _on(snapshot["s1_fire"])
         and pending_refill_hit is not None
         and _off(snapshot["s1_flush"])
@@ -752,14 +712,28 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         and pending_refill_cycle <= pending_refill_hit["response_cycle"]
         and not any(_same_cache_key(item, pending_key) for item in mshrs)
     )
-    _mark(recorder, "icache_miss_path", "refill_then_fetch_hit", cycle, refill_then_hit, evidence)
     if _on(snapshot["s1_fire"]):
         state["pending_refill_hit"] = None
+    return flags, evidence
+
+
+def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
+    flags, evidence = evaluate_icache_hitmiss_coverage(recorder, env, cycle)
+    for group, bin_name in ICACHE_HITMISS_SAMPLER_BIN_KEYS:
+        _mark(
+            recorder,
+            group,
+            bin_name,
+            cycle,
+            flags.get(bin_name, False),
+            evidence,
+        )
 
 
 __all__ = (
     "ICACHE_HITMISS_COVERPOINTS",
     "ICACHE_HITMISS_SAMPLER_BIN_KEYS",
+    "evaluate_icache_hitmiss_coverage",
     "reset_icache_hitmiss_coverage_state",
     "sample_icache_hitmiss_coverage",
 )

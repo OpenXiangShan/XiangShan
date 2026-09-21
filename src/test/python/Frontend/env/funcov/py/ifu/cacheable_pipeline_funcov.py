@@ -2406,6 +2406,19 @@ def _resolve_backend_flush_causality(
     return False
 
 
+def evaluate_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int):
+    from ...native_toffee import EvaluateFlagRecorder
+
+    flags = {
+        (group, bin_name): False
+        for group, bin_name in IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS
+    }
+    evidence = {}
+    wrapped = EvaluateFlagRecorder(recorder, flags, evidence)
+    sample_ifu_cacheable_pipeline_coverage(wrapped, env, cycle)
+    return flags, evidence
+
+
 def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
     if _dut(recorder) is None:
         return
@@ -2574,6 +2587,7 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
 
 __all__ = [
     "IFU_CACHEABLE_PIPELINE_COVERPOINTS",
+    "evaluate_ifu_cacheable_pipeline_coverage",
     "IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS",
     "initialize_ifu_cacheable_pipeline_state",
     "reset_ifu_cacheable_pipeline_state",

@@ -761,6 +761,45 @@ class _CoverageGroupRecorder:
         return None
 
 
+class _EvaluateFlagRecorder:
+    """Collect mark conditions into flags/evidence without emitting hits."""
+
+    def __init__(self, recorder, flags, evidence):
+        object.__setattr__(self, "_recorder", recorder)
+        object.__setattr__(self, "_flags", flags)
+        object.__setattr__(self, "_evidence", evidence)
+
+    def __getattr__(self, name):
+        return getattr(self._recorder, name)
+
+    def __setattr__(self, name, value):
+        setattr(self._recorder, name, value)
+
+    def mark(self, group, bin_name, cycle, evidence=None, *, coverpoint=None, **kwargs):
+        del cycle, coverpoint, kwargs
+        key = (str(group), str(bin_name))
+        self._flags[key] = True
+        if isinstance(evidence, dict):
+            self._evidence.clear()
+            self._evidence.update(evidence)
+        return True
+
+
+def evaluate_two_fetch_coverage(
+    recorder, env, cycle: int, groups=None
+) -> tuple[dict[tuple[str, str], bool], dict]:
+    """Update two-fetch history and return same-cycle flags/evidence without marking."""
+    flags = {
+        (group_name, bin_name): False
+        for group_name, bin_name in TWO_FETCH_SAMPLER_BIN_KEYS
+        if groups is None or group_name in set(groups)
+    }
+    evidence: dict = {}
+    wrapped = _EvaluateFlagRecorder(recorder, flags, evidence)
+    sample_two_fetch_coverage(wrapped, env, cycle, groups=groups)
+    return flags, evidence
+
+
 def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
     if groups is not None:
         recorder = _CoverageGroupRecorder(recorder, groups)

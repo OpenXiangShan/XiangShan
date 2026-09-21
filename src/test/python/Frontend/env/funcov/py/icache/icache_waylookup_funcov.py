@@ -263,6 +263,14 @@ def _any_on(values: Iterable[Optional[int]]) -> bool:
 
 
 def _mark(recorder, group: str, name: str, cycle: int, condition: bool, evidence: dict[str, Any]) -> None:
+    flags = getattr(recorder, "_pending_waylookup_flags", None)
+    if flags is not None:
+        flags[name] = bool(condition)
+        pending_evidence = getattr(recorder, "_pending_waylookup_evidence", None)
+        if isinstance(pending_evidence, dict):
+            pending_evidence.clear()
+            pending_evidence.update(evidence)
+        return
     if condition:
         recorder.mark(group, name, cycle, evidence, coverpoint=ICACHE_WAYLOOKUP_COVERPOINTS[group])
 
@@ -383,6 +391,22 @@ def _update_values(
         base = entry_index * 2
         selected.extend(values[base : base + 2])
     return tuple(selected)
+
+
+def evaluate_icache_waylookup_coverage(
+    recorder, env, cycle: int
+) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Update WayLookup history and return same-cycle flags/evidence without marking."""
+    flags = {bin_name: False for _, bin_name in ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS}
+    evidence: dict[str, Any] = {}
+    recorder._pending_waylookup_flags = flags
+    recorder._pending_waylookup_evidence = evidence
+    try:
+        sample_icache_waylookup_coverage(recorder, env, cycle)
+    finally:
+        recorder._pending_waylookup_flags = None
+        recorder._pending_waylookup_evidence = None
+    return flags, evidence
 
 
 def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
@@ -740,6 +764,7 @@ def sample_icache_waylookup_coverage(recorder, env, cycle: int) -> None:
 __all__ = (
     "ICACHE_WAYLOOKUP_COVERPOINTS",
     "ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS",
+    "evaluate_icache_waylookup_coverage",
     "reset_icache_waylookup_coverage_state",
     "sample_icache_waylookup_coverage",
 )

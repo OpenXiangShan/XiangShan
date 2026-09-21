@@ -137,6 +137,12 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/mmio_v3_funcov.py": root / "py" / "ifu" / "mmio_v3_funcov.py",
         "funcov/py/ifu/mmio_nc_owner_funcov.py": root / "py" / "ifu" / "mmio_nc_owner_funcov.py",
         "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
+        "funcov/toffee_bridge.py": root / "toffee_bridge.py",
+        "funcov/toffee_artifact.py": root / "toffee_artifact.py",
+        **{
+            f"funcov/py/{path.relative_to(root / 'py').as_posix()}": path
+            for path in sorted((root / "py").rglob("*_toffee.py"))
+        },
     }
 
 
@@ -353,6 +359,13 @@ class FunctionalCoverageRecorder:
         self.contract_errors: deque[dict] = deque(maxlen=128)
         self._contract_error_keys: deque[tuple[str, int, str]] = deque(maxlen=128)
         self.env = None
+        self.toffee_sink = None
+        self.toffee_direct_domains: set[str] = set()
+        self.toffee_event_models = []
+        self.toffee_owner_model = None
+        self.toffee_uncache_model = None
+        self._cycle_snapshot_cycle: Optional[int] = None
+        self._cycle_snapshot_values: Dict[str, Optional[int]] = {}
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
         self._last_fetch_path = "icache_seq"
@@ -595,6 +608,21 @@ class FunctionalCoverageRecorder:
     def attach(self, env) -> None:
         self.env = env
 
+    def attach_toffee_sink(self, sink) -> None:
+        self.toffee_sink = sink
+
+    def enable_toffee_direct_domain(self, domain: str) -> None:
+        self.toffee_direct_domains.add(str(domain).strip().lower())
+
+    def attach_toffee_event_model(self, model) -> None:
+        self.toffee_event_models.append(model)
+
+    def attach_toffee_owner_model(self, model) -> None:
+        self.toffee_owner_model = model
+
+    def attach_toffee_uncache_model(self, model) -> None:
+        self.toffee_uncache_model = model
+
     def raw_path(self) -> Path:
         return self.output_dir / f"{self.artifact_tag}.funcov.json"
 
@@ -640,6 +668,8 @@ class FunctionalCoverageRecorder:
         evidence: Optional[dict] = None,
         *,
         coverpoint: Optional[str] = None,
+        forward_to_toffee: bool = True,
+        derive_owner: bool = True,
     ) -> bool:
         key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         if key not in self.definition_by_key:
@@ -654,14 +684,29 @@ class FunctionalCoverageRecorder:
             hit.first_cycle = int(cycle)
         if evidence is not None and len(hit.evidence) < 8:
             hit.evidence.append(_sanitize(evidence))
-        definition = self.definition_by_key[key]
-        if self.sampler_domain_enabled("ifu"):
-            derive_owner_v3_from_source(
-                self,
-                definition.bin_id,
-                int(cycle),
+        if forward_to_toffee and self.toffee_sink is not None:
+            self.toffee_sink.mark(
+                coverage_group,
+                bin_name,
+                cycle,
                 evidence,
+                coverpoint=coverpoint,
             )
+        definition = self.definition_by_key[key]
+        if derive_owner and self.sampler_domain_enabled("ifu"):
+            if self.toffee_owner_model is not None:
+                self.toffee_owner_model.derive_from_source(
+                    definition.bin_id,
+                    int(cycle),
+                    evidence,
+                )
+            else:
+                derive_owner_v3_from_source(
+                    self,
+                    definition.bin_id,
+                    int(cycle),
+                    evidence,
+                )
         return True
 
     def _coverage_key(
@@ -696,16 +741,21 @@ class FunctionalCoverageRecorder:
             return
 
         if self.sampler_domain_enabled("ifu"):
-            handle_owner_v3_event(self, evt)
-            handle_mmio_v3_checked_event(self, evt)
+            if self.toffee_owner_model is None:
+                handle_owner_v3_event(self, evt)
+            if "ifu_mmio_v3" not in self.toffee_direct_domains:
+                handle_mmio_v3_checked_event(self, evt)
+        for model in self.toffee_event_models:
+            model.handle_event(evt)
 
+        path_mark_target = self.toffee_uncache_model or self
         if event_type == "handshake.icache_a":
             if (
                 self._redirected_fetch_path is not None
                 and self._redirected_fetch_path.get("path") == "mmio_uncache"
                 and self._redirected_fetch_path.get("pbmt_nc") is True
             ):
-                self.mark(
+                path_mark_target.mark(
                     "uncache_path_switch",
                     "uncache_to_icache_clean",
                     cycle,
@@ -723,7 +773,7 @@ class FunctionalCoverageRecorder:
                 and self._redirected_fetch_path.get("path") == "icache_seq"
                 and self._uncache_active_nc
             ):
-                self.mark(
+                path_mark_target.mark(
                     "uncache_path_switch",
                     "icache_to_nc_clean",
                     cycle,
@@ -740,7 +790,7 @@ class FunctionalCoverageRecorder:
                 and self.env is not None
                 and self.env.memory.is_mmio(address)
             ):
-                self.mark(
+                path_mark_target.mark(
                     "fetch_path_switch",
                     "icache_to_mmio_clean",
                     cycle,
@@ -793,6 +843,7 @@ class FunctionalCoverageRecorder:
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
         cycle = int(cycle)
+        self.begin_cycle_snapshot(cycle)
         reset_val = self._read_dut_signal(dut, "reset", 0)
         if reset_val == 1:
             self._reset_seen_high = True
@@ -802,26 +853,39 @@ class FunctionalCoverageRecorder:
             self._reset_release_cycle = cycle
 
         if self.sampler_domain_enabled("ftq"):
-            sample_two_fetch_coverage(self, env, cycle)
+            if "ftq_two_fetch" not in self.toffee_direct_domains:
+                sample_two_fetch_coverage(self, env, cycle)
         if self.sampler_domain_enabled("ifu"):
-            sample_cfvec_coverage(self, env, cycle)
+            if "ifu_cfvec" not in self.toffee_direct_domains:
+                sample_cfvec_coverage(self, env, cycle)
             # Keep the cross-path half-RVI producer on the recorder's canonical
             # cycle clock. cfVec sampling may return early when no lane is valid,
             # while BIN-922 observes redirect state in valid-hole cycles.
             _sample_uncache_half_isolation(self, dut, cycle)
-            sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
-            sample_mmio_v3_coverage(self, env, cycle)
-            sample_mmio_nc_owner_coverage(self, env, cycle)
+            if "ifu_cacheable_pipeline" not in self.toffee_direct_domains:
+                sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
+            if "ifu_mmio_v3" not in self.toffee_direct_domains:
+                sample_mmio_v3_coverage(self, env, cycle)
+            if "ifu_mmio_nc_owner" not in self.toffee_direct_domains:
+                sample_mmio_nc_owner_coverage(self, env, cycle)
         if self.sampler_domain_enabled("icache"):
-            sample_icache_mainpipe_coverage(self, env, cycle)
-            sample_icache_prefetchpipe_coverage(self, env, cycle)
-            sample_icache_missunit_coverage(self, env, cycle)
-            sample_icache_waylookup_coverage(self, env, cycle)
-            sample_icache_hitmiss_coverage(self, env, cycle)
+            if "icache_mainpipe" not in self.toffee_direct_domains:
+                sample_icache_mainpipe_coverage(self, env, cycle)
+            if "icache_prefetchpipe" not in self.toffee_direct_domains:
+                sample_icache_prefetchpipe_coverage(self, env, cycle)
+            if "icache_missunit" not in self.toffee_direct_domains:
+                sample_icache_missunit_coverage(self, env, cycle)
+            if "icache_waylookup" not in self.toffee_direct_domains:
+                sample_icache_waylookup_coverage(self, env, cycle)
+            if "icache_hitmiss" not in self.toffee_direct_domains:
+                sample_icache_hitmiss_coverage(self, env, cycle)
 
         if self.sampler_domain_enabled("ibuffer"):
             self._sample_ibuffer_contract(dut, cycle)
-        if self.sampler_domain_enabled("uncache"):
+        if (
+            self.sampler_domain_enabled("uncache")
+            and "uncache_event" not in self.toffee_direct_domains
+        ):
             self._sample_uncache_cycle_state(dut, cycle, env)
 
     def _lookup_dut_signal(self, dut, name: str):
@@ -845,6 +909,13 @@ class FunctionalCoverageRecorder:
 
         self._dut_signal_cache[name] = signal
         return signal
+
+    def begin_cycle_snapshot(self, cycle: int) -> None:
+        """Start the read-once DUT value snapshot for one StepRis cycle."""
+        cycle = int(cycle)
+        if self._cycle_snapshot_cycle != cycle:
+            self._cycle_snapshot_cycle = cycle
+            self._cycle_snapshot_values.clear()
 
     @cached_property
     def _registered_internal_signals(self) -> Optional[set[str]]:
@@ -870,25 +941,37 @@ class FunctionalCoverageRecorder:
         return registered is None or str(name) in registered
 
     def _read_dut_signal(self, dut, name: str, default: int = 0) -> int:
-        signal = self._lookup_dut_signal(dut, str(name))
-        if signal is None:
-            return int(default)
-        value = getattr(signal, "value", None)
-        if value is None:
-            return int(default)
-        return int(value)
+        value = self._try_read_dut_signal(dut, str(name))
+        return int(default) if value is None else int(value)
 
     def _try_read_dut_signal(self, dut, name: str) -> Optional[int]:
+        name = str(name)
+        if self._cycle_snapshot_cycle is not None and name in self._cycle_snapshot_values:
+            return self._cycle_snapshot_values[name]
+        if self._cycle_snapshot_cycle is None and self.toffee_direct_domains:
+            raise RuntimeError(
+                "DUT signal reads require an active cycle snapshot once Toffee "
+                f"direct domains are enabled (signal={name})"
+            )
         signal = self._lookup_dut_signal(dut, str(name))
         if signal is None:
+            if self._cycle_snapshot_cycle is not None:
+                self._cycle_snapshot_values[name] = None
             return None
         value = getattr(signal, "value", None)
         if value is None:
+            if self._cycle_snapshot_cycle is not None:
+                self._cycle_snapshot_values[name] = None
             return None
         try:
-            return int(value)
+            result = int(value)
         except Exception:
+            if self._cycle_snapshot_cycle is not None:
+                self._cycle_snapshot_values[name] = None
             return None
+        if self._cycle_snapshot_cycle is not None:
+            self._cycle_snapshot_values[name] = result
+        return result
 
     def _read_first_dut_signal(self, dut, names: Iterable[str]) -> Optional[int]:
         for name in names:
@@ -1138,7 +1221,8 @@ class FunctionalCoverageRecorder:
                 "next_page_requested": False,
             }
 
-    def _sample_uncache_cycle_state(self, dut, cycle: int, env) -> None:
+    def _sample_uncache_cycle_state(self, dut, cycle: int, env, *, mark_target=None) -> None:
+        mark_target = self if mark_target is None else mark_target
         pbmt = self._try_read_dut_signal(
             dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
         )
@@ -1156,21 +1240,21 @@ class FunctionalCoverageRecorder:
         if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
             self._uncache_active_nc = True
         if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
-            self.mark(
+            mark_target.mark(
                 "uncache_ordering",
                 "pbmt_nc_pmp_mmio_wait_commit",
                 cycle,
                 {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
             )
         if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
-            self.mark(
+            mark_target.mark(
                 "uncache_ordering",
                 "pbmt_io_wait_commit",
                 cycle,
                 {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
             )
         if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
-            self.mark(
+            mark_target.mark(
                 "uncache_ordering",
                 "pbmt_nc_non_mmio_no_commit_gate",
                 cycle,

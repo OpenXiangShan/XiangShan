@@ -174,6 +174,16 @@ def _sample_tl_a_stall(recorder, dut, cycle: int) -> None:
         recorder._ifu_mmio_stalled_a = None
 
 
+def evaluate_mmio_v3_coverage(recorder, env, cycle: int):
+    from ...native_toffee import EvaluateFlagRecorder
+
+    flags = {(group, bin_name): False for group, bin_name in MMIO_V3_SAMPLER_BIN_KEYS}
+    evidence: dict[str, Any] = {}
+    wrapped = EvaluateFlagRecorder(recorder, flags, evidence)
+    sample_mmio_v3_coverage(wrapped, env, cycle)
+    return flags, evidence
+
+
 def sample_mmio_v3_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:
@@ -273,6 +283,7 @@ __all__ = [
     "MMIO_V3_CHECKED_EVENT_TYPE",
     "MMIO_V3_COVERPOINTS",
     "MMIO_V3_SAMPLER_BIN_KEYS",
+    "evaluate_mmio_v3_coverage",
     "handle_mmio_v3_checked_event",
     "initialize_mmio_v3_coverage_state",
     "reset_mmio_v3_coverage_state",

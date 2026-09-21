@@ -348,6 +348,14 @@ def _mark_prefetch(
     condition: bool,
     evidence: dict[str, Any],
 ) -> None:
+    flags = getattr(recorder, "_pending_prefetchpipe_flags", None)
+    if flags is not None:
+        flags[bin_name] = bool(condition)
+        pending_evidence = getattr(recorder, "_pending_prefetchpipe_evidence", None)
+        if isinstance(pending_evidence, dict):
+            pending_evidence.clear()
+            pending_evidence.update(evidence)
+        return
     if condition:
         recorder.mark(
             group,
@@ -414,6 +422,22 @@ def _matching_s2_refill_ports(
         if s[f"s2_set{port}"] is not None
         and int(s[f"s2_set{port}"]) == int(s["refill_vset"])
     )
+
+
+def evaluate_icache_prefetchpipe_coverage(
+    recorder, env, cycle: int
+) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Update PrefetchPipe history and return same-cycle flags/evidence without marking."""
+    flags = {bin_name: False for _, bin_name in ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS}
+    evidence: dict[str, Any] = {}
+    recorder._pending_prefetchpipe_flags = flags
+    recorder._pending_prefetchpipe_evidence = evidence
+    try:
+        sample_icache_prefetchpipe_coverage(recorder, env, cycle)
+    finally:
+        recorder._pending_prefetchpipe_flags = None
+        recorder._pending_prefetchpipe_evidence = None
+    return flags, evidence
 
 
 def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
@@ -1054,3 +1078,11 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         if hw_request and entry_resources_ready and _off(s["global_flush"])
         else None
     )
+
+__all__ = (
+    "ICACHE_PREFETCHPIPE_COVERPOINTS",
+    "ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS",
+    "evaluate_icache_prefetchpipe_coverage",
+    "reset_icache_prefetchpipe_coverage_state",
+    "sample_icache_prefetchpipe_coverage",
+)

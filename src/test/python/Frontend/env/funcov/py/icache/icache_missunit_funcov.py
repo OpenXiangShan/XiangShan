@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 
 _TOP = "Frontend_top."
@@ -78,6 +78,14 @@ def _read(recorder, names: Iterable[str]) -> Optional[int]:
 
 
 def _mark(recorder, group: str, name: str, cycle: int, condition: bool, evidence: dict) -> None:
+    flags = getattr(recorder, "_pending_missunit_flags", None)
+    if flags is not None:
+        flags[name] = bool(condition)
+        pending_evidence = getattr(recorder, "_pending_missunit_evidence", None)
+        if isinstance(pending_evidence, dict):
+            pending_evidence.clear()
+            pending_evidence.update(evidence)
+        return
     if condition:
         recorder.mark(
             group,
@@ -224,6 +232,22 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "last_fetch_request_observation": None,
         "last_parallel_request_observation": None,
     }
+
+
+def evaluate_icache_missunit_coverage(
+    recorder, env, cycle: int
+) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Update MissUnit history and return same-cycle flags/evidence without marking."""
+    flags = {bin_name: False for _, bin_name in ICACHE_MISSUNIT_SAMPLER_BIN_KEYS}
+    evidence: dict[str, Any] = {}
+    recorder._pending_missunit_flags = flags
+    recorder._pending_missunit_evidence = evidence
+    try:
+        sample_icache_missunit_coverage(recorder, env, cycle)
+    finally:
+        recorder._pending_missunit_flags = None
+        recorder._pending_missunit_evidence = None
+    return flags, evidence
 
 
 def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
@@ -1149,3 +1173,11 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         }
     state["last_flush"] = signals["flush"]
     state["last_fencei"] = signals["fencei"]
+
+__all__ = (
+    "ICACHE_MISSUNIT_COVERPOINTS",
+    "ICACHE_MISSUNIT_SAMPLER_BIN_KEYS",
+    "evaluate_icache_missunit_coverage",
+    "reset_icache_missunit_coverage_state",
+    "sample_icache_missunit_coverage",
+)

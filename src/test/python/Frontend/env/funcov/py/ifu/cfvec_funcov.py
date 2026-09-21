@@ -266,6 +266,16 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
     recorder._ifu_last_cfvec = {"pc": int(pc), "is_rvc": int(bool(is_rvc)), "slot": int(slot)}
 
 
+def evaluate_cfvec_coverage(recorder, env, cycle: int):
+    from ...native_toffee import EvaluateFlagRecorder
+
+    flags = {(group, bin_name): False for group, bin_name in CFVEC_SAMPLER_BIN_KEYS}
+    evidence = {}
+    wrapped = EvaluateFlagRecorder(recorder, flags, evidence)
+    sample_cfvec_coverage(wrapped, env, cycle)
+    return flags, evidence
+
+
 def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:

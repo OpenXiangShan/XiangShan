@@ -1546,6 +1546,20 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         state["previous_path"] = current_path
 
 
+def evaluate_mmio_nc_owner_coverage(recorder, env, cycle: int):
+    from ...native_toffee import EvaluateFlagRecorder
+    from .instr_uncache_owner_funcov import INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS
+
+    flags = {
+        (group, bin_name): False
+        for group, bin_name in (MMIO_NC_OWNER_SAMPLER_BIN_KEYS | INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS)
+    }
+    evidence = {}
+    wrapped = EvaluateFlagRecorder(recorder, flags, evidence)
+    sample_mmio_nc_owner_coverage(wrapped, env, cycle)
+    return flags, evidence
+
+
 def sample_mmio_nc_owner_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:

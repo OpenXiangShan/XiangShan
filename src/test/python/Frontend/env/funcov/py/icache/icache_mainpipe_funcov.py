@@ -492,6 +492,14 @@ def _mark(
     condition: bool,
     evidence: dict[str, Any],
 ) -> None:
+    flags = getattr(recorder, "_pending_mainpipe_flags", None)
+    if flags is not None:
+        flags[bin_name] = bool(condition)
+        pending_evidence = getattr(recorder, "_pending_mainpipe_evidence", None)
+        if isinstance(pending_evidence, dict):
+            pending_evidence.clear()
+            pending_evidence.update(evidence)
+        return
     if condition:
         recorder.mark(
             group,
@@ -762,6 +770,22 @@ def _snapshot(recorder) -> dict[str, Any]:
             scalar["start_vaddr"][0], scalar["req0_end_position"]
         )
     return scalar
+
+
+def evaluate_icache_mainpipe_coverage(
+    recorder, env, cycle: int
+) -> tuple[dict[str, bool], dict[str, Any]]:
+    """Update MainPipe history and return same-cycle flags/evidence without marking."""
+    flags = {bin_name: False for _, bin_name in ICACHE_MAINPIPE_SAMPLER_BIN_KEYS}
+    evidence: dict[str, Any] = {}
+    recorder._pending_mainpipe_flags = flags
+    recorder._pending_mainpipe_evidence = evidence
+    try:
+        sample_icache_mainpipe_coverage(recorder, env, cycle)
+    finally:
+        recorder._pending_mainpipe_flags = None
+        recorder._pending_mainpipe_evidence = None
+    return flags, evidence
 
 
 def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
@@ -1799,3 +1823,11 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
 
     state["s2_valid_shadow"] = s2_valid_shadow_after
     state["prev"] = s
+
+__all__ = (
+    "ICACHE_MAINPIPE_COVERPOINTS",
+    "ICACHE_MAINPIPE_SAMPLER_BIN_KEYS",
+    "evaluate_icache_mainpipe_coverage",
+    "reset_icache_mainpipe_coverage_state",
+    "sample_icache_mainpipe_coverage",
+)
