@@ -331,10 +331,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
-  // muti buffer and port for multi-channel L1-L2 interface
-  val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty)
-    Seq.tabulate(numMemChannelsFromDcache)(i => LazyModule(new TLBuffer))
-  else Seq.empty
+  // Multi-channel L1D-to-L2 ports. Buffering is owned by CustomL1L2Fabric after arbitration.
   val dcache_port = Seq.tabulate(numMemChannelsFromDcache)(i =>
     TLNameNode(s"dcache_client_${i}")
   )
@@ -604,7 +601,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val tlbcsr = RegNext(io.ooo_to_mem.tlbCsr)
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
-  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -1315,7 +1311,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(dcache),
         CellNode(io.reset_backend)
       )
-      ++ l1d_to_l2_buffer.map(ModuleNode(_))
     )
     ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
     ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
