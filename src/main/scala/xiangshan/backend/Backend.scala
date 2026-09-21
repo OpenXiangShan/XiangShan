@@ -375,50 +375,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   intRegion.io.fpSchdBusyTable := 0.U.asTypeOf(intRegion.io.fpSchdBusyTable)
   intRegion.io.vfSchdBusyTable := 0.U.asTypeOf(intRegion.io.vfSchdBusyTable)
 
-  vecRegion.in.fromTop.hartId := io.fromTop.hartId
-  vecRegion.in.flush := ctrlBlock.io.toIssueBlock.flush
-  vecRegion.in.fromDispatch.uops.flatten
-    .lazyZip(vecRegion.out.toDispatch.canAccept.flatten)
-    .lazyZip(ctrlBlock.io.toIssueBlock.vfUops)
-    .foreach {
-      case (sink: ValidIO[VecIssueQueue.Enq], sinkCanAccept: Bool, source: DecoupledIO[DispatchOutUop]) =>
-        sink.valid := source.valid
-        sink.bits.fromDispatchOutUop(source.bits)
-        source.ready := sinkCanAccept
-    }
-  require(
-    vecRegion.in.fromIntRegion.vstdUops.flatten.size == vecRegion.out.toIntRegion.vstdCanAccept.flatten.size &&
-      vecRegion.out.toIntRegion.vstdCanAccept.flatten.size == intRegion.io.toVecRegionVStd.get.flatten.size,
-    s"vecRegion vstd ports: in=${vecRegion.in.fromIntRegion.vstdUops.flatten.size}, " +
-      s"canAccept=${vecRegion.out.toIntRegion.vstdCanAccept.flatten.size}, " +
-      s"intRegion=${intRegion.io.toVecRegionVStd.get.flatten.size}"
-  )
-  vecRegion.in.fromIntRegion.vstdUops.flatten
-    .lazyZip(vecRegion.out.toIntRegion.vstdCanAccept.flatten)
-    .lazyZip(intRegion.io.toVecRegionVStd.get.flatten)
-    .foreach {
-      case (sink: ValidIO[VecIssueQueue.Enq], sinkCanAccept: Bool, source: DecoupledIO[RegionInUop]) =>
-        sink.valid := source.valid
-        sink.bits.fromRegionInUop(source.bits)
-        source.ready := sinkCanAccept
-    }
-  vecRegion.in.fromIntRegion.gpWbWakeUp zip intRegion.io.exuOut.flatten.filter(_.bits.toIntRf.nonEmpty) foreach {
-    case (sink: VecIssueQueue.WakeUpBundle, source: ValidIO[NewExuOutput]) =>
-      sink.wen := source.valid && source.bits.toIntRf.get.valid
-      sink.pdest := source.bits.pdest
-      sink.delay := 0.U // Todo
-  }
-  vecRegion.in.fromIntRegion.vlWb0Next zip intRegion.io.exuOut.flatten.filter(_.bits.toVlRf.nonEmpty) foreach {
-    case (sink: Exu.ToRf, source: ValidIO[NewExuOutput]) =>
-      sink.wen := source.valid && source.bits.toVlRf.get.valid
-      sink.pdest := source.bits.pdestVl.get
-      sink.data := source.bits.toVlRf.get.bits
-  }
-  vecRegion.in.fromIntRegion.is0GpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read gp
-  vecRegion.in.fromIntRegion.is1GpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read gp
-
-  vecRegion.in.fromFltRegion := fpRegion.out.toVecRegion
-  fpRegion.in.fromVecRegion.is1RdAddrNext := vecRegion.out.toFltRegion.is1RdAddrNext
 
   val intRegionExuOutWriteFp = intRegion.io.exuOut.flatten.filter(_.bits.params.writeFpRf)
   fpRegion.in.fromIntRegion.fpWbNext.flatten lazyZip intRegionExuOutWriteFp foreach {
@@ -467,6 +423,53 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     x := 0.U.asTypeOf(x)
   }
 
+  /**
+   *  Connection of [[vecRegion]] begin
+   */
+
+  vecRegion.in.fromTop.hartId := io.fromTop.hartId
+  vecRegion.in.flush := ctrlBlock.io.toIssueBlock.flush
+  vecRegion.in.fromDispatch.uops.flatten
+    .lazyZip(vecRegion.out.toDispatch.canAccept.flatten)
+    .lazyZip(ctrlBlock.io.toIssueBlock.vfUops)
+    .foreach {
+      case (sink: ValidIO[VecIssueQueue.Enq], sinkCanAccept: Bool, source: DecoupledIO[DispatchOutUop]) =>
+        sink.valid := source.valid
+        sink.bits.fromDispatchOutUop(source.bits)
+        source.ready := sinkCanAccept
+    }
+  require(
+    vecRegion.in.fromIntRegion.vstdUops.flatten.size == vecRegion.out.toIntRegion.vstdCanAccept.flatten.size &&
+      vecRegion.out.toIntRegion.vstdCanAccept.flatten.size == intRegion.io.toVecRegionVStd.get.flatten.size,
+    s"vecRegion vstd ports: in=${vecRegion.in.fromIntRegion.vstdUops.flatten.size}, " +
+      s"canAccept=${vecRegion.out.toIntRegion.vstdCanAccept.flatten.size}, " +
+      s"intRegion=${intRegion.io.toVecRegionVStd.get.flatten.size}"
+  )
+  vecRegion.in.fromIntRegion.vstdUops.flatten
+    .lazyZip(vecRegion.out.toIntRegion.vstdCanAccept.flatten)
+    .lazyZip(intRegion.io.toVecRegionVStd.get.flatten)
+    .foreach {
+      case (sink: ValidIO[VecIssueQueue.Enq], sinkCanAccept: Bool, source: DecoupledIO[RegionInUop]) =>
+        sink.valid := source.valid
+        sink.bits.fromRegionInUop(source.bits)
+        source.ready := sinkCanAccept
+    }
+  vecRegion.in.fromIntRegion.gpWbWakeUp zip intRegion.io.exuOut.flatten.filter(_.bits.toIntRf.nonEmpty) foreach {
+    case (sink: VecIssueQueue.WakeUpBundle, source: ValidIO[NewExuOutput]) =>
+      sink.wen := source.valid && source.bits.toIntRf.get.valid
+      sink.pdest := source.bits.pdest
+      sink.delay := 0.U // Todo
+  }
+  vecRegion.in.fromIntRegion.vlWb0Next zip intRegion.io.exuOut.flatten.filter(_.bits.toVlRf.nonEmpty) foreach {
+    case (sink: Exu.ToRf, source: ValidIO[NewExuOutput]) =>
+      sink.wen := source.valid && source.bits.toVlRf.get.valid
+      sink.pdest := source.bits.pdestVl.get
+      sink.data := source.bits.toVlRf.get.bits
+  }
+  vecRegion.in.fromIntRegion.is0GpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read gp
+  vecRegion.in.fromIntRegion.is1GpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read gp
+
+  vecRegion.in.fromFltRegion := fpRegion.out.toVecRegion
 
   vecRegion.in.fromMem.vldS3VpWbNext.flatten lazyZip io.mem.vecWriteback.flatten foreach {
     case (sink: Exu.ToRf, source: NewExuOutput) =>
