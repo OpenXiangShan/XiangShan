@@ -35,6 +35,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
     val dwpu = Flipped(new DwpuBaseIO(nWays = nWays, nPorts = 1))
+    val mtrack = Output(new MissTrackLoadIO)
     val load128Req = Input(Bool())
     // req got nacked in stage 0?
     val nack      = Input(Bool())
@@ -147,6 +148,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
 
+  // MissTrack observes ordinary DCache reads; each replay queries again.
+  io.mtrack.s0_valid := s0_fire && !io.nack && !s0_load128Req &&
+    s0_req.cmd === MemoryOpConstants.M_XRD && s0_req.instrtype === LOAD_SOURCE.U
+  io.mtrack.s0_vaddr := s0_vaddr
+
+
   val meta_read = io.meta_read.bits
   val tag_read = io.tag_read.bits
 
@@ -169,6 +176,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
+  io.mtrack.s1_paddr := s1_paddr_dup_dcache
   val s1_load128Req = RegEnable(s0_load128Req, s0_fire)
   val s1_is_prefetch = s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
@@ -179,6 +187,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_bank_oh = RegEnable(s0_bank_oh, s0_fire)
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
+  io.mtrack.s1_valid := s1_fire && !s1_nack && !io.lsu.s1_kill
   s1_ready := !s1_valid || s1_fire
 
   when (s0_fire) { s1_valid := true.B }
@@ -467,6 +476,21 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.tag_error := false.B
   resp.bits.mshr_id := io.miss_resp.id
   resp.bits.handled := s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.handled
+  // Keep truth, VA, PA and actual way together in s2. Bank/WPU replays do not
+  // change residency; tag/permission truth must not depend on the WPU guess.
+  io.mtrack.s2.valid := s2_valid && !s2_nack_hit && !io.lsu.s2_kill &&
+    !s2_tag_error && !s2_tl_error.asUInt.orR && !s2_load128Req &&
+    s2_req.cmd === MemoryOpConstants.M_XRD && s2_req.instrtype === LOAD_SOURCE.U
+  io.mtrack.s2.bits.vaddr := s2_vaddr
+  io.mtrack.s2.bits.paddr := s2_paddr
+  io.mtrack.s2.bits.way := s2_real_way_en
+  io.mtrack.s2.bits.hit := s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
+  io.mtrack.s2.bits.first_issue := s2_req.isFirstIssue
+  io.mtrack.s2.bits.handled := resp.bits.handled
+  io.mtrack.s2.bits.merged := s2_miss_merged
+  io.mtrack.s2.bits.allocated := s2_miss_req_fire && !io.miss_req.bits.cancel &&
+    !io.wbq_block_miss_req && io.miss_resp.allocated
+  io.mtrack.s2.bits.mshr_id := io.miss_resp.id
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit

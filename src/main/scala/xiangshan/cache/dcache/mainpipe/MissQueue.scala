@@ -134,6 +134,9 @@ class MissResp(implicit p: Parameters) extends DCacheBundle {
   // cache req missed, merged into one of miss queue entries
   // i.e. !miss_merged means this access is the first miss for this cacheline
   val merged = Bool()
+  // This request is the leader that actually allocated a new MissEntry. Compressed
+  // followers may be handled by that allocation, but must not count as allocations.
+  val allocated = Bool()
 }
 
 class MissQueueBlockReqBundle(implicit p: Parameters) extends XSBundle {
@@ -1175,6 +1178,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val resp = Vec(reqNum, Output(new MissResp))
     val refill_to_ldq = ValidIO(new Refill)
 
+    // All accepted allocations stay distinct. Owners validate PENDING lifetime.
+    val misstrack_alloc = Vec(reqNum, ValidIO(new MissTrackAlloc))
+    val misstrack_owners = Vec(cfg.nMissEntries, ValidIO(new MissTrackLine))
+
     // cmo req
     val cmo_req = Flipped(DecoupledIO(new CMOReq))
     val cmo_resp = DecoupledIO(new CMOResp)
@@ -1597,6 +1604,20 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
   }
 
+  // Observe the allocation on the same cycle that the MissEntry becomes valid.
+  for (i <- 0 until reqNum) {
+    val preg = parallel_pipe_regs(i)
+    io.misstrack_alloc(i).valid := RegNext(preg.alloc && !preg.cancel, false.B)
+    io.misstrack_alloc(i).bits.vaddr := RegNext(preg.req.vaddr)
+    io.misstrack_alloc(i).bits.paddr := RegNext(preg.req.addr)
+    io.misstrack_alloc(i).bits.mshr_id := RegNext(preg.mshr_id)
+  }
+  for (i <- entries.indices) {
+    io.misstrack_owners(i).valid := entries(i).io.req_addr.valid
+    io.misstrack_owners(i).bits.paddr := entries(i).io.req_addr.bits
+    io.misstrack_owners(i).bits.vaddr := entries(i).io.req_vaddr.bits
+  }
+
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
 
   // For compressed requests, we need to return the actual MSHR that will handle them
@@ -1614,6 +1635,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   for(i <- 0 until reqNum) {
+    val groupStrategy = analysis.strategy(analysis.compress_group(i))
     // merged to pipeline reg
     io.resp(i).id := Mux(
       can_merge_from_pipe(i),
@@ -1621,7 +1643,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       actual_target_mshr_for_group(i)
     )
     io.resp(i).handled := (Cat(req_mshr_handled_vec).orR || can_merge_from_pipe(i)) && query_fire(i)
-    io.resp(i).merged := (analysis.strategy(i) & 2.U) =/= 0.U
+    // Compressed followers inherit whether the group leader targeted an existing
+    // owner. Their local strategy only contains the compress bit.
+    io.resp(i).merged := query_fire(i) && (groupStrategy & 2.U) =/= 0.U
+    io.resp(i).allocated := query_fire(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
+      analysis.compress_group(i) === i.U
   }
 
   val source_except_load_cnt = RegInit(0.U(10.W))

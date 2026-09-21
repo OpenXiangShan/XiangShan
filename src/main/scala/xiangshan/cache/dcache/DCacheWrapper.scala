@@ -68,8 +68,17 @@ case class DCacheParameters
   // Channel selection strategy
   // true = select by address set低位
   // false = select by MSHR ID
-  channelSelByAddr: Boolean = true
+  channelSelByAddr: Boolean = true,
+
+  // ========== MissTrack (shadow first) ==========
+  enMissTrack: Boolean = false,
+  missTrackShadow: Boolean = true,
+  missTrackEntries: Int = 8,
+  missTrackHashBits: Int = 5
 ) extends L1CacheParameters {
+  require(!enMissTrack || missTrackShadow, "MissTrack supports shadow mode only")
+  require(missTrackEntries >= 2, "MissTrack needs at least two entries")
+  require(missTrackHashBits > 0, "MissTrack hash must be nonempty")
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
   // we need to avoid this by recoding additional bits in L2 cache
@@ -1427,6 +1436,28 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       ldu(i).io.dwpu.resp(0).valid := false.B
       ldu(i).io.dwpu.resp(0).bits := DontCare
     }
+  }
+
+  /** MissTrack observes all load ports; it never changes request/response control. */
+  if (cfg.enMissTrack) {
+    val misstrack = Module(new MissTrack(MissReqPortCount))
+    for (w <- 0 until LoadPipelineWidth) {
+      misstrack.io.loads(w) := ldu(w).io.mtrack
+    }
+    misstrack.io.alloc := missQueue.io.misstrack_alloc
+    misstrack.io.owners := missQueue.io.misstrack_owners
+    misstrack.io.install := mainPipe.io.misstrack_install
+    val tagWrite = mainPipe.io.tag_write
+    val metaWrite = mainPipe.io.meta_write
+    // Both ports belong to the same MainPipe s3 transaction. Tag writes remove
+    // the old occupant; installation of the new line is handled independently.
+    misstrack.io.invalidate.valid := tagWrite.fire ||
+      (metaWrite.fire && !metaWrite.bits.meta.coh.isValid())
+    misstrack.io.invalidate.bits.idx := Mux(tagWrite.fire, tagWrite.bits.idx, metaWrite.bits.idx)
+    misstrack.io.invalidate.bits.way := Mux(tagWrite.fire, tagWrite.bits.way_en, metaWrite.bits.way_en)
+    // Error reports can arrive after the s2 training observation. Conservatively
+    // clear the small history table; normal cache error handling remains intact.
+    misstrack.io.clear := mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _)
   }
 
   //----------------------------------------
