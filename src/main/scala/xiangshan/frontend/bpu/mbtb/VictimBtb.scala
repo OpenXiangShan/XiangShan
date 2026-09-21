@@ -83,7 +83,7 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
   private val snapshot   = io.snapshot
   private val trainEntry = io.trainEntry
 
-  private val entries = Reg(Vec(NumVictimBtbWays, new VictimBtbEntry))
+  private val entries = RegInit(VecInit.fill(NumVictimBtbWays)(0.U.asTypeOf(new VictimBtbEntry)))
   trainEntry.entries := entries
 
   private val replacer = Module(new VictimBtbReplacer)
@@ -229,7 +229,4 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
     }
   }
 
-  when(reset.asBool) {
-    entries.foreach(e => e.entry.attribute := BranchAttribute.None)
-  }
 }
