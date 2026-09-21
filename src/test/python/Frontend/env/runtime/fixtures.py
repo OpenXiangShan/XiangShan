@@ -86,11 +86,16 @@ def _session_toffee_coverage(request):
     return collector
 
 
-def write_toffee_session_report(session) -> Path | None:
+def write_toffee_session_report(session, path: Path | None = None) -> Path | None:
     collector = getattr(session, "_frontend_toffee_session_coverage", None)
     if collector is None:
         return None
-    return collector.write(_funcov_dir() / "toffee.funcov.json")
+    return collector.write(path or (_funcov_dir() / "toffee.funcov.json"))
+
+
+def toffee_session_report_path(worker_id: str | None = None) -> Path:
+    suffix = "" if not worker_id else f".{worker_id}"
+    return _funcov_dir() / f"toffee.funcov{suffix}.json"
 
 
 def _safe_path_component(value: str) -> str:

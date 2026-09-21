@@ -10,6 +10,8 @@ This file intentionally stays thin:
 
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +36,10 @@ os.makedirs(_DATA_DIR, exist_ok=True)
 
 
 def pytest_configure(config):
+    if not hasattr(config, "workerinput") and not os.getenv("TB_RUN_ID", "").strip():
+        os.environ["TB_RUN_ID"] = (
+            f"frontend_pytest_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{os.getpid()}"
+        )
     config.addinivalue_line(
         "markers",
         "funcov_bins(*bin_ids): declare the functional coverage Bin_ID targets for this DUT test",
@@ -51,11 +57,40 @@ def pytest_configure(config):
     )
 
 
+def pytest_testnodedown(node, error):
+    del error
+    report_path = node.workeroutput.get("toffee_report_path")
+    if report_path:
+        paths = getattr(node.config, "_frontend_toffee_worker_reports", None)
+        if paths is None:
+            paths = []
+            node.config._frontend_toffee_worker_reports = paths
+        paths.append(Path(report_path))
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
-    from env.runtime.fixtures import finish_vcs_batch_dut, write_toffee_session_report
+    from env.runtime.fixtures import (
+        finish_vcs_batch_dut,
+        toffee_session_report_path,
+        write_toffee_session_report,
+    )
 
-    write_toffee_session_report(session)
+    if hasattr(session.config, "workerinput"):
+        worker_id = str(session.config.workerinput.get("workerid", "worker"))
+        report_path = write_toffee_session_report(
+            session, toffee_session_report_path(worker_id)
+        )
+        if report_path is not None:
+            session.config.workeroutput["toffee_report_path"] = str(report_path.resolve())
+    else:
+        worker_reports = list(getattr(session.config, "_frontend_toffee_worker_reports", []))
+        if worker_reports:
+            from env.funcov.toffee_bridge import merge_native_toffee_reports
+
+            merge_native_toffee_reports(worker_reports, toffee_session_report_path())
+        else:
+            write_toffee_session_report(session)
     finish_vcs_batch_dut()
 
 
