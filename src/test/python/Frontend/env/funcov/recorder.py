@@ -138,7 +138,6 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/mmio_nc_owner_funcov.py": root / "py" / "ifu" / "mmio_nc_owner_funcov.py",
         "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
         "funcov/toffee_bridge.py": root / "toffee_bridge.py",
-        "funcov/toffee_artifact.py": root / "toffee_artifact.py",
         **{
             f"funcov/py/{path.relative_to(root / 'py').as_posix()}": path
             for path in sorted((root / "py").rglob("*_toffee.py"))
@@ -1047,11 +1046,6 @@ class FrontendFuncovSampleHub:
             except ValueError:
                 return int(instr)
         return int(raw_fetch) & 0xFFFFFFFF
-
-    def write_artifacts(self) -> dict:
-        raise RuntimeError(
-            "FrontendFuncovSampleHub cannot write legacy funcov artifacts"
-        )
 
     def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
         addr = int(payload.get("address", 0))

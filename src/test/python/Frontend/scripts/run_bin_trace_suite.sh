@@ -207,7 +207,7 @@ for case_entry in "${CASES[@]}"; do
     echo "[frontend-bin-suite][error] FAIL status=${status} case=${case_entry}" >&2
     failed+=("${case_entry}:status_${status}")
     if [[ "${TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL}" != "1" ]]; then
-      exit "${status}"
+      break
     fi
   fi
 done
@@ -224,6 +224,31 @@ for case_path in "${resolved_cases[@]}"; do
     printf '  %-48s %s\n' "${stem}" "missing"
   fi
 done
+
+funcov_artifacts=()
+for case_path in "${resolved_cases[@]}"; do
+  stem="$(basename "${case_path}")"
+  stem="${stem%.*}"
+  funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/toffee.funcov.json"
+  if [[ -f "${funcov_path}" ]]; then
+    funcov_artifacts+=("${funcov_path}")
+  else
+    echo "[frontend-bin-suite][warn] missing native Toffee report: ${funcov_path}" >&2
+  fi
+done
+
+if [[ "${#funcov_artifacts[@]}" -gt 0 ]]; then
+  suite_funcov_dir="${SUITE_ARTIFACT_DIR}/report/funcov"
+  mkdir -p "${suite_funcov_dir}"
+  merge_args=()
+  for funcov_path in "${funcov_artifacts[@]}"; do
+    merge_args+=(--artifact "${funcov_path}")
+  done
+  echo "[frontend-bin-suite] native Toffee functional coverage aggregate:"
+  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
+    --output "${suite_funcov_dir}/${SUITE_ID}.toffee.funcov.json" \
+    "${merge_args[@]}"
+fi
 
 if [[ "${#failed[@]}" -gt 0 ]]; then
   echo "[frontend-bin-suite][error] failed cases: ${failed[*]}" >&2

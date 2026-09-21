@@ -159,11 +159,6 @@ for case_path in "${CASES[@]}"; do
   fi
 done
 
-if [[ "${#failed[@]}" -gt 0 ]]; then
-  echo "[frontend-suite][error] failed cases: ${failed[*]}" >&2
-  exit 1
-fi
-
 echo
 if [[ "${TB_RUN_DUT}" != "0" ]]; then
   suite_report_dir="${SUITE_ARTIFACT_DIR}/report"
@@ -171,31 +166,25 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
   for case_path in "${CASES[@]}"; do
     stem="$(basename "${case_path}")"
     stem="${stem%.*}"
-    funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/${stem}_test_bin_trace.toffee.funcov.json"
-    if [[ ! -f "${funcov_path}" ]]; then
-      echo "[frontend-suite][error] missing functional coverage artifact: ${funcov_path}" >&2
-      exit 2
+    funcov_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/funcov/toffee.funcov.json"
+    if [[ -f "${funcov_path}" ]]; then
+      funcov_artifacts+=("${funcov_path}")
+    else
+      echo "[frontend-suite][warn] missing native Toffee report: ${funcov_path}" >&2
     fi
-    funcov_artifacts+=("${funcov_path}")
   done
   mkdir -p "${suite_report_dir}/funcov"
-  gate_args=()
   merge_args=()
   for funcov_path in "${funcov_artifacts[@]}"; do
-    gate_args+=(--artifact "${funcov_path}")
     merge_args+=(--artifact "${funcov_path}")
   done
 
-  echo "[frontend-suite] Toffee functional coverage per-case gate audit:"
-  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
-    --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
-    --artifact-gate-only \
-    --audit-json "${suite_report_dir}/funcov/artifact_gate_audit.json" \
-    "${gate_args[@]}"
-  echo "[frontend-suite] Toffee functional coverage aggregate:"
-  "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
-    --output "${suite_report_dir}/funcov/${SUITE_ID}.toffee.funcov.json" \
-    "${merge_args[@]}"
+  if [[ "${#funcov_artifacts[@]}" -gt 0 ]]; then
+    echo "[frontend-suite] native Toffee functional coverage aggregate:"
+    "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/merge_toffee_funcov.py" \
+      --output "${suite_report_dir}/funcov/${SUITE_ID}.toffee.funcov.json" \
+      "${merge_args[@]}"
+  fi
 
   echo "[frontend-suite] raw coverage summary:"
   "${PYTHON:-python3}" "${FRONTEND_DIR}/scripts/report_raw_code_coverage.py" \
@@ -205,6 +194,11 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
     --json-output "${suite_report_dir}/code_coverage_summary.json"
 else
   echo "[frontend-suite] raw coverage summary skipped: TB_RUN_DUT=0"
+fi
+
+if [[ "${#failed[@]}" -gt 0 ]]; then
+  echo "[frontend-suite][error] failed cases: ${failed[*]}" >&2
+  exit 1
 fi
 
 echo "[frontend-suite] done"

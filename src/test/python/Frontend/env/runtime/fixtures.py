@@ -7,7 +7,6 @@ import re
 import shutil
 import sys
 import tempfile
-from dataclasses import asdict
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
@@ -31,7 +30,6 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
         sys.path.insert(0, _path)
 
 from ..api import api_Frontend_load_program
-from .artifact_provenance import file_sha256
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from ..support.env_config import DEFAULT_ENV_CONFIG
 from ..funcov.recorder import default_pilot_csv_path
@@ -76,6 +74,23 @@ def _funcov_dir() -> Path:
             p = _data_dir() / _safe_path_component(_effective_run_id()) / "funcov"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def _session_toffee_coverage(request):
+    from ..funcov.toffee_bridge import ToffeeSessionCoverage
+
+    collector = getattr(request.session, "_frontend_toffee_session_coverage", None)
+    if collector is None:
+        collector = ToffeeSessionCoverage()
+        request.session._frontend_toffee_session_coverage = collector
+    return collector
+
+
+def write_toffee_session_report(session) -> Path | None:
+    collector = getattr(session, "_frontend_toffee_session_coverage", None)
+    if collector is None:
+        return None
+    return collector.write(_funcov_dir() / "toffee.funcov.json")
 
 
 def _safe_path_component(value: str) -> str:
@@ -173,14 +188,6 @@ def _read_int_env(name: str, default: str) -> int:
 
 def _test_seed() -> int:
     return _read_int_env("TB_SEED", "1")
-
-
-def _input_path_metadata(env_name: str) -> tuple[str | None, str]:
-    raw = os.getenv(env_name, "").strip()
-    if not raw:
-        return None, "unavailable"
-    path = Path(raw).resolve()
-    return str(path), file_sha256(path)
 
 
 def _artifact_tag(request) -> str:
@@ -281,74 +288,6 @@ def _coverage_omit_path() -> Path | None:
     raw = os.getenv("TB_LINE_COVERAGE_OMIT", "").strip()
     path = Path(raw) if raw else _HERE / "Frontend.omit"
     return path if path.is_file() else None
-
-
-def _funcov_run_metadata(request, env) -> dict:
-    report = getattr(getattr(request, "node", None), "rep_call", None)
-    outcome = str(getattr(report, "outcome", "unknown") or "unknown").lower()
-    exit_code = 0 if outcome == "passed" else 1
-    try:
-        errors = list(env.get_errors())
-    except Exception:
-        errors = [{"kind": "checker_error_collection_failed"}]
-    node = getattr(request, "node", None)
-    node_path_raw = getattr(node, "path", None)
-    testcase_path = Path(str(node_path_raw)).resolve() if node_path_raw is not None else None
-    bin_path, bin_sha256 = _input_path_metadata("TB_BIN_PATH")
-    trace_path, trace_sha256 = _input_path_metadata("TB_TRACE_PATH")
-    asm_path, asm_sha256 = _input_path_metadata("TB_ASM_PATH")
-    seed = _test_seed()
-    backend_seed = _read_int_env("TB_BACKEND_RANDOM_SEED", str(seed))
-    config = getattr(env, "config", DEFAULT_ENV_CONFIG)
-    nodeid = str(getattr(node, "nodeid", "") or "").strip()
-    run_command = os.getenv("TB_RUN_COMMAND", "").strip() or f"pytest {nodeid}".strip()
-    run_id = _effective_run_id()
-    artifact_root_raw = os.getenv("TB_ARTIFACT_DIR", "").strip()
-    artifact_root = (
-        Path(artifact_root_raw)
-        if artifact_root_raw
-        else _data_dir() / _safe_path_component(run_id)
-    ).resolve()
-    case_log_path_raw = str(
-        getattr(getattr(env, "dut", None), "_frontend_case_log_path", "") or ""
-    ).strip()
-    case_log_path = str(Path(case_log_path_raw).resolve()) if case_log_path_raw else ""
-    return {
-        "outcome": outcome,
-        "exit_code": exit_code,
-        "checker": {
-            "status": "pass" if not errors and outcome == "passed" else "fail",
-            "error_count": len(errors),
-            "errors": errors[:32],
-        },
-        "run_id": run_id,
-        "execution": {
-            "testcase_nodeid": nodeid,
-            "testcase_path": None if testcase_path is None else str(testcase_path),
-            "testcase_sha256": (
-                "unavailable" if testcase_path is None else file_sha256(testcase_path)
-            ),
-            "asm_path": asm_path,
-            "asm_sha256": asm_sha256,
-            "bin_path": bin_path,
-            "bin_sha256": bin_sha256,
-            "trace_path": trace_path,
-            "trace_sha256": trace_sha256,
-            "run_command": run_command,
-            "artifact_root": str(artifact_root),
-            "case_log_path": case_log_path or None,
-            "seed": seed,
-            "seeds": {
-                "test": seed,
-                "backend": backend_seed,
-                "icache": int(config.icache.seed),
-                "ptw": int(config.ptw.seed),
-            },
-            "random_scenarios": list(
-                getattr(env, "random_scenario_records", [])
-            ),
-        },
-    }
 
 
 def _line_ranges(lines: list[int]) -> list[str]:
@@ -580,11 +519,9 @@ def env(dut, request):
         "TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"
     )
     # Formal path is always SampleHub + Toffee when functional coverage is on.
-    toffee_artifact_path = funcov_dir / f"{tag}.toffee.funcov.json"
     runtime_context = None
     toffee_sink = None
     toffee_direct_models = []
-    metadata = None
     if functional_coverage_enabled:
         targets = _funcov_targets(request)
         runtime_context = FrontendFuncovSampleHub.from_pilot_csv(
@@ -624,7 +561,6 @@ def env(dut, request):
         toffee_sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
         runtime_context.attach_toffee_sink(toffee_sink)
         tb.toffee_functional_coverage = toffee_sink
-        toffee_sink.configure_artifact_path(toffee_artifact_path)
 
         runtime = create_toffee_runtime(
             runtime_context,
@@ -653,49 +589,8 @@ def env(dut, request):
     )
     yield tb
     if runtime_context is not None and toffee_sink is not None:
-        metadata = _funcov_run_metadata(request, tb)
-        metadata["execution"]["funcov_path"] = str(toffee_artifact_path.resolve())
         toffee_sink.flush_pending()
-        if request.config.getoption("--toffee-report"):
-            from toffee_test.reporter import set_func_coverage
-
-            set_func_coverage(request, toffee_sink.cov_groups)
-        execution = dict(metadata.get("execution") or {})
-        execution["line_coverage_path"] = str(Path(coverage).resolve())
-        execution["waveform_path"] = str(Path(waveform).resolve())
-        try:
-            monitor_stats = dict((tb.get_stats() or {}).get("monitor") or {})
-        except Exception:
-            monitor_stats = {}
-        toffee_metadata = {
-            "mode": "formal",
-            "artifact_tag": runtime_context.artifact_tag,
-            "testcase_name": runtime_context.testcase_name,
-            "source_csv": runtime_context.source_csv,
-            "coverage_targets": runtime_context.coverage_targets,
-            "definitions": [asdict(item) for item in runtime_context.definitions],
-            "run": {
-                "outcome": metadata["outcome"],
-                "exit_code": metadata["exit_code"],
-                "checker": metadata["checker"],
-                "run_id": metadata["run_id"],
-                "testcase_nodeid": str(execution.get("testcase_nodeid") or "").strip(),
-            },
-            "execution": execution,
-            "stats": {
-                "monitor": {
-                    "cycles_total": int(monitor_stats.get("cycles_total") or 0),
-                    "error_count": int(monitor_stats.get("error_count") or 0),
-                    "errors": list(monitor_stats.get("errors") or []),
-                }
-            },
-            "errors": [],
-            "provenance": runtime_context.provenance,
-        }
-        toffee_sink.write_artifact(
-            toffee_artifact_path,
-            metadata=toffee_metadata,
-        )
+        _session_toffee_coverage(request).add(toffee_sink.cov_groups)
 
 
 @pytest.fixture(scope="function")

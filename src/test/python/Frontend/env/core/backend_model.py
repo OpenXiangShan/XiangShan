@@ -2938,6 +2938,7 @@ class BackendModel:
             for bit, name in exception_signals:
                 if self._read_cfvec_slot_signal(name, slot):
                     exception_bits |= 1 << int(bit)
+            pred_taken = bool(self._read_cfvec_slot_signal("cfvec_pred_taken", slot))
             slots.append(
                 CfVecSlotSnapshot(
                     slot=slot,
@@ -2945,8 +2946,12 @@ class BackendModel:
                     foldpc=self._read_cfvec_slot_signal("cfvec_foldpc", slot),
                     instr=self._read_cfvec_slot_signal("cfvec_instr", slot),
                     is_rvc=bool(self._read_cfvec_slot_signal("cfvec_is_rvc", slot)),
-                    pred_taken=bool(self._read_cfvec_slot_signal("cfvec_pred_taken", slot)),
-                    fixed_taken=bool(self._read_cfvec_slot_signal("cfvec_fixed_taken", slot)),
+                    pred_taken=pred_taken,
+                    # The current cfVec ABI exposes predTaken only. Its use as
+                    # fixed_taken remains equivalent for backend CFI handling:
+                    # direct/indirect jumps are decoded as taken independently,
+                    # while conditional branches use predTaken.
+                    fixed_taken=pred_taken,
                     ftq_flag=self._read_cfvec_slot_signal("cfvec_ftq_ptr_flag", slot),
                     ftq_value=self._read_cfvec_slot_signal("cfvec_ftq_ptr_value", slot),
                     ftq_offset=self._read_cfvec_slot_signal("cfvec_ftq_offset", slot),

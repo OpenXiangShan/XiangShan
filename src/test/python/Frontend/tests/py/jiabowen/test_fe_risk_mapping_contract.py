@@ -105,42 +105,6 @@ def test_fe_risk_terms_are_present_in_canonical_testpoints(label: str, tokens: t
     assert not missing, f"{label}: missing canonical test-point token(s): {missing}"
 
 
-def _artifact_candidates(data_dir: Path, tag: str, run_id: str = "") -> list[Path]:
-    if not run_id:
-        return []
-    run_component = Path(run_id).name
-    exact = (
-        data_dir
-        / run_component
-        / "funcov"
-        / f"{tag}.toffee.funcov.json"
-    )
-    if exact.is_file():
-        return [exact]
-    return sorted(
-        (data_dir / run_component / "funcov").glob(
-            f"{tag}*.toffee.funcov.json"
-        )
-    )
-
-
-def test_artifact_candidates_use_the_evidence_run_id(tmp_path):
-    tag = "case_a_test_bin_trace"
-    stale = (
-        tmp_path / "stale-run" / "funcov" / f"{tag}.toffee.funcov.json"
-    )
-    current = (
-        tmp_path / "current-run" / "funcov" / f"{tag}.toffee.funcov.json"
-    )
-    stale.parent.mkdir(parents=True)
-    current.parent.mkdir(parents=True)
-    stale.write_text("{}", encoding="utf-8")
-    current.write_text("{}", encoding="utf-8")
-
-    assert _artifact_candidates(tmp_path, tag, "current-run") == [current]
-    assert _artifact_candidates(tmp_path, tag) == []
-
-
 def test_fe_risk_hit_evidence_is_auditable_dut():
     """Keep detailed DUT diagnostics in artifacts rather than testpoint rows."""
 

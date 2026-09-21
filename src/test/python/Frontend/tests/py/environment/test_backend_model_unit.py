@@ -54,7 +54,6 @@ class _ObserveIf:
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
         self.cfvec_pred_taken = [_Signal() for _ in range(8)]
-        self.cfvec_fixed_taken = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
@@ -413,21 +412,19 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     model.begin_cycle(7)
     _set_first_cfvec(model, interface, 0x80001000, ftq_value=3)
     interface.cfvec_pred_taken[0].value = 1
-    interface.cfvec_fixed_taken[0].value = 0
     interface.cfvec_exception_vec_12[0].value = 1
 
     snapshot = model.capture_cfvec_snapshot()
 
     assert snapshot.slots[0].valid is True
     assert snapshot.slots[0].pred_taken is True
-    assert snapshot.slots[0].fixed_taken is False
+    assert snapshot.slots[0].fixed_taken is True
     assert snapshot.slots[0].exception_bits == 1 << 12
     assert interface.cfvec_valid[0].read_count == 1
     assert interface.cfvec_foldpc[0].read_count == 1
     assert interface.cfvec_instr[0].read_count == 1
     assert interface.cfvec_is_rvc[0].read_count == 1
     assert interface.cfvec_pred_taken[0].read_count == 1
-    assert interface.cfvec_fixed_taken[0].read_count == 1
     assert interface.cfvec_ftq_ptr_flag[0].read_count == 1
     assert interface.cfvec_ftq_ptr_value[0].read_count == 1
     assert interface.cfvec_ftq_offset[0].read_count == 1
@@ -447,7 +444,7 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     assert monitor.observations[0].pc == 0x80001000
     assert monitor.observations[0].pred_taken is True
     assert model._cfvec_queue[0].pc == 0x80001000
-    assert model._cfvec_queue[0].pred_taken is False
+    assert model._cfvec_queue[0].pred_taken is True
     assert interface.cfvec_foldpc[0].read_count == 1
     assert interface.cfvec_ftq_ptr_value[0].read_count == 1
 
@@ -1220,7 +1217,7 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
 
     _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
     interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_fixed_taken[0].value = 1
+    interface.cfvec_pred_taken[0].value = 1
     interface.cfvec_exception_vec_2[0].value = 1
 
     model._sample_cfvec()

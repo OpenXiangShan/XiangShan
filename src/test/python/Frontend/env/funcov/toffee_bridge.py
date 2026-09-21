@@ -3,23 +3,55 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import csv
 import json
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from toffee.funcov import CovGroup
 
-
-def _package_version(name: str) -> str:
-    try:
-        return version(name)
-    except PackageNotFoundError:
-        return "unavailable"
-
-
 @dataclass
 class _PointPulse:
     active_bins: set[str] = field(default_factory=set)
+
+
+class ToffeeSessionCoverage:
+    """Accumulate native CovGroup reports for one pytest session."""
+
+    def __init__(self) -> None:
+        self._groups: list[str] = []
+
+    def add(self, groups: Iterable[CovGroup]) -> None:
+        self.add_groups(group.as_dict() for group in groups)
+
+    def add_groups(self, groups: Iterable[Mapping[str, Any]]) -> None:
+        self._groups.extend(
+            json.dumps(dict(group), ensure_ascii=False, sort_keys=True)
+            for group in groups
+        )
+
+    def report(self) -> dict[str, Any]:
+        from toffee_test.reporter import __update_func_coverage__
+
+        return __update_func_coverage__(self._groups)
+
+    def write(self, path: Path) -> Path:
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(self.report(), ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        return output
+
+
+def merge_native_toffee_reports(paths: Iterable[Path], output: Path) -> Path:
+    collector = ToffeeSessionCoverage()
+    for path in paths:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        groups = raw.get("groups")
+        if not isinstance(groups, list):
+            raise ValueError(f"invalid native Toffee report: {path}")
+        collector.add_groups(groups)
+    return collector.write(output)
 
 
 class ToffeeCoverageSink:
@@ -31,7 +63,6 @@ class ToffeeCoverageSink:
         *,
         bin_ids: Mapping[tuple[str, str, str], str] | None = None,
     ) -> None:
-        self._artifact_path: Path | None = None
         self._sample_hub = None
         self.cov_groups: list[CovGroup] = []
         self._groups: dict[str, CovGroup] = {}
@@ -42,7 +73,6 @@ class ToffeeCoverageSink:
         self._native_group_names: set[str] = set()
         self._native_models_by_group: dict[str, Any] = {}
         self._owner_model = None
-        self._hit_details: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.bin_ids = {
             (str(group), str(point), str(bin_name)): str(bin_id)
             for (group, point, bin_name), bin_id in (bin_ids or {}).items()
@@ -78,9 +108,6 @@ class ToffeeCoverageSink:
                 self._point_targets[(group_name, point_name)] = target
             self._groups[group_name] = group
             self.cov_groups.append(group)
-
-    def configure_artifact_path(self, artifact_path: Path) -> None:
-        self._artifact_path = Path(artifact_path)
 
     def attach_sample_hub(self, sample_hub) -> None:
         self._sample_hub = sample_hub
@@ -230,35 +257,7 @@ class ToffeeCoverageSink:
 
         target.active_bins.add(bin_name)
         self._dirty_groups.add(group_name)
-        self._record_mark_detail(
-            (group_name, point_name, bin_name),
-            cycle,
-            evidence,
-        )
         return True
-
-    def _record_mark_detail(
-        self,
-        key: tuple[str, str, str],
-        cycle: int,
-        evidence: Mapping[str, Any] | None,
-    ) -> None:
-        if key not in self.bin_ids:
-            return
-        detail = self._hit_details.setdefault(
-            key,
-            {
-                "bin_id": self.bin_ids[key],
-                "first_cycle": int(cycle),
-                "last_cycle": int(cycle),
-                "evidence": [],
-            },
-        )
-        detail["last_cycle"] = int(cycle)
-        if isinstance(evidence, Mapping) and len(detail["evidence"]) < 8:
-            detail["evidence"].append(
-                json.loads(json.dumps(dict(evidence), ensure_ascii=False, default=str))
-            )
 
     def on_cycle(self, cycle: int) -> None:
         """Keep a common callback contract for cycle-driven Toffee sinks."""
@@ -327,30 +326,6 @@ class ToffeeCoverageSink:
             count += 1
         return count
 
-    def hit_detail(
-        self,
-        coverage_group: str,
-        bin_name: str,
-        *,
-        coverpoint: str | None = None,
-    ) -> dict[str, Any] | None:
-        group_name = str(coverage_group)
-        bin_name = str(bin_name)
-        point_name = (
-            self._point_by_group_bin.get((group_name, bin_name))
-            if coverpoint is None
-            else str(coverpoint)
-        )
-        if point_name is None:
-            return None
-        return self._hit_details.get((group_name, point_name, bin_name))
-
-    def hit_detail_by_bin_id(self, bin_id: str) -> dict[str, Any] | None:
-        key = self._key_by_bin_id.get(str(bin_id))
-        if key is None:
-            return None
-        return self._hit_details.get(key)
-
     def record_native_hits(
         self,
         flags: Mapping[tuple[str, str], bool],
@@ -362,8 +337,6 @@ class ToffeeCoverageSink:
         if not active_items or not self.bin_ids:
             return
 
-        resolved: list[tuple[tuple[str, str, str], dict[str, Any]]] = []
-        needs_evidence = False
         for group_name, bin_name in active_items:
             point_name = self.point_name(group_name, bin_name)
             declared_point = coverpoints.get((str(group_name), str(bin_name)))
@@ -378,30 +351,9 @@ class ToffeeCoverageSink:
             key = (str(group_name), point_name, str(bin_name))
             if key not in self.bin_ids:
                 raise KeyError(f"unknown native Toffee evidence key: {key}")
-            detail = self._hit_details.setdefault(
-                key,
-                {
-                    "bin_id": self.bin_ids[key],
-                    "first_cycle": int(cycle),
-                    "last_cycle": int(cycle),
-                    "evidence": [],
-                },
-            )
-            detail["last_cycle"] = int(cycle)
-            resolved.append((key, detail))
-            needs_evidence = needs_evidence or len(detail["evidence"]) < 8
-
-        safe_evidence = (
-            json.loads(json.dumps(dict(evidence), ensure_ascii=False, default=str))
-            if needs_evidence and isinstance(evidence, Mapping)
-            else None
-        )
-        for key, detail in resolved:
-            if safe_evidence is not None and len(detail["evidence"]) < 8:
-                detail["evidence"].append(safe_evidence)
             if self._owner_model is not None:
                 self._owner_model.derive_from_source(
-                    self.bin_ids[key], int(cycle), safe_evidence
+                    self.bin_ids[key], int(cycle), evidence
                 )
 
     def key_hit(
@@ -426,68 +378,3 @@ class ToffeeCoverageSink:
         self.flush_pending()
         point = self._groups[group_name].cover_point(point_name)
         return int(point["hints"].get(bin_name, 0)) > 0
-
-    def raw_path(self) -> Path:
-        if self._artifact_path is None:
-            raise RuntimeError("Toffee artifact path is not configured")
-        return self._artifact_path
-
-    def summary(self) -> dict[str, int | float]:
-        groups = self.report()
-        points = [point for group in groups for point in group["points"]]
-        bins = [item for point in points for item in point["bins"]]
-        hinted_bins = sum(int(item["hints"] > 0) for item in bins)
-        hinted_points = sum(
-            int(all(item["hints"] > 0 for item in point["bins"]))
-            for point in points
-        )
-        hinted_groups = sum(
-            int(
-                all(
-                    all(item["hints"] > 0 for item in point["bins"])
-                    for point in group["points"]
-                )
-            )
-            for group in groups
-        )
-        return {
-            "group_num_total": len(groups),
-            "group_num_hints": hinted_groups,
-            "point_num_total": len(points),
-            "point_num_hints": hinted_points,
-            "bin_num_total": len(bins),
-            "bin_num_hints": hinted_bins,
-            "bin_rate": (100.0 * hinted_bins / len(bins)) if bins else 0.0,
-        }
-
-    def write_artifact(self, path: Path, *, metadata: Mapping[str, Any] | None = None) -> Path:
-        output = Path(path)
-        output.parent.mkdir(parents=True, exist_ok=True)
-        hit_counts = self.hit_counts()
-        hit_details = {}
-        for key, detail in sorted(self._hit_details.items()):
-            hit_details["::".join(key)] = {
-                **detail,
-                "hits": int(hit_counts.get(key, 0)),
-            }
-        payload = {
-            "schema_version": 1,
-            "collector": {
-                "toffee-test": _package_version("toffee-test"),
-                "pytoffee": _package_version("pytoffee"),
-            },
-            "metadata": dict(metadata or {}),
-            "summary": self.summary(),
-            "bin_ids": {
-                "::".join(key): value for key, value in sorted(self.bin_ids.items())
-            },
-            "hit_details": hit_details,
-            "coverage": {"groups": self.report()},
-        }
-        output.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-        return output
-
-    

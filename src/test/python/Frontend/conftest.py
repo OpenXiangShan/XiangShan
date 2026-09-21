@@ -53,8 +53,9 @@ def pytest_configure(config):
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
-    from env.runtime.fixtures import finish_vcs_batch_dut
+    from env.runtime.fixtures import finish_vcs_batch_dut, write_toffee_session_report
 
+    write_toffee_session_report(session)
     finish_vcs_batch_dut()
 
 

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import ast
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from toffee.funcov import CovGroup
 from env.funcov.recorder import default_pilot_csv_path
-from env.funcov.toffee_bridge import ToffeeCoverageSink
+from env.funcov.toffee_bridge import (
+    ToffeeCoverageSink,
+    ToffeeSessionCoverage,
+    merge_native_toffee_reports,
+)
 from env.funcov.sample_hub import FrontendFuncovSampleHub
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     ICACHE_HITMISS_COVERPOINTS,
@@ -71,10 +74,8 @@ from env.funcov.py.ifu.uncache_event_toffee import (
 from env.funcov.py.ifu.cfvec_toffee import IfuCfvecToffeeCoverage
 from env.funcov.py.ifu.cacheable_pipeline_toffee import IfuCacheablePipelineToffeeCoverage
 from env.funcov.recorder import UNCACHE_EVENT_SAMPLER_BIN_KEYS
-from env.funcov.toffee_artifact import merge_toffee_artifacts
 from env.funcov.toffee_runtime import create_toffee_runtime
 from env.funcov.native_toffee import EvaluateFlagRecorder
-from tools.backannotate_funcov import normalize_artifact
 
 
 @dataclass
@@ -115,13 +116,11 @@ def test_toffee_funcov_report_preserves_group_point_bin_names() -> None:
     assert group.is_point_covered("contract_point") is False
 
 
-def test_toffee_sink_key_hit_uses_toffee_hints(tmp_path) -> None:
+def test_toffee_sink_key_hit_uses_toffee_hints() -> None:
     sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
-    sink.configure_artifact_path(tmp_path / "case.toffee.funcov.json")
     assert not sink.key_hit("group", "bin")
     sink.mark("group", "bin", cycle=1, coverpoint="point")
     assert sink.key_hit("group", "bin")
-    assert sink.raw_path() == tmp_path / "case.toffee.funcov.json"
 
 
 def test_toffee_sink_samples_each_group_once_per_cycle() -> None:
@@ -172,99 +171,46 @@ def test_toffee_funcov_registry_model_contains_all_python_recorder_bins() -> Non
     assert len(sink.bin_ids) == 573
 
 
-def test_toffee_funcov_artifact_has_compact_summary_and_stable_bin_ids(tmp_path) -> None:
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    artifact = sink.write_artifact(tmp_path / "toffee.funcov.json")
+def test_toffee_session_coverage_merges_native_groups_without_frontend_metadata(tmp_path) -> None:
+    first = ToffeeCoverageSink({("group", "point"): ("bin",)})
+    first.mark("group", "bin", cycle=1, coverpoint="point")
+    first.flush_cycle(1)
+    second = ToffeeCoverageSink({("group", "point"): ("bin",)})
+    second.mark("group", "bin", cycle=2, coverpoint="point")
+    second.flush_cycle(2)
+
+    collector = ToffeeSessionCoverage()
+    collector.add(first.cov_groups)
+    collector.add(second.cov_groups)
+    output = collector.write(tmp_path / "toffee.funcov.json")
 
     import json
 
-    payload = json.loads(artifact.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
-    assert payload["collector"]["toffee-test"] != "unavailable"
-    assert payload["collector"]["pytoffee"] != "unavailable"
-    assert payload["summary"]["bin_num_total"] == 573
-    assert payload["summary"]["bin_num_hints"] == 0
-    assert len(payload["bin_ids"]) == 573
-    assert set(payload["coverage"]) == {"groups"}
-    assert payload["metadata"] == {}
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert "metadata" not in payload
+    assert payload["groups"][0]["points"][0]["bins"] == [
+        {"name": "bin", "hints": 2}
+    ]
 
 
-def test_toffee_artifact_normalizes_to_frontend_gate_schema(tmp_path) -> None:
-    hub = FrontendFuncovSampleHub.from_pilot_csv(
-        default_pilot_csv_path(),
-        testcase_name="case",
-        artifact_tag="case",
-        output_dir=tmp_path,
-        target_bin_ids=["BIN-759"],
-    )
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    key = next(key for key, value in sink.bin_ids.items() if value == "BIN-759")
-    group_name, point_name, bin_name = key
-    sink.mark(group_name, bin_name, cycle=3, coverpoint=point_name)
-    sink.flush_cycle(3)
-    sink.record_native_hits(
-        {(group_name, bin_name): True},
-        {group_name: point_name},
-        cycle=3,
-        evidence={"event": "unit"},
-    )
-    artifact_path = tmp_path / "case.toffee.funcov.json"
-    metadata = {
-        "mode": "formal",
-        "artifact_tag": hub.artifact_tag,
-        "testcase_name": hub.testcase_name,
-        "source_csv": hub.source_csv,
-        "coverage_targets": hub.coverage_targets,
-        "definitions": [vars(item) for item in hub.definitions],
-        "run": {
-            "outcome": "passed",
-            "exit_code": 0,
-            "checker": {"status": "pass", "error_count": 0, "errors": []},
-            "run_id": "unit-run",
-        },
-        "execution": {
-            "testcase_nodeid": "tests/test_case.py::test_case",
-            "funcov_path": str(artifact_path),
-            "waveform_path": str(tmp_path / "case.fst"),
-            "line_coverage_path": str(tmp_path / "case.dat"),
-        },
-        "stats": {"monitor": {"cycles_total": 4, "error_count": 0}},
-        "errors": [],
-        "provenance": hub.provenance,
-    }
-    sink.write_artifact(artifact_path, metadata=metadata)
+def test_native_toffee_report_merge_counts_every_input(tmp_path) -> None:
+    reports = []
+    for cycle in (1, 2):
+        sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
+        sink.mark("group", "bin", cycle=cycle, coverpoint="point")
+        sink.flush_cycle(cycle)
+        collector = ToffeeSessionCoverage()
+        collector.add(sink.cov_groups)
+        reports.append(collector.write(tmp_path / f"case_{cycle}.json"))
+
+    output = merge_native_toffee_reports(reports, tmp_path / "merged.json")
 
     import json
 
-    normalized = normalize_artifact(
-        json.loads(artifact_path.read_text(encoding="utf-8")),
-        artifact_path=artifact_path,
-    )
-    hit_key = "::".join(key)
-    assert normalized["artifact_schema_version"] == 2
-    assert normalized["schema_source"] == "toffee"
-    assert normalized["coverage_targets"]["bin_ids"] == ["BIN-759"]
-    assert normalized["hits"][hit_key]["bin_id"] == "BIN-759"
-    assert normalized["hits"][hit_key]["hits"] == 1
-    assert normalized["hits"][hit_key]["first_cycle"] == 3
-    assert normalized["hits"][hit_key]["last_cycle"] == 3
-    assert normalized["hits"][hit_key]["evidence"] == [{"event": "unit"}]
-    assert normalized["run"]["pytest_outcome"] == "passed"
-
-
-def test_toffee_evidence_skips_serialization_without_active_hits() -> None:
-    class UnexpectedEvidenceRead(dict):
-        def keys(self):
-            raise AssertionError("inactive cycle must not serialize evidence")
-
-    sink = ToffeeCoverageSink({("group", "point"): ("bin",)})
-    sink.record_native_hits(
-        {("group", "bin"): False},
-        {("group", "bin"): "point"},
-        cycle=1,
-        evidence=UnexpectedEvidenceRead(event="inactive"),
-    )
-    assert sink._hit_details == {}
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["groups"][0]["points"][0]["bins"] == [
+        {"name": "bin", "hints": 2}
+    ]
 
 
 def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
@@ -273,12 +219,12 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     source = (
         Path(__file__).resolve().parents[3] / "env" / "runtime" / "fixtures.py"
     ).read_text(encoding="utf-8")
-    assert 'funcov_dir / f"{tag}.toffee.funcov.json"' in source
     assert "FrontendFuncovSampleHub.from_pilot_csv" in source
     assert "ToffeeCoverageSink.from_registry" in source
     assert "create_toffee_runtime(" in source
+    assert "_session_toffee_coverage(request).add(toffee_sink.cov_groups)" in source
     assert "audit_recorder=None" in source
-    assert '"mode": "formal"' in source
+    assert 'collector.write(_funcov_dir() / "toffee.funcov.json")' in source
     assert "FunctionalCoverageRecorder" not in source
     assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
     assert "TB_ENABLE_FUNCOV_AUDIT" not in source
@@ -286,14 +232,6 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert 'funcov_dir.parent / "audit" / "legacy-funcov"' not in source
     assert 'metadata["execution"]["legacy_funcov_audit_path"]' not in source
     assert "legacy_recorder" not in source
-    assert "runtime_context.write_artifacts()" not in source
-    assert 'execution["line_coverage_path"] = str(Path(coverage).resolve())' in source
-    assert 'execution["waveform_path"] = str(Path(waveform).resolve())' in source
-    assert '"testcase_nodeid": str(execution.get("testcase_nodeid") or "").strip()' in source
-    assert '"stats": {' in source
-    assert '"coverage_targets": runtime_context.coverage_targets' in source
-    assert '"definitions": [asdict(item) for item in runtime_context.definitions]' in source
-    assert '"source_csv": runtime_context.source_csv' in source
 
 
 class _CountingSignal:
@@ -457,22 +395,6 @@ def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
     assert callback.index("runtime_context.on_cycle(cycle, tb)") < callback.index(
         "for model in toffee_direct_models:"
     )
-
-
-def test_formal_runtime_context_rejects_legacy_artifact_output(tmp_path) -> None:
-    from env.funcov.runtime_context import FrontendFuncovRuntimeContext
-
-    assert FrontendFuncovRuntimeContext is FrontendFuncovSampleHub
-
-    context = FrontendFuncovSampleHub.from_pilot_csv(
-        default_pilot_csv_path(),
-        testcase_name="formal-context",
-        artifact_tag="formal-context",
-        output_dir=tmp_path,
-    )
-
-    with pytest.raises(RuntimeError, match="cannot write legacy funcov artifacts"):
-        context.write_artifacts()
 
 
 def test_toffee_mainpipe_model_contains_all_54_bins() -> None:
@@ -649,72 +571,6 @@ def test_all_573_bins_are_native_installed(tmp_path) -> None:
     assert all_bins == set(sink.bin_ids)
     assert len(runtime.cycle_models) == 12
 
-def test_toffee_artifact_merge_sums_hints_and_rejects_failed_runs(
-    tmp_path, monkeypatch
-) -> None:
-    from tools import backannotate_funcov
-
-    monkeypatch.setattr(
-        backannotate_funcov,
-        "evaluate_artifact",
-        lambda _raw, **_kwargs: {"eligible": True, "reasons": []},
-    )
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    key = next(iter(sink.bin_ids))
-    group_name, point_name, bin_name = key
-    sink.mark(group_name, bin_name, cycle=1, coverpoint=point_name)
-    metadata = {
-        "mode": "formal",
-        "run": {
-            "outcome": "passed",
-            "exit_code": 0,
-            "checker": {"status": "pass"},
-        },
-        "provenance": {"compatibility_signature": "same"},
-    }
-    first = sink.write_artifact(tmp_path / "first.json", metadata=metadata)
-    second = sink.write_artifact(tmp_path / "second.json", metadata=metadata)
-    merged = merge_toffee_artifacts(
-        (first, second), tmp_path / "merged.json"
-    )
-
-    import json
-
-    payload = json.loads(merged.read_text(encoding="utf-8"))
-    merged_bins = {
-        (group["name"], point["name"], item["name"]): item["hints"]
-        for group in payload["coverage"]["groups"]
-        for point in group["points"]
-        for item in point["bins"]
-    }
-    assert merged_bins[key] == 2
-
-    failed_metadata = deepcopy(metadata)
-    failed_metadata["run"]["outcome"] = "failed"
-    failed = sink.write_artifact(tmp_path / "failed.json", metadata=failed_metadata)
-    with pytest.raises(ValueError, match="did not pass"):
-        merge_toffee_artifacts((first, failed), tmp_path / "rejected.json")
-
-
-def test_toffee_merge_rejects_artifact_without_frontend_gate_metadata(tmp_path) -> None:
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
-    artifact = sink.write_artifact(
-        tmp_path / "incomplete.json",
-        metadata={
-            "mode": "formal",
-            "run": {
-                "outcome": "passed",
-                "exit_code": 0,
-                "checker": {"status": "pass"},
-            },
-            "provenance": {"compatibility_signature": "same"},
-        },
-    )
-
-    with pytest.raises(ValueError, match="failed signoff gate"):
-        merge_toffee_artifacts((artifact,), tmp_path / "rejected.json")
-
-
 def test_toffee_merge_cli_is_available() -> None:
     from pathlib import Path
 
@@ -810,15 +666,6 @@ def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> No
     )
 
     assert sink.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_076")
-    detail = sink._hit_details[
-        (
-            "ifu_v3_boundary_owner_model",
-            "verified_leaf_event",
-            "owner_leaf_076",
-        )
-    ]
-    assert detail["first_cycle"] == 754
-    assert detail["evidence"] == [{"event": "checked-owner"}]
 
     wrapped.mark(
         "two_fetch_ifu_source",

@@ -654,7 +654,7 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
     assert env.functional_coverage.key_hit(
         "ifu_instruncache_owner_v3", "instruncache_leaf_010"
-    ), env.functional_coverage.raw_path()
+    )
     assert not env.monitor.get_errors()
 
 
@@ -1496,7 +1496,7 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     if (old_attr, new_attr) == ("nc", "mmio"):
         assert env.functional_coverage.key_hit(
             "ifu_instruncache_owner_v3", "instruncache_leaf_038"
-        ), env.functional_coverage.raw_path()
+        )
     assert not env.monitor.get_errors()
 
 

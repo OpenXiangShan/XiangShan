@@ -915,7 +915,7 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     assert not env.memory.is_mmio(first_beat)
     assert env.functional_coverage.key_hit(
         "ifu_instruncache_owner_v3", "instruncache_leaf_035"
-    ), env.functional_coverage.raw_path()
+    )
     assert not env.monitor.get_errors()
 
 
