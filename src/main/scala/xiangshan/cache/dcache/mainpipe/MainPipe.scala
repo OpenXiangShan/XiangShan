@@ -197,6 +197,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
+    val misstrack_install = ValidIO(new MissTrackResident)
     val tag_write_ready_dup = Vec(nDupTagWriteReady, Input(Bool()))
     val tag_write_intend = Output(new Bool())
 
@@ -1047,6 +1048,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_write.bits.tag := get_tag(s3_req.addr)
   io.tag_write.bits.ecc := DontCare // generate ecc code in tagArray
   io.tag_write.bits.vaddr := s3_req.vaddr
+
+  // Only a committed, readable installation supplies a RESIDENT record.
+  io.misstrack_install.valid := io.tag_write.fire && io.meta_write.fire &&
+    new_coh.isValid() && !s3_l2_error_wb.asUInt.orR && !s3_error_wb
+  io.misstrack_install.bits.vaddr := s3_req.vaddr
+  io.misstrack_install.bits.paddr := s3_req.addr
+  io.misstrack_install.bits.way := s3_way_en
 
   io.tag_write_intend := s3_req.miss && s3_valid
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
