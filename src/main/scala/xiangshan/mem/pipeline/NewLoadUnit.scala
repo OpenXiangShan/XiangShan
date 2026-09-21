@@ -839,6 +839,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     val dcacheBankConflict = Input(Bool())
     val dcacheRRBankConflict = Input(Bool())
     val dcacheMSHRNack = Input(Bool())
+    val dcacheUse = Output(Bool())
+    val fwdMask = Input(UInt((VLEN / 8).W))
 
     // Global rr bank-conflict fast replay arbitration in S2.
     val rrBankConflictFastReplayCandidate = Output(Bool())
@@ -1004,6 +1006,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val dcacheMiss = io.dcacheResp.bits.miss
   val mshrNack = io.dcacheMSHRNack
+  val cacheRetry = io.dcacheResp.bits.cacheRetry
   val bankConflict = io.dcacheBankConflict
 
   /**
@@ -1071,7 +1074,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   nukeQueryReq.paddr := paddr
   nukeQueryReq.lqIdx := uop.lqIdx
   nukeQueryReq.sqIdx := uop.sqIdx
-  nukeQueryReq.dataValid := fullForward || isNCReplay || needDCacheAccess && !dcacheMiss && !bankConflict
+  nukeQueryReq.dataValid := fullForward || isNCReplay || needDCacheAccess && io.dcacheResp.bits.baseValid
   nukeQueryReq.nc := isNCReplay
   nukeQueryReq.mask := in.mask
   nukeQueryReq.isRVC := uop.isRVC
@@ -1095,8 +1098,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
   cause(C_TM) := troubleMaker && tlbMiss
   cause(C_FF) := troubleMaker && sqDataInvalid
-  cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
-  cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
+  cause(C_DR) := troubleMaker && needDCacheAccess && (mshrNack || cacheRetry)
+  cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss && !cacheRetry
   cause(C_WF) := false.B
   cause(C_BC) := troubleMaker && (needDCacheAccess && bankConflict || isUnalignHead && in.shouldFastReplay.get)
   cause(C_RAR) := troubleMaker && rarNack
@@ -1185,6 +1188,9 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   io.dcacheKill := kill || exception || isUncache || isUncacheReplay
   io.dcacheResp.ready := true.B
+  io.dcacheUse := pipeIn.fire && io.dcacheResp.valid && io.dcacheResp.bits.baseValid &&
+    !kill && !exception && !isPrefetch && !isUncache && !isUncacheReplay &&
+    !shouldReplay && !matchInvalid && (in.mask & ~io.fwdMask).orR
 
   io.rarNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
   io.rarNukeQueryReq.bits := nukeQueryReq
@@ -1825,6 +1831,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
     val s2TLDForwardResp = Flipped(ValidIO(new DCacheForwardResp))
     val s2UncacheBypassResp = Flipped(ValidIO(new UncacheBypassRespS2))
     val s2DCacheResp = Flipped(ValidIO(new DCacheWordResp))
+    val s2FwdMask = Output(UInt((VLEN / 8).W))
     val s3ShiftData = Output(UInt(VLEN.W)) // used by vector writeback
     val s3ShiftAndExtData = Output(UInt(VLEN.W)) // used by scalar writeback
   })
@@ -1870,6 +1877,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   ).unzip
 
   val s2Data = mergeData(rawData, datas, masks)
+  io.s2FwdMask := masks.reduce(_ | _)
   val s2RdataTypeOH = genRdataOH(fuOpType, fpWen)
   val s2RdataSelByOffset = VecInit((0 until VLEN / 8).map(i => bankOffset === i.U))
   // If the load is unaligned, its bank offset must reside in (8, 15]
@@ -2061,6 +2069,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.tlbHint := io.tlbHint
   io.dcache.s2_kill := s2.io.dcacheKill
   s2.io.dcacheResp <> io.dcache.resp
+  io.dcache.dcacheUse := s2.io.dcacheUse
+  s2.io.fwdMask := dataPath.io.s2FwdMask
   s2.io.dcacheBankConflict := io.dcache.s2_bank_conflict
   s2.io.dcacheRRBankConflict := io.dcache.s2_rr_bank_conflict
   s2.io.dcacheMSHRNack := io.dcache.s2_mq_nack

@@ -53,6 +53,7 @@ case class DCacheParameters
   nMMIOs: Int = 1,
   blockBytes: Int = 64,
   nMaxPrefetchEntry: Int = 1,
+  nPBEntries: Int = 16,
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
@@ -66,7 +67,7 @@ case class DCacheParameters
   numMemChannels: Int = 1,
 
   // Channel selection strategy
-  // true = select by address set低位
+  // true = select by address set low bits
   // false = select by MSHR ID
   channelSelByAddr: Boolean = true
 ) extends L1CacheParameters {
@@ -169,6 +170,10 @@ trait HasDCacheParameters
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
+  val PBEntries = cacheParams.nPBEntries
+  val PBIdBits = log2Ceil(PBEntries max 2)
+  val PBAliasBits = cacheParams.aliasBitsOpt.getOrElse(0) max 1
+  require(PBEntries >= 0)
   def DCacheVWordBytes = VLEN / 8
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -518,6 +523,8 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
   // s2
   val handled = Bool()
   val real_miss = Bool()
+  val cacheRetry = Bool()
+  val baseValid = Bool()
   // s3: 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
   val tl_error_delayed = new TLError()
@@ -679,6 +686,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // kill previous cycle's req
   val s1_kill           = Output(Bool()) // kill loadpipe req at s1
   val s2_kill           = Output(Bool())
+  val dcacheUse = Output(Bool())
   val s0_pc             = Output(UInt(VAddrBits.W))
   val s1_pc             = Output(UInt(VAddrBits.W))
   val s2_pc             = Output(UInt(VAddrBits.W))
@@ -1073,6 +1081,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
+  val prefetchUseTracker = Module(new PrefetchUseTracker)
+  prefetcherMonitor.io.bufferinfo := 0.U.asTypeOf(prefetcherMonitor.io.bufferinfo)
   val bloomFilter =  Module(new BloomFilter(BLOOM_FILTER_ENTRY_NUM, true))
   val counterFilter = Module(new CounterFilter)
   bankedDataArray.dump()
@@ -1094,6 +1104,60 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
+  val pbSafe = WireInit(true.B)
+  val pbError = WireInit(0.U.asTypeOf(Valid(new L1CacheErrorInfo)))
+  val pbRelease = Wire(Decoupled(new WritebackReq))
+  pbRelease.valid := false.B
+  pbRelease.bits := 0.U.asTypeOf(new WritebackReq)
+  mainPipe.io.pbOwners := missQueue.io.pbOwners
+  prefetchUseTracker.io.load.zip(ldu).foreach { case (event, pipe) => event := pipe.io.prefetchUse }
+  prefetchUseTracker.io.install := mainPipe.io.prefetchUseInstall
+  prefetchUseTracker.io.invalidate.valid := mainPipe.io.meta_write.fire &&
+    mainPipe.io.meta_write.bits.meta.coh.state === ClientStates.Nothing
+  prefetchUseTracker.io.invalidate.bits.set := mainPipe.io.meta_write.bits.idx
+  prefetchUseTracker.io.invalidate.bits.way := OHToUInt(mainPipe.io.meta_write.bits.way_en)
+  if (PBEntries > 0) {
+    val pb = Module(new PrefetchBuffer)
+
+    for (lane <- 0 until LoadPipelineWidth) {
+      val select = VecInit((0 until PBEntries).map(i => pb.io.dcache.perf.firstUse(i).valid &&
+        PopCount(pb.io.dcache.perf.firstUse.take(i).map(_.valid)) === lane.U))
+      prefetcherMonitor.io.bufferinfo.first_use(lane).valid := RegNext(select.asUInt.orR, false.B)
+      prefetcherMonitor.io.bufferinfo.first_use(lane).bits := RegEnable(
+        Mux1H(select, pb.io.dcache.perf.firstUse.map(_.bits)), select.asUInt.orR)
+    }
+    assert(PopCount(pb.io.dcache.perf.firstUse.map(_.valid)) <= LoadPipelineWidth.U)
+    prefetcherMonitor.io.bufferinfo.unused_exit.valid := RegNext(pb.io.dcache.perf.unusedExit.valid, false.B)
+    prefetcherMonitor.io.bufferinfo.unused_exit.bits := RegEnable(pb.io.dcache.perf.unusedExit.bits, pb.io.dcache.perf.unusedExit.valid)
+    ldu.zipWithIndex.foreach { case (pipe, lane) =>
+      pb.io.load(lane) <> pipe.io.pb
+    }
+    pb.io.pipe <> mainPipe.io.pb
+    pb.io.mshr <> missQueue.io.pb
+    pbRelease <> pb.io.releaseReq
+    pb.io.dcache.wfi.wfiReq := io.wfi.wfiReq
+    pbSafe := pb.io.dcache.wfi.safe
+    pbError := pb.io.dcache.error.report
+    assert(!pb.io.dcache.error.fatal, "PB metadata integrity failure; coherence ownership is frozen")
+  } else {
+    ldu.foreach { pipe =>
+      pipe.io.pb.s1_hit := false.B
+      pipe.io.pb.s1_retry := false.B
+      pipe.io.pb.s2_dataResp := 0.U.asTypeOf(pipe.io.pb.s2_dataResp)
+    }
+    mainPipe.io.pb.s1_hit := false.B
+    mainPipe.io.pb.s1_paddr.ready := true.B
+    mainPipe.io.pb.s1_probeResp := 0.U.asTypeOf(mainPipe.io.pb.s1_probeResp)
+    mainPipe.io.pb.s2_storeResp := 0.U.asTypeOf(mainPipe.io.pb.s2_storeResp)
+    mainPipe.io.pb.s2_dataResp.valid := false.B
+    mainPipe.io.pb.s2_dataResp.bits := 0.U.asTypeOf(new PBPipeDataResp)
+    mainPipe.io.pb.s0_moveReq.valid := false.B
+    mainPipe.io.pb.s0_moveReq.bits := 0.U.asTypeOf(new PBMoveReq)
+    missQueue.io.pb.allocReq.ready := false.B
+    missQueue.io.pb.allocEntryId := 0.U
+    missQueue.io.pb.refillReq.ready := false.B
+    missQueue.io.pb.status := 0.U.asTypeOf(missQueue.io.pb.status)
+  }
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
@@ -1108,7 +1172,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.mshr_store_empty := missQueue.io.mshr_store_empty
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
-  io.wfi <> missQueue.io.wfi
+  missQueue.io.wfi.wfiReq := io.wfi.wfiReq
+  io.wfi.wfiSafe := missQueue.io.wfi.wfiSafe && pbSafe
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
 
@@ -1147,7 +1212,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
                                          ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
   }
 
-  val errors = Seq(mainPipe.io.error) ++ // store / misc error
+  val errors = Seq(pbError, mainPipe.io.error) ++ // PB / store / misc error
         ldu.map(_.io.error)// load error
   val error_valid = errors.map(e => e.valid).reduce(_|_)
   io.error.bits <> RegEnable(
@@ -1240,8 +1305,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val extra_flag_prefetch = Mux1H(extra_flag_way_en, prefetchArray.io.resp.last)
     val extra_flag_access = Mux1H(extra_flag_way_en, accessArray.io.resp.last)
 
-    prefetcherMonitor.io.replinfo.pf_useless := extra_flag_valid && !extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
-    prefetcherMonitor.io.replinfo.pf_source_useless := extra_flag_prefetch
+    prefetcherMonitor.io.replinfo.pf_useless := RegNext(prefetchUseTracker.io.unusedExit.valid, false.B)
+    prefetcherMonitor.io.replinfo.pf_source_useless := RegEnable(prefetchUseTracker.io.unusedExit.bits,
+      prefetchUseTracker.io.unusedExit.valid)
 
     prefetcherMonitor.io.replinfo.hit_pf_in_cache := extra_flag_valid && extra_flag_access && isFromL1Prefetch(extra_flag_prefetch)
     prefetcherMonitor.io.replinfo.hit_pf_source_in_cache := extra_flag_prefetch
@@ -1459,11 +1525,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   for (w <- 0 until LoadPipelineWidth) {
     prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_stat
+    prefetcherMonitor.io.loadinfo(w).hit_pf_in_cache := RegNext(prefetchUseTracker.io.firstUse(w).valid, false.B)
+    prefetcherMonitor.io.loadinfo(w).hit_source := RegEnable(prefetchUseTracker.io.firstUse(w).bits,
+      prefetchUseTracker.io.firstUse(w).valid)
   }
   prefetcherMonitor.io.maininfo := mainPipe.io.prefetch_stat
   prefetcherMonitor.io.missinfo := missQueue.io.prefetch_stat
   prefetcherMonitor.io.debugRolling := io.debugRolling
-  prefetcherMonitor.io.clear_flag := clear_flag
+  prefetcherMonitor.io.clear_flag := VecInit(Seq.fill(LoadPipelineWidth)(false.B))
+  XSPerfAccumulate("dcache_first_read_from_prefetched_line",
+    PopCount(prefetcherMonitor.io.loadinfo.map(_.hit_pf_in_cache)) +&
+      PopCount(prefetcherMonitor.io.bufferinfo.first_use.map(_.valid)))
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
 
   /** LoadMissDB: record load miss state */
@@ -1644,8 +1716,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.atomic_req <> io.lsu.atomics.req
 
   mainPipe.io.invalid_resv_set := RegNext(
-    wb.io.req.fire &&
-    wb.io.req.bits.addr === mainPipe.io.lrsc_locked_block.bits &&
+    wb.io.accepted.valid &&
+    wb.io.accepted.bits.addr === mainPipe.io.lrsc_locked_block.bits &&
     mainPipe.io.lrsc_locked_block.valid
   )
 
@@ -1656,12 +1728,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
   mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
-  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
 
   //----------------------------------------
   // wb
-  // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
-  wb.io.req <> mainPipe.io.wb
+  // MainPipe is directly connected to the WBQueue request port. PB releases
+  // enter the WBQueue-owned pending buffer through a separate input.
+  mainPipe.io.wb <> wb.io.req
+  wb.io.pbRelease <> pbRelease
+  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
   for (ch <- 0 until numMemChannels) {
     buses(ch).c <> wb.io.mem_release(ch)
   }
@@ -1670,8 +1744,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
   //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
-  io.lsu.release.valid := RegNext(wb.io.req.fire)
-  io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)
+  io.lsu.release.valid := RegNext(wb.io.accepted.valid)
+  io.lsu.release.bits.paddr := RegEnable(wb.io.accepted.bits.addr, wb.io.accepted.valid)
   // Note: RegNext() is required by:
   // * load queue released flag update logic
   // * load / load violation check logic
