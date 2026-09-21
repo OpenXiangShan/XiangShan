@@ -107,6 +107,8 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       if (fu.in.vxrm.nonEmpty) require(in.vxrm.nonEmpty, s"${fu.name} needs vxrm input, but it's not provided by exu")
       fu.in.frm.zip(effectiveFrm).foreach { case (sink, source) => sink := source }
       fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
+      require(fu.in.sqDeqPtr.isDefined == fu.cfg.isVStd)
+      fu.in.sqDeqPtr.foreach(_ := in.sqDeqPtr.get)
   }
 
   private val isWidenEx = mgus.indices.map {
@@ -210,6 +212,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
   out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
+  out.ex0VStdSuccess.foreach(_ := out.uop.valid)
   out.outFuLat.foreach { sink =>
     sink.zip(nonFixedLatFus).foreach { case (toWbBusyTable, fu) =>
       toWbBusyTable <> fu.outFuLat
@@ -248,10 +251,12 @@ object Exu {
     val vpWb0, vpWb1 = Vec(backendParams.getVfRfWriteSize, UInt(VLEN.W))
     val gpWb0 = Vec(backendParams.getIntRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
+    val sqDeqPtr = Option.when(param.hasVStd)(new SqPtr)
   }
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
+    val ex0VStdSuccess = Option.when(param.hasVStd)(Bool())
     val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
     val outFuWakeUp = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)))
   }

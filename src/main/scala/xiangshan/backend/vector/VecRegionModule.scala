@@ -36,7 +36,7 @@ import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.vector.util.RegUtil._
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
-import xiangshan.mem.StoreQueueDataWrite
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 
 class VecRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -217,6 +217,9 @@ class VecRegionImp(
     case (iq, i) =>
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
+      iq.in.resps.ex0VStdSuccess.foreach { resp =>
+        resp := issuePipes(i).map(_.out.ex0VStdSuccess.get).ensuring(_.size == 1).head
+      }
       iq.in.wakeup.gpWbVec := in.fromIntRegion.gpWbWakeUp
       iq.in.wakeup.fpWbVec := in.fromFltRegion.wbWakeUp
       iq.in.wakeup.vlWb0Vec.foreach(_ := in.vlWb0WakeUp)
@@ -260,6 +263,7 @@ class VecRegionImp(
 
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.vxrm.foreach(_ := in.fromCSR.vxrm)
+      pipe.in.sqDeqPtr.foreach(_ := in.fromMem.sqDeqPtr)
 
       pipe.in.vpWbM1 := vpWbDataPath.in.fromExus.flatten.flatten.sortBy(_.wbCfg.port).map(_.data)
       pipe.in.vpWb0 := vpWbDataPath.out.wb0.map(_.data)
@@ -654,6 +658,7 @@ object VecRegionModule {
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
     val vldToRVP = Vec(backendParams.LdExuCnt, Valid(UInt(VfPhyRegIdxWidth.W)))
+    val sqDeqPtr = new SqPtr
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
@@ -696,7 +701,7 @@ object VecRegionModule {
     val toMem = new OutToMem
 
     val toRob = new Bundle {
-      val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_))
+      val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_), _ => true)
       val vldWriteback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     }
     val gpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.intPregParams)
