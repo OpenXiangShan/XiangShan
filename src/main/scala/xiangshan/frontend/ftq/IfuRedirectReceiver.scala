@@ -17,7 +17,6 @@ package xiangshan.frontend.ftq
 
 import chisel3._
 import chisel3.util._
-import utility.XSError
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
 import xiangshan.Resolve
@@ -28,7 +27,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
       wbRedirect:      Valid[FrontendRedirect],
       backendRedirect: Bool
-  ): (Valid[FtqPtr], Valid[Redirect], Valid[Resolve], Bool) = {
+  ): (FtqPtr, Valid[Redirect], Valid[Resolve], Bool) = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
     val resolve  = WireInit(0.U.asTypeOf(Valid(new Resolve)))
 
@@ -54,36 +53,15 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     resolve.bits.attribute  := wbRedirect.bits.attribute
     resolve.bits.debug_isRVC.foreach(_ := wbRedirect.bits.isRVC)
 
-    val ftqIdx = Wire(Valid(new FtqPtr))
-    ftqIdx.valid := redirect.valid
-    ftqIdx.bits  := redirect.bits.ftqIdx
-
-    val redirectValid    = RegNext(redirect.valid && !redirect.bits.attribute.isReturn && !backendRedirect, false.B)
-    val redirectRasValid = RegNext(redirect.valid && redirect.bits.attribute.isReturn && !backendRedirect, false.B)
-    val redirectRasValidDelayed = RegNext(redirectRasValid && !backendRedirect, false.B)
-
-    val resolveValid    = RegNext(resolve.valid && !redirect.bits.attribute.isReturn && !backendRedirect, false.B)
-    val resolveRasValid = RegNext(resolve.valid && redirect.bits.attribute.isReturn && !backendRedirect, false.B)
-    val resolveRasValidDelayed = RegNext(resolveRasValid && !backendRedirect, false.B)
-
-    val redirectDelayed = RegInit(0.U.asTypeOf(new Redirect))
-    val resolveDelayed  = RegInit(0.U.asTypeOf(new Resolve))
-    when(redirect.valid) {
-      redirectDelayed := redirect.bits
-    }
-    when(resolve.valid) {
-      resolveDelayed := resolve.bits
-    }
-    // A return redirect is delayed one cycle, during which the bits above must be kept stable. A new IFU redirect in
-    // that cycle would overwrite them and emit the wrong bits, so it must not happen.
-    XSError(redirectRasValid && redirect.valid, "no new IFU redirect is allowed while a return is delayed")
-
-    val ifuRedirect = Wire(new Valid(new Redirect))
-    val ifuResolve  = Wire(new Valid(new Resolve))
-    ifuRedirect.valid := (redirectValid || redirectRasValidDelayed)
-    ifuRedirect.bits  := redirectDelayed
-    ifuResolve.valid  := (resolveValid || resolveRasValidDelayed)
-    ifuResolve.bits   := resolveDelayed
-    (ftqIdx, ifuRedirect, ifuResolve, redirectRasValidDelayed)
+    val ftqPtrsEarlyByOneCycles = Wire(new FtqPtr)
+    val blockSelEarlyByOneCycle = Wire(Bool())
+    blockSelEarlyByOneCycle := wbRedirect.bits.blockSel
+    ftqPtrsEarlyByOneCycles := wbRedirect.bits.ftqIdx
+    (
+      ftqPtrsEarlyByOneCycles,
+      RegNext(redirect, init = 0.U.asTypeOf(Valid(new Redirect))),
+      RegNext(resolve, init = 0.U.asTypeOf(Valid(new Resolve))),
+      blockSelEarlyByOneCycle
+    )
   }
 }
