@@ -43,6 +43,14 @@ trait HasUncacheBufferParameters extends HasXSParameter with HasDCacheParameters
   def BLOCK_OFFSET = log2Up(XLEN / 8)
   def getBlockAddr(x: UInt) = x >> BLOCK_OFFSET
 
+  def uncacheAxiIdBits = math.max(1, log2Up(UncacheBufferSize))
+  def uncacheAxiBundleParams = AXI4BundleParameters(
+    addrBits = PAddrBits,
+    dataBits = XLEN,
+    idBits = uncacheAxiIdBits,
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+  )
+
   def axiDenied(resp: UInt): Bool =
     resp === AXI4Parameters.RESP_SLVERR || resp === AXI4Parameters.RESP_DECERR
 
@@ -195,7 +203,7 @@ class UncacheEntryState(implicit p: Parameters) extends DCacheBundle {
   }
 }
 
-class UncacheIO(implicit p: Parameters) extends DCacheBundle {
+class UncacheIO(implicit p: Parameters) extends DCacheBundle with HasUncacheBufferParameters {
   val hartId = Input(UInt())
   val enableOutstanding = Input(Bool())
   val flush = Flipped(new UncacheFlushBundle)
@@ -203,12 +211,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val forward = Vec(LoadPipelineWidth, Flipped(new UncacheForward))
   val wfi = Flipped(new WfiReqBundle)
   val busError = Output(new L1BusErrorUnitInfo())
-  val axi = new AXI4Bundle(AXI4BundleParameters(
-    addrBits = PAddrBits,
-    dataBits = XLEN,
-    idBits   = math.max(1, log2Up(UncacheBufferSize)),
-    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
-  ))
+  val axi = new AXI4Bundle(uncacheAxiBundleParams)
 }
 
 class Uncache()(implicit p: Parameters) extends LazyModule with HasXSParameter {
