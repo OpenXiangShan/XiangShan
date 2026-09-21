@@ -889,7 +889,6 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
-  val ctrl_cchi = Option.when(cacheCtrlParamsOpt.nonEmpty)(Flipped(new CCHIType3Port))
 }
 
 private object ArbiterCtrl {
@@ -977,7 +976,7 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new DCacheCCHICtrlUnit(params)))
+  val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new DCacheAXICtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
 }
@@ -1081,7 +1080,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
 
-  // l1 dcache controller (Compact CHI Type 3)
+  // l1 dcache controller (AXI4RegisterNode)
   ldu.foreach {
     case mod =>
       mod.io.pseudo_error.valid := false.B
@@ -1094,18 +1093,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   if (cacheCtrlParamsOpt.nonEmpty) {
     val ctrlUnit = outer.cacheCtrlOpt.get.module
-    io.ctrl_cchi.get <> ctrlUnit.io.cchi
 
     if (EnableTagEcc) {
-      ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io.pseudoError(0))
-      mainPipe.io.pseudo_error <> ctrlUnit.io.pseudoError(0)
-      ctrlUnit.io.pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
+      ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
+      mainPipe.io.pseudo_error <> ctrlUnit.io_pseudoError(0)
+      ctrlUnit.io_pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
                                           ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
     }
 
     if (EnableDataEcc) {
-      bankedDataArray.io.pseudo_error <> ctrlUnit.io.pseudoError(1)
-      ctrlUnit.io.pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
+      bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)
+      ctrlUnit.io_pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
                                           (mainPipe.io.pseudo_data_error_inj_done ||
                                            ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
     }

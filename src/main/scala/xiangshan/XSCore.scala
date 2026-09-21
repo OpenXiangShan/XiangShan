@@ -33,6 +33,8 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
+import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}
+import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 import xiangshan.cache.{CCHIType1Port, CCHIType3Port, CCHIType4Port}
 import xiangshan.mem._
 import xiangshan.cache.mmu._
@@ -67,6 +69,11 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
   val backend = LazyModule(new Backend(backendParams))
 
   val memBlock = LazyModule(new MemBlock)
+
+  // I$ Ctrl AXI: Frontend ICacheAXICtrlUnit <-> MemBlock AXI4Xbar
+  (frontend.inner.icache.ctrlUnitOpt zip memBlock.inner.icacheCtrlNode).foreach {
+    case (ctrl, n) => ctrl.node := n
+  }
 }
 
 class XSCore()(implicit p: config.Parameters) extends XSCoreBase
@@ -118,8 +125,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val icache_cchi = new CCHIType4Port
     // Compact CHI Type 4 PTW (from MemBlock); not wired to L2 in phase 2.2
     val ptw_cchi = new CCHIType4Port
-    // Compact CHI Type 3 Uncache (from MemBlock); not wired to L2 in phase 2.3a
-    val d_mmio_cchi = new CCHIType3Port
+    // Uncache AXI (from MemBlock); not wired to L2 in phase 2.3a
+    val d_mmio_axi = new AXI4Bundle(AXI4BundleParameters(
+      addrBits = PAddrBits,
+      dataBits = XLEN,
+      idBits = math.max(1, log2Up(UncacheBufferSize)),
+      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+    ))
     // Compact CHI Type 3 InstrUncache (from Frontend); not wired to L2 in phase 2.3b
     val i_mmio_cchi = new CCHIType3Port
   })
@@ -202,8 +214,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_icache_cchi <> frontend.io.icache_cchi
   // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock buffer <-> tile; RX not wired to L2 in phase 2.3b
   memBlock.io.inner_i_mmio_cchi <> frontend.io.i_mmio_cchi
-  // I$ Ctrl Compact CHI Type 3: MemBlock Type3Router <-> Frontend (not via L2)
-  frontend.io.icache_ctrl_cchi.zip(memBlock.io.inner_icache_ctrl_cchi).foreach { case (a, b) => a <> b }
   io.dcache_cchi <> memBlock.io.outer_dcache_cchi
   io.icache_cchi.upREQ <> memBlock.io.outer_icache_cchi.upREQ
   io.icache_cchi.dnDAT <> memBlock.io.outer_icache_cchi.dnDAT
@@ -216,17 +226,15 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.ptw_cchi.upREQ.ready := true.B
   io.ptw_cchi.dnDAT.valid := false.B
   io.ptw_cchi.dnDAT.bits  := DontCare
-  // Uncache Compact CHI Type 3: MemBlock <-> tile; RX not wired to L2 in phase 2.3a
-  io.d_mmio_cchi.upREQ <> memBlock.io.outer_d_mmio_cchi.upREQ
-  io.d_mmio_cchi.upDAT <> memBlock.io.outer_d_mmio_cchi.upDAT
-  io.d_mmio_cchi.dnRSP <> memBlock.io.outer_d_mmio_cchi.dnRSP
-  io.d_mmio_cchi.dnDAT <> memBlock.io.outer_d_mmio_cchi.dnDAT
-  io.d_mmio_cchi.upREQ.ready := true.B
-  io.d_mmio_cchi.upDAT.ready := true.B
-  io.d_mmio_cchi.dnRSP.valid := false.B
-  io.d_mmio_cchi.dnRSP.bits  := DontCare
-  io.d_mmio_cchi.dnDAT.valid := false.B
-  io.d_mmio_cchi.dnDAT.bits  := DontCare
+  // Uncache AXI: MemBlock <-> tile; R/B not wired to L2 in phase 2.3a
+  io.d_mmio_axi <> memBlock.io.outer_d_mmio_axi
+  io.d_mmio_axi.aw.ready := true.B
+  io.d_mmio_axi.w.ready := true.B
+  io.d_mmio_axi.ar.ready := true.B
+  io.d_mmio_axi.b.valid := false.B
+  io.d_mmio_axi.b.bits := DontCare
+  io.d_mmio_axi.r.valid := false.B
+  io.d_mmio_axi.r.bits := DontCare
   // InstrUncache Compact CHI Type 3: Frontend <-> MemBlock <-> tile; RX not wired to L2 in phase 2.3b
   io.i_mmio_cchi.upREQ <> memBlock.io.outer_i_mmio_cchi.upREQ
   io.i_mmio_cchi.upDAT <> memBlock.io.outer_i_mmio_cchi.upDAT

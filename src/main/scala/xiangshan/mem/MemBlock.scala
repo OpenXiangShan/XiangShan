@@ -23,6 +23,8 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
+import freechips.rocketchip.amba.axi4._
+import xscache.coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
 import utility._
@@ -289,6 +291,51 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
   val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
+  // Uncache AXI xbar: Uncache master -> D$ Ctrl / I$ Ctrl / d_mmio
+  val uncacheAxiXbar = AXI4Xbar(awQueueDepth = UncacheBufferSize)
+  val uncacheAxiMaster = AXI4MasterNode(Seq(AXI4MasterPortParameters(
+    masters = Seq(AXI4MasterParameters(
+      name = "uncache",
+      id = IdRange(0, UncacheBufferSize),
+      maxFlight = Some(1)
+    )),
+    requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+  )))
+
+  private def dMmioAddressSets: Seq[AddressSet] = {
+    val full = AddressSet(0, (BigInt(1) << PAddrBits) - 1)
+    val holes =
+      dcacheParameters.cacheCtrlAddressOpt.toSeq ++
+        Option.when(icacheCtrlEnabled)(icacheCtrlAddress).toSeq
+    holes.foldLeft(Seq(full)) { (acc, hole) => acc.flatMap(_.subtract(hole)) }
+  }
+
+  val dMmioNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+    slaves = Seq(AXI4SlaveParameters(
+      address = dMmioAddressSets,
+      regionType = RegionType.UNCACHED,
+      executable = true,
+      supportsWrite = TransferSizes(1, 8),
+      supportsRead = TransferSizes(1, 8),
+      interleavedId = Some(0)
+    )),
+    beatBytes = 8,
+    requestKeys = Seq(MemBackTypeMM, MemPageTypeNC)
+  )))
+
+  val icacheCtrlNode = Option.when(icacheCtrlEnabled)(AXI4IdentityNode())
+
+  uncacheAxiXbar := uncacheAxiMaster
+  dMmioNode := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+  if (dcache.useDcache) {
+    dcache.dcache.cacheCtrlOpt.foreach { ctrl =>
+      ctrl.node := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+    }
+  }
+  icacheCtrlNode.foreach { n =>
+    n := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+  }
+
   lazy val module = new MemBlockInlinedImp(this)
 }
 
@@ -365,14 +412,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // PTW Compact CHI Type 4 (page-table refill). L2TLB lives in MemBlock; only outer port is IO
     val outer_ptw_cchi = new CCHIType4Port
 
-    // Uncache Compact CHI Type 3 (NC + MMIO). Type3Router lives in MemBlock; only outer port is IO
-    val outer_d_mmio_cchi = new CCHIType3Port
+    // Uncache AXI (NC + MMIO). AXI4Xbar lives in MemBlock; only outer port is IO
+    val outer_d_mmio_axi = new AXI4Bundle(AXI4BundleParameters(
+      addrBits = PAddrBits,
+      dataBits = XLEN,
+      idBits = math.max(1, log2Up(UncacheBufferSize)),
+      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+    ))
 
     // InstrUncache Compact CHI Type 3 (MMIO/NC fetch); Frontend <-> MemBlock buffer
     val inner_i_mmio_cchi = Flipped(new CCHIType3Port)
     val outer_i_mmio_cchi = new CCHIType3Port
-
-    val inner_icache_ctrl_cchi = Option.when(icacheCtrlEnabled)(new CCHIType3Port)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1441,22 +1491,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   CCHIBuffer(ptw.io.cchi, io.outer_ptw_cchi)
   CCHIBuffer(io.inner_i_mmio_cchi, io.outer_i_mmio_cchi, nStages = 2)
 
-  val type3Router = Module(new Type3Router)
-  uncache.io.cchi <> type3Router.io.up
-  type3Router.io.txdatAddr := uncache.io.txdatAddr
-  CCHIBuffer(type3Router.io.downL2, io.outer_d_mmio_cchi, nStages = 2)
-
-  if (dcacheParameters.cacheCtrlAddressOpt.nonEmpty) {
-    CCHIBuffer(type3Router.io.downCtrl(0), dcache.io.ctrl_cchi.get, nStages = 2)
-  } else {
-    type3Router.io.downCtrl(0).tieOff()
-  }
-
-  if (icacheCtrlEnabled) {
-    CCHIBuffer(type3Router.io.downCtrl(1), io.inner_icache_ctrl_cchi.get, nStages = 2)
-  } else {
-    type3Router.io.downCtrl(1).tieOff()
-  }
+  val (uncacheAxi, _) = outer.uncacheAxiMaster.out.head
+  uncache.io.axi <> uncacheAxi
+  val (dMmioAxi, _) = outer.dMmioNode.in.head
+  io.outer_d_mmio_axi <> dMmioAxi
 
   // vector segmentUnit
   // TODO: DONT use `head` find segment
