@@ -347,6 +347,22 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
     n := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
   }
 
+  // InstrUncache AXI: Frontend master -> 2-stage buffer -> i_mmio (not on Uncache xbar)
+  val iMmioFromFrontend = AXI4IdentityNode()
+  val iMmioNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+    slaves = Seq(AXI4SlaveParameters(
+      address = Seq(AddressSet(0, (BigInt(1) << PAddrBits) - 1)),
+      regionType = RegionType.UNCACHED,
+      executable = true,
+      supportsWrite = TransferSizes.none,
+      supportsRead = TransferSizes(1, 8),
+      interleavedId = Some(0)
+    )),
+    beatBytes = 8,
+    requestKeys = Seq(MemBackTypeMM, MemPageTypeNC)
+  )))
+  iMmioNode := AXI4Buffer() := AXI4Buffer() := iMmioFromFrontend
+
   lazy val module = new MemBlockInlinedImp(this)
 }
 
@@ -361,6 +377,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasTlbConst
   with SdtrigExt
 {
+  val (iMmioAxi, _) = outer.iMmioNode.in.head
+
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Flipped(ValidIO(new Redirect))
@@ -432,9 +450,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
     ))
 
-    // InstrUncache Compact CHI Type 3 (MMIO/NC fetch); Frontend <-> MemBlock buffer
-    val inner_i_mmio_cchi = Flipped(new CCHIType3Port)
-    val outer_i_mmio_cchi = new CCHIType3Port
+    // InstrUncache AXI (MMIO/NC fetch). AXI4Buffer lives in MemBlock; only outer port is IO
+    val outer_i_mmio_axi = chiselTypeOf(iMmioAxi)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1307,12 +1324,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   CCHIBuffer(io.inner_icache_cchi, io.outer_icache_cchi, nStages = 2)
   CCHIBuffer(ptw.io.cchi, io.outer_ptw_cchi)
-  CCHIBuffer(io.inner_i_mmio_cchi, io.outer_i_mmio_cchi, nStages = 2)
 
   val (uncacheAxi, _) = outer.uncacheAxiMaster.out.head
   uncache.io.axi <> uncacheAxi
   val (dMmioAxi, _) = outer.dMmioNode.in.head
   io.outer_d_mmio_axi <> dMmioAxi
+  io.outer_i_mmio_axi <> iMmioAxi
 
   // reset tree of MemBlock
   if (p(DebugOptionsKey).ResetGen) {

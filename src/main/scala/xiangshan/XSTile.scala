@@ -62,7 +62,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
   // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
   // Data-side Uncache uses AXI4 (see XSCore.io.d_mmio_axi); not connected to L2 yet.
-  // InstrUncache uses Compact CHI Type 3 (see XSCore.io.i_mmio_cchi); not connected to L2 yet.
+  // InstrUncache uses AXI4 (see XSCore.io.i_mmio_axi); not connected to L2 yet.
 
   // L2 Prefetch
   l2top.inner.l2cache match {
@@ -87,7 +87,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case None => None
   }
 
-  // i_mmio_port TL disconnected (InstrUncache uses CHI i_mmio_cchi via XSCore)
+  // i_mmio_port TL disconnected (InstrUncache uses AXI i_mmio_axi via XSCore)
   // d_mmio_port / icachectrl_port TL disconnected (Uncache/I$ Ctrl use MemBlock AXI4Xbar)
 
   // =========== IO Connection ============
