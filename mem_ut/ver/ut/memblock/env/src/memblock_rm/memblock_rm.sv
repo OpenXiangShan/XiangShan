@@ -87,14 +87,13 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         bit s2_active,
         output bit [1:0] effective_pbmt
     );
-    // 中文注释：只对 PMA 已明确为普通可缓存、PBMT=00 且硬件非对齐处理已开启
-    // 的 scalar 访问抑制 address-misaligned expectation；其他路径保持保守旧语义。
+    // 中文注释：V2 硬件非对齐处理对 PMA C=0/1 均适用；仅 PBMT-NC/MMIO
+    // 路径保留 address-misaligned expectation。
     extern function bit observer_should_expect_addr_misaligned(
         bit misaligned,
         bit store_access,
         memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
-        bit all_bytes_pma_pbmt,
-        bit all_bytes_normal_cacheable
+        bit all_bytes_pma_pbmt
     );
     extern function bit observer_build_commit_item(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
@@ -336,16 +335,19 @@ function bit memblock_rm::observer_should_expect_addr_misaligned(
     bit misaligned,
     bit store_access,
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
-    bit all_bytes_pma_pbmt,
-    bit all_bytes_normal_cacheable
+    bit all_bytes_pma_pbmt
 );
     bit hd_misalign_enabled;
 
     if (!misaligned) return 1'b0;
     hd_misalign_enabled = store_access ? tlb_context.hd_misalign_st_enable :
                                          tlb_context.hd_misalign_ld_enable;
-    if (hd_misalign_enabled && all_bytes_pma_pbmt &&
-        all_bytes_normal_cacheable) begin
+    // V2 hardware handles misaligned accesses for both PMA C=1 and C=0
+    // when the PMA/PMP permissions allow the access.  C=0 alone does not
+    // imply an address-misaligned exception; only PBMT-NC or actual MMIO
+    // paths do so in the DUT.  Access faults are already reflected in
+    // expected_exception before this helper is called.
+    if (hd_misalign_enabled && all_bytes_pma_pbmt) begin
         return 1'b0;
     end
     return 1'b1;
@@ -551,12 +553,16 @@ function bit memblock_rm::observer_build_commit_item(
             access_fault |= entry.pma_af || entry.fault_effective_s1_af ||
                             entry.fault_effective_s2_gaf;
             entry_stage_one_fault = entry.fault_effective_s1_pf ||
-                                    observer_stage_permission_fault(entry, tlb_context,
-                                                                    store_access, 1'b1) ||
+                                    ((!entry.fault_effective_s1_pf &&
+                                      !entry.fault_effective_s1_af) &&
+                                     observer_stage_permission_fault(entry, tlb_context,
+                                                                     store_access, 1'b1)) ||
                                     pbmt_force_s1_pf;
             entry_stage_two_fault = entry.fault_effective_s2_gpf ||
-                                    observer_stage_permission_fault(entry, tlb_context,
-                                                                    store_access, 1'b0) ||
+                                    ((!entry.fault_effective_s2_gpf &&
+                                      !entry.fault_effective_s2_gaf) &&
+                                     observer_stage_permission_fault(entry, tlb_context,
+                                                                     store_access, 1'b0)) ||
                                     pbmt_force_s2_gpf;
             stage_one_fault |= entry_stage_one_fault;
             stage_two_fault |= entry_stage_two_fault;
@@ -644,7 +650,6 @@ function bit memblock_rm::observer_build_commit_item(
             if (!byte_pma_pmp_view.valid ||
                 !byte_pma_pmp_view.translation_eligible ||
                 !byte_pma_pmp_view.af_decided ||
-                byte_pma_pmp_view.dcache_fact_needed_for_c ||
                 !byte_pma_pmp_view.normal_cacheable ||
                 (store_access ? byte_pma_pmp_view.st_access_fault :
                                 byte_pma_pmp_view.ld_access_fault)) begin
@@ -654,14 +659,6 @@ function bit memblock_rm::observer_build_commit_item(
         // 当前 V2 smoke 的 U 态默认 PMP 会在基础权限阶段结束；若未来 profile
         // 允许访问且 PMA C=0，需要独立 cache observer 提供 fact 后再补 cache-path AF。
         // 此处不把 C=0/MMIO 分类或未知 fact 猜测成异常，保留模型诊断字段即可。
-        if (!pma_pmp_view.af_decided) begin
-            `uvm_info("RM_LS_PMA_FACT",
-                      $sformatf("uid %0d PMA C-path requires independent DCache fact; base_fault=%0d/%0d PA=0x%0h",
-                                item.uid, pma_pmp_view.base_ld_access_fault,
-                                pma_pmp_view.base_st_access_fault,
-                                item.pa_by_byte[0]),
-                      UVM_LOW)
-        end
     end
     // 中文注释：DUT exceptionVec 保留可同时成立的 access/page/guest-page fault，
     // 不能按软件优先级折叠成单一 bit。LoadUnit 在 TLB fault 到达时会清掉
@@ -672,7 +669,7 @@ function bit memblock_rm::observer_build_commit_item(
     if (item.expected_exception == '0 &&
         observer_should_expect_addr_misaligned(
             misaligned, store_access, tlb_context,
-            all_bytes_pma_pbmt, all_bytes_normal_cacheable))
+            all_bytes_pma_pbmt))
         item.expected_exception[store_access ? 6 : 4] = 1'b1;
     if (item.expected_exception == '0 &&
         item.pa_valid_mask != required_pa_mask) begin

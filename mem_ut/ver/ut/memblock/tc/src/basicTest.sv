@@ -103,7 +103,11 @@ class basicTest extends tcnt_test_base ;
             configure_real_env_cfg(real_smoke_cfg);
             uvm_config_db#(memblock_env_cfg)::set(this, "env", "cfg", real_smoke_cfg);
             this.env = memblock_env::type_id::create("env", this);
-            uvm_top.set_timeout(10000us,1);
+            // Long real-dispatch stress presets can require more than 10 ms
+            // of simulation time to drain fault/redirect/replay traffic.
+            // Keep the timeout as a testbench safety bound without cutting
+            // off a legal 100000-request run before terminal retirement.
+            uvm_top.set_timeout(100000us,1);
             uvm_cmdline_proc = uvm_cmdline_processor::get_inst();
             `uvm_info(get_type_name(),"enter test_build_phase",UVM_LOW)
 

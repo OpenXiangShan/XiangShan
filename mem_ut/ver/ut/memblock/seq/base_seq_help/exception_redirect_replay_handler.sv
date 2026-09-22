@@ -30,7 +30,7 @@ class exception_redirect_replay_handler extends uvm_object;
             `uvm_fatal("EXC_REDIRECT", $sformatf("redirect valid mismatch: redirect_valid=%0b redirect.valid=%0b source=%0d",
                                                  wb_event.redirect_valid, wb_event.redirect.valid, wb_event.source))
         end
-        return wb_event.redirect.valid;
+        return (wb_event.redirect.valid === 1'b1);
     endfunction:event_is_redirect
 
     function bit event_is_replay(input memblock_wb_event_t wb_event);
@@ -65,6 +65,9 @@ class exception_redirect_replay_handler extends uvm_object;
         memblock_redirect_payload_t cand_redirect;
         memblock_redirect_payload_t best_redirect;
 
+        if (!event_is_redirect(candidate) || !event_is_redirect(best)) begin
+            return 1'b0;
+        end
         cand_redirect = redirect_from_event(candidate);
         best_redirect = redirect_from_event(best);
         if (cand_redirect.rob_key.flag == best_redirect.rob_key.flag &&
@@ -84,9 +87,11 @@ class exception_redirect_replay_handler extends uvm_object;
             if (!event_is_redirect(events[idx])) begin
                 continue;
             end
-            if (!found || redirect_event_is_older(events[idx], selected)) begin
+            if (!found) begin
                 selected = events[idx];
                 found = 1'b1;
+            end else if (redirect_event_is_older(events[idx], selected)) begin
+                selected = events[idx];
             end
         end
         return found;

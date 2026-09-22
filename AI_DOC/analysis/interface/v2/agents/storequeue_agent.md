@@ -553,7 +553,7 @@ dataReadyPtr scan = allocated &&
 |---|---:|---|
 | `io_sqCommitPtr{flag,value}` | 1 + 6 | SQ 当前按 ROB 顺序已经连续提交区域之后的 commit frontier（提交前沿/下一个待处理边界），不是“刚刚提交的那一项”的回执。`sqCommitUopIdx` 和 `sqCommitRobIdx` 是该前沿位置读出的身份。 |
 | `io_sqCommitUopIdx[6:0]`、`io_sqCommitRobIdx{flag,value}` | 7、1 + 8 | commit 前沿对应 uop 的身份，供相邻 vector/ROB 逻辑观察。它们没有独立 `valid`；只有在模型已知 SQ 处于可提交的非空前沿时才有事务语义，空队列或边界状态下的数值不能当成新的 commit 事件。 |
-| `io_sqDeq[1:0]` | 2 | 报告上一拍组合逻辑计算出的连续 completed-entry 释放数，范围 0–2；输出经过一拍寄存。因此不能与同拍 SBuffer/uncache/MMIO fire 直接等同，也不是 ROB `scommit` 的同义词。 |
+| `io_sqDeq[1:0]` | 2 | 报告 SQ 物理队头本次释放的 entry 数，当前 `EnsbufferWidth=2`，范围 0–2。内部先扫描 `deqPtrExt` 开始的连续前缀：只有 `allocated && completed` 才能计入；如果第 0 项未完成，即使第 1 项已完成也不能越过。源码用 `sqDeqCnt` 计算后执行 `deqPtrExtNext := deqPtrExt + sqDeqCnt`、清除对应 `allocated/completed`，最后以 `io.sqDeq := RegNext(sqDeqCnt)` 对外输出。因此它是“物理 SQ 槽释放计数”，不是 request valid、ROB 架构 commit 数，也不是同拍 SBuffer/Uncache/MMIO fire 数。跨 16B store 的低/高片段可以占两条 DataBuffer/SBuffer lane，但二者共享一个原始 SQ entry，只有 `sqNeedDeq=1` 的完成事件会置该 entry `completed`，最终通常只产生 `sqDeq=1`。 |
 | `io_sqDeqIsVec` | 1 | 直接观察当前 dequeue head 是否为 vector store。它不是 `sqDeq` 的 valid/type sideband：`sqDeq` 是寄存后的 dequeue count，而 `sqDeqIsVec` 取当前 head，二者不保证对应同一次 dequeue。**禁止用 `sqDeqIsVec` 给同拍 `sqDeq` 分类。** |
 | `io_sqCancelCnt[5:0]` | 6 | redirect 所取消的 SQ entry 数，带有前述 pipeline 延迟。 |
 | `io_sqEmpty` | 1 | SQ 是否为空的寄存输出，故比内部指针即时比较晚一拍。 |

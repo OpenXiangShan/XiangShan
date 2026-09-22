@@ -17,12 +17,6 @@ typedef enum bit [2:0] {
     PMA_PMP_CMD_ATOM_WRITE = 3'd5
 } pma_pmp_cmd_e;
 
-typedef enum bit [1:0] {
-    PMA_PMP_DCACHE_FACT_UNKNOWN = 2'd0,
-    PMA_PMP_DCACHE_FACT_YES     = 2'd1,
-    PMA_PMP_DCACHE_FACT_NO      = 2'd2
-} pma_pmp_dcache_fact_e;
-
 // 中文注释：一次动态标量访问的不可变身份。UID 相同但 redirect 后的
 // dynamic_epoch 不同，必须使用不同上下文；access_seq 由 PMA/PMP owner 单调分配，
 // 用于避免同一 UID 的旧 DCache 事实覆盖重发实例。
@@ -115,7 +109,6 @@ typedef struct packed {
     bit                  base_ld_access_fault;
     bit                  base_st_access_fault;
     bit                  base_instr_access_fault;
-    bit                  dcache_fact_needed_for_c;
     bit                  af_decided;
     // 中文注释：仅向 RM 提供“PMA 是否确认该访问为普通可缓存内存”的窄事实。
     // 它不表示 DUT 的实际路由，也不用于比较 debug isMMIO/isNCIO；当前唯一消费者
@@ -243,12 +236,6 @@ class memblock_pma_pmp_model extends uvm_object;
     extern function void make_base_af_view(
         input pma_pmp_eval_t result,
         output pma_pmp_af_view_t view
-    );
-    extern function bit finalize_cache_path_af(
-        input pma_pmp_eval_t result,
-        input pma_pmp_af_view_t base_view,
-        input pma_pmp_dcache_fact_e dcache_fact,
-        output pma_pmp_af_view_t final_view
     );
     extern function bit read_entry(
         input bit is_pma,
@@ -880,39 +867,10 @@ function void memblock_pma_pmp_model::make_base_af_view(
     view.st_access_fault = result.st_fault;
     view.instr_access_fault = result.instr_fault;
     view.normal_cacheable = result.cacheable;
-    if (view.base_ld_access_fault || view.base_st_access_fault ||
-        view.base_instr_access_fault) begin
-        view.af_decided = 1'b1;
-    end else if ((result.cmd == PMA_PMP_CMD_READ || result.cmd == PMA_PMP_CMD_WRITE) &&
-                 !result.cacheable) begin
-        view.dcache_fact_needed_for_c = 1'b1;
-        view.af_decided = 1'b0;
-    end else begin
-        view.af_decided = 1'b1;
-    end
+    // V2 non-PBMT memory type is decided directly by the PMA entry.
+    // Cacheability is not deferred to a DCache-side fact.
+    view.af_decided = 1'b1;
 endfunction:make_base_af_view
-
-function bit memblock_pma_pmp_model::finalize_cache_path_af(
-    input pma_pmp_eval_t result,
-    input pma_pmp_af_view_t base_view,
-    input pma_pmp_dcache_fact_e dcache_fact,
-    output pma_pmp_af_view_t final_view
-);
-    final_view = base_view;
-    if (!base_view.valid || !base_view.dcache_fact_needed_for_c ||
-        (dcache_fact != PMA_PMP_DCACHE_FACT_YES &&
-         dcache_fact != PMA_PMP_DCACHE_FACT_NO)) begin
-        return 1'b0;
-    end
-    final_view.dcache_fact_needed_for_c = 1'b0;
-    final_view.af_decided = 1'b1;
-    if (dcache_fact == PMA_PMP_DCACHE_FACT_YES) begin
-        final_view.pma_cache_path_fault = 1'b1;
-        if (result.cmd == PMA_PMP_CMD_READ) final_view.ld_access_fault = 1'b1;
-        else if (result.cmd == PMA_PMP_CMD_WRITE) final_view.st_access_fault = 1'b1;
-    end
-    return 1'b1;
-endfunction:finalize_cache_path_af
 
 function bit memblock_pma_pmp_model::read_entry(
     input bit is_pma,
