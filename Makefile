@@ -383,20 +383,17 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		DESIGN_DIR=$(abspath .) WITH_IOMMU=$(IOMMU_ENABLED) RTL_INCLUDE="$(RTL_INCLUDE)"
+	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
 gsim: sim-chirrtl
-	$(MAKE) -C ./difftest emu GSIM=1 WITH_IOMMU=0 SIM_TOP=SimTop \
-		DESIGN_DIR=$(abspath .) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
 simv: sim-verilog
-	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) \
-		DESIGN_DIR=$(abspath .) WITH_IOMMU=$(IOMMU_ENABLED) RTL_INCLUDE="$(RTL_INCLUDE)"
+	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
