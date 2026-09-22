@@ -77,6 +77,16 @@ class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
   val topRetAddr: GuardedPc = GuardedPc()
 }
 
+class RasSpecReadReq(implicit p: Parameters) extends RasBundle {
+  val tosr:       RasPtr = new RasPtr
+  val ssp:        UInt   = UInt(log2Up(CommitStackSize).W)
+}
+
+class ReadRetAddr(implicit p: Parameters) extends RasBundle {
+  val req:     RasSpecReadReq = Input(new RasSpecReadReq)
+  val retAddr: GuardedPc      = Output(GuardedPc())
+}
+
 class RasCommitMeta(implicit p: Parameters) extends RasBundle {
   val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
   val tosw: RasPtr = new RasPtr
