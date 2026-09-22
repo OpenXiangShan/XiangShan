@@ -308,6 +308,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val blockSqIdx = Reg(Vec(LoadQueueReplaySize, new SqPtr))
   // DCache miss block
   val missMSHRId = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U((log2Up(cfg.nMissEntries+1).W)))))
+  val enqLastBeatHint = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val tlbHintId = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U((log2Up(loadfiltersize+1).W)))))
   // Has this load already updated dcache replacement?
   val replacementUpdated = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
@@ -470,6 +471,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val storeDataWakeupCount = PopCount((0 until LoadQueueReplaySize).map(i => storeDataWakeupVec(i).asUInt.orR && allocated(i)))
 
   // update blocking condition
+  enqLastBeatHint.foreach(_ := false.B)
   (0 until LoadQueueReplaySize).map(i => {
     // case C_MA
     when (cause(i)(LoadReplayCauses.C_MA)) {
@@ -495,7 +497,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val l2HintFirstBeat = l2HintMatchThisCycle && l2HintSelectThisBeat(missMSHRId(i), dataInLastBeatReg(i))
     val l2HintLastBeat = l2HintMatchThisCycle && !l2HintSelectThisBeat(missMSHRId(i), dataInLastBeatReg(i))
     val l2HintLastBeatUnblock = RegNext(l2HintLastBeat, false.B)
-    when (l2HintFirstBeat || l2HintLastBeatUnblock) {
+    when (l2HintFirstBeat || l2HintLastBeatUnblock || enqLastBeatHint(i)) {
       blocking(i) := false.B
     }
     // case C_RAR
@@ -927,10 +929,15 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         val tlDHitThisCycle = tlDChannelHit(replayInfo.mshr_id)
         val tlDHitPrevCycle = tlDChannelHitPrev(replayInfo.mshr_id)
         val tlDHitPrevPrevCycle = tlDChannelHitPrevPrev(replayInfo.mshr_id)
+        val l2HintNow = l2HintHit(replayInfo.mshr_id)
+        val l2HintFirstBeat = l2HintNow && l2HintSelectThisBeat(replayInfo.mshr_id, dataInLastBeat)
+        val l2HintLastBeat = l2HintNow && !l2HintSelectThisBeat(replayInfo.mshr_id, dataInLastBeat)
         blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
                               !tlDHitThisCycle && // no refill in this cycle
                               !tlDHitPrevCycle && // not refill in last cycle
-                              !(replayInfo.rep_from_unalign_head && tlDHitPrevPrevCycle)
+                              !(replayInfo.rep_from_unalign_head && tlDHitPrevPrevCycle) &&
+                              !l2HintFirstBeat
+        enqLastBeatHint(enqIndex) := l2HintLastBeat
       }
 
       when (isFF) {
