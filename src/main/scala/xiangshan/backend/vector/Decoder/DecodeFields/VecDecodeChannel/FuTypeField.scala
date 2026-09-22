@@ -7,11 +7,9 @@ import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{Opcode, Opcodes}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.DecodePatterns.InstSewLmulNfPattern
-import xiangshan.backend.vector.Decoder.InstPattern.VecMemInstPattern
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
-import xiangshan.backend.vector.util.Decode
 
 import scala.language.implicitConversions
 
@@ -59,6 +57,7 @@ object FuTypeField {
     opcodes match {
       case _: Opcode.AluOpcodes.type => FuType.alu
       case _: Opcode.BruOpcodes.type => FuType.brh
+      case _: Opcode.LinkOpcodes.type => FuType.link
       case _: Opcode.JmpOpcodes.type => FuType.jmp
       case _: Opcode.MulOpcodes.type => FuType.mul
       case _: Opcode.DivOpcodes.type => FuType.div
@@ -68,23 +67,24 @@ object FuTypeField {
       case _: Opcode.BkuOpcodes.type => FuType.bku
       case _: Opcode.CsrOpcodes.type => FuType.csr
       case _: Opcode.FenceOpcodes.type => FuType.fence
-      case _: Opcode.FMacOpcodes.type => FuType.fmac
+      case _: Opcode.FAluOpcodes.type => FuType.falu
+      case _: Opcode.FMacOpcodes.type => FuType.fmul
       case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt
       case _: Opcode.FCvtOpcodes.type => FuType.fcvt
       case _: Opcode.FMiscOpcodes.type => FuType.fcmp
-      case _: Opcode.VFMacOpcodes.type => FuType.vfma
+      case _: Opcode.VFMacOpcodes.type => FuType.vfmac
       case _: Opcode.VFDivOpcodes.type => FuType.vfdiv
       case _: Opcode.VFCvtOpcodes.type => FuType.vfcvt
-      case _: Opcode.VFMiscOpcodes.type => FuType.vfalu
+      case _: Opcode.VFMiscOpcodes.type => FuType.vialu
       case _: Opcode.VSetOpcodes.type => FuType.vset
       case _: Opcode.VIAluOpcodes.type => FuType.vialu
       case _: Opcode.VMoveOpcodes.type => FuType.vmove
       case _: Opcode.VMAluOpcodes.type => FuType.vmpu
       case _: Opcode.VIMacOpcodes.type => FuType.vimac
-      case _: Opcode.VIRedOpcodes.type => FuType.vipu
-      case _: Opcode.VIPermOpcodes.type => FuType.vppu
+      case _: Opcode.VIRedOpcodes.type => FuType.vredu
+      case _: Opcode.VIPermOpcodes.type => FuType.vperm
       case _: Opcode.VIDivOpcodes.type => FuType.vidiv
-      case _: Opcode.VFRedOpcodes.type => FuType.vfalu
+      case _: Opcode.VFRedOpcodes.type => FuType.vredu
       case _: Opcode.VSha256msOpcodes.type => FuType.vsha256ms
       case _: Opcode.VSha256cOpcodes.type => FuType.vsha256c
     }

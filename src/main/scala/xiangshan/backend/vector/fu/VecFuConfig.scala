@@ -154,15 +154,19 @@ case class VecFuConfig (
   // predict info
   def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
-
-  var aluNeedPc: Boolean = false
+  def needPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
   def needSqIdx: Boolean = Seq(FuType.ldu, FuType.stu).contains(fuType)
 
   def isAlu: Boolean = fuType == FuType.alu
+
+  def isFAlu: Boolean = fuType == FuType.falu
+
+  def isFmul: Boolean = fuType == FuType.fmul
+
+  def isFdiv: Boolean = fuType == FuType.fDivSqrt
 
   def isMul: Boolean = fuType == FuType.mul
 
@@ -174,22 +178,37 @@ case class VecFuConfig (
 
   def isJmp: Boolean = fuType == FuType.jmp
 
+  def isLink: Boolean = fuType == FuType.link
+
   def isFence: Boolean = fuType == FuType.fence
 
   def isVStd: Boolean = name == "vstd"
 
-  def isVecArith: Boolean = fuType == FuType.vialu || fuType == FuType.vimac ||
-                            fuType == FuType.vppu || fuType == FuType.vipu ||
-                            fuType == FuType.vfalu || fuType == FuType.vfma ||
-                            fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
-                            fuType == FuType.vidiv || fuType == FuType.vmove
+  def isVecArith: Boolean = FuType.FuTypeOrR(
+    fuType,
+    FuType.vialu,
+    FuType.vimac,
+    FuType.vfmac,
+    FuType.vfdiv,
+    FuType.vfcvt,
+    FuType.vidiv,
+    FuType.vmove,
+    FuType.vsha256ms,
+    FuType.vsha256c,
+  )
 
-  def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
-                          fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
-                          name == "vstd"
+  def needWidenOut: Boolean = FuType.FuTypeOrR(
+    this.fuType,
+    FuType.vialu,
+    FuType.vfmac,
+    FuType.vfcvt,
+  )
 
-
-  def needOg2: Boolean = isVecArith || isVecMem
+  def needNarrowOut: Boolean = FuType.FuTypeOrR(
+    this.fuType,
+    FuType.vialu,
+    FuType.vfcvt,
+  )
 
   def isSta: Boolean = name.contains("sta")
 
@@ -252,10 +271,10 @@ object VecFuConfig {
     newCfg
   }
 
-  val JmpCfg = VecFuConfig.fromFuConfig(FuConfig.JmpCfg)
+  val NJmpCfg = VecFuConfig.fromFuConfig(FuConfig.NJmpCfg)
+  val LinkCfg = VecFuConfig.fromFuConfig(FuConfig.LinkCfg)
   val BrhCfg = VecFuConfig.fromFuConfig(FuConfig.BrhCfg)
   val I2fCfg = VecFuConfig.fromFuConfig(FuConfig.I2fCfg)
-  val FcmpCfg = VecFuConfig.fromFuConfig(FuConfig.FcmpCfg)
   val I2vCfg = VecFuConfig.fromFuConfig(FuConfig.I2vCfg)
   val F2vCfg = VecFuConfig.fromFuConfig(FuConfig.F2vCfg)
   val CsrCfg = VecFuConfig.fromFuConfig(FuConfig.CsrCfg)
@@ -279,27 +298,22 @@ object VecFuConfig {
   val VialuCfg = VecFuConfig.fromFuConfig(FuConfig.VialuCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIAluWrapper(cfg)(p).suggestName("Vialu")))
   val VimacCfg = VecFuConfig.fromFuConfig(FuConfig.VimacCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")))
   val VidivCfg = VecFuConfig.fromFuConfig(FuConfig.VidivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")))
-  val VppuCfg = VecFuConfig.fromFuConfig(FuConfig.VppuCfg)
-  val VipuCfg = VecFuConfig.fromFuConfig(FuConfig.VipuCfg)
   val VmoveCfg = VecFuConfig.fromFuConfig(FuConfig.VmoveCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")))
-  val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
-  val VfmaCfg = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg)
-  val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg)
+  val VfmacCfg = VecFuConfig.fromFuConfig(FuConfig.VfmacCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfmac")))
+  val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VFDivWrapper(cfg)(p).suggestName("Vfdiv")))
   val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
   val VSha256cCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256cCfg)
-  val FaluCfg = VecFuConfig.fromFuConfig(FuConfig.FaluCfg)
-  val FmacCfg = VecFuConfig.fromFuConfig(FuConfig.FmacCfg)
-  val FdivCfg = VecFuConfig.fromFuConfig(FuConfig.FdivCfg)
-  val FcvtCfg = VecFuConfig.fromFuConfig(FuConfig.FcvtCfg)
+  val FaluCfg = VecFuConfig.fromFuConfig(FuConfig.FaluCfg, (p: Parameters, cfg: VecFuConfig) => Module(new FAluFlt(cfg)(p).suggestName("Falu")))
+  val FmulCfg = VecFuConfig.fromFuConfig(FuConfig.FmulCfg, (p: Parameters, cfg: VecFuConfig) => Module(new FMulFlt(cfg)(p).suggestName("Fmul")))
+  val FcvtCfg = VecFuConfig.fromFuConfig(FuConfig.FcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new FCVTFlt(cfg)(p).suggestName("Fcvt")))
+  val FcmpCfg = VecFuConfig.fromFuConfig(FuConfig.FcmpCfg, (p: Parameters, cfg: VecFuConfig) => Module(new FCMPFlt(cfg)(p).suggestName("Fcmp")))
+  val FdivCfg = VecFuConfig.fromFuConfig(FuConfig.FdivCfg, (p: Parameters, cfg: VecFuConfig) => Module(new FDivSqrtFlt(cfg)(p).suggestName("Fdiv")))
   val VStdCfg = VecFuConfig.fromFuConfig(FuConfig.VStdCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VStdWrapper(cfg)(p).suggestName("Vstd")))
-  val VlduCfg = VecFuConfig.fromFuConfig(FuConfig.VlduCfg)
-  val VstuCfg = VecFuConfig.fromFuConfig(FuConfig.VstuCfg)
-  val VseglduCfg = VecFuConfig.fromFuConfig(FuConfig.VseglduCfg)
-  val VsegstuCfg = VecFuConfig.fromFuConfig(FuConfig.VsegstuCfg)
 
   def allConfigs = Seq(
-    JmpCfg,
+    NJmpCfg,
+    LinkCfg,
     BrhCfg,
     I2fCfg,
     FcmpCfg,
@@ -326,24 +340,17 @@ object VecFuConfig {
     VialuCfg,
     VimacCfg,
     VidivCfg,
-    VppuCfg,
-    VipuCfg,
     VmoveCfg,
-    VfaluCfg,
-    VfmaCfg,
+    VfmacCfg,
     VfdivCfg,
     VfcvtCfg,
     VSha256msCfg,
     VSha256cCfg,
     FaluCfg,
-    FmacCfg,
+    FmulCfg,
     FdivCfg,
     FcvtCfg,
     VStdCfg,
-    VlduCfg,
-    VstuCfg,
-    VseglduCfg,
-    VsegstuCfg,
   )
 
   trait VecVectorV2Config { self: VecFuConfig =>

@@ -188,7 +188,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     storeQueue.io.enq.req(i).bits.reqStartPtr := io.enq.req(i).bits.reqStartPtr
     storeQueue.io.enq.req(i).valid          := io.enq.needAlloc(i)(1) && io.enq.req(i).valid
     connectSamePort(storeQueue.io.enq.req(i).bits.uop, io.enq.req(i).bits.uop)
-    storeQueue.io.enq.req(i).bits.uop.isVec := FuType.isVStore(io.enq.req(i).bits.uop.fuType)
+    storeQueue.io.enq.req(i).bits.uop.isVec := LSUOpType.isVecMemOp(io.enq.req(i).bits.uop.fuOpType)
     // only enable difftest, it will be used.
     if(env.EnableDifftest){
       storeQueue.io.enq.req(i).bits.debugUop.get := io.enq.req(i).bits.uop
@@ -375,8 +375,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val waitLsqRecover = Value // wait lsq recover pointer
   }
 
-  private val lqDeq = Mux(io.lqDeq.valid, io.lqDeq.bits, 0.U)
-  private val sqDeq = Mux(io.sqDeq.valid, io.sqDeq.bits, 0.U)
+  private val lqDeq = RegNext(Mux(io.lqDeq.valid, io.lqDeq.bits, 0.U), 0.U)
+  private val sqDeq = RegNext(Mux(io.sqDeq.valid, io.sqDeq.bits, 0.U), 0.U)
 
   val lqHeadPtr = RegInit(0.U.asTypeOf(new LqPtr))
   val sqHeadPtr = RegInit(0.U.asTypeOf(new SqPtr))
@@ -408,8 +408,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
 
   // rename pre-calculate sqPtr/lqPtr
   val numLsElem = io.fromRename.req.map(_.bits.num)
-  val needEnqLoadQueue = VecInit(io.fromRename.req.map(x => x.valid && (FuType.isLoad(x.bits.fuType) || FuType.isVNonsegLoad(x.bits.fuType))))
-  val needEnqStoreQueue = VecInit(io.fromRename.req.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isVNonsegStore(x.bits.fuType))))
+  val needEnqLoadQueue = VecInit(io.fromRename.req.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
+  val needEnqStoreQueue = VecInit(io.fromRename.req.map(x => x.valid && FuType.isStore(x.bits.fuType)))
   val loadQueueElem = needEnqLoadQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
   val storeQueueElem = needEnqStoreQueue.zip(numLsElem).map(x => Mux(x._1, x._2, 0.U))
   val loadFlowPopCount = 0.U +: loadQueueElem.zipWithIndex.map{ case (l, i) =>
@@ -458,7 +458,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
       lqTailPtr.addWrapCircles(lqAllocNumber)
     )
   )
-  // sqRedirect will arrive after 3 -> (3 + virtual store queue walk cycles) cycle of io.redirect.
+  // sqRedirect will arrive after 4 -> (4 + virtual store queue walk cycles) cycle of io.redirect.
   val sqTailPtrNext = Mux(io.sqRedirectPtr.valid,
     io.sqRedirectPtr.bits,
     Mux(io.redirect.valid,

@@ -39,19 +39,15 @@ on:
         options:
           - spec06-rva23-novec-gcc16-0.3c
           - spec06-rva23-novec-gcc16-1.0c
-          - spec06-rv64gcb-gcc16-0.3c
-          - spec06-rv64gcb-gcc16-1.0c
-          - spec06-xscc-0.3c
-          - spec06-xscc-0.8c
-          - spec06-xscc-1.0c
+          - spec06-rva23-novec-xscc-0.3c
+          - spec06-rva23-novec-xscc-1.0c
+          - spec17-rva23-novec-gcc16-0.3c
+          - spec17-rva23-novec-gcc16-1.0c
           - spec26-gcc15-0.3c
           - spec26-gcc15-1.0c
-          - spec26-rv64gc-gcc15-0.3c
-          - spec26-rv64gc-gcc15-1.0c
           - legacy-spec06-gcc15-0.3c
           - legacy-spec06-gcc15-1.0c
           - custom
-          - dryrun
         default: spec06-rva23-novec-gcc16-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
@@ -76,11 +72,23 @@ on:
         required: false
         type: string
       checkpoint_path:
-        description: Directory for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
+        description: "Custom checkpoint directory. Empty: json_path is a workload list"
         required: false
         type: string
       json_path:
-        description: JSON file path for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
+        description: Custom JSON, or workload list if checkpoint_path is empty
+        required: false
+        type: string
+      warmup:
+        description: emu -W (default 20000000)
+        required: false
+        type: string
+      max_instr:
+        description: emu -I (default 40000000)
+        required: false
+        type: string
+      max_cycles:
+        description: emu -C (omit for unlimited)
         required: false
         type: string
 
@@ -99,3 +107,6 @@ jobs:
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}
+        warmup: ${{ github.event.inputs.warmup }}
+        max_instr: ${{ github.event.inputs.max_instr }}
+        max_cycles: ${{ github.event.inputs.max_cycles }}

@@ -67,7 +67,8 @@ class SrcSelectModule extends Module with HasVectorSettings {
             rs2 | uopNumD2M1
           } else {
             rd
-          })
+          }),
+        Src1SelectEnum.S2INC2P1 -> (rs2 + (2 * i + 1).U),
       ).map { case (k, v) => k.toUInt -> v }
     )
 
@@ -79,6 +80,7 @@ class SrcSelectModule extends Module with HasVectorSettings {
         Src2SelectEnum.INCF2 -> (rs2 + (i / 2).U),
         Src2SelectEnum.INCF4 -> (rs2 + (i / 4).U),
         Src2SelectEnum.CONST -> rs2,
+        Src2SelectEnum.INC2 -> (rs2 + (2 * i).U),
         Src2SelectEnum.INC1x7_S1 -> Mux1H(Seq(
           ((i == 0).B && uopNum(0)) -> rs1,
           ((i == 1).B && uopNum(1)) -> rs1,

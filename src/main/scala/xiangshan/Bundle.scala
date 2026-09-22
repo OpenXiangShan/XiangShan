@@ -94,11 +94,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
-  val fixedTaken = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
-  val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+  val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
   val loadWaitBit = Bool()
@@ -699,6 +698,8 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
 
   def shouldBeSext: Bool = sv39 || sv48
   def shouldBeZext: Bool = bare || sv39x4 || sv48x4
+
+  def extend(pc: UInt, len: Int): UInt = Mux(shouldBeSext, SignExt(pc, len), ZeroExt(pc, len))
 }
 
 object AddrTransType {

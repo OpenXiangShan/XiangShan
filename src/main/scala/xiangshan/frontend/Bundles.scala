@@ -53,6 +53,7 @@ import xiangshan.frontend.instruncache.InstrUncacheResp
 class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
   val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
+  val s2FtqPtr:   FtqPtr                     = Output(new FtqPtr)
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
 
   // perfMeta uses the same valid signal as meta
@@ -298,9 +299,8 @@ class FtqPcOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
-  val predTaken:  Bool = Bool()
-  val fixedTaken: Bool = Bool()
-  val offset:     UInt = UInt(FetchBlockInstOffsetWidth.W)
+  val predTaken: Bool = Bool()
+  val offset:    UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
@@ -315,7 +315,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val isBackendException: Bool          = Bool()
   val hasSatpFlush:       Bool          = Bool()
   val exceptionCrossPage: Bool          = Bool()
-  val exceptionMask:      Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
+  val exceptionMask:      UInt          = UInt(IBufferEnqueueWidth.W)
 
   val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
   val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
@@ -328,14 +328,15 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
+class IfuToGpAddrMem(implicit p: Parameters) extends FrontendBundle {
+  val wen:   Bool        = Bool()
+  val waddr: UInt        = UInt(log2Ceil(FtqSize).W)
+  val wdata: GPAMemEntry = new GPAMemEntry
+}
+
 class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
   // write to backend gpaddr mem
-  class ToGpAddrMem extends Bundle {
-    val wen:   Bool        = Bool()
-    val waddr: UInt        = UInt(log2Ceil(FtqSize).W)
-    val wdata: GPAMemEntry = new GPAMemEntry
-  }
-  val gpAddrMem: ToGpAddrMem = new ToGpAddrMem
+  val gpAddrMem: IfuToGpAddrMem = new IfuToGpAddrMem
 }
 
 object BlameBpuSource {

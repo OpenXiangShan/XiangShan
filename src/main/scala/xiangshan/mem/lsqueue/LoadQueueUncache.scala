@@ -204,7 +204,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.ncOut.bits := DontCare
 
   when(req.nc){
-    io.ncOut.valid := (uncacheState === s_wait) && !needFlush
+    io.ncOut.valid := (uncacheState === s_wait) // we will be flush in loadUnit s1, don't need to flush in s0.
     io.ncOut.bits := DontCare
     io.ncOut.bits.uop := req.uop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -213,7 +213,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
   }.otherwise{
-    io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
+    io.mmioOut.valid := (uncacheState === s_wait) // we will be flush in loadUnit s1, don't need to flush in s0.
     io.mmioOut.bits := DontCare
     io.mmioOut.bits.uop := req.uop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -228,9 +228,9 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
   }
-  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlush && !needFlushReg
+  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlushReg
   io.ncWakeup.bits := req.uop.lqIdx
-  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlush && !needFlushReg
+  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
   io.exception.valid := RegNext(writeback)

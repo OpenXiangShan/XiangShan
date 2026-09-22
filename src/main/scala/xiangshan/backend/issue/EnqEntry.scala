@@ -152,22 +152,12 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
-class EnqEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
-  with HasCircularQueuePtrHelper {
-
-  require(params.isVecMemIQ, "EnqEntryVecMem can only be instance of VecMem IQ")
-
-  EntryVecMemConnect(io.commonIn, entryReg, entryUpdate)
-}
-
 object EnqEntry {
   def apply(isComp: Boolean)(implicit p: Parameters, iqParams: IssueBlockParams): EnqEntry = {
     iqParams.schdType match {
       case IntScheduler() => new EnqEntry(isComp)
       case FpScheduler()  => new EnqEntry(isComp)
-      case VecScheduler() =>
-        if (iqParams.isVecMemIQ) new EnqEntryVecMem(isComp)
-        else new EnqEntry(isComp)
+      case VecScheduler() => new EnqEntry(isComp)
       case _ => null
     }
   }

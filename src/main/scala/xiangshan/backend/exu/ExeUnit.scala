@@ -41,7 +41,11 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val toFrontendBJUResolve = Option.when(params.hasBrhFu)(Valid(new Resolve))
   val I2FDataIn = Option.when(params.needDataFromI2F)(Flipped(ValidIO(UInt(XLEN.W))))
-  val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped((new Bundle {
+    val valid = Bool()
+    val pdest = UInt(FpPhyRegIdxWidth.W)
+    val data = UInt(XLEN.W)
+  })))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
@@ -49,7 +53,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVlRf)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVlRf)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVlRf)(Output(Bool()))
-  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasBrhFu || params.hasAluFu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasLinkFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
 class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {
@@ -59,12 +63,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   val funcUnits = fuCfgs.map(cfg => {
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
-    if (exuParams.aluNeedPc && cfg.isAlu) {
-      AluCfg.aluNeedPc = true
-      println(s"[ExeUnit] ${exuParams.name}'s alu need pc")
-    }
     val module = cfg.fuGen(p, cfg)
-    AluCfg.aluNeedPc = false
     module
   })
 
@@ -194,10 +193,10 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ctrl.ftqOffset.get)
       sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.ctrl.predictInfo.get)
       sink.bits.ctrl.fflagsWen   .foreach(x => x := source.bits.ctrl.fflagsWen.get)
-      sink.bits.ctrl.vpu         .foreach(x => x := source.bits.ctrl.vpu.get)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+      sink.bits.ctrl.vm          .foreach(x => x := source.bits.ctrl.vm.get)
+      sink.bits.ctrl.uopIdx      .foreach(x => x := source.bits.ctrl.uopIdx.get)
+      sink.bits.ctrl.lastUop     .foreach(x => x := source.bits.ctrl.lastUop.get)
+      sink.bits.ctrl.vtype       .foreach(x => x := source.bits.ctrl.vtype.get)
       sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
       sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
@@ -229,11 +228,10 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.ftqOffset.foreach(  x => x := source.ctrl.ftqOffset.get)
       sink.predictInfo.foreach(x => x := source.ctrl.predictInfo.get)
       sink.fflagsWen.foreach(x => x := source.ctrl.fflagsWen.get)
-      sink.vpu.foreach(x => x := source.ctrl.vpu.get)
-      sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
-      sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
-      sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)
-      sink.vpu.foreach(x => x.maskVecGen := 0.U)
+      sink.vm.foreach(x => x := source.ctrl.vm.get)
+      sink.uopIdx.foreach(x => x := source.ctrl.uopIdx.get)
+      sink.lastUop.foreach(x => x := source.ctrl.lastUop.get)
+      sink.vtype.foreach(x => x := source.ctrl.vtype.get)
       sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       sink.frm.foreach(_ := source.ctrl.frm.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
@@ -311,7 +309,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
           fuoutOH && fu.io.out.bits.ctrl.rfWen.getOrElse(false.B) })
       }
     val data = if (exuParams.needDataFromF2I) {
-        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.bits)
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.data)
       } else {
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data })
       }
@@ -359,7 +357,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   val criticalErrors = funcUnits.filter(fu => fu.cfg.needCriticalErrors).flatMap(fu => fu.getCriticalErrors)
   generateCriticalErrors()
 
-  val F2IIntWen = io.F2IDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val F2IIntWen = io.F2IDataIn.map(_.valid).getOrElse(false.B)
 
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach{ fu =>
@@ -414,7 +412,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.toV0Rf.           foreach(x => x.bits  := outV0Data.get)
   io.out.bits.toVlRf.           foreach(x => x.valid := Mux1H(fuOutValidOH, fuVlWenVec))
   io.out.bits.toVlRf.           foreach(x => x.bits  := outVlData.get)
-  io.out.bits.pdest                                  := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
+  val F2IPdest = io.F2IDataIn.map(_.pdest).getOrElse(0.U)
+  io.out.bits.pdest                                  := Mux1H(fuOutValidOH :+ F2IIntWen, fuOutBitsVec.map(_.ctrl.pdest) :+ F2IPdest)
   io.out.bits.pdestV0.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestV0.getOrElse(0.U))))
   io.out.bits.pdestVl.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestVl.getOrElse(0.U))))
   io.out.bits.redirect.               foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))

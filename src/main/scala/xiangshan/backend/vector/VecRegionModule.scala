@@ -32,6 +32,8 @@ import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
+import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
 
@@ -123,65 +125,76 @@ class VecRegionImp(
   private val v0WbPortIdxMap = v0RegfileWbPortIds.zipWithIndex.toMap
   private val vlWbPortIdxMap = vlRegfileWbPortIds.zipWithIndex.toMap
 
-  private val intWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
-    issueQueues, _.out.toWbFuBusyTable.intWbFuBusyTableIn, _.intWbPortIds
+  private val intNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getGpWriteCfg.map(_.port), _.writeIntRf)
+  private val fpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getFpWriteCfg.map(_.port), _.writeFpRf)
+  private val vpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVpWriteCfg.map(_.port), _.writeVecRf)
+  private val v0NonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getV0WriteCfg.map(_.port), _.writeV0Rf)
+  private val vlNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVlWriteCfg.map(_.port), _.writeVlRf)
+
+  private val intWbFuBusyTable = buildWbFuBusyTable(
+    intRegfileWbPortIds,
+    nonFixedLatFuPortIndices(_.intNonFixedLatFuWbPortIds, intWbPortIdxMap),
   )
-  private val fpWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
-    issueQueues, _.out.toWbFuBusyTable.fpWbFuBusyTableIn, _.fpWbPortIds
+  private val fpWbFuBusyTable = buildWbFuBusyTable(
+    fpRegfileWbPortIds,
+    nonFixedLatFuPortIndices(_.fpNonFixedLatFuWbPortIds, fpWbPortIdxMap),
   )
-  private val vpWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
-    issueQueues, _.out.toWbFuBusyTable.vpWbFuBusyTableIn, _.vpWbPortIds
+  private val vpWbFuBusyTable = buildWbFuBusyTable(
+    vpRegfileWbPortIds,
+    nonFixedLatFuPortIndices(_.vpNonFixedLatFuWbPortIds, vpWbPortIdxMap),
   )
-  private val v0WbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
-    issueQueues, _.out.toWbFuBusyTable.v0WbFuBusyTableIn, _.v0WbPortIds
+  private val v0WbFuBusyTable = buildWbFuBusyTable(
+    v0RegfileWbPortIds,
+    nonFixedLatFuPortIndices(_.v0NonFixedLatFuWbPortIds, v0WbPortIdxMap),
   )
-  private val vlWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
-    issueQueues, _.out.toWbFuBusyTable.vlWbFuBusyTableIn, _.vlWbPortIds
+  private val vlWbFuBusyTable = buildWbFuBusyTable(
+    vlRegfileWbPortIds,
+    nonFixedLatFuPortIndices(_.vlNonFixedLatFuWbPortIds, vlWbPortIdxMap),
   )
 
-  private val intWbFuBusyTable: WbFuBusyTable = if (intRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(intRegfileWbPortIds.size)) else null
-  private val fpWbFuBusyTable: WbFuBusyTable = if (fpRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(fpRegfileWbPortIds.size)) else null
-  private val vpWbFuBusyTable: WbFuBusyTable = if (vpRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(vpRegfileWbPortIds.size)) else null
-  private val v0WbFuBusyTable: WbFuBusyTable = if (v0RegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(v0RegfileWbPortIds.size)) else null
-  private val vlWbFuBusyTable: WbFuBusyTable = if (vlRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(vlRegfileWbPortIds.size)) else null
+  private val intWbFuBusyTableRead = connectWbFuBusyTable(
+    intWbFuBusyTable, "Int", intRegfileWbPortIds,
+    issueQueueWbSources(_.out.toWbFuBusyTable.intWbFuBusyTableIn, _.intWbPortIds),
+    intNonFixedLatFuWbSources,
+  )
+  private val fpWbFuBusyTableRead = connectWbFuBusyTable(
+    fpWbFuBusyTable, "Fp", fpRegfileWbPortIds,
+    issueQueueWbSources(_.out.toWbFuBusyTable.fpWbFuBusyTableIn, _.fpWbPortIds),
+    fpNonFixedLatFuWbSources,
+  )
+  private val vpWbFuBusyTableRead = connectWbFuBusyTable(
+    vpWbFuBusyTable, "Vp", vpRegfileWbPortIds,
+    issueQueueWbSources(_.out.toWbFuBusyTable.vpWbFuBusyTableIn, _.vpWbPortIds),
+    vpNonFixedLatFuWbSources,
+  )
+  private val v0WbFuBusyTableRead = connectWbFuBusyTable(
+    v0WbFuBusyTable, "V0", v0RegfileWbPortIds,
+    issueQueueWbSources(_.out.toWbFuBusyTable.v0WbFuBusyTableIn, _.v0WbPortIds),
+    v0NonFixedLatFuWbSources,
+  )
+  private val vlWbFuBusyTableRead = connectWbFuBusyTable(
+    vlWbFuBusyTable, "Vl", vlRegfileWbPortIds,
+    issueQueueWbSources(_.out.toWbFuBusyTable.vlWbFuBusyTableIn, _.vlWbPortIds),
+    vlNonFixedLatFuWbSources,
+  )
 
-  private val intWbFuBusyTableRead = if (intWbFuBusyTable != null) {
-    intWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Int", intRegfileWbPortIds, intWbFuBusyTableSources)
-    intWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
-  } else {
-    Map.empty[Int, UInt]
-  }
-  private val fpWbFuBusyTableRead = if (fpWbFuBusyTable != null) {
-    fpWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Fp", fpRegfileWbPortIds, fpWbFuBusyTableSources)
-    fpWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
-  } else {
-    Map.empty[Int, UInt]
-  }
-  private val vpWbFuBusyTableRead = if (vpWbFuBusyTable != null) {
-    vpWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Vp", vpRegfileWbPortIds, vpWbFuBusyTableSources)
-    vpWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
-  } else {
-    Map.empty[Int, UInt]
-  }
-  private val v0WbFuBusyTableRead = if (v0WbFuBusyTable != null) {
-    v0WbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("V0", v0RegfileWbPortIds, v0WbFuBusyTableSources)
-    v0WbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
-  } else {
-    Map.empty[Int, UInt]
-  }
-  private val vlWbFuBusyTableRead = if (vlWbFuBusyTable != null) {
-    vlWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Vl", vlRegfileWbPortIds, vlWbFuBusyTableSources)
-    vlWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
-  } else {
-    Map.empty[Int, UInt]
-  }
+  private val intCtrlBlockRead = ctrlBlockRead(intWbFuBusyTable)
+  private val fpCtrlBlockRead = ctrlBlockRead(fpWbFuBusyTable)
+  private val vpCtrlBlockRead = ctrlBlockRead(vpWbFuBusyTable)
+  private val v0CtrlBlockRead = ctrlBlockRead(v0WbFuBusyTable)
+  private val vlCtrlBlockRead = ctrlBlockRead(vlWbFuBusyTable)
 
   issueQueues.foreach { iq =>
-    iq.in.fromWbFuBusyTable.intWbFuBusyTableRead.foreach(_.zip(iq.param.intWbPortIds).foreach { case (sink, portId) => sink := intWbFuBusyTableRead(intWbPortIdxMap(portId)) })
-    iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead.foreach(_.zip(iq.param.fpWbPortIds).foreach { case (sink, portId) => sink := fpWbFuBusyTableRead(fpWbPortIdxMap(portId)) })
-    iq.in.fromWbFuBusyTable.vpWbFuBusyTableRead.foreach(_.zip(iq.param.vpWbPortIds).foreach { case (sink, portId) => sink := vpWbFuBusyTableRead(vpWbPortIdxMap(portId)) })
-    iq.in.fromWbFuBusyTable.v0WbFuBusyTableRead.foreach(_.zip(iq.param.v0WbPortIds).foreach { case (sink, portId) => sink := v0WbFuBusyTableRead(v0WbPortIdxMap(portId)) })
-    iq.in.fromWbFuBusyTable.vlWbFuBusyTableRead.foreach(_.zip(iq.param.vlWbPortIds).foreach { case (sink, portId) => sink := vlWbFuBusyTableRead(vlWbPortIdxMap(portId)) })
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.intWbFuBusyTableRead, iq.param.intWbPortIds, intWbFuBusyTableRead, intWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead, iq.param.fpWbPortIds, fpWbFuBusyTableRead, fpWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.vpWbFuBusyTableRead, iq.param.vpWbPortIds, vpWbFuBusyTableRead, vpWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.v0WbFuBusyTableRead, iq.param.v0WbPortIds, v0WbFuBusyTableRead, v0WbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.vlWbFuBusyTableRead, iq.param.vlWbPortIds, vlWbFuBusyTableRead, vlWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.intCtrlBlockRead, iq.param.intWbPortIds, intCtrlBlockRead, intWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.fpCtrlBlockRead, iq.param.fpWbPortIds, fpCtrlBlockRead, fpWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.vpCtrlBlockRead, iq.param.vpWbPortIds, vpCtrlBlockRead, vpWbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.v0CtrlBlockRead, iq.param.v0WbPortIds, v0CtrlBlockRead, v0WbPortIdxMap)
+    connectBusyTableRead(iq.in.fromWbFuBusyTable.vlCtrlBlockRead, iq.param.vlWbPortIds, vlCtrlBlockRead, vlWbPortIdxMap)
   }
 
   issueQueues.filterNot(_.param.hasVStd).zipWithIndex.foreach {
@@ -204,7 +217,7 @@ class VecRegionImp(
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
       iq.in.wakeup.gpWbVec := in.fromIntRegion.gpWbWakeUp
-      iq.in.wakeup.fpWbVec := in.fromFltRegion.fpWbWakeUp
+      iq.in.wakeup.fpWbVec := in.fromFltRegion.wbWakeUp
       iq.in.wakeup.vlWb0Vec.foreach(_ := in.vlWb0WakeUp)
       iq.in.wakeup.v0WbVec.foreach(
         _.zipWithIndex.foreach { case (wakeup, i) =>
@@ -218,7 +231,7 @@ class VecRegionImp(
         vpWbM3WakeUp.size == iq.in.wakeup.vpWbM3Vec.size,
         s"vpWbM3WakeUp: ${vpWbM3WakeUp.size}, iq.in.wakeup.vpWbM3Vec: ${iq.in.wakeup.vpWbM3Vec.size}"
       )
-      iq.in.wakeup.vpWbM3Vec := vpWbM3WakeUp
+      iq.in.wakeup.vpWbM3Vec := VecInit(vpWbM3WakeUp)
   }
 
 
@@ -235,10 +248,14 @@ class VecRegionImp(
       pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
+      out.toFltRegion.is1RdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1FpRdAddrNext
+      // TODO
+      out.toFltRegion.wbNext := 0.U.asTypeOf(out.toFltRegion.wbNext)
+      out.toFltRegion.wbM3Wakeup := 0.U.asTypeOf(out.toFltRegion.wbM3Wakeup)
       pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
-      pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
+      pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is2RdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
-      pipe.in.is2FpRdFailNext := in.fromFltRegion.is0FpRdDataFail(iqIdx)(pipeIdx)
+      pipe.in.is2FpRdFailNext := in.fromFltRegion.is1RdDataFailNext(iqIdx)(pipeIdx)
 
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.vxrm.foreach(_ := in.fromCSR.vxrm)
@@ -247,7 +264,7 @@ class VecRegionImp(
       pipe.in.vpWb0 := vpWbDataPath.out.wb0.map(_.data)
       pipe.in.vpWb1 := vpWbDataPath.out.wb1.map(_.data)
       pipe.in.gpWb0 := 0.U.asTypeOf(pipe.in.gpWb0) // TODO: vec read gp bypass
-      pipe.in.fpWb0 := 0.U.asTypeOf(pipe.in.fpWb0) // TODO: vec read fp bypass
+      pipe.in.fpWb0 := ShiftRegister(in.fromFltRegion.wb0, 3)
     }
   }
 
@@ -345,7 +362,7 @@ class VecRegionImp(
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
 
-  out.toDispatch.wakeUpVec := vpWbM3WakeUp
+  out.toDispatch.wakeUpVec := VecInit(vpWbM3WakeUp)
 
   for ((iq, i) <- issueQueues.filter(_.param.hasVStd).zipWithIndex) {
     out.toIntRegion.vstdCanAccept(i).foreach(_ := iq.out.canAccept)
@@ -411,6 +428,66 @@ class VecRegionImp(
     difftest.value := vecDiffReadData.get
   }
 
+  private def issueQueueWbSources(
+    sinkSel: VecIssueQueue => Option[WbFuBusyTable.In],
+    wbPortIdsSel: IssueParam => Seq[Int],
+  ): Seq[WbFuBusyTable.Source] =
+    WbFuBusyTable.issueQueueSources(issueQueues, sinkSel, wbPortIdsSel)
+
+  private def nonFixedLatFuWbSources(
+    wbPortSel: ExuParam => Option[Int],
+    writeSel: VecFuConfig => Boolean,
+  ): Seq[WbFuBusyTable.Source] =
+    issuePipes.flatten.flatMap { pipe =>
+      pipe.out.outFuLat.toSeq.flatMap { latencies =>
+        latencies.zip(pipe.param.nonFixedLatFuConfigs).flatMap { case (latency, fuCfg) =>
+          wbPortSel(pipe.param)
+            .filter(_ => writeSel(fuCfg))
+            .map(port => WbFuBusyTable.Source.NonFixedLatFu(port, latency.valid, latency.bits))
+        }
+      }
+    }
+
+  private def nonFixedLatFuPortIndices(
+    wbPortIdsSel: IssueParam => Seq[Int],
+    wbPortIdxMap: Map[Int, Int],
+  ): Seq[Int] =
+    param.issueParams.flatMap(wbPortIdsSel).distinct.flatMap(wbPortIdxMap.get)
+
+  private def buildWbFuBusyTable(
+    regfileWbPortIds: Seq[Int],
+    nonFixedLatFuPortIndices: Seq[Int],
+  ): Option[WbFuBusyTable] =
+    Option.when(regfileWbPortIds.nonEmpty)(
+      Module(new WbFuBusyTable(regfileWbPortIds.size, nonFixedLatFuPortIndices))
+    )
+
+  private def connectWbFuBusyTable(
+    table: Option[WbFuBusyTable],
+    wbType: String,
+    regfileWbPortIds: Seq[Int],
+    issueSources: Seq[WbFuBusyTable.Source],
+    nonFixedLatFuSources: Seq[WbFuBusyTable.Source],
+  ): Map[Int, UInt] =
+    table.map { t =>
+      t.in =#> WbFuBusyTable.ConnectInfo(wbType, regfileWbPortIds, issueSources ++ nonFixedLatFuSources)
+      t.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+    }.getOrElse(Map.empty)
+
+  private def ctrlBlockRead(table: Option[WbFuBusyTable]): Map[Int, WbFuBusyTable.CtrlBlockEntry] =
+    table.map(_.out.ctrlBlock.zipWithIndex.map(_.swap).toMap).getOrElse(Map.empty)
+
+  private def connectBusyTableRead[T <: Data](
+    sink: Option[Vec[T]],
+    wbPortIds: Seq[Int],
+    tableRead: Map[Int, T],
+    wbPortIdxMap: Map[Int, Int],
+  ): Unit = {
+    sink.foreach(_.zip(wbPortIds).foreach { case (readPort, wbPortId) =>
+      readPort := tableRead(wbPortIdxMap(wbPortId))
+    })
+  }
+
 }
 
 object VecRegionModule {
@@ -442,12 +519,7 @@ object VecRegionModule {
       // Todo: bypass data
     }
 
-    val fromFltRegion = new Bundle {
-      val is0FpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
-      val is1FpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
-      val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
-      // Todo: bypass data
-    }
+    val fromFltRegion = new FromFltRegion
 
     val fromCSR = new Bundle {
       val vxrm = Vxrm()
@@ -505,6 +577,8 @@ object VecRegionModule {
       )
     }
 
+    val toFltRegion = new ToFltRegion
+
     val toMem = new OutToMem
 
     val toRob = new Bundle {
@@ -545,6 +619,19 @@ object VecRegionModule {
   class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val vstd: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
       param.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
+  }
+
+  class FromFltRegion(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    val is1RdDataFailNext: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
+    val is2RdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
+    val wbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
+    val wb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
+  }
+
+  class ToFltRegion(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    val is1RdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] = param.genRfRdAddrBundle(backendParams.fpPregParams)
+    val wbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
+    val wbM3Wakeup = Vec(param.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
   }
 
   class DiffIn(implicit p: Parameters) extends XSBundle {

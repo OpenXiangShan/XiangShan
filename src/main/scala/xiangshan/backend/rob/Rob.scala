@@ -148,7 +148,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
 
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
-  val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
@@ -1065,6 +1064,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
+    // [[wbCnt]] is the number of writebacks that can update this entry. [[canWbSeq]] is 1-hot writeback valid signal
+    // with corresponding robIdx value. all exuWBs must have distinct robIdx value
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
 
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
@@ -1259,18 +1260,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.crossPageIPFFix := false.B
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.orR || TriggerAction.isDmode(trigger) else 0.U)
-    exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
-    exc_wb.bits.vuopIdx := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vuopIdx else 0.U)
-    exc_wb.bits.isVecLoad := wb.bits.vls.map(_.isVecLoad).getOrElse(false.B)
-    exc_wb.bits.isVlm := wb.bits.vls.map(_.isVlm).getOrElse(false.B)
-    exc_wb.bits.isStrided := wb.bits.vls.map(_.isStrided).getOrElse(false.B) // strided need two mode tmp vreg
-    exc_wb.bits.isIndexed := wb.bits.vls.map(_.isIndexed).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
-    exc_wb.bits.isWhole := wb.bits.vls.map(_.isWhole).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
-    exc_wb.bits.nf := wb.bits.vls.map(_.vpu.nf).getOrElse(0.U)
-    exc_wb.bits.vsew := wb.bits.vls.map(_.vpu.vsew).getOrElse(0.U)
-    exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
-    exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
+    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isStrided := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isIndexed := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isWhole := false.B // Todo[Vector]: remove it
+    exc_wb.bits.nf := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vsew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
   }
 
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
@@ -1388,6 +1389,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.div.U)
   XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.brh.U)
   XSPerfAccumulate("waitJmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.jmp.U)
+  XSPerfAccumulate("waitLinkCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.link.U)
   XSPerfAccumulate("waitCsrCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.csr.U)
   XSPerfAccumulate("waitFenCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fence.U)
   XSPerfAccumulate("waitBkuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.bku.U)
@@ -1396,20 +1398,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mou.U)
 
   XSPerfAccumulate("waitfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.falu.U)
-  XSPerfAccumulate("waitfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmac.U)
+  XSPerfAccumulate("waitfmulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmul.U)
   XSPerfAccumulate("waitfcvtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcvt.U)
   XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
   XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
 
-  XSPerfAccumulate("waitVfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfalu.U)
-  XSPerfAccumulate("waitVfmaCycle" , deqNotWritebacked && deqHeadInfoFuType === FuType.vfma.U)
+  XSPerfAccumulate("waitVfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfmac.U)
   XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
-
-  val vfalufuop = Seq() // Todo: vector pma
-
-  vfalufuop.zipWithIndex.map{
-    case(fuoptype,i) =>  XSPerfAccumulate(s"waitVfalu_${i}Cycle", deqNotWritebacked && deqHeadInfoFuType === fuoptype && deqHeadInfoFuType === FuType.vfalu.U)
-  }
 
   XSPerfAccumulate("waitNormalCycle", deqNotWritebacked && deqUopCommitType === CommitType.NORMAL)
   XSPerfAccumulate("waitBranchCycle", deqNotWritebacked && Itype.isBranch(debug_deqUop.traceBlockInPipe.itype))
@@ -1544,15 +1539,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val debug_VecOtherPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(8)(0.U(PhyRegIdxWidth.W))))
 
-  vldWBs.map{ vldWb =>
-    val vldWbPdest  = vldWb.bits.pdest
-    val vldWbRobIdx = vldWb.bits.robIdx.value
-    val vldWbvdIdx  = vldWb.bits.vls.get.vdIdx
-    when (vldWb.fire && robEntries(vldWbRobIdx).valid && (vldWb.bits.vecWen.get || vldWb.bits.v0Wen.get)) {
-      debug_VecOtherPdest(vldWbRobIdx)(vldWbvdIdx) := vldWbPdest
-    }
-  }
-
   // topdown
   val notIssue = !debug_lsIssue(deqPtr.value)
   val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
@@ -1668,8 +1654,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         (robHeadTime < idealWaitTime)
       val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
         FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
-        FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
-        FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
+        FuType.isStore(robHeadFutype)  -> StoreStall.id.U           ,
+        FuType.isLoad(robHeadFutype)    -> ldReason                  ,
         FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
         FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
         FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
@@ -1786,7 +1772,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       if (fullBasicDiff) {
         val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)
-        difftest.pc := Mux(pcTransType.shouldBeSext, SignExt(uop.debug_pc.getOrElse(0.U), XLEN), uop.debug_pc.getOrElse(0.U))
+        difftest.pc := pcTransType.extend(uop.debug_pc.getOrElse(0.U), XLEN)
         difftest.instr := uop.debug_instr.getOrElse(0.U)
         difftest.robIdx := ZeroExt(ptr, 10)
         difftest.lqIdx := ZeroExt(uop.debug_lqIdx.getOrElse(0.U.asTypeOf(new LqPtr)).value, 7)

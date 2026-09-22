@@ -35,10 +35,7 @@ class VectorDecodeChannel(
   import VectorDecodeChannel._
 
   @public val in = IO(Input(new DecodeChannelInput))
-  @public val out = IO(Output(new Bundle {
-    val uop = Vec(maxSplitUopNum, ValidIO(new VecDecodeChannelOutputUop))
-    val uopNumOH = NumUopOH()
-  }))
+  @public val out = IO(Output(new VecDecodeChannelOutput(maxSplitUopNum)))
 
   val rawInst = in.rawInst
   val sew = in.sew
@@ -115,6 +112,7 @@ class VectorDecodeChannel(
     Src12RevField,
     VdEew1bField,
     AlwaysTaField,
+    DirtyVsField,
     CommitTypeField,
     IsVecMemContinousField,
     ImmIsSign5b,
@@ -227,6 +225,7 @@ class VectorDecodeChannel(
   dontTouch(vecExceptionGen.out)
 
   val alwaysTa = instBundle(AlwaysTaField)
+  val dirtyVs = instBundle(DirtyVsField)
 
   // TODO: temporarily remove vecOverlapAgnostic from ma/ta for difftest
   val ma = in.ma
@@ -253,6 +252,7 @@ class VectorDecodeChannel(
     out.uop(i).bits.frmRen := instBundle(FrmRenField)
     out.uop(i).bits.v0Ren := !instFields.VM
     out.uop(i).bits.fflagsWen := instBundle(FFlagsWenField)
+    out.uop(i).bits.dirtyVs := dirtyVs
     out.uop(i).bits.frm := instBundle(FrmField)
     out.uop(i).bits.uopDepend := false.B // Todo
     out.uop(i).bits.src12Rev := instBundle(Src12RevField)
@@ -339,6 +339,7 @@ object VectorDecodeChannel {
     val v0Ren = Bool()
     val frmRen = Bool()
     val fflagsWen = Bool()
+    val dirtyVs = Bool()
     val frm = Frm()
     val uopDepend = Bool()
     val src12Rev = Bool()
@@ -358,4 +359,11 @@ object VectorDecodeChannel {
 
     val exceptionII = Bool()
   }
+
+  class VecDecodeChannelOutput(val uopWidth: Int) extends Bundle {
+    val uop = Vec(uopWidth, ValidIO(new VecDecodeChannelOutputUop))
+    val uopNumOH = NumUopOH()
+  }
 }
+
+

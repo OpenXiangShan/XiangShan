@@ -178,6 +178,9 @@ class UopNumDecoder(val splitTypeOneHot: Boolean = false) extends Module with Ha
   if (splitTypeOneHot) {
     out.uopNumOH := Mux1H(Seq(
       Cat(Seq(
+        VFNCVT,
+      ).map(_.litValue).map(i => in.splitTypeOH(i))).orR -> lmulOH,
+      Cat(Seq(
         WVV,
         WVW,
         VVW,

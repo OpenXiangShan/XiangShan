@@ -11,9 +11,11 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile._
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.fu.FuType
 
 import scala.beans.BeanProperty
 
@@ -223,6 +225,8 @@ class ExuParam(
 
   def hasVStd: Boolean = fuConfigs.exists(Seq(VecFuConfig.VStdCfg).contains)
 
+  def hasVfmac: Boolean = fuConfigs.contains(VecFuConfig.VfmacCfg)
+
   def genBundle[T <: Bundle](
     cond: ExuParam => Boolean,
     gen: => T,
@@ -230,7 +234,7 @@ class ExuParam(
     Option.when(cond(this))(gen)
   }
 
-  def genRfRdAddrBundle(pregParams: PregParams): MixedVec[RfReadAddrBundle] = MixedVec(
+  def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
            FpPregParams(_, _, _, _) |
@@ -303,6 +307,12 @@ class ExuParam(
 
   @BeanProperty
   var exeUnitParams: ExeUnitParams = _
+
+  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(cfg => Seq(FuType.vidiv, FuType.vfdiv, FuType.fDivSqrt).contains(cfg.fuType))
+
+  def numNonFixedLatFu: Int = nonFixedLatFuConfigs.size
+
+  def hasNonFixedLatFu: Boolean = numNonFixedLatFu > 0
 }
 
 object ExuParam {

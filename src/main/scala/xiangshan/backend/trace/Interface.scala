@@ -6,8 +6,6 @@ import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 import xiangshan.HasXSParameter
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.backend.fu.FuType
-import xiangshan.JumpOpType
 
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
@@ -79,22 +77,19 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
-  def jumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
+  def jumpTypeGen(isJ: Bool, isJr: Bool, isBranch: Bool, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
-    val isJal       = FuType.isJump(fuType) && fuoptype === JumpOpType.jal
-    val isJalr      = FuType.isJump(fuType) && fuoptype === JumpOpType.jalr
-    val isBranch    = FuType.isBrh(fuType)
 
     // push to RAS when rd is link, pop from RAS when rs is link
-    def isUninferableCall      = isJalr && rd.isLink && (!rs.isLink || rs.isLink && isEqualRdRs)  //8   push
-    def isInferableCall        = isJal && rd.isLink                                               //9   push
-    def isUninferableTailCall  = isJalr && rd.isX0 && !rs.isLink                                  //10  no op
-    def isInferableTailCall    = isJal && rd.isX0                                                 //11  no op
-    def isCoRoutineSwap        = isJalr && rd.isLink && rs.isLink && !isEqualRdRs                 //12  pop then push
-    def isFunctionReturn       = isJalr && !rd.isLink && rs.isLink                                //13  pop
-    def isOtherUninferableJump = isJalr && !rd.isLink && !rd.isX0 && !rs.isLink                   //14  no op
-    def isOtherInferableJump   = isJal && !rd.isLink && !rd.isX0                                  //15  no op
+    def isUninferableCall      = isJr && rd.isLink && (!rs.isLink || rs.isLink && isEqualRdRs)  //8   push
+    def isInferableCall        = isJ  && rd.isLink                                              //9   push
+    def isUninferableTailCall  = isJr && rd.isX0 && !rs.isLink                                  //10  no op
+    def isInferableTailCall    = isJ  && rd.isX0                                                //11  no op
+    def isCoRoutineSwap        = isJr && rd.isLink && rs.isLink && !isEqualRdRs                 //12  pop then push
+    def isFunctionReturn       = isJr && !rd.isLink && rs.isLink                                //13  pop
+    def isOtherUninferableJump = isJr && !rd.isLink && !rd.isX0 && !rs.isLink                   //14  no op
+    def isOtherInferableJump   = isJ  && !rd.isLink && !rd.isX0                                 //15  no op
 
     val jumpType = Mux1H(
       Seq(
@@ -121,7 +116,7 @@ object Itype extends NamedUInt(4) {
       )
     )
 
-    Mux(isBranch || isJal || isJalr, jumpType, 0.U)
+    Mux(isBranch || isJ || isJr, jumpType, 0.U)
   }
 
   def isTrap(itype: UInt) = Seq(Exception, Interrupt).map(_ === itype).reduce(_ || _)

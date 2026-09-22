@@ -55,6 +55,7 @@ $(PDB_HOME)/libUTSimTop.so: $(PDB_HOME)/picker.f
 		--lang python \
 		--tdir $(PDB_HOME)/pyxscore \
 		--fs $(PDB_HOME)/picker.f \
+		-S "-I$(NOOP_HOME)/build/generated-src" \
 		-V "--output-split;20000;--no-timing;--threads;8;+define+DIFFTEST;-I$(NOOP_HOME)/build/generated-src" \
 		-C "-fPIC -lz -I$(PICKER_INCLUDE) -L$(PDB_HOME)/pydifftest -ldifftest -Wl,-rpath='$$ORIGIN../pydifftest' -lpython$(PYTHON_VERSION) $(SIM_LDFLAGS)" 
 

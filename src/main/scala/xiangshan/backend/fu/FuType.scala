@@ -13,7 +13,8 @@ object FuType extends ChiselOHEnum {
   val FuTypeOrR: IsOneOf.type = IsOneOf
 
   // int
-  val jmp = addType(name = "jmp")
+  val jmp = addType(name = "njmp")
+  val link = addType(name = "link")
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
@@ -27,7 +28,7 @@ object FuType extends ChiselOHEnum {
 
   // fp
   val falu = addType(name = "falu")
-  val fmac = addType(name = "fmac")
+  val fmul = addType(name = "fmul")
   val fcvt = addType(name = "fcvt")
   val fDivSqrt = addType(name = "fDivSqrt")
   val fcmp = addType(name = "fcmp")
@@ -38,29 +39,24 @@ object FuType extends ChiselOHEnum {
   val mou = addType(name = "mou")
 
   // vec
-  val vipu = addType(name = "vipu")
+  val vset = addType(name = "vset")
   val vmpu = addType(name = "vmpu")
   val vialu = addType(name = "vialu")
-  val vppu = addType(name = "vppu")
   val vimac = addType(name = "vimac")
   val vidiv = addType(name = "vidiv")
-  val vfalu = addType(name = "vfalu")
-  val vmove = addType(name = "vmove")
-  val vfma = addType(name = "vfma")
+
+  val vfmac = addType(name = "vfmac")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
-  val vset = addType(name = "vset")
 
-  // vec ls
-  val vldu = addType(name = "vldu")
-  val vstu = addType(name = "vstu")
-  val vsegldu = addType(name = "vsegldu")
-  val vsegstu = addType(name = "vsegstu")
+  val vmove = addType(name = "vmove")
+  val vredu = addType(name = "vredu")
+  val vperm = addType(name = "vperm")
 
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
 
-  val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -111,19 +107,13 @@ object FuType extends ChiselOHEnum {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
+  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialu, vppu, vimac, vidiv)
-  val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val vecOPI = Seq(vialu, vimac, vidiv)
+  val vecOPF = Seq(vfmac, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
-  val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
-  val vecArithOrMem = vecArith ++ vecMem
-  val vecMove = Seq(vmove)
-  val vecAll = vecVSET ++ vecArithOrMem ++ vecMove
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
-  val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
-  val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
   val blockBackCompress = Seq(brh, jmp)
 
   def X = BitPat.N(num) // Todo: Don't Care
@@ -148,11 +138,11 @@ object FuType extends ChiselOHEnum {
 
   def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
 
-  def isVall(futype: UInt): Bool = FuTypeOrR(futype, vecAll)
-
   def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 
   def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp))
+
+  def isLink(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(link))
 
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
@@ -168,6 +158,12 @@ object FuType extends ChiselOHEnum {
 
   def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
 
+  def isFmul(fuType: UInt): Bool = FuTypeOrR(fuType, fmul)
+
+  def isFalu(fuType: UInt): Bool = FuTypeOrR(fuType, falu)
+
+  def isFdiv(fuType: UInt): Bool = FuTypeOrR(fuType, fDivSqrt)
+
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
   def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
@@ -176,48 +172,15 @@ object FuType extends ChiselOHEnum {
 
   def isVIAlu(fuType: UInt): Bool = FuTypeOrR(fuType, vialu)
 
-  def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu)
-
-  def isVnonsegls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu)
-
-  def isVsegls(futype: UInt): Bool = FuTypeOrR(futype, vsegldu, vsegstu)
-
-  def isVLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vsegldu)
-
-  def isVStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu, vsegstu)
-
-  def isVSegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vsegldu)
-
-  def isVSegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vsegstu)
-
-  def isVNonsegLoad(fuType: UInt): Bool = FuTypeOrR(fuType, vldu)
-
-  def isVNonsegStore(fuType: UInt): Bool = FuTypeOrR(fuType, vstu)
-
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
-
-  def isVecOPFFma(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
-
-  def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
 
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
 
   def storeIsAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
-  def isVppu(fuType: UInt): Bool = FuTypeOrR(fuType, vppu)
-
-  def isScalaNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, scalaNeedFrm)
-
-  def isVectorNeedFrm(fuType: UInt): Bool = FuTypeOrR(fuType, vectorNeedFrm)
-
   def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
 
-  def isStoreVstore(fuType: UInt): Bool = isStore(fuType) || isVStore(fuType)
-
-  def isLoadVload(fuType: UInt): Bool = isLoad(fuType) || isVLoad(fuType)
-
   val functionNameMap = Map(
-    jmp -> "jmp",
     brh -> "brh",
     i2f -> "int_to_float",
     i2v -> "int_to_vector",
@@ -228,21 +191,16 @@ object FuType extends ChiselOHEnum {
     div -> "div",
     fence -> "fence",
     bku -> "bku",
-    fmac -> "fmac",
+    fmul -> "fmul",
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",
     mou -> "mou",
-    vipu -> "vipu",
     vialu -> "vialu",
-    vldu -> "vldu",
-    vstu -> "vstu",
-    vppu -> "vppu",
     vimac -> "vimac",
     vidiv -> "vidiv",
-    vfalu -> "vfalu",
+    vfmac -> "vfmac",
     vmove -> "vmove",
-    vfma -> "vfma",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
   )

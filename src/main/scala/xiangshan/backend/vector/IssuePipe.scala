@@ -8,10 +8,12 @@ import org.chipsalliance.cde.config.Parameters
 import utility.PerfCCT
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.PregParams
-import xiangshan.backend.vector.VecIssueQueue.RespBundle
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
@@ -89,30 +91,36 @@ class IssuePipe(
     case (readBundle, srcIdx) =>
       readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
       readBundle.addr := is0Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is0Next.bits.robIdx
   }
 
   out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
-      readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx)
+      val readRf = is1Next.bits.bypassDelay(srcIdx) >= BypassDelay.delay2
+      readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx) && readRf
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VpRdAddrNext.zip(is1VpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
       readBundle.ren := is1Next.valid && is1Next.bits.vpRen(srcIdx)
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1V0RdAddrNext.zip(is1Next.bits.psrcV0).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VlRdAddrNext.zip(is1Next.bits.psrcVl).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
@@ -122,9 +130,6 @@ class IssuePipe(
   when (is1Next.valid) {
     is1.bits := is1Next.bits
   }
-
-  is1Resp.fail := false.B
-  is1Resp.success := is2Next.valid
 
   /**
    * is2 stage
@@ -148,6 +153,11 @@ class IssuePipe(
         false.B
   })
 
+  val is2RdFail = is2GpRdFail.asUInt.orR || is2FpRdFail.asUInt.orR
+
+  is1Resp.fail := is1.valid && is2RdFail
+  is1Resp.success := is2Next.valid
+
   val is2ImmNext: Option[UInt] = Option.when(is1.bits.imm.nonEmpty)(VecImmExtractor(
     VLEN, param.immTypes
   )(
@@ -156,7 +166,7 @@ class IssuePipe(
     is1.bits.vtype.get.vsew
   ))
 
-  is2Next.valid := is1.valid && !is1Flush && !is2GpRdFail.asUInt.orR && !is2FpRdFail.asUInt.orR
+  is2Next.valid := is1.valid && !is1Flush && !is2RdFail
   is2Next.bits.ctrl.fromIssueDeq(is1.bits)
   is2Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
   is2Next.bits.data.pc.foreach(_ := ???)
@@ -181,6 +191,8 @@ class IssuePipe(
         immKV,
       ).reduce(_ ++ _))
   }
+
+  //to do
 
   is2Next.bits.data.v0.foreach(_ := 0.U)
   is2Next.bits.data.vl.foreach(_ := in.is2VlRdDataNext.head.data)
@@ -250,28 +262,51 @@ class IssuePipe(
 
   out.ex0 := ex0
 
-  private val is0WakeupValid: Bool = is0.valid && is0.bits.vpWen                         && 0.U === is0.bits.latency
-  private val is1WakeupValid: Bool = is1.valid && is1.bits.vpWen                         && 1.U === is1.bits.latency
-  private val is2WakeupValid: Bool = is2.valid && is2.bits.ctrl.vpWen.getOrElse(false.B) && 2.U === is2.bits.ctrl.latency
-  private val ex0WakeupValid: Bool = ex0.valid && ex0.bits.ctrl.vpWen.getOrElse(false.B) && 3.U === ex0.bits.ctrl.latency
+  private val is0FixedLatVpWen = is0.bits.vpWen && !FuType.FuTypeOrR(is0.bits.fuType, FuType.vidiv, FuType.vfdiv)
+  private val is1FixedLatVpWen = is1.bits.vpWen && !FuType.FuTypeOrR(is1.bits.fuType, FuType.vidiv, FuType.vfdiv)
+  private val is2FixedLatVpWen =
+    is2.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(is2.bits.ctrl.fuType, FuType.vidiv, FuType.vfdiv)
+  private val ex0FixedLatVpWen =
+    ex0.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(ex0.bits.ctrl.fuType, FuType.vidiv, FuType.vfdiv)
 
-  out.vpWbM3Wakeup.wen := Seq(
+  private val is0WakeupValid: Bool = is0.valid && is0FixedLatVpWen && 0.U === is0.bits.latency
+  private val is1WakeupValid: Bool = is1.valid && is1FixedLatVpWen && 1.U === is1.bits.latency
+  private val is2WakeupValid: Bool = is2.valid && is2FixedLatVpWen && 2.U === is2.bits.ctrl.latency
+  private val ex0WakeupValid: Bool = ex0.valid && ex0FixedLatVpWen && 3.U === ex0.bits.ctrl.latency
+
+  private val nonFixedLatWakeUp = Wire(new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
+  nonFixedLatWakeUp.wen := false.B
+  nonFixedLatWakeUp.pdest := 0.U
+  nonFixedLatWakeUp.delay := BypassDelay.delay3
+
+  exu.out.outFuWakeUp.foreach { wakeups =>
+    nonFixedLatWakeUp.wen := wakeups.map(_.wen).reduce(_ || _)
+    nonFixedLatWakeUp.pdest := Mux1H(wakeups.map(wakeup => wakeup.wen -> wakeup.pdest))
+    nonFixedLatWakeUp.delay := Mux1H(wakeups.map(wakeup => wakeup.wen -> wakeup.delay))
+  }
+
+  private val fixedLatWakeupValid = Seq(
     is0WakeupValid,
     is1WakeupValid,
     is2WakeupValid,
     ex0WakeupValid,
   ).reduce(_ || _)
 
-  out.vpWbM3Wakeup.pdest := Mux1H(Seq(
+  out.vpWbM3Wakeup.wen := fixedLatWakeupValid || nonFixedLatWakeUp.wen
+
+  private val fixedLatWakeupPdest = Mux1H(Seq(
     is0WakeupValid -> is0.bits.pdest,
     is1WakeupValid -> is1.bits.pdest,
     is2WakeupValid -> is2.bits.ctrl.pdest,
     ex0WakeupValid -> ex0.bits.ctrl.pdest,
   ))
+  out.vpWbM3Wakeup.pdest := Mux(nonFixedLatWakeUp.wen, nonFixedLatWakeUp.pdest, fixedLatWakeupPdest)
 
-  // Delay means that the cycle of this uop send wakeup after it should do.
-  // It is not needed yet.
-  out.vpWbM3Wakeup.delay := 0.U
+  out.outFuLat.zip(exu.out.outFuLat).foreach {
+    case (sink, source) => sink <> source
+  }
+
+  out.vpWbM3Wakeup.delay := Mux(nonFixedLatWakeUp.wen, nonFixedLatWakeUp.delay, 0.U)
 }
 
 object IssuePipe {
@@ -318,6 +353,7 @@ object IssuePipe {
     val vpWbM3Wakeup = new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)
 
     val ex0 = param.genExuInputBundle(ValidIO(_))
+    val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
 
     val gpWbNext: Option[Exu.ToRf] = param.writePortCfgs.find(_.writeInt).map(x => new Exu.ToRf(x, backendParams.intPregParams))
     val fpWbNext: Option[Exu.ToRf] = param.writePortCfgs.find(_.writeFp).map(x => new Exu.ToRf(x, backendParams.fpPregParams))
@@ -332,9 +368,10 @@ object IssuePipe {
     val rdConfig  : RdConfig,
     val srcIdx    : Int,
     val pregParams: PregParams,
-  ) extends Bundle {
+  )(implicit p: Parameters) extends Bundle {
     val ren = Bool()
     val addr = UInt(pregParams.addrWidth.W)
+    val robIdx = new RobPtr
   }
 
   class RfReadDataBundle(

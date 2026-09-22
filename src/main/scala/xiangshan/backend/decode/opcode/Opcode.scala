@@ -9,7 +9,6 @@ import xiangshan.backend.vector.Decoder.Types
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, MaskType, Operand, OperandType}
 import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, UopInfoRenameSimple}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
-import yunsuan.encoding.Opcode.Opcodes
 
 import scala.language.implicitConversions
 
@@ -19,6 +18,7 @@ object Opcode {
     val opcodes = Seq(
       AluOpcodes,
       BruOpcodes,
+      LinkOpcodes,
       JmpOpcodes,
       MulOpcodes,
       DivOpcodes,
@@ -70,9 +70,12 @@ object Opcode {
   val FCvtOpcodes       = Opcodes.FCvtOpcode
   val FMiscOpcodes      = Opcodes.FMiscOpcode
   val FMacOpcodes       = Opcodes.FMacOpcode
-  val VFMiscOpcodes     = Opcodes.VFMiscOpcode
-  val VFCvtOpcodes      = Opcodes.VFCvtOpcode
+  val FAluOpcodes       = Opcodes.FAluOpcode
   val VFMacOpcodes      = Opcodes.VFMacOpcode
+  val VFMiscOpcodes     = Opcodes.VFMiscOpcode
+  val VFRedOpcodes      = Opcodes.VFRedOpcode
+  val VFDivOpcodes      = Opcodes.VFDivOpcode
+  val VFCvtOpcodes      = Opcodes.VFCvtOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -268,7 +271,6 @@ object Opcode {
     def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
 
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
-    def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
   }
 
   object BruOpcodes extends Opcodes {
@@ -284,13 +286,31 @@ object Opcode {
     def isBranchInvert(func: UInt) = func(0)
   }
 
-  object JmpOpcodes extends Opcodes {
-    val jal        = IntUJType(bb"111_1000")
-    val jalr       = IntIType(bb"111_1001")
-    val auipc      = IntUJType(bb"111_1010")
+  // object JmpOpcodes extends Opcodes {
+  //   val jal        = IntUJType(bb"111_1000")
+  //   val jalr       = IntIType(bb"111_1001")
+  //   val auipc      = IntUJType(bb"111_1010")
 
-    def jumpOpisJalr(op: UInt) = op(0)
-    def jumpOpisAuipc(op: UInt) = op(1)
+  //   def jumpUopisJalr(op: UInt) = op(0)
+  //   def jumpUopisAuipc(op: UInt) = op(1)
+  // }
+
+  object LinkOpcodes extends Opcodes {
+    // The link uop does not need Src1Gp, but this flag will be used in rename to get right dest to src bypass pdest.
+    // When uop leaving rename, srcType should set to SrcType.no
+    val link  = Value(bb"001") + GpWen + Src1Gp
+    val auipc = IntUJType(bb"010")
+
+    def linkUopisLink(op: UInt) = op(0)
+    def linkUopisAuipc(op: UInt) = op(1)
+  }
+
+  object JmpOpcodes extends Opcodes {
+    val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
+    val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
+
+    def jumpUopisj(op: UInt) = !op(0)
+    def jumpUopisjr(op: UInt) = op(0)
   }
 
   object MulOpcodes extends Opcodes {
@@ -357,12 +377,6 @@ object Opcode {
     def sizeIs(sz: this.type => this.Size)(op: UInt): Bool = {
       op(Size.width, 1) === sz(this).U
     }
-
-    def makeLsUop(isHlv: Bool, isHlvx: Bool, size: UInt): UInt = {
-      Cat(isHlv, isHlvx, bitPatToUInt(sign), size.pad(Size.width), 0.U(1.W))
-    }
-
-    def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
     val idxDC = bb"00" // Don't care
     val idx0 = bb"00"
@@ -840,7 +854,10 @@ object Opcode {
 
   object LduOpcodes extends LduOpcodes
 
-  object StuOpcodes extends StuOpcodes
+  object StuOpcodes extends StuOpcodes {
+    // A store has no destination register to write back, so the whole space is latency 0.
+    override def getLat(opcode: Opcode): Int = 0
+  }
 
   object AmoOpcodes extends AmoOpcodes
 
@@ -886,11 +903,11 @@ object Opcode {
   object FenceOpcodes extends Opcodes {
     val fence    = Value    (bb"10000") + NoSpec + BlockBack + FlushPipe // FENCE           / PAUSE
     val sfence   = IntBSType(bb"10001") + NoSpec + BlockBack + FlushPipe // SFENCE_VMA      / SINVAL_VMA (no flushpipe)
-    val mfence   = IntBSType(bb"10111") + NoSpec + BlockBack + FlushPipe         // HasMptCheck self defined instruction
     val fencei   = Value    (bb"10010") + NoSpec + BlockBack + FlushPipe // FENCE_I
     val hfence_v = IntBSType(bb"10011") + NoSpec + BlockBack + FlushPipe // HFENCE_VVMA     / HINVAL_VVMA (no flushpipe)
     val hfence_g = IntBSType(bb"10100") + NoSpec + BlockBack + FlushPipe // HFENCE_GVMA     / HINVAL_GVMA (no flushpipe)
     val nofence  = Value    (bb"00000") + NoSpec + BlockBack + FlushPipe // SFENCE_INVAL_IR / SFENCE_W_INVAL (no flushpipe)
+    val mfence   = IntBSType(bb"10111") + NoSpec + BlockBack + FlushPipe // HasMptCheck self defined instruction
   }
 
   object BkuOpcodes extends Opcodes {
@@ -958,13 +975,11 @@ object Opcode {
     val vfsqrt_fp32: Opcode = DvSvlS2vS1(FSQRT, FP32, V)
     val vfdiv_fp64 : Opcode = DvSvlS2vS1(FDIV , FP64, V)
     val vfsqrt_fp64: Opcode = DvSvlS2vS1(FSQRT, FP64, V)
+
+    def getFormat(implicit op: UInt): UInt = op(2, 1)
   }
 
   object FDivOpcodes extends FDivOpcodes
-
-  object FAluOpcodes extends Opcodes.FMacOpcode
-  object VFRedOpcodes extends Opcodes.VFRedOpcode
-  object VFDivOpcodes extends Opcodes.VFDivOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm
@@ -1031,6 +1046,7 @@ object Opcode {
 
   val ALUOpType = AluOpcodes
   val BRUOpType = BruOpcodes
+  val LinkOpType = LinkOpcodes
   val JumpOpType = JmpOpcodes
   val FenceOpType = FenceOpcodes
   val MULOpType = MulOpcodes

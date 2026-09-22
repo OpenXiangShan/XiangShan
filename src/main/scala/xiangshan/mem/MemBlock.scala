@@ -61,23 +61,17 @@ trait HasMemBlockParameters extends HasXSParameter {
   val hyaParams = intMemExeUnitParams.filter(_.hasHyldaFu)
   val mouParam = intMemExeUnitParams.filter(_.hasMouFu).head
   val moudParam = intMemExeUnitParams.filter(_.hasMoudFu).head
-  val vlduParams = vecMemExeUnitParams.filter(_.hasVLoadFu)
-  val vstuParams = vecMemExeUnitParams.filter(_.hasVStoreFu)
-
 
   val LduCnt  = backendParams.LduCnt
   val StaCnt  = backendParams.StaCnt
   val StdCnt  = backendParams.StdCnt
   val HyuCnt  = backendParams.HyuCnt
-  val VlduCnt = backendParams.VlduCnt
-  val VstuCnt = backendParams.VstuCnt
 
   val LdExuCnt  = LduCnt + HyuCnt
   val StAddrCnt = StaCnt + HyuCnt
   val StDataCnt = StdCnt
   val MemExuCnt = LduCnt + HyuCnt + StaCnt + StdCnt
   val MemAddrExtCnt = LdExuCnt + StaCnt
-  val MemVExuCnt = VlduCnt + VstuCnt
 
   val AtomicWBPort   = 0
   val MisalignWBPort = 1
@@ -468,7 +462,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueLda = intIssue.filter(_.bits.params.hasLoadFu)
   val issueSta = intIssue.filter(_.bits.params.hasStoreAddrFu)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
-  val issueVldu = intIssue.filter(_.bits.params.hasVLoadFu)
   val vstdStoreData: Seq[ValidIO[StoreQueueDataWrite]] = io.ooo_to_mem.vstdStoreData.flatten
 
   val intWriteback: Seq[MemWriteBack] = io.mem_to_ooo.intWriteback.flatten
@@ -1169,8 +1162,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
     }
   }
-
-  issueVldu.foreach(_.ready := false.B)
 
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl

@@ -65,6 +65,7 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   // tlb hint
   val tlb_id          = UInt(log2Up(loadfiltersize).W)
   val tlb_full        = Bool()
+  val rep_from_unalign_head = Bool()
 
   // alias
   def mem_amb       = cause(LoadReplayCauses.C_MA)

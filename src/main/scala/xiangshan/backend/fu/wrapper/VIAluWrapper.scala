@@ -9,7 +9,6 @@ import xiangshan.backend.vector.fu.Func._
 import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
 import yunsuan.vector.Common.VSew
 import yunsuan.vector.VectorALU.VIAlu
-import yunsuan.vector.VectorALU.{Adder, Misc}
 
 // Todo: support double narrow
 class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
@@ -23,6 +22,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   // modules
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
+  private val vs2Ex1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
+  private val vs1Ex1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vialus = Seq.fill(numVecModule)(Module(new VIAlu))
 
   private val resultStages = cfg.latency + 1
@@ -61,6 +62,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
 
   vs2Split.io.inVecData := ex0vs2
   vs1Split.io.inVecData := ex0vs1
+  vs2Ex1Split.io.inVecData := vs2Ex(1)
+  vs1Ex1Split.io.inVecData := vs1Ex(1)
 
   private val vs2Vec: Vec[UInt] = Wire(Vec(numVecModule, UInt(XLEN.W)))
   private val vs1Vec: Vec[UInt] = Wire(Vec(numVecModule, UInt(XLEN.W)))
@@ -137,8 +140,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
         fixPointCtrl.isMax    := isMax.ex1
         fixPointCtrl.isNClip  := isNClip.ex1
       }
-      mod.in.ex1.bits.data.vs2 := vs2Ex(1)
-      mod.in.ex1.bits.data.vs1 := vs1Ex(1)
+      mod.in.ex1.bits.data.vs2 := vs2Ex1Split.io.outVec64b(i)
+      mod.in.ex1.bits.data.vs1 := vs1Ex1Split.io.outVec64b(i)
   }
 
   out.ex(0).bits.data.vec.foreach {
@@ -149,6 +152,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       vecData.maskE16 := Cat(vialus.map(_.out.ex0.mask.e16).reverse)
       vecData.maskE32 := Cat(vialus.map(_.out.ex0.mask.e32).reverse)
       vecData.maskE64 := Cat(vialus.map(_.out.ex0.mask.e64).reverse)
+      vecData.isWiden.get := isWiden.ex0
+      vecData.isNarrow.get := isNarrow.ex0
       vecData.vxsatE8.get := vialus.flatMap(_.out.ex0.vxsat.asBools)
       vecData.narrowVxsatE8.get := vialus.flatMap(_.out.ex0.narrowVxsat.asBools)
   }
@@ -161,6 +166,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       vecData.maskE16 := Cat(vialus.map(_.out.ex1.mask.e16).reverse)
       vecData.maskE32 := Cat(vialus.map(_.out.ex1.mask.e32).reverse)
       vecData.maskE64 := Cat(vialus.map(_.out.ex1.mask.e64).reverse)
+      vecData.isWiden.get := isWiden.ex1
+      vecData.isNarrow.get := isNarrow.ex1
       vecData.vxsatE8.get := vialus.flatMap(_.out.ex1.vxsat.asBools)
       vecData.narrowVxsatE8.get := vialus.flatMap(_.out.ex1.narrowVxsat.asBools)
   }

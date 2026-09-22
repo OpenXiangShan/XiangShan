@@ -46,6 +46,14 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   val sramResetDone: Bool = Output(Bool())
 }
 
+trait HasAheadPredictorIO extends BasePredictorIO {
+  val redirect:        Bool      = Input(Bool())
+  val bpuS2Override:   Bool      = Input(Bool())
+  val bpuS3Override:   Bool      = Input(Bool())
+  val newStartPc:      GuardedPc = Input(GuardedPc())
+  val overrideStartPc: GuardedPc = Input(GuardedPc())
+}
+
 trait HasFastTrainIO extends BasePredictorIO {
   override val fastTrain: Option[Valid[FastTrain]] = Option(Input(Valid(new FastTrain)))
 }

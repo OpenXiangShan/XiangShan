@@ -114,7 +114,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(IntPhyRegs, RabCommitWidth))
+  val intFreeList = Module(new StdFreeList(IntPhyRegs - 1, 1, Reg_I, RabCommitWidth, IntLogicRegs, false))
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth, FpLogicRegs))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, VecStdLogicRegs))
   val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, RabCommitWidth, VlLogicRegs))
@@ -360,51 +360,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
   private val fuType       = uops.map(_.fuType)
-  private val fuOpType     = uops.map(_.fuOpType)
-  private val vtype        = uops.map(_.vpu.vtype)
-  private val sew          = vtype.map(_.vsew)
-  private val lmul         = vtype.map(_.vlmul)
-  private val eew          = uops.map(_.vpu.veew)
-  private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
-  private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))
-  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
-  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
-  private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map { case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
-  private val mulBits      = 3 // dirty code
-  private val emul         = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
-    Mux(
-      LSUOpType.isWhole(fuOpTypeItem),
-      GenUSWholeEmul(nf(index)),
-      Mux(
-        LSUOpType.isMasked(fuOpTypeItem),
-        0.U(mulBits.W),
-        EewLog2(eew(index)) - sew(index) + lmul(index)
-      )
-    )
-  }
-  private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
-    isVlsTypeItme && isUnitStrideItem
-  }
-  private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
-  private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+
   private val isAMOVec      = fuType.map(fuTypeItem => FuType.isAMO(fuTypeItem))
-  // There is no way to calculate the 'flow' for 'unit-stride' exactly:
-  //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
-  // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
-  private val numLsElem = instType.zipWithIndex.map { case (instTypeItem, index) =>
-    Mux(
-      isVecUnitType(index),
-      VecMemUnitStrideMaxFlowNum.U,
-      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
-    )
-  }
+
   uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(isVlsType(i) && !isfofFixVlUop(i), numLsElem(i), 1.U)
+    u.numLsElem := 1.U
   }
 
   // speculatively assign the sqIdx/lqIdx
   io.toLsqEnqCtrl.req.zipWithIndex.map{ case (port, i) =>
-    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) //TODO: !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) will be remove in the future.
+    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i)
     port.bits.num := uops(i).numLsElem // here will be change to io.in.bits in the future, this port need `numLsElem`
     port.bits.fuType := uops(i).fuType
   }
@@ -446,6 +411,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+
+  // Cross-cycle psrc(0) forwarding for JALR/JAL:
+  // When link uop is at RenameWidth-1, capture its lsrc(0) RAT value.
+  // In the next cycle, jr uop at position 0 uses this captured value instead of
+  // reading the RAT (which was speculatively updated by the link uop).
+  val linkPsrc0Reg = RegInit(0.U(PhyRegIdxWidth.W))
+  val linkPsrc0Valid = RegInit(false.B)
 
   // uop calculation
   for (i <- 0 until RenameWidth) {
@@ -529,7 +501,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).fflagsWen := (compressMasksVec(i) & Cat(io.in.map(_.bits.fflagsWen).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
-    uops(i).dirtyVs := false.B // Todo: handle this in some DecodeField
+    uops(i).dirtyVs := (compressMasksVec(i) & Cat(io.in.map(_.bits.dirtyVs).reverse)).orR
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(intReadPortsData(i)(1), fpReadPortsData(i)(1), vecReadPortsData(i)(1)))
@@ -563,9 +535,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
     io.out(i).bits := uops(i)
+
+    // set link uop's src1Type to SrcType.no
+    when ((io.in(i).bits.isJ || io.in(i).bits.isJr) && io.in(i).bits.firstUop && !io.in(i).bits.lastUop) {
+      io.out(i).bits.srcType(0) := SrcType.no
+    }
+
     // dirty code
     if (i == 0) {
-      io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+      val jrFollowsLink = (io.in(0).bits.isJ || io.in(0).bits.isJr) && io.in(0).bits.lastUop && !io.in(0).bits.firstUop
+      io.out(i).bits.psrc(0) := Mux(jrFollowsLink,
+        linkPsrc0Reg,
+        Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+      )
       io.out(i).bits.psrcIntForMove := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrcIntForMove)
     }
     // Todo: move these shit in decode stage
@@ -660,7 +642,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).traceBlockInPipe.itype := Mux(
         isXret,
         Itype.ExpIntReturn,
-        Itype.jumpTypeGen(inVec(i).fuType, inVec(i).fuOpType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf(new OpRegType))
+        Itype.jumpTypeGen(
+          inVec(i).isJ,
+          inVec(i).isJr,
+          FuType.isBrh(inVec(i).fuType),
+          inVec(i).ldest.asTypeOf(new OpRegType),
+          inVec(i).lsrc(0).asTypeOf(new OpRegType),
+        )
       )
     }
   }
@@ -709,14 +697,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     for ((
       intRen, fpRen, vecRen,
-      (lsrc, j)
+      (lsrc, srcIdx)
     ) <- (intCond lazyZip fpCond lazyZip vecCond) lazyZip lsrcVec.zipWithIndex) {
-      val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
+      val destToSrc = io.in.take(i).zipWithIndex.map { case (in, k) =>
         val indexMatch = in.bits.ldest === lsrc
-        val writeMatch = intRen && needIntDest(j) || fpRen && needFpDest(j) || vecRen && needVecDest(j)
-        indexMatch && writeMatch
+        val writeMatch = intRen && needIntDest(k) || fpRen && needFpDest(k) || vecRen && needVecDest(k)
+        // Break false dependency: link uop's dest should not bypass to jr uop's psrc(0)
+        val linkToJrFalseDep = (srcIdx == 0).B && (k == i - 1).B &&
+          (in.bits.isJ || in.bits.isJr) && in.bits.firstUop && !in.bits.lastUop &&
+          (io.in(i).bits.isJ || io.in(i).bits.isJr) && io.in(i).bits.lastUop && !io.in(i).bits.firstUop
+        indexMatch && writeMatch && !linkToJrFalseDep
       }
-      bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
+      bypassCond(srcIdx)(i - 1) := VecInit(destToSrc).asUInt
     }
     bypassCondV0(i - 1) := VecInit(io.in.take(i).map(_.bits.v0Wen && io.in(i).bits.v0Ren)).asUInt
     bypassCondVl(i - 1) := VecInit(io.in.take(i).map(_.bits.vlWen && io.in(i).bits.vlRen)).asUInt
@@ -759,6 +751,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
 
+  // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
+  // Link uop now has Src1Gp (for correct bypass in Rename), cleared to SrcType.no
+  // on output, so uops(i).psrc(0) and the bypass chain are both correct.
+  when (io.in.last.valid && (io.in.last.bits.isJ || io.in.last.bits.isJr) && io.in.last.bits.firstUop && !io.in.last.bits.lastUop && canOut) {
+    linkPsrc0Reg   := io.out.last.bits.psrc(0)
+    linkPsrc0Valid := true.B
+  }.elsewhen (io.in.head.valid && (io.in.head.bits.isJ || io.in.head.bits.isJr) && io.in.head.bits.lastUop && !io.in.head.bits.firstUop && canOut) {
+    linkPsrc0Valid := false.B
+  }
+
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val lastCycleCreateSnpt = RegInit(false.B)
   lastCycleCreateSnpt := genSnapshot && !io.snptIsFull
@@ -774,6 +776,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
     dontTouch(genSnapshot)
+    dontTouch(linkPsrc0Valid)
     fusionValidVec.foreach{ fusionValid =>
       dontTouch(fusionValid)
     }

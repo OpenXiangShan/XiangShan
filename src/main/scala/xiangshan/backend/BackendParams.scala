@@ -117,12 +117,11 @@ case class BackendParams(
   def StdCnt = allSchdParams.map(_.StdCnt).sum
   def LduCnt = allSchdParams.map(_.LduCnt).sum
   def HyuCnt = allSchdParams.map(_.HyuCnt).sum
-  def VlduCnt = allSchdParams.map(_.VlduCnt).sum
-  def VstuCnt = allSchdParams.map(_.VstuCnt).sum
   def LsExuCnt = StaCnt + LduCnt + HyuCnt
   val LdExuCnt = LduCnt + HyuCnt
   val StaExuCnt = StaCnt + HyuCnt
   def JmpCnt = allSchdParams.map(_.JmpCnt).sum
+  def LinkCnt = allSchdParams.map(_.LinkCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum
   def CsrCnt = allSchdParams.map(_.CsrCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
@@ -130,8 +129,9 @@ case class BackendParams(
   def hasLoadSchd = LdExuCnt > 0
   def hasStoreSchd = StaExuCnt > 0
 
-  def numPcMemReadPort = allExuParams.filter(_.needPc).size
-  def numTargetReadPort = allRealExuParams.count(x => x.needTarget)
+  def aluBjuPcPortNum = allExuParams.count(_.aluBjuNeedPc)
+  def numPcMemReadPort = allExuParams.count(_.needPc)
+  def numTargetReadPort = allRealExuParams.count(_.needTarget)
 
   def numPregRd(dataCfg: DataConfig) = this.getRfReadSize(dataCfg)
   def numPregWb(dataCfg: DataConfig) = this.getRfWriteSize(dataCfg)
@@ -356,6 +356,42 @@ case class BackendParams(
     rdCfgs
   }
 
+  def getRdCfgsIntSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = intSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsFltSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = fpSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsVecSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = vecSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
   def getVlRdCfgs: Seq[Seq[Seq[VlRD]]] = {
     allIssueParams.map(
       _.exuBlockParams.map(
@@ -408,6 +444,9 @@ case class BackendParams(
     this.fpPregParams.numWrite.getOrElse(this.getWbPortIndices(FpData()).size)
   }
 
+  def getFpRfReadSize = {
+    this.fpPregParams.numRead.getOrElse(this.getRdPortIndices(FpData()).size)
+  }
   /**
     * Get size of read ports of vec regfile
     *
@@ -633,6 +672,7 @@ sealed trait NewParam { self: BackendParams =>
   // New api name
   def gpPregParams = this.intPregParams
   def vpPregParams = this.vfPregParams
+  def getFpWriteSize = this.getFpRfWriteSize
   def getVpWriteSize = this.getVfRfWriteSize
 
   def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
@@ -657,12 +697,12 @@ object BackendV2SchdParams {
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
+        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
+        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(1, 0)), Seq(IntRD(5, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
+        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -674,7 +714,7 @@ object BackendV2SchdParams {
           2,
           vlWB = VlWB(port = intSchdVlWbPort, 0),
         ),
-        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
+        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU3", Seq(AluCfg, BkuCfg, MulCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(7, 0))), true, 2)
@@ -713,13 +753,13 @@ object BackendV2SchdParams {
     SchdBlockParams(Seq(
       // FcmpCfg and FcvtCfg must be in the same ExuUnit because they both need to write to the integer register file.
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
+        ExeUnitParams("FEX0", Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
     ),
       numPregs = numPregsFp,
@@ -736,7 +776,7 @@ object BackendV2SchdParams {
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
+          Seq(VialuCfg, VimacCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
           Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 7, 0), FpWB(port = 6, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
           vlWB = VlWB(port = vfSchdVlWbPort, 0),
@@ -746,30 +786,10 @@ object BackendV2SchdParams {
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
-          Seq(VialuCfg, VfaluCfg, VfmaCfg, VfdivCfg, VidivCfg),
+          Seq(VialuCfg, VfdivCfg, VidivCfg),
           Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
           vlRD = VlRD(1, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU0",
-          Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg),
-          Seq(VfWB(2, 0), V0WB(2, 0)),
-          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0))),
-          vlWB = VlWB(port = 2, 0),
-          vlRD = VlRD(2, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU1",
-          Seq(VlduCfg, VstuCfg),
-          Seq(VfWB(3, 0), V0WB(3, 0)),
-          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0))),
-          vlWB = VlWB(port = 3, 0),
-          vlRD = VlRD(3, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
     ),
