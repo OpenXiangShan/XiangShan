@@ -143,6 +143,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val specReadReq      = Wire(new RasSpecReadReq)
   specReadReq.tosr       := ifuAdvanceRedirectMeta.tosr
   specReadReq.ssp        := ifuAdvanceRedirectMeta.ssp
+  specReadReq.tosrInSpec := ifuAdvanceRedirectMeta.tosrInSpec
 
   private val specRead    = io.fromBpu.specRead
   private val specRetAddr = RegNext(ifuAdvanceRedirectMeta.topRetAddr)
