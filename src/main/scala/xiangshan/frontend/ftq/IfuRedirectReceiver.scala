@@ -26,9 +26,8 @@ import xiangshan.frontend.GuardedPcInit
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
       wbRedirect:      Valid[FrontendRedirect],
-      specTopAddr:     UInt,
       backendRedirect: Bool
-  ): (Valid[FtqPtr], Valid[Redirect], Valid[Resolve]) = {
+  ): (FtqPtr, Valid[Redirect], Valid[Resolve], Bool) = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
     val resolve  = WireInit(0.U.asTypeOf(Valid(new Resolve)))
 
@@ -39,7 +38,7 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.isRVC     := wbRedirect.bits.isRVC
     redirect.bits.attribute := wbRedirect.bits.attribute
     redirect.bits.pc        := wbRedirect.bits.pc
-    val selectedTarget = GuardedPcInit(Mux(wbRedirect.bits.attribute.isReturn, specTopAddr, wbRedirect.bits.target))
+    val selectedTarget = GuardedPcInit(wbRedirect.bits.target)
     redirect.bits.target    := selectedTarget.toUInt
     redirect.bits.taken     := wbRedirect.bits.taken
     redirect.bits.isMisPred := true.B
@@ -54,10 +53,15 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     resolve.bits.attribute  := wbRedirect.bits.attribute
     resolve.bits.debug_isRVC.foreach(_ := wbRedirect.bits.isRVC)
 
-    val ftqIdx = Wire(Valid(new FtqPtr))
-    ftqIdx.valid := redirect.valid
-    ftqIdx.bits  := redirect.bits.ftqIdx
-
-    (ftqIdx, RegNext(redirect), RegNext(resolve, init = 0.U.asTypeOf(Valid(new Resolve))))
+    val ftqPtrsEarlyByOneCycles = Wire(new FtqPtr)
+    val blockSelEarlyByOneCycle = Wire(Bool())
+    blockSelEarlyByOneCycle := wbRedirect.bits.blockSel
+    ftqPtrsEarlyByOneCycles := wbRedirect.bits.ftqIdx
+    (
+      ftqPtrsEarlyByOneCycles,
+      RegNext(redirect, init = 0.U.asTypeOf(Valid(new Redirect))),
+      RegNext(resolve, init = 0.U.asTypeOf(Valid(new Resolve))),
+      blockSelEarlyByOneCycle
+    )
   }
 }
