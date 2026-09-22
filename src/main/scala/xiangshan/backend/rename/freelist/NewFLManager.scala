@@ -75,10 +75,14 @@ class NewFLManager(
     val lastCandidate = reverseBankPRegIndices(lastFromBankEnd)
     val bankHasCandidate = firstInBank < bankWidth.U
 
+    // Keep a fixed bank order for the first candidates, then walk the banks
+    // in reverse order for the last candidates:
+    // bank0_first ... bank3_first, bank3_last ... bank0_last.
+    val lastCandidateIdx = renameWidth - 1 - bankIndex
     s0Candidates(bankIndex) := firstCandidate
-    s0Candidates(bankIndex + bankCount) := lastCandidate
+    s0Candidates(lastCandidateIdx) := lastCandidate
     s0CandidateValid(bankIndex) := bankHasCandidate
-    s0CandidateValid(bankIndex + bankCount) := bankHasCandidate && firstCandidate =/= lastCandidate
+    s0CandidateValid(lastCandidateIdx) := bankHasCandidate && firstCandidate =/= lastCandidate
   }
 
   val s0CandidateBitmap = (0 until renameWidth).map { candidateIdx =>
