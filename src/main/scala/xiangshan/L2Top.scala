@@ -19,7 +19,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
-import chisel3.util.{Valid, ValidIO}
+import chisel3.util.{Valid, ValidIO, log2Up}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -75,7 +75,13 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
-  val l1_l2_fabric = LazyModule(new CustomL1L2Fabric())
+  private val specMissEnabled = coreParams.dcacheParametersOpt.exists(c => c.enMissTrack && !c.missTrackShadow)
+  val l1_l2_fabric = LazyModule(new CustomL1L2Fabric(
+    specChannels = if (specMissEnabled) numMemChannelsFromDcache else 0,
+    specOwners = if (specMissEnabled) LoadPipelineWidth else 0,
+    specIdBits = if (specMissEnabled) log2Up(dcacheParameters.nMissEntries) else 0,
+    specBlockBytes = if (specMissEnabled) dcacheParameters.blockBytes else 0
+  ))
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableL2) None else Some(TLIdentityNode())

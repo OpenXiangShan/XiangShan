@@ -67,6 +67,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := clientNode
     }
   }
+  l2top.inner.l1_l2_fabric.specSink.foreach { sink =>
+    sink := memBlock.dcache.dcache.specFabricSource.get
+  }
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
