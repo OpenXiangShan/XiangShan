@@ -66,7 +66,7 @@ _SIGNALS = {
         "TOP.Frontend_top.Frontend._inner_icache_io_toIfu_req_valid",
     ),
     "to_ifu_exception": _aliases(
-        "Frontend_top.Frontend._inner_icache_io_toIfu_req_bits_info_0_icacheMeta_exception_value"
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_exceptionOut_value"
     ),
 }
 

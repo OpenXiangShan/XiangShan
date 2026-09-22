@@ -119,7 +119,7 @@ def _waylookup_snapshot(env) -> dict[str, int | None]:
         "bpu_flush_match": _waylookup_value(env, "bpu_flush_match"),
         "ftq_req1_valid": _try_read_internal(
             env,
-            (_MAIN + "io_fromFtq_bits_req_1_valid",),
+            (_ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",),
         ),
         "info1_valid": _try_read_internal(
             env,

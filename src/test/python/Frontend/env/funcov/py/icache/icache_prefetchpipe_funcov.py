@@ -147,7 +147,6 @@ _PREFETCH_SIGNALS = {
     "waylookup_exception_valid": (_WAYLOOKUP + "exceptionEntry_valid",),
     "global_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
-        _ICACHE + "io_fromFtq_redirectFlush",
         _PREFETCH + "io_flush",
     ),
     "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),

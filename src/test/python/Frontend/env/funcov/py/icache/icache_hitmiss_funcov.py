@@ -69,7 +69,6 @@ _SIGNALS = {
     "s1_flush": (_MAIN + "s1_flush", _MAIN + "__Vtogcov__s1_flush"),
     "global_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
-        _ICACHE + "io_fromFtq_redirectFlush",
     ),
     "cross0": _S1_CROSS[0],
     "cross1": _S1_CROSS[1],

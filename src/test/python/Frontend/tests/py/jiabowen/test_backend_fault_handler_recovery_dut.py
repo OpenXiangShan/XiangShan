@@ -23,7 +23,7 @@ _SIGNALS = {
     "way_exception": "inner_icache.wayLookup.exceptionEntry_valid",
     # ICache.sv connects this input and WayLookup.io_write_0_ready to one wire.
     "way_ready": "inner_icache.prefetcher.io_wayLookupWrite_0_ready",
-    "way_flush": "inner_icache.io_fromFtq_redirectFlush",
+    "way_flush": "inner_icache.__Vtogcov__io_fromFtq_redirectFlush",
     "backend_exception": "inner_ftq.backendException_value",
 }
 
@@ -33,11 +33,7 @@ def _read_required_signal(env, name: str, selected_paths: dict[str, str]) -> int
         value = probes._try_read_dut_signal(env, selected_paths[name])
         assert value is not None, {"signal_became_unreadable": selected_paths[name]}
         return value
-    scope, leaf = _SIGNALS[name].rsplit(".", 1)
-    paths = (
-        f"Frontend_top.Frontend.{scope}.{leaf}",
-        f"Frontend_top.Frontend.{scope}.__Vtogcov__{leaf}",
-    )
+    paths = (f"Frontend_top.Frontend.{_SIGNALS[name]}",)
     for path in paths:
         value = probes._try_read_dut_signal(env, path)
         if value is not None:
