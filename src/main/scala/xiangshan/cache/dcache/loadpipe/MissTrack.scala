@@ -48,13 +48,23 @@ class MissTrackLoadResult(implicit p: Parameters) extends MissTrackResident {
   val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
-// Observation only: no MissTrack output drives a LoadPipe control signal.
 class MissTrackLoadIO(implicit p: Parameters) extends DCacheBundle {
   val s0_valid = Bool()
   val s0_vaddr = UInt(VAddrBits.W)
   val s1_valid = Bool()
   val s1_paddr = UInt(PAddrBits.W)
   val s2 = Valid(new MissTrackLoadResult)
+}
+
+/** S1 qualification for the speculative-miss fast path.  This is only a
+  * permission to prepare a request; the accurate S2 tag/PMP/MissQueue result
+  * still owns the transaction. */
+class MissTrackSpec(implicit p: Parameters) extends DCacheBundle {
+  val valid = Bool()
+  val candidate = Bool()
+  val resident = Bool()
+  val pending = Bool()
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
@@ -88,7 +98,6 @@ class MissTrackAssessment(implicit p: Parameters) extends DCacheBundle {
   * by a round-robin arbiter; losing insertion opportunities affects coverage only.
   */
 class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
-  require(cfg.missTrackShadow, "MissTrack currently supports shadow operation only")
   require(cfg.missTrackEntries >= 2)
   require(cfg.missTrackHashBits > 0 && cfg.missTrackHashBits <= VAddrBits - untagBits)
   require(allocPorts > 0)
@@ -102,6 +111,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     val invalidate = Flipped(Valid(new MissTrackInvalidate))
     val clear = Input(Bool())
     val assessment = Output(Vec(LoadPipelineWidth, Valid(new MissTrackAssessment)))
+    val spec = Output(Vec(LoadPipelineWidth, new MissTrackSpec))
   })
 
   private val entries = RegInit(VecInit(Seq.fill(cfg.missTrackEntries)(0.U.asTypeOf(new MissTrackEntry))))
@@ -185,6 +195,13 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     a.bits.handled := truth.handled
     a.bits.merged := truth.handled && truth.merged
     a.bits.new_alloc := truth.handled && truth.allocated
+    io.spec(w).valid := q.s1_valid && !io.clear && !s1Multi
+    io.spec(w).resident := s1.valid && !s1.is_pending && s1PaMatch
+    io.spec(w).pending := s1.valid && s1.is_pending && s1PaMatch
+    io.spec(w).mshr_id := s1.mshr_id
+    // UNKNOWN after PA validation is the only state eligible for a new
+    // speculative miss.  A live resident/pending line suppresses duplication.
+    io.spec(w).candidate := io.spec(w).valid && !io.spec(w).resident && !io.spec(w).pending && s1PaMatch === false.B
     when (a.valid) {
       assert(PopCount(Seq(a.bits.resident, a.bits.pending, a.bits.unknown)) === 1.U)
       assert(s2.idx === get_dcache_idx(truth.vaddr) || !s2.valid,
