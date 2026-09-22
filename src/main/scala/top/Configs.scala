@@ -595,11 +595,20 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  OpenLLCConfig("32MB", ways = 16, banks = 4)
+  (OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
-    ++ new BaseConfig(n)
+    ++ new BaseConfig(n)).alter((site, here, up) => {
+      case XSTileKey => up(XSTileKey).map { p =>
+        p.copy(
+          dcacheParametersOpt = p.dcacheParametersOpt.map(_.copy(
+            enMissTrack = true,
+            missTrackShadow = false
+          ))
+        )
+      }
+    })
 )
 
 class NoRobCompressionConfig(n: Int = 1) extends Config(
@@ -607,6 +616,9 @@ class NoRobCompressionConfig(n: Int = 1) extends Config(
     case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))
   })
 )
+
+// Compatibility alias. DefaultConfig now enables the functional SpecMiss path.
+class SpecMissConfig(n: Int = 1) extends DefaultConfig(n)
 
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
