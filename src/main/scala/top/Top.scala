@@ -142,8 +142,17 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     core_with_l2(i).nmi_int_node := nmiIntNode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
-    if (!enableCHI) {
-      misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache
+    if (enableCHI) {
+      misc.soc_xbar.get :=
+        AXI4Buffer() :=
+        AXI4UserYanker() :=
+        AXI4IdIndexer(idBits = 4) :=
+        core_with_l2(i).mmio_axi_port
+    } else {
+      misc.peripheral_ports.get(i) :=
+        AXI4ToTL() :=
+        AXI4UserYanker() :=
+        core_with_l2(i).mmio_axi_port
     }
     core_with_l2(i).memory_port.foreach(port => (misc.core_to_l3_ports.get)(i) :=* port)
     misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>

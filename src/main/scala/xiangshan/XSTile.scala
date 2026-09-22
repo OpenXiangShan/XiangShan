@@ -43,7 +43,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== Public Ports ============
   val memBlock = core.memBlock.inner
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
-  val tl_uncache = l2top.inner.mmio_port
+  val mmio_axi_port = l2top.inner.mmio_port
   val sep_tl_opt = l2top.inner.sep_tl_port_opt
   val beu_int_source = l2top.inner.beu.intNode
   val core_reset_sink = BundleBridgeSink(Some(() => Reset()))
@@ -61,8 +61,9 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // L1D cacheable path uses Compact CHI Type 1 (see XSCore.io.dcache_cchi); not connected to L2 yet.
   // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
   // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
-  // Data-side Uncache uses AXI4 (see XSCore.io.d_mmio_axi); not connected to L2 yet.
-  // InstrUncache uses AXI4 (see XSCore.io.i_mmio_axi); not connected to L2 yet.
+
+  l2top.inner.d_mmio_port := memBlock.dMmioToL2
+  l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.iMmioToL2
 
   // L2 Prefetch
   l2top.inner.l2cache match {
@@ -82,9 +83,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case Some(l2) => l2.tpmeta_sink_node
     case None => None
   }
-
-  // i_mmio_port TL disconnected (InstrUncache uses AXI i_mmio_axi via XSCore)
-  // d_mmio_port / icachectrl_port TL disconnected (Uncache/I$ Ctrl use MemBlock AXI4Xbar)
 
   // =========== IO Connection ============
   class XSTileImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
