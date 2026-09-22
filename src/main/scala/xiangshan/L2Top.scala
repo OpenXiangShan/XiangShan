@@ -23,11 +23,14 @@ import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
+import freechips.rocketchip.tile.{BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
-import xscache.coupledL2.{EnableL2DecoupledDownstreamCHI, L2ParamKey, L2ToL1PfCtrl, PrefetchCtrlFromCore}
+import freechips.rocketchip.amba.axi4._
+import xscache.coupledL2.{
+  CoupledL2, EnableL2DecoupledDownstreamCHI, L2ParamKey, L2ToL1PfCtrl,
+  MemBackTypeMMField, MemPageTypeNCField, PrefetchCtrlFromCore
+}
 import xscache.chi.{CHIDataCheckKey, CHIIssue, CHIAddrWidthKey, CHIPoisonKey, DecoupledPortIO, NonSecureKey, PortIO}
-import xscache.coupledL2.CoupledL2
 import xscache.common.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -36,6 +39,7 @@ import utility.sram.SramBroadcastBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
+import xiangshan.mem.BusErrorUnitAXI
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -76,16 +80,16 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
   val l1_xbar = TLXbar()
-  val mmio_xbar = TLXbar()
-  val mmio_port = TLIdentityNode() // to L3
+  val mmio_xbar = AXI4Xbar()
+  val mmio_port = AXI4IdentityNode() // to soc_xbar (step 4a)
   val memory_port = if (enableL2) None else Some(TLIdentityNode())
-  val beu = LazyModule(new BusErrorUnit(
+  val beu = LazyModule(new BusErrorUnitAXI(
     new XSL1BusErrors(),
     BusErrorUnitParams(soc.BEURange.base, soc.BEURange.mask.toInt + 1)
   ))
 
-  val i_mmio_port = TLTempNode()
-  val d_mmio_port = TLTempNode()
+  val i_mmio_port = AXI4IdentityNode()
+  val d_mmio_port = AXI4IdentityNode()
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
 
   val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
@@ -98,7 +102,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
   val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
-  val i_mmio_buffer = LazyModule(new TLBuffer)
+  val i_mmio_buffer = LazyModule(new AXI4Buffer())
 
   val clint_int_node = IntIdentityNode()
   val debug_int_node = IntIdentityNode()
@@ -140,31 +144,58 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   // =========== Connection ============
   // l2 to l2_binder, then to memory_port
+  val l2MmioStubOpt = l2cache.map { l2 =>
+    val stub = TLClientNode(Seq(TLMasterPortParameters.v1(
+      clients = Seq(TLMasterParameters.v1(
+        name = "l2_mmio_stub",
+        sourceId = IdRange(0, 1)
+      )),
+      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
+    )))
+    l2.mmioNode := stub
+    stub
+  }
+
   l2cache match {
     case Some(l2) =>
       l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
       l2.managerNode := TLXbar() :=* l2_binder.get
-      l2.mmioNode := mmio_port
     case None =>
       memory_port.get := l1_xbar
   }
 
-  mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
-  // d_mmio_port: no TL master in phase 2.3a (data-side Uncache uses CHI d_mmio_cchi)
-  beu.node := TLBuffer.chainNode(1) := mmio_xbar
+  mmio_xbar := AXI4Buffer() := AXI4Buffer() := i_mmio_port
+  mmio_xbar := AXI4Buffer() := AXI4Buffer() := d_mmio_port
+  beu.node := AXI4Buffer() := mmio_xbar
   if (SeperateBus != top.SeperatedBusType.NONE) {
-    sep_tl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
+    sep_tl_port_opt.get := AXI4ToTL() := AXI4Buffer() := mmio_xbar
   }
 
-  // filter out in-core addresses before sent to mmio_port
-  // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
+  // Filter out in-core addresses before they appear on mmio_port / soc_xbar.
+  // AXI4Filter only has Smask (intersect); Ssubtract matches TLFilter.mSubtract.
   private def icacheCtrlAddressOpt: Option[AddressSet] = Option.when(icacheCtrlEnabled)(icacheCtrlAddress)
   private def dcacheCtrlAddressOpt: Option[AddressSet] = dcacheParameters.cacheCtrlAddressOpt
   private def cacheAddressSet: Seq[AddressSet] = (icacheCtrlAddressOpt ++ dcacheCtrlAddressOpt).toSeq
   private def mmioFilters = (if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet) :+ soc.BEURange
+  private def axi4Ssubtract(excepts: Seq[AddressSet]): AXI4SlaveParameters => Option[AXI4SlaveParameters] = { s =>
+    val filtered = excepts.foldLeft(s.address) { (addr, e) => addr.flatMap(_.subtract(e)) }
+    if (filtered.isEmpty) {
+      None
+    } else {
+      val alignment = filtered.map(_.alignment).min
+      val maxTransfer = 1 << 30
+      val capTransfer = if (alignment == 0 || alignment > maxTransfer) maxTransfer else alignment.toInt
+      val cap = TransferSizes(1, capTransfer)
+      Some(s.copy(
+        address = filtered,
+        supportsWrite = s.supportsWrite.intersect(cap),
+        supportsRead = s.supportsRead.intersect(cap)
+      ))
+    }
+  }
   mmio_port :=
-    TLFilter(TLFilter.mSubtract(mmioFilters)) :=
-    TLBuffer() :=
+    AXI4Filter(axi4Ssubtract(mmioFilters)) :=
+    AXI4Buffer() :=
     mmio_xbar
 
   beu_local_int_source_buffer := beu_local_int_source
@@ -245,6 +276,18 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     })
     io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
     io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
+
+    l2MmioStubOpt.foreach { stubNode =>
+      val (stub, _) = stubNode.out.head
+      stub.a.valid := false.B
+      stub.a.bits := DontCare
+      stub.d.ready := true.B
+      stub.b.ready := true.B
+      stub.c.valid := false.B
+      stub.c.bits := DontCare
+      stub.e.valid := false.B
+      stub.e.bits := DontCare
+    }
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 

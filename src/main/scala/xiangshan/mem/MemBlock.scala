@@ -24,7 +24,7 @@ import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import xscache.coupledL2.{MemBackTypeMM, MemBackTypeMMField, MemPageTypeNC, MemPageTypeNCField}
+import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 import org.chipsalliance.cde.config.Parameters
 import system.HasSoCParameter
 import utility._
@@ -302,7 +302,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
   val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
-  // Uncache AXI xbar: Uncache master -> D$ Ctrl / I$ Ctrl / d_mmio
+  // Uncache AXI xbar: Uncache master -> D$ Ctrl / I$ Ctrl / dMmioToL2 (Identity egress)
   val uncacheAxiXbar = AXI4Xbar(awQueueDepth = UncacheBufferSize)
   val uncacheAxiMaster = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
@@ -313,31 +313,11 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
     requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
   )))
 
-  private def dMmioAddressSets: Seq[AddressSet] = {
-    val full = AddressSet(0, (BigInt(1) << PAddrBits) - 1)
-    val holes =
-      dcacheParameters.cacheCtrlAddressOpt.toSeq ++
-        Option.when(icacheCtrlEnabled)(icacheCtrlAddress).toSeq
-    holes.foldLeft(Seq(full)) { (acc, hole) => acc.flatMap(_.subtract(hole)) }
-  }
-
-  val dMmioNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-    slaves = Seq(AXI4SlaveParameters(
-      address = dMmioAddressSets,
-      regionType = RegionType.UNCACHED,
-      executable = true,
-      supportsWrite = TransferSizes(1, 8),
-      supportsRead = TransferSizes(1, 8),
-      interleavedId = Some(0)
-    )),
-    beatBytes = 8,
-    requestKeys = Seq(MemBackTypeMM, MemPageTypeNC)
-  )))
-
+  val dMmioToL2 = AXI4IdentityNode()
   val icacheCtrlNode = Option.when(icacheCtrlEnabled)(AXI4IdentityNode())
 
   uncacheAxiXbar := uncacheAxiMaster
-  dMmioNode := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
   if (dcache.useDcache) {
     dcache.dcache.cacheCtrlOpt.foreach { ctrl =>
       ctrl.node := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
@@ -347,21 +327,10 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
     n := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
   }
 
-  // InstrUncache AXI: Frontend master -> 2-stage buffer -> i_mmio (not on Uncache xbar)
+  // InstrUncache AXI: Frontend master -> 2-stage buffer -> iMmioToL2 (not on Uncache xbar)
   val iMmioFromFrontend = AXI4IdentityNode()
-  val iMmioNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-    slaves = Seq(AXI4SlaveParameters(
-      address = Seq(AddressSet(0, (BigInt(1) << PAddrBits) - 1)),
-      regionType = RegionType.UNCACHED,
-      executable = true,
-      supportsWrite = TransferSizes.none,
-      supportsRead = TransferSizes(1, 8),
-      interleavedId = Some(0)
-    )),
-    beatBytes = 8,
-    requestKeys = Seq(MemBackTypeMM, MemPageTypeNC)
-  )))
-  iMmioNode := AXI4Buffer() := AXI4Buffer() := iMmioFromFrontend
+  val iMmioToL2 = AXI4IdentityNode()
+  iMmioToL2 := AXI4Buffer() := AXI4Buffer() := iMmioFromFrontend
 
   lazy val module = new MemBlockInlinedImp(this)
 }
@@ -377,8 +346,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   with HasTlbConst
   with SdtrigExt
 {
-  val (iMmioAxi, _) = outer.iMmioNode.in.head
-
   val io = IO(new Bundle {
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Flipped(ValidIO(new Redirect))
@@ -441,17 +408,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // PTW Compact CHI Type 4 (page-table refill). L2TLB lives in MemBlock; only outer port is IO
     val outer_ptw_cchi = new CCHIType4Port
-
-    // Uncache AXI (NC + MMIO). AXI4Xbar lives in MemBlock; only outer port is IO
-    val outer_d_mmio_axi = new AXI4Bundle(AXI4BundleParameters(
-      addrBits = PAddrBits,
-      dataBits = XLEN,
-      idBits = math.max(1, log2Up(UncacheBufferSize)),
-      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
-    ))
-
-    // InstrUncache AXI (MMIO/NC fetch). AXI4Buffer lives in MemBlock; only outer port is IO
-    val outer_i_mmio_axi = chiselTypeOf(iMmioAxi)
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1327,9 +1283,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val (uncacheAxi, _) = outer.uncacheAxiMaster.out.head
   uncache.io.axi <> uncacheAxi
-  val (dMmioAxi, _) = outer.dMmioNode.in.head
-  io.outer_d_mmio_axi <> dMmioAxi
-  io.outer_i_mmio_axi <> iMmioAxi
 
   // reset tree of MemBlock
   if (p(DebugOptionsKey).ResetGen) {

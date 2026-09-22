@@ -204,6 +204,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     core_with_l2(i).nmi_int_node := nmiIntNode
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
+    misc.soc_xbar.get :=
+      AXI4Buffer() :=
+      AXI4UserYanker() :=
+      AXI4IdIndexer(idBits = 4) :=
+      core_with_l2(i).mmio_axi_port
     misc.SepTLXbarOpt.foreach { SepTLXbarOpt =>
       // SeperateBus can only be connected to DebugModule now in non-XSNoCTop environment
       println(s"SeparateDM: ${SeperateDM}")

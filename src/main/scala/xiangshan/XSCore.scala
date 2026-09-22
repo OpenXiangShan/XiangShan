@@ -33,8 +33,6 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
-import freechips.rocketchip.amba.axi4.{AXI4Bundle, AXI4BundleParameters}
-import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 import xiangshan.cache.{CCHIType1Port, CCHIType4Port}
 import xiangshan.mem._
 import xiangshan.cache.mmu._
@@ -131,15 +129,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val icache_cchi = new CCHIType4Port
     // Compact CHI Type 4 PTW (from MemBlock); not wired to L2 in phase 2.2
     val ptw_cchi = new CCHIType4Port
-    // Uncache AXI (from MemBlock); not wired to L2 in phase 2.3a
-    val d_mmio_axi = new AXI4Bundle(AXI4BundleParameters(
-      addrBits = PAddrBits,
-      dataBits = XLEN,
-      idBits = math.max(1, log2Up(UncacheBufferSize)),
-      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
-    ))
-    // InstrUncache AXI (from MemBlock); not wired to L2 in phase 2.3b
-    val i_mmio_axi = chiselTypeOf(memBlock.io.outer_i_mmio_axi)
   })
 
   dontTouch(io.l2_flush_done)
@@ -228,24 +217,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.ptw_cchi.upREQ.ready := true.B
   io.ptw_cchi.dnDAT.valid := false.B
   io.ptw_cchi.dnDAT.bits  := DontCare
-  // Uncache AXI: MemBlock <-> tile; R/B not wired to L2 in phase 2.3a
-  io.d_mmio_axi <> memBlock.io.outer_d_mmio_axi
-  io.d_mmio_axi.aw.ready := true.B
-  io.d_mmio_axi.w.ready := true.B
-  io.d_mmio_axi.ar.ready := true.B
-  io.d_mmio_axi.b.valid := false.B
-  io.d_mmio_axi.b.bits := DontCare
-  io.d_mmio_axi.r.valid := false.B
-  io.d_mmio_axi.r.bits := DontCare
-  // InstrUncache AXI: MemBlock <-> tile; R/B not wired to L2 in phase 2.3b
-  io.i_mmio_axi <> memBlock.io.outer_i_mmio_axi
-  io.i_mmio_axi.aw.ready := true.B
-  io.i_mmio_axi.w.ready := true.B
-  io.i_mmio_axi.ar.ready := true.B
-  io.i_mmio_axi.b.valid := false.B
-  io.i_mmio_axi.b.bits := DontCare
-  io.i_mmio_axi.r.valid := false.B
-  io.i_mmio_axi.r.bits := DontCare
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
