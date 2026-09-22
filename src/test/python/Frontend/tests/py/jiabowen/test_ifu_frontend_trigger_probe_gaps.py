@@ -28,7 +28,7 @@ def test_trigger_missing_config_is_visible_and_discards_pending_history(tmp_path
         getattr(dut, _TRIGGER_PREFIX + stem).value = None
     _sample_frontend_trigger(recorder, dut, 2)
     _sample_frontend_trigger(recorder, dut, 3)
-    assert not recorder.hits
+    assert not any(recorder.toffee_sink.hit_counts().values())
     if field != "timing":
         assert recorder._ifu_frontend_trigger_state is None
     else:
@@ -44,7 +44,7 @@ def test_trigger_missing_config_is_visible_and_discards_pending_history(tmp_path
     # The artifact must retain the capability gap even after risk-tail eviction.
     for cycle in range(128):
         recorder.risk_observations.append({"event": "unrelated_risk", "cycle": cycle})
-    persistent = recorder._raw_dict()["sampler_diagnostics"]["frontend_trigger_config_gap"]
+    persistent = recorder._ifu_frontend_trigger_config_gap
     assert persistent["missing"] == [stem] and persistent["active"] is True
     assert persistent["first_cycle"] == 2 and persistent["last_cycle"] == 3
     assert persistent["rejected_samples"] == 2
@@ -54,8 +54,8 @@ def test_trigger_missing_config_is_visible_and_discards_pending_history(tmp_path
     assert restored["verified_updates"] == {}
     assert restored["held_trigger"] is None
     assert not restored["chain_samples"] and not restored["s2_transaction_baselines"]
-    assert not recorder.hits
+    assert not any(recorder.toffee_sink.hit_counts().values())
     # Absent handles are cached for the fixed DUT ABI; adding a fake attribute
     # cannot change that ABI. A transiently unreadable existing handle can
     # recover, but only with fresh temporal state.
-    assert recorder._raw_dict()["sampler_diagnostics"]["frontend_trigger_config_gap"]["active"] is (unavailable == "absent")
+    assert recorder._ifu_frontend_trigger_config_gap["active"] is (unavailable == "absent")

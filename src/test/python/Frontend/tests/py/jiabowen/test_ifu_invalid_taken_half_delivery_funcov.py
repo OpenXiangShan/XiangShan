@@ -92,7 +92,13 @@ def test_bin940_requires_all_phases_and_fired_delivery(tmp_path):
     dut.set(_PREFIX + "io_toIBuffer_ready", 1)
     _sample_invalid_taken_half_delivery(recorder, dut, 15)
     assert _hit(recorder)
-    evidence = recorder.hits[("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_042")].evidence[-1]
+    detail = recorder.hit_detail(
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_042",
+        coverpoint="verified_leaf_event",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["producer"] == "ifu_invalid_taken_half_delivery_sampler"
     assert [evidence["observations"][k] for k in ("redirect_cycle", "s0_cycle", "s1_cycle", "delivery_cycle")] == [10, 11, 13, 15]
     assert evidence["observations"]["signal_paths"]["s1_baseInstrData_3"]

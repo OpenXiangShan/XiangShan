@@ -34,9 +34,10 @@ def _setup(tmp_path):
 def test_first_owner_clipping_marks_once_per_accepted_transaction(tmp_path):
     recorder, env, dut = _setup(tmp_path)
     sample_cfvec_coverage(recorder, env, 10)
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-874"].key]
-    assert hit.hits == 1
-    assert hit.first_cycle == 10
+    detail = recorder.hit_detail_by_bin_id("BIN-874")
+    assert detail is not None
+    assert detail["hits"] == 1
+    assert detail["first_cycle"] == 10
 
 
 @pytest.mark.parametrize("stem,value", [

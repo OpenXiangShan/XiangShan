@@ -109,7 +109,7 @@ def test_frontend_trigger_exported_config_and_pc_compare_canary(env):
     gap = recorder._raw_dict()["sampler_diagnostics"]["frontend_trigger_config_gap"]
     assert gap and gap["active"] and set(gap["missing"]) == {f"tdataVec_{slot}_timing" for slot in range(4)}
     assert gap["affected_bin_ids"] == ["BIN-1000"]
-    assert not any(recorder.definition_by_key[key].bin_id == "BIN-1000" for key in recorder.hits)
+    assert recorder.hit_count_by_bin_id("BIN-1000") == 0
     recorder.risk_observations.append(dict(event="frontend_trigger_exported_abi_canary",
         phases=results, actual_paths=paths, unavailable_control="timing",
         missing_timing_value_supplied=False, owner_backannotation_eligible=False,

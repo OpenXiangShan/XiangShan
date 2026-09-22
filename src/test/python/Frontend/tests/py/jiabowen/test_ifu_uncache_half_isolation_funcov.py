@@ -56,8 +56,13 @@ def test_uncache_half_isolation_matches_saved_pc_data_through_backend_recovery(t
     recorder, _env, dut, _memory = _make_recorder(tmp_path)
     _drive(recorder, dut, _samples())
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_024")
-    evidence = recorder.hits[("ifu_v3_pipeline_owner_model", "verified_leaf_event",
-                              "owner_leaf_024")].evidence[-1]["observations"]
+    detail = recorder.hit_detail(
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_024",
+        coverpoint="verified_leaf_event",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]["observations"]
     assert evidence["half_data"] == 0x313
     assert evidence["source_cycle"] < evidence["redirect_cycle"] < evidence["recovery_cycle"]
     assert evidence["recovery_pc"] == 0x80003000

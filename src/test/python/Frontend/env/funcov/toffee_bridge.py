@@ -73,6 +73,7 @@ class ToffeeCoverageSink:
         self._native_group_names: set[str] = set()
         self._native_models_by_group: dict[str, Any] = {}
         self._owner_model = None
+        self._hit_details: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.bin_ids = {
             (str(group), str(point), str(bin_name)): str(bin_id)
             for (group, point, bin_name), bin_id in (bin_ids or {}).items()
@@ -255,6 +256,10 @@ class ToffeeCoverageSink:
                 f"unknown Toffee coverage point: {group_name}::{point_name}::{bin_name}"
             )
 
+        if bin_name not in target.active_bins:
+            self._record_hit_detail(
+                (group_name, point_name, bin_name), cycle, evidence
+            )
         target.active_bins.add(bin_name)
         self._dirty_groups.add(group_name)
         return True
@@ -326,6 +331,58 @@ class ToffeeCoverageSink:
             count += 1
         return count
 
+    def hit_detail(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        *,
+        coverpoint: str | None = None,
+    ) -> dict[str, Any] | None:
+        point_name = (
+            self._point_by_group_bin.get((str(coverage_group), str(bin_name)))
+            if coverpoint is None
+            else str(coverpoint)
+        )
+        if point_name is None:
+            return None
+        detail = self._hit_details.get(
+            (str(coverage_group), point_name, str(bin_name))
+        )
+        if detail is None:
+            return None
+        return {
+            **detail,
+            "evidence": list(detail["evidence"]),
+        }
+
+    def hit_detail_by_bin_id(self, bin_id: str) -> dict[str, Any] | None:
+        key = self._key_by_bin_id.get(str(bin_id))
+        if key is None:
+            return None
+        return self.hit_detail(key[0], key[2], coverpoint=key[1])
+
+    def _record_hit_detail(
+        self,
+        key: tuple[str, str, str],
+        cycle: int,
+        evidence: Mapping[str, Any] | None,
+    ) -> None:
+        detail = self._hit_details.setdefault(
+            key,
+            {
+                "hits": 0,
+                "first_cycle": None,
+                "last_cycle": None,
+                "evidence": [],
+            },
+        )
+        detail["hits"] += 1
+        detail["last_cycle"] = int(cycle)
+        if detail["first_cycle"] is None:
+            detail["first_cycle"] = int(cycle)
+        if evidence is not None and len(detail["evidence"]) < 8:
+            detail["evidence"].append(dict(evidence))
+
     def record_native_hits(
         self,
         flags: Mapping[tuple[str, str], bool],
@@ -351,6 +408,7 @@ class ToffeeCoverageSink:
             key = (str(group_name), point_name, str(bin_name))
             if key not in self.bin_ids:
                 raise KeyError(f"unknown native Toffee evidence key: {key}")
+            self._record_hit_detail(key, cycle, evidence)
             if self._owner_model is not None:
                 self._owner_model.derive_from_source(
                     self.bin_ids[key], int(cycle), evidence

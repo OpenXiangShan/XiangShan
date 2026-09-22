@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from env.funcov.recorder import CoverageHit, FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.toffee_bridge import ToffeeCoverageSink
+from env.funcov.toffee_runtime import create_toffee_runtime
 from tests.py.jiabowen.test_ifu_nc_dual_suppression_v3_dut import (
     _BASE, _candidate_paths, _nc_loop_trace, _second_block_taken_loop,
     _dual_nc_candidate, _check_single_nc_response, _check_target_acceptance,
@@ -85,20 +87,23 @@ def test_nc_response_must_be_single_and_keep_input_identity(wrong):
         _check_single_nc_response(request, response)
 
 
-@pytest.mark.parametrize("fault", [None, "missing_hit", "zero_hit", "serialized_key",
-                                  "wrong_cycle", "no_acceptance"])
+@pytest.mark.parametrize("fault", [None, "missing_hit", "wrong_cycle", "no_acceptance"])
 def test_target_lookup_uses_runtime_key_and_requires_matching_acceptance(tmp_path, fault):
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+    recorder = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(), testcase_name="nc_target_lookup_unit",
         artifact_tag="nc_target_lookup_unit", output_dir=tmp_path,
     )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    recorder.attach_toffee_sink(sink)
+    create_toffee_runtime(recorder, sink)
     key = recorder.definition_by_bin_id["BIN-904"].key
     assert isinstance(key, tuple) and len(key) == 3
     checkpoints = [] if fault == "no_acceptance" else [{"cycle": 708}]
     if fault != "missing_hit":
-        recorder.hits["::".join(key) if fault == "serialized_key" else key] = CoverageHit(
-            hits=0 if fault == "zero_hit" else 1,
-            first_cycle=709 if fault == "wrong_cycle" else 708,
+        sink.mark_native(
+            key[0],
+            key[2],
+            cycle=709 if fault == "wrong_cycle" else 708,
         )
     if fault:
         with pytest.raises(AssertionError):

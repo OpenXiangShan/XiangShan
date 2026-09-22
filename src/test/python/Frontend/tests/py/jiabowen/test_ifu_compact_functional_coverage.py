@@ -250,10 +250,13 @@ def test_ifu_owner_address_boundary_requires_low_and_high_in_one_run(tmp_path):
     sample_cfvec_coverage(recorder, env, 2)
     assert set(recorder._ifu_owner_address_boundary_witnesses) == {"low", "high"}
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_002")
-    hit = recorder.hits[
-        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_002")
-    ]
-    evidence = hit.evidence[-1]
+    detail = recorder.hit_detail(
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_002",
+        coverpoint="verified_leaf_event",
+    )
+    assert detail is not None
+    evidence = detail["evidence"][-1]
     assert evidence["producer"] == "ifu_address_boundary_sampler"
     assert evidence["observations"]["same_recorder_run"] is True
 

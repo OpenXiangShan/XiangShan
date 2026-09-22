@@ -52,12 +52,12 @@ def _check_single_nc_response(request, response):
 
 def _check_target_acceptance(recorder, response_checkpoints):
     assert response_checkpoints, "BIN-904 has no accepted single-response checkpoint"
-    definition = recorder.definition_by_bin_id["BIN-904"]
-    # Runtime keys are tuples; the group::point::bin spelling is JSON-only.
-    target = recorder.hits.get(definition.key)
-    assert target is not None and target.hits > 0, "BIN-904 has no runtime hit"
-    assert any(p["cycle"] == target.first_cycle for p in response_checkpoints), (
-        "BIN-904 first hit does not match a checked IFU acceptance", target.first_cycle)
+    target = recorder.hit_detail_by_bin_id("BIN-904")
+    assert target is not None and target["hits"] > 0, "BIN-904 has no runtime hit"
+    assert any(p["cycle"] == target["first_cycle"] for p in response_checkpoints), (
+        "BIN-904 first hit does not match a checked IFU acceptance",
+        target["first_cycle"],
+    )
 
 
 @pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires real Frontend DUT")

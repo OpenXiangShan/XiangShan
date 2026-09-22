@@ -123,6 +123,34 @@ def test_toffee_sink_key_hit_uses_toffee_hints() -> None:
     assert sink.key_hit("group", "bin")
 
 
+def test_toffee_sink_records_native_hit_detail(tmp_path) -> None:
+    context = FrontendFuncovSampleHub.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name="native_hit_detail",
+        artifact_tag="native_hit_detail",
+        output_dir=tmp_path,
+    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    context.attach_toffee_sink(sink)
+    create_toffee_runtime(context, sink)
+    definition = context.definition_by_bin_id["BIN-904"]
+
+    sink.mark_native(
+        definition.coverage_group,
+        definition.bin_name,
+        cycle=17,
+        evidence={"acceptance_cycle": 17},
+    )
+
+    assert sink.hit_count_by_bin_id("BIN-904") == 1
+    assert sink.hit_detail_by_bin_id("BIN-904") == {
+        "hits": 1,
+        "first_cycle": 17,
+        "last_cycle": 17,
+        "evidence": [{"acceptance_cycle": 17}],
+    }
+
+
 def test_toffee_sink_samples_each_group_once_per_cycle() -> None:
     sink = ToffeeCoverageSink(
         {("group", "point"): ("first", "second")}
@@ -224,7 +252,7 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "create_toffee_runtime(" in source
     assert "_session_toffee_coverage(request).add(toffee_sink.cov_groups)" in source
     assert "audit_recorder=None" in source
-    assert 'collector.write(_funcov_dir() / "toffee.funcov.json")' in source
+    assert 'collector.write(path or (_funcov_dir() / "toffee.funcov.json"))' in source
     assert "FunctionalCoverageRecorder" not in source
     assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
     assert "TB_ENABLE_FUNCOV_AUDIT" not in source

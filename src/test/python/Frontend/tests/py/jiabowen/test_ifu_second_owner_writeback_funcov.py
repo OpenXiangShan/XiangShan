@@ -44,8 +44,9 @@ def test_second_owner_matches_both_raw_second_and_cross_block_rvi(tmp_path, raw_
     _drive(recorder, dut, raw_owner=raw_owner, cross=cross)
     _sample_predchecker_v3(recorder, dut, 11)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_049")
-    hit = recorder.hits[recorder.definition_by_bin_id["BIN-947"].key]
-    evidence = hit.evidence[-1]["observations"]
+    detail = recorder.hit_detail_by_bin_id("BIN-947")
+    assert detail is not None
+    evidence = detail["evidence"][-1]["observations"]
     assert evidence["checkpoint_passed"]
     assert evidence["source_blocks"][1]["ftqIdx_value"] == 11
     assert evidence["writeback"]["io_toFtq_wbRedirect_bits_ftqIdx_value"] == 11
