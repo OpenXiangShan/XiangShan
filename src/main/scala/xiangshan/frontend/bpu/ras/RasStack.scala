@@ -57,9 +57,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     val spec:     RasSpecIO       = new RasSpecIO
     val commit:   RasCommitIO     = new RasCommitIO
     val redirect: RasRedirectIO   = new RasRedirectIO
+    val specRead: ReadRetAddr     = new ReadRetAddr
     val meta:     RasInternalMeta = Output(new RasInternalMeta)
 
-    val specNearOverflow: Bool     = Output(Bool())
     val debug:            RasDebug = new RasDebug
   }
   val io: RasStackIO = IO(new RasStackIO)
@@ -322,7 +322,12 @@ class RasStack(implicit p: Parameters) extends RasModule
     specPop(ssp, sctr, tosr, tosw, topNos)
   }
 
-  io.spec.popAddr := timingTop.retAddr
+  private val specQueueRetAddr  = specQueue(io.specRead.req.tosr.value).retAddr
+  private val specCommitRetAddr = commitStack(io.specRead.req.ssp).retAddr
+  private val isInQueue         = tosrInRange(io.specRead.req.tosr, tosw)
+  private val specReadRetAddr   = Mux(isInQueue, specQueueRetAddr, specCommitRetAddr)
+  io.spec.popAddr     := timingTop.retAddr
+  io.specRead.retAddr := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr))
 
   io.meta.tosw := tosw
   io.meta.tosr := tosr
@@ -419,8 +424,6 @@ class RasStack(implicit p: Parameters) extends RasModule
     specNearOverflowed := false.B
   }
 
-  io.specNearOverflow := specNearOverflowed
-  XSPerfAccumulate("specNearOverflow", specNearOverflowed)
   io.debug.bos := bos
   io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
   io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
