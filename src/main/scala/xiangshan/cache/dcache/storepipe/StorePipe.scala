@@ -183,6 +183,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.req_coh := s2_hit_coh
   // TODO: consider tag error
   io.miss_req.bits.cancel := io.lsu.s2_kill
+  io.miss_req.bits.isSpecMiss := false.B
   io.miss_req.bits.pc := io.lsu.s2_pc
 
   /**
