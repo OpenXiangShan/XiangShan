@@ -45,10 +45,11 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val commit:   Valid[BpuCommit]   = Flipped(Valid(new BpuCommit))
     val redirect: Valid[BpuRedirect] = Flipped(Valid(new BpuRedirect))
 
-    val topRetAddr:   GuardedPc       = Output(GuardedPc())
-    val redirectMeta: RasRedirectMeta = Output(new RasRedirectMeta)
-    val commitMeta:   RasCommitMeta   = Output(new RasCommitMeta)
-    val specRead:     ReadRetAddr     = new ReadRetAddr
+    val topRetAddr:      GuardedPc       = Output(GuardedPc())
+    val topRetAddrValid: Bool            = Output(Bool())
+    val redirectMeta:    RasRedirectMeta = Output(new RasRedirectMeta)
+    val commitMeta:      RasCommitMeta   = Output(new RasCommitMeta)
+    val specRead:        ReadRetAddr     = new ReadRetAddr
   }
 
   val io: RasIO = IO(new RasIO)
@@ -89,6 +90,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   io.redirectMeta     := redirectMeta
   io.commitMeta       := commitMeta
   io.topRetAddr       := stack.spec.popAddr
+  io.topRetAddrValid  := stack.topRetAddrValid
   io.specRead.retAddr := stack.specRead.retAddr
 
   private val redirect = RegNextWithEnable(io.redirect)

@@ -28,8 +28,22 @@ case class RasParameters(
 trait HasRasParameters extends HasBpuParameters {
   def rasParameters: RasParameters = bpuParameters.rasParameters
 
-  def CommitStackSize:   Int = rasParameters.CommitStackSize
-  def SpecQueueSize:     Int = rasParameters.SpecQueueSize
+  def CommitStackSize: Int = rasParameters.CommitStackSize
+  def SpecQueueSize:   Int = rasParameters.SpecQueueSize
+  require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
+  require(isPow2(CommitStackSize), "CommitStackSize must be a power of 2")
+
+  // Address width used to index the committed stack.
+  def CommitStackAddrWidth: Int = log2Up(CommitStackSize)
+
+  // Width of the committed-stack occupancy counter (0..CommitStackSize).
+  def CommitDepthWidth: Int = log2Up(CommitStackSize + 1)
+
+  // Width of the stack pointers. Large enough that `ssp - nsp` (net in-flight) can be
+  // sign-interpreted across the whole operating range without modular aliasing, so emptiness
+  // detection needs no extra disambiguation bit. The only aliased endpoint (a fully saturated
+  // +SpecQueueSize push window) always has its top inside the spec queue and is masked there.
+  def StackPtrWidth: Int = log2Up(CommitStackSize + SpecQueueSize)
 
   // A single FTQ entry drives at most one RAS spec op (BPU S3), so the number of
   // outstanding speculative pushes is bounded by FtqSize. SpecQueueSize must be at
