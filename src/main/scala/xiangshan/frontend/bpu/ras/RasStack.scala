@@ -42,7 +42,7 @@ class RasStack(implicit p: Parameters) extends RasModule
       val pushAddr:  GuardedPc = Input(GuardedPc())
       val metaTosw:  RasPtr    = Input(new RasPtr)
       // for debug purpose only
-      val metaSsp: UInt = Input(UInt(log2Up(CommitStackSize).W))
+      val metaSsp: UInt = Input(UInt(StackPtrWidth.W))
     }
 
     class RasRedirectIO extends Bundle {
@@ -53,11 +53,13 @@ class RasStack(implicit p: Parameters) extends RasModule
       val meta:     RasInternalMeta = Input(new RasInternalMeta)
     }
 
-    val spec:     RasSpecIO       = new RasSpecIO
-    val commit:   RasCommitIO     = new RasCommitIO
-    val redirect: RasRedirectIO   = new RasRedirectIO
-    val specRead: ReadRetAddr     = new ReadRetAddr
-    val meta:     RasInternalMeta = Output(new RasInternalMeta)
+    val spec:     RasSpecIO     = new RasSpecIO
+    val commit:   RasCommitIO   = new RasCommitIO
+    val redirect: RasRedirectIO = new RasRedirectIO
+    val specRead: ReadRetAddr   = new ReadRetAddr
+    // Whether the speculative top (`spec.popAddr`) can be used to predict a return.
+    val topRetAddrValid: Bool            = Output(Bool())
+    val meta:            RasInternalMeta = Output(new RasInternalMeta)
 
     val debug: RasDebug = new RasDebug
   }
@@ -73,8 +75,13 @@ class RasStack(implicit p: Parameters) extends RasModule
     RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(GuardedPcInit(0.U(GuardedVAddrBits.W))))))
   private val specNosList = RegInit(VecInit(Seq.fill(SpecQueueSize)(0.U.asTypeOf(new NosEntry))))
 
-  private val nsp = RegInit(0.U(log2Up(CommitStackSize).W))
-  private val ssp = RegInit(0.U(log2Up(CommitStackSize).W))
+  // Wider than log2Up(CommitStackSize) so that `ssp - nsp` (the net in-flight push/pop
+  // effect) can be sign-interpreted without a modular wrap ambiguity.
+  private val nsp = RegInit(0.U(StackPtrWidth.W))
+  private val ssp = RegInit(0.U(StackPtrWidth.W))
+
+  // Number of valid entries in the committed stack (0..CommitStackSize).
+  private val commitDepth = RegInit(0.U(CommitDepthWidth.W))
 
   private val tosr      = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
   private val tosw      = RegInit(RasPtr(false.B, 0.U))
@@ -96,7 +103,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     inflightValid
   }
 
-  def getCommitTop(currSsp: UInt): RasEntry = commitStack(currSsp)
+  def commitStackIdx(ptr: UInt): UInt = ptr(CommitStackAddrWidth - 1, 0)
+
+  def getCommitTop(currSsp: UInt): RasEntry = commitStack(commitStackIdx(currSsp))
 
   def getTopNos(currTosr: RasPtr, currTosw: RasPtr, currInSpec: Bool, allowBypass: Boolean): NosEntry = {
     val ret = Wire(new NosEntry)
@@ -218,7 +227,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }.elsewhen(io.redirect.valid && io.redirect.isRet) {
     // getTop using redirect Nos as tosr
-    val popRedSsp  = Wire(UInt(log2Up(CommitStackSize).W))
+    val popRedSsp  = Wire(UInt(StackPtrWidth.W))
     val popRedTosr = io.redirect.meta.nos
     val popRedTosw = io.redirect.meta.tosw
 
@@ -240,7 +249,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     timingTop := getTop(popSsp, popTosr, popTosw, allowBypass = false, io.redirect.meta.tosrInSpec)
   }.elsewhen(io.spec.popValid) {
     // getTop using current Nos as tosr
-    val popSsp  = Wire(UInt(log2Up(CommitStackSize).W))
+    val popSsp  = Wire(UInt(StackPtrWidth.W))
     val popTosr = topNos
     val popTosw = tosw
 
@@ -293,7 +302,7 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   private val specQueueRetAddr  = specQueue(io.specRead.req.tosr.value).retAddr
-  private val specCommitRetAddr = commitStack(io.specRead.req.ssp).retAddr
+  private val specCommitRetAddr = commitStack(commitStackIdx(io.specRead.req.ssp)).retAddr
   private val isInQueue         = tosrInRange(io.specRead.req.tosr, tosw, io.specRead.req.tosrInSpec)
   private val specReadRetAddr   = Mux(isInQueue, specQueueRetAddr, specCommitRetAddr)
   io.spec.popAddr     := timingTop.retAddr
@@ -306,8 +315,36 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.meta.nosInSpec := topNosEntry.inSpec
   io.meta.ssp       := ssp
 
+  // The stack is empty iff the top is not in the spec queue and the committed stack has been
+  // fully consumed. `ssp - nsp` is the net in-flight effect; with `StackPtrWidth` wide enough
+  // it is reconstructed exactly by a signed subtraction, so no modular-wrap disambiguation is
+  // needed.
+  private def resolvedEmpty(
+      currSsp:    UInt,
+      currTosr:   RasPtr,
+      currTosw:   RasPtr,
+      currInSpec: Bool
+  ): Bool = {
+    val speculativeDepth = commitDepth.zext.asSInt + (currSsp.asSInt - nsp.asSInt)
+    !tosrInRange(currTosr, currTosw, currInSpec) && speculativeDepth <= 0.S
+  }
+
+  private val rasIsEmpty = RegInit(true.B)
+  when(io.redirect.valid) {
+    rasIsEmpty := Mux(
+      io.redirect.isCall,
+      false.B,
+      resolvedEmpty(io.redirect.meta.ssp, io.redirect.meta.tosr, io.redirect.meta.tosw, io.redirect.meta.tosrInSpec)
+    )
+  }.elsewhen(io.spec.pushValid) {
+    rasIsEmpty := false.B
+  }.otherwise {
+    rasIsEmpty := resolvedEmpty(ssp, tosr, tosw, tosrInSpec)
+  }
+  io.topRetAddrValid := !rasIsEmpty
+
   when(io.commit.popValid) {
-    val nspUpdate = Wire(UInt(log2Up(CommitStackSize).W))
+    val nspUpdate = Wire(UInt(StackPtrWidth.W))
     when(io.commit.metaSsp =/= nsp) {
       // force set nsp to commit ssp to avoid permanent errors
       nspUpdate := io.commit.metaSsp
@@ -315,13 +352,14 @@ class RasStack(implicit p: Parameters) extends RasModule
       nspUpdate := nsp
     }
 
-    nsp := ptrDec(nspUpdate)
+    nsp         := ptrDec(nspUpdate)
+    commitDepth := Mux(commitDepth === 0.U, 0.U, commitDepth - 1.U)
   }
 
   private val commitPushAddr = specQueue(io.commit.metaTosw.value).retAddr
 
   when(io.commit.pushValid) {
-    val nspUpdate = Wire(UInt(log2Up(CommitStackSize).W))
+    val nspUpdate = Wire(UInt(StackPtrWidth.W))
     when(io.commit.metaSsp =/= nsp) {
       // force set nsp to commit ssp to avoid permanent errors
       nspUpdate := io.commit.metaSsp
@@ -329,8 +367,9 @@ class RasStack(implicit p: Parameters) extends RasModule
       nspUpdate := nsp
     }
 
-    nsp                                    := ptrInc(nspUpdate)
-    commitStack(ptrInc(nspUpdate)).retAddr := commitPushAddr
+    nsp         := ptrInc(nspUpdate)
+    commitDepth := Mux(commitDepth === CommitStackSize.U, commitDepth, commitDepth + 1.U)
+    commitStack(commitStackIdx(ptrInc(nspUpdate))).retAddr := commitPushAddr
   }
 
   private val tmpWriteTosr  = RegEnable(io.commit.metaTosw, io.commit.pushValid)
