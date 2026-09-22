@@ -58,9 +58,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1D cacheable path uses Compact CHI Type 1 (see XSCore.io.dcache_cchi); not connected to L2 yet.
-  // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
-  // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
+  // L1 D$/I$/PTW Compact CHI is forwarded to L2Top; not wired to CoupledL2 yet.
 
   l2top.inner.d_mmio_port := memBlock.dMmioToL2
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.iMmioToL2
@@ -158,6 +156,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.beu_errors.icache <> core.module.io.beu_errors.icache
     l2top.module.io.beu_errors.dcache <> core.module.io.beu_errors.dcache
     l2top.module.io.beu_errors.uncache <> core.module.io.beu_errors.uncache
+
+    l2top.module.io.dcache_cchi <> core.module.io.dcache_cchi
+    l2top.module.io.icache_cchi <> core.module.io.icache_cchi
+    l2top.module.io.ptw_cchi <> core.module.io.ptw_cchi
 
     l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }

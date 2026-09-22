@@ -123,11 +123,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     })
     val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
-    // Compact CHI Type 1 DCache (from MemBlock); not wired to L2 yet
+    // Compact CHI Type 1 DCache / Type 4 ICache / Type 4 PTW; forwarded to L2Top
     val dcache_cchi = Vec(numMemChannelsFromDcache, new CCHIType1Port)
-    // Compact CHI Type 4 ICache (from Frontend); not wired to L2 in phase 2.1
     val icache_cchi = new CCHIType4Port
-    // Compact CHI Type 4 PTW (from MemBlock); not wired to L2 in phase 2.2
     val ptw_cchi = new CCHIType4Port
   })
 
@@ -203,20 +201,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
-  // ICache Compact CHI Type 4: Frontend <-> MemBlock buffer <-> tile; RXDAT not wired to L2 in phase 2.1
   memBlock.io.inner_icache_cchi <> frontend.io.icache_cchi
   io.dcache_cchi <> memBlock.io.outer_dcache_cchi
-  io.icache_cchi.upREQ <> memBlock.io.outer_icache_cchi.upREQ
-  io.icache_cchi.dnDAT <> memBlock.io.outer_icache_cchi.dnDAT
-  io.icache_cchi.upREQ.ready := true.B
-  io.icache_cchi.dnDAT.valid := false.B
-  io.icache_cchi.dnDAT.bits  := DontCare
-  // PTW Compact CHI Type 4: L2TLB <-> MemBlock buffer <-> tile; dnDAT not wired to L2 in phase 2.2
-  io.ptw_cchi.upREQ <> memBlock.io.outer_ptw_cchi.upREQ
-  io.ptw_cchi.dnDAT <> memBlock.io.outer_ptw_cchi.dnDAT
-  io.ptw_cchi.upREQ.ready := true.B
-  io.ptw_cchi.dnDAT.valid := false.B
-  io.ptw_cchi.dnDAT.bits  := DontCare
+  io.icache_cchi <> memBlock.io.outer_icache_cchi
+  io.ptw_cchi <> memBlock.io.outer_ptw_cchi
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ

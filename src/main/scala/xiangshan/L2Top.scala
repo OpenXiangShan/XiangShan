@@ -36,6 +36,7 @@ import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
 import utility.sram.SramBroadcastBundle
+import xiangshan.cache.{CCHIType1Port, CCHIType4Port}
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
@@ -260,6 +261,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val chi = Option.when(isOpenLLC)(new PortIO)
       val decoupledCHI = Option.when(isZhuJiang)(new DecoupledPortIO)
       val nodeID = Some(Input(UInt(NodeIDWidth.W)))
+      // Compact CHI from L1; not wired to CoupledL2 yet
+      val dcache_cchi = Flipped(Vec(numMemChannelsFromDcache, new CCHIType1Port))
+      val icache_cchi = Flipped(new CCHIType4Port)
+      val ptw_cchi = Flipped(new CCHIType4Port)
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
@@ -344,6 +349,28 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     dontTouch(io.cpu_wfi)
     dontTouch(io.cpu_critical_error)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
+    dontTouch(io.dcache_cchi)
+    dontTouch(io.icache_cchi)
+    dontTouch(io.ptw_cchi)
+
+    // Drain L1 CCHI until CoupledL2 Compact CHI is connected.
+    io.dcache_cchi.foreach { p =>
+      p.upEVT.ready := true.B
+      p.upREQ.ready := true.B
+      p.upRSP.ready := true.B
+      p.upDAT.ready := true.B
+      p.dnSNP.valid := false.B
+      p.dnSNP.bits := DontCare
+      p.dnRSP.valid := false.B
+      p.dnRSP.bits := DontCare
+      p.dnDAT.valid := false.B
+      p.dnDAT.bits := DontCare
+    }
+    Seq(io.icache_cchi, io.ptw_cchi).foreach { p =>
+      p.upREQ.ready := true.B
+      p.dnDAT.valid := false.B
+      p.dnDAT.bits := DontCare
+    }
 
     val hartIsInReset = RegInit(true.B)
     hartIsInReset := io.hartIsInReset.resetInFrontend
