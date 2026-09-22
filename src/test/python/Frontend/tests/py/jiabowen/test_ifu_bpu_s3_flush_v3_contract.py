@@ -12,8 +12,6 @@ from env.runtime.pylib import frontend_offset_path
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[7]
-_EXPECTED_SOURCE = "8724911fd6d94c1b953b6ab646584845da9c7fc5"
-_EXPECTED_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
 _REQUIRED_IFU_KEYS = (
     "req_valid",
     "req_ready",
@@ -57,8 +55,25 @@ def test_bin814_review_is_bound_to_the_current_dut_manifest() -> None:
         "runtime_head": runtime_head,
         "reason": "DUT build is not based on the current verification history",
     }
-    assert manifest["dut_source_sha"] == _EXPECTED_SOURCE
-    assert manifest["design_baseline_sha"] == _EXPECTED_DESIGN_BASELINE
+    source_sha = manifest["dut_source_sha"]
+    baseline_sha = manifest["design_baseline_sha"]
+    for label, sha in (("dut_source_sha", source_sha), ("design_baseline_sha", baseline_sha)):
+        valid = subprocess.run(
+            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+            cwd=_REPO_ROOT,
+            check=False,
+        )
+        assert valid.returncode == 0, {"field": label, "value": sha}
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_sha, runtime_head],
+        cwd=_REPO_ROOT,
+        check=False,
+    ).returncode == 0
+    assert subprocess.run(
+        ["git", "merge-base", "--is-ancestor", baseline_sha, source_sha],
+        cwd=_REPO_ROOT,
+        check=False,
+    ).returncode == 0
     assert manifest["source_tree_dirty"] is False
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import subprocess
 from pathlib import Path
 
 try:
@@ -31,7 +32,35 @@ _PILOT_PATH = (
 _GROUP = "ifu_instruncache_owner_v3"
 _COVERPOINT = "protocol_leaf"
 _MODEL_EVIDENCE = "MODEL:sample_instr_uncache_owner_coverage"
-_CURRENT_V3_DESIGN_BASELINE = "3448f4ad4e381f1ede51a34a6d5cad39bc5daaed"
+
+
+def _current_v3_design_baseline() -> str:
+    """Resolve the current V3 design baseline from repository merge history."""
+    result = subprocess.run(
+        [
+            "git",
+            "log",
+            "--first-parent",
+            "--merges",
+            "--format=%H%x00%P%x00%s",
+            "HEAD",
+        ],
+        cwd=_FRONTEND_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    for line in result.stdout.splitlines():
+        fields = line.split("\0", 2)
+        if len(fields) != 3 or "kunminghu-v3" not in fields[2]:
+            continue
+        parents = fields[1].split()
+        if len(parents) >= 2:
+            return parents[1]
+    raise RuntimeError("cannot resolve the current kunminghu-v3 design baseline")
+
+
+_CURRENT_V3_DESIGN_BASELINE = _current_v3_design_baseline()
 _OBSOLETE_HALF_STATE_TERMS = (
     "halfPc",
     "halfData",
