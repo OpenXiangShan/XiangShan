@@ -587,6 +587,21 @@ class MissTrackConfig(n: Int = 1) extends Config(
   })
 )
 
+// Functional specmiss path.  MissTrackConfig remains shadow-only for
+// validation and performance comparison; this config enables the S1/S2 gate.
+class SpecMissConfig(n: Int = 1) extends Config(
+  (new DefaultConfig(n)).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map { p =>
+      p.copy(
+        dcacheParametersOpt = p.dcacheParametersOpt.map(_.copy(
+          enMissTrack = true,
+          missTrackShadow = false
+        ))
+      )
+    }
+  })
+)
+
 class FuzzConfig(dummy: Int = 0) extends Config(
   new WithFuzzer
     ++ new DefaultConfig(1)
