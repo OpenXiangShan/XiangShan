@@ -33,4 +33,10 @@ trait HasRasParameters extends HasBpuParameters {
   def SpecQueueSize:     Int = rasParameters.SpecQueueSize
   def StackCounterWidth: Int = rasParameters.StackCounterWidth
   def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
+
+  // A single FTQ entry drives at most one RAS spec op (BPU S3), so the number of
+  // outstanding speculative pushes is bounded by FtqSize. SpecQueueSize must be at
+  // least FtqSize, otherwise the circular spec queue can wrap and overwrite entries
+  // that are still live.
+  require(SpecQueueSize >= FtqSize, s"SpecQueueSize ($SpecQueueSize) must be >= FtqSize ($FtqSize)")
 }
