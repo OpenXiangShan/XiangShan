@@ -57,6 +57,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.ras.RasSpecReadReq
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason
@@ -128,18 +129,33 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
-  private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
-  private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
+  private val ifuFtqPtrsEarlyByTwoCycles = io.fromIfu.advanceFtqIdx
+  private val (ifuFtqPtrsEarlyByOneCycles, ifuRedirect, ifuResolve, ifuBlockSelEarlyByOneCycle) = receiveIfuRedirect(
     io.fromIfu.wbRedirect,
-    specTopAddr,
     backendRedirect.valid
   )
+  private val ifuRedirectMetaEarlyByOneCycle = ifuFtqPtrsEarlyByTwoCycles.map {
+    case ftqIdx => RegNext(metaQueueRedirect(ftqIdx.value)).ras
+  }
+  private val ifuAdvanceRedirectMeta =
+    Mux(ifuBlockSelEarlyByOneCycle, ifuRedirectMetaEarlyByOneCycle(1), ifuRedirectMetaEarlyByOneCycle(0))
+
+  private val specReadReq      = Wire(new RasSpecReadReq)
+  specReadReq.tosr       := ifuAdvanceRedirectMeta.tosr
+  specReadReq.ssp        := ifuAdvanceRedirectMeta.ssp
+
+  private val specRead    = io.fromBpu.specRead
+  private val specRetAddr = RegNext(ifuAdvanceRedirectMeta.topRetAddr)
+
+  // Fix the target fed to the training path with the fresh RAS address (BPU fixes its own redirect target itself).
+  private val ifuResolveCorrect = WireInit(ifuResolve)
+  ifuResolveCorrect.bits.target := Mux(ifuResolve.bits.attribute.isReturn, specRead.unGuard, ifuResolve.bits.target)
 
   // redirectFtqIdxInAdvance is always one cycle ahead of redirect
   private val redirectFtqIdxInAdvance = Mux(
     backendRedirectFtqIdxInAdvance.valid,
     backendRedirectFtqIdxInAdvance.bits,
-    ifuRedirectFtqIdxInAdvance.bits
+    ifuFtqPtrsEarlyByOneCycles
   )
 
   private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
@@ -382,7 +398,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
   io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
-  io.toBpu.redirectFromIFU         := ifuRedirect.valid
+  io.toBpu.needChangeTarget        := ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn
+  io.toBpu.specReadReq             := specReadReq
+
+  // How often the return address stored in the FTQ meta differs from the value freshly read out of the RAS.
+  private val diffRetAddr =
+    ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn && (specRead =/= specRetAddr)
+  dontTouch(diffRetAddr)
+  XSPerfAccumulate("bpu_redirect_from_ifu_retDiff", diffRetAddr)
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
@@ -392,7 +415,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
 
   resolveQueue.io.backendResolve := io.fromBackend.resolve
-  resolveQueue.io.ifuResolve     := ifuResolve
+  resolveQueue.io.ifuResolve     := ifuResolveCorrect
 
   private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
   private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
@@ -576,6 +599,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("conditional", redirect.bits.attribute.isConditional),
       ("direct", redirect.bits.attribute.isDirect),
       ("indirect", redirect.bits.attribute.isIndirect),
+      ("ret", redirect.bits.attribute.isReturn),
       ("indirect_ret_call", redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect)
     )
   )
