@@ -1347,10 +1347,9 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         {"path": str((data_dir / "case.dat").resolve()), "size_bytes": 64},
         {"path": str((data_dir / "case_2.dat").resolve()), "size_bytes": 64},
     ]
-    assert summary["provenance"]["run_ids"] == ["unit-codecov-json"]
-    assert [
-        item["testcase_nodeid"] for item in summary["provenance"]["dat_files"]
-    ] == ["tests/test_case.py::test_case", "tests/test_case.py::test_case_2"]
+    assert summary["provenance"]["run_ids"] == []
+    assert summary["provenance"]["provenance_skipped"] is True
+    assert all("testcase_nodeid" not in item for item in summary["provenance"]["dat_files"])
     assert summary["overall"]["line"] == {"hit": 1, "total": 1, "pct": 100.0}
     assert summary["overall"]["branch"] == {"hit": 0, "total": 1, "pct": 0.0}
     assert summary["scopes"]["all"]["source_lines"] == 2

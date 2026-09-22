@@ -33,6 +33,7 @@ from ..api import api_Frontend_load_program
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from ..support.env_config import DEFAULT_ENV_CONFIG
 from ..funcov.recorder import default_pilot_csv_path
+from ..runtime.artifact_provenance import file_sha256
 from ..funcov.sample_hub import FrontendFuncovSampleHub
 from ..core.frontend_env import FrontendEnv
 from ..support.logging_utils import configure_env_logging
@@ -193,6 +194,58 @@ def _read_int_env(name: str, default: str) -> int:
 
 def _test_seed() -> int:
     return _read_int_env("TB_SEED", "1")
+
+
+def _input_path_metadata(name: str) -> tuple[str | None, str | None]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None, None
+    path = Path(raw).resolve()
+    return str(path), file_sha256(path) if path.is_file() else "unavailable"
+
+
+def _funcov_run_metadata(request, env) -> dict:
+    report = getattr(getattr(request, "node", None), "rep_call", None)
+    outcome = str(getattr(report, "outcome", "unknown") or "unknown").lower()
+    try:
+        errors = list(env.get_errors())
+    except Exception:
+        errors = [{"kind": "checker_error_collection_failed"}]
+    node = getattr(request, "node", None)
+    node_path = getattr(node, "path", None)
+    testcase_path = Path(str(node_path)).resolve() if node_path is not None else None
+    seed = _test_seed()
+    config = getattr(env, "config", DEFAULT_ENV_CONFIG)
+    run_id = _effective_run_id()
+    artifact_root = Path(os.getenv("TB_ARTIFACT_DIR", "") or (_data_dir() / _safe_path_component(run_id))).resolve()
+    case_log = str(getattr(getattr(env, "dut", None), "_frontend_case_log_path", "") or "").strip()
+    execution = {
+        "testcase_nodeid": str(getattr(node, "nodeid", "") or "").strip(),
+        "testcase_path": None if testcase_path is None else str(testcase_path),
+        "testcase_sha256": "unavailable" if testcase_path is None else file_sha256(testcase_path),
+        "run_command": os.getenv("TB_RUN_COMMAND", "").strip(),
+        "artifact_root": str(artifact_root),
+        "case_log_path": str(Path(case_log).resolve()) if case_log else None,
+        "seed": seed,
+        "seeds": {
+            "test": seed,
+            "backend": _read_int_env("TB_BACKEND_RANDOM_SEED", str(seed)),
+            "icache": int(config.icache.seed),
+            "ptw": int(config.ptw.seed),
+        },
+        "random_scenarios": list(getattr(env, "random_scenario_records", [])),
+    }
+    for env_name, field in (("TB_ASM_PATH", "asm"), ("TB_BIN_PATH", "bin"), ("TB_TRACE_PATH", "trace")):
+        path, digest = _input_path_metadata(env_name)
+        execution[f"{field}_path"] = path
+        execution[f"{field}_sha256"] = digest
+    return {
+        "outcome": outcome,
+        "exit_code": 0 if outcome == "passed" else 1,
+        "checker": {"status": "pass" if not errors and outcome == "passed" else "fail", "error_count": len(errors), "errors": errors[:32]},
+        "run_id": run_id,
+        "execution": execution,
+    }
 
 
 def _artifact_tag(request) -> str:

@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,11 +135,35 @@ def parse_args() -> argparse.Namespace:
 
 
 def raw_coverage_context(dat_files: list[Path]) -> dict:
+    funcov_dir = dat_files[0].parent.parent / "funcov" if dat_files else None
+    sidecars = sorted(funcov_dir.glob("*.toffee.funcov.json")) if funcov_dir else []
+    sidecar_by_stem = {
+        path.name.split(".toffee.funcov.json", 1)[0]: path for path in sidecars
+    }
+    records = []
+    run_ids = set()
+    provenance_skipped = not sidecars
+    for path in dat_files:
+        record = {"path": str(path.resolve()), "size_bytes": path.stat().st_size}
+        sidecar = sidecar_by_stem.get(path.stem)
+        if sidecar is None and len(sidecars) == 1:
+            sidecar = sidecars[0]
+        if sidecar is not None:
+            raw = json.loads(sidecar.read_text(encoding="utf-8"))
+            metadata = raw.get("metadata") or {}
+            run = metadata.get("run") or {}
+            execution = metadata.get("execution") or {}
+            required = (run.get("testcase_nodeid"), execution.get("testcase_nodeid"), execution.get("waveform_path"), (metadata.get("stats") or {}).get("monitor"))
+            if any(value in (None, "") for value in required) or not isinstance(required[-1], dict):
+                raise ValueError(f"toffee sidecar incomplete: {sidecar}")
+            record["funcov_path"] = str(sidecar.resolve())
+            record["testcase_nodeid"] = str(execution["testcase_nodeid"])
+            run_ids.add(str(run.get("run_id") or ""))
+        records.append(record)
     return {
-        "dat_files": [
-            {"path": str(path.resolve()), "size_bytes": path.stat().st_size}
-            for path in dat_files
-        ],
+        "dat_files": records,
+        "run_ids": sorted(run_ids),
+        "provenance_skipped": bool(provenance_skipped),
     }
 
 
@@ -340,7 +365,11 @@ def main() -> int:
     if not dat_files:
         raise SystemExit(f"no .dat files matched: {args.data_dir / args.glob}")
 
-    provenance = raw_coverage_context(dat_files)
+    try:
+        provenance = raw_coverage_context(dat_files)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"toffee sidecar validation failed: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
 
     points = load_merged_points(dat_files)
     overall, modules = build_stats(points)
