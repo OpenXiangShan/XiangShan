@@ -921,6 +921,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.req_coh := s2_hit_coh
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
+  miss_req.isSpecMiss := false.B
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
