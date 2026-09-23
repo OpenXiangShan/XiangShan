@@ -212,28 +212,46 @@ class IttageTable(
   private val updateUsefulBitmask       = usefulMaskEntry.asUInt
   private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
-  private val needReset      = RegInit(false.B)
-  private val usefulCanReset = !(io.req.fire || io.update.valid) && needReset
-  // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in NumSetsPerBank cycles.
-  private val (resetSet, resetFinish) = Counter(usefulCanReset, NumSetsPerBank)
+  // Per-bank useful-counter reset: each bank sweeps its own set index whenever that bank is neither
+  // being read nor updated, so a busy bank no longer stalls the reset of the other banks.
+  private val needReset = RegInit(VecInit(Seq.fill(NumBanks)(false.B)))
+  private val bankCanReset = VecInit(Seq.tabulate(NumBanks) { bankIdx =>
+    val bankRead   = io.req.fire && s0_bankMask(bankIdx)
+    val bankUpdate = io.update.valid && updateBankMask(bankIdx)
+    needReset(bankIdx) && !bankRead && !bankUpdate
+  })
+  // Each bank keeps its own sweep pointer; it clears itself over NumSetsPerBank non-busy cycles.
+  private val resetSet    = Wire(Vec(NumBanks, UInt(SetIdxWidth.W)))
+  private val resetFinish = Wire(Vec(NumBanks, Bool()))
+  for (bankIdx <- 0 until NumBanks) {
+    val (set, finish) = Counter(bankCanReset(bankIdx), NumSetsPerBank)
+    resetSet(bankIdx)    := set
+    resetFinish(bankIdx) := finish
+  }
   when(io.update.resetUsefulCnt) {
-    needReset := true.B
-  }.elsewhen(resetFinish) {
-    needReset := false.B
+    needReset := VecInit(Seq.fill(NumBanks)(true.B))
+  }.otherwise {
+    for (bankIdx <- 0 until NumBanks) {
+      when(resetFinish(bankIdx)) { needReset(bankIdx) := false.B }
+    }
   }
   private val updateBitmask = Mux(
     io.update.usefulCntValid && io.update.valid,
     updateAllBitmask,
-    Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
+    Mux(io.update.valid, updateExceptUsefulBitmask, updateNoBitmask)
   )
+  // Reset entries reuse the update datapath but only flip the useful bits to negative.
+  private val resetEntry = WireInit(updateWdata)
+  resetEntry.usefulCnt := UsefulCounter.SaturateNegative
 
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
     val writePort = writeBuffer.io.write.head
-    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || usefulCanReset
-    writePort.bits.entry   := updateWdata
-    writePort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
-    writePort.bits.bitmask := updateBitmask
+    val canReset  = bankCanReset(bankIdx)
+    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || canReset
+    writePort.bits.entry   := Mux(canReset, resetEntry, updateWdata)
+    writePort.bits.setIdx  := Mux(canReset, resetSet(bankIdx), updateIdx)
+    writePort.bits.bitmask := Mux(canReset, updateUsefulBitmask, updateBitmask)
   }
 
   // read the stored write req from write buffer and push into the matching bank SRAM
@@ -267,11 +285,7 @@ class IttageTable(
     oldCtr.getUpdate(io.update.correct)
   )
   updateWdata.tag := updateTag
-  updateWdata.usefulCnt := Mux(
-    usefulCanReset,
-    UsefulCounter.SaturateNegative,
-    io.update.usefulCnt
-  )
+  updateWdata.usefulCnt := io.update.usefulCnt
   // only when ctr is null
   updateWdata.targetOffset := Mux(
     io.update.alloc || oldCtr.isSaturateNegative,
