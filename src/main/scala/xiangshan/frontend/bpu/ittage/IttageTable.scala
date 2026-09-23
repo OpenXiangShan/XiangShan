@@ -232,7 +232,7 @@ class IttageTable(
     needReset := VecInit(Seq.fill(NumBanks)(true.B))
   }.otherwise {
     for (bankIdx <- 0 until NumBanks) {
-      when(resetFinish(bankIdx)) { needReset(bankIdx) := false.B }
+      when(resetFinish(bankIdx))(needReset(bankIdx) := false.B)
     }
   }
   private val updateBitmask = Mux(
@@ -284,7 +284,7 @@ class IttageTable(
     ConfidenceCounter.WeakPositive, // reset to neutral (weak positive) when allocate
     oldCtr.getUpdate(io.update.correct)
   )
-  updateWdata.tag := updateTag
+  updateWdata.tag       := updateTag
   updateWdata.usefulCnt := io.update.usefulCnt
   // only when ctr is null
   updateWdata.targetOffset := Mux(
