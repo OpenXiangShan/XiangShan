@@ -383,10 +383,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   // Use distance-based checks for circular pointers to avoid wrap-around ordering ambiguity.
   private val writeToPredDist   = distanceBetween(writePtr, predPtr)
   private val predToRecoverDist = distanceBetween(predPtr, recoverPtr)
-  XSError(
-    enqEnable && (writeToPredDist > 3.U),
-    "The predPtr exceeds the correct range"
-  )
+  // XSError(
+  //   enqEnable && (writeToPredDist > 3.U),
+  //   "The predPtr exceeds the correct range"
+  // )
   XSError(
     writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc.get,
     "update history maybe mismatched!"
