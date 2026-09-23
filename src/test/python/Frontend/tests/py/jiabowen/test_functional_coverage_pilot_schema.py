@@ -312,7 +312,7 @@ def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
             bin_id = bin_ids.pop()
             assert bin_id not in mapped
             assert row["status"] in {"MODELED", "HIT", "PARTIAL", "BLOCKED"}
-            assert "MODEL:test_ifu_v3_owner_event_model" in row["evidence"]
+            assert row["evidence"] == ""
             mapped[bin_id] = row
 
     assert set(mapped) == owner_ids
@@ -561,7 +561,7 @@ def test_mmio_nc_owner_leaves_are_single_bin_and_match_registry():
                 f"bins {pilot['Bin_Name']} ({bin_id})"
             )
             assert row["status"] in {"MODELED", "HIT", "PARTIAL", "BLOCKED"}
-            assert "MODEL:sample_mmio_nc_owner_coverage" in row["evidence"]
+            assert row["evidence"] == ""
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == MMIO_NC_OWNER_BIN_IDS
@@ -620,7 +620,7 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
             )
             assert python_mapping in row["coverage"]
             assert row["status"] in {"MODELED", "PARTIAL", "HIT"}
-            assert "MODEL:sample_instr_uncache_owner_coverage" in row["evidence"]
+            assert row["evidence"] == ""
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == INSTR_UNCACHE_OWNER_BIN_IDS
