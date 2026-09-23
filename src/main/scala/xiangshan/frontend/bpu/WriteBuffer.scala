@@ -40,29 +40,37 @@ import xiangshan.XSModule
  * used to update the entry's wayMask and wayData when hit the same entry
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
+ * @param hasReadBypass Whether to expose a set-index read port for forwarding shadow entries
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:           T,
+    numEntries:    Int = 1,
+    numPorts:      Int = 1,
+    numWays:       Int = 1,
+    hasCnt:        Boolean = false,
+    hasWayMask:    Boolean = false,
+    hasFlush:      Boolean = false,
+    hasReadBypass: Boolean = false,
+    nameSuffix:    String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
   require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
+    class ReadBypass extends Bundle {
+      val req:  ValidIO[UInt]   = Flipped(Valid(UInt(gen.setIdx.getWidth.W)))
+      val resp: Vec[ValidIO[T]] = Output(Vec(numPorts, Valid(gen)))
+    }
+
     val write: Vec[ValidIO[T]]     = Vec(numPorts, Flipped(Valid(gen)))
     val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
     val full:  Vec[Bool]           = Output(Vec(numPorts, Bool()))
     // A full miss overwrites a pending dirty entry.
-    val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
-    val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
-    val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+    val overwrite:  Vec[Bool]          = Output(Vec(numPorts, Bool()))
+    val takenMask:  Option[Vec[Bool]]  = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:      Option[Bool]       = Option.when(hasFlush)(Input(Bool()))
+    val readBypass: Option[ReadBypass] = Option.when(hasReadBypass)(new ReadBypass)
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -111,6 +119,24 @@ class WriteBuffer[T <: WriteReqBundle](
   dontTouch(readValidVec)
   dontTouch(replacerWay)
   dontTouch(emptyVec)
+
+  io.readBypass.foreach { readBypass =>
+    // Match the SRAM read latency. The registered set index is compared with the
+    // current shadow state, so a write accepted with the request is visible in the response cycle.
+    val readValid  = RegNext(readBypass.req.valid, false.B)
+    val readSetIdx = RegEnable(readBypass.req.bits, 0.U(gen.setIdx.getWidth.W), readBypass.req.valid)
+    readBypass.resp.zipWithIndex.foreach { case (resp, portIdx) =>
+      val hitVec = VecInit(entries(portIdx).zip(shadowValid(portIdx)).map { case (entry, valid) =>
+        valid && entry.setIdx === readSetIdx
+      })
+      XSError(
+        readValid && PopCount(hitVec) > 1.U,
+        f"WriteBuffer_$nameSuffix read bypass port${portIdx}_hitMask should be no more than 1"
+      )
+      resp.valid := readValid && hitVec.asUInt.orR
+      resp.bits  := Mux1H(hitVec, entries(portIdx))
+    }
+  }
 
   // Apply drain first. Write requests below override it when they update the same slot,
   // and flush overrides both at the end of the next-state calculation.
