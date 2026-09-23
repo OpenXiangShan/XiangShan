@@ -148,7 +148,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val ifuAdvanceRedirectMeta =
     Mux(ifuBlockSelEarlyByOneCycle, ifuRedirectMetaEarlyByOneCycle(1), ifuRedirectMetaEarlyByOneCycle(0))
 
-  private val specReadReq      = Wire(new RasSpecReadReq)
+  private val specReadReq = Wire(new RasSpecReadReq)
   specReadReq.tosr       := ifuAdvanceRedirectMeta.tosr
   specReadReq.ssp        := ifuAdvanceRedirectMeta.ssp
   specReadReq.tosrInSpec := ifuAdvanceRedirectMeta.tosrInSpec

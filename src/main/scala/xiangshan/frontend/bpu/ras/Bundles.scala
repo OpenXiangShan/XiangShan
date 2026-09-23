@@ -52,28 +52,28 @@ object RasPtr {
 }
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:       UInt   = UInt(StackPtrWidth.W)
-  val tosw:      RasPtr = new RasPtr
-  val tosr:      RasPtr = new RasPtr
-  val nos:       RasPtr = new RasPtr
-  val tosrInSpec: Bool  = Bool()
-  val nosInSpec: Bool   = Bool()
+  val ssp:        UInt   = UInt(StackPtrWidth.W)
+  val tosw:       RasPtr = new RasPtr
+  val tosr:       RasPtr = new RasPtr
+  val nos:        RasPtr = new RasPtr
+  val tosrInSpec: Bool   = Bool()
+  val nosInSpec:  Bool   = Bool()
 }
 
 object RasInternalMeta {
   def apply(
-      ssp:       UInt,
-      tosw:      RasPtr,
-      tosr:      RasPtr,
-      nos:       RasPtr,
+      ssp:        UInt,
+      tosw:       RasPtr,
+      tosr:       RasPtr,
+      nos:        RasPtr,
       tosrInSpec: Bool = false.B,
-      nosInSpec: Bool = false.B
+      nosInSpec:  Bool = false.B
   )(implicit p: Parameters): RasInternalMeta = {
     val entry = Wire(new RasInternalMeta)
-    entry.ssp       := ssp
-    entry.tosw      := tosw
-    entry.tosr      := tosr
-    entry.nos       := nos
+    entry.ssp        := ssp
+    entry.tosw       := tosw
+    entry.tosr       := tosr
+    entry.nos        := nos
     entry.tosrInSpec := tosrInSpec
     entry.nosInSpec  := nosInSpec
     entry
