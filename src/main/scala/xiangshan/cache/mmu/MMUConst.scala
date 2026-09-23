@@ -68,7 +68,7 @@ case class L2TLBParameters
   bcReservedBits: Int = 1,
   bcReplacer: Option[String] = Some("setplru"),
   // sp
-  spSize: Int = 16,
+  spSize: Int = 128,
   spReplacer: Option[String] = Some("plru"),
   // hash asid width
   hashAsidWidth: Int = 3,
