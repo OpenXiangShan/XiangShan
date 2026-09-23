@@ -223,6 +223,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    val specialMode = Output(Bool())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -322,6 +323,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
   loadQueueReplay.io.replayAllocate <> io.replayAllocate
+  io.specialMode := loadQueueReplay.io.specialMode
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
