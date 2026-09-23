@@ -531,24 +531,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
+  private val hasBubbleReason = topdownStages.last.reasons.asUInt.orR
+  private val encodedBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
     topdownStages.last.reasons.reverse
   )
+  // Other is a fallback, not a set bit: its larger enum ID must not mask
+  // a real cause such as OverrideBubble. Never use the encoder's zero-input result.
+  private val matchBubble = Mux(hasBubbleReason, encodedBubble,
+    Mux(deqValidCount === 0.U,
+      TopDownCounters.FrontendOtherCoreStall.id.U,
+      TopDownCounters.FetchFragBubble.id.U))
 
-  io.stallReason.reason.foreach(_ := 0.U)
+  io.stallReason.reason.foreach(_ := TopDownCounters.NoStall.id.U)
   for (i <- 0 until DecodeWidth) {
     when(i.U < deqWasteCount) {
       io.stallReason.reason(DecodeWidth - i - 1) := matchBubble
-    }
-  }
-
-  when(!(deqWasteCount === DecodeWidth.U || topdownStages.last.reasons.asUInt.orR)) {
-    // should set reason for FetchFragmentationStall
-    // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
-    for (i <- 0 until DecodeWidth) {
-      when(i.U < deqWasteCount) {
-        io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
-      }
     }
   }
 
