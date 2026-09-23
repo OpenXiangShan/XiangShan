@@ -81,7 +81,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   redirectMeta.nos        := stack.meta.nos
   redirectMeta.tosrInSpec := stack.meta.tosrInSpec
   redirectMeta.nosInSpec  := stack.meta.nosInSpec
-  redirectMeta.topRetAddr := stack.spec.popAddr
+  redirectMeta.topRetAddr.foreach(_ := stack.spec.popAddr)
 
   private val commitMeta = Wire(new RasCommitMeta)
   commitMeta.ssp  := stack.meta.ssp
