@@ -83,9 +83,9 @@ class RasStack(implicit p: Parameters) extends RasModule
   // Number of valid entries in the committed stack (0..CommitStackSize).
   private val commitDepth = RegInit(0.U(CommitDepthWidth.W))
 
-  private val tosr      = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
-  private val tosw      = RegInit(RasPtr(false.B, 0.U))
-  private val bos       = RegInit(RasPtr(false.B, 0.U))
+  private val tosr       = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
+  private val tosw       = RegInit(RasPtr(false.B, 0.U))
+  private val bos        = RegInit(RasPtr(false.B, 0.U))
   private val tosrInSpec = RegInit(false.B)
 
   private val writeBypassEntry    = Reg(new RasEntry)
@@ -171,7 +171,7 @@ class RasStack(implicit p: Parameters) extends RasModule
   ): Unit = {
     // tosr is only maintained when spec queue is not empty
     when(tosrInRange(currTosr, currTosw, currInSpec)) {
-      tosr      := currTopNos
+      tosr       := currTopNos
       tosrInSpec := currNosInSpec
     }
     // spec sp should always be maintained
@@ -268,9 +268,6 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
   private val diffTop = Mux(writeBypassValid, writeBypassEntry.retAddr, topEntry.retAddr)
 
-  XSPerfAccumulate("ras_top_mismatch", diffTop =/= timingTop.retAddr)
-  // could diff when more pop than push and a commit stack is updated with inflight info
-
   realWriteEntry := RegEnable(writeEntry, io.spec.fire || io.redirect.isCall)
 
   private val realWriteAddr = RegEnable(
@@ -308,12 +305,12 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.spec.popAddr     := timingTop.retAddr
   io.specRead.retAddr := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr))
 
-  io.meta.tosw      := tosw
-  io.meta.tosr      := tosr
-  io.meta.nos       := topNos
+  io.meta.tosw       := tosw
+  io.meta.tosr       := tosr
+  io.meta.nos        := topNos
   io.meta.tosrInSpec := tosrInSpec
-  io.meta.nosInSpec := topNosEntry.inSpec
-  io.meta.ssp       := ssp
+  io.meta.nosInSpec  := topNosEntry.inSpec
+  io.meta.ssp        := ssp
 
   // The stack is empty iff the top is not in the spec queue and the committed stack has been
   // fully consumed. `ssp - nsp` is the net in-flight effect; with `StackPtrWidth` wide enough
@@ -329,6 +326,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     !tosrInRange(currTosr, currTosw, currInSpec) && speculativeDepth <= 0.S
   }
 
+  // `resolvedEmpty` is exact, but this flag is registered for timing and is only forced non-empty
+  // on push / redirect-call. A valid top is therefore never reported empty, while a pop or ret
+  // that empties the stack is noticed a cycle late.
   private val rasIsEmpty = RegInit(true.B)
   when(io.redirect.valid) {
     rasIsEmpty := Mux(
@@ -384,9 +384,9 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   when(io.redirect.valid) {
-    tosr      := io.redirect.meta.tosr
-    tosw      := io.redirect.meta.tosw
-    ssp       := io.redirect.meta.ssp
+    tosr       := io.redirect.meta.tosr
+    tosw       := io.redirect.meta.tosw
+    ssp        := io.redirect.meta.ssp
     tosrInSpec := io.redirect.meta.tosrInSpec
 
     when(io.redirect.isCall) {
@@ -409,7 +409,13 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNosList(i).nos }
   io.debug.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
 
+  // Unexpected: ssp and nsp advance on the same push/pop events.
   private val sspDiffNsp = (io.commit.popValid || io.commit.pushValid) && (io.commit.metaSsp =/= nsp)
-  dontTouch(sspDiffNsp)
   XSPerfAccumulate("ras_ssp_mismatch_with_nsp", sspDiffNsp)
+
+  // Expected only on an empty stack (undefined top, timingTop lags diffTop); too many means the
+  // fast path has diverged. Empty-stack ones are harmless, RAS is not used then.
+  private val topMismatch = diffTop =/= timingTop.retAddr
+  XSPerfAccumulate("ras_top_mismatch", topMismatch)
+  XSPerfAccumulate("ras_top_mismatch_and_stack_empty", topMismatch && rasIsEmpty)
 }
