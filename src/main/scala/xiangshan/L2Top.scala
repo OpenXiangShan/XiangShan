@@ -40,7 +40,7 @@ import xiangshan.cache.{CCHIType1Port, CCHIType4Port}
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
-import xiangshan.mem.BusErrorUnitAXI
+import xiangshan.cache.axi.{AXI4PMAUserAdapter, BusErrorUnitAXI}
 
 class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
@@ -167,9 +167,9 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   mmio_xbar := AXI4Buffer() := AXI4Buffer() := i_mmio_port
   mmio_xbar := AXI4Buffer() := AXI4Buffer() := d_mmio_port
-  beu.node := AXI4Buffer() := mmio_xbar
+  beu.node := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := mmio_xbar
   if (SeperateBus != top.SeperatedBusType.NONE) {
-    sep_tl_port_opt.get := AXI4ToTL() := AXI4Buffer() := mmio_xbar
+    sep_tl_port_opt.get := AXI4ToTL() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := mmio_xbar
   }
 
   // Filter out in-core addresses before they appear on mmio_port / soc_xbar.
@@ -197,6 +197,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   mmio_port :=
     AXI4Filter(axi4Ssubtract(mmioFilters)) :=
     AXI4Buffer() :=
+    AXI4PMAUserAdapter() :=
     mmio_xbar
 
   beu_local_int_source_buffer := beu_local_int_source

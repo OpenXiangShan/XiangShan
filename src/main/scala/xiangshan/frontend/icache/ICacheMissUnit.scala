@@ -97,6 +97,7 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   // TXREQ (was mem_acquire on TileLink)
   io.txreq.valid := acquireArb.io.out.valid
   acquireArb.io.out.ready := io.txreq.ready
+  io.txreq.bits := 0.U.asTypeOf(io.txreq.bits)
   when(io.txreq.fire) {
     val req = acquireArb.io.out.bits
     ICacheCCHI.Tx.missReq(
@@ -205,7 +206,7 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   io.rxdat.ready := true.B
 
   private val lastFireNext = RegNext(lastFire)
-  private val idNext       = RegEnable(refillTxnId, refillTxnId, lastFire)
+  private val idNext       = RegEnable(refillTxnId, lastFire)
 
   when(lastFireNext) {
     gotDataId0 := false.B

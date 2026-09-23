@@ -548,6 +548,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // CHI ReadOnce request
   io.cchi.upREQ.valid := mem_arb.io.out.valid && !flush && !wfiReq
+  io.cchi.upREQ.bits := 0.U.asTypeOf(io.cchi.upREQ.bits)
   when (io.cchi.upREQ.fire) {
     PtwCCHI.Tx.readReq(
       io.cchi.upREQ.bits,

@@ -45,6 +45,7 @@ import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
+import xiangshan.cache.axi.AXI4PMAUserAdapter
 import xiangshan.cache.mmu._
 import xiangshan.cache.CCHIType4Port
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
@@ -317,14 +318,14 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val icacheCtrlNode = Option.when(icacheCtrlEnabled)(AXI4IdentityNode())
 
   uncacheAxiXbar := uncacheAxiMaster
-  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter() := uncacheAxiXbar
   if (dcache.useDcache) {
     dcache.dcache.cacheCtrlOpt.foreach { ctrl =>
-      ctrl.node := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+      ctrl.node := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar
     }
   }
   icacheCtrlNode.foreach { n =>
-    n := AXI4Buffer() := AXI4Buffer() := uncacheAxiXbar
+    n := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar
   }
 
   // InstrUncache AXI: Frontend master -> 2-stage buffer -> iMmioToL2 (not on Uncache xbar)
