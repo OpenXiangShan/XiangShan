@@ -12,7 +12,8 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.PregParams
-import xiangshan.backend.vector.VecIssueQueue.RespBundle
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
@@ -90,30 +91,36 @@ class IssuePipe(
     case (readBundle, srcIdx) =>
       readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
       readBundle.addr := is0Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is0Next.bits.robIdx
   }
 
   out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
-      readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx)
+      val readRf = is1Next.bits.bypassDelay(srcIdx) >= BypassDelay.delay2
+      readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx) && readRf
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VpRdAddrNext.zip(is1VpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
       readBundle.ren := is1Next.valid && is1Next.bits.vpRen(srcIdx)
       readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1V0RdAddrNext.zip(is1Next.bits.psrcV0).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   out.is1VlRdAddrNext.zip(is1Next.bits.psrcVl).foreach {
     case (readBundle, psrc) =>
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
+      readBundle.robIdx := is1Next.bits.robIdx
   }
 
   is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
@@ -123,9 +130,6 @@ class IssuePipe(
   when (is1Next.valid) {
     is1.bits := is1Next.bits
   }
-
-  is1Resp.fail := false.B
-  is1Resp.success := is2Next.valid
 
   /**
    * is2 stage
@@ -149,6 +153,11 @@ class IssuePipe(
         false.B
   })
 
+  val is2RdFail = is2GpRdFail.asUInt.orR || is2FpRdFail.asUInt.orR
+
+  is1Resp.fail := is1.valid && is2RdFail
+  is1Resp.success := is2Next.valid
+
   val is2ImmNext: Option[UInt] = Option.when(is1.bits.imm.nonEmpty)(VecImmExtractor(
     VLEN, param.immTypes
   )(
@@ -157,7 +166,7 @@ class IssuePipe(
     is1.bits.vtype.get.vsew
   ))
 
-  is2Next.valid := is1.valid && !is1Flush && !is2GpRdFail.asUInt.orR && !is2FpRdFail.asUInt.orR
+  is2Next.valid := is1.valid && !is1Flush && !is2RdFail
   is2Next.bits.ctrl.fromIssueDeq(is1.bits)
   is2Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
   is2Next.bits.data.pc.foreach(_ := ???)
@@ -268,7 +277,7 @@ class IssuePipe(
   private val nonFixedLatWakeUp = Wire(new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
   nonFixedLatWakeUp.wen := false.B
   nonFixedLatWakeUp.pdest := 0.U
-  nonFixedLatWakeUp.delay := VecIssueQueue.BypassDelay.delay3
+  nonFixedLatWakeUp.delay := BypassDelay.delay3
 
   exu.out.outFuWakeUp.foreach { wakeups =>
     nonFixedLatWakeUp.wen := wakeups.map(_.wen).reduce(_ || _)
@@ -359,9 +368,10 @@ object IssuePipe {
     val rdConfig  : RdConfig,
     val srcIdx    : Int,
     val pregParams: PregParams,
-  ) extends Bundle {
+  )(implicit p: Parameters) extends Bundle {
     val ren = Bool()
     val addr = UInt(pregParams.addrWidth.W)
+    val robIdx = new RobPtr
   }
 
   class RfReadDataBundle(

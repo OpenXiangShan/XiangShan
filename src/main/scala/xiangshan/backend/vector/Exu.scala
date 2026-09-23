@@ -292,10 +292,11 @@ object Exu {
       sink.vtype       .foreach(x => x := this.ctrl.vtype.get)
       sink.oldVType    .foreach(x => x := this.ctrl.oldVType.get)
       sink.vm          .foreach(x => x := this.ctrl.vm.get)
+      sink.frm         .foreach(x => x := this.ctrl.frm.get)
     }
 
     def <#=:(sink: Func.InData): Unit = {
-      sink.src                         := this.data.src
+      sink.src.zip(this.data.src).foreach(x => x._1 := x._2)
       sink.vl          .foreach(x => x := this.data.vl.get)
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)

@@ -41,6 +41,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
 import xiangshan.backend.vector.{Decoder, VecIssueQueue}
+import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.vector.Decoder.DecodeStage
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -804,7 +805,7 @@ class CtrlBlockImp(
   rob.io.enq.req := enqRob.req
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
-  dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
+  dispatch.io.wakeUpFp  := io.toDispatch.wakeUpFp
   dispatch.io.wakeUpVec := io.toDispatch.wakeUpVec
   dispatch.io.IQValidNumVec := io.toDispatch.IQValidNumVec
   dispatch.io.ldCancel := io.toDispatch.ldCancel
@@ -966,7 +967,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toDispatch = new Bundle {
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpFp  = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
+    val wakeUpFp: Vec[FltWakeUpBundle] = Input(
+      Vec(backendParams.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
+    )
     val wakeUpVec: Vec[VecIssueQueue.WakeUpBundle] = Input(
       Vec(backendParams.getVpWriteSize, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
     )

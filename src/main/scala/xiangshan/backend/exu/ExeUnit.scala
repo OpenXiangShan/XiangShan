@@ -41,7 +41,11 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
   val toFrontendBJUResolve = Option.when(params.hasBrhFu)(Valid(new Resolve))
   val I2FDataIn = Option.when(params.needDataFromI2F)(Flipped(ValidIO(UInt(XLEN.W))))
-  val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped(ValidIO(UInt(XLEN.W))))
+  val F2IDataIn = Option.when(params.needDataFromF2I)(Flipped((new Bundle {
+    val valid = Bool()
+    val pdest = UInt(FpPhyRegIdxWidth.W)
+    val data = UInt(XLEN.W)
+  })))
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val fenceio = Option.when(params.hasFence)(new FenceIO)
   val frm = Option.when(params.needSrcFrm)(Input(Frm()))
@@ -305,7 +309,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
           fuoutOH && fu.io.out.bits.ctrl.rfWen.getOrElse(false.B) })
       }
     val data = if (exuParams.needDataFromF2I) {
-        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.bits)
+        (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data } :+ io.F2IDataIn.get.data)
       } else {
         (funcUnits.zip(fuOutresVec).filter { case (fu, _) => fu.cfg.writeIntRf }.map { case (_, fuout) => fuout.data })
       }
@@ -353,7 +357,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   val criticalErrors = funcUnits.filter(fu => fu.cfg.needCriticalErrors).flatMap(fu => fu.getCriticalErrors)
   generateCriticalErrors()
 
-  val F2IIntWen = io.F2IDataIn.getOrElse(0.U.asTypeOf(ValidIO(UInt(XLEN.W)))).valid
+  val F2IIntWen = io.F2IDataIn.map(_.valid).getOrElse(false.B)
 
   io.out.valid := Cat(fuOutValidOH).orR
   funcUnits.foreach{ fu =>
@@ -408,7 +412,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.toV0Rf.           foreach(x => x.bits  := outV0Data.get)
   io.out.bits.toVlRf.           foreach(x => x.valid := Mux1H(fuOutValidOH, fuVlWenVec))
   io.out.bits.toVlRf.           foreach(x => x.bits  := outVlData.get)
-  io.out.bits.pdest                                  := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.pdest))
+  val F2IPdest = io.F2IDataIn.map(_.pdest).getOrElse(0.U)
+  io.out.bits.pdest                                  := Mux1H(fuOutValidOH :+ F2IIntWen, fuOutBitsVec.map(_.ctrl.pdest) :+ F2IPdest)
   io.out.bits.pdestV0.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestV0.getOrElse(0.U))))
   io.out.bits.pdestVl.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestVl.getOrElse(0.U))))
   io.out.bits.redirect.               foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
