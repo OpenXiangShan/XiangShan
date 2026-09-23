@@ -41,6 +41,9 @@ class SpecMissABuffer[T <: Data](gen: T, depth: Int, nOwners: Int, idBits: Int) 
   io.deq.valid := count =/= 0.U && (!entries(0).speculative || entries(0).committed || headCommittedNow)
   io.deq.bits := entries(0).data
   io.enq.ready := count < depth.U
+  when(io.deq.valid && entries(0).speculative) {
+    assert(entries(0).committed || headCommittedNow, "uncommitted SpecMiss reached TileLink A")
+  }
 
   for (w <- 0 until nOwners) {
     io.pending(w) := VecInit((0 until depth).map(i => occupied(i) &&
