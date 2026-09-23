@@ -41,11 +41,6 @@ class MissTrackInvalidate(implicit p: Parameters) extends DCacheBundle {
 
 class MissTrackLoadResult(implicit p: Parameters) extends MissTrackResident {
   val hit = Bool() // Accurate tag/permission result, independent of WPU prediction.
-  val first_issue = Bool()
-  val handled = Bool()
-  val merged = Bool()
-  val allocated = Bool()
-  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
 }
 
 class MissTrackLoadIO(implicit p: Parameters) extends DCacheBundle {
@@ -78,22 +73,22 @@ class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
   val age = UInt(3.W)
 }
 
-class MissTrackAssessment(implicit p: Parameters) extends DCacheBundle {
-  val resident = Bool()
-  val pending = Bool()
-  val unknown = Bool()
-  val pa_fail = Bool()
-  val multi_hit = Bool()
-  val actual_hit = Bool()
-  val way_correct = Bool()
-  val owner_match = Bool()
-  val mshr_match = Bool()
-  val handled = Bool()
-  val merged = Bool()
-  val new_alloc = Bool()
+object MissTrack {
+  def balancedHashBitPairs(addr: UInt, hi: Int, lo: Int, step: Int = 2): UInt = {
+    require(hi >= lo)
+    require(step > 0)
+    if ((hi - lo + 1) <= step) {
+      addr(hi, lo)
+    } else {
+      val remain = (hi - lo + 1) % step
+      val chunks = (lo to (hi - remain) by step).map(i => addr(i + step - 1, i))
+      val xor = ParallelXOR(chunks)
+      if (remain == 0) xor else Cat(xor(step - 1, remain), xor(remain - 1, 0) ^ addr(hi, hi - remain + 1))
+    }
+  }
 }
 
-/** Small, lossy history table for speculative-miss eligibility, currently shadow only.
+/** Small, lossy history table for speculative-miss eligibility.
   * Existing records are maintained in parallel. One new record per cycle is sampled
   * by a round-robin arbiter; losing insertion opportunities affects coverage only.
   */
@@ -110,19 +105,27 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     // Tag replacement OR meta invalidation, at the actual write handshake.
     val invalidate = Flipped(Valid(new MissTrackInvalidate))
     val clear = Input(Bool())
-    val assessment = Output(Vec(LoadPipelineWidth, Valid(new MissTrackAssessment)))
     val spec = Output(Vec(LoadPipelineWidth, new MissTrackSpec))
   })
 
   private val entries = RegInit(VecInit(Seq.fill(cfg.missTrackEntries)(0.U.asTypeOf(new MissTrackEntry))))
   private def block(pa: UInt): UInt = pa(PAddrBits - 1, blockOffBits)
   private def hash(va: UInt): UInt = XORFold(va(VAddrBits - 1, untagBits), cfg.missTrackHashBits)
+  private def index(va: UInt): UInt = modeId match {
+    case 1 => Cat(
+      MissTrack.balancedHashBitPairs(va, PAddrBits - 1, pgIdxBits),
+      va(untagBits - 1 - (untagBits - pgUntagBits), blockOffBits)
+    )(idxBits - 1, 0)
+    case 2 => va(untagBits - 1, blockOffBits)
+    case _ => throw new IllegalArgumentException(s"Invalid MissTrack index modeId: $modeId")
+  }
   private def sameLine(a: MissTrackEntry, b: MissTrackEntry): Bool =
     a.idx === b.idx && a.block_paddr === b.block_paddr
-  private def ownerMatches(e: MissTrackEntry): Bool = VecInit(io.owners.zipWithIndex.map { case (o, i) =>
-    o.valid && e.mshr_id === i.U && block(o.bits.paddr) === e.block_paddr &&
-      get_dcache_idx(o.bits.vaddr) === e.idx
-  }).asUInt.orR
+  private def ownerMatches(e: MissTrackEntry): Bool = {
+    val owner = io.owners(e.mshr_id)
+    owner.valid && block(owner.bits.paddr) === e.block_paddr &&
+      index(owner.bits.vaddr) === e.idx
+  }
   private def overlaps(idx: UInt, way: UInt, inv: Valid[MissTrackInvalidate]): Bool =
     inv.valid && inv.bits.idx === idx && (inv.bits.way & way).orR
 
@@ -130,6 +133,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   // either during that observation or during the training cycle.
   val previousInvalidate = RegNext(io.invalidate, 0.U.asTypeOf(io.invalidate))
   val previousClear = RegNext(io.clear, false.B)
+  val previousAllocs = RegNext(io.alloc, 0.U.asTypeOf(io.alloc))
   val events = Wire(Vec(1 + allocPorts + LoadPipelineWidth, Valid(new MissTrackEntry)))
   val lookupEntries = Wire(Vec(cfg.missTrackEntries, new MissTrackEntry))
   events := 0.U.asTypeOf(events)
@@ -137,7 +141,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
     e.valid := true.B
-    e.idx := get_dcache_idx(va)
+    e.idx := index(va)
     e.src_hash := hash(va)
     e.block_paddr := block(pa)
     e.is_pending := pending
@@ -152,49 +156,39 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   for (i <- 0 until allocPorts) {
     val a = io.alloc(i)
     events(1 + i).bits := makeEntry(a.bits.vaddr, a.bits.paddr, 0.U, true.B, a.bits.mshr_id)
-    events(1 + i).valid := a.valid && ownerMatches(events(1 + i).bits)
+    // MissQueue emits alloc only after the allocation commits. The registered
+    // owner arrives one cycle later and owns liveness checks from then on.
+    events(1 + i).valid := a.valid
+  }
+  for (a <- previousAllocs) {
+    val owner = io.owners(a.bits.mshr_id)
+    when (a.valid) {
+      assert(owner.valid && block(owner.bits.paddr) === block(a.bits.paddr) &&
+        index(owner.bits.vaddr) === index(a.bits.vaddr),
+        "MissTrack allocation must match its registered owner on the following cycle")
+    }
   }
   for (w <- 0 until LoadPipelineWidth) {
     val q = io.loads(w)
     val truth = q.s2.bits
     val training = events(1 + allocPorts + w)
     training.bits := makeEntry(truth.vaddr, truth.paddr, truth.way, false.B, 0.U)
+    val truthIdx = index(truth.vaddr)
     training.valid := q.s2.valid && truth.hit && PopCount(truth.way) === 1.U && !previousClear &&
-      !overlaps(get_dcache_idx(truth.vaddr), truth.way, io.invalidate) &&
-      !overlaps(get_dcache_idx(truth.vaddr), truth.way, previousInvalidate)
+      !overlaps(truthIdx, truth.way, io.invalidate) &&
+      !overlaps(truthIdx, truth.way, previousInvalidate)
 
-    val matches = VecInit(lookupEntries.map(e => e.valid && e.idx === get_dcache_idx(q.s0_vaddr) &&
-      e.src_hash === hash(q.s0_vaddr)))
-    val unique = PopCount(matches) === 1.U
-    // Selection is well-defined even on a collision; valid rejects the collision.
-    val candidate = WireDefault(lookupEntries(PriorityEncoder(matches)))
+    val queryIdx = index(q.s0_vaddr)
+    val queryHash = hash(q.s0_vaddr)
+    val matches = VecInit(lookupEntries.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
+    val matchCount = PopCount(matches)
+    val unique = matchCount === 1.U
+    // The payload is ignored on zero or multiple matches.
+    val candidate = WireDefault(ParallelMux(matches.zip(lookupEntries)))
     candidate.valid := q.s0_valid && unique && !io.clear
     val s1 = RegEnable(candidate, q.s0_valid)
-    val s1Vaddr = RegEnable(q.s0_vaddr, q.s0_valid)
-    val s1Valid = RegNext(q.s0_valid && !io.clear, false.B) && q.s1_valid
-    val s1Multi = RegEnable(PopCount(matches) > 1.U, q.s0_valid)
+    val s1Multi = RegEnable(matchCount > 1.U, q.s0_valid)
     val s1PaMatch = s1.valid && s1.block_paddr === block(q.s1_paddr)
-    val s2 = RegEnable(s1, s1Valid)
-    val s2Vaddr = RegEnable(s1Vaddr, s1Valid)
-    val s2ObservedBlock = RegEnable(block(q.s1_paddr), s1Valid)
-    val s2Valid = RegNext(s1Valid && !io.clear, false.B) && q.s2.valid && !io.clear
-    val s2PaMatch = RegEnable(s1PaMatch, s1Valid)
-    val s2Multi = RegEnable(s1Multi, s1Valid)
-
-    val a = io.assessment(w)
-    a.valid := s2Valid
-    a.bits.resident := s2.valid && s2PaMatch && !s2.is_pending
-    a.bits.pending := s2.valid && s2PaMatch && s2.is_pending
-    a.bits.unknown := !s2.valid || !s2PaMatch
-    a.bits.pa_fail := s2.valid && !s2PaMatch
-    a.bits.multi_hit := s2Multi
-    a.bits.actual_hit := truth.hit
-    a.bits.way_correct := a.bits.resident && truth.hit && s2.way === truth.way
-    a.bits.owner_match := a.bits.pending && ownerMatches(s2)
-    a.bits.mshr_match := a.bits.pending && truth.handled && s2.mshr_id === truth.mshr_id
-    a.bits.handled := truth.handled
-    a.bits.merged := truth.handled && truth.merged
-    a.bits.new_alloc := truth.handled && truth.allocated
     io.spec(w).valid := q.s1_valid && !io.clear && !s1Multi
     io.spec(w).resident := s1.valid && !s1.is_pending && s1PaMatch
     io.spec(w).pending := s1.valid && s1.is_pending && s1PaMatch
@@ -202,15 +196,6 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     // UNKNOWN after PA validation is the only state eligible for a new
     // speculative miss.  A live resident/pending line suppresses duplication.
     io.spec(w).candidate := io.spec(w).valid && !io.spec(w).resident && !io.spec(w).pending && s1PaMatch === false.B
-    when (a.valid) {
-      assert(PopCount(Seq(a.bits.resident, a.bits.pending, a.bits.unknown)) === 1.U)
-      assert(s2.idx === get_dcache_idx(truth.vaddr) || !s2.valid,
-        "MissTrack query and load result must refer to the same attempt")
-      assert(s2Vaddr(VAddrBits - 1, blockOffBits) === truth.vaddr(VAddrBits - 1, blockOffBits),
-        "MissTrack s0 and s2 virtual addresses must refer to the same attempt")
-      assert(s2ObservedBlock === block(truth.paddr),
-        "MissTrack s1 and s2 physical addresses must refer to the same attempt")
-    }
   }
 
   // Collapse simultaneous observations of the same line before insertion. The
@@ -226,6 +211,11 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
 
   // Priority is local to a matching line: installation > allocation > hit.
   // Other lines' events cannot suppress maintenance of an existing record.
+  // Compare against register Q once. Maintenance never changes an existing
+  // entry's (idx, block_paddr), and any matching valid event restores valid,
+  // even if that entry is simultaneously retired or invalidated. Thus an
+  // active event is already present after maintenance iff it matches here.
+  val eventMatches = events.map(u => entries.map(e => e.valid && sameLine(e, u.bits)))
   val maintained = WireDefault(entries)
   val retired = Wire(Vec(cfg.missTrackEntries, Bool()))
   val invalidated = Wire(Vec(cfg.missTrackEntries, Bool()))
@@ -235,29 +225,50 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     invalidated(i) := e.valid && !e.is_pending && overlaps(e.idx, e.way, io.invalidate)
     when (e.valid && e.age =/= 7.U) { maintained(i).age := e.age + 1.U }
     when (retired(i) || invalidated(i)) { maintained(i).valid := false.B }
-    val updates = events.map(u => u.valid && e.valid && sameLine(e, u.bits))
-    when (VecInit(updates).asUInt.orR) {
-      maintained(i) := PriorityMux(updates.zip(events.map(_.bits)))
+    val updates = events.indices.map(j => events(j).valid && eventMatches(j)(i))
+    val updateOH = updates.indices.map { j =>
+      updates(j) && (if (j == 0) true.B else !ParallelORR(updates.take(j)))
+    }
+    when (ParallelORR(updates)) {
+      maintained(i) := ParallelMux(updateOH.zip(events.map(_.bits)))
+      // These fields already equal the winning event; do not put the event
+      // priority network in front of another wide line-address comparison.
+      maintained(i).idx := e.idx
+      maintained(i).block_paddr := e.block_paddr
     }
   }
 
   val insert = Module(new RRArbiter(new MissTrackEntry, events.length))
   for (i <- events.indices) {
     insert.io.in(i).valid := !io.clear && canonicalEvents(i).valid &&
-      !VecInit(maintained.map(e => e.valid && sameLine(e, canonicalEvents(i).bits))).asUInt.orR
+      !ParallelORR(eventMatches(i))
     insert.io.in(i).bits := canonicalEvents(i).bits
   }
   insert.io.out.ready := true.B
-  val invalids = VecInit(maintained.map(!_.valid))
-  val maxAge = maintained.map(_.age).reduce((a, b) => Mux(a > b, a, b))
-  val victim = Mux(invalids.asUInt.orR, PriorityEncoder(invalids),
-    PriorityEncoder(maintained.map(_.age === maxAge)))
+  // Preserve invalid-first, then oldest, with lowest entry index breaking ties.
+  // Generate one-hot choices directly instead of max -> equality -> priority
+  // encoder -> decoder. Parallel 3-bit comparisons trade area for fewer levels.
+  val invalids = maintained.map(e => !e.valid)
+  val hasInvalid = ParallelORR(invalids)
+  val invalidVictimOH = VecInit(invalids.indices.map { i =>
+    invalids(i) && (if (i == 0) true.B else !ParallelORR(invalids.take(i)))
+  }).asUInt
+  val oldestVictimOH = VecInit(maintained.indices.map { i =>
+    ParallelANDR(maintained.indices.filter(_ != i).map { j =>
+      if (j < i) maintained(i).age > maintained(j).age
+      else maintained(i).age >= maintained(j).age
+    })
+  }).asUInt
+  val victimOH = Mux(hasInvalid, invalidVictimOH, oldestVictimOH)
   val nextEntries = WireDefault(maintained)
-  when (insert.io.out.fire) { nextEntries(victim) := insert.io.out.bits }
+  for (i <- entries.indices) {
+    when (insert.io.out.fire && victimOH(i)) {
+      nextEntries(i) := insert.io.out.bits
+    }
+  }
   when (io.clear) { nextEntries.foreach(_.valid := false.B) }
-  // Queries see maintenance and accepted training from this cycle. This closes
-  // the otherwise avoidable cycle between a MissEntry becoming live and PENDING.
-  lookupEntries := nextEntries
+  // Table maintenance becomes visible to queries after the register boundary.
+  lookupEntries := entries
   entries := nextEntries
 
   // Hash collisions are allowed; duplicate (physical block, cache set) records aren't.
@@ -276,33 +287,4 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("mtrack_event_coalesced", PopCount(events.map(_.valid)) - PopCount(canonicalEvents.map(_.valid)))
   XSPerfAccumulate("mtrack_clear", io.clear)
 
-  // Same truth matrix for all attempts and first issues; PA failures are UNKNOWN.
-  for ((prefix, firstOnly) <- Seq("attempt" -> false, "first" -> true)) {
-    def count(name: String)(f: MissTrackAssessment => Bool): Unit = {
-      XSPerfAccumulate(s"mtrack_${prefix}_$name", PopCount(io.assessment.zipWithIndex.map { case (a, w) =>
-        a.valid && (if (firstOnly) io.loads(w).s2.bits.first_issue else true.B) && f(a.bits)
-      }))
-    }
-    count("evaluated")(_ => true.B)
-    count("resident_hit")(a => a.resident && a.actual_hit)
-    count("resident_miss")(a => a.resident && !a.actual_hit)
-    count("resident_way_correct")(_.way_correct)
-    count("pending_hit")(a => a.pending && a.actual_hit)
-    count("pending_miss")(a => a.pending && !a.actual_hit)
-    count("pending_owner_match")(_.owner_match)
-    count("pending_merged")(a => a.pending && a.merged)
-    count("pending_merged_same_id")(a => a.pending && a.merged && a.mshr_match)
-    count("pending_merged_wrong_id")(a => a.pending && a.merged && !a.mshr_match)
-    count("pending_new_alloc")(a => a.pending && a.new_alloc)
-    count("pending_unhandled_miss")(a => a.pending && !a.actual_hit && !a.handled)
-    count("unknown_hit")(a => a.unknown && a.actual_hit)
-    count("unknown_miss")(a => a.unknown && !a.actual_hit)
-    count("unknown_new_alloc")(a => a.unknown && a.new_alloc)
-    count("unknown_merged")(a => a.unknown && a.merged)
-    count("unknown_handled_other")(a => a.unknown && !a.actual_hit && a.handled && !a.merged && !a.new_alloc)
-    count("unknown_unhandled_miss")(a => a.unknown && !a.actual_hit && !a.handled)
-    count("new_alloc")(_.new_alloc)
-    count("pa_fail")(_.pa_fail)
-    count("multi_hit")(_.multi_hit)
-  }
 }

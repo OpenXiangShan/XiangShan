@@ -346,9 +346,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_pred_way_en = RegEnable(s1_pred_tag_match_way_dup_dc, s1_fire)
   val s2_dm_way_num = RegEnable(s1_direct_map_way_num, s1_fire)
   val s2_wpu_pred_fail_and_real_hit = RegEnable(s1_wpu_pred_fail_and_real_hit, s1_fire)
-  val s2_spec_candidate = RegEnable(s1_spec_candidate, s1_fire)
-  val s2_spec_reserved = RegEnable(s1_spec_candidate && io.spec_query.ready, s1_fire)
-  val s2_spec_id = RegEnable(io.spec_query.id, s1_spec_candidate && io.spec_query.ready)
+  val s2_spec_candidate = RegNext(s1_spec_candidate, false.B)
+  val s2_spec_reserved = io.spec_query.grant.valid
+  val s2_spec_id = io.spec_query.grant.bits
 
   // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
   io.occupy_set := addr_to_dcache_set(s2_vaddr)
@@ -460,6 +460,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.lqIdx := s2_req.lqIdx
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
   io.miss_req.bits.occupy_way := s2_tag_match_way
+  when(io.miss_req.valid && io.miss_req.bits.isSpecMiss) {
+    assert(s2_spec_reserved && !s2_tag_match && !s2_tl_error.asUInt.orR &&
+      !s2_tag_error && !s2_btot_occupy_fail && !io.lsu.s2_kill,
+      "SpecMiss commit candidate must be an accurately confirmed S2 miss")
+  }
+  when(io.spec_query.grant.valid) {
+    assert(s2_valid && s2_spec_candidate,
+      "registered SpecMiss grant must align with its LoadPipe S2 request")
+  }
 
   //send load miss to wbq
   io.wbq_conflict_check.valid := s2_miss_req_valid_dup
@@ -502,12 +511,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.mtrack.s2.bits.paddr := s2_paddr
   io.mtrack.s2.bits.way := s2_real_way_en
   io.mtrack.s2.bits.hit := s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
-  io.mtrack.s2.bits.first_issue := s2_req.isFirstIssue
-  io.mtrack.s2.bits.handled := resp.bits.handled
-  io.mtrack.s2.bits.merged := s2_miss_merged
-  io.mtrack.s2.bits.allocated := s2_miss_req_fire && !s2_request_cancel &&
-    !io.wbq_block_miss_req && io.miss_resp.allocated
-  io.mtrack.s2.bits.mshr_id := io.miss_resp.id
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
   io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
@@ -701,7 +704,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire && !resp.bits.miss && !resp.bits.replay)
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire && resp.bits.miss)
   XSPerfAccumulate("specmiss_s1_candidate", s1_spec_candidate)
-  XSPerfAccumulate("specmiss_s1_reserve", s1_spec_candidate && io.spec_query.ready)
+  XSPerfAccumulate("specmiss_s1_reserve", io.spec_query.grant.valid)
   XSPerfAccumulate("specmiss_s2_confirm", s2_specmiss_confirm)
   XSPerfAccumulate("specmiss_pmp_or_kill", s2_spec_candidate && s2_valid && io.lsu.s2_kill)
   XSPerfAccumulate("specmiss_hit_cancel", s2_spec_candidate && s2_valid && s2_hit)
