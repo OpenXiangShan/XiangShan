@@ -99,6 +99,13 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   for (i <- 1 until numOfStage) {
     topdownStages(i) := topdownStages(i - 1)
   }
+  // BPU can flush a fetch already in IFU s0. The discarded s0 slot becomes
+  // an s1 bubble on the next edge, independently of the instruction handshake.
+  // Older IFU stages survive this flush. Backend/IFU redirects take precedence.
+  when(io.ifuPerfCtrl.fromBpuFlush &&
+    !io.ifuPerfCtrl.backendRedirect && !io.ifuPerfCtrl.ifuWbRedirect) {
+    topdownStages(1).reasons(TopDownCounters.OverrideBubble.id) := true.B
+  }
   when(icacheMissBubble) {
     topdownStages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
   }

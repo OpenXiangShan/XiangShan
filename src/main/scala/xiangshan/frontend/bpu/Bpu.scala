@@ -26,6 +26,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
+import xiangshan.TopDownCounters
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -669,8 +670,31 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.scUsed              := s3_scUsed.asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
-  // TODO: override reason and redirect reason
-  io.toFtq.topdownReasons := 0.U.asTypeOf(new FrontendTopDownBundle())
+
+  // Track lost prediction slots through S1/S2/S3, independently of valid-ready.
+  // This tracks prediction bubbles; IFU separately tags fetches flushed by BPU.
+  private val topdownStages = RegInit(VecInit.fill(3)(0.U.asTypeOf(new FrontendTopDownBundle)))
+  topdownStages(0) := 0.U.asTypeOf(new FrontendTopDownBundle)
+  for (i <- 1 until 3) {
+    topdownStages(i) := topdownStages(i - 1)
+  }
+
+  // S0 already uses the corrected PC in the override cycle. The discarded S1
+  // slot becomes a bubble in S2 on the next edge; S3 override also discards S2.
+  // Set bits after shifting so overlapping overrides merge with existing bubbles.
+  // Redirect wins PC selection and makes concurrent overrides irrelevant.
+  when(redirect.valid) {
+    // Discard pending override tags from the old path as well as new overrides.
+    topdownStages.foreach(_ := 0.U.asTypeOf(new FrontendTopDownBundle))
+  }.otherwise {
+    when(s2_override || s3_override) {
+      topdownStages(1).reasons(TopDownCounters.OverrideBubble.id) := true.B
+    }
+    when(s3_override) {
+      topdownStages(2).reasons(TopDownCounters.OverrideBubble.id) := true.B
+    }
+  }
+  io.toFtq.topdownReasons := topdownStages.last
 
   /* *** BpTrace *** */
   when(io.toFtq.meta.fire) {
