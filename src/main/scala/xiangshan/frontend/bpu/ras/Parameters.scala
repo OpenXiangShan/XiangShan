@@ -19,8 +19,8 @@ import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class RasParameters(
-    CommitStackSize:   Int = 16, // Size of the RAS stack
-    SpecQueueSize:     Int = 64 // Size of the RAS speculative queue
+    CommitStackSize: Int = 16, // Size of the RAS stack
+    SpecQueueSize:   Int = 64  // Size of the RAS speculative queue
 ) {
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
 }

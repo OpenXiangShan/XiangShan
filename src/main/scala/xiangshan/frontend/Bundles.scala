@@ -405,8 +405,9 @@ object BlameBpuSource {
           // if branch type is return, prediction use ras directly
           // so blame to ras only when source is ras
           // and trigger assertion when source is mbtb
-          blame    := Mux(src.s3Ras, RAS, BTB)
-          retError := src.s3Mbtb
+          // blame    := Mux(src.s3Ras, RAS, BTB)
+          // retError := src.s3Mbtb
+          blame := RAS
         }.otherwise {
           posError := true.B
         }
@@ -435,7 +436,7 @@ object BlameBpuSource {
       }
     }
     XSError(en && posError, "resolved branch's position cannot be greater than predicted jump's position")
-    XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
+    // XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
     blame
   }
 }
