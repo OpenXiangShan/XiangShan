@@ -278,9 +278,9 @@ class VecRegionImp(
   private val vldS5VpWb = Reg(chiselTypeOf(vldS3VpWb))
   private val vldS6VpWb = Reg(chiselTypeOf(vldS3VpWb))
   private val vldS3MergeInfo = in.fromMem.vldS3MergeInfo
-  private val vldS4MergeInfo = VecInit(vldS3MergeInfo.map(x => GatedRegNext(x)))
-  private val vldS5MergeInfo = VecInit(vldS4MergeInfo.map(x => GatedRegNext(x)))
-  private val vldS6MergeInfo = VecInit(vldS5MergeInfo.map(x => GatedRegNext(x)))
+  private val vldS4MergeInfo = VecInit(vldS3MergeInfo.map(x => GatedRegNext(x, false.B)))
+  private val vldS5MergeInfo = VecInit(vldS4MergeInfo.map(x => GatedRegNext(x, false.B)))
+  private val vldS6MergeInfo = VecInit(vldS5MergeInfo.map(x => GatedRegNext(x, false.B)))
 
   private val vldS6RobWb: Seq[Seq[ValidIO[Exu.ToRob]]] = in.fromMem.vldS3RobWb.map { iqWB => iqWB.map {
     exuWB => Pipe(exuWB, 3)
