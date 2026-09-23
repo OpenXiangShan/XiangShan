@@ -28,6 +28,7 @@ class InstrUncache(implicit p: Parameters) extends LazyModule with HasInstrUncac
     masters = Seq(AXI4MasterParameters(
       name = "instrUncache",
       id = IdRange(0, nMmioAxiIdEnd),
+      aligned = true,
       maxFlight = Some(1)
     )),
     requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())

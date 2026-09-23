@@ -21,6 +21,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config._
 import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.devices.debug.DebugModuleKey
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnitParams, BusErrors, MaxHartIdBits}
@@ -31,6 +32,7 @@ import xscache.coupledL2.{
   MemBackTypeMMField, MemPageTypeNCField, PrefetchCtrlFromCore
 }
 import xscache.chi.{CHIDataCheckKey, CHIIssue, CHIAddrWidthKey, CHIPoisonKey, DecoupledPortIO, NonSecureKey, PortIO}
+import xscache.oceanus.compactchi.CCHIParametersKey
 import xscache.common.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -130,6 +132,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       )
       case CHIIssue => p(CHIIssue)
       case CHIAddrWidthKey => p(CHIAddrWidthKey)
+      case CCHIParametersKey => p(CCHIParametersKey)
       case NonSecureKey => p(NonSecureKey)
       case CHIDataCheckKey if isZhuJiang => "none"
       case CHIPoisonKey if isZhuJiang => false
@@ -194,9 +197,29 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       ))
     }
   }
+  // Tile MMIO AXI is 8B (Uncache / BEU / CtrlUnit). soc_xbar is 32B (NCB).
+  // Convert only on the egress so in-core masters keep a 64-bit AXI bundle.
+  private val mmioBusBytes = 8
+  private val mmioToSocXbar = TLXbar()
+  // Distinct from SoC TLError at 0x1000000000000, which is still visible
+  // through TLToAXI4 and would overlap on AXI4ToTL's AXI slave port.
+  private val mmioToSocError = LazyModule(new TLError(
+    params = DevNullParams(
+      address = Seq(AddressSet(0x2000000000000L, 0xffffffffffffL)),
+      maxAtomic = 8,
+      maxTransfer = 4096
+    ),
+    beatBytes = mmioBusBytes
+  ))
+  mmioToSocError.node := mmioToSocXbar
   mmio_port :=
     AXI4Filter(axi4Ssubtract(mmioFilters)) :=
     AXI4Buffer() :=
+    TLToAXI4(wcorrupt = false) :=
+    TLWidthWidget(mmioBusBytes) :=
+    mmioToSocXbar :=
+    TLFIFOFixer() :=
+    AXI4ToTL(wcorrupt = false) :=
     AXI4PMAUserAdapter() :=
     mmio_xbar
 

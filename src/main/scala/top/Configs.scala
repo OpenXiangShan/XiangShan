@@ -51,6 +51,7 @@ import device.EnableJtag
 import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
 import xscache.common.DirtyField
+import xscache.oceanus.compactchi.{CCHIParameters, CCHIParametersKey}
 
 object LLCType extends Enumeration {
   val OpenLLC, ZhuJiang = Value
@@ -86,6 +87,7 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case MaxHartIdBits => log2Up(n) max 6
   case EnableJtag => true.B
   case DFTOptionsKey => DFTOptions()
+  case CCHIParametersKey => CCHIParameters()
 })
 
 class MinimalConfig(n: Int = 1) extends Config(

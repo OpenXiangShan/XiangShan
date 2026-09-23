@@ -309,6 +309,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
     masters = Seq(AXI4MasterParameters(
       name = "uncache",
       id = IdRange(0, UncacheBufferSize),
+      aligned = true,
       maxFlight = Some(1)
     )),
     requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
