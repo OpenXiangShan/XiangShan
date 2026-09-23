@@ -155,7 +155,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   val iommu = Option.when(enableIommu)(LazyModule(new IommuLazy))
   if (enableIommu) {
-    iommu.get.slaveNode := AXI4IdIndexer(10) := dmac.masterNode
+    iommu.get.slaveNode := AXI4IdIndexer(iommu.get.slaveIdBits) := dmac.masterNode
     iopmp.slaveNodes(0) := iommu.get.masterNode
   } else {
     iopmp.slaveNodes(0) := dmac.masterNode

@@ -237,6 +237,7 @@ private class IommuWrapBlackBox extends ExtModule {
   * 56-bit/6-bit-ID AXI4. Both data paths are 256 bits wide.
   */
 class IommuLazy(implicit p: Parameters) extends LazyModule {
+  val slaveIdBits = 10
   private val allMemory = Seq(AddressSet(0x0L, 0xffffffffffffL))
 
   val slaveNode = AXI4SlaveNode(Seq(AXI4SlavePortParameters(
@@ -266,7 +267,7 @@ class IommuLazy(implicit p: Parameters) extends LazyModule {
     private val (master, _) = masterNode.out.head
     private val (ds, _) = dsMasterNode.out.head
 
-    require(slave.params.dataBits == 256 && slave.params.idBits == 10)
+    require(slave.params.dataBits == 256 && slave.params.idBits == slaveIdBits)
     require(master.params.dataBits == 256 && master.params.idBits == 10)
     require(ds.params.dataBits == 256 && ds.params.idBits == 6)
 
