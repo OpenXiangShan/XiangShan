@@ -70,10 +70,9 @@ case class DCacheParameters
   // false = select by MSHR ID
   channelSelByAddr: Boolean = true,
 
-  // ========== MissTrack (shadow first) ==========
+  // ========== MissTrack / SpecMiss ==========
   enMissTrack: Boolean = false,
-  missTrackShadow: Boolean = true,
-  missTrackEntries: Int = 8,
+  missTrackEntries: Int = 16,
   missTrackHashBits: Int = 5
 ) extends L1CacheParameters {
   require(missTrackEntries >= 2, "MissTrack needs at least two entries")
@@ -945,8 +944,7 @@ class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
 
 class DCacheSpecMissQueryIOBundle(implicit p: Parameters) extends DCacheBundle {
   val req = ValidIO(new DCacheSpecMissReq)
-  val ready = Input(Bool())
-  val id = Input(UInt(log2Up(cfg.nMissEntries).W))
+  val grant = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 }
 
 class DCacheSpecMissReq(implicit p: Parameters) extends MissTrackLine {
@@ -996,7 +994,7 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  val specFabricSource = Option.when(cfg.enMissTrack && !cfg.missTrackShadow)(
+  val specFabricSource = Option.when(cfg.enMissTrack)(
     BundleBridgeSource(() => new SpecMissFabricIO)
   )
 
@@ -1470,28 +1468,41 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
   }
 
-  /** MissTrack observes all load ports and optionally qualifies specmiss. */
+  /** MissTrack observes all load ports and qualifies SpecMiss requests. */
   if (cfg.enMissTrack) {
     val misstrack = Module(new MissTrack(MissReqPortCount))
+    // Keep ECC/readline control off the same-cycle MissTrack age cone. The
+    // table is advisory, so observing install/error events one cycle later is
+    // safe; the functional load/miss pipeline is unchanged.
+    val delayedInstall = RegNext(
+      mainPipe.io.misstrack_install,
+      0.U.asTypeOf(Valid(new MissTrackResident))
+    )
+    val delayedClear = RegNext(
+      mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _),
+      false.B
+    )
     for (w <- 0 until LoadPipelineWidth) {
       misstrack.io.loads(w) := ldu(w).io.mtrack
-      ldu(w).io.specmiss := (if (cfg.missTrackShadow) 0.U.asTypeOf(new MissTrackSpec) else misstrack.io.spec(w))
+      ldu(w).io.specmiss := misstrack.io.spec(w)
       ldu(w).io.mshr_full := missQueue.io.full
     }
     misstrack.io.alloc := missQueue.io.misstrack_alloc
     misstrack.io.owners := missQueue.io.misstrack_owners
-    misstrack.io.install := mainPipe.io.misstrack_install
+    misstrack.io.install := delayedInstall
     val tagWrite = mainPipe.io.tag_write
     val metaWrite = mainPipe.io.meta_write
     // Both ports belong to the same MainPipe s3 transaction. Tag writes remove
     // the old occupant; installation of the new line is handled independently.
     misstrack.io.invalidate.valid := tagWrite.fire ||
       (metaWrite.fire && !metaWrite.bits.meta.coh.isValid())
-    misstrack.io.invalidate.bits.idx := Mux(tagWrite.fire, tagWrite.bits.idx, metaWrite.bits.idx)
-    misstrack.io.invalidate.bits.way := Mux(tagWrite.fire, tagWrite.bits.way_en, metaWrite.bits.way_en)
+    // Both payloads are the same s3_idx/s3_way_en even when a port is not valid.
+    // Avoid putting the late write handshake on the invalidate payload mux.
+    misstrack.io.invalidate.bits.idx := metaWrite.bits.idx
+    misstrack.io.invalidate.bits.way := metaWrite.bits.way_en
     // Error reports can arrive after the s2 training observation. Conservatively
     // clear the small history table; normal cache error handling remains intact.
-    misstrack.io.clear := mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _)
+    misstrack.io.clear := delayedClear
   } else {
     for (w <- 0 until LoadPipelineWidth) {
       ldu(w).io.specmiss := 0.U.asTypeOf(new MissTrackSpec)
