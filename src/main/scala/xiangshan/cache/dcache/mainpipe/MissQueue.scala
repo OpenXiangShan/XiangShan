@@ -1025,6 +1025,9 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
   io.main_pipe_req.bits.probe := false.B
+  io.main_pipe_req.bits.local_evict := false.B
+  io.main_pipe_req.bits.local_evict_tag := false.B
+  io.main_pipe_req.bits.local_evict_way_en := 0.U
   io.main_pipe_req.bits.source := req.source
   io.main_pipe_req.bits.cmd := req.cmd
   io.main_pipe_req.bits.vaddr := req.vaddr

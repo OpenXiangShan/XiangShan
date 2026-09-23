@@ -22,6 +22,11 @@ import freechips.rocketchip.tilelink.TLPermissions._
 import freechips.rocketchip.tilelink.{TLArbiter, TLBundleC, TLBundleD, TLEdgeOut}
 import org.chipsalliance.cde.config.Parameters
 import utils.HasTLDump
+class EccEvictComplete(implicit p: Parameters) extends DCacheBundle {
+  val addr = UInt(PAddrBits.W)
+  val tag = Bool()
+}
+
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 
@@ -31,6 +36,8 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val hasData = Bool()
   val corrupt = Bool()
   val dirty = Bool()
+  val local_evict = Bool()
+  val local_evict_tag = Bool()
 
   val delay_release = Bool()
   val miss_id = UInt(log2Up(cfg.nMissEntries).W)
@@ -65,6 +72,8 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.hasData := hasData
     out.corrupt := corrupt
     out.dirty := dirty
+    out.local_evict := local_evict
+    out.local_evict_tag := local_evict_tag
     out.delay_release := delay_release
     out.miss_id := miss_id
     out
@@ -77,6 +86,8 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
     out.hasData := hasData
     out.corrupt := corrupt
     out.dirty := dirty
+    out.local_evict := local_evict
+    out.local_evict_tag := local_evict_tag
     out.delay_release := delay_release
     out.miss_id := miss_id
     out
@@ -135,6 +146,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
 
     val block_addr  = Output(Valid(UInt()))
+    val evict_complete = Output(Valid(new EccEvictComplete))
   })
 
   val s_invalid :: s_release_req :: s_release_resp ::Nil = Enum(3)
@@ -178,14 +190,15 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   //val busy = remain.orR && s_data_override && s_data_merge // have remain beats and data write finished
   val busy = remain.orR && s_data_override  // have remain beats and data write finished
   val req = Reg(new WritebackReqWodata)
-
-  // assign default signals to output signals
   io.req.ready := false.B
   io.mem_release.valid := false.B
   io.mem_release.bits  := DontCare
   io.mem_grant.ready   := false.B
-  io.block_addr.valid  := state =/= s_invalid
-  io.block_addr.bits   := req.addr
+  io.block_addr.valid := state =/= s_invalid
+  io.block_addr.bits := req.addr
+  io.evict_complete.valid := state === s_release_resp && io.mem_grant.fire && req.local_evict
+  io.evict_complete.bits.addr := req.addr
+  io.evict_complete.bits.tag := req.local_evict_tag
 
   s_data_override := true.B // data_override takes only 1 cycle
   //s_data_merge := true.B // data_merge takes only 1 cycle
@@ -325,6 +338,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // main pipe * 1 + load pipe * LduCnt + store pipe * StaCnt (optional) + hybrid * HyuCnt
     val miss_req_conflict_check = Vec(MissReqPortCount, Flipped(Valid(UInt())))
     val block_miss_req = Vec(MissReqPortCount, Output(Bool()))
+    val evict_complete = Output(Valid(new EccEvictComplete))
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -340,8 +354,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // assign default values to output signals
   for (ch <- 0 until numMemChannels) {
     io.mem_release(ch).valid := false.B
-    io.mem_release(ch).bits  := DontCare
-    io.mem_grant(ch).ready   := false.B
+    io.mem_release(ch).bits := DontCare
+    io.mem_grant(ch).ready := false.B
   }
 
   // delay data write in writeback req for 1 cycle
@@ -349,6 +363,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   require(isPow2(cfg.nMissEntries))
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
+  io.evict_complete.valid := VecInit(entries.map(_.io.evict_complete.valid)).asUInt.orR
+  io.evict_complete.bits := PriorityMux(entries.map(e => e.io.evict_complete.valid -> e.io.evict_complete.bits))
   entries.zipWithIndex.foreach {
     case (entry, i) =>
       val former_primary_ready = if(i == 0)

@@ -207,8 +207,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             nReleaseEntries = 8,
             nMaxPrefetchEntry = 2,
             enableTagEcc = true,
-            enableDataEcc = true,
-            cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+            enableDataEcc = true
           )),
           itlbParameters = TLBParameters(
             name = "itlb",
@@ -309,8 +308,7 @@ case class WithNKBL1D(n: Int, ways: Int = 8, numMemChannels: Int = 1) extends Co
         nMaxPrefetchEntry = 6,
         numMemChannels = numMemChannels,
         enableTagEcc = true,
-        enableDataEcc = true,
-        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+        enableDataEcc = true
       ))
     ))
 })

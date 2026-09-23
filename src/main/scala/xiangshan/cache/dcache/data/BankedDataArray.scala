@@ -82,6 +82,8 @@ class L1BankedDataReadResult(implicit p: Parameters) extends DCacheBundle
   val ecc = Bits(dataECCBits.W)
   val raw_data = Bits(DCacheSRAMRowBits.W)
   val error_delayed = Bool() // 1 cycle later than data resp
+  val correctable_delayed = Bool()
+  val uncorrectable_delayed = Bool()
 
   def asECCData() = {
     Cat(ecc, raw_data)
@@ -267,13 +269,14 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val readline_error_delayed = Output(Bool())
     val read_resp          = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult())))
     val read_error_delayed = Output(Vec(LoadPipelineWidth,Vec(VLEN/DCacheSRAMRowBits, Bool())))
+    val read_correctable_delayed = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, Bool())))
+    val read_uncorrectable_delayed = Output(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, Bool())))
     // val nacks = Output(Vec(LoadPipelineWidth, Bool()))
     // val errors = Output(Vec(LoadPipelineWidth + 1, ValidIO(new L1CacheErrorInfo))) // read ports + readline port
     // when bank_conflict, read (1) port should be ignored
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val rr_bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
-    val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
   })
 
   // Half of the data banks use the duplicate address path to reduce fanout.
@@ -491,19 +494,6 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(read_result)
   dontTouch(read_error_delayed_result)
 
-  val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
-    case bank =>
-      Mux(io.pseudo_error.valid && bank.valid, bank.mask(DCacheSRAMRowBits - 1, 0), 0.U)
-  }
-  val readline_hit = io.readline.fire &&
-                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
-  val readbank_hit = io.read.zip(bank_addrs.zip(io.is128Req)).zipWithIndex.map {
-                          case ((read, (bank_addr, is128Req)), i) =>
-                            val error_bank0 = io.pseudo_error.bits(bank_addr(0))
-                            val error_bank1 = io.pseudo_error.bits(bank_addr(1))
-                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) && !io.bank_conflict_slow(i)
-                      }.reduce(_|_)
-  io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
 
   for (div_index <- 0 until DCacheSetDiv){
     for (bank_index <- 0 until DCacheBanks) {
@@ -543,15 +533,22 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         data_bank.io.r.addr := sram_set_addr
 
         read_result(div_index)(bank_index)(way_index).ecc := getECCFromEncWord(data_bank.io.r.data)
-        read_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data) ^ pseudo_data_toggle_mask(bank_index)
+        read_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data)
 
         if (EnableDataEcc) {
           val ecc_data = read_result(div_index)(bank_index)(way_index).asECCData()
           val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_en))
-          read_result(div_index)(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
+          val decoder = Module(new DCacheEccDetect(DCacheSRAMRowBits, dcacheParameters.dataCode))
+          decoder.io.encoded := ecc_data_delayed
+          decoder.io.valid := true.B
+          read_result(div_index)(bank_index)(way_index).correctable_delayed := decoder.io.correctable
+          read_result(div_index)(bank_index)(way_index).uncorrectable_delayed := decoder.io.uncorrectable
+          read_result(div_index)(bank_index)(way_index).error_delayed := decoder.io.correctable || decoder.io.uncorrectable
           read_error_delayed_result(div_index)(bank_index)(way_index) := read_result(div_index)(bank_index)(way_index).error_delayed
         } else {
           read_result(div_index)(bank_index)(way_index).error_delayed := false.B
+          read_result(div_index)(bank_index)(way_index).correctable_delayed := false.B
+          read_result(div_index)(bank_index)(way_index).uncorrectable_delayed := false.B
           read_error_delayed_result(div_index)(bank_index)(way_index) := false.B
         }
 
@@ -587,6 +584,10 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       // error detection
       // normal read ports
       io.read_error_delayed(i)(j) := rr_read_fire && read_error_delayed_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
+      io.read_correctable_delayed(i)(j) := rr_read_fire &&
+        read_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr).correctable_delayed && !RegNext(io.bank_conflict_slow(i))
+      io.read_uncorrectable_delayed(i)(j) := rr_read_fire &&
+        read_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr).uncorrectable_delayed && !RegNext(io.bank_conflict_slow(i))
     })
   })
 
@@ -670,10 +671,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   println("  DCacheType: BankedDataArray")
   // Keep precise readline bank conflicts enabled for the 32x2B path.
   val ReduceReadlineConflict = true
-  require(
-    io.pseudo_error.bits.head.mask.getWidth >= DCacheSRAMRowBits,
-    "pseudo-error masks must cover the data-bank row width"
-  )
 
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
@@ -825,18 +822,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
 
-  val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
-    case bank =>
-      Mux(io.pseudo_error.valid && bank.valid, bank.mask(DCacheSRAMRowBits - 1, 0), 0.U)
-  }
-  val readline_hit = io.readline.fire &&
-                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
-  val pseudoErrorBankValid = VecInit(io.pseudo_error.bits.map(_.valid)).asUInt
-  val readbank_hit = io.read.zipWithIndex.map {
-    case (read, i) =>
-      read.fire && (read.bits.bankMask & pseudoErrorBankValid).orR && !io.bank_conflict_slow(i)
-  }.reduce(_|_)
-  io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
 
   for (div_index <- 0 until DCacheSetDiv) {
     for (bank_index <- 0 until DCacheBanks) {
@@ -889,15 +874,22 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       for (way_index <- 0 until DCacheWays) {
         val mbistAck = mbistSramPorts.map(_(div_index)(bank_index).ack).getOrElse(false.B)
         bank_result(div_index)(bank_index)(way_index).ecc := getECCFromEncWord(data_bank.io.r.data(way_index))
-        bank_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data(way_index)) ^ Mux(mbistAck, 0.U, pseudo_data_toggle_mask(bank_index))
+        bank_result(div_index)(bank_index)(way_index).raw_data := getDataFromEncWord(data_bank.io.r.data(way_index))
 
         if (EnableDataEcc) {
           val ecc_data = bank_result(div_index)(bank_index)(way_index).asECCData()
           val ecc_data_delayed = RegEnable(ecc_data, RegNext(read_enable))
-          bank_result(div_index)(bank_index)(way_index).error_delayed := dcacheParameters.dataCode.decode(ecc_data_delayed).error
+          val decoder = Module(new DCacheEccDetect(DCacheSRAMRowBits, dcacheParameters.dataCode))
+          decoder.io.encoded := ecc_data_delayed
+          decoder.io.valid := true.B
+          bank_result(div_index)(bank_index)(way_index).correctable_delayed := decoder.io.correctable
+          bank_result(div_index)(bank_index)(way_index).uncorrectable_delayed := decoder.io.uncorrectable
+          bank_result(div_index)(bank_index)(way_index).error_delayed := decoder.io.correctable || decoder.io.uncorrectable
           read_bank_error_delayed(div_index)(bank_index)(way_index) := bank_result(div_index)(bank_index)(way_index).error_delayed
         } else {
           bank_result(div_index)(bank_index)(way_index).error_delayed := false.B
+          bank_result(div_index)(bank_index)(way_index).correctable_delayed := false.B
+          bank_result(div_index)(bank_index)(way_index).uncorrectable_delayed := false.B
           read_bank_error_delayed(div_index)(bank_index)(way_index) := false.B
         }
         bank_result_delayed(div_index)(bank_index)(way_index) := RegEnable(bank_result(div_index)(bank_index)(way_index), RegNext(read_enable))
@@ -930,6 +922,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       io.read_resp(i)(j)          := bank_result(r_div_addr)(r_bank_addr(j))(r_way_addr)
       // error detection
       io.read_error_delayed(i)(j) := rr_read_fire && read_bank_error_delayed(rr_div_addr)(rr_bank_addr(j))(rr_way_addr) && !RegNext(io.bank_conflict_slow(i))
+      io.read_correctable_delayed(i)(j) := rr_read_fire &&
+        bank_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr).correctable_delayed && !RegNext(io.bank_conflict_slow(i))
+      io.read_uncorrectable_delayed(i)(j) := rr_read_fire &&
+        bank_result(rr_div_addr)(rr_bank_addr(j))(rr_way_addr).uncorrectable_delayed && !RegNext(io.bank_conflict_slow(i))
     })
   })
 

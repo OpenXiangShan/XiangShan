@@ -356,9 +356,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
     ptw_to_l2_buffer.node := ptw.node
   }
   uncache_xbar := TLBuffer() := uncache.clientNode
-  if (dcache.uncacheNode.isDefined) {
-    dcache.uncacheNode.get := TLBuffer.chainNode(2) := uncache_xbar
-  }
   uncache_port := TLBuffer.chainNode(2) := uncache_xbar
 
   lazy val module = new MemBlockInlinedImp(this)
