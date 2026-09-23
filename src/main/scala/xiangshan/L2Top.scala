@@ -75,7 +75,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
-  private val specMissEnabled = coreParams.dcacheParametersOpt.exists(c => c.enMissTrack && !c.missTrackShadow)
+  private val specMissEnabled = coreParams.dcacheParametersOpt.exists(_.enMissTrack)
   val l1_l2_fabric = LazyModule(new CustomL1L2Fabric(
     specChannels = if (specMissEnabled) numMemChannelsFromDcache else 0,
     specOwners = if (specMissEnabled) LoadPipelineWidth else 0,

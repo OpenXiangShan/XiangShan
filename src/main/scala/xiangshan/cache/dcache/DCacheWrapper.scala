@@ -70,10 +70,9 @@ case class DCacheParameters
   // false = select by MSHR ID
   channelSelByAddr: Boolean = true,
 
-  // ========== MissTrack (shadow first) ==========
+  // ========== MissTrack / SpecMiss ==========
   enMissTrack: Boolean = false,
-  missTrackShadow: Boolean = true,
-  missTrackEntries: Int = 8,
+  missTrackEntries: Int = 16,
   missTrackHashBits: Int = 5
 ) extends L1CacheParameters {
   require(missTrackEntries >= 2, "MissTrack needs at least two entries")
@@ -945,8 +944,7 @@ class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
 
 class DCacheSpecMissQueryIOBundle(implicit p: Parameters) extends DCacheBundle {
   val req = ValidIO(new DCacheSpecMissReq)
-  val ready = Input(Bool())
-  val id = Input(UInt(log2Up(cfg.nMissEntries).W))
+  val grant = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
 }
 
 class DCacheSpecMissReq(implicit p: Parameters) extends MissTrackLine {
@@ -996,7 +994,7 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  val specFabricSource = Option.when(cfg.enMissTrack && !cfg.missTrackShadow)(
+  val specFabricSource = Option.when(cfg.enMissTrack)(
     BundleBridgeSource(() => new SpecMissFabricIO)
   )
 
@@ -1470,12 +1468,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
   }
 
-  /** MissTrack observes all load ports and optionally qualifies specmiss. */
+  /** MissTrack observes all load ports and qualifies SpecMiss requests. */
   if (cfg.enMissTrack) {
     val misstrack = Module(new MissTrack(MissReqPortCount))
     for (w <- 0 until LoadPipelineWidth) {
       misstrack.io.loads(w) := ldu(w).io.mtrack
-      ldu(w).io.specmiss := (if (cfg.missTrackShadow) 0.U.asTypeOf(new MissTrackSpec) else misstrack.io.spec(w))
+      ldu(w).io.specmiss := misstrack.io.spec(w)
       ldu(w).io.mshr_full := missQueue.io.full
     }
     misstrack.io.alloc := missQueue.io.misstrack_alloc

@@ -1310,16 +1310,18 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Analysis result for all queryMQ requests
   val analysis = WireInit(0.U.asTypeOf(new ReqAnalysisResult(reqNum, cfg.nMissEntries)))
   val query_valid = VecInit(io.queryMQ.map(_.req.valid))
-  val reserve_valid = RegInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
-  val reserve_id = Reg(Vec(LoadPipelineWidth, UInt(log2Up(cfg.nMissEntries).W)))
-  val reserve_line = Reg(Vec(LoadPipelineWidth, new MissTrackLine))
+  val spec_candidate_fire = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
+  val spec_candidate_id = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(log2Up(cfg.nMissEntries).W))))
+  val spec_grant_register = Module(new SpecMissGrantRegister(LoadPipelineWidth))
   for (w <- 0 until LoadPipelineWidth) {
-    reserve_valid(w) := io.spec_query(w).req.valid && io.spec_query(w).ready
-    when (io.spec_query(w).req.valid && io.spec_query(w).ready) {
-      reserve_id(w) := io.spec_query(w).id
-      reserve_line(w) := io.spec_query(w).req.bits
-    }
+    spec_grant_register.io.capture(w).valid := spec_candidate_fire(w)
+    spec_grant_register.io.capture(w).bits.id := spec_candidate_id(w)
+    spec_grant_register.io.capture(w).bits.line := io.spec_query(w).req.bits
+    io.spec_query(w).grant := spec_grant_register.io.grant(w)
   }
+  val reserve_valid = VecInit(spec_grant_register.io.grant.map(_.valid))
+  val reserve_id = VecInit(spec_grant_register.io.grant.map(_.bits))
+  val reserve_line = spec_grant_register.io.line
   for (w <- 0 until LoadPipelineWidth; other <- 0 until w) {
     assert(!(reserve_valid(w) && reserve_valid(other) && reserve_id(w) === reserve_id(other)),
       "SpecMiss reservations must own distinct MSHR IDs")
@@ -1610,6 +1612,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     val alloc_ready = has_alloc && !has_compress && !has_merge && is_valid
 
+    // YYMTODO：valid 依赖 ready
     io.queryMQ(i).ready := query_valid(i) && (compress_ready || merge_ready || alloc_ready) &&
       !(io.wbq_block_miss_req(i) || io.wbq_block_miss_req(analysis.compress_group(i)) || io.queryMQ(analysis.compress_group(i)).req.bits.cancel)
   }
@@ -1630,50 +1633,64 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       (analysis.strategy(i) & 1.U) =/= 0.U && analysis.compress_group(i) === i.U &&
       !io.wfi.wfiReq
     when(io.spec_fabric.resolve(w).bits.commit) {
+      assert(io.spec_fabric.resolve(w).valid && io.queryMQ(i).req.bits.isSpecMiss &&
+        query_fire(i) && reserved_for_req(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
+        analysis.compress_group(i) === i.U,
+        "SpecMiss commit must own its reservation and a new MissQueue allocation")
       assert(io.spec_fabric.committed(w), "committed SpecMiss has no post-xbar A slot")
+    }
+    when(io.spec_fabric.committed(w)) {
+      assert(io.spec_fabric.resolve(w).valid && io.spec_fabric.resolve(w).bits.commit,
+        "post-xbar SpecMiss commit has no matching MissQueue resolution")
     }
     XSPerfAccumulate(s"spec_fabric_commit_$w", io.spec_fabric.committed(w))
   }
 
-  // Ordinary S2 enqueues win ID conflicts. Only a fabric-arbitrated candidate
-  // becomes a one-cycle reservation; losing candidates use the normal S2 path.
-  val spec_pre_grant = Wire(Vec(LoadPipelineWidth, Bool()))
-  val spec_pre_grant_id = Wire(Vec(LoadPipelineWidth, UInt(log2Up(cfg.nMissEntries).W)))
+  // Reserve a suffix of the free-entry ranks for speculative candidates. Every
+  // valid ordinary query is counted conservatively so its allocation always
+  // has priority, without feeding the ordinary allocation result into this path.
+  val occupied_blocks = entries.map(e =>
+    e.io.req_addr.valid -> get_block(e.io.req_addr.bits)
+  ) ++ active_pipe_regs.map(preg =>
+    preg.reg_valid() -> get_block(preg.req.addr)
+  ) ++ (0 until reqNum).map(i =>
+    (query_valid(i) && !io.queryMQ(i).req.bits.cancel) -> get_block(io.queryMQ(i).req.bits.addr)
+  ) ++ (0 until LoadPipelineWidth).map(i =>
+    reserve_valid(i) -> get_block(reserve_line(i).paddr)
+  )
+  val spec_requests = io.spec_query.map(request =>
+    request.req.valid -> get_block(request.req.bits.paddr)
+  )
+  val spec_choices = SpecMissReservationLogic.allocate(
+    initial_free,
+    free_count_before,
+    query_valid,
+    spec_requests,
+    occupied_blocks
+  )
   for (w <- 0 until LoadPipelineWidth) {
     val request = io.spec_query(w).req
-    val address_busy = VecInit(entries.map(e =>
-      e.io.req_addr.valid && get_block(e.io.req_addr.bits) === get_block(request.bits.paddr)
-    ) ++ active_pipe_regs.map(preg =>
-      preg.reg_valid() && get_block(preg.req.addr) === get_block(request.bits.paddr)
-    ) ++ (0 until reqNum).map(i =>
-      query_valid(i) && !io.queryMQ(i).req.bits.cancel &&
-        get_block(io.queryMQ(i).req.bits.addr) === get_block(request.bits.paddr)
-    ) ++ (0 until w).map(i =>
-      spec_pre_grant(i) && get_block(io.spec_query(i).req.bits.paddr) === get_block(request.bits.paddr)
-    )).asUInt.orR
-    val available = VecInit((0 until cfg.nMissEntries).map { e =>
-      val normal_claim = VecInit((0 until reqNum).map(i =>
-        query_fire(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
-          analysis.compress_group(i) === i.U && analysis.target_mshr(i) === e.U
-      )).asUInt.orR
-      val earlier_spec = if (w == 0) false.B else VecInit((0 until w).map(i =>
-        spec_pre_grant(i) && spec_pre_grant_id(i) === e.U
-      )).asUInt.orR
-      initial_free(e) && !normal_claim && !earlier_spec
-    })
-    io.spec_query(w).id := PriorityEncoder(available)
-    spec_pre_grant(w) := request.valid && available.asUInt.orR && !address_busy
-    spec_pre_grant_id(w) := io.spec_query(w).id
-    io.spec_fabric.candidate(w).valid := spec_pre_grant(w)
+    val choice = spec_choices(w)
+
+    io.spec_fabric.candidate(w).valid := choice.valid
     io.spec_fabric.candidate(w).bits.vaddr := request.bits.vaddr
     io.spec_fabric.candidate(w).bits.paddr := get_block_addr(request.bits.paddr)
     io.spec_fabric.candidate(w).bits.pc := request.bits.pc
     io.spec_fabric.candidate(w).bits.grow := request.bits.grow
-    io.spec_fabric.candidate(w).bits.id := spec_pre_grant_id(w)
+    io.spec_fabric.candidate(w).bits.id := choice.id
     io.spec_fabric.candidate(w).bits.alias := get_alias(request.bits.vaddr)
     io.spec_fabric.candidate(w).bits.prefetch := !io.l2_pf_store_only
-    io.spec_fabric.candidate(w).bits.channel := selectChannel(request.bits.paddr, spec_pre_grant_id(w))
-    io.spec_query(w).ready := io.spec_fabric.candidate(w).fire
+    io.spec_fabric.candidate(w).bits.channel := selectChannel(request.bits.paddr, choice.id)
+    spec_candidate_fire(w) := io.spec_fabric.candidate(w).fire
+    spec_candidate_id(w) := choice.id
+    when(request.valid && choice.addressBusy) {
+      assert(!io.spec_fabric.candidate(w).valid,
+        "SpecMiss reserved a physical block already owned by MissQueue")
+    }
+    when(io.spec_fabric.candidate(w).valid) {
+      assert(PopCount(choice.choiceOH) === 1.U && choice.rank < free_entry_count,
+        "SpecMiss rank allocator selected an invalid free-entry rank")
+    }
   }
 
   /*  MissQueue enq logic is now splitted into 2 cycles
@@ -1722,6 +1739,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.misstrack_owners(i).valid := entries(i).io.req_addr.valid
     io.misstrack_owners(i).bits.paddr := entries(i).io.req_addr.bits
     io.misstrack_owners(i).bits.vaddr := entries(i).io.req_vaddr.bits
+  }
+  for (i <- entries.indices; j <- 0 until i) {
+    assert(!(entries(i).io.req_addr.valid && entries(j).io.req_addr.valid &&
+      get_block(entries(i).io.req_addr.bits) === get_block(entries(j).io.req_addr.bits)),
+      "multiple MissQueue owners hold the same physical block")
   }
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
