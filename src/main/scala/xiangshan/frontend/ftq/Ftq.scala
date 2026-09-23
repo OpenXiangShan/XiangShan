@@ -169,18 +169,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with BPU
   // --------------------------------------------------------------------------------
 
-  private val bpTrainStallCnt = RegInit(0.U((log2Ceil(BpTrainStallLimit) + 1).W))
-  when(io.toBpu.train.valid && !io.toBpu.train.ready) {
-    bpTrainStallCnt := bpTrainStallCnt + 1.U
-  }.otherwise {
-    bpTrainStallCnt := 0.U
-  }
-
-  // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
-  // BPU
   io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
-    distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U &&
-    bpTrainStallCnt < BpTrainStallLimit.U
+    distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U
   io.fromBpu.meta.ready := true.B
 
   private val prediction = io.fromBpu.prediction
@@ -397,7 +387,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
   private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
 
-  resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
+  resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.valid
 
   private val flushTrainCache =
     backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
@@ -437,7 +427,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
     trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
     trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
-  }.elsewhen(io.toBpu.train.fire) {
+  }.elsewhen(io.toBpu.train.valid) {
     trainCache.valid := false.B
   }
 
@@ -536,7 +526,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
     topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
   }.elsewhen(
-    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U && bpTrainStallCnt < BpTrainStallLimit.U)
+    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < PrefetchDepth.U)
   ) {
     topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
   }

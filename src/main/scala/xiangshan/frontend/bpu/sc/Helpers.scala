@@ -24,9 +24,18 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.ScTableInfo
+import xiangshan.frontend.bpu.Train
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.tage.TageMeta
 
 trait Helpers extends HasScParameters with PhrHelper {
+  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): PhrAllFoldedHistories = {
+    val pathFoldedHistoryInfos = PathTableInfos.flatMap(_.getFoldedHistoryInfoSet()).toSet
+    val foldedHist             = Wire(new PhrAllFoldedHistories(pathFoldedHistoryInfos))
+    foldedHist.autoConnectFrom(allFoldedPathHist)
+    foldedHist
+  }
+
   def sign(x: SInt): Bool = x(x.getWidth - 1)
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
@@ -43,8 +52,11 @@ trait Helpers extends HasScParameters with PhrHelper {
   lazy val addrFields = generateAddrField()
 
   // sc should start using startPc as setIdx from the highest bit of CfiPosition
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc)
+
   def getBankMask(pc: PrunedAddr): UInt =
-    UIntToOH(addrFields.extract("bankIdx", pc))
+    UIntToOH(getBankIndex(pc), NumBanks)
 
   def getWayIdx(cfiPosition: UInt): UInt = {
     val nChunks = (cfiPosition.getWidth + log2Ceil(NumWays) - 1) / log2Ceil(NumWays)
@@ -66,7 +78,8 @@ trait Helpers extends HasScParameters with PhrHelper {
       takenMask:     Vec[Bool],
       wayIdxVec:     Vec[UInt],
       branchIdxVec:  Vec[UInt],
-      metaData:      ScMeta
+      scMeta:        ScMeta,
+      tageMeta:      TageMeta
   ): Vec[ScEntry] = {
     require(
       writeValidVec.length == takenMask.length &&
@@ -80,8 +93,8 @@ trait Helpers extends HasScParameters with PhrHelper {
     val writeDirMask  = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
     writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).zipWithIndex.foreach {
       case ((((valid, taken), writeIdx), oldIdx), i) =>
-        val needUpdate = valid && metaData.tagePredValid(oldIdx) &&
-          (metaData.scPred(oldIdx) =/= taken || !metaData.sumAboveThres(oldIdx))
+        val needUpdate = valid && tageMeta.entries(oldIdx).hasProvider &&
+          (scMeta.scPred(oldIdx) =/= taken || !scMeta.sumAboveThres(oldIdx))
         writeNeedMask(i)(writeIdx) := needUpdate
         writeDirMask(i)(writeIdx)  := taken
     }
@@ -111,6 +124,38 @@ trait Helpers extends HasScParameters with PhrHelper {
         }
     }
     updateWayMask
+  }
+
+  def getTrainingInfo(train: Train) = {
+    val branches    = train.branches
+    val mbtbEntries = train.meta.mbtb.entries.flatten
+    val scMeta      = train.meta.sc
+    val tageMeta    = train.meta.tage.entries
+
+    // if the branch cfi not in mbtbResult, do not train
+    // During training, find the predicted scPred and lowBits values in the order of the predicted mbtbResult
+    // MBTB may invalidate entry with larger idx during multihit, and the order needs to be reversed
+    val branchesScIdxHitVec = WireInit(VecInit.fill(ResolveEntryBranchNumber)(false.B))
+    val branchesScIdxVec    = WireInit(VecInit.fill(ResolveEntryBranchNumber)(0.U(log2Ceil(NumWays).W)))
+    branches.zipWithIndex.foreach { case (branch, branchIdx) =>
+      for (i <- (0 until NumWays).reverse) {
+        when(branch.valid && mbtbEntries(i).hit(branch.bits)) {
+          branchesScIdxHitVec(branchIdx) := true.B
+          branchesScIdxVec(branchIdx)    := i.U
+        }
+      }
+    }
+    val writeTakenVec = VecInit(branches.map(b => b.valid && b.bits.taken && b.bits.attribute.isConditional))
+    val writeValidVec =
+      VecInit(branches.zip(branchesScIdxHitVec).zip(branchesScIdxVec).zip(writeTakenVec).map {
+        case (((b, hit), predIdx), taken) =>
+          val tagePredValid = tageMeta(predIdx).hasProvider
+          val tagePred      = tageMeta(predIdx).providerPred
+          b.valid && b.bits.attribute.isConditional && hit && tagePredValid &&
+          (!(scMeta.useScPred(predIdx) && scMeta.scPred(predIdx) === taken) ||
+            !(scMeta.useScPred(predIdx) && scMeta.scPred(predIdx) === tagePred))
+      })
+    (branchesScIdxHitVec, branchesScIdxVec, writeTakenVec, writeValidVec)
   }
 }
 

@@ -55,8 +55,6 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   // Ras used Regfile instead of SRAM to store entires
   io.sramResetDone := true.B
 
-  io.trainReady := true.B
-
   def alignMask: UInt = Cat(Fill(GuardedVAddrBits - FetchBlockAlignWidth, 1.U), 0.U(FetchBlockAlignWidth.W))
 
   private val stack = Module(new RasStack).io

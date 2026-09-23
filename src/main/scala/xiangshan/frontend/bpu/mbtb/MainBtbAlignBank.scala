@@ -76,6 +76,8 @@ class MainBtbAlignBank(
     val write: Write                 = new Write
     val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
+    val t0_fire: Bool = Input(Bool())
+
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
   }
@@ -193,7 +195,7 @@ class MainBtbAlignBank(
   /* *** t0 ***
    * read replacer in advance for better timing
    */
-  private val t0_fire    = io.stageCtrl.t0_fire && io.enable
+  private val t0_fire    = io.t0_fire && io.enable
   private val t0_startPc = io.t0_startPc
 
   replacer.io.train.t0_setIdx := getReplacerSetIndex(t0_startPc)
