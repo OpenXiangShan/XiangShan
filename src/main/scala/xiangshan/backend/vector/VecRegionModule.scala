@@ -33,6 +33,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
 
@@ -216,7 +217,7 @@ class VecRegionImp(
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
       iq.in.wakeup.gpWbVec := in.fromIntRegion.gpWbWakeUp
-      iq.in.wakeup.fpWbVec := in.fromFltRegion.fpWbWakeUp
+      iq.in.wakeup.fpWbVec := in.fromFltRegion.wbWakeUp
       iq.in.wakeup.vlWb0Vec.foreach(_ := in.vlWb0WakeUp)
       iq.in.wakeup.v0WbVec.foreach(
         _.zipWithIndex.foreach { case (wakeup, i) =>
@@ -247,10 +248,14 @@ class VecRegionImp(
       pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
+      out.toFltRegion.is1RdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1FpRdAddrNext
+      // TODO
+      out.toFltRegion.wbNext := 0.U.asTypeOf(out.toFltRegion.wbNext)
+      out.toFltRegion.wbM3Wakeup := 0.U.asTypeOf(out.toFltRegion.wbM3Wakeup)
       pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
-      pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
+      pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is2RdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
-      pipe.in.is2FpRdFailNext := in.fromFltRegion.is0FpRdDataFail(iqIdx)(pipeIdx)
+      pipe.in.is2FpRdFailNext := in.fromFltRegion.is1RdDataFailNext(iqIdx)(pipeIdx)
 
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.vxrm.foreach(_ := in.fromCSR.vxrm)
@@ -259,7 +264,7 @@ class VecRegionImp(
       pipe.in.vpWb0 := vpWbDataPath.out.wb0.map(_.data)
       pipe.in.vpWb1 := vpWbDataPath.out.wb1.map(_.data)
       pipe.in.gpWb0 := 0.U.asTypeOf(pipe.in.gpWb0) // TODO: vec read gp bypass
-      pipe.in.fpWb0 := 0.U.asTypeOf(pipe.in.fpWb0) // TODO: vec read fp bypass
+      pipe.in.fpWb0 := ShiftRegister(in.fromFltRegion.wb0, 3)
     }
   }
 
@@ -514,12 +519,7 @@ object VecRegionModule {
       // Todo: bypass data
     }
 
-    val fromFltRegion = new Bundle {
-      val is0FpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
-      val is1FpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
-      val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
-      // Todo: bypass data
-    }
+    val fromFltRegion = new FromFltRegion
 
     val fromCSR = new Bundle {
       val vxrm = Vxrm()
@@ -577,6 +577,8 @@ object VecRegionModule {
       )
     }
 
+    val toFltRegion = new ToFltRegion
+
     val toMem = new OutToMem
 
     val toRob = new Bundle {
@@ -617,6 +619,19 @@ object VecRegionModule {
   class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val vstd: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
       param.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
+  }
+
+  class FromFltRegion(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    val is1RdDataFailNext: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
+    val is2RdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
+    val wbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
+    val wb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
+  }
+
+  class ToFltRegion(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    val is1RdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] = param.genRfRdAddrBundle(backendParams.fpPregParams)
+    val wbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
+    val wbM3Wakeup = Vec(param.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
   }
 
   class DiffIn(implicit p: Parameters) extends XSBundle {

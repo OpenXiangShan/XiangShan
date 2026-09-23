@@ -34,6 +34,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromExu: Option[MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]]] = Option.when(params.needUncertainWakeupFromExu)(Flipped(params.genExuWakeUpOutValidBundle))
   val wakeupFromI2F: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromI2F)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
+  val busyTableF2I = Option.when(params.needWakeupFromF2I)(Input(UInt(3.W)))
+  val busyTableI2F = Option.when(params.getFuCfgs.contains(I2fCfg))(Output(UInt(3.W)))
   val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   //to Mem, wake up LoadQueueReplay
@@ -693,7 +695,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     if(busyTableRead.nonEmpty) {
       val btrd = busyTableRead.get
       val bt = busyTable.get
-      btrd.io.in.fuBusyTable := bt
+      val f2i = if (param.exuBlockParams(i).needDataFromF2I) io.busyTableF2I.get else 0.U
+      btrd.io.in.fuBusyTable := bt | f2i
       btrd.io.in.fuTypeRegVec := fuTypeVec
       intWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
@@ -882,7 +885,15 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.perfDebugInfo.foreach(_.issueTime := GTimer() + 1.U)
   }
 
+  val busyTableI2F = RegInit(0.U(3.W))
   val deqDelay = Reg(params.genIssueValidBundle)
+  // i2f in exu0
+  when(deqBeforeDly(0).valid && deqBeforeDly(0).bits.fpWen.getOrElse(false.B)) {
+    busyTableI2F := "b100".U | (busyTableI2F >> 1).asUInt
+  }.otherwise{
+    busyTableI2F := (busyTableI2F >> 1).asUInt
+  }
+  io.busyTableI2F.foreach(_ := busyTableI2F)
   deqDelay.zip(deqBeforeDly).zipWithIndex.foreach { case ((deqDly, deq), i) =>
     deqDly.valid := deq.valid
     when(validVec.asUInt.orR) {

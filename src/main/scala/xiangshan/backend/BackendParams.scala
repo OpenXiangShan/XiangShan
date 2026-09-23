@@ -356,6 +356,42 @@ case class BackendParams(
     rdCfgs
   }
 
+  def getRdCfgsIntSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = intSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsFltSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = fpSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
+  def getRdCfgsVecSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = vecSchdParams.get.issueBlockParams.map(
+      _.exuBlockParams.map(
+        _.rfrPortConfigs.map(
+          _.collectFirst { case x: T => x }
+            .getOrElse(NoRD())
+        )
+      )
+    )
+    rdCfgs
+  }
+
   def getVlRdCfgs: Seq[Seq[Seq[VlRD]]] = {
     allIssueParams.map(
       _.exuBlockParams.map(
@@ -408,6 +444,9 @@ case class BackendParams(
     this.fpPregParams.numWrite.getOrElse(this.getWbPortIndices(FpData()).size)
   }
 
+  def getFpRfReadSize = {
+    this.fpPregParams.numRead.getOrElse(this.getRdPortIndices(FpData()).size)
+  }
   /**
     * Get size of read ports of vec regfile
     *
@@ -633,6 +672,7 @@ sealed trait NewParam { self: BackendParams =>
   // New api name
   def gpPregParams = this.intPregParams
   def vpPregParams = this.vfPregParams
+  def getFpWriteSize = this.getFpRfWriteSize
   def getVpWriteSize = this.getVfRfWriteSize
 
   def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
@@ -713,13 +753,13 @@ object BackendV2SchdParams {
     SchdBlockParams(Seq(
       // FcmpCfg and FcvtCfg must be in the same ExuUnit because they both need to write to the integer register file.
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX0", Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
+        ExeUnitParams("FEX0", Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg, F2vCfg), Seq(FpWB(port = 0, 0), IntWB(port = 3, 1), VfWB(port = 5, 0), V0WB(port = 3, 0)), Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 18, numEnq = 2, numComp = 14),
     ),
       numPregs = numPregsFp,

@@ -13,7 +13,7 @@ import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, JmpOpcodes, Opcode, VSetOpcodes}
+import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, JmpOpcodes, LduOpcodes, Opcode, VSetOpcodes}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.vector.Decoder.InstPattern._
@@ -78,6 +78,7 @@ class PseudoDecodeChannel(
       DecodeSelImm.I         -> ImmUnion.I.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.I.len),
       DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
       DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
+      DecodeSelImm.S         -> ImmUnion.S.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.S.len),
     )
   )
 
@@ -187,6 +188,9 @@ object PseudoDecodeChannel {
   val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
     CSRRVL        -> (VSetOpcodes.readvl + NeedVecEnable),
     CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),
+    PREFETCH_I    -> (LduOpcodes.prefetch_i + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
+    PREFETCH_R    -> (LduOpcodes.prefetch_r + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
+    PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
   )
@@ -207,7 +211,7 @@ object PseudoDecodeChannel {
         case _: Opcode.JmpOpcodes.type => FuType.jmp.U
         case _: Opcode.MulOpcodes.type => ???
         case _: Opcode.DivOpcodes.type => ???
-        case _: Opcode.LduOpcodes.type => ???
+        case _: Opcode.LduOpcodes.type => FuType.ldu.U
         case _: Opcode.StuOpcodes.type => ???
         case _: Opcode.AmoOpcodes.type => ???
         case _: Opcode.BkuOpcodes.type => ???

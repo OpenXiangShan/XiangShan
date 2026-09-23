@@ -1211,7 +1211,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       }
       else {
         uncacheStall(i) := !isCacheable(dataEntry.memoryType) || uncacheStall(i - 1)
-        cboStall(i)     := ctrlEntry.isCbo || cboStall(i - 1)
+        cboStall(i)     := ctrlEntry.isCbo || ctrlEntries(i - 1).isCbo || cboStall(i - 1)
       }
     }
     // generate to sbuffer valid

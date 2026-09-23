@@ -1,5 +1,6 @@
 """Select checkpoints for emu-performance CI test"""
 
+import argparse
 from dataclasses import dataclass, asdict
 import json
 from pathlib import Path
@@ -7,16 +8,6 @@ import os
 import random
 import sys
 from typing import Callable
-
-CKPT_JSON_LEGACY = os.environ.get("CKPT_JSON_LEGACY", "")
-CKPT_JSON_XSCC = os.environ.get("CKPT_JSON_XSCC", "")
-CKPT_JSON = os.environ.get("CKPT_JSON", "")
-PROFILE_PATH = os.environ.get("PROFILE_PATH", "")
-
-# for filtering out slow benchmarks, in seconds
-ETA_THRESHOLD = float(os.environ.get("ETA_THRESHOLD", "30000"))
-# for reproducibility
-RANDOM_SEED = os.environ.get("GITHUB_RUN_NUMBER", "0")
 
 
 @dataclass
@@ -43,14 +34,17 @@ class CkptJson:
         points: dict[str, float]
         etas: dict[str, float]
 
-        @property
-        def filtered_points(self) -> dict[str, float]:
+        def filtered_points(self, eta_threshold: float | None) -> dict[str, float]:
             """Get the filtered points based on ETA_THRESHOLD"""
-            return {
-                point: weight
-                for point, weight in self.points.items()
-                if self.etas.get(point, 0.0) < ETA_THRESHOLD
-            }
+            return (
+                {
+                    point: weight
+                    for point, weight in self.points.items()
+                    if self.etas.get(point, 0.0) < eta_threshold
+                }
+                if eta_threshold is not None
+                else self.points
+            )
 
     path: Path
     # the original is group_benchmark -> {point -> weight}
@@ -60,21 +54,21 @@ class CkptJson:
     benchmarks: dict[str, dict[str, Benchmark]]
 
     @staticmethod
-    def from_json(path: Path) -> "CkptJson":
+    def from_json(path: Path, profile_path: Path | None = None) -> "CkptJson":
         """Parse the JSON file into a CkptJson object"""
         with path.open("r", encoding="utf-8") as f:
             content = json.load(f)
 
         # load profile (group_benchmark -> {point -> eta}) if PROFILE_PATH is set
         profile_content = {}
-        if PROFILE_PATH:
-            profile_path = Path(PROFILE_PATH) / f"{path.parent.parent.name}.json"
-            if profile_path.exists():
-                print(f"Loading profile from {profile_path}", file=sys.stderr)
-                with profile_path.open("r", encoding="utf-8") as f:
+        if profile_path:
+            profile_json_path = profile_path / f"{path.parent.parent.name}.json"
+            if profile_json_path.exists():
+                print(f"Loading profile from {profile_json_path}", file=sys.stderr)
+                with profile_json_path.open("r", encoding="utf-8") as f:
                     profile_content = json.load(f)
             else:
-                print(f"{profile_path} does not exist, skipping", file=sys.stderr)
+                print(f"{profile_json_path} does not exist, skipping", file=sys.stderr)
         else:
             print("PROFILE_PATH is not set, skipping profile loading", file=sys.stderr)
 
@@ -109,23 +103,19 @@ def __format_name(group: str, benchmark: str) -> str:
     return f"{group}_{benchmark}" if benchmark else group
 
 
-def __select_ckpts(
-    j: CkptJson,
-    prefix: str,
-    select_func: Callable[[dict[tuple[str, str], float]], tuple[str, str]],
-    exclude: set[tuple[str, str]] = set(),
+def select_most_weighted(
+    j: CkptJson, prefix: str, eta_threshold: float | None = None
 ) -> list[SelectedCkpt]:
-    """Select checkpoints based on the provided selection function"""
+    """Select the most weighted checkpoint for each benchmark"""
     selected = []
     for group, benchmarks in j.benchmarks.items():
         # flatten the benchmarks into a single dictionary of benchmark_point -> weight
         flattened = {
             (benchmark, point): weight
             for benchmark, data in benchmarks.items()
-            for point, weight in data.filtered_points.items()
-            if (__format_name(group, benchmark), point) not in exclude
+            for point, weight in data.filtered_points(eta_threshold).items()
         }
-        benchmark, point = select_func(flattened)
+        benchmark, point = max(flattened, key=lambda p: flattened[p])
         name = __format_name(group, benchmark)
         ckpt_path = next((j.ckpt_path / name / point).glob("*.zstd"), None)
         if ckpt_path is None:
@@ -147,54 +137,115 @@ def __select_ckpts(
     return selected
 
 
-def select_most_weighted(j: CkptJson, prefix: str) -> list[SelectedCkpt]:
-    """Select the most weighted checkpoint for each benchmark"""
-    return __select_ckpts(
-        j, prefix, lambda points: max(points, key=lambda p: points[p])
-    )
-
-
 def select_random(
-    j: CkptJson, prefix: str, n: int, already_selected: list[SelectedCkpt]
+    j: CkptJson,
+    prefix: str,
+    n: int,
+    already_selected: list[SelectedCkpt] | None = None,
+    eta_threshold: float | None = None,
 ) -> list[SelectedCkpt]:
-    """Select n random benchmarks, and 1 checkpoint for each benchmark"""
-    selected = __select_ckpts(
-        j,
-        prefix,
-        lambda points: random.choice(list(points.keys())),
-        exclude={(c.name, c.point) for c in already_selected},
-    )
-    return random.sample(selected, min(n, len(selected))) if selected else []
+    """Select n random checkpoints"""
+    flattened = {
+        (__format_name(group, benchmark), point): (
+            weight,
+            benchmarks[benchmark].etas.get(point, 0.0),
+        )
+        for group, benchmarks in j.benchmarks.items()
+        for benchmark, data in benchmarks.items()
+        for point, weight in data.filtered_points(eta_threshold).items()
+    }
+
+    for c in already_selected or []:
+        flattened.pop((c.name, c.point), None)
+
+    selected = random.sample(list(flattened.items()), k=min(n, len(flattened)))
+
+    return [
+        SelectedCkpt(
+            name=name,
+            point=point,
+            weight=weight,
+            eta=eta,
+            path=str(next((j.ckpt_path / name / point).glob("*.zstd"), None)),
+            prefix=prefix,
+        )
+        for (name, point), (weight, eta) in selected
+    ]
 
 
 def main() -> None:
     """Entrypoint"""
-    random.seed(int(RANDOM_SEED))  # for reproducibility
+    parser = argparse.ArgumentParser(description="Select checkpoints for CI test")
+    parser.add_argument(
+        "--seed", type=int, default=0, help="Random seed for reproducibility"
+    )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        help="Path to profile JSON for filtering/sorting benchmarks based on ETA",
+    )
+    parser.add_argument(
+        "--eta-threshold",
+        type=float,
+        help="ETA threshold for filtering benchmarks (in seconds)",
+    )
+
+    parser.add_argument(
+        "--weighted",
+        type=str, # do not use Path here, because we need to parse prefix:path
+        action="append",
+        help="prefix:path for weighted selection",
+    )
+    parser.add_argument(
+        "--random",
+        type=str, # similar to --weighted, but with prefix:count:path
+        action="append",
+        help="prefix:count:path for random selection",
+    )
+
+    parser.add_argument(
+        "--output",
+        choices=["json", "list"],
+        default="json",
+        help="Output format: config json or file path list",
+    )
+
+    args = parser.parse_args()
+
+    random.seed(int(args.seed))  # for reproducibility
     selected = []
 
-    # if legacy exists, run them
-    # use legacy- prefix for performance report
-    if CKPT_JSON_LEGACY != "":
-        legacy_ckpt_json = CkptJson.from_json(Path(CKPT_JSON_LEGACY))
-        selected.extend(select_most_weighted(legacy_ckpt_json, "legacy-"))
+    for conf in args.weighted or []:
+        prefix, path = conf.split(":")
+        if not path or not (path := Path(path)).exists():
+            print(
+                f"Warning: Weighted selection path '{path}' for '{prefix}' does not exist",
+                file=sys.stderr,
+            )
+            continue
+        j = CkptJson.from_json(path, profile_path=args.profile)
+        selected.extend(select_most_weighted(j, prefix, args.eta_threshold))
 
-    # run the most weighted checkpoints from the main ckpt json
-    ckpt_json = CkptJson.from_json(Path(CKPT_JSON))
-    selected.extend(select_most_weighted(ckpt_json, ""))
-
-    # run random 5 checkpoints from the main ckpt json
-    # use fuzz- prefix to skip performance report
-    selected.extend(select_random(ckpt_json, "fuzz-", 5, selected))
-
-    # also run random 5 checkpoints from xscc, use fuzz- prefix too
-    if CKPT_JSON_XSCC != "":
-        xscc_ckpt_json = CkptJson.from_json(Path(CKPT_JSON_XSCC))
-        selected.extend(select_random(xscc_ckpt_json, "fuzz-", 5, selected))
+    for conf in args.random or []:
+        prefix, count, path = conf.split(":")
+        count = int(count)
+        if not path or not (path := Path(path)).exists():
+            print(
+                f"Warning: Random selection path '{path}' for '{prefix}' does not exist",
+                file=sys.stderr,
+            )
+            continue
+        j = CkptJson.from_json(path, profile_path=args.profile)
+        selected.extend(select_random(j, prefix, count, selected, args.eta_threshold))
 
     # sort by eta for better scheduling, descending order
     selected.sort(key=lambda c: -c.eta)
 
-    print(json.dumps([asdict(c) for c in selected]))
+    if args.output == "json":
+        print(json.dumps([asdict(c) for c in selected]))
+    else:
+        for c in selected:
+            print(c.path)
 
 
 if __name__ == "__main__":

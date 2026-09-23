@@ -34,6 +34,10 @@ object LatDecoder {
   // One group per opcode space; keep in sync with the vector exe units in `vecSchdParams`.
   // Groups sharing a fuType would be OR-ed together by the Mux1H below.
   val opcodes = Seq(
+    FAluOpcodes,
+    FMiscOpcodes,
+    FCvtOpcodes,
+    FMacOpcodes,
     VIAluOpcodes,
     VIMacOpcodes,
     VMoveOpcodes,
