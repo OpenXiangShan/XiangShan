@@ -42,7 +42,7 @@ if [[ $# -eq 0 ]]; then
   set -- "${FRONTEND_DIR}/tests"
 fi
 
-CLI_LEVEL="${TB_LOG_CLI_LEVEL:-${TB_ENV_LOG_LEVEL:-INFO}}"
+CLI_LEVEL="${TB_LOG_CLI_LEVEL:-${TB_ENV_LOG_LEVEL:-WARNING}}"
 PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
 INCLUDE_FUNCOV_CLOSURE_PENDING="${TB_INCLUDE_FUNCOV_CLOSURE_PENDING:-0}"
 ENABLE_TOFFEE_HTML_REPORT="${TB_ENABLE_TOFFEE_HTML_REPORT:-1}"
@@ -68,14 +68,14 @@ if [[ "${ENABLE_TOFFEE_HTML_REPORT}" != "0" ]]; then
   echo "[frontend] native toffee HTML report: ${REPORT_DIR}/funcov.html"
 fi
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
-  echo "[frontend] running: pytest -p no:rerunfailures -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
+  echo "[frontend] running: pytest -p no:rerunfailures -q --capture=sys -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
 else
-  echo "[frontend] running: pytest -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
+  echo "[frontend] running: pytest -q --capture=sys -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
 fi
 
 cd "${REPO_DIR}"
 export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
-PYTEST_CMD=(pytest -s -o log_cli=true --log-cli-level="${CLI_LEVEL}")
+PYTEST_CMD=(pytest -q --capture=sys -o log_cli=true --log-cli-level="${CLI_LEVEL}")
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
   PYTEST_CMD+=(-p no:rerunfailures)
 fi
