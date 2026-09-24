@@ -59,6 +59,8 @@ class FrontendMonitor:
         self._recovery_target_pc: Optional[int] = None
         self._translation_s2xlate: Optional[int] = None
         self._translation_priv_imode: int = 1
+        self._fetch_fault_outstanding = False
+        self._fetch_fault_redirect_count = 0
 
     def _golden_step_bytes(self, pc: int) -> int:
         if self.memory is None:
@@ -427,6 +429,13 @@ class FrontendMonitor:
 
         skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
         recovery_first_cfvec_seen = False
+        if (
+            self._fetch_fault_outstanding
+            and int(self.redirect_count) > int(self._fetch_fault_redirect_count)
+            and not self.wait_sync_after_redirect
+        ):
+            self._fetch_fault_outstanding = False
+        self._fetch_fault_redirect_count = 0
         for i in range(8):
             cfvec = None if cfvec_snapshot is None else cfvec_snapshot.slots[i]
             valid = (
@@ -522,6 +531,8 @@ class FrontendMonitor:
 
             if ex_sum > 0:
                 self.exception_mark_count += 1
+                self._fetch_fault_outstanding = True
+                self._fetch_fault_redirect_count = int(self.redirect_count)
 
             if has_ftq_identity and ftq_identity_tracking_active and not self.wait_sync_after_redirect:
                 is_sync = (ftq_expected_pc is None) or (int(pc) == int(ftq_expected_pc))
@@ -569,6 +580,7 @@ class FrontendMonitor:
                 and not self.wait_sync_after_redirect
                 and self.redirect_grace == 0
                 and int(ex_sum) == 0
+                and not self._fetch_fault_outstanding
             ):
                 fetch_size = 2 if is_rvc else 4
                 raw_fetch, fetch_meta = self._read_expected_fetch_raw(int(pc), fetch_size)
@@ -755,6 +767,8 @@ class FrontendMonitor:
         self._recovery_target_pc = None
         self._translation_s2xlate = None
         self._translation_priv_imode = 1
+        self._fetch_fault_outstanding = False
+        self._fetch_fault_redirect_count = 0
 
 
 __all__ = ["Observation", "FrontendMonitor"]

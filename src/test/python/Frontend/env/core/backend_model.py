@@ -44,6 +44,7 @@ from .transactions import BackendRedirectClass, FtqIdxAheadTxn
 _MIN_BACKEND_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MIN_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MAX_DELAY = 5
+_FETCH_FAULT_BITS = ((1, "backend_iaf"), (12, "backend_ipf"), (20, "backend_igpf"))
 
 # BackendModel owns backend-side semantic planning for FTQ, golden-trace,
 # resolve, redirect, and commit behavior.
@@ -1319,6 +1320,95 @@ class BackendModel:
         if replayed_any:
             self._ensure_commit_queue_consistency()
 
+    def _fetch_fault_redirect_bits(self, exception_bits: int) -> dict:
+        selected = {
+            name: int((int(exception_bits) & (1 << bit)) != 0)
+            for bit, name in _FETCH_FAULT_BITS
+        }
+        if sum(selected.values()) != 1:
+            raise AssertionError(
+                "fetch fault redirect needs exactly one of IAF/IPF/IGPF: "
+                f"exception_bits=0x{int(exception_bits):x}"
+            )
+        return selected
+
+    def _redirect_event_is_older(self, older: dict, younger: dict) -> bool:
+        required = ("ftq_flag", "ftq_value", "ftq_offset")
+        if any(key not in older or key not in younger for key in required):
+            return False
+        older_rank = self._ftq_ptr_rank_after_commit(int(older["ftq_flag"]), int(older["ftq_value"]))
+        younger_rank = self._ftq_ptr_rank_after_commit(int(younger["ftq_flag"]), int(younger["ftq_value"]))
+        if int(older_rank) != int(younger_rank):
+            return int(older_rank) < int(younger_rank)
+        return int(older["ftq_offset"]) < int(younger["ftq_offset"])
+
+    def _drop_younger_pending_redirects(self, payload: dict) -> None:
+        self.pending_events = deque(
+            evt
+            for evt in self.pending_events
+            if not (
+                evt.kind == "redirect"
+                and self._redirect_event_is_older(payload, evt.payload)
+            )
+        )
+
+    def _note_fetch_fault(self, queue_index: int) -> None:
+        entry = self._cfvec_queue[int(queue_index)]
+        if sum((int(entry.exception_bits) & (1 << bit)) != 0 for bit, _name in _FETCH_FAULT_BITS) != 1:
+            return
+        if self._has_pending_redirect_for_ftq(int(entry.ftq_flag), int(entry.ftq_value)):
+            entry.path_state = PATH_STATE_WRONG
+            entry.golden_match_state = GOLDEN_MATCH_STATE_UNKNOWN
+            return
+        if any(
+            evt.kind == "redirect"
+            and self._redirect_event_is_older(evt.payload, {
+                "ftq_flag": int(entry.ftq_flag),
+                "ftq_value": int(entry.ftq_value),
+                "ftq_offset": int(entry.ftq_offset),
+            })
+            for evt in self.pending_events
+        ):
+            entry.path_state = PATH_STATE_WRONG
+            entry.golden_match_state = GOLDEN_MATCH_STATE_UNKNOWN
+            return
+        redirect_context, redirect_target_pc, _ = self._derive_wrong_path_redirect(
+            queue_index=int(queue_index),
+            queue_entry=entry,
+        )
+        if (
+            redirect_context is not None
+            and redirect_target_pc is not None
+            and int(redirect_context.get("pc", entry.pc)) != int(entry.pc)
+        ):
+            self._cfvec_queue_note_mismatch(int(queue_index))
+            return
+        entry.path_state = PATH_STATE_WRONG
+        entry.golden_match_state = GOLDEN_MATCH_STATE_UNKNOWN
+        self._drop_younger_pending_redirects({
+            "ftq_flag": int(entry.ftq_flag),
+            "ftq_value": int(entry.ftq_value),
+            "ftq_offset": int(entry.ftq_offset),
+        })
+        fault_bits = self._fetch_fault_redirect_bits(int(entry.exception_bits))
+        self._queue_redirect_event(
+            target_pc=int(entry.pc),
+            reason="backend_fetch_fault_redirect",
+            flush_on_drive=True,
+            payload_extra={
+                "source_bound": True,
+                "pc": int(entry.pc),
+                "taken": 1,
+                "ftq_flag": int(entry.ftq_flag),
+                "ftq_value": int(entry.ftq_value),
+                "ftq_offset": int(entry.ftq_offset),
+                "is_rvc": int(entry.is_rvc),
+                "level": 1,
+                "redirect_class": BackendRedirectClass.OTHER,
+                **fault_bits,
+            },
+        )
+
     def _drop_pending_redirects_for_target(self, target_pc: int) -> None:
         self.pending_events = deque(
             evt
@@ -1599,6 +1689,10 @@ class BackendModel:
         if redirect_context is None or redirect_target_pc is None:
             return False
         redirect_target_pc = int(redirect_target_pc)
+        if self._has_pending_redirect_for_ftq(
+            int(redirect_context["ftq_flag"]), int(redirect_context["ftq_value"])
+        ):
+            return False
         self._assert_active_redirect_context_valid(
             redirect_context,
             reason="queue_active_wrong_path_redirect",
@@ -1884,6 +1978,45 @@ class BackendModel:
             return True
         return False
 
+    def _continue_preceding_fetch_fault(self, queue_index: int) -> bool:
+        if int(queue_index) <= 0:
+            return False
+        fault = self._cfvec_queue[int(queue_index) - 1]
+        if not fault.exception_marked or fault.path_state != PATH_STATE_WRONG:
+            return False
+        if sum((int(fault.exception_bits) & (1 << bit)) != 0 for bit, _name in _FETCH_FAULT_BITS) != 1:
+            return False
+        pending = next(
+            (
+                evt
+                for evt in self.pending_events
+                if evt.kind == "redirect"
+                and str(evt.payload.get("reason", "")) == "backend_fetch_fault_redirect"
+                and int(evt.payload.get("ftq_flag", -1)) == int(fault.ftq_flag)
+                and int(evt.payload.get("ftq_value", -1)) == int(fault.ftq_value)
+            ),
+            None,
+        )
+        if pending is None:
+            return False
+        self._begin_active_wrong_path_episode(
+            origin_index=int(queue_index) - 1,
+            target_pc=int(pending.payload["target_pc"]),
+            redirect_context={
+                "pc": int(fault.pc),
+                "ftq_flag": int(fault.ftq_flag),
+                "ftq_value": int(fault.ftq_value),
+                "ftq_offset": int(fault.ftq_offset),
+                "is_rvc": int(fault.is_rvc),
+                "branch_type": 0,
+                "ras_action": 0,
+                "queue_index": int(queue_index) - 1,
+                "queue_context_optional": True,
+            },
+            queue_redirect=False,
+        )
+        return True
+
     def _cfvec_queue_note_mismatch(self, queue_index: int, *, queue_redirect: bool = True) -> None:
         if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
@@ -1903,6 +2036,8 @@ class BackendModel:
             if not bool(queue_redirect) and queued_redirect:
                 return
             if not queued_redirect:
+                if self._continue_preceding_fetch_fault(int(queue_index)):
+                    return
                 mismatch_target_pc = self.current_golden_pc()
                 self._raise_logged_assertion(
                     "first mismatch has no attributable CFI for redirect; "
@@ -3282,6 +3417,7 @@ class BackendModel:
                         }
                     self._cfvec_queue_flush_wrong_path(keep_open_ftqs=keep_open_ftqs)
                 return
+        self._drop_younger_pending_redirects(payload)
         self.pending_events.append(
             BackendEvent(
                 kind="redirect",
@@ -3893,13 +4029,8 @@ class BackendModel:
                     hit_recovery_target = True
                 else:
                     self._cfvec_queue_mark_recovery_residual(int(queue_index))
-            elif (
-                int(exception_bits) != 0
-                and episode is None
-                and expected_golden is not None
-                and int(pc) != int(expected_golden)
-            ):
-                self._cfvec_queue_note_mismatch(int(queue_index))
+            elif int(exception_bits) != 0 and episode is None:
+                self._note_fetch_fault(int(queue_index))
             elif episode is None and int(exception_bits) == 0:
                 golden_entry = self._consume_golden_entry(int(pc))
             if golden_entry is not None:

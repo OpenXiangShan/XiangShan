@@ -1233,8 +1233,8 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
     assert model._queue_instruction_commit_candidate_indices() == []
 
 
-def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
-    model = BackendModel()
+def test_access_fault_cfvec_queues_backend_iaf_redirect() -> None:
+    model = BackendModel(random_seed=1)
     interface = _ObserveIf()
     model.observe_if = interface
     model.current_cycle = 20
@@ -1242,30 +1242,90 @@ def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
         [TraceEntry(index=0, pc=0x80003240, instr=0x10050663, size=4)]
     )
 
-    prev = _queue_instr(0x80000DC8, 0, 2)
-    prev.instr = 0x00008082
-    prev.is_rvc = True
-    prev.is_cfi = True
-    prev.path_state = PATH_STATE_CORRECT
-    prev.golden_target_pc = 0x80003240
-    model._cfvec_queue = deque([prev])
-
-    _set_first_cfvec(model, interface, 0x80003248, ftq_value=3, is_rvc=True)
-    interface.cfvec_instr[0].value = 0x05130000
-    interface.cfvec_exception_vec_2[0].value = 1
+    _set_first_cfvec(model, interface, 0x40, ftq_value=3)
+    interface.cfvec_instr[0].value = 0
+    interface.cfvec_exception_vec_1[0].value = 1
 
     model._sample_cfvec()
 
-    assert len(model._cfvec_queue) == 2
-    wrong = model._cfvec_queue[1]
-    assert wrong.exception_marked is True
-    assert wrong.path_state == PATH_STATE_WRONG
-    assert model._active_wrong_path_episode() is not None
-    assert model._active_wrong_path_episode()["origin_index"] == 1
-    assert model._active_wrong_path_episode()["target_pc"] == 0x80003240
-    assert model.pending_events
-    assert model.pending_events[-1].payload["target_pc"] == 0x80003240
+    fault = model._cfvec_queue[-1]
+    assert fault.exception_bits == (1 << 1)
+    assert fault.path_state == PATH_STATE_WRONG
+    assert fault.golden_match_state == GOLDEN_MATCH_STATE_UNKNOWN
+    assert model._active_wrong_path_episode() is None
+    payload = model.pending_events[-1].payload
+    assert payload["reason"] == "backend_fetch_fault_redirect"
+    assert payload["target_pc"] == 0x40
+    assert payload["level"] == 1
+    assert payload["backend_iaf"] == 1
+    assert payload["backend_ipf"] == 0
+    assert payload["backend_igpf"] == 0
     assert model.golden_trace.peek().pc == 0x80003240
+
+
+def test_older_mismatch_redirect_drops_younger_fetch_fault_redirect() -> None:
+    model = BackendModel(random_seed=1)
+    model.current_cycle = 30
+    model._queue_redirect_event(
+        target_pc=0x40,
+        reason="backend_fetch_fault_redirect",
+        delay_cycles=1,
+        payload_extra={
+            "pc": 0x40,
+            "ftq_flag": 0,
+            "ftq_value": 4,
+            "ftq_offset": 1,
+            "level": 1,
+            "backend_iaf": 1,
+        },
+    )
+    model._queue_redirect_event(
+        target_pc=0x80000D30,
+        reason="golden_first_mismatch_redirect",
+        delay_cycles=8,
+        payload_extra={
+            "pc": 0x80000D46,
+            "ftq_flag": 0,
+            "ftq_value": 2,
+            "ftq_offset": 3,
+            "level": 0,
+        },
+    )
+
+    assert [evt.payload["reason"] for evt in model.pending_events] == [
+        "golden_first_mismatch_redirect"
+    ]
+
+
+
+def test_packet_after_fetch_fault_continues_that_fault() -> None:
+    model = BackendModel(random_seed=1)
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 20
+    model.golden_trace = GoldenTrace(
+        [TraceEntry(index=0, pc=0x80000D30, instr=0x13, size=4)]
+    )
+    fault = _queue_instr(0x0, 0, 32)
+    fault.exception_marked = True
+    fault.exception_bits = 1 << 1
+    fault.path_state = PATH_STATE_WRONG
+    fault.ftq_offset = 1
+    model._cfvec_queue = deque([fault])
+    model._queue_redirect_event(
+        target_pc=0x0,
+        reason="backend_fetch_fault_redirect",
+        delay_cycles=3,
+        payload_extra={"pc": 0x0, "ftq_flag": 0, "ftq_value": 32, "ftq_offset": 1, "level": 1, "backend_iaf": 1},
+    )
+
+    _set_first_cfvec(model, interface, 0x40, ftq_value=33)
+    interface.cfvec_instr[0].value = 0
+    model._sample_cfvec()
+
+    assert model._active_wrong_path_episode() is not None
+    assert model._active_wrong_path_episode()["origin_index"] == 0
+    assert [evt.payload["reason"] for evt in model.pending_events] == ["backend_fetch_fault_redirect"]
 
 
 def test_commit_ftq_idx_must_be_contiguous() -> None:

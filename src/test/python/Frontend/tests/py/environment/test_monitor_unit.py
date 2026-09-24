@@ -166,6 +166,28 @@ def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
     assert monitor.observations[0].pc == 0x8000_3248
 
 
+
+def test_reported_fetch_fault_suppresses_following_instr_compare() -> None:
+    memory = MemoryModel()
+    monitor = FrontendMonitor(memory=memory)
+    interface = _ObserveIf()
+    monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
+
+    _set_first_cfvec(interface, 0x40)
+    interface.cfvec_instr[0].value = 0
+    interface.cfvec_exception_vec_1[0].value = 1
+    monitor.on_clock_edge(20)
+
+    interface.cfvec_exception_vec_1[0].value = 0
+    interface.cfvec_instr[0].value = 0
+    _set_first_cfvec(interface, 0x44)
+    monitor.on_clock_edge(21)
+
+    assert monitor.get_errors() == []
+    assert monitor.exception_mark_count == 1
+
+
 def test_dut_redirect_skip_window_does_not_wait_for_target_cfvec() -> None:
     monitor, interface = _new_monitor()
     monitor.redirect_sync_max = 2
