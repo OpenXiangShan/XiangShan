@@ -7,6 +7,8 @@ from __future__ import annotations
 # 32-bit opcode constants
 _OP_LOAD   = 0x03
 _OP_STORE  = 0x23
+_OP_LOAD_FP = 0x07
+_OP_STORE_FP = 0x27
 _OP_IMM    = 0x13
 _OP_IMM32  = 0x1B  # ADDIW / SLLIW / etc.
 _OP_REG    = 0x33
@@ -113,6 +115,13 @@ def _q0(i: int) -> int:
             raise ValueError(f"C.ADDI4SPN nzuimm=0: illegal {i:#06x}")
         return _i_type(nzuimm, 2, 0, _creg(rd_s), _OP_IMM)
 
+    if funct3 == 0b001:  # C.FLD (RV64) → FLD rd', offset[7:3](rs1')
+        offset = (
+            (((i >> 10) & 0x7) << 3)
+            | (((i >> 5) & 0x3) << 6)
+        )
+        return _i_type(offset, _creg(rs1_s), 3, _creg(rd_s), _OP_LOAD_FP)
+
     if funct3 == 0b010:  # C.LW → LW rd', offset[6:2](rs1')
         offset = (
             (((i >> 10) & 0x7) << 3)   # bits[12:10] → offset[5:3]
@@ -135,6 +144,13 @@ def _q0(i: int) -> int:
             | (((i >> 5) & 0x1) << 6)
         )
         return _s_type(offset, _creg(rs2_s), _creg(rs1_s), 2, _OP_STORE)
+
+    if funct3 == 0b101:  # C.FSD (RV64) → FSD rs2', offset[7:3](rs1')
+        offset = (
+            (((i >> 10) & 0x7) << 3)
+            | (((i >> 5) & 0x3) << 6)
+        )
+        return _s_type(offset, _creg(rs2_s), _creg(rs1_s), 3, _OP_STORE_FP)
 
     if funct3 == 0b111:  # C.SD (RV64) → SD rs2', offset[7:3](rs1')
         offset = (
@@ -257,11 +273,17 @@ def _q2(i: int) -> int:
     rs2    = (i >> 2) & 0x1F
     bit12  = (i >> 12) & 0x1
 
-    if funct3 == 0b000:  # C.SLLI → SLLI rd, rd, shamt
+    if funct3 == 0b000:  # C.SLLI → SLLI rd, rd, shamt; rd=0 is a hint, not reserved
         shamt = (bit12 << 5) | ((i >> 2) & 0x1F)
-        if rd == 0:
-            raise ValueError(f"C.SLLI rd=0: reserved {i:#06x}")
         return _i_type(shamt & 0x3F, rd, 1, rd, _OP_IMM)
+
+    if funct3 == 0b001:  # C.FLDSP (RV64) → FLD rd, offset[8:3](x2)
+        offset = (
+            (bit12 << 5)
+            | (((i >> 5) & 0x3) << 3)
+            | (((i >> 2) & 0x7) << 6)
+        )
+        return _i_type(offset, 2, 3, rd, _OP_LOAD_FP)
 
     if funct3 == 0b010:  # C.LWSP → LW rd, offset[7:2](x2)
         if rd == 0:
@@ -305,6 +327,13 @@ def _q2(i: int) -> int:
             | (((i >> 7) & 0x3) << 6)  # bits[8:7]  → offset[7:6]
         )
         return _s_type(offset, rs2, 2, 2, _OP_STORE)
+
+    if funct3 == 0b101:  # C.FSDSP (RV64) → FSD rs2, offset[8:3](x2)
+        offset = (
+            (((i >> 10) & 0x7) << 3)
+            | (((i >> 7) & 0x7) << 6)
+        )
+        return _s_type(offset, rs2, 2, 3, _OP_STORE_FP)
 
     if funct3 == 0b111:  # C.SDSP (RV64) → SD rs2, offset[8:3](x2)
         offset = (
