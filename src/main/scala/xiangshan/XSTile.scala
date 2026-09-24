@@ -37,7 +37,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 {
   override def shouldBeInlined: Boolean = false
   val core = LazyModule(new XSCore())
-  val l2top = LazyModule(new L2Top())
+  val l2top = LazyModule(new L2TopWrapper())
 
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Public Ports ============
@@ -58,32 +58,19 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1 D$/I$/PTW Compact CHI is forwarded to L2Top; not wired to CoupledL2 yet.
+  // L1 D$/I$/PTW Compact CHI is wired to oceanus.l2.L2Top in L2TopWrapperInlined.Imp.
 
   l2top.inner.d_mmio_port := memBlock.dMmioToL2
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.iMmioToL2
 
-  // L2 Prefetch
-  l2top.inner.l2cache match {
-    case Some(l2) =>
-      l2.pf_recv_node.foreach(recv => {
-        println("Connecting L1 prefetcher to L2!")
-        recv := memBlock.l2_pf_sender_opt.get
-      })
-      l2.l3_pf_recv_node.foreach(recv => {
-        println("Connecting L1 prefetcher L3 requests to L2!")
-        recv := memBlock.l3_pf_sender_opt.get
-      })
-    case None =>
+  // L2 Prefetch. Oceanus L2 has no prefetcher yet; sinks live on L2TopWrapper as reserved.
+  l2top.inner.pf_recv_node.foreach { recv =>
+    println("Connecting L1 prefetcher to L2!")
+    recv := memBlock.l2_pf_sender_opt.get
   }
-
-  val core_l3_tpmeta_source_port = l2top.inner.l2cache match {
-    case Some(l2) => l2.tpmeta_source_node
-    case None => None
-  }
-  val core_l3_tpmeta_sink_port = l2top.inner.l2cache match {
-    case Some(l2) => l2.tpmeta_sink_node
-    case None => None
+  l2top.inner.l3_pf_recv_node.foreach { recv =>
+    println("Connecting L1 prefetcher L3 requests to L2!")
+    recv := memBlock.l3_pf_sender_opt.get
   }
 
   // =========== IO Connection ============

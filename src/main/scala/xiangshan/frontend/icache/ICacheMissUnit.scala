@@ -104,7 +104,8 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
       io.txreq.bits,
       txnId = req.mshrId,
       addr = Cat(req.blkPAddr, 0.U(blockOffBits.W)),
-      alias = aliasFromVSetIdx(req.vSetIdx)
+      alias = aliasFromVSetIdx(req.vSetIdx),
+      srcId = cchiIcacheSrcId
     )
   }
 

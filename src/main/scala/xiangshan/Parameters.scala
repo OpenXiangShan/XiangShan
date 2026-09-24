@@ -35,7 +35,9 @@ import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.backend.trace._
 import xiangshan.cache.DCacheParameters
+import xiangshan.cache.L1CCHIUpstream
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
+import oceanus.l2.L2UpstreamTable
 import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.mem.prefetch._
@@ -286,6 +288,10 @@ case class XSCoreParameters
     enableDataEcc = true,
     cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
   )),
+  // Shared L1/L2 Compact CHI upstream table. L2TopWrapper passes this as L2Configuration.upstream to oceanus.l2.L2Top;
+  // D$/I$/PTW SrcIDs are looked up from the same object. Type1 order = D$ channel index.
+  // Keep in sync with dcacheParametersOpt.numMemChannels (WithNKBL1D updates both).
+  cchiUpstream: L2UpstreamTable = L1CCHIUpstream(1),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
     ways = 8,
@@ -300,6 +306,9 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
 ){
+  require(cchiUpstream.type1.size == dcacheParametersOpt.map(_.numMemChannels).getOrElse(1),
+          s"cchiUpstream Type1 count ${cchiUpstream.type1.size} must equal DCache numMemChannels")
+
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
     // single letter extensions, in canonical order
@@ -879,6 +888,11 @@ trait HasXSParameter {
 
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
   def numMemChannelsFromDcache = coreParams.dcacheParametersOpt.map(_.numMemChannels).getOrElse(1)
+
+  def cchiUpstream: L2UpstreamTable = coreParams.cchiUpstream
+  def cchiDcacheSrcId(ch: UInt): UInt = VecInit(cchiUpstream.type1.map(e => e.nid.U))(ch)
+  def cchiIcacheSrcId: UInt = cchiUpstream.type4(0).nid.U
+  def cchiPtwSrcId: UInt = cchiUpstream.type4(1).nid.U
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
   // for constrained LR/SC loop

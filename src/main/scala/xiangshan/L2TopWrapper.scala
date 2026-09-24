@@ -20,25 +20,23 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config._
 import chisel3.util.{Valid, ValidIO}
-import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnitParams, BusErrors, MaxHartIdBits}
+import freechips.rocketchip.tile.{BusErrorUnitParams, BusErrors}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
-import xscache.coupledL2.{
-  CoupledL2, EnableL2DecoupledDownstreamCHI, L2ParamKey, L2ToL1PfCtrl,
-  MemBackTypeMMField, MemPageTypeNCField, PrefetchCtrlFromCore
-}
-import xscache.chi.{CHIDataCheckKey, CHIIssue, CHIAddrWidthKey, CHIPoisonKey, DecoupledPortIO, NonSecureKey, PortIO}
-import xscache.oceanus.compactchi.CCHIParametersKey
-import xscache.common.BankBitsKey
+import xscache.coupledL2.{L2ToL1PfCtrl, MemBackTypeMMField, MemPageTypeNCField, PrefetchCtrlFromCore, PrefetchRecv}
+import xscache.chi.{ChannelIO, DecoupledPortIO, PortIO}
+import oceanus.chi.EnumCHIChannel
+import oceanus.chi.bundle.{CHIBundleDAT, CHIBundleREQ, CHIBundleRSP, CHIBundleSNP}
+import oceanus.chi.link.OceanusChannelAdapter
+import oceanus.l2.{L2Configuration, L2Top}
 import system.HasSoCParameter
-import top.BusPerfMonitor
 import utility._
-import utility.sram.SramBroadcastBundle
-import xiangshan.cache.{CCHIType1Port, CCHIType4Port}
+import utility.sram.{SramBroadcastBundle, SramHelper}
+import utility.mbist.{MbistInterface, MbistPipeline}
+import xiangshan.cache.{CCHIConnect, CCHIType1Port, CCHIType4Port}
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
@@ -64,25 +62,16 @@ class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
 }
 
 /**
-  *   L2Top contains everything between Core and XSTile-IO
+  * Tile-side wrapper around oceanus.l2.L2Top
   */
-class L2TopInlined()(implicit p: Parameters) extends LazyModule
+class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter
 {
   override def shouldBeInlined: Boolean = true
 
-  def chainBuffer(depth: Int, n: String): (Seq[LazyModule], TLNode) = {
-    val buffers = Seq.fill(depth){ LazyModule(new TLBuffer()) }
-    buffers.zipWithIndex.foreach{ case (b, i) => {
-      b.suggestName(s"${n}_${i}")
-    }}
-    val node = buffers.map(_.node.asInstanceOf[TLNode]).reduce(_ :*=* _)
-    (buffers, node)
-  }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
   // =========== Components ============
-  val l1_xbar = TLXbar()
   val mmio_xbar = AXI4Xbar()
   val mmio_port = AXI4IdentityNode() // to soc_xbar (step 4a)
   val memory_port = if (enableL2) None else Some(TLIdentityNode())
@@ -94,17 +83,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val i_mmio_port = AXI4IdentityNode()
   val d_mmio_port = AXI4IdentityNode()
   val sep_tl_port_opt = Option.when(SeperateBus != top.SeperatedBusType.NONE)(TLTempNode())
-
-  val misc_l2_pmu = BusPerfMonitor(name = "Misc_L2", enable = !debugOpts.FPGAPlatform) // l1D & l1I & PTW
-  val xbar_l2_buffer = TLBuffer()
-
-  val enbale_tllog = !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB
-  val l1d_logger = Seq.tabulate(numMemChannelsFromDcache)(i =>
-    TLLogger(s"L2_L1D_${coreParams.HartId}_ch$i", enbale_tllog)
-  )
-  val l1i_logger = TLLogger(s"L2_L1I_${coreParams.HartId}", enbale_tllog)
-  val ptw_logger = TLLogger(s"L2_PTW_${coreParams.HartId}", enbale_tllog)
-  val ptw_to_l2_buffer = LazyModule(new TLBuffer)
   val i_mmio_buffer = LazyModule(new AXI4Buffer())
 
   val clint_int_node = IntIdentityNode()
@@ -114,60 +92,14 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
   val beu_local_int_source_buffer = IntBuffer()
 
-  val l2cache = if (enableL2) {
-    val sliceCoherentClientMap =
-      if (coreParams.dcacheParametersOpt.exists(p => p.numMemChannels == 2 && p.channelSelByAddr) &&
-          coreParams.L2NBanks % 2 == 0) {
-        Some(Seq.tabulate(coreParams.L2NBanks)(i => i % 2))
-      } else {
-        None
-      }
-    val config = new Config((_, _, _) => {
-      case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
-        hartId = p(XSCoreParamsKey).HartId,
-        FPGAPlatform = debugOpts.FPGAPlatform,
-        hasMbist = hasMbist,
-        PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
-        sliceCoherentClientMap = sliceCoherentClientMap
-      )
-      case CHIIssue => p(CHIIssue)
-      case CHIAddrWidthKey => p(CHIAddrWidthKey)
-      case CCHIParametersKey => p(CCHIParametersKey)
-      case NonSecureKey => p(NonSecureKey)
-      case CHIDataCheckKey if isZhuJiang => "none"
-      case CHIPoisonKey if isZhuJiang => false
-      case EnableL2DecoupledDownstreamCHI => isZhuJiang
-      case BankBitsKey => log2Ceil(coreParams.L2NBanks)
-      case MaxHartIdBits => p(MaxHartIdBits)
-      case LogUtilsOptionsKey => p(LogUtilsOptionsKey)
-      case PerfCounterOptionsKey => p(PerfCounterOptionsKey)
-    })
-    Some(LazyModule(new CoupledL2()(new Config(config))))
-  } else None
-  val l2_binder = coreParams.L2CacheParamsOpt.map(_ => BankBinder(coreParams.L2NBanks, 64))
+  // Reserved L2 prefetch Diplomacy sinks. Oceanus L2 has no prefetcher yet;
+  // keep the L1 sender endpoints so they can be wired later.
+  val pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] =
+    Option.when(coreParams.prefetcher.nonEmpty)(BundleBridgeSink(Some(() => new PrefetchRecv)))
+  val l3_pf_recv_node: Option[BundleBridgeSink[PrefetchRecv]] =
+    Option.when(coreParams.prefetcher.nonEmpty)(BundleBridgeSink(Some(() => new PrefetchRecv)))
 
   // =========== Connection ============
-  // l2 to l2_binder, then to memory_port
-  val l2MmioStubOpt = l2cache.map { l2 =>
-    val stub = TLClientNode(Seq(TLMasterPortParameters.v1(
-      clients = Seq(TLMasterParameters.v1(
-        name = "l2_mmio_stub",
-        sourceId = IdRange(0, 1)
-      )),
-      requestFields = Seq(MemBackTypeMMField(), MemPageTypeNCField())
-    )))
-    l2.mmioNode := stub
-    stub
-  }
-
-  l2cache match {
-    case Some(l2) =>
-      l2_binder.get :*= l2.node :*= xbar_l2_buffer :*= l1_xbar :=* misc_l2_pmu
-      l2.managerNode := TLXbar() :=* l2_binder.get
-    case None =>
-      memory_port.get := l1_xbar
-  }
-
   mmio_xbar := AXI4Buffer() := AXI4Buffer() := i_mmio_port
   mmio_xbar := AXI4Buffer() := AXI4Buffer() := d_mmio_port
   beu.node := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := mmio_xbar
@@ -220,7 +152,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     mmioToSocXbar :=
     TLFIFOFixer() :=
     AXI4ToTL(wcorrupt = false) :=
-    AXI4PMAUserAdapter() :=
+    AXI4PMAUserAdapter(stripUser = true) :=
     mmio_xbar
 
   beu_local_int_source_buffer := beu_local_int_source
@@ -285,7 +217,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val chi = Option.when(isOpenLLC)(new PortIO)
       val decoupledCHI = Option.when(isZhuJiang)(new DecoupledPortIO)
       val nodeID = Some(Input(UInt(NodeIDWidth.W)))
-      // Compact CHI from L1; not wired to CoupledL2 yet
       val dcache_cchi = Flipped(Vec(numMemChannelsFromDcache, new CCHIType1Port))
       val icache_cchi = Flipped(new CCHIType4Port)
       val ptw_cchi = Flipped(new CCHIType4Port)
@@ -305,18 +236,6 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     })
     io.dft_out.zip(io.dft).foreach({ case(a, b) => a := b })
     io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
-
-    l2MmioStubOpt.foreach { stubNode =>
-      val (stub, _) = stubNode.out.head
-      stub.a.valid := false.B
-      stub.a.bits := DontCare
-      stub.d.ready := true.B
-      stub.b.ready := true.B
-      stub.c.valid := false.B
-      stub.c.bits := DontCare
-      stub.e.valid := false.B
-      stub.e.bits := DontCare
-    }
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
@@ -377,119 +296,200 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     dontTouch(io.icache_cchi)
     dontTouch(io.ptw_cchi)
 
-    // Drain L1 CCHI until CoupledL2 Compact CHI is connected.
-    io.dcache_cchi.foreach { p =>
-      p.upEVT.ready := true.B
-      p.upREQ.ready := true.B
-      p.upRSP.ready := true.B
-      p.upDAT.ready := true.B
-      p.dnSNP.valid := false.B
-      p.dnSNP.bits := DontCare
-      p.dnRSP.valid := false.B
-      p.dnRSP.bits := DontCare
-      p.dnDAT.valid := false.B
-      p.dnDAT.bits := DontCare
-    }
-    Seq(io.icache_cchi, io.ptw_cchi).foreach { p =>
-      p.upREQ.ready := true.B
-      p.dnDAT.valid := false.B
-      p.dnDAT.bits := DontCare
-    }
-
     val hartIsInReset = RegInit(true.B)
     hartIsInReset := io.hartIsInReset.resetInFrontend
     io.hartIsInReset.toTile := hartIsInReset
 
-    if (l2cache.isDefined) {
-      val l2 = l2cache.get.module
+    io.debugTopDown.l2MissMatch := false.B
+    io.l2Miss := false.B
+    io.l2_flush_done.foreach(_ := false.B)
+    io.perfEvents := DontCare
+    beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
+    io.decoupledCHI.foreach(_ := DontCare)
 
-      l2.io.pfCtrlFromCore := io.pfCtrlFromCore
-      l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
-      l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
-      io.l2_hint := l2.io.l2_hint
-      io.l2_fdbk_pf_ctrl := l2.io.l2_fdbk_pf_ctrl
-      l2.io.debugTopDown.robHeadPaddr := DontCare
-      l2.io.hartId := io.hartId.fromTile
-      l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
-      l2.io.debugTopDown.robTrueCommit := io.debugTopDown.robTrueCommit
-      io.debugTopDown.l2MissMatch := l2.io.debugTopDown.l2MissMatch
-      io.l2Miss := l2.io.l2Miss
-      io.l2_flush_done.foreach { _ := l2.io.l2FlushDone.getOrElse(false.B) }
-      l2.io.l2Flush.foreach { _ := io.l2_flush_en.getOrElse(false.B) }
+    // Reserved L2 prefetch / L1-hint ports (CoupledL2 mapping).
+    // Oceanus L2 has no prefetcher yet; keep the L1-facing mapping and do not
+    // connect these wires to oceanusL2.
+    val l2Pf = Wire(new Bundle {
+      val pfCtrlFromCore = new PrefetchCtrlFromCore
+      val l2_hint = chiselTypeOf(io.l2_hint)
+      val l2_fdbk_pf_ctrl = new L2ToL1PfCtrl
+      val l2_tlb_req = chiselTypeOf(io.l2_tlb_req)
+      val l2_pmp_resp = chiselTypeOf(io.l2_pmp_resp)
+    })
+    l2Pf.pfCtrlFromCore := io.pfCtrlFromCore
+    io.l2_hint := l2Pf.l2_hint
+    io.l2_fdbk_pf_ctrl := l2Pf.l2_fdbk_pf_ctrl
 
-      /* l2 tlb */
-      io.l2_tlb_req.req.bits := DontCare
-      io.l2_tlb_req.req.valid := l2.io.l2_tlb_req.req.valid
-      io.l2_tlb_req.resp.ready := l2.io.l2_tlb_req.resp.ready
-      io.l2_tlb_req.req.bits.vaddr := l2.io.l2_tlb_req.req.bits.vaddr
-      io.l2_tlb_req.req.bits.cmd := l2.io.l2_tlb_req.req.bits.cmd
-      io.l2_tlb_req.req.bits.size := l2.io.l2_tlb_req.req.bits.size
-      io.l2_tlb_req.req.bits.kill := l2.io.l2_tlb_req.req.bits.kill
-      io.l2_tlb_req.req.bits.isPrefetch := l2.io.l2_tlb_req.req.bits.isPrefetch
-      io.l2_tlb_req.req.bits.no_translate := l2.io.l2_tlb_req.req.bits.no_translate
-      io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
-      io.perfEvents := l2.io_perf
+    /* l2 tlb */
+    io.l2_tlb_req.req.bits := DontCare
+    io.l2_tlb_req.req.valid := l2Pf.l2_tlb_req.req.valid
+    io.l2_tlb_req.resp.ready := l2Pf.l2_tlb_req.resp.ready
+    io.l2_tlb_req.req.bits.vaddr := l2Pf.l2_tlb_req.req.bits.vaddr
+    io.l2_tlb_req.req.bits.cmd := l2Pf.l2_tlb_req.req.bits.cmd
+    io.l2_tlb_req.req.bits.size := l2Pf.l2_tlb_req.req.bits.size
+    io.l2_tlb_req.req.bits.kill := l2Pf.l2_tlb_req.req.bits.kill
+    io.l2_tlb_req.req.bits.isPrefetch := l2Pf.l2_tlb_req.req.bits.isPrefetch
+    io.l2_tlb_req.req.bits.no_translate := l2Pf.l2_tlb_req.req.bits.no_translate
+    io.l2_tlb_req.req_kill := l2Pf.l2_tlb_req.req_kill
+    l2Pf.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid
+    l2Pf.l2_tlb_req.req.ready := io.l2_tlb_req.req.ready
+    l2Pf.l2_tlb_req.resp.bits := io.l2_tlb_req.resp.bits
+    l2Pf.l2_pmp_resp := io.l2_pmp_resp
 
-      val allPerfEvents = l2.getPerfEvents
-      if (printEventCoding) {
-        for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-          println("L2 Cache perfEvents Set", name, inc, i)
-        }
+    // Idle L2-side drivers until oceanus prefetch is implemented.
+    l2Pf.l2_hint := 0.U.asTypeOf(l2Pf.l2_hint)
+    l2Pf.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
+    l2Pf.l2_tlb_req.req.valid := false.B
+    l2Pf.l2_tlb_req.req.bits := DontCare
+    l2Pf.l2_tlb_req.req_kill := false.B
+    l2Pf.l2_tlb_req.resp.ready := true.B
+    dontTouch(l2Pf)
+
+    pf_recv_node.foreach { n => dontTouch(n.in.head._1) }
+    l3_pf_recv_node.foreach { n => dontTouch(n.in.head._1) }
+
+    if (enableL2) {
+      require(cchiUpstream.type1.size == numMemChannelsFromDcache)
+      require(cchiUpstream.type4.size >= 2)
+
+      val l2cfg = new L2Configuration(
+        nodeId = coreParams.HartId,
+        eSAM = true,
+        slices = 0 until coreParams.L2NBanks,
+        upstream = cchiUpstream
+      )
+      val oceanusL2 = Module(new L2Top(l2cfg))
+
+      require(oceanusL2.io.t1p.size == io.dcache_cchi.size)
+      oceanusL2.io.t1p.zip(io.dcache_cchi).foreach { case (t1, l1) => CCHIConnect.type1(t1, l1) }
+      CCHIConnect.type4(oceanusL2.io.t4p(0), io.icache_cchi)
+      CCHIConnect.type4(oceanusL2.io.t4p(1), io.ptw_cchi)
+
+      if (isOpenLLC) {
+        connectOceanusChi(oceanusL2.io.chi, io.chi.get)
       }
 
-      l2.io.l2_tlb_req.resp.valid := io.l2_tlb_req.resp.valid
-      l2.io.l2_tlb_req.req.ready := io.l2_tlb_req.req.ready
-      l2.io.l2_tlb_req.resp.bits.paddr.head := io.l2_tlb_req.resp.bits.paddr.head
-      l2.io.l2_tlb_req.resp.bits.pbmt := io.l2_tlb_req.resp.bits.pbmt.head
-      l2.io.l2_tlb_req.resp.bits.miss := io.l2_tlb_req.resp.bits.miss
-      l2.io.l2_tlb_req.resp.bits.excp.head.gpf := io.l2_tlb_req.resp.bits.excp.head.gpf
-      l2.io.l2_tlb_req.resp.bits.excp.head.pf := io.l2_tlb_req.resp.bits.excp.head.pf
-      l2.io.l2_tlb_req.resp.bits.excp.head.af := io.l2_tlb_req.resp.bits.excp.head.af
-      l2.io.l2_tlb_req.pmp_resp.ld := io.l2_pmp_resp.ld
-      l2.io.l2_tlb_req.pmp_resp.st := io.l2_pmp_resp.st
-      l2.io.l2_tlb_req.pmp_resp.instr := io.l2_pmp_resp.instr
-      l2.io.l2_tlb_req.pmp_resp.mmio := io.l2_pmp_resp.mmio
-      l2.io.l2_tlb_req.pmp_resp.atomic := io.l2_pmp_resp.atomic
-      l2cache.get match {
-        case l2cache: CoupledL2 =>
-          val l2 = l2cache.module
-          l2.io.nodeID := io.nodeID.get
-          if (isOpenLLC) {
-            io.chi.get <> l2.io.lcreditCHI.get
-          } else {
-            io.decoupledCHI.get <> l2.io.decoupledCHI.get
+      // Collect oceanus L2 SRAM DFT ports (CoupledL2 used to do this).
+      val sigFromSrams = Option.when(hasDFT)(SramHelper.genBroadCastBundleTop())
+      val cg = Option.when(hasMbist)(ClockGate.genTeSrc)
+      if (hasMbist) {
+        cg.get.cgen := io.dft.get.cgen
+      }
+      sigFromSrams.foreach(_ := DontCare)
+      sigFromSrams.zip(io.dft).foreach {
+        case (sig, dft) =>
+          if (hasMbist) {
+            sig.ram_hold := dft.ram_hold
+            sig.ram_bypass := dft.ram_bypass
+            sig.ram_bp_clken := dft.ram_bp_clken
+            sig.ram_aux_clk := dft.ram_aux_clk
+            sig.ram_aux_ckbp := dft.ram_aux_ckbp
+            sig.ram_mcp_hold := dft.ram_mcp_hold
+            sig.cgen := dft.cgen
           }
-          l2.io.cpu_wfi.foreach { _ := io.cpu_wfi.fromCore }
+          if (hasSramCtl) {
+            sig.ram_ctl := dft.ram_ctl
+          }
       }
-
-      beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid
-      beu.module.io.errors.l2.ecc_error.bits := l2.io.error.address
+      val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "L2Cache", hasMbist)
+      if (hasMbist) {
+        val intf = Module(new MbistInterface(
+          params = Seq(mbistPl.get.nodeParams),
+          ids = Seq(mbistPl.get.childrenIds),
+          name = "MbistIntfL2",
+          pipelineNum = 1
+        ))
+        intf.toPipeline.head <> mbistPl.get.mbist
+        if (coreParams.HartId == 0) mbistPl.get.registerCSV(intf.info, "MbistL2")
+        intf.mbist := DontCare
+        dontTouch(intf.mbist)
+      }
     } else {
-      io.l2_hint := 0.U.asTypeOf(io.l2_hint)
-      io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
-      io.debugTopDown <> DontCare
-      io.l2Miss := false.B
+      io.chi.foreach(_ := DontCare)
+      io.dcache_cchi.foreach { p =>
+        p.upEVT.ready := true.B
+        p.upREQ.ready := true.B
+        p.upRSP.ready := true.B
+        p.upDAT.ready := true.B
+        p.dnSNP.valid := false.B
+        p.dnSNP.bits := DontCare
+        p.dnRSP.valid := false.B
+        p.dnRSP.bits := DontCare
+        p.dnDAT.valid := false.B
+        p.dnDAT.bits := DontCare
+      }
+      Seq(io.icache_cchi, io.ptw_cchi).foreach { p =>
+        p.upREQ.ready := true.B
+        p.dnDAT.valid := false.B
+        p.dnDAT.bits := DontCare
+      }
+    }
 
-      io.l2_tlb_req.req.valid := false.B
-      io.l2_tlb_req.req.bits := DontCare
-      io.l2_tlb_req.req_kill := DontCare
-      io.l2_tlb_req.resp.ready := true.B
-      io.perfEvents := DontCare
+    def connectOceanusChi(l2chi: oceanus.chi.intf.CHIRNFInterface, rn: PortIO): Unit = {
+      val adpTxReq = Wire(ChannelIO(new CHIBundleREQ))
+      OceanusChannelAdapter.connectRX(l2chi.txreq, adpTxReq, EnumCHIChannel.REQ)
+      rn.tx.req.flitpend := adpTxReq.flitpend
+      rn.tx.req.flitv := adpTxReq.flitv
+      rn.tx.req.flit := adpTxReq.flit
+      adpTxReq.lcrdv := rn.tx.req.lcrdv
 
-      beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
+      val adpTxRsp = Wire(ChannelIO(new CHIBundleRSP))
+      OceanusChannelAdapter.connectRX(l2chi.txrsp, adpTxRsp, EnumCHIChannel.RSP)
+      rn.tx.rsp.flitpend := adpTxRsp.flitpend
+      rn.tx.rsp.flitv := adpTxRsp.flitv
+      rn.tx.rsp.flit := adpTxRsp.flit
+      adpTxRsp.lcrdv := rn.tx.rsp.lcrdv
+
+      val adpTxDat = Wire(ChannelIO(new CHIBundleDAT))
+      OceanusChannelAdapter.connectRX(l2chi.txdat, adpTxDat, EnumCHIChannel.DAT)
+      rn.tx.dat.flitpend := adpTxDat.flitpend
+      rn.tx.dat.flitv := adpTxDat.flitv
+      rn.tx.dat.flit := adpTxDat.flit
+      adpTxDat.lcrdv := rn.tx.dat.lcrdv
+
+      val adpRxSnp = Wire(ChannelIO(new CHIBundleSNP))
+      adpRxSnp.flitpend := rn.rx.snp.flitpend
+      adpRxSnp.flitv := rn.rx.snp.flitv
+      adpRxSnp.flit := rn.rx.snp.flit
+      rn.rx.snp.lcrdv := adpRxSnp.lcrdv
+      OceanusChannelAdapter.connectTX(adpRxSnp, l2chi.rxsnp, EnumCHIChannel.SNP)
+
+      val adpRxRsp = Wire(ChannelIO(new CHIBundleRSP))
+      adpRxRsp.flitpend := rn.rx.rsp.flitpend
+      adpRxRsp.flitv := rn.rx.rsp.flitv
+      adpRxRsp.flit := rn.rx.rsp.flit
+      rn.rx.rsp.lcrdv := adpRxRsp.lcrdv
+      OceanusChannelAdapter.connectTX(adpRxRsp, l2chi.rxrsp, EnumCHIChannel.RSP)
+
+      val adpRxDat = Wire(ChannelIO(new CHIBundleDAT))
+      adpRxDat.flitpend := rn.rx.dat.flitpend
+      adpRxDat.flitv := rn.rx.dat.flitv
+      adpRxDat.flit := rn.rx.dat.flit
+      rn.rx.dat.lcrdv := adpRxDat.lcrdv
+      OceanusChannelAdapter.connectTX(adpRxDat, l2chi.rxdat, EnumCHIChannel.DAT)
+
+      rn.tx.linkactivereq := l2chi.txlinkactivereq
+      l2chi.txlinkactiveack := rn.tx.linkactiveack
+      l2chi.rxlinkactivereq := rn.rx.linkactivereq
+      rn.rx.linkactiveack := l2chi.rxlinkactiveack
+      rn.txsactive := l2chi.txsactive
+      l2chi.rxsactive := rn.rxsactive
+      rn.syscoreq := l2chi.syscoreq
+      l2chi.syscoack := rn.syscoack
     }
   }
 
   lazy val module = new Imp(this)
 }
 
-class L2Top()(implicit p: Parameters) extends LazyModule
+class L2TopWrapper()(implicit p: Parameters) extends LazyModule
   with HasXSParameter
   with HasSoCParameter {
 
   override def shouldBeInlined: Boolean = false
 
-  val inner = LazyModule(new L2TopInlined())
+  val inner = LazyModule(new L2TopWrapperInlined())
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(inner.module.io.cloneType)

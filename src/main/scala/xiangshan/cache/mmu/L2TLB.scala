@@ -553,7 +553,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     PtwCCHI.Tx.readReq(
       io.cchi.upREQ.bits,
       txnId = mem_arb.io.out.bits.id,
-      addr = blockBytes_align(mem_arb.io.out.bits.addr)
+      addr = blockBytes_align(mem_arb.io.out.bits.addr),
+      srcId = cchiPtwSrcId
     )
   }
 

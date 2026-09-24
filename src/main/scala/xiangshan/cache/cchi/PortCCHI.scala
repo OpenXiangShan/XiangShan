@@ -41,16 +41,16 @@ class CCHIType4Port(implicit p: Parameters) extends Bundle {
  */
 object DCacheCCHI {
   object Params {
-    val srcId: UInt = L1CCHINodeId.DCacheSrcId
-    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    // REQ/EVT TgtID is rewritten by L2 eSAM; CompAck/SnpResp still need a placeholder.
+    val tgtId: UInt = 0.U
     // CHI MemAttr[3:0] = {Allocate, Cacheable, Device, EWA}; cacheable DCache: 0b1101
     val memAttr: UInt = "b1101".U(4.W)
     val size64: UInt = CCHISize.B64.U
   }
 
   object Tx {
-    private def fillReq(req: FlitREQ, expCompData: Bool): Unit = {
-      req.SrcID := Params.srcId
+    private def fillReq(req: FlitREQ, expCompData: Bool, srcId: UInt): Unit = {
+      req.SrcID := srcId
       req.TgtID := Params.tgtId
       req.Size := Params.size64
       req.NS := false.B
@@ -63,8 +63,8 @@ object DCacheCCHI {
       req.TraceTag := 0.U(1.W)
     }
 
-    def fillEvt(evt: FlitEVT): Unit = {
-      evt.SrcID := Params.srcId
+    def fillEvt(evt: FlitEVT, srcId: UInt): Unit = {
+      evt.SrcID := srcId
       evt.TgtID := Params.tgtId
       evt.NS := false.B
       evt.MemAttr := false.B
@@ -73,22 +73,22 @@ object DCacheCCHI {
       evt.TraceTag := 0.U(1.W)
     }
 
-    private def fillUpRsp(rsp: FlitUpRSP, traceTag: UInt = 0.U(1.W)): Unit = {
-      rsp.SrcID := Params.srcId
+    private def fillUpRsp(rsp: FlitUpRSP, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
+      rsp.SrcID := srcId
       rsp.TgtID := Params.tgtId
       rsp.RespErr := 0.U
       rsp.TraceTag := traceTag
     }
 
-    def fillUpDat(dat: FlitUpDAT, traceTag: UInt = 0.U(1.W)): Unit = {
-      dat.SrcID := Params.srcId
+    def fillUpDat(dat: FlitUpDAT, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
+      dat.SrcID := srcId
       dat.TgtID := Params.tgtId
       dat.RespErr := 0.U
       dat.TraceTag := traceTag
     }
 
-    def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, growParam: UInt, fullOverwrite: Bool): Unit = {
-      fillReq(req, expCompData = !fullOverwrite)
+    def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, growParam: UInt, fullOverwrite: Bool, srcId: UInt): Unit = {
+      fillReq(req, expCompData = !fullOverwrite, srcId)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
       req.TagAlias := alias(1, 0)
@@ -98,8 +98,8 @@ object DCacheCCHI {
         Mux(growParam === TLPermissions.NtoB, CCHIOpcode.ReadShared.U, CCHIOpcode.ReadUnique.U))
     }
 
-    def cmoReq(req: FlitREQ, txnId: UInt, addr: UInt, cmoOpcode: UInt): Unit = {
-      fillReq(req, expCompData = false.B)
+    def cmoReq(req: FlitREQ, txnId: UInt, addr: UInt, cmoOpcode: UInt, srcId: UInt): Unit = {
+      fillReq(req, expCompData = false.B, srcId)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
       req.TagAlias := 0.U(2.W)
@@ -107,8 +107,8 @@ object DCacheCCHI {
         Mux(cmoOpcode === 2.U, CCHIOpcode.MakeInvalid.U, CCHIOpcode.CleanShared.U))
     }
 
-    def compAck(rsp: FlitUpRSP, dbid: UInt): Unit = {
-      fillUpRsp(rsp)
+    def compAck(rsp: FlitUpRSP, dbid: UInt, srcId: UInt): Unit = {
+      fillUpRsp(rsp, srcId)
       rsp.Opcode := CCHIOpcode.CompAck.U
       rsp.TxnID := dbid
       rsp.Resp := 0.U(3.W)
@@ -124,30 +124,30 @@ object DCacheCCHI {
       Mux(dirty, base | 0b100.U(3.W), base)
     }
 
-    def evtEvict(evt: FlitEVT, txnId: UInt, addr: UInt): Unit = {
-      fillEvt(evt)
+    def evtEvict(evt: FlitEVT, txnId: UInt, addr: UInt, srcId: UInt): Unit = {
+      fillEvt(evt, srcId)
       evt.Opcode := CCHIOpcode.Evict.U
       evt.TxnID := txnId
       evt.Addr := addr(47, 0)
     }
 
-    def evtWriteBackFull(evt: FlitEVT, txnId: UInt, addr: UInt): Unit = {
-      fillEvt(evt)
+    def evtWriteBackFull(evt: FlitEVT, txnId: UInt, addr: UInt, srcId: UInt): Unit = {
+      fillEvt(evt, srcId)
       evt.Opcode := CCHIOpcode.WriteBackFull.U
       evt.TxnID := txnId
       evt.Addr := addr(47, 0)
     }
 
-    def snpResp(rsp: FlitUpRSP, txnId: UInt, tlParam: UInt, dirty: Bool, traceTag: UInt): Unit = {
-      fillUpRsp(rsp, traceTag)
+    def snpResp(rsp: FlitUpRSP, txnId: UInt, tlParam: UInt, dirty: Bool, traceTag: UInt, srcId: UInt): Unit = {
+      fillUpRsp(rsp, srcId, traceTag)
       rsp.Opcode := CCHIOpcode.SnpResp.U
       rsp.TxnID := txnId
       rsp.Resp := probeResp(tlParam, dirty)
     }
 
     def snpRespData(dat: FlitUpDAT, txnId: UInt, tlParam: UInt, dirty: Bool, dataId: UInt,
-      beatData: UInt, corrupt: Bool, traceTag: UInt): Unit = {
-      fillUpDat(dat, traceTag)
+      beatData: UInt, corrupt: Bool, traceTag: UInt, srcId: UInt): Unit = {
+      fillUpDat(dat, srcId, traceTag)
       dat.Opcode := CCHIOpcode.SnpRespData.U
       dat.TxnID := txnId
       dat.Resp := probeResp(tlParam, dirty)
@@ -157,8 +157,8 @@ object DCacheCCHI {
     }
 
     def copyBackWrData(dat: FlitUpDAT, dbid: UInt, dataId: UInt, beatData: UInt, corrupt: Bool,
-      traceTag: UInt = 0.U(1.W)): Unit = {
-      fillUpDat(dat, traceTag)
+      srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
+      fillUpDat(dat, srcId, traceTag)
       dat.Opcode := CCHIOpcode.CopyBackWrData.U
       dat.TxnID := dbid
       dat.Resp := 0.U(3.W)
@@ -185,16 +185,15 @@ object DCacheCCHI {
 
 object ICacheCCHI {
   object Params {
-    val srcId: UInt = L1CCHINodeId.ICacheSrcId
-    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    val tgtId: UInt = DCacheCCHI.Params.tgtId
     val memAttr: UInt = DCacheCCHI.Params.memAttr
     val size64: UInt = DCacheCCHI.Params.size64
   }
 
   object Tx {
-    def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt): Unit = {
+    def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, srcId: UInt): Unit = {
       req.TxnID := txnId
-      req.SrcID := Params.srcId
+      req.SrcID := srcId
       req.TgtID := Params.tgtId
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
@@ -219,16 +218,15 @@ object ICacheCCHI {
 
 object PtwCCHI {
   object Params {
-    val srcId: UInt = L1CCHINodeId.PtwSrcId
-    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    val tgtId: UInt = DCacheCCHI.Params.tgtId
     val memAttr: UInt = DCacheCCHI.Params.memAttr
     val size64: UInt = DCacheCCHI.Params.size64
   }
 
   object Tx {
-    def readReq(req: FlitREQ, txnId: UInt, addr: UInt): Unit = {
+    def readReq(req: FlitREQ, txnId: UInt, addr: UInt, srcId: UInt): Unit = {
       req.TxnID := txnId
-      req.SrcID := Params.srcId
+      req.SrcID := srcId
       req.TgtID := Params.tgtId
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
@@ -248,5 +246,22 @@ object PtwCCHI {
   object Rx {
     def denied(respErr: UInt): Bool = DCacheCCHI.Rx.denied(respErr)
     def corrupt(respErr: UInt): Bool = DCacheCCHI.Rx.corrupt(respErr)
+  }
+}
+
+object CCHIConnect {
+  def type1(l2: CCHIInterfaceType1, l1: CCHIType1Port): Unit = {
+    l2.UpEVT <> l1.upEVT
+    l2.UpREQ <> l1.upREQ
+    l1.dnSNP <> l2.DnSNP
+    l2.UpRSP <> l1.upRSP
+    l2.UpDAT <> l1.upDAT
+    l1.dnRSP <> l2.DnRSP
+    l1.dnDAT <> l2.DnDAT
+  }
+
+  def type4(l2: CCHIInterfaceType4, l1: CCHIType4Port): Unit = {
+    l2.UpREQ <> l1.upREQ
+    l1.dnDAT <> l2.DnDAT
   }
 }

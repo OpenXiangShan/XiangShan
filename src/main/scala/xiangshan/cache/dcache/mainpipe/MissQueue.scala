@@ -292,7 +292,8 @@ class MissReqPipeRegBundle()(implicit p: Parameters) extends DCacheBundle
       get_block_addr(req.addr),
       get_alias(req.vaddr),
       grow_param,
-      req.full_overwrite
+      req.full_overwrite,
+      cchiDcacheSrcId(selectMemChannel(req.addr, mshr_id))
     )
     acquire
   }
@@ -368,7 +369,8 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     io.txreq.bits,
     cmoTxnId.U,
     req.address,
-    req.opcode
+    req.opcode,
+    cchiDcacheSrcId(selectMemChannel(req.address))
   )
 
   io.rxrsp.ready := state === s_wresp
@@ -946,7 +948,8 @@ for(i <- 0 until reqNum) {
     req.addr,
     get_alias(req.vaddr),
     grow_param,
-    full_overwrite
+    full_overwrite,
+    cchiDcacheSrcId(channel_sel)
   )
   require(nSets <= 256)
 
@@ -956,7 +959,7 @@ for(i <- 0 until reqNum) {
   assert(!(io.rxrsp.valid && !(!w_grantlast && s_acquire)), p"dcache should always be ready for Comp now:${io.id}")
 
   io.txrsp.valid := !s_grantack && w_grantfirst
-  DCacheCCHI.Tx.compAck(io.txrsp.bits, dbid)
+  DCacheCCHI.Tx.compAck(io.txrsp.bits, dbid, cchiDcacheSrcId(channel_sel))
 
   // Send mainpipe_req when receive hint from L2 or receive data without hint
   io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)

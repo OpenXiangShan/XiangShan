@@ -22,7 +22,6 @@ import xscache.coupledL2.{L2ToL1PfCtrl, PrefetchCtrlFromCore, PrefetchRecv}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 import org.chipsalliance.cde.config.Parameters
@@ -282,13 +281,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
   val ptw = LazyModule(new L2TLBWrapper())
-  // muti buffer and port for multi-channel L1-L2 interface
-  val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty)
-    Seq.tabulate(numMemChannelsFromDcache)(i => LazyModule(new TLBuffer))
-  else Seq.empty
-  val dcache_port = Seq.tabulate(numMemChannelsFromDcache)(i =>
-    TLNameNode(s"dcache_client_${i}")
-  )
 
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
   val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
@@ -319,7 +311,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val icacheCtrlNode = Option.when(icacheCtrlEnabled)(AXI4IdentityNode())
 
   uncacheAxiXbar := uncacheAxiMaster
-  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter() := uncacheAxiXbar
+  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar
   if (dcache.useDcache) {
     dcache.dcache.cacheCtrlOpt.foreach { ctrl =>
       ctrl.node := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar
@@ -586,7 +578,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(io.ooo_to_mem.tlbCsr)
   private val ptw = outer.ptw.module
-  private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
   ptw.io.csr.tlb <> tlbcsr
@@ -1306,7 +1297,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(dcache),
         CellNode(io.reset_backend)
       )
-      ++ l1d_to_l2_buffer.map(ModuleNode(_))
     )
     ResetGen(leftResetTree, reset, sim = false, io.dft_reset)
     ResetGen(rightResetTree, reset, sim = false, io.dft_reset)
