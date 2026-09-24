@@ -32,6 +32,7 @@ import xiangshan.backend.datapath.NewPipelineConnect
 case class L1CacheCtrlParams (
   address: AddressSet,
   beatBytes: Int = 8,
+  nBanks: Int = 8,
 ) {
   def maxBanks    = 1
   def bankBytes   = 128
@@ -42,6 +43,8 @@ case class L1CacheCtrlParams (
   def ctrlOffset  = 0x0
   def delayOffset = ctrlOffset + regBytes
   def maskOffset  = delayOffset + regBytes
+  def addrStartOffset = maskOffset + nBanks * regBytes
+  def addrEndOffset   = addrStartOffset + regBytes
 
   def nSignalComps = 2
 }
@@ -76,6 +79,11 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
 
   class CtrlUnitImp extends LazyModuleImp(this) {
     val io_pseudoError = IO(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
+    val io_addrRange = IO(Output(new Bundle {
+      val start = UInt(PAddrBits.W)
+      val end   = UInt(PAddrBits.W)
+    }))
+    val io_addrMatch = IO(Input(Vec(params.nSignalComps, Bool())))  // address match signal for each component
 
     require(params.maxBanks > 0, "At least one bank!")
     require(params.maxBanks == 1, "Is it necessary to have more than 1 bank?")
@@ -84,6 +92,16 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
     val delayRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
     val maskRegs  = RegInit(VecInit(Seq.fill(DCacheBanks)(0.U(DCacheSRAMRowBits.W))))
     val counterRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
+    val addrStartReg = RegInit(0.U(PAddrBits.W))
+    val addrEndReg   = RegInit(0.U(PAddrBits.W))
+
+    // Expose address range registers for external checking
+    io_addrRange.start := addrStartReg
+    io_addrRange.end   := addrEndReg
+
+    // Address range bypass: when both start and end are 0, bypass address check
+    val rangeBypass = addrStartReg === 0.U && addrEndReg === 0.U
+
     val pseudoError_gen = Wire(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
     pseudoError_gen.zipWithIndex.foreach {
       case (inj, i) =>
@@ -93,7 +111,13 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
         val counterReg = counterRegs.head
 
         require(log2Up(pseudoError_gen.length) == ctrlRegBundle.comp.getWidth, "pseudoError_gen must equal number of components!")
-        inj.valid := ctrlRegBundle.ese && (ctrlRegBundle.comp === i.U) && (!ctrlRegBundle.ede || counterReg === 0.U)
+
+        // Current cycle address match condition
+        val currentAddrMatch = rangeBypass || io_addrMatch(i)
+        val baseCond = ctrlRegBundle.ese && (ctrlRegBundle.comp === i.U) && (!ctrlRegBundle.ede || counterReg === 0.U)
+
+        // Use current address match for valid generation
+        inj.valid := baseCond && currentAddrMatch
         inj.bits.zip(ctrlRegBundle.bank.asBools).zip(maskRegs).map {
           case ((bankOut, bankEnable), mask) =>
             bankOut.valid := bankEnable
@@ -153,6 +177,24 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
         reset     = Some(0)
       )
 
+    def addrStartRegDesc() =
+      RegFieldDesc(
+        name      = "addr_start",
+        desc      = "Error injection address range start (inclusive). When both addr_start and addr_end are 0, address check is bypassed.",
+        group     = Some("addr_range"),
+        groupDesc = Some("Error injection address range"),
+        reset     = Some(0)
+      )
+
+    def addrEndRegDesc() =
+      RegFieldDesc(
+        name      = "addr_end",
+        desc      = "Error injection address range end (inclusive). When both addr_start and addr_end are 0, address check is bypassed.",
+        group     = Some("addr_range"),
+        groupDesc = Some("Error injection address range"),
+        reset     = Some(0)
+      )
+
     def ctrlRegField(x: UInt, i: Int) = {
       RegField(params.regWidth, x, ctrlRegDesc(i))
     }
@@ -174,6 +216,10 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
       RegField(params.regWidth, x, maskRegDesc(i))
     }
 
+    def addrRegField(x: UInt, desc: RegFieldDesc) = {
+      RegField(params.regWidth, x, desc)
+    }
+
     val ctrlRegFields = ctrlRegs.zipWithIndex.map {
       case (reg, i) =>
         params.ctrlOffset -> Seq(ctrlRegField(reg, i))
@@ -187,6 +233,11 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
         (params.maskOffset + 8 * i) -> Seq(maskRegField(reg, i))
     }
 
-    node.regmap((ctrlRegFields ++ delayRegFields ++ maskRegFields):_*)
+    val addrRangeRegFields = Seq(
+      params.addrStartOffset -> Seq(addrRegField(addrStartReg, addrStartRegDesc())),
+      params.addrEndOffset   -> Seq(addrRegField(addrEndReg, addrEndRegDesc()))
+    )
+
+    node.regmap((ctrlRegFields ++ delayRegFields ++ maskRegFields ++ addrRangeRegFields):_*)
   }
 }
