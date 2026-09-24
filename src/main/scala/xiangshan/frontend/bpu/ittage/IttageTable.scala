@@ -151,16 +151,50 @@ class IttageTable(
 
   io.sramResetDone := tables.map(_.io.resetDone).reduce(_ && _)
 
+  /**
+    Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
+    Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
+  */
+  private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
+    Module(new WriteBuffer(
+      gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
+      numEntries = TableWriteBufferSize,
+      numPorts = 1,
+      hasReadBypass = true,
+      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
+    )).suggestName(s"ittage_write_buffer_bank$bankIdx")
+  }
+
+  private val readBypassPorts = writeBuffers.map(_.io.readBypass.get)
+  // Prediction bypass: forward the target bank's pending shadow entry in the same cycle as the
+  // SRAM response, so an entry still queued in the write buffer can hit the predict read.
+  readBypassPorts.zipWithIndex.foreach { case (readBypass, bankIdx) =>
+    readBypass.req.valid := io.req.fire && s0_bankMask(bankIdx)
+    readBypass.req.bits  := s0_setIdx
+  }
+
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
     bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)
     bank.io.r.req.bits.setIdx := s0_setIdx
   }
 
-  private val tableReadData =
-    Mux1H(s1_bankMask, tables.map(_.io.r.resp.data.head))
+  // Compute the hit per bank ahead of the bank mux: the SRAM tag compare starts right at the
+  // SRAM output, in parallel with the bypass select and the bank mux. A bypass hit already
+  // implies a tag match, so no compare is needed on the merged data after the mux.
+  private val bankReadRes = tables.zip(readBypassPorts).map { case (table, readBypass) =>
+    val sramData   = table.io.r.resp.data.head
+    val bypassData = readBypass.resp.head.bits.entry
+    // Prefer the shadow entry: it holds an update that has not drained to SRAM yet.
+    // Only forward entries that carry a full prediction (valid bit set by a real update).
+    val bypassHit = readBypass.resp.head.valid && bypassData.valid &&
+      (if (tagLen != 0) bypassData.tag === s1_tag else true.B)
+    val sramHit = sramData.valid && (if (tagLen != 0) sramData.tag === s1_tag else true.B)
+    (Mux(bypassHit, bypassData, sramData), bypassHit || sramHit)
+  }
 
-  private val s1_reqReadHit = tableReadData.valid && (if (tagLen != 0) tableReadData.tag === s1_tag else true.B)
+  private val tableReadData = Mux1H(s1_bankMask, bankReadRes.map(_._1))
+  private val s1_reqReadHit = Mux1H(s1_bankMask, bankReadRes.map(_._2))
 
   io.resp.valid             := s1_reqReadHit && s1_valid // && s1_mask(b)
   io.resp.bits.cnt          := tableReadData.confidenceCnt
@@ -182,52 +216,68 @@ class IttageTable(
   private val updateUsefulBitmask       = usefulMaskEntry.asUInt
   private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
-  private val needReset      = RegInit(false.B)
-  private val usefulCanReset = !(io.req.fire || io.update.valid) && needReset
-  // Sweep one set index per cycle; all banks reuse resetSet so the full table resets in NumSetsPerBank cycles.
-  private val (resetSet, resetFinish) = Counter(usefulCanReset, NumSetsPerBank)
+  // Per-bank useful-counter reset: each bank sweeps its own set index whenever that bank is neither
+  // being read nor updated, so a busy bank no longer stalls the reset of the other banks.
+  private val needReset = RegInit(VecInit(Seq.fill(NumBanks)(false.B)))
+  private val bankCanReset = VecInit(Seq.tabulate(NumBanks) { bankIdx =>
+    val bankRead   = io.req.fire && s0_bankMask(bankIdx)
+    val bankUpdate = io.update.valid && updateBankMask(bankIdx)
+    needReset(bankIdx) && !bankRead && !bankUpdate
+  })
+  // Reset writes go straight to the SRAM write port instead of the write buffer, so they never
+  // occupy buffer entries and can never be forwarded by the prediction read bypass.
+  // Each bank keeps its own sweep pointer, which only advances when the reset write actually fires;
+  // it clears itself over NumSetsPerBank fired writes.
+  private val resetWrite  = Wire(Vec(NumBanks, Bool()))
+  private val resetSet    = Wire(Vec(NumBanks, UInt(SetIdxWidth.W)))
+  private val resetFinish = Wire(Vec(NumBanks, Bool()))
+  for (bankIdx <- 0 until NumBanks) {
+    val (set, finish) = Counter(resetWrite(bankIdx), NumSetsPerBank)
+    resetSet(bankIdx)    := set
+    resetFinish(bankIdx) := finish
+  }
   when(io.update.resetUsefulCnt) {
-    needReset := true.B
-  }.elsewhen(resetFinish) {
-    needReset := false.B
+    needReset := VecInit(Seq.fill(NumBanks)(true.B))
+  }.otherwise {
+    for (bankIdx <- 0 until NumBanks) {
+      when(resetFinish(bankIdx))(needReset(bankIdx) := false.B)
+    }
   }
   private val updateBitmask = Mux(
     io.update.usefulCntValid && io.update.valid,
     updateAllBitmask,
-    Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
+    Mux(io.update.valid, updateExceptUsefulBitmask, updateNoBitmask)
   )
-
-  /**
-    Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
-    Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
-  */
-  private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
-    Module(new WriteBuffer(
-      gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
-      numEntries = TableWriteBufferSize,
-      numPorts = 1,
-      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
-    )).suggestName(s"ittage_write_buffer_bank$bankIdx")
-  }
+  // Reset entries reuse the update datapath but only flip the useful bits to negative.
+  private val resetEntry = WireInit(updateWdata)
+  resetEntry.usefulCnt := UsefulCounter.SaturateNegative
 
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
     val writePort = writeBuffer.io.write.head
-    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || usefulCanReset
+    writePort.valid        := io.update.valid && updateBankMask(bankIdx)
     writePort.bits.entry   := updateWdata
-    writePort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
+    writePort.bits.setIdx  := updateIdx
     writePort.bits.bitmask := updateBitmask
   }
 
-  // read the stored write req from write buffer and push into the matching bank SRAM
+  // Single-port SRAM arbitration per bank, highest priority first:
+  //   1. predict read: never blocked by the write side
+  //   2. write-buffer drain: real updates, served whenever the read port is idle
+  //   3. useful-counter reset: only when the bank is idle and the buffer has nothing to drain
   tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
-    val readPort     = writeBuffer.io.read.head
-    val writeValid   = readPort.valid && !bank.io.r.req.valid
-    val writeEntry   = readPort.bits.entry
-    val writeSetIdx  = readPort.bits.setIdx
-    val writeBitMask = readPort.bits.bitmask
-    bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
-    readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
+    val readPort   = writeBuffer.io.read.head
+    val readValid  = bank.io.r.req.valid
+    val drainValid = readPort.valid && !readValid
+    resetWrite(bankIdx) := bankCanReset(bankIdx) && !readValid && !readPort.valid && bank.io.w.req.ready
+    bank.io.w.apply(
+      drainValid || resetWrite(bankIdx),
+      Mux(resetWrite(bankIdx), resetEntry, readPort.bits.entry),
+      Mux(resetWrite(bankIdx), resetSet(bankIdx), readPort.bits.setIdx),
+      true.B,
+      Mux(resetWrite(bankIdx), updateUsefulBitmask, readPort.bits.bitmask)
+    )
+    readPort.ready := bank.io.w.req.ready && !readValid
   }
 
   // Power-on reset
@@ -249,12 +299,8 @@ class IttageTable(
     ConfidenceCounter.WeakPositive, // reset to neutral (weak positive) when allocate
     oldCtr.getUpdate(io.update.correct)
   )
-  updateWdata.tag := updateTag
-  updateWdata.usefulCnt := Mux(
-    usefulCanReset,
-    UsefulCounter.SaturateNegative,
-    io.update.usefulCnt
-  )
+  updateWdata.tag       := updateTag
+  updateWdata.usefulCnt := io.update.usefulCnt
   // only when ctr is null
   updateWdata.targetOffset := Mux(
     io.update.alloc || oldCtr.isSaturateNegative,
