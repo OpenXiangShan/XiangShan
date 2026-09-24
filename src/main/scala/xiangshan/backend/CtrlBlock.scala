@@ -51,7 +51,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 
   val commit = Valid(new FtqPtr)
-  val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
+  val callRetCommit = Vec(2 * CommitWidth, Valid(new CallRetCommit))
 }
 
 class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
@@ -442,10 +442,10 @@ class CtrlBlockImp(
   io.frontend.toFtq.ftqIdxAhead.valid := oldestExuRedirect.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
   io.frontend.toFtq.ftqIdxAhead.bits := oldestExuRedirect.bits.ftqIdx
 
-  for (i <- 0 until CommitWidth) {
+  for (i <- 0 until 2 * CommitWidth) {
     val crc = io.frontend.toFtq.callRetCommit(i)
     val blk = rob.io.trace.traceCommitInfo.blocks(i)
-    val vld = rob.io.commits.isCommit && rob.io.commits.commitValid(i)
+    val vld = blk.valid
     crc.valid := GatedValidRegNext(vld)
     crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
     crc.bits.rasAction := RegEnable(Itype.isPush(blk.bits.tracePipe.itype) ## Itype.isPop(blk.bits.tracePipe.itype), vld)
@@ -680,8 +680,12 @@ class CtrlBlockImp(
   // fusion decoder
   fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {
-    fusionDecoder.io.in(i).valid := decode.out.uop(i).valid && !decodeHasException(i)
+    fusionDecoder.io.in(i).valid := decode.out.uop(i).valid &&
+      !decodeHasException(i)
     fusionDecoder.io.in(i).bits := decode.out.uop(i).bits.instr
+    if (i < DecodeWidth - 1) {
+      fusionDecoder.io.headLastInFtqEntry(i) := decode.out.uop(i).bits.isLastInFtqEntry
+    }
     if (i > 0) {
       fusionDecoder.io.inReady(i - 1) := decode.out.uop(i).ready
     }
@@ -699,7 +703,6 @@ class CtrlBlockImp(
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
-    rename.io.fusionCross2FtqVec(i) := false.B
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -881,6 +884,7 @@ class CtrlBlockImp(
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
+  io.robio.diffLatterExceptionFormerCommit := rob.io.diffLatterExceptionFormerCommit
   io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
@@ -1021,6 +1025,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
+    val diffLatterExceptionFormerCommit = Output(Bool())
     val lsq = new RobLsqIO
     val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
     val debug_ls = Input(new DebugLSIO())

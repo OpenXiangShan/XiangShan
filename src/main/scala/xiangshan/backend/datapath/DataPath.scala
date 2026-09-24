@@ -162,6 +162,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       arbInSeq.headOption.foreach(_.valid := v0RFRen(iqIdx)(exuIdx).get)
       arbInSeq.headOption.foreach(_.bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrcV0.get)
       arbInSeq.headOption.foreach(_.bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx)
+      arbInSeq.headOption.foreach(_.bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx)
       arbInSeq.headOption.foreach(_.bits.issueValid := fromIQ(iqIdx)(exuIdx).valid)
     }
   }

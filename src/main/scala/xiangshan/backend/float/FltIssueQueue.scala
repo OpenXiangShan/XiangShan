@@ -408,22 +408,25 @@ class FltIssueQueue(
 
   private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
   private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
+  private val deqPrevChanelIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U(log2Up(RenameWidth).W))))
   private val deqPrevUopIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(UopIdx()))))
 
   for ((deq, deqIdx) <- out.deq.zipWithIndex) {
     val sameAsPrev = deq.valid &&
       deqPrevValid(deqIdx) &&
       deq.bits.robIdx === deqPrevRobIdx(deqIdx) &&
+      deq.bits.chanelIdx === deqPrevChanelIdx(deqIdx) &&
       deq.bits.uopIdx === deqPrevUopIdx(deqIdx)
 
     assert(
       !sameAsPrev,
-      s"FltIssueQueue out.deq($deqIdx) robIdx/uopIdx unchanged for more than 1 cycle while valid"
+      s"FltIssueQueue out.deq($deqIdx) robIdx/chanelIdx/uopIdx unchanged for more than 1 cycle while valid"
     )
 
     deqPrevValid(deqIdx) := deq.valid
     when(deq.valid) {
       deqPrevRobIdx(deqIdx) := deq.bits.robIdx
+      deqPrevChanelIdx(deqIdx) := deq.bits.chanelIdx
       deqPrevUopIdx(deqIdx) := deq.bits.uopIdx
     }
   }

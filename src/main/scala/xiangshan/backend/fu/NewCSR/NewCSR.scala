@@ -151,8 +151,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
+        val diffWaitFormerCommit = Bool()
       })
       val commit = Input(new RobCommitCSR)
+      val diffLatterExceptionFormerCommit = Input(Bool())
       val robDeqPtr = Input(new RobPtr)
     })
 
@@ -1645,16 +1647,26 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    // Delay trap passed to difftest until VecExcpMod is not busy
+    // The hardware trap is handled immediately; only the difftest event waits for a surviving former slot.
     val pendingTrap = RegInit(false.B)
+    val pendingTrapWaitFormer = RegInit(false.B)
+    val pendingFormerRetired = RegInit(false.B)
+    val trapValid = pendingTrap && !io.fromVecExcpMod.busy &&
+      (!pendingTrapWaitFormer || pendingFormerRetired || io.fromRob.diffLatterExceptionFormerCommit)
     when (hasTrap) {
       pendingTrap := true.B
-    }.elsewhen (!io.fromVecExcpMod.busy) {
+      pendingTrapWaitFormer := io.fromRob.trap.bits.diffWaitFormerCommit
+    }.elsewhen (trapValid) {
       pendingTrap := false.B
+      pendingTrapWaitFormer := false.B
+    }
+    when (trapValid) {
+      pendingFormerRetired := false.B
+    }.elsewhen (io.fromRob.diffLatterExceptionFormerCommit) {
+      pendingFormerRetired := true.B
     }
 
     val hartId = io.fromTop.hartId
-    val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val hasNMI = nmi && hasTrap
@@ -1683,9 +1695,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
     diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
-    diffArchEvent.isFormer := RegEnable(trapIsFormer, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
-    diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && interrupt)
+    diffArchEvent.virtualInterruptIsHvictlInject := RegEnable(virtualInterruptIsHvictlInject && interrupt, hasTrap)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
     diffArchEvent.irToVS := RegEnable(irToVS, hasTrap)
     if (env.EnableDifftest || env.FullBasicDiff) {

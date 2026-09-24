@@ -27,7 +27,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 class CommitQueue(implicit p: Parameters) extends FtqModule with HasCircularQueuePtrHelper {
 
   class CommitQueueIO extends FtqBundle {
-    val backendCommit: Vec[Valid[CallRetCommit]] = Input(Vec(CommitWidth, Valid(new CallRetCommit)))
+    val backendCommit: Vec[Valid[CallRetCommit]] = Input(Vec(2 * CommitWidth, Valid(new CallRetCommit)))
     val bpuTrain:      Valid[CallRetCommit]      = Output(Valid(new CallRetCommit))
   }
 
@@ -38,13 +38,13 @@ class CommitQueue(implicit p: Parameters) extends FtqModule with HasCircularQueu
   private val enqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
   private val deqPtr = RegInit(CommitQueuePtr(false.B, 0.U))
 
-  private val full = distanceBetween(enqPtr, deqPtr) >= (CommitQueueSize - 8).U
+  private val full = distanceBetween(enqPtr, deqPtr) >= (CommitQueueSize - 2 * CommitWidth).U
 
   private val isCallRet = io.backendCommit.map(instr =>
     instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
   )
 
-  private val enqIndex = VecInit((0 until CommitWidth).map(i => (enqPtr + PopCount(isCallRet.take(i))).value))
+  private val enqIndex = VecInit((0 until 2 * CommitWidth).map(i => (enqPtr + PopCount(isCallRet.take(i))).value))
 
   when(!full)(enqPtr := enqPtr + PopCount(isCallRet))
 

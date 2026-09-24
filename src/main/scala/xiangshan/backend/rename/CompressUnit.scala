@@ -94,15 +94,24 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     !CommitType.isLoadStore(x.bits.commitType) && !FuType.isFence(x.bits.fuType) && !FuType.isCsr(x.bits.fuType) && !FuType.isVset(x.bits.fuType) && !FuType.isAMO(x.bits.fuType)
   }
 
-  val cannotCompressVec = VecInit(io.in.map{ x =>
+  val vectorFuTypes = FuType.vecArith ++ Seq(
+    FuType.vset, FuType.vmpu, FuType.vmove, FuType.vredu, FuType.vperm,
+    FuType.vsha256ms, FuType.vsha256c, FuType.i2v, FuType.f2v
+  )
+  val isVectorUopVec = VecInit(io.in.map { x =>
+    FuType.FuTypeOrR(x.bits.fuType, vectorFuTypes) ||
+      (FuType.isLoadStore(x.bits.fuType) && LSUOpType.isVecMemOp(x.bits.fuOpType))
+  })
+
+  val cannotCompressVec = VecInit(io.in.zipWithIndex.map{ case (x, i) =>
     // The current VTypeBuffer tracks one commit token per vector-state uop,
     // while a compressed ROB entry exposes only one entry-level needVTB bit.
-    // Keep vset and vector-memory instructions in independent entries so no
+    // Keep vector instructions in independent entries so no
     // VTypeBuffer token can be hidden in the latter slot. A split instruction
     // must also keep the target ROB's existing firstUop/lastUop allocation
     // semantics instead of treating each emitted uop as an architectural slot.
     x.valid && (x.bits.waitForward || x.bits.blockBackward ||
-      FuType.isVset(x.bits.fuType) || FuType.isVArithMem(x.bits.fuType) ||
+      isVectorUopVec(i) ||
       !x.bits.firstUop || !x.bits.lastUop)
   })
 
@@ -124,16 +133,16 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val actualValidVec = VecInit(io.actualValid.zip(validVec).map { case (actual, arch) => actual && arch })
   // TODO: move it to decode
   val isCboVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType) && LSUOpType.isCboAll(x.bits.fuOpType)))
-  val rawNoCompressTypeVec = VecInit(io.in.zip(isCboVec).zip(cannotCompressVec).zip(slotNeedsFlushVec).map { case (((x, isCbo), cannotCompress), slotNeedsFlush) =>
+  val rawNoCompressTypeVec = VecInit((0 until RenameWidth).map { i =>
+    val x = io.in(i)
     x.valid && (io.forceNoCompress ||
-      FuType.isVArithMem(x.bits.fuType) ||
-      FuType.isVset(x.bits.fuType) ||
+      isVectorUopVec(i) ||
       FuType.isCsr(x.bits.fuType) ||
       FuType.isFence(x.bits.fuType) ||
       FuType.isAMO(x.bits.fuType) ||
-      isCbo ||
-      cannotCompress ||
-      slotNeedsFlush
+      isCboVec(i) ||
+      cannotCompressVec(i) ||
+      slotNeedsFlushVec(i)
     )
   })
   val noCompressTypeVec = rawNoCompressTypeVec

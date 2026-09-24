@@ -514,6 +514,7 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
     // T0: detect instruction fusions in these instructions
     val in = Vec(DecodeWidth, Flipped(ValidIO(UInt(32.W))))
     val inReady = Vec(DecodeWidth - 1, Input(Bool())) // dropRight(1)
+    val headLastInFtqEntry = Vec(DecodeWidth - 1, Input(Bool()))
     // T1: decode result
     val dec = Vec(DecodeWidth - 1, Input(new DecodeOutUop)) // dropRight(1)
     // T1: whether an instruction fusion is found
@@ -558,7 +559,9 @@ class FusionDecoder(implicit p: Parameters) extends XSModule {
       new FusedLui32w(pair)
     )
     val fire = io.in(i).valid && io.inReady(i)
-    val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR, false.B, io.inReady(i))
+    // The follower is cleared after fusion, so a pair cannot cross FTQ entries.
+    val instrPairValid = RegEnable(VecInit(pair.map(_.valid)).asUInt.andR &&
+      !io.headLastInFtqEntry(i), false.B, io.inReady(i))
     val fusionVec = RegEnable(VecInit(fusionList.map(_.isValid)), fire)
     // HINT instructions are not considered for fusion.
     // NOTE: The RD of some FENCE instructions are not 0, but they are also HINT instructions.

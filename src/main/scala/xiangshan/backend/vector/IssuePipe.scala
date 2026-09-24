@@ -16,7 +16,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
 import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.{HasXSParameter, Redirect, XSBundle}
+import xiangshan.{HasXSParameter, Redirect, XSBundle, XSCoreParamsKey}
 
 class IssuePipe(
   override val wrapper: IssuePipe.LazyMod
@@ -92,6 +92,7 @@ class IssuePipe(
       readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
       readBundle.addr := is0Next.bits.psrc(srcIdx)
       readBundle.robIdx := is0Next.bits.robIdx
+      readBundle.chanelIdx := is0Next.bits.chanelIdx
   }
 
   out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
@@ -100,6 +101,7 @@ class IssuePipe(
       readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx) && readRf
       readBundle.addr := is1Next.bits.psrc(srcIdx)
       readBundle.robIdx := is1Next.bits.robIdx
+      readBundle.chanelIdx := is1Next.bits.chanelIdx
   }
 
   out.is1VpRdAddrNext.zip(is1VpRdAddrReqSrcIdx).foreach {
@@ -107,6 +109,7 @@ class IssuePipe(
       readBundle.ren := is1Next.valid && is1Next.bits.vpRen(srcIdx)
       readBundle.addr := is1Next.bits.psrc(srcIdx)
       readBundle.robIdx := is1Next.bits.robIdx
+      readBundle.chanelIdx := is1Next.bits.chanelIdx
   }
 
   out.is1V0RdAddrNext.zip(is1Next.bits.psrcV0).foreach {
@@ -114,6 +117,7 @@ class IssuePipe(
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
       readBundle.robIdx := is1Next.bits.robIdx
+      readBundle.chanelIdx := is1Next.bits.chanelIdx
   }
 
   out.is1VlRdAddrNext.zip(is1Next.bits.psrcVl).foreach {
@@ -121,6 +125,7 @@ class IssuePipe(
       readBundle.ren := is1Next.valid && psrc.valid
       readBundle.addr := psrc.bits
       readBundle.robIdx := is1Next.bits.robIdx
+      readBundle.chanelIdx := is1Next.bits.chanelIdx
   }
 
   is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
@@ -372,6 +377,7 @@ object IssuePipe {
     val ren = Bool()
     val addr = UInt(pregParams.addrWidth.W)
     val robIdx = new RobPtr
+    val chanelIdx = UInt(log2Up(p(XSCoreParamsKey).RenameWidth).W)
   }
 
   class RfReadDataBundle(

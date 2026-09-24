@@ -164,6 +164,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcReady              = Output(Bool())
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
+    val chanelIdx             = Output(UInt(log2Up(RenameWidth).W))
     // for enq.ready
     val validRegNext          = Output(Bool())
     val issuedRegNext         = Output(Bool())

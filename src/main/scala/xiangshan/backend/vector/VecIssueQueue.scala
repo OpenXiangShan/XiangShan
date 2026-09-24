@@ -465,22 +465,25 @@ class VecIssueQueue(
 
   private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
   private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
+  private val deqPrevChanelIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U(log2Up(RenameWidth).W))))
   private val deqPrevUopIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(UopIdx()))))
 
   for ((deq, deqIdx) <- out.deq.zipWithIndex) {
     val sameAsPrev = deq.valid &&
       deqPrevValid(deqIdx) &&
       deq.bits.robIdx === deqPrevRobIdx(deqIdx) &&
+      deq.bits.chanelIdx === deqPrevChanelIdx(deqIdx) &&
       deq.bits.uopIdx === deqPrevUopIdx(deqIdx)
 
     assert(
       !sameAsPrev,
-      s"VecIssueQueue out.deq($deqIdx) robIdx/uopIdx unchanged for more than 1 cycle while valid"
+      s"VecIssueQueue out.deq($deqIdx) robIdx/chanelIdx/uopIdx unchanged for more than 1 cycle while valid"
     )
 
     deqPrevValid(deqIdx) := deq.valid
     when(deq.valid) {
       deqPrevRobIdx(deqIdx) := deq.bits.robIdx
+      deqPrevChanelIdx(deqIdx) := deq.bits.chanelIdx
       deqPrevUopIdx(deqIdx) := deq.bits.uopIdx
     }
   }
@@ -921,6 +924,7 @@ object VecIssueQueue {
 
     // from rename
     val robIdx    = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val psrc      = Vec(numRegSrc, UInt(PhyRegIdxWidth.W))
     val psrcV0    = UInt(V0PhyRegIdxWidth.W)
     val psrcVl    = UInt(VlPhyRegIdxWidth.W)
@@ -966,6 +970,7 @@ object VecIssueQueue {
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
+      this.chanelIdx := source.chanelIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0
       this.psrcVl := source.psrcVl
@@ -1012,6 +1017,7 @@ object VecIssueQueue {
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
+      this.chanelIdx := source.chanelIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0.getOrElse(0.U)
       this.psrcVl := source.psrcVl.getOrElse(0.U)
@@ -1036,6 +1042,7 @@ object VecIssueQueue {
     val opcode       = Opcode()
 
     val robIdx       = new RobPtr
+    val chanelIdx    = UInt(log2Up(RenameWidth).W)
     val uopIdx       = UopIdx()
 
     val gpRen        = Vec(exuParam.numRegSrc, Bool())
@@ -1084,6 +1091,7 @@ object VecIssueQueue {
       this.vm.foreach(_ := entry.payload.vm.get)
       this.src12Rev := entry.payload.src12Rev
       this.robIdx := entry.status.robIdx
+      this.chanelIdx := entry.status.chanelIdx
       this.uopIdx := entry.status.uopIdx
 
       this.gpRen := entry.status.srcStatus.map(_.gpRen)
@@ -1152,6 +1160,7 @@ object VecIssueQueue {
 
   class Status(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val robIdx      = new RobPtr
+    val chanelIdx   = UInt(log2Up(RenameWidth).W)
     val uopIdx      = UopIdx()
     val fuType      = FuType()
     val srcStatus   = Vec(param.numRegSrc, new SrcStatus())
@@ -1173,6 +1182,7 @@ object VecIssueQueue {
 
     def fromEnq(enq: Enq): Unit = {
       this.robIdx := enq.robIdx
+      this.chanelIdx := enq.chanelIdx
       this.uopIdx := enq.uopIdx
       this.fuType := enq.fuType
       for ((s, srcIdx) <- this.srcStatus.zipWithIndex) {

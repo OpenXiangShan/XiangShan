@@ -31,7 +31,8 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 object Bundles {
   def NormalUopNumWidth(implicit p: Parameters): Int =
-    log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
+    // Vector stores can emit two writebacks per micro-op.
+    log2Up(p(XSCoreParamsKey).MaxUopSize * 2 + 1)
 
   def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
     log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
@@ -149,6 +150,7 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
+    val isLastInFtqEntry = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -246,9 +248,15 @@ object Bundles {
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val entryPairType = CompressType()
+    val formerNumWB = NumWB()
+    val latterNumWB = NumWB()
+    val formerFpWen = Bool()
+    val formerFflagsWen = Bool()
+    val formerEntryHasStore = Bool()
     val complexSlotHasDest = UInt(1.W)
     val entryHasStore = Bool()
     val noCompressReason = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val slotNeedFlushMask = UInt(2.W)
     val interruptSafe = Bool()
     val commitType = CommitType()
@@ -1748,6 +1756,8 @@ object Bundles {
     val isForVSnonLeafPTE = Bool()
     // Identifies the faulting slot when two instructions share one ROB entry.
     val slotIsFormer = Bool()
+    // Delay the difftest event only when an older former slot remains to retire.
+    val diffWaitFormerCommit = Bool()
   }
 
   object UopIdx extends NamedUInt(3)

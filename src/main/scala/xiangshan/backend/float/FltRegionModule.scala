@@ -250,6 +250,7 @@ class FltRegionImp(
         sssink.bits.issueValid := false.B
         sssink.bits.addr := ssource2.psrc(i)
         sssink.bits.robIdx := ssource1.bits.robIdx
+        sssink.bits.chanelIdx := ssource1.bits.chanelIdx
         ssource1.ready := sssink.ready
       }
     }
@@ -262,6 +263,7 @@ class FltRegionImp(
         exuArb(raddr.srcIdx).bits.issueValid := false.B
         exuArb(raddr.srcIdx).bits.addr := raddr.addr
         exuArb(raddr.srcIdx).bits.robIdx := raddr.robIdx
+        exuArb(raddr.srcIdx).bits.chanelIdx := raddr.chanelIdx
       }
     }
   }
@@ -272,6 +274,7 @@ class FltRegionImp(
         src.bits.issueValid := false.B
         src.bits.addr := issuePipes(iqIdx)(exuIdx).out.is0FpRdAddr(srcIdx).addr
         src.bits.robIdx := issuePipes(iqIdx)(exuIdx).out.is0FpRdAddr(srcIdx).robIdx
+        src.bits.chanelIdx := issuePipes(iqIdx)(exuIdx).out.is0FpRdAddr(srcIdx).chanelIdx
         // TODO
         src.bits.bankValidVec.foreach(x => x := 0.U.asTypeOf(x))
       }
@@ -289,6 +292,7 @@ class FltRegionImp(
           arbInSeq(srcIdx).bits.issueValid := false.B
           arbInSeq(srcIdx).bits.addr := allFpRFReadArbiterIn(iqIdx)(exuIdx)(srcIdx).bits.addr
           arbInSeq(srcIdx).bits.robIdx := allFpRFReadArbiterIn(iqIdx)(exuIdx)(srcIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := allFpRFReadArbiterIn(iqIdx)(exuIdx)(srcIdx).bits.chanelIdx
           allFpRFReadArbiterIn(iqIdx)(exuIdx)(srcIdx).ready := arbInSeq(srcIdx).ready
         } else {
           println(s"fltRFReadArbiter.io.in is zero: iqIdx = $iqIdx, exuIdx = $exuIdx, srcIdx = $srcIdx")

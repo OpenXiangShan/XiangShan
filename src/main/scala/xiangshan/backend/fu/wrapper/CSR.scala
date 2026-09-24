@@ -142,6 +142,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
   csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
+  csrMod.io.fromRob.trap.bits.diffWaitFormerCommit := csrIn.exception.bits.diffWaitFormerCommit
+  csrMod.io.fromRob.diffLatterExceptionFormerCommit := csrIn.diffLatterExceptionFormerCommit
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty

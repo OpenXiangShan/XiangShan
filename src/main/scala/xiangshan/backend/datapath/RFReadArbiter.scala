@@ -215,6 +215,7 @@ abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Para
             arbiterIn.valid := (if(params.pregParams.numBank == 1) ioIn.valid else ioIn.bits.bankValidVec.get(i))
             arbiterIn.bits.addr := pregParams.bankAddr(ioIn.bits.addr)
             arbiterIn.bits.robIdx := ioIn.bits.robIdx
+            arbiterIn.bits.chanelIdx := ioIn.bits.chanelIdx
             arbiterIn.bits.issueValid := ioIn.bits.issueValid
             ioIn.ready := arbiters.get.map(x => x.io.in(idx).ready).reduce(_ && _)
           }

@@ -16,7 +16,7 @@ class TraceParams(
 class TraceIO(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val in = new Bundle {
     val fromEncoder    = Input(new FromEncoder)
-    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, CommitWidth, IretireWidthCommited))
+    val fromRob        = Flipped(new TraceBundle(hasIaddr = false, 2 * CommitWidth, IretireWidthCommited))
   }
   val out = new Bundle {
     val toPcMem        = new TraceBundle(hasIaddr = false, TraceGroupNum, IretireWidthCompressed)
@@ -40,8 +40,8 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
    */
   val s1_in = fromRob
   val s1_out = WireInit(0.U.asTypeOf(s1_in))
-  for(i <- 0 until CommitWidth) {
-    s1_out.blocks(i).valid := RegEnable(s1_in.blocks(i).valid, false.B, !blockCommit)
+  for(i <- 0 until 2 * CommitWidth) {
+    s1_out.blocks(i).valid := RegNext(s1_in.blocks(i).valid && fromEncoder.enable, false.B)
     s1_out.blocks(i).bits := RegEnable(s1_in.blocks(i).bits, 0.U.asTypeOf(s1_in.blocks(i).bits), s1_in.blocks(i).valid)
   }
 
@@ -59,7 +59,7 @@ class Trace(implicit val p: Parameters) extends Module with HasXSParameter {
    * stage 3: groups with iaddr from pcMem(ftqidx & ftqOffset -> iaddr) -> encoder
    */
   val s3_in_groups = s2_out_groups
-  val s3_out_groups = RegNext(s3_in_groups)
+  val s3_out_groups = RegEnable(s3_in_groups, !fromEncoder.stall)
   toPcMem := s3_in_groups
   io.out.toEncoder := s3_out_groups
 }

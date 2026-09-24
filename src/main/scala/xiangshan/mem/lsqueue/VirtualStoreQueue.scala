@@ -255,7 +255,10 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val retireRobIdxVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).robIdx))
   val retireAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
-  val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(retireRobIdxVec(i), robHeadPtr) && retireAllocatedVec(i)))
+  // CROB orders the former and latter slots within one ROB entry. Keep the
+  // SQ release test consistent with headIsRetired so a former-slot store can
+  // retire when the ROB head has advanced to its latter slot.
+  val retireBaseVec = VecInit((0 until CommitWidth).map(i => retireRobIdxVec(i).isBeforeSlot(robHeadPtr) && retireAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
   val deqPtrVecNext = deqPtrVec.map(_ + retireCount)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))

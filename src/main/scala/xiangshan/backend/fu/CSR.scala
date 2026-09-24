@@ -90,6 +90,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val vpu = Flipped(new VpuCsrIO)
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
+  val diffLatterExceptionFormerCommit = Input(Bool())
   val robDeqPtr = Input(new RobPtr)
   // to ROB
   val trapTarget = Output(new TargetPCBundle)

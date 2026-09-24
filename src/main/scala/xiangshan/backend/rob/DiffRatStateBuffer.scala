@@ -33,8 +33,9 @@ case class DiffRatStateParams()(implicit p: Parameters) {
   require(commitWidth > 0)
 
   val totalEntries: Int = intEntries + fpEntries + vecEntries + vlEntries
-  // Keep the two circular ROB pointer generations distinct in snapshot storage.
-  val storageEntries: Int = robEntries * 2
+  // Two ROB pointer generations, each with former and latter snapshots.
+  val storageEntries: Int = robEntries * 2 * 2
+  val entryBits: Int = log2Ceil(robEntries * 2)
   val bankBits: Int = log2Ceil(renameWidth max 2)
   val slotBits: Int = log2Ceil(storageEntries)
 }
@@ -82,8 +83,12 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   })
 
   private def slotOf(ptr: RobPtr): UInt = {
-    val generationOffset = Mux(ptr.flag, params.robEntries.U(params.slotBits.W), 0.U(params.slotBits.W))
-    (Cat(0.U(1.W), ptr.value) +& generationOffset)(params.slotBits - 1, 0)
+    // Keep the generation arithmetic at entry width before appending the
+    // former/latter bit. A full slot-width add would expose a carry bit that
+    // aliases the slot index when the result is truncated below.
+    val generationOffset = Mux(ptr.flag, params.robEntries.U(params.entryBits.W), 0.U(params.entryBits.W))
+    val entrySlot = (Cat(0.U(1.W), ptr.value) + generationOffset)(params.entryBits - 1, 0)
+    Cat(entrySlot, !ptr.slotIsFormer)(params.slotBits - 1, 0)
   }
 
   val laneRat = Wire(Vec(params.renameWidth + 1, new DiffRatState(params)))
@@ -119,12 +124,13 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   }
   val stateWriteValid = VecInit(io.snapshotEnds.map(_.valid))
   val stateWriteSlots = io.snapshotEnds.map(req => slotOf(req.bits))
-  val stateWriteData = laneRat.tail.map(_.asUInt)
+  // A snapshot boundary belongs to its rename lane. Using the final lane for
+  // every write would expose younger same-cycle allocations to older entries.
+  val stateWriteData = (0 until params.renameWidth).map(lane => laneRat(lane + 1).asUInt)
   val stateBankTags = Mem(params.storageEntries, UInt(params.bankBits.W))
   val stateSlotValid = RegInit(VecInit.fill(params.storageEntries)(false.B))
 
-  // ROB compression means snapshot slots are not necessarily consecutive.
-  // Give each rename lane a dedicated bank and retain the selected lane per ROB slot.
+  // Each rename lane has one bank; tags retain its bank at each ROB half-slot.
   for {
     older <- 0 until params.renameWidth
     younger <- older + 1 until params.renameWidth
@@ -152,14 +158,17 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   assert(!io.commitRobIdx.valid || !readWriteConflict, "diff RAT state is read and written in the same cycle")
 
   for (commit <- io.commitRobIdxVec) {
-    val commitSlot = slotOf(commit.bits)
+    val commitSlot = slotOf(commit.bits.asFormer)
+    val latterSlot = commitSlot + 1.U
     val commitWriteConflict = VecInit.tabulate(params.renameWidth) { lane =>
-      stateWriteValid(lane) && stateWriteSlots(lane) === commitSlot
+      stateWriteValid(lane) &&
+        (stateWriteSlots(lane) === commitSlot || stateWriteSlots(lane) === latterSlot)
     }.asUInt.orR
     when(commit.valid) {
-      assert(stateSlotValid(commitSlot), "diff RAT commit clears an invalid state")
+      assert(stateSlotValid(commitSlot), "diff RAT commit clears an invalid former state")
       assert(!commitWriteConflict, "diff RAT state is committed and written in the same cycle")
       stateSlotValid(commitSlot) := false.B
+      stateSlotValid(latterSlot) := false.B
     }
   }
   for {
@@ -168,8 +177,8 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   } {
     assert(
       !(io.commitRobIdxVec(older).valid && io.commitRobIdxVec(younger).valid &&
-        io.commitRobIdxVec(older).bits === io.commitRobIdxVec(younger).bits),
-      "two commit lanes clear the same diff RAT slot"
+        io.commitRobIdxVec(older).bits.isSameEntry(io.commitRobIdxVec(younger).bits)),
+      "two commit lanes clear the same diff RAT entry"
     )
   }
 
