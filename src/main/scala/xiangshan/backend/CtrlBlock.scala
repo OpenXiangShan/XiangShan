@@ -356,7 +356,7 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
     println(s"[CtrlBlock] pcMem read port for \"trace\" index $i: $pcMemIdx.")
     val traceValid = trace.toPcMem.blocks(i).valid
-    pcMem.io.ren.get(pcMemIdx) := traceValid
+    pcMem.io.ren.get(pcMemIdx) := traceValid && !io.traceCoreInterface.fromEncoder.stall
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
     tracePcStart(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
