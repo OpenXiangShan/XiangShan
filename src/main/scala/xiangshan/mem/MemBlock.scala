@@ -22,7 +22,6 @@ import xscache.coupledL2.{L2ToL1PfCtrl, PrefetchCtrlFromCore, PrefetchRecv}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
-import freechips.rocketchip.tilelink._
 import freechips.rocketchip.amba.axi4._
 import xscache.coupledL2.{MemBackTypeMMField, MemPageTypeNCField}
 import org.chipsalliance.cde.config.Parameters
@@ -284,9 +283,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val dcache = LazyModule(new DCacheWrapper())
   val uncache = LazyModule(new Uncache())
   val ptw = LazyModule(new L2TLBWrapper())
-  val dcache_port = Seq.tabulate(numMemChannelsFromDcache)(i =>
-    TLNameNode(s"dcache_client_${i}")
-  )
 
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
   val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
@@ -317,7 +313,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val icacheCtrlNode = Option.when(icacheCtrlEnabled)(AXI4IdentityNode())
 
   uncacheAxiXbar := uncacheAxiMaster
-  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter() := uncacheAxiXbar
+  dMmioToL2 := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar
   if (dcache.useDcache) {
     dcache.dcache.cacheCtrlOpt.foreach { ctrl =>
       ctrl.node := AXI4Buffer() := AXI4Buffer() := AXI4PMAUserAdapter(stripUser = true) := uncacheAxiXbar

@@ -177,7 +177,8 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   when (phase === phase_probe_rsp) {
     io.txrsp.valid := busy
-    DCacheCCHI.Tx.snpResp(io.txrsp.bits, snp_txn_id, req.param, req.dirty, trace_tag)
+    DCacheCCHI.Tx.snpResp(io.txrsp.bits, snp_txn_id, req.param, req.dirty, trace_tag,
+      cchiDcacheSrcId(resp_channel))
     when (io.txrsp.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       phase := phase_idle
@@ -189,7 +190,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   when (phase === phase_probe_dat) {
     io.txdat.valid := busy
     DCacheCCHI.Tx.snpRespData(io.txdat.bits, snp_txn_id, req.param, req.dirty, beat, beat_data(beat),
-      req.corrupt, trace_tag)
+      req.corrupt, trace_tag, cchiDcacheSrcId(resp_channel))
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       when (PopCount(remain) === 1.U) {
@@ -203,9 +204,9 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   when (phase === phase_evt) {
     io.txevt.valid := busy
     when (req.hasData) {
-      DCacheCCHI.Tx.evtWriteBackFull(io.txevt.bits, io.id, req.addr)
+      DCacheCCHI.Tx.evtWriteBackFull(io.txevt.bits, io.id, req.addr, cchiDcacheSrcId(resp_channel))
     } .otherwise {
-      DCacheCCHI.Tx.evtEvict(io.txevt.bits, io.id, req.addr)
+      DCacheCCHI.Tx.evtEvict(io.txevt.bits, io.id, req.addr, cchiDcacheSrcId(resp_channel))
     }
     when (io.txevt.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
@@ -217,7 +218,8 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   when (phase === phase_copyback) {
     io.txdat.valid := busy
-    DCacheCCHI.Tx.copyBackWrData(io.txdat.bits, copyback_dbid, beat, beat_data(beat), req.corrupt, trace_tag)
+    DCacheCCHI.Tx.copyBackWrData(io.txdat.bits, copyback_dbid, beat, beat_data(beat), req.corrupt,
+      cchiDcacheSrcId(resp_channel), trace_tag)
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       when (PopCount(remain) === 1.U) {

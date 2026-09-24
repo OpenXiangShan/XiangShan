@@ -52,6 +52,9 @@ import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
 import xscache.common.DirtyField
 import xscache.oceanus.compactchi.{CCHIParameters, CCHIParametersKey}
+import oceanus.chi.{CHIParameters, CHIParametersKey, EnumCHIIssue}
+import oceanus.l2.{L2Params, L2ParamsKey}
+import xiangshan.cache.L1CCHIUpstream
 
 case object EnableIommuKey extends Field[Boolean](false)
 
@@ -90,6 +93,17 @@ class BaseConfig(n: Int) extends Config((site, here, up) => {
   case EnableJtag => true.B
   case DFTOptionsKey => DFTOptions()
   case CCHIParametersKey => CCHIParameters()
+  case CHIParametersKey => CHIParameters(
+    issue = EnumCHIIssue.E,
+    nodeIdWidth = 11,
+    reqAddrWidth = 48,
+    reqRsvdcWidth = 4,
+    datRsvdcWidth = 4,
+    dataWidth = 256,
+    dataCheckPresent = true,
+    poisonPresent = true,
+    mpamPresent = true
+  )
 })
 
 class MinimalConfig(n: Int = 1) extends Config(
@@ -315,7 +329,8 @@ case class WithNKBL1D(n: Int, ways: Int = 8, numMemChannels: Int = 1) extends Co
         enableTagEcc = true,
         enableDataEcc = true,
         cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
-      ))
+      )),
+      cchiUpstream = L1CCHIUpstream(numMemChannels)
     ))
 })
 
@@ -376,6 +391,18 @@ case class L2CacheConfig
       )),
       L2NBanks = banks
     ))
+  case L2ParamsKey =>
+    val l2p = site(XSTileKey).head.L2CacheParamsOpt.getOrElse(L2Param())
+    L2Params(
+      physicalAddrWidth = 48,
+      mshrSize = l2p.mshrs,
+      ways = 4,
+      sets = l2p.sets * l2p.ways / 4,
+      blockBytes = l2p.blockBytes,
+      enableDataECC = l2p.enableDataECC,
+      hasMbist = l2p.hasMbist,
+      hasSramCtl = l2p.hasSramCtl
+    )
 })
 
 case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Config((site, here, up) => {
