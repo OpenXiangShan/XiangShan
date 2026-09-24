@@ -26,12 +26,14 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWriteBack, NewExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue
+import xiangshan.mem.vector.VldMaskGen
 import xiangshan.backend.vector.VecIssueQueue.BypassDelay
 import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
@@ -39,6 +41,7 @@ import xiangshan.mem.LoadStage._
 import xiangshan.mem.prefetch._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
+import xiangshan.mem.vector.VldExcpGen
 
 class LoadUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,
@@ -89,6 +92,7 @@ class LoadUnitS0(param: ExeUnitParams)(
       val pc = Output(UInt(VAddrBits.W))
     })
   })
+  val vldMaskGen = Module(new VldMaskGen)
 
   /**
     * Request sources arbitration, in order of priority:
@@ -119,6 +123,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   )
   val sink = Wire(DecoupledIO(new LoadStageIO))
 
+  private def vectorMaskGen(vaddr: UInt, fuOpType: UInt, vlByteMask: UInt): UInt = {
+    val size = LSUOpType.size(fuOpType)
+    genVWmask128(vaddr, size) & (vlByteMask << vaddr(3, 0))
+  }
+
   // 0. unalign tail inject from s1
   unalignTail <> io.unalignTail
   unalignTail.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
@@ -126,6 +135,14 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 1. high-priority replay from LRQ, including NC / MMIO replay
   val replay = Wire(new LoadStageIO)
   connectSamePort(replay, io.replay.bits)
+  replay.vlByteMask.foreach(_ := io.replay.bits.mask)
+  replay.vlBytes.foreach(_ := io.replay.bits.vlBytes.get)
+  replay.useVstart.foreach(_ := io.replay.bits.useVstart.get)
+  replay.mask := Mux(
+    io.replay.bits.accessType.isVector(),
+    vectorMaskGen(io.replay.bits.vaddr, io.replay.bits.uop.fuOpType, io.replay.bits.mask),
+    genVWmask(io.replay.bits.vaddr, LSUOpType.size(io.replay.bits.uop.fuOpType))
+  )
   replay.noQuery.get := io.replay.bits.uncacheReplay.get
   replay.DontCarePAddr()
   replay.DontCareUnalign() // assign later in sink
@@ -139,6 +156,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 2. fast replay from s3
   fastReplay.valid := io.fastReplay.valid
   connectSamePort(fastReplay.bits, io.fastReplay.bits)
+  fastReplay.bits.vlByteMask.foreach(_ := io.fastReplay.bits.vlByteMask.get)
+  fastReplay.bits.vlBytes.foreach(_ := io.fastReplay.bits.vlBytes.get)
+  fastReplay.bits.useVstart.foreach(_ := io.fastReplay.bits.useVstart.get)
   fastReplay.bits.noQuery.get := true.B
   fastReplay.bits.entrance := io.fastReplay.bits.entrance | LoadEntrance.fastReplay.U
   fastReplay.bits.DontCareUnalign() // assign later in sink
@@ -179,15 +199,30 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   // 6. loads issued from IQ
   val ldin = io.ldin.bits
+  val ldinUop = ldin.toDynInst()
   val ldinVAddr = ldin.src(0) + SignExt(ldin.imm(11, 0), VAddrBits)
   val ldinFullva = ldin.src(0) + SignExt(ldin.imm(11, 0), XLEN)
   val ldinSize = LSUOpType.size(ldin.fuOpType) // B, H, W, D, excluding of Q
+  val isVLoad = MemorySize.sizeIs(_.Q)(ldinSize)
+  // vlnr (memOpType WHOLE) and vlm (memOpType MASK) load a whole register: the byte mask covers the
+  // whole uop and vl, vstart and v0 are ignored, so the vl-derived mask must not be applied to them.
+  val isWholeReg = LSUOpType.isWhole(ldin.fuOpType) || LSUOpType.isMasked(ldin.fuOpType)
+  vldMaskGen.in.vl := ldin.vl.get
+  vldMaskGen.in.vstart := ldin.vstart.get
+  vldMaskGen.in.vm := ldinUop.vm
+  vldMaskGen.in.isWhole := isWholeReg
+  vldMaskGen.in.v0Mask := ldin.v0.get(VldMaskGen.uopBytes - 1, 0)
+  vldMaskGen.in.eew := LSUOpType.vecElemSize(ldin.fuOpType)
+  vldMaskGen.in.uopIdx := ldinUop.uopIdx
+
+  val vectorMask = vectorMaskGen(ldinVAddr, ldin.fuOpType, vldMaskGen.out.mask)
+  val scalarMask = genVWmask(ldinVAddr, ldinSize)
   scalarIssue.valid := io.ldin.valid
   scalarIssue.bits.entrance := LoadEntrance.scalarIssue.U
   scalarIssue.bits.accessType.instrType := Mux(
     LSUOpType.isPrefetch(ldin.fuOpType),
     InstrType.prefetch.U, // software prefetch
-    InstrType.scalar.U
+    Mux(isVLoad, InstrType.vector.U, InstrType.scalar.U)
   )
   scalarIssue.bits.accessType.pftType := Mux( // valid only when instrType is prefetch
     ldin.fuOpType === LSUOpType.prefetch_i,
@@ -203,12 +238,19 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
-  scalarIssue.bits.mask := Mux(LSUOpType.isPrefetch(ldin.fuOpType), 0.U, genVWmask128(ldinVAddr, ldinSize))
+  scalarIssue.bits.mask := Mux(
+    LSUOpType.isPrefetch(ldin.fuOpType),
+    0.U,
+    Mux(isVLoad, vectorMask, scalarMask)
+  )
   scalarIssue.bits.DontCarePAddr()
   scalarIssue.bits.noQuery.get := ldin.fuOpType === LSUOpType.prefetch_i // swInstr
   scalarIssue.bits.DontCareUnalign() // assign later in sink
   scalarIssue.bits.DontCareReplayFromLRQFields()
   scalarIssue.bits.DontCareVectorFields()
+  scalarIssue.bits.vlByteMask.get := vldMaskGen.out.mask
+  scalarIssue.bits.vlBytes.get := vldMaskGen.out.vlBytes
+  scalarIssue.bits.useVstart.get := vldMaskGen.out.useVstart
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
@@ -653,12 +695,14 @@ class LoadUnitS1(param: ExeUnitParams)(
     */
   val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
+  val scalarMask = genVWmask(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
+  val vectorMask = (genVWmask128(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes) & ((in.vlByteMask.get << vaddr(3,0)) >> DCacheVWordBytes)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := LoadEntrance.unalignTail.U
   unalignTail.vaddr := ((vaddr >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.fullva := ((in.fullva >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.size := MemorySize.QB.U
-  unalignTail.mask := genVWmask128(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
+  unalignTail.mask := Mux(accessType.isVector(), vectorMask, scalarMask)
   unalignTail.align.get := false.B
   unalignTail.unalignHead.get := false.B
   unalignTail.readWholeBank.get := true.B
@@ -1330,6 +1374,7 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // Exception info
     val exceptionInfo = ValidIO(new MemExceptionInfo)
+    val vldExceptionInfo = ValidIO(new MemExceptionInfo)
 
     // Load cancel
     val cancel = Output(Bool())
@@ -1433,13 +1478,41 @@ class LoadUnitS3(param: ExeUnitParams)(
     s4HeadExceptionVec,
     s3ExceptionVec
   )
+  val vecLoadExceptionUop = Mux(isUnalignTail, s4Head.uop, uop)
+  val vecLoadExceptionVaddr = Mux(isUnalignTail, s4Head.vaddr, in.vaddr)
+  val vecLoadExceptionGpaddr = Mux(isUnalignTail, s4Head.gpaddr.get, in.gpaddr.get)
+  val vldExcpGen = Module(new VldExcpGen)
+  vldExcpGen.in.uopIdx := vecLoadExceptionUop.uopIdx
+  vldExcpGen.in.fuOpType := vecLoadExceptionUop.fuOpType
+  vldExcpGen.in.exceptionVec := exceptionVec
+  vldExcpGen.in.eew := LSUOpType.vecElemSize(vecLoadExceptionUop.fuOpType)
+  vldExcpGen.in.s3TriggerMask := in.vecTriggerMask.get
+  vldExcpGen.in.s4TriggerMask := Mux(s4HeadValid, s4Head.vecTriggerMask.get, 0.U)
+  vldExcpGen.in.s3Mask := in.mask
+  vldExcpGen.in.s4Mask := Mux(s4HeadValid, s4Head.mask, 0.U)
+  vldExcpGen.in.s3ExceptionVec := s3ExceptionVec
+  vldExcpGen.in.s4ExceptionVec := ExceptSparseVec.mux2(
+    s4HeadValid,
+    s4HeadExceptionVec,
+    ExceptSparseVec.zeros(LduCfg.exceptionOut)
+  )
+  vldExcpGen.in.vaddr := vecLoadExceptionVaddr
+  vldExcpGen.in.gpaddr := vecLoadExceptionGpaddr
+
   val exception = s4HeadValid && s4HeadHasException || s3Exception
   val exceptionFullva = Mux(s4HeadValid && s4HeadHasException, s4Head.fullva, in.fullva)
   val exceptionGpaddr = Mux(s4HeadValid && s4HeadHasException, s4Head.gpaddr.get, in.gpaddr.get)
+  val vldExceptionVaddr = vldExcpGen.out.vaddr
+  val vldExceptionGpaddr = vldExcpGen.out.gpaddr
   val exceptionIsForVSnonLeafPTE = Mux(
     s4HeadValid && s4HeadHasException,
     s4Head.isForVSnonLeafPTE.get,
     in.isForVSnonLeafPTE.get
+  )
+  val exceptionIsHyper = Mux(
+    s4HeadValid && s4HeadHasException,
+    s4Head.tlbException.get.isHyper,
+    in.tlbException.get.isHyper
   )
   val exceptionVaNeedExt = Mux(
     s4HeadValid && s4HeadHasException,
@@ -1529,6 +1602,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.valid := ldoutValid
   ldout.toRob.bits.robIdx := uop.robIdx
   ldout.toRob.bits.exceptionVec extendFrom exceptionVec
+  ldout.toRob.bits.vLoadMeta.foreach(_ := 0.U.asTypeOf(new xiangshan.backend.Bundles.VLoadMeta))
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
   ldout.toRob.bits.trigger.get := uop.trigger
   ldout.toRob.bits.isRVC.get := uop.isRVC
@@ -1545,9 +1619,40 @@ class LoadUnitS3(param: ExeUnitParams)(
   val vldout = Wire(new NewExuOutput(param))
   vldout := ldout.toNewExuOutputBundle()
   vldout.toRob.valid := vldoutValid
+  vldout.toRob.bits.exceptionVec extendFrom vldExcpGen.out.exceptionVec
+  vldout.toRob.bits.vLoadMeta.foreach { info =>
+    info.vstart := vldExcpGen.out.vstart
+    info.vuopIdx := vecLoadExceptionUop.uopIdx
+    info.nf := 0.U // Todo: nf - 1 of the instruction, non-zero only for segment loads
+    info.vsew := vecLoadExceptionUop.vtype.vsew
+    info.veew := LSUOpType.vecElemSize(vecLoadExceptionUop.fuOpType)
+    info.vlmul := vecLoadExceptionUop.vtype.vlmul
+    info.isVecLoad := true.B
+    info.isVlm := LSUOpType.isMasked(vecLoadExceptionUop.fuOpType)
+    info.isStrided := LSUOpType.isStrided(vecLoadExceptionUop.fuOpType)
+    info.isIndexed := LSUOpType.isIndexed(vecLoadExceptionUop.fuOpType)
+    info.isWhole := LSUOpType.isWhole(vecLoadExceptionUop.fuOpType)
+  }
+
+  val vldNormalWriteback = pipeIn.valid && endPipe && uop.vecWen && shouldWakeup
+  val vldVecRfWriteback = vldNormalWriteback || (vldoutValid && vldExcpGen.out.vstart =/= 0.U)
   vldout.toVecRf.foreach { case port =>
-    port.valid := uop.vecWen && pipeIn.valid && endPipe && shouldWakeup
+    port.valid := vldVecRfWriteback
     port.bits := DontCare
+  }
+  vldout.vldToRVP.foreach { req =>
+    req.valid := vldVecRfWriteback
+    req.bits := uop.psrc(2)(VfPhyRegIdxWidth - 1, 0)
+  }
+  vldout.vldMergeInfo.foreach { info =>
+    info.valid := vldVecRfWriteback
+    info.bits.uopIdx := uop.uopIdx
+    info.bits.mask := in.vlByteMask.get
+    info.bits.vlBytes := in.vlBytes.get
+    info.bits.eew := LSUOpType.vecElemSize(uop.fuOpType)
+    info.bits.vma := uop.vtype.vma
+    info.bits.vta := uop.vtype.vta
+    info.bits.useVstart := in.useVstart.get
   }
   vldout.toV0Rf.foreach { case port =>
     port.valid := uop.v0Wen && pipeIn.valid && endPipe && shouldWakeup
@@ -1574,7 +1679,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.fullva := exceptionFullva
   lqWrite.paddr := paddr
   lqWrite.gpaddr := exceptionGpaddr
-  lqWrite.mask := mask
+  lqWrite.mask := Mux(isVector, in.vlByteMask.get, mask)
+  lqWrite.vlBytes := Mux(isVector, in.vlBytes.get, 0.U)
+  lqWrite.useVstart := isVector && in.useVstart.get
   lqWrite.nc := in.nc.get || in.isNCReplay()
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
@@ -1693,8 +1800,17 @@ class LoadUnitS3(param: ExeUnitParams)(
   exceptionInfo.vaNeedExt := exceptionVaNeedExt
   exceptionInfo.isHyper := in.tlbException.get.isHyper
   exceptionInfo.uopIdx := 0.U.asTypeOf(UopIdx())
-  exceptionInfo.vl := 0.U
-  exceptionInfo.vstart := 0.U
+
+  val vldExceptionInfoValid = vldoutValid && !in.isMMIOReplay()
+  val vldExceptionInfo = Wire(new MemExceptionInfo)
+  vldExceptionInfo.robIdx := vecLoadExceptionUop.robIdx
+  vldExceptionInfo.exceptionVec extendFrom vldExcpGen.out.exceptionVec
+  vldExceptionInfo.vaddr := vldExceptionVaddr
+  vldExceptionInfo.gpaddr := vldExceptionGpaddr
+  vldExceptionInfo.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
+  vldExceptionInfo.vaNeedExt := exceptionVaNeedExt
+  vldExceptionInfo.isHyper := exceptionIsHyper
+  vldExceptionInfo.uopIdx := vecLoadExceptionUop.uopIdx
 
   /**
     * Pipeline connect
@@ -1731,7 +1847,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.lqWrite.valid := lqWriteValid
   io.lqWrite.bits := lqWrite
 
-  io.vldS3WakeUp.wen := vldout.toVecRf.get.valid
+  io.vldS3WakeUp.wen := vldNormalWriteback
   io.vldS3WakeUp.pdest := vldout.pdest
   io.vldS3WakeUp.delay := BypassDelay.delay0
 
@@ -1760,6 +1876,8 @@ class LoadUnitS3(param: ExeUnitParams)(
 
   io.exceptionInfo.valid := exceptionInfoValid
   io.exceptionInfo.bits := exceptionInfo
+  io.vldExceptionInfo.valid := vldExceptionInfoValid
+  io.vldExceptionInfo.bits := vldExceptionInfo
 
   io.cancel := cancel
   io.perfMdpAddr := perfMdpAddr
@@ -2029,6 +2147,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val rrBankConflictFastReplay = new RRBankConflictFastReplayIO
   // Exception info
   val exceptionInfo = ValidIO(new MemExceptionInfo)
+  val vldExceptionInfo = ValidIO(new MemExceptionInfo)
   // Data forwarding and bypass
   val sqForward = new SQForward
   val sbufferForward = new SbufferForward
@@ -2184,6 +2303,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.perfMdpAddr := s3.io.perfMdpAddr
   io.exceptionInfo := s3.io.exceptionInfo
   io.sourceExecuteFailRobHead := s3.io.sourceExecuteFailRobHead
+  io.vldExceptionInfo := s3.io.vldExceptionInfo
   s3.io.csrCtrl := io.csrCtrl
   io.vldS3WakeUp := s3.io.vldS3WakeUp
 

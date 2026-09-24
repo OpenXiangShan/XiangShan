@@ -58,6 +58,8 @@ object Bundles {
     val paddr = UInt(PAddrBits.W)
     val gpaddr = UInt(XLEN.W)
     val mask = UInt((VLEN/8).W)
+    val vlBytes = UInt(log2Ceil(VLEN / 8 + 1).W)
+    val useVstart = Bool()
     val nc = Bool()
     val mmio = Bool()
     val memBackTypeMM = Bool()

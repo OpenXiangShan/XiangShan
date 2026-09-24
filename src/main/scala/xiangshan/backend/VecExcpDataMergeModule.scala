@@ -121,8 +121,6 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
   )
 
   private val sNoExcp_handleUntil = sNoExcp_maxVdIdx(3, 0) // [1, 8]
-  // strided vector load need 2 uop to move data, so skip these reg maps
-  private val sNoExcp_writeOffset = Mux(sNoExcp_vecExcpInfo.bits.isStride, 2.U, 1.U)
 
   private val sWaitRab_vecExcpInfo     = RegNextWithEnable(sNoExcp_vecExcpInfo)
 
@@ -340,8 +338,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
             }
           }
         }.otherwise {
-          (1 until RabCommitWidth).map { idx =>
-            val vdIdx = idx - 1
+          (0 until RabCommitWidth).map { idx =>
+            val vdIdx = idx
             when(regWriteFromRabVec(idx).valid) {
               regMaps(vdIdx).lreg := regWriteFromRabVec(idx).bits.lreg
               regMaps(vdIdx).newPreg := regWriteFromRabVec(idx).bits.preg
@@ -361,8 +359,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
             }
           }
         }.otherwise {
-          (0 until MaxLMUL + 1 - RabCommitWidth).map { idx =>
-            val vdIdx = idx - 1 + RabCommitWidth
+          (0 until MaxLMUL - RabCommitWidth).map { idx =>
+            val vdIdx = idx + RabCommitWidth
             when(regWriteFromRabVec(idx).valid) {
               regMaps(vdIdx).lreg := regWriteFromRabVec(idx).bits.lreg
               regMaps(vdIdx).newPreg := regWriteFromRabVec(idx).bits.preg
@@ -383,8 +381,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
             }
           }
         }.otherwise {
-          (1 until RabCommitWidth).map { idx =>
-            val vdIdx = idx - 1
+          (0 until RabCommitWidth).map { idx =>
+            val vdIdx = idx
             when(regWriteFromRatVec(idx).valid) {
               regMaps(vdIdx).oldPreg := regWriteFromRatVec(idx).bits
               ratCommitted(vdIdx) := true.B
@@ -402,8 +400,8 @@ class VecExcpDataMergeModule(implicit p: Parameters) extends XSModule {
             }
           }
         }.otherwise {
-          (0 until MaxLMUL + 1 - RabCommitWidth).map { idx =>
-            val vdIdx = idx - 1 + RabCommitWidth
+          (0 until MaxLMUL - RabCommitWidth).map { idx =>
+            val vdIdx = idx + RabCommitWidth
             when(regWriteFromRatVec(idx).valid) {
               regMaps(vdIdx).oldPreg := regWriteFromRatVec(idx).bits
               ratCommitted(vdIdx) := true.B
@@ -651,4 +649,3 @@ class HWRange(w: Int) extends Bundle {
 object HWRange {
   def apply(w: Int)(_from: Bits, _until: Bits): HWRange = Wire(new HWRange(w)).apply(_from, _until)
 }
-

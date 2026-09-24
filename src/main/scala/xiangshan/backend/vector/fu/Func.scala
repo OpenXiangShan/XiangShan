@@ -72,6 +72,7 @@ object Func {
     val vxrm = Option.when(cfg.needSrcVxrm)(Vxrm())
     val FmulToFadd = Option.when(cfg.isFAlu)(ValidIO(new FuncUnitFaluInputFromFmul))
     val busyTableEmpty = Option.when(cfg.isFdiv)(Bool())
+    val sqDeqPtr = Option.when(cfg.isVStd)(new SqPtr)
   }
 
   class Out(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {

@@ -107,6 +107,8 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       if (fu.in.vxrm.nonEmpty) require(in.vxrm.nonEmpty, s"${fu.name} needs vxrm input, but it's not provided by exu")
       fu.in.frm.zip(effectiveFrm).foreach { case (sink, source) => sink := source }
       fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
+      require(fu.in.sqDeqPtr.isDefined == fu.cfg.isVStd)
+      fu.in.sqDeqPtr.foreach(_ := in.sqDeqPtr.get)
   }
 
   private val isWidenEx = mgus.indices.map {
@@ -172,6 +174,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       val fuOuts: Seq[ValidIO[Func.OutUop]] = fus.flatMap(_.out.ex.lift(i))
       out.valid := fuOuts.map(_.valid).orR
       out.bits :<#= fuOuts
+      out.bits.toRob.vLoadMeta.foreach(_ := 0.U.asTypeOf(new Bundles.VLoadMeta))
       out.bits.toVpRf.foreach(_.data := mgus(i).out.res.asUInt)
 
       out.bits.toRob.vxsat.foreach {
@@ -209,6 +212,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
   out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
+  out.ex0VStdSuccess.foreach(_ := out.uop.valid)
   out.outFuLat.foreach { sink =>
     sink.zip(nonFixedLatFus).foreach { case (toWbBusyTable, fu) =>
       toWbBusyTable <> fu.outFuLat
@@ -247,10 +251,12 @@ object Exu {
     val vpWb0, vpWb1 = Vec(backendParams.getVfRfWriteSize, UInt(VLEN.W))
     val gpWb0 = Vec(backendParams.getIntRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
+    val sqDeqPtr = Option.when(param.hasVStd)(new SqPtr)
   }
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
+    val ex0VStdSuccess = Option.when(param.hasVStd)(Bool())
     val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
     val outFuWakeUp = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)))
   }
@@ -473,6 +479,7 @@ object Exu {
     val vxsat         = Option.when(param.needVxsatWen)(Bool())
     val exceptionVec  = ExceptSparseVec(param.exceptionOut)
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
+    val vLoadMeta     = Option.when(param.hasLdu)(new Bundles.VLoadMeta())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
@@ -489,6 +496,7 @@ object Exu {
       toRob.lqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.sqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.trigger       .foreach(x => x := 0.U.asTypeOf(x))
+      toRob.vLoadMeta.zip(this.vLoadMeta).foreach { case (sink, source) => sink := source }
       toRob.data          := 0.U
       toRob.pdest         := 0.U
       toRob.vecWen        .foreach(_ := false.B)
@@ -509,6 +517,7 @@ object Exu {
       this.vxsat       .foreach(_ := source.toRob.bits.vxsat       .get)
       this.exceptionVec := source.toRob.bits.exceptionVec
       this.trigger     .foreach(_ := source.toRob.bits.trigger     .get)
+      this.vLoadMeta.zip(source.toRob.bits.vLoadMeta).foreach { case (sink, source) => sink := source }
       this.debug.foreach { case x =>
         x.debug         := source.debug
         x.perfDebugInfo := source.perfDebugInfo.get
@@ -525,6 +534,7 @@ object Exu {
       this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
       this.exceptionVec.zeroInit()
       this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
+      this.vLoadMeta   .foreach(x => x := 0.U.asTypeOf(x))
       this.debug       .foreach(x => x := source.ctrl.debug.get)
     }
   }

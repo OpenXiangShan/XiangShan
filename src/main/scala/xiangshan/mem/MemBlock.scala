@@ -224,8 +224,6 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
 
   val lsqio = new Bundle {
     val vaddr = Output(UInt(XLEN.W))
-    val vstart = Output(UInt((log2Up(VLEN) + 1).W))
-    val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(XLEN.W))
     val isForVSnonLeafPTE = Output(Bool())
     val mmioBusy = Output(Bool())
@@ -1248,12 +1246,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   exceptionInfoGen.io.redirect          <> redirect
   exceptionInfoGen.io.fromCsr           <> tlbcsr
   io.mem_to_ooo.lsqio.vaddr             := RegNext(exceptionInfoGen.io.exceptionInfo.vaddr)
-  io.mem_to_ooo.lsqio.vl                := RegNext(exceptionInfoGen.io.exceptionInfo.vl)
-  io.mem_to_ooo.lsqio.vstart            := RegNext(exceptionInfoGen.io.exceptionInfo.vstart)
   io.mem_to_ooo.lsqio.isForVSnonLeafPTE := RegNext(exceptionInfoGen.io.exceptionInfo.isForVSnonLeafPTE)
   io.mem_to_ooo.lsqio.gpaddr            := RegNext(exceptionInfoGen.io.exceptionInfo.gpaddr)
 
-  val exceptionInfo = newLoadUnits.map(_.io.exceptionInfo) ++ storeUnits.map(_.io.exceptionInfo) ++
+  val exceptionInfo = newLoadUnits.map(_.io.exceptionInfo) ++ newLoadUnits.map(_.io.vldExceptionInfo) ++
+    storeUnits.map(_.io.exceptionInfo) ++
     Seq(lsq.io.stExceptionInfo) ++ Seq(lsq.io.ldExceptionInfo) ++
     Seq(atomicsUnit.io.exceptionInfo)
 

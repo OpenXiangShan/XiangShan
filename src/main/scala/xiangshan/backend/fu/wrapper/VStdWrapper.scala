@@ -6,8 +6,13 @@ import xiangshan.backend.vector.fu.{Func, VecFuConfig}
 
 class VStdWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) {
   require(cfg.name == "vstd")
+  require(in.sqDeqPtr.isDefined && in.ex.head.bits.ctrl.sqIdx.isDefined)
 
   out.ex.zip(in.ex).foreach { case (outStage, inStage) =>
+    val cancel = !inStage.bits.ctrl.sqIdx.get.withInPhysicalQueue(in.sqDeqPtr.get)
+    when (cancel) {
+      outStage.valid := false.B
+    }
     outStage.bits.data.vstd.foreach { vstd =>
       vstd.fuType := cfg.fuType.U
       vstd.fuOpType := inStage.bits.ctrl.opcode
