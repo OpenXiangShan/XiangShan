@@ -295,8 +295,7 @@ jobs:
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
 
-      - name: Report SPEC CPU score
-        if: ${{ inputs.benchmark_type != 'custom' || inputs.checkpoint_path != '' }}
+      - name: Generate report
         run: |
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py \
@@ -307,8 +306,7 @@ jobs:
             --report \
             > "$SCORE_FILE"
 
-      - name: Summary result
-        if: ${{ inputs.benchmark_type != 'custom' || inputs.checkpoint_path != '' }}
+      - name: Generate GitHub summary
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -317,17 +315,19 @@ jobs:
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
-          echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
-          echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC\(rate\)\?[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
-          INT_SCORE=$(grep "SPECint\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
-          FP_SCORE=$(grep "SPECfp\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
-          echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
-          echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
-          echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+          # if is custom and checkpoint_path is empty, then the benchmark is a workload list, which does not have a score, so we don't show the key indicators
+          if [[ ${{ inputs.benchmark_type }} != 'custom' || ${{ inputs.checkpoint_path }} != '' ]]; then
+            echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
+            echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
+            TOTAL_SCORE=$(grep "SPEC\(rate\)\?[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
+            INT_SCORE=$(grep "SPECint\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+            FP_SCORE=$(grep "SPECfp\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+            echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
+            echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
+            echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Upload report
-        if: ${{ inputs.benchmark_type != 'custom' || inputs.checkpoint_path != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
