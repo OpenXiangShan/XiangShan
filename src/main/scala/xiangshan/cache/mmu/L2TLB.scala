@@ -94,10 +94,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck) 5 else 4)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
   if (HasBitmapCheck) {
-    if (KeyIDBits > 0) {
-      pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.KEYIDEN.asBool, csr_dup(0).mbmc.CMODE.asBool, ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
-    } else {
-      pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
+    // Bitmap table accesses are implicit M-mode accesses, while page-table walks use S-mode.
+    val pmp_check_modes = Seq.fill(4)(ModeS) :+ ModeM
+    pmp_check.zip(pmp_check_modes).foreach { case (checker, mode) =>
+      if (KeyIDBits > 0) {
+        checker.check_env.apply(csr_dup(0).mbmc.KEYIDEN.asBool, csr_dup(0).mbmc.CMODE.asBool, mode, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma)
+      } else {
+        checker.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, mode, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma)
+      }
     }
   } else {
     pmp_check.foreach(_.check_env.apply(ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
