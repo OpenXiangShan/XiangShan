@@ -348,7 +348,8 @@ class CtrlBlockImp(
    * trace begin
    */
   val trace = Module(new Trace)
-  trace.io.in.fromEncoder.stall  := io.traceCoreInterface.fromEncoder.stall
+  val traceStall = io.traceCoreInterface.fromEncoder.stall
+  trace.io.in.fromEncoder.stall  := traceStall
   trace.io.in.fromEncoder.enable := io.traceCoreInterface.fromEncoder.enable
   trace.io.in.fromRob            := rob.io.trace.traceCommitInfo
   rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
@@ -356,20 +357,28 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
     println(s"[CtrlBlock] pcMem read port for \"trace\" index $i: $pcMemIdx.")
     val traceValid = trace.toPcMem.blocks(i).valid
-    pcMem.io.ren.get(pcMemIdx) := traceValid && !io.traceCoreInterface.fromEncoder.stall
+    pcMem.io.ren.get(pcMemIdx) := traceValid && !traceStall
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
     tracePcStart(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
+  // Hold CSR metadata with the trace block across encoder backpressure.
+  val traceStallPrev = RegNext(traceStall, false.B)
+  val traceCSRHold = Reg(new TraceCSR)
+  when(traceStall && !traceStallPrev) {
+    traceCSRHold := io.fromCSR.traceCSR
+  }
+  val traceCSR = Mux(traceStallPrev, traceCSRHold, io.fromCSR.traceCSR)
+
   // Trap/Xret only occur in block(0).
   val tracePriv = Mux(Itype.isTrapOrXret(trace.toEncoder.blocks(0).bits.tracePipe.itype),
-    io.fromCSR.traceCSR.lastPriv,
-    io.fromCSR.traceCSR.currentPriv
+    traceCSR.lastPriv,
+    traceCSR.currentPriv
   )
-  io.traceCoreInterface.toEncoder.trap.cause := io.fromCSR.traceCSR.cause
-  io.traceCoreInterface.toEncoder.trap.tval  := io.fromCSR.traceCSR.tval
+  io.traceCoreInterface.toEncoder.trap.cause := traceCSR.cause
+  io.traceCoreInterface.toEncoder.trap.tval  := traceCSR.tval
   io.traceCoreInterface.toEncoder.priv       := tracePriv
-  io.traceCoreInterface.toEncoder.mstatus    := io.fromCSR.traceCSR.mstatus
+  io.traceCoreInterface.toEncoder.mstatus    := traceCSR.mstatus
   (0 until TraceGroupNum).foreach(i => {
     io.traceCoreInterface.toEncoder.groups(i).valid := trace.io.out.toEncoder.blocks(i).valid
     io.traceCoreInterface.toEncoder.groups(i).bits.iaddr := tracePcStart(i)
