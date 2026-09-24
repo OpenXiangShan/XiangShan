@@ -85,7 +85,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** aliases *** */
   private val commit   = io.fromFtq.commit
-  private val redirect = io.fromFtq.redirect
+  private val redirect = Wire(Valid(new BpuRedirect))
+  redirect             := io.fromFtq.redirect
+  redirect.bits.target := Mux(io.fromFtq.needChangeTarget, ras.io.specRead.retAddr, io.fromFtq.redirect.bits.target)
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val csrCtrl   = DelayN(io.ctrl, 2) // delay 2 cycle for timing
@@ -227,6 +229,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.startPc     := s3_startPc.get.toUInt
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
+  ras.io.specRead.req            := io.fromFtq.specReadReq
+  io.toFtq.specRead              := ras.io.specRead.retAddr
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
@@ -434,9 +438,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s3_firstTakenBranchOH = s3_compareMatrix.getLeastElementOH(s3_takenMask)
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
-  // tage, ittage, etc.'s `hit` is gated by `enable` so no extra `&& .enable` is required,
-  // but ras does not have a `hit` or `valid` output, so gate directly using `.enable`
-  private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable
+  // tage, ittage, etc.'s `hit` is gated by `enable` so no extra `&& .enable` is required.
+  // ras has no `hit`, so gate it with `enable` and additionally require a non-empty stack.
+  private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable && ras.io.topRetAddrValid
   private val s3_useIttage = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
@@ -737,6 +741,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   )
   XSPerfAccumulate("s3_use_ras", s3_fire && s3_taken && s3_useRas)
+  XSPerfAccumulate(
+    "s3_use_ras_invalid",
+    s3_fire && s3_taken && s3_firstTakenBranch.bits.attribute.isReturn && !ras.io.topRetAddrValid
+  )
   XSPerfAccumulate("s3_use_ittage", s3_fire && s3_taken && !s3_useRas && s3_useIttage)
   XSPerfAccumulate("s3_use_mbtb_tage", s3_fire && s3_prediction.attribute.isConditional)
 
