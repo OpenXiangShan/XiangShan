@@ -1632,15 +1632,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s3_misalign_rep_cause := VecInit(s3_mab_sel_rep_cause.asBools)
 
-  when (s3_rep_frm_fetch || s3_frm_mabuf) {
-    s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
-  } .otherwise {
-    s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
-
-  }
-  io.lsq.ldin.bits.rep_info.cause := s3_replayqueue_rep_cause
-
-
   // Int load, if hit, will be writebacked at s3
   s3_out.valid                := s3_valid && s3_safe_writeback && !toMisalignBufferValid
   s3_out.bits.uop             := s3_in.uop
@@ -1651,6 +1642,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   when (s3_nc_with_data) {
     s3_out.bits.uop.exceptionVec := s3_in.uop.exceptionVec
   }
+  val s3_writeback_exception = s3_out.valid && s3_vecActive &&
+    ExceptionNO.selectByFu(s3_out.bits.uop.exceptionVec, LduCfg).asUInt.orR
+  val s3_final_exception = s3_exception || s3_writeback_exception
+  when (s3_rep_frm_fetch || s3_frm_mabuf || s3_writeback_exception) {
+    s3_replayqueue_rep_cause := 0.U.asTypeOf(s3_lrq_rep_info.cause.cloneType)
+  } .otherwise {
+    s3_replayqueue_rep_cause := VecInit(s3_lrq_sel_rep_cause.asBools)
+  }
+  io.lsq.ldin.bits.rep_info.cause := s3_replayqueue_rep_cause
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
   s3_out.bits.data            := s3_in.data
@@ -1686,7 +1686,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     (io.misalign_ldout.bits.rep_info.fwd_fail || io.misalign_ldout.bits.rep_info.mem_amb || io.misalign_ldout.bits.rep_info.nuke
       || io.misalign_ldout.bits.rep_info.rar_nack || io.misalign_ldout.bits.rep_info.raw_nack)
 
-  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_frm_mis_flush) && !s3_exception
+  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_frm_mis_flush) && !s3_final_exception
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
@@ -1701,12 +1701,14 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldin.bits.uop := s3_out.bits.uop
 //  io.lsq.ldin.bits.uop.exceptionVec(loadAddrMisaligned) := Mux(s3_in.onlyMisalignException, false.B, s3_in.uop.exceptionVec(loadAddrMisaligned))
 
-  val s3_revoke = s3_exception || io.lsq.ldin.bits.rep_info.need_rep || s3_mis_align || (s3_frm_mabuf && io.misalign_ldout.bits.rep_info.need_rep)
+  val s3_revoke = s3_final_exception || io.lsq.ldin.bits.rep_info.need_rep || s3_mis_align || (s3_frm_mabuf && io.misalign_ldout.bits.rep_info.need_rep)
   io.lsq.ldld_nuke_query.revoke := s3_revoke
   io.lsq.stld_nuke_query.revoke := s3_revoke
 
   // feedback slow
-  s3_fast_rep := RegNext(s2_fast_rep)
+  val s3_late_writeback_error = s3_safe_writeback && s3_vecActive && !s3_in.isPrefetch &&
+    !s3_nc_with_data && !s3_mis_align && (s3_hw_err || io.dcache.resp.bits.tl_error_delayed.asUInt.orR)
+  s3_fast_rep := RegNext(s2_fast_rep) && !s3_late_writeback_error
 
   val s3_fb_no_waiting = !s3_in.isLoadReplay &&
                         (!(s3_fast_rep && !s3_fast_rep_canceled)) &&
@@ -1850,7 +1852,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.vecldout.bits.elemIdx := s3_vecout.elemIdx
   io.vecldout.bits.elemIdxInsideVd.get := s3_vecout.elemIdxInsideVd
   io.vecldout.bits.mask := s3_vecout.mask
-  io.vecldout.bits.hasException := s3_exception
+  io.vecldout.bits.hasException := s3_final_exception
   io.vecldout.bits.reg_offset.get := s3_vecout.reg_offset
   io.vecldout.bits.usSecondInv := s3_usSecondInv
   io.vecldout.bits.mBIndex := s3_vec_mBIndex
