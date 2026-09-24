@@ -137,6 +137,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.dtlb.req.bits.frm_mabuf := false.B
   io.dtlb.req_kill     := false.B
   io.dtlb.resp.ready   := true.B
 
@@ -405,11 +407,11 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       ))
     )
 
-    when (dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable) {
-      exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(hardwareError)    := dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
-    }
+    val canTriggerCacheError = dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable
+
+    exceptionVec(loadAccessFault)  := canTriggerCacheError && isLr && dcache_resp_tl_error.tl_denied
+    exceptionVec(storeAccessFault) := canTriggerCacheError && !isLr && dcache_resp_tl_error.tl_denied
+    exceptionVec(hardwareError)    := canTriggerCacheError && dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
 
     resp_data := resp_data_wire
     state := s_finish

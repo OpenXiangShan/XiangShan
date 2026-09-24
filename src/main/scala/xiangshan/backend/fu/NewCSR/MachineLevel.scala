@@ -130,7 +130,20 @@ trait MachineLevel { self: NewCSR =>
     }
   }).setAddr(CSRs.mie)
 
-  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
+  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
+    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
+    reset_mtvec.foreach{ init =>
+      val should_reset = RegNext(false.B, true.B)
+      when(should_reset){
+        reg := init.asTypeOf(reg)
+      }.elsewhen(wen){
+        reg.addr := wdata.addr
+        reg.mode := Mux(XtvecMode.isLegal(wdata.mode), wdata.mode, reg.mode)
+      }.otherwise{
+        reg := reg
+      }
+    }
+  })
     .setAddr(CSRs.mtvec)
 
   // Todo: support "Stimecmp/Vstimecmp" Extension, Version 1.0.0
@@ -341,7 +354,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
+    val PMM   = EnvPMM(33, 32, wNoFilter).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
     val MLPE  = RO(10).withDescription("Machine landing-pad enable from the Zicfilp extension.")
     val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
     val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
@@ -437,7 +450,8 @@ trait MachineLevel { self: NewCSR =>
     val ALL = RO(hartIdLen - 1, 0).withDescription("Hardware thread identifier.")
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.regOut.ALL := hartid
+    val dmode  = IO(Input(Bool()))
+    this.regOut.ALL := (if(hartIDDmodeWidth > 0) Mux(dmode, hartid(hartIDDmodeWidth - 1, 0), hartid) else hartid)
   })
     .setAddr(CSRs.mhartid)
 

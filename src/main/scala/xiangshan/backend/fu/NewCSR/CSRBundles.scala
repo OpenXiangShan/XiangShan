@@ -71,10 +71,10 @@ object CSRBundles {
     val ADUE  =      RO(    61)           .withReset(0.U).withDescription("Enable hardware A/D-bit update during page-table walks from the Svadu extension.")
     val CDE   =      RO(    60)           .withReset(0.U).withDescription("Enable Smcdeleg/Ssccfg extension.")
     val DTE   =      RO(    59)           .withReset(0.U).withDescription("Enable double-trap support for lower privilege modes from the Ssdbltrp extension.")
-    val PMM   =  EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Environment protection and memory-type mode from the Smnpm extension.")
+    val PMM   =  EnvPMM(33, 32, wNoFilter).withReset(EnvPMM.Disable).withDescription("Environment protection and memory-type mode from the Smnpm extension.")
     val CBZE  =      RW(     7)           .withReset(1.U).withDescription("Enable cache-block zero operations from the Zicboz extension.")
     val CBCFE =      RW(     6)           .withReset(1.U).withDescription("Enable cache-block clean-and-flush operations from the Zicbom extension.")
-    val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval).withDescription("Enable cache-block invalidate operations from the Zicbom extension.")
+    val CBIE  = EnvCBIE( 5,  4, wNoFilter).withReset(EnvCBIE.Inval).withDescription("Enable cache-block invalidate operations from the Zicbom extension.")
     val SSE   =      RO(     3)           .withReset(0.U).withDescription("Enable the Zicfiss shadow-stack extension below M-mode.")
     val LPE   =      RO(     2)           .withReset(0.U).withDescription("Enable the Zicfilp landing-pad extension.")
     val FIOM  =      RO(     0)           .withReset(0.U).withDescription("Fence of I/O implies memory ordering.")
@@ -212,6 +212,7 @@ object CSRBundles {
     val hd_misalign_st_enable = Output(Bool())
     val hd_misalign_ld_enable = Output(Bool())
     val power_down_enable = Output(Bool())
+    val commit_stuck_check_enable = Output(Bool())
     val flush_l2_enable = Output(Bool())
   }
 }

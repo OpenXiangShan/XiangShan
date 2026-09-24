@@ -920,6 +920,7 @@ extends DCacheModule {
     tlbReqArb.io.in(i).bits.hlvx := DontCare
     tlbReqArb.io.in(i).bits.hyperinst := DontCare
     tlbReqArb.io.in(i).bits.pmp_addr := DontCare
+    tlbReqArb.io.in(i).bits.frm_mabuf := DontCare
   }
   tlbReqArb.io.out.ready := true.B
 

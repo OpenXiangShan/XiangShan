@@ -184,6 +184,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromTop.hartId := io.csrin.get.hartId
   csrMod.io.fromTop.clintTime := io.csrin.get.clintTime
   csrMod.io.fromTop.l2FlushDone := io.csrin.get.l2FlushDone
+  csrMod.io.fromTop.reset_mtvec.foreach(_ := io.csrin.get.reset_mtvec.get)
   csrMod.io.fromTop.criticalErrorState := io.csrin.get.criticalErrorState
   private val csrModOutValid = csrMod.io.out.valid
   private val csrModOut      = csrMod.io.out.bits
@@ -403,6 +404,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
+      custom.commit_stuck_check_enable        := csrMod.io.status.custom.commit_stuck_check_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // distribute csr write signal
       // write to frontend and memory
@@ -431,6 +433,7 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val l2FlushDone = Input(Bool())
+  val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
   val fromVecExcpMod = Input(new Bundle {
     val busy = Bool()
@@ -595,6 +598,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
     // Rename
     val fusion_enable = Bool()
     val wfi_enable = Bool()
+    val commit_stuck_check_enable = Bool()
   }
 
   // rename single step
