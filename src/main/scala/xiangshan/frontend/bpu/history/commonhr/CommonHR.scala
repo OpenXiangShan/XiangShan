@@ -66,11 +66,13 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val r1_valid    = RegNext(io.redirect.valid, false.B)
   private val r1_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  private val enqPtr     = RegInit(HistPtr(false.B, 0.U))
-  private val predPtr    = RegInit(HistPtr(false.B, 0.U))
-  private val writePtr   = RegInit(HistPtr(false.B, 0.U))
-  private val recoverPtr = RegInit(HistPtr(false.B, 0.U))
-  private val histQueue  = RegInit(VecInit(Seq.fill(HistQueueSize)(0.U.asTypeOf(new CommonHREntry))))
+  private val enqPtr           = RegInit(HistPtr(false.B, 0.U))
+  private val predPtr          = RegInit(HistPtr(false.B, 0.U))
+  private val writePtr         = RegInit(HistPtr(false.B, 0.U))
+  private val recoverPtr       = RegInit(HistPtr(false.B, 0.U))
+  private val overridePending  = RegInit(false.B)
+  private val overrideCommonHR = RegInit(0.U.asTypeOf(new CommonHREntry))
+  private val histQueue        = RegInit(VecInit(Seq.fill(HistQueueSize)(0.U.asTypeOf(new CommonHREntry))))
 
   /*
    * CommonHR train from redirect/s3_prediction
@@ -283,7 +285,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
       0.U
     )
     imli    := r0_newImli
-    s0_imli := r0_newImli
+    s0_imli := Mux(s0_fire, r0_newImli, imli)
   }.elsewhen(s3_override) {
     val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, Mux(s3_imli.andR, s3_imli, s3_imli + 1.U), 0.U)
     imli    := s3_newImli
@@ -321,40 +323,51 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val initCommonHR    = WireInit(0.U.asTypeOf(new CommonHREntry))
   initCommonHR.predStartPc.get := io.s0_startPc.get
 
+  when(r0_valid || enqEnable) {
+    overridePending := false.B
+  }.elsewhen(s3_override || s2_override) {
+    overridePending  := true.B
+    overrideCommonHR := Mux(s3_override, histQueue(recoverPtr.value), s1_commonHR)
+  }
+
   when(r0_valid) {
-    enqPtr                            := writePtr + 1.U
+    when(enqEnable) {
+      enqPtr := writePtr + 1.U
+    }.otherwise {
+      enqPtr := writePtr
+    }
     recoverPtr                        := writePtr - 1.U
     predPtr                           := writePtr - 1.U
     histQueue(writePtr.value)         := initCommonHR // The queue value during redirect is used for diff
     histQueue((writePtr - 1.U).value) := r0_commonHR  // The queue value during redirect is used for diff
   }.elsewhen(s3_override) {
     val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
-    histQueue(writePtr.value)         := s3_newCommonHR // update s3_fire block
-    histQueue((writePtr + 1.U).value) := initCommonHR   // write new s0_block
-    enqPtr                            := writePtr + 2.U
-    predPtr                           := realRecoverPtr
-    writePtr                          := writePtr + 1.U
-    recoverPtr                        := realRecoverPtr
+    histQueue(writePtr.value) := s3_newCommonHR // update s3_fire block
+    when(enqEnable) {
+      histQueue((writePtr + 1.U).value) := initCommonHR // write new s0_block
+    }
+    enqPtr     := Mux(enqEnable, writePtr + 2.U, writePtr + 1.U)
+    predPtr    := realRecoverPtr
+    writePtr   := writePtr + 1.U
+    recoverPtr := realRecoverPtr
   }.elsewhen(s2_override) {
-    // S2 keeps the corrected block, flushes the younger S1 block, and starts a
-    // new S0 block. Compact the queue so the next write still corresponds to
-    // the block that will reach S3 next.
+    // S2 keeps the corrected block and flushes the younger S1 block. Compact
+    // the queue, allocating the new S0 entry only when S0 actually fires.
     val writePtrPlus1 = writePtr + 1.U
     val writePtrPlus2 = writePtr + 2.U
-    val writePtrPlus3 = writePtr + 3.U
     val nextWritePtr  = Mux(s3_fire, writePtrPlus1, writePtr)
     val newS0Ptr      = Mux(s3_fire, writePtrPlus2, writePtrPlus1)
-    val nextEnqPtr    = Mux(s3_fire, writePtrPlus3, writePtrPlus2)
+    val nextEnqPtr    = Mux(enqEnable, newS0Ptr + 1.U, newS0Ptr)
 
     when(s3_fire) {
       histQueue(writePtr.value) := s3_newCommonHR
     }
-    histQueue(newS0Ptr.value) := initCommonHR
+    when(enqEnable) {
+      histQueue(newS0Ptr.value) := initCommonHR
+    }
 
-    enqPtr := nextEnqPtr
-    // Keep predPtr on the corresponding queue entry. The S0 block launched by
-    // an S2 override reuses the flushed S1 block's history below, and the
-    // following cycle must consume the S3 update before predPtr advances.
+    enqPtr     := nextEnqPtr
+    predPtr    := Mux(s3_fire, writePtr, Mux(writePtr === predPtr, predPtr, writePtr - 1.U))
     writePtr   := nextWritePtr
     recoverPtr := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
   }.otherwise {
@@ -380,10 +393,15 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   // Use distance-based checks for circular pointers to avoid wrap-around ordering ambiguity.
   private val writeToPredDist   = distanceBetween(writePtr, predPtr)
+  private val enqToPredDist     = distanceBetween(enqPtr, predPtr)
   private val predToRecoverDist = distanceBetween(predPtr, recoverPtr)
   XSError(
-    enqEnable && (writeToPredDist > 3.U || predToRecoverDist > 2.U),
+    enqEnable && (writeToPredDist > 3.U),
     "The predPtr exceeds the correct range"
+  )
+  XSError(
+    enqToPredDist > 3.U,
+    "The enqPtr exceeds the predPtr range"
   )
   XSError(
     writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc.get,
@@ -400,6 +418,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
       // this S1 block carried when it was predicted in S0, rather than the
       // S3 update produced in the same cycle.
       s2_override                  -> s1_commonHR,
+      overridePending              -> overrideCommonHR,
       (s0_fire && s3_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
       s0_fire                      -> histQueue(predPtr.value)
     )
