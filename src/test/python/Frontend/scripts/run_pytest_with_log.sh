@@ -15,6 +15,9 @@
 #   TB_INCLUDE_FUNCOV_CLOSURE_PENDING=1
 #                                     Run strict-xfail closure reachability checks
 #                                     that the normal regression excludes.
+#   TB_ENABLE_TOFFEE_HTML_REPORT=0   Skip the native toffee-test HTML report.
+#                                     Default writes <run>/funcov/funcov.html.
+#                                     This report is a viewer, not HIT evidence.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,6 +45,7 @@ fi
 CLI_LEVEL="${TB_LOG_CLI_LEVEL:-${TB_ENV_LOG_LEVEL:-INFO}}"
 PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
 INCLUDE_FUNCOV_CLOSURE_PENDING="${TB_INCLUDE_FUNCOV_CLOSURE_PENDING:-0}"
+ENABLE_TOFFEE_HTML_REPORT="${TB_ENABLE_TOFFEE_HTML_REPORT:-1}"
 PENDING_ARGS=()
 if [[ "${INCLUDE_FUNCOV_CLOSURE_PENDING}" != "1" ]]; then
   PENDING_ARGS=(-m "not funcov_closure_pending")
@@ -54,10 +58,19 @@ if [[ "${INCLUDE_FUNCOV_CLOSURE_PENDING}" == "1" ]]; then
 else
   echo "[frontend] excluding funcov closure pending reachability checks"
 fi
+RUN_ID="${TB_RUN_ID:-frontend_pytest_$(date +%Y%m%d_%H%M%S_%N)_$$}"
+export TB_RUN_ID="${RUN_ID}"
+REPORT_ARGS=()
+if [[ "${ENABLE_TOFFEE_HTML_REPORT}" != "0" ]]; then
+  REPORT_DIR="${REPO_DIR}/build-frontend/artifacts/${RUN_ID}/funcov"
+  mkdir -p "${REPORT_DIR}"
+  REPORT_ARGS=(--toffee-report --report-dir "${REPORT_DIR}" --report-name funcov.html)
+  echo "[frontend] native toffee HTML report: ${REPORT_DIR}/funcov.html"
+fi
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
-  echo "[frontend] running: pytest -p no:rerunfailures -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${PENDING_ARGS[*]} $*"
+  echo "[frontend] running: pytest -p no:rerunfailures -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
 else
-  echo "[frontend] running: pytest -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${PENDING_ARGS[*]} $*"
+  echo "[frontend] running: pytest -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
 fi
 
 cd "${REPO_DIR}"
@@ -66,6 +79,7 @@ PYTEST_CMD=(pytest -s -o log_cli=true --log-cli-level="${CLI_LEVEL}")
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
   PYTEST_CMD+=(-p no:rerunfailures)
 fi
+PYTEST_CMD+=("${REPORT_ARGS[@]}")
 PYTEST_CMD+=("${PENDING_ARGS[@]}")
 PYTEST_CMD+=("$@")
 "${PYTEST_CMD[@]}" 2>&1 | tee "${LOG_FILE}"

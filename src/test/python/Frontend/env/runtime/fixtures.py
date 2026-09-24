@@ -545,11 +545,6 @@ def dut(request):
             dut.FlushWaveform()
     except Exception:
         logger.exception("dut waveform flush failed")
-    if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
-        from toffee_test.reporter import set_line_coverage
-
-        ignore = _expanded_coverage_ignore_path()
-        set_line_coverage(request, str(coverage), ignore=ignore)
     handler = getattr(dut, "_frontend_case_log_handler", None)
     if handler is not None:
         try:
@@ -646,9 +641,17 @@ def env(dut, request):
         reset_cycles=20,
     )
     yield tb
+    if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
+        from toffee_test.reporter import set_line_coverage
+
+        set_line_coverage(request, str(coverage), ignore=_expanded_coverage_ignore_path())
     if runtime_context is not None and toffee_sink is not None:
         toffee_sink.flush_pending()
         _session_toffee_coverage(request).add(toffee_sink.cov_groups)
+        if request.config.getoption("--toffee-report"):
+            from toffee_test.reporter import set_func_coverage
+
+            set_func_coverage(request, toffee_sink.cov_groups)
 
 
 @pytest.fixture(scope="function")

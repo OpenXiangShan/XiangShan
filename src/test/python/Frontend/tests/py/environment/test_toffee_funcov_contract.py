@@ -251,6 +251,8 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "ToffeeCoverageSink.from_registry" in source
     assert "create_toffee_runtime(" in source
     assert "_session_toffee_coverage(request).add(toffee_sink.cov_groups)" in source
+    assert 'request.config.getoption("--toffee-report")' in source
+    assert "set_func_coverage(request, toffee_sink.cov_groups)" in source
     assert "audit_recorder=None" in source
     assert 'collector.write(path or (_funcov_dir() / "toffee.funcov.json"))' in source
     assert "FunctionalCoverageRecorder" not in source
