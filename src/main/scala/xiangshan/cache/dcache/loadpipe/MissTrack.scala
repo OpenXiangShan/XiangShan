@@ -221,12 +221,27 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     insert.io.in(i).bits := canonicalEvents(i).bits
   }
   insert.io.out.ready := true.B
-  val invalids = VecInit(maintained.map(!_.valid))
-  val maxAge = maintained.map(_.age).reduce((a, b) => Mux(a > b, a, b))
-  val victim = Mux(invalids.asUInt.orR, PriorityEncoder(invalids),
-    PriorityEncoder(maintained.map(_.age === maxAge)))
+  // Keep invalid-first/oldest semantics while balancing both reductions.
+  // This removes the 16-entry left-folded max and victim priority chain.
+  val invalids = maintained.map(e => !e.valid)
+  val hasInvalid = ParallelORR(invalids)
+  val invalidVictimOH = UIntToOH(
+    ParallelPriorityEncoder(invalids),
+    cfg.missTrackEntries
+  )
+  val maxAge = ParallelMax(maintained.map(_.age))
+  val oldest = maintained.map(_.age === maxAge)
+  val oldestVictimOH = UIntToOH(
+    ParallelPriorityEncoder(oldest),
+    cfg.missTrackEntries
+  )
+  val victimOH = Mux(hasInvalid, invalidVictimOH, oldestVictimOH)
   val nextEntries = WireDefault(maintained)
-  when (insert.io.out.fire) { nextEntries(victim) := insert.io.out.bits }
+  for (i <- entries.indices) {
+    when (insert.io.out.fire && victimOH(i)) {
+      nextEntries(i) := insert.io.out.bits
+    }
+  }
   when (io.clear) { nextEntries.foreach(_.valid := false.B) }
   // Table maintenance becomes visible to queries after the register boundary.
   lookupEntries := entries

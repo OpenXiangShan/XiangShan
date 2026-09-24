@@ -1471,6 +1471,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   /** MissTrack observes all load ports and qualifies SpecMiss requests. */
   if (cfg.enMissTrack) {
     val misstrack = Module(new MissTrack(MissReqPortCount))
+    // Keep ECC/readline control off the same-cycle MissTrack age cone. The
+    // table is advisory, so observing install/error events one cycle later is
+    // safe; the functional load/miss pipeline is unchanged.
+    val delayedInstall = RegNext(
+      mainPipe.io.misstrack_install,
+      0.U.asTypeOf(Valid(new MissTrackResident))
+    )
+    val delayedClear = RegNext(
+      mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _),
+      false.B
+    )
     for (w <- 0 until LoadPipelineWidth) {
       misstrack.io.loads(w) := ldu(w).io.mtrack
       ldu(w).io.specmiss := misstrack.io.spec(w)
@@ -1478,7 +1489,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
     misstrack.io.alloc := missQueue.io.misstrack_alloc
     misstrack.io.owners := missQueue.io.misstrack_owners
-    misstrack.io.install := mainPipe.io.misstrack_install
+    misstrack.io.install := delayedInstall
     val tagWrite = mainPipe.io.tag_write
     val metaWrite = mainPipe.io.meta_write
     // Both ports belong to the same MainPipe s3 transaction. Tag writes remove
@@ -1489,7 +1500,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     misstrack.io.invalidate.bits.way := Mux(tagWrite.fire, tagWrite.bits.way_en, metaWrite.bits.way_en)
     // Error reports can arrive after the s2 training observation. Conservatively
     // clear the small history table; normal cache error handling remains intact.
-    misstrack.io.clear := mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _)
+    misstrack.io.clear := delayedClear
   } else {
     for (w <- 0 until LoadPipelineWidth) {
       ldu(w).io.specmiss := 0.U.asTypeOf(new MissTrackSpec)
