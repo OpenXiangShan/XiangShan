@@ -26,6 +26,7 @@ import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.decode.isa.Instructions.{MOP_R_N, MOP_RR_N}
 
 import scala.collection.SeqMap
 import scala.language.implicitConversions
@@ -161,6 +162,9 @@ object PseudoDecodeChannel {
 
     val J            = PseudoInstPattern(PseudoInstructions.J)
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+
+    val MOP_R  = PseudoInstPattern(MOP_R_N)
+    val MOP_RR = PseudoInstPattern(MOP_RR_N)
   }
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
@@ -193,6 +197,8 @@ object PseudoDecodeChannel {
     PREFETCH_W    -> (LduOpcodes.prefetch_w + Src1Gp + Src2Imm(DecodeSelImm.S) + CannotRobCompress),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
+    MOP_R         -> (AluOpcodes.add.copy() - GpWen - Src1Gp - Src2Gp),
+    MOP_RR        -> (AluOpcodes.add.copy() - GpWen - Src1Gp - Src2Gp),
   )
 
   val legalField = new DecodeFieldGen(
