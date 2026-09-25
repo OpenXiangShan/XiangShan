@@ -67,9 +67,10 @@ class NewFLManager(
   /** Stage 0: select up to two candidates from every bank. */
   val s0CanEnqueue = !in.flush && s1EnqueueCapacity =/= 0.U
   val s0AllocBitmap = Mux(s0CanEnqueue, in.freeBitmap & ~reservedBitmap, 0.U)
-  // The refill start is a bank-level round-robin pointer. It advances by
-  // the number of bitmap candidates actually accepted into s1; freeReq is
-  // deliberately excluded from this count.
+  // The refill start is a bank-level round-robin pointer. Start from bank1
+  // because the initial bitmap has fewer allocatable entries in bank0
+  // (including physical register zero for Int); partial refills advance
+  // according to the candidate slots examined.
   val s0BankStartPtr = RegInit(1.U(bankPtrWidth.W))
   val s0BankCandidates = Wire(Vec(bankCount, Vec(2, UInt(phyRegIdxWidth.W))))
   val s0BankCandidateValid = Wire(Vec(bankCount, Vec(2, Bool())))
@@ -148,10 +149,22 @@ class NewFLManager(
       enqueueOffset(candidateIdx) < s1EnqueueCapacity
   }
   val enqueueCount = PopCount(enqueueValid)
-  // Only bitmap candidates participate in bank round-robin progress.
-  // freeReq entries are appended after the bitmap candidates and must not
-  // change the next bitmap start bank.
-  val bitmapEnqueueCount = PopCount(enqueueValid.take(renameWidth))
+  // Advance by the number of s0 candidate slots examined, rather than by the
+  // number of accepted candidates. This accounts for invalid holes before the
+  // last accepted candidate. If every valid s0 candidate fits, the complete
+  // candidate vector has been examined, including any invalid trailing slots.
+  // freeReq entries are outside s0EnqueueValid and never affect bank rotation.
+  val s0EnqueueValid = VecInit(enqueueValid.take(renameWidth))
+  val s0AnyEnqueue = s0EnqueueValid.asUInt.orR
+  val s0AllValidCandidatesAccepted =
+    (s0CandidateValid.asUInt & ~s0EnqueueValid.asUInt) === 0.U
+  val s0LastEnqueueFromEnd = PriorityEncoder(Reverse(s0EnqueueValid.asUInt))
+  val s0LastEnqueueIdx = (renameWidth - 1).U - s0LastEnqueueFromEnd
+  val s0ConsumedSlots = Mux(
+    s0AllValidCandidatesAccepted,
+    renameWidth.U,
+    s0LastEnqueueIdx + 1.U
+  )
   val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
     Mux(
       enqueueValid(candidateIdx),
@@ -199,8 +212,8 @@ class NewFLManager(
   // append at the tail. Track availability as the queue fills so allocation
   // can resume immediately when recovery ends.
   when(!in.flush) {
-    when(bitmapEnqueueCount =/= 0.U) {
-      s0BankStartPtr := addBankPtr(s0BankStartPtr, bitmapEnqueueCount)
+    when(s0AnyEnqueue) {
+      s0BankStartPtr := addBankPtr(s0BankStartPtr, s0ConsumedSlots)
     }
     s1HeadPtr := s1HeadPtrNext
     s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
