@@ -123,21 +123,55 @@ class NewFLManager(
   val enqueueWidth = renameWidth + freeWidth
   val enqueueCandidates = VecInit(s0Candidates ++ in.freePhyReg)
   val enqueueCandidateValid = VecInit(s0CandidateValid ++ freeCandidateValid)
-  val enqueueOffset = Wire(Vec(enqueueWidth, UInt(log2Ceil(enqueueWidth + 1).W)))
-  val enqueueValid = Wire(Vec(enqueueWidth, Bool()))
+
+  // Compute each raw candidate's stable compacted position in parallel. Keep
+  // count generation independent from the candidate-data crossbar: the count
+  // is simply the smaller of the number of valid inputs and the FIFO capacity.
+  // This avoids feeding a recursive compaction network into the count, tail,
+  // canAllocate, and reserved-bitmap state updates.
+  private val enqueueCountWidth = log2Ceil(enqueueWidth + 1)
+  val enqueueOffset = Wire(Vec(enqueueWidth, UInt(enqueueCountWidth.W)))
   for (candidateIdx <- 0 until enqueueWidth) {
     enqueueOffset(candidateIdx) := PopCount(enqueueCandidateValid.take(candidateIdx))
-    enqueueValid(candidateIdx) := enqueueCandidateValid(candidateIdx) &&
-      enqueueOffset(candidateIdx) < s1EnqueueCapacity
   }
-  val enqueueCount = PopCount(enqueueValid)
+  val rawCandidateCount = PopCount(enqueueCandidateValid)
+  val enqueueCount = Mux(
+    rawCandidateCount > s1EnqueueCapacity,
+    s1EnqueueCapacity,
+    rawCandidateCount
+  )
+  val rawEnqueueValid = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+    enqueueCandidateValid(candidateIdx) &&
+      enqueueOffset(candidateIdx) < s1EnqueueCapacity
+  })
+  private val maxEnqueueWidth = math.min(enqueueWidth, s1QueueSize)
+  val compactedCandidates = VecInit(Seq.tabulate(maxEnqueueWidth) { compactedIdx =>
+    val selectOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+      enqueueCandidateValid(candidateIdx) &&
+        enqueueOffset(candidateIdx) === compactedIdx.U
+    })
+    Mux1H(selectOH, enqueueCandidates)
+  })
+  val enqueueValid = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
+    candidateIdx.U < enqueueCount
+  })
   val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
     Mux(
-      enqueueValid(candidateIdx),
+      rawEnqueueValid(candidateIdx),
       UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
+
+  // Decode the existing tail pointer only on the queue-write branch. It is a
+  // combinational view, not another state element, so candidate selection and
+  // enqueueCount cannot create a new path ending at a tail one-hot register.
+  val s1TailPtrOH = UIntToOH(s1TailPtr, s1QueueSize)
+  val enqueueSlotOH = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
+    VecInit(Seq.tabulate(s1QueueSize) { queueIdx =>
+      s1TailPtrOH((queueIdx - candidateIdx + s1QueueSize) % s1QueueSize)
+    }).asUInt
+  })
 
   // Allocation lanes consume compacted requests from the head of s1.
   // Keep a statically rotated view of the queue, as StdFreeList does, so the
@@ -162,6 +196,7 @@ class NewFLManager(
   val s1CanAllocateNext = s1ValidCountNext >= renameWidth.U
   val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
   val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
+  val s1TailPtrNext = addS1Ptr(s1TailPtr, enqueueCount)
 
   val selectedBitmap = (0 until renameWidth).map { laneIdx =>
     Mux(
@@ -182,12 +217,14 @@ class NewFLManager(
     s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
   }
   s1CanAllocateReg := s1CanAllocateNext
-  s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
+  s1TailPtr := s1TailPtrNext
   s1ValidCount := s1ValidCountNext
-  for (candidateIdx <- 0 until enqueueWidth) {
-    when(enqueueValid(candidateIdx)) {
-      val writePtr = addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
-      s1Queue(writePtr) := enqueueCandidates(candidateIdx)
+  for (queueIdx <- 0 until s1QueueSize) {
+    val writeLaneOH = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
+      enqueueValid(candidateIdx) && enqueueSlotOH(candidateIdx)(queueIdx)
+    })
+    when(writeLaneOH.asUInt.orR) {
+      s1Queue(queueIdx) := Mux1H(writeLaneOH, compactedCandidates)
     }
   }
 
@@ -205,14 +242,9 @@ class NewFLManager(
   // assert(PopCount(enqueueBitmap) === enqueueCount)
   // assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
   // assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
-  // for (candidateIdx <- 0 until enqueueWidth) {
+  // for (candidateIdx <- 0 until maxEnqueueWidth) {
   //   when(enqueueValid(candidateIdx)) {
-  //     assert(enqueueCandidates(candidateIdx) < numPhyRegs.U)
-  //     if (candidateIdx < renameWidth) {
-  //       assert(s0AllocBitmap(enqueueCandidates(candidateIdx)))
-  //     } else {
-  //       assert(in.freeReq(candidateIdx - renameWidth))
-  //     }
+  //     assert(compactedCandidates(candidateIdx) < numPhyRegs.U)
   //   }
   // }
 }
