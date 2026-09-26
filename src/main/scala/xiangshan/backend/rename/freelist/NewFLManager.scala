@@ -57,23 +57,13 @@ class NewFLManager(
   // timing-friendly staged FIFO scheme used by MaskFreeList.
   val s1EnqueueCapacity = s1FreeCount
 
-  // A free request is not normally visible in freeBitmap until the next
-  // cycle. Exclude it explicitly from s0 so a malformed/already-free request
-  // still cannot be captured by both sources in the same cycle. This also
-  // keeps the live free-request path independent from the s0 priority encoders.
-  val currentFreeReqBitmap = (0 until freeWidth).map { freeIdx =>
-    Mux(
-      in.freeReq(freeIdx),
-      UIntToOH(in.freePhyReg(freeIdx), numPhyRegs),
-      0.U(numPhyRegs.W)
-    )
-  }.reduce(_ | _)
-
   /** Stage 0: select up to two candidates from every bank. */
   val s0CanCapture = !in.flush
   // Selection does not depend on current FIFO capacity. Even when s1 is full,
   // capture a batch that can use space made visible in the following cycle.
-  val s0AllocBitmap = in.freeBitmap & ~reservedBitmap & ~currentFreeReqBitmap
+  // A current freeReq is not present in the registered free bitmap yet, so it
+  // cannot overlap a candidate selected here.
+  val s0AllocBitmap = in.freeBitmap & ~reservedBitmap
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
   for (bankIndex <- 0 until bankCount) {
@@ -119,21 +109,11 @@ class NewFLManager(
   // Newly released registers are not yet in this cycle's bitmap. Append
   // them after the registered bitmap candidates so they can refill s1
   // immediately. Both sources may refill during recovery; only new bitmap
-  // selection is paused. Filter duplicates against all local reservations
-  // and earlier free requests before compacting.
-  val freeCandidateValid = Wire(Vec(freeWidth, Bool()))
-  for (freeIdx <- 0 until freeWidth) {
-    val freeReg = in.freePhyReg(freeIdx)
-    val duplicateFree = if (freeIdx == 0) {
-      false.B
-    } else {
-      in.freeReq.take(freeIdx).zip(in.freePhyReg.take(freeIdx)).map {
-        case (valid, previousReg) => valid && previousReg === freeReg
-      }.reduce(_ || _)
-    }
-    freeCandidateValid(freeIdx) := in.freeReq(freeIdx) &&
-      !reservedBitmap(freeReg) && !duplicateFree
-  }
+  // selection is paused. As in StdFreeList, the free interface guarantees
+  // that valid entries are unique and are not already free. Keep validity
+  // independent of the preg value; dynamically checking reservedBitmap and
+  // comparing free lanes would put freePhyReg back on the count/control path.
+  val freeCandidateValid = in.freeReq
 
   val enqueueWidth = renameWidth + freeWidth
   val enqueueCandidates = VecInit(pendingCandidates ++ in.freePhyReg)
@@ -159,21 +139,13 @@ class NewFLManager(
     enqueueCandidateValid(candidateIdx) &&
       enqueueOffset(candidateIdx) < s1EnqueueCapacity
   })
-  private val maxEnqueueWidth = math.min(enqueueWidth, s1QueueSize)
-  val compactedCandidates = VecInit(Seq.tabulate(maxEnqueueWidth) { compactedIdx =>
-    val selectOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
-      enqueueCandidateValid(candidateIdx) &&
-        enqueueOffset(candidateIdx) === compactedIdx.U
-    })
-    Mux1H(selectOH, enqueueCandidates)
-  })
-  val enqueueValid = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
-    candidateIdx.U < enqueueCount
-  })
-  val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
+  // Pending entries were reserved when they entered the pending register.
+  // Only accepted free requests add new bits to reservedBitmap here.
+  val freeEnqueueBitmap = (0 until freeWidth).map { freeIdx =>
+    val candidateIdx = renameWidth + freeIdx
     Mux(
       rawEnqueueValid(candidateIdx),
-      UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs),
+      UIntToOH(in.freePhyReg(freeIdx), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
@@ -210,14 +182,11 @@ class NewFLManager(
     pendingCandidateBitmap := s0CandidateBitmap
   }
 
-  // Decode the existing tail pointer only on the queue-write branch. It is a
-  // combinational view, not another state element, so candidate selection and
-  // enqueueCount cannot create a new path ending at a tail one-hot register.
-  val s1TailPtrOH = UIntToOH(s1TailPtr, s1QueueSize)
-  val enqueueSlotOH = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
-    VecInit(Seq.tabulate(s1QueueSize) { queueIdx =>
-      s1TailPtrOH((queueIdx - candidateIdx + s1QueueSize) % s1QueueSize)
-    }).asUInt
+  // Each raw candidate directly targets tail + its compacted offset. Select
+  // it only once at the physical queue slot, rather than first crossing into a
+  // compacted-candidate vector and then crossing again into the circular FIFO.
+  val enqueueWritePtr = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+    addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
   })
 
   // Allocation lanes consume compacted requests from the head of s1.
@@ -267,19 +236,19 @@ class NewFLManager(
   s1TailPtr := s1TailPtrNext
   s1ValidCount := s1ValidCountNext
   for (queueIdx <- 0 until s1QueueSize) {
-    val writeLaneOH = VecInit(Seq.tabulate(maxEnqueueWidth) { candidateIdx =>
-      enqueueValid(candidateIdx) && enqueueSlotOH(candidateIdx)(queueIdx)
+    val writeCandidateOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+      rawEnqueueValid(candidateIdx) && enqueueWritePtr(candidateIdx) === queueIdx.U
     })
-    when(writeLaneOH.asUInt.orR) {
-      s1Queue(queueIdx) := Mux1H(writeLaneOH, compactedCandidates)
+    when(writeCandidateOH.asUInt.orR) {
+      s1Queue(queueIdx) := Mux1H(writeCandidateOH, enqueueCandidates)
     }
   }
 
   // Reserve the new s0 batch as soon as it enters the pending register. The
   // previous pending batch either becomes an s1 entry or is released here if
   // FIFO capacity could not accept it. Accepted freeReq candidates bypass the
-  // pending register and are reserved through enqueueBitmap.
-  reservedBitmap := (reservedBitmap | s0CandidateBitmap | enqueueBitmap) &
+  // pending register and are reserved through freeEnqueueBitmap.
+  reservedBitmap := (reservedBitmap | s0CandidateBitmap | freeEnqueueBitmap) &
     ~(pendingUnusedBitmap | s1DequeuedBitmap)
 
   // when(!in.flush) {
@@ -291,12 +260,12 @@ class NewFLManager(
   // assert(s1ValidCount <= s1QueueSize.U)
   // assert(s1DequeueCount <= s1ValidCount)
   // assert(enqueueCount <= s1EnqueueCapacity)
-  // assert(PopCount(enqueueBitmap) === enqueueCount)
+  // assert(PopCount(freeEnqueueBitmap) === PopCount(rawEnqueueValid.drop(renameWidth)))
   // assert(s1HeadPtrOH === UIntToOH(s1HeadPtr, s1QueueSize))
   // assert(s1TailPtr === addS1Ptr(s1HeadPtr, s1ValidCount))
-  // for (candidateIdx <- 0 until maxEnqueueWidth) {
-  //   when(enqueueValid(candidateIdx)) {
-  //     assert(compactedCandidates(candidateIdx) < numPhyRegs.U)
+  // for (candidateIdx <- 0 until enqueueWidth) {
+  //   when(rawEnqueueValid(candidateIdx)) {
+  //     assert(enqueueCandidates(candidateIdx) < numPhyRegs.U)
   //   }
   // }
 }
