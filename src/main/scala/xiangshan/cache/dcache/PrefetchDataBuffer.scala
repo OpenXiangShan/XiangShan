@@ -18,9 +18,11 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.{ClientMetadata, ClientStates, TLPermissions}
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.L1CacheErrorInfo
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
-class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
+class PrefetchDataBuffer(
+  enableMoveToDCacheOverride: Option[Boolean] = None
+)(implicit p: Parameters) extends DCacheModule {
   require(PBEntries > 0)
   require(cfg.blockBytes * 8 % VLEN == 0)
   private val entryCount = PBEntries
@@ -145,6 +147,12 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
   // ========================================================================
   // Move/Release
   // ========================================================================
+  // 默认关闭 Load 使用后的后台搬运；Store 命中触发的必要搬运不受此开关影响。
+  val enableMoveToDCache = enableMoveToDCacheOverride match {
+    case Some(enable) => enable.B
+    case None => Constantin.createRecord(
+      s"enablePDBMoveToDCache${p(XSCoreParamsKey).HartId}", initValue = false)
+  }
   val moveSelValid = RegInit(false.B)
   val moveSelId = RegInit(0.U(PBIdBits.W))
   val relSelValid = RegInit(false.B)
@@ -153,24 +161,27 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
   val entryProbeLock = Wire(Vec(entryCount, Bool()))
   val entryStoreLock = Wire(Vec(entryCount, Bool()))
 
-  val moveRelEnable = !io.dcache.wfi.wfiReq || allocBlocked
+  val releasePressure = io.mshr.refillWait && !allocReady
+  val moveScheduleEnable = enableMoveToDCache && (!io.dcache.wfi.wfiReq || releasePressure)
+  val releaseScheduleEnable = releasePressure && !entryReleased.asUInt.orR
   val entryNeedMove = VecInit(entryMeta.indices.map(i =>
     entryReadable(i) && entryMeta(i).movePending
   ))
   val entryNeedRel = VecInit(entryMeta.indices.map { i =>
     val meta = entryMeta(i)
-    !entryNeedMove(i) && (meta.state === PBState.poison ||
-      meta.state === PBState.resident && allocBlocked)
+    meta.state === PBState.poison || meta.state === PBState.resident &&
+      (!enableMoveToDCache || !entryNeedMove(i))
   })
 
   val entrySelected = VecInit(entryMeta.indices.map(i =>
     moveSelValid && moveSelId === i.U || relSelValid && relSelId === i.U))
-  val entryCanSelect = VecInit(entryMeta.indices.map(i => moveRelEnable &&
+  val entryCanSelect = VecInit(entryMeta.indices.map(i =>
     !entrySelected(i) && !entryProbeLock(i) && !entryStoreLock(i)))
 
   // Move
   val moveArb = Module(new RRArbiter(UInt(PBIdBits.W), entryCount))
-  val moveMask = VecInit(entryMeta.indices.map(i => entryCanSelect(i) && entryNeedMove(i)))
+  val moveMask = VecInit(entryMeta.indices.map(i =>
+    moveScheduleEnable && entryCanSelect(i) && entryNeedMove(i)))
   val moveSelReady = Wire(Bool())
 
   for (i <- entryMeta.indices) {
@@ -179,20 +190,21 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
   }
   moveArb.io.out.ready := moveSelReady
 
-  val moveS0Valid = moveSelValid && entryNeedMove(moveSelId) && moveRelEnable
+  val moveS0Valid = moveSelValid && entryNeedMove(moveSelId) && moveScheduleEnable
   val moveS0Fire = moveS0Valid && io.pipe.s0_moveReq.ready
   val moveTaken = entryProbeLock(moveSelId) || entryStoreLock(moveSelId)
   val moveSelFire = moveSelReady && moveArb.io.out.valid
   val entryMoveLock = VecInit(entryMeta.indices.map(i => moveS0Fire && moveSelId === i.U))
 
   moveSelReady := !moveSelValid || !moveS0Valid || moveS0Fire || moveTaken
-  
+
   when (moveSelReady) { moveSelValid := moveArb.io.out.valid }
   when (moveSelFire) { moveSelId := moveArb.io.out.bits }
 
   // Release
   val relArb = Module(new RRArbiter(UInt(PBIdBits.W), entryCount))
-  val relMask = VecInit(entryMeta.indices.map(i => entryCanSelect(i) && entryNeedRel(i)))
+  val relMask = VecInit(entryMeta.indices.map(i =>
+    releaseScheduleEnable && entryCanSelect(i) && entryNeedRel(i)))
   val relSelReady = Wire(Bool())
 
   for (i <- entryMeta.indices) {
@@ -201,15 +213,26 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
   }
   relArb.io.out.ready := relSelReady
 
-  val relValid = relSelValid && entryNeedRel(relSelId) && moveRelEnable
+  val relValid = relSelValid && entryNeedRel(relSelId) && releaseScheduleEnable
   val relFire = relValid && io.releaseReq.ready
   val relTaken = entryProbeLock(relSelId) || entryStoreLock(relSelId)
   val relSelFire = relSelReady && relArb.io.out.valid
 
-  relSelReady := !relSelValid || !relValid || relFire || relTaken
+  relSelReady := !relSelValid || !relValid || relTaken
 
-  when (relSelReady) { relSelValid := relArb.io.out.valid }
+  when (relFire) {
+    relSelValid := false.B
+  }.elsewhen (relSelReady) {
+    relSelValid := relArb.io.out.valid
+  }
   when (relSelFire) { relSelId := relArb.io.out.bits }
+
+  assert(!moveS0Fire || enableMoveToDCache,
+    "PDB background move fired while move-to-dcache is disabled")
+  assert(!relSelFire || releasePressure,
+    "PDB release selected without a completed MissQueue refill waiting for space")
+  assert(!relFire || releasePressure,
+    "PDB release fired without a completed MissQueue refill waiting for space")
 
   val relData = entryData(relSelId)
   val relDataBad = entryMeta(relSelId).dataBad
@@ -271,9 +294,9 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
     pipeS1MatchOH.zip(entryReadable).map { case (m, r) => m && r }.reduce(_ || _)
   val pipeS1HasOwner = pipeS1MatchOH.zip(entryReserved).map { case (m, r) => m && !r }.reduce(_ || _)
   val pipeS1Ready = !pipeS2Valid || io.pipe.s2_dataResp.ready
-  
+
   pipeS1Fire := pipeS1Query && pipeS1Ready
-  
+
   val storeS1Fire = pipeS1Fire && !pipeS1IsProbe && !pipeS1IsMove && io.pipe.s1_storeReq
   val storeS1AliasMatch = if (blockOffBits + idxBits > pgIdxBits) {
     io.pipe.s1_alias === get_alias(entryMeta(pipeS1MatchId).vaddr)
@@ -284,7 +307,7 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
     !(relFire && pipeS1MatchOH(relSelId))
   val storeS1AliasMismatch = storeS1Fire && pipeS1Hit && !storeS1AliasMatch &&
     !(relFire && pipeS1MatchOH(relSelId))
-  
+
   entryStoreLock := VecInit(entryMeta.indices.map(i => storeS1Lock && pipeS1MatchOH(i)))
 
   val pipeS1ReadId = Mux(pipeS1IsMove, pipeS1MoveId, pipeS1MatchId)
@@ -555,6 +578,7 @@ class PrefetchBuffer(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("evict", relFire)
   XSPerfAccumulate("full", allocBlocked)
   XSPerfAccumulate("capacity_full_cycles", !freeEntryOH.orR)
+  XSPerfAccumulate("release_pressure_cycles", releasePressure)
   XSPerfAccumulate("maint_entry_wait_cycles", moveS0Valid && !io.pipe.s0_moveReq.ready)
   XSPerfAccumulate("release_wait_cycles", relValid && !io.releaseReq.ready)
   XSPerfAccumulate("line_response_wait_cycles", pipeS2Valid && !io.pipe.s2_dataResp.ready)
