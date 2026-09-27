@@ -94,6 +94,8 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 {
   private val useExternalLLC = p(UseExternalLLCKey)
   require(!useExternalLLC || isOpenLLC, "External LLC requires LLC=OpenLLC")
+  private val useWolvicZj = p(UseWolvicZjKey)
+  require(!useWolvicZj || isZhuJiang, "WolvicZj requires LLC=ZhuJiang")
 
   val nocMisc = Some(LazyModule(new MemMisc()))
   val misc: MemMisc = nocMisc.get
@@ -375,9 +377,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         EnableHWMoniter = false
       )
     }
-    val zhujiang_opt = Option.when(isZhuJiang)(
+    val zhujiang_opt = Option.when(isZhuJiang && !useWolvicZj)(
       withClockAndReset(io.clock, io.reset) {
         Module(new Zhujiang()(zhujiangParams))
+      }
+    )
+    val wolvicZj_opt = Option.when(isZhuJiang && useWolvicZj)(
+      withClockAndReset(io.clock, io.reset) {
+        val periParams = zhujiangCfgMasters.map(_.out.head._1.params)
+        // tile 侧 decoupledCHI 在 ZhuJiang 模式下关 DataCheck/Poison（上文本类
+        // core_with_l2 的 alter），BlackBox 端口须用同参数 elaborate
+        val bbParams = p.alter((site, here, up) => {
+          case CHIDataCheckKey => "none"
+          case CHIPoisonKey => false
+        })
+        Module(new WolvicZjBB(NumCores, zhujiangMemMaster.get.out.head._1.params, periParams)(bbParams))
       }
     )
 
@@ -564,6 +578,26 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
         }
         zj.dmaIO.foreach { axi => axi := DontCare }
         zj.hwaIO.foreach { axi => axi := DontCare }
+
+        core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
+        core_with_l2.foreach(_.module.io.l3Miss := false.B)
+      }
+    }
+
+    wolvicZj_opt.foreach { wj =>
+      withClockAndReset(io.clock, io.reset) {
+        wj.io.clock := io.clock
+        wj.io.reset := io.reset.asBool
+        // wolvicmod 模型内含 flit remap 与 Socket 两半，tile 直连 BlackBox
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          wj.io.rn(i) <> core.module.io.decoupledCHI.get
+        }
+        val (zjMemAxi, _) = zhujiangMemMaster.get.out.head
+        zjMemAxi <> wj.io.ddrc.viewAs[AXI4Bundle]
+        wj.io.peri.zip(zhujiangCfgMasters).foreach { case (peri, master) =>
+          val (cfgAxi, _) = master.out.head
+          cfgAxi <> peri.viewAs[AXI4Bundle]
+        }
 
         core_with_l2.foreach(_.module.io.debugTopDown.l3MissMatch := false.B)
         core_with_l2.foreach(_.module.io.l3Miss := false.B)

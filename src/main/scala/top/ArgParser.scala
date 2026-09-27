@@ -51,6 +51,7 @@ object ArgParser {
       |--disable-perf
       |--disable-alwaysdb
       |--external-llc
+      |--wolvic-zj
       |--enable-dfx
       |--enable-simfrontend
       |--imsic-bus-type <NONE|TL|AXI>
@@ -156,6 +157,10 @@ object ArgParser {
         case "--external-llc" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case UseExternalLLCKey => true
+          }), tail)
+        case "--wolvic-zj" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case UseWolvicZjKey => true
           }), tail)
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {

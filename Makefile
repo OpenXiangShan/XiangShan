@@ -155,6 +155,11 @@ endif
 # LLC backend selection
 COMMON_EXTRA_ARGS += --llc $(LLC)
 
+# wolvicmod ZhuJiang L3 model (BlackBox + DPI-C, requires LLC=ZhuJiang)
+ifeq ($(WOLVIC_ZJ),1)
+COMMON_EXTRA_ARGS += --wolvic-zj
+endif
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
