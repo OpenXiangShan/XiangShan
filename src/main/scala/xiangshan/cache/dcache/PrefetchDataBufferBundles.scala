@@ -99,6 +99,7 @@ class PBMSHRIO(implicit p: Parameters) extends DCacheBundle {
   val allocEntryId = Output(UInt(PBIdBits.W))
   val cancelReq = Input(Vec(cfg.nMissEntries, ValidIO(UInt(PBIdBits.W))))
   val refillReq = Flipped(DecoupledIO(new PBRefillReq))
+  val refillWait = Input(Bool())
   val status = Output(Vec(PBEntries, ValidIO(UInt(PAddrBits.W))))
   val preAcquire = Input(Vec(cfg.nMissEntries, Bool()))
 }

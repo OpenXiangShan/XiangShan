@@ -444,6 +444,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val pbSlot = Input(UInt(PBIdBits.W))
     val pbFill = Decoupled(new PBRefillReq)
     val pbRefillDone = Input(Bool())
+    val pbRefillWait = Output(Bool())
     val pbPreA = Output(Bool())
     val pbOwner = Output(Valid(UInt(PAddrBits.W)))
     // this entry is free and can be allocated to new reqs
@@ -762,6 +763,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.pbPreA := req_valid && toPB && !s_acquire && !io.mem_acquire.fire && !io.acquire_fired_by_pipe_reg
   io.pbOwner.valid := req_valid && toPB && !pbCompleted && (w_grantfirst || io.mem_grant.fire)
   io.pbOwner.bits := req.addr
+  io.pbRefillWait := io.pbAlloc.valid && w_grantlast
 
   // Wire to hold updated data that has merged grant data (on grant.fire)
   val refill_and_store_data_update = Wire(Vec(blockRows, UInt(rowBits.W)))
@@ -1108,7 +1110,7 @@ for(i <- 0 until reqNum) {
   when (io.mem_grant.fire && refill_done) { pb_data_cycle := pb_cycle }
   XSPerfAccumulate("pb_mshr_alloc", pb_new_mshr)
   XSPerfAccumulate("pb_reservation_wait_cycles", req_valid && toPB && !pbReserved)
-  XSPerfAccumulate("pb_data_ready_no_slot_cycles", req_valid && toPB && w_grantlast && !pbReserved)
+  XSPerfAccumulate("pb_data_ready_no_slot_cycles", io.pbRefillWait)
   XSPerfAccumulate("pb_fill_arb_wait_cycles", io.pbFill.valid && !io.pbFill.ready)
   XSPerfAccumulate("pb_merge_reserved", pbMerge && pbReserved)
   XSPerfAccumulate("pb_merge_unreserved", pbMerge && !pbReserved)
@@ -1762,8 +1764,14 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         actual_target_mshr_for_group(i) === pipe.mshr_id
     }.reduce(_ || _)
   })
+  val pbRefillWaitVec = VecInit(entries.map(_.io.pbRefillWait))
+  val pbRefillWait = pbRefillWaitVec.asUInt.orR
   val pb_alloc_arb = Module(new RRArbiter(new PBAlloc, cfg.nMissEntries))
-  pb_alloc_arb.io.in.zip(entries).foreach { case (port, entry) => port <> entry.io.pbAlloc }
+  pb_alloc_arb.io.in.zip(entries).zip(pbRefillWaitVec).foreach { case ((port, entry), waitForRefill) =>
+    port.valid := entry.io.pbAlloc.valid && (!pbRefillWait || waitForRefill)
+    port.bits := entry.io.pbAlloc.bits
+    entry.io.pbAlloc.ready := port.ready && (!pbRefillWait || waitForRefill)
+  }
   io.pb.allocReq <> pb_alloc_arb.io.out
   entries.foreach(_.io.pbSlot := io.pb.allocEntryId)
 
@@ -1772,6 +1780,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   pb_fill_arb.io.in.zip(entries).foreach { case (port, entry) => port <> entry.io.pbFill }
   pb_fill_queue.io.enq <> pb_fill_arb.io.out
   io.pb.refillReq <> pb_fill_queue.io.deq
+  io.pb.refillWait := pbRefillWait
+  assert(!io.pb.refillWait || io.pb.allocReq.valid,
+    "a PDB refill waiter must participate in allocation arbitration")
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   val VLENB = VLEN / 8

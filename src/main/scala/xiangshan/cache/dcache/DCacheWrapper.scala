@@ -1117,7 +1117,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   prefetchUseTracker.io.invalidate.bits.set := mainPipe.io.meta_write.bits.idx
   prefetchUseTracker.io.invalidate.bits.way := OHToUInt(mainPipe.io.meta_write.bits.way_en)
   if (PBEntries > 0) {
-    val pb = Module(new PrefetchBuffer)
+    val pb = Module(new PrefetchDataBuffer())
 
     for (lane <- 0 until LoadPipelineWidth) {
       val select = VecInit((0 until PBEntries).map(i => pb.io.dcache.perf.firstUse(i).valid &&
