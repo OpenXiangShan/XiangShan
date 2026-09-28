@@ -225,7 +225,7 @@ src/test/python/Frontend/scripts/run_random_regression_suite.sh nightly
 
 - `tests/py/zhaoxinran/translation/test_translation_random_regression_dut.py` 保留原始的
   fault-inclusive 随机流。
-- `tests/py/icache/test_translation_random_regression_filtered_dut.py` 默认过滤
+- `tests/py/icache/random_dut/test_translation_random_regression_filtered_dut.py` 默认过滤
   已知会产生 translation fault 的场景；设置
   `TB_TRANSLATION_RANDOM_ALLOW_FAULTS=1` 可显式包含这些场景。
 

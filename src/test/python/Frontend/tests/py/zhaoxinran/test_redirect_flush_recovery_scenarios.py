@@ -17,8 +17,8 @@ from env.core.transactions import BackendRedirectClass, RedirectTxn, ProgramImag
 from env.sequences import InjectRedirectSequence, LoadProgramSequence
 from env.support import record_scenario, scenario_rng
 from tests.py.jiabowen import test_ifu_predchecker_v3_dut as predchecker
-from tests.py.icache import test_icache_lowrisk_gap_closure_dut as lowrisk
-from tests.py.icache import test_icache_mainpipe_s1_flush_closure_dut as s1_flush
+from tests.py.icache.directed_dut import test_icache_lowrisk_gap_closure_dut as lowrisk
+from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1_flush
 from tests.py.zhaoxinran.translation import test_instruction_fetch_permission_boundary as faults
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.zhaoxinran.uncache import test_instr_uncache_port_boundaries as uncache_tests

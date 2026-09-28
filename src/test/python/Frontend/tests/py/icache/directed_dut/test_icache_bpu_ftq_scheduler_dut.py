@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from tests.py.icache import test_icache_mainpipe_s0_flush_closure_dut as s0
-from tests.py.icache import test_icache_mainpipe_s1_flush_closure_dut as s1
+from tests.py.icache.directed_dut import test_icache_mainpipe_s0_flush_closure_dut as s0
+from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1
 
 
 pytestmark = pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")

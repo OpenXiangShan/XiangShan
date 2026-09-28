@@ -22,7 +22,7 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import _c_j
 from tests.py.zhaoxinran.test_multi_branch import (
     test_large_loop_multi_segment as _run_large_loop,
 )
-from tests.py.icache.test_icache_mainpipe_s0_flush_closure_dut import (
+from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut import (
     _initialize_bpu_s3_stream,
     _restore_predictors,
     _s0_sampling_window,
