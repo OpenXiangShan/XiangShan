@@ -257,14 +257,16 @@ class MainBtbAlignBank(
 
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
-      branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
+      branch.valid && branch.bits.attribute.isConditional && meta.hit(branch.bits)
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
 
-    t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
-    t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
+    val newCounter = Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
+    // skip the counter write if the value does not change (e.g. already saturated on this direction)
+    t1_counterWayMask(i) := (entryOverridden || hitMask.reduce(_ || _)) && newCounter =/= meta.counter
+    t1_newCounters(i)    := newCounter
   }
   private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
     val hitMask = t1_branches.map(branch =>

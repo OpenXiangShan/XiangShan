@@ -21,7 +21,6 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.SaturateCounter
-import xiangshan.frontend.bpu.WriteBuffer
 
 class MainBtbInternalBank(
     alignIdx: Int,
@@ -118,23 +117,8 @@ class MainBtbInternalBank(
     suffix = Option("bpu_mbtb_counter")
   )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
 
-  private val entryWriteBuffer = Module(new WriteBuffer(
-    new MainBtbEntrySramWriteReq,
-    numEntries = WriteBufferSize,
-    numPorts = NumWay,
-    hasReadBypass = true,
-    nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
-  ))
-
-  private val counterWriteBuffer = Module(new WriteBuffer(
-    new MainBtbCounterSramWriteReq,
-    numEntries = WriteBufferSize,
-    numPorts = 1,
-    numWays = NumWay,
-    hasWayMask = true,
-    hasReadBypass = true,
-    nameSuffix = s"mbtbCounterAlign${alignIdx}_Bank${bankIdx}"
-  ))
+  private val writeBuffer = Module(new MainBtbWriteBuffer)
+  writeBuffer.suggestName(s"mbtb_writebuffer_align${alignIdx}_bank${bankIdx}")
 
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
 
@@ -144,89 +128,65 @@ class MainBtbInternalBank(
     sram.io.r.req.valid       := read.req.valid
     sram.io.r.req.bits.setIdx := read.req.bits.setIdx
   }
-  entryWriteBuffer.io.readBypass.get.req.valid   := read.req.valid
-  entryWriteBuffer.io.readBypass.get.req.bits    := read.req.bits.setIdx
-  counterWriteBuffer.io.readBypass.get.req.valid := read.req.valid
-  counterWriteBuffer.io.readBypass.get.req.bits  := read.req.bits.setIdx
-  private val entryWriteBufferResp   = entryWriteBuffer.io.readBypass.get.resp
-  private val counterWriteBufferResp = counterWriteBuffer.io.readBypass.get.resp.head
+  writeBuffer.io.readBypass.req.valid := read.req.valid
+  writeBuffer.io.readBypass.req.bits  := read.req.bits.setIdx
+  private val bypass = writeBuffer.io.readBypass.resp
   // each entry sram template has 1 way, so here we only read data.head
-  read.resp.entries := VecInit(entrySrams.zip(entryWriteBufferResp).map { case (sram, bufferResp) =>
-    Mux(bufferResp.valid, bufferResp.bits.entry, sram.io.r.resp.data.head)
+  read.resp.entries := VecInit(entrySrams.zipWithIndex.map { case (sram, wayIdx) =>
+    Mux(bypass.valid && bypass.entryWayMask(wayIdx), bypass.entries(wayIdx), sram.io.r.resp.data.head)
   })
   read.resp.counters := VecInit(counterSram.io.r.resp.data.zipWithIndex.map { case (sramCounter, wayIdx) =>
-    Mux(
-      counterWriteBufferResp.valid && counterWriteBufferResp.bits.wayMask.get(wayIdx),
-      counterWriteBufferResp.bits.wayData.get(wayIdx).asTypeOf(TakenCounter()),
-      sramCounter
-    )
+    Mux(bypass.valid && bypass.counterMask(wayIdx), bypass.counters(wayIdx), sramCounter)
   })
 
   /* *** writeBuffer -> sram *** */
-  // entry
-  (entrySrams zip entryWriteBuffer.io.read).foreach { case (way, bufRead) =>
-    way.io.w.req.valid        := bufRead.valid && !way.io.r.req.valid
-    way.io.w.req.bits.data(0) := bufRead.bits.entry
-    way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
-    bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
+  private val drainBits = writeBuffer.io.drain.bits
+  entrySrams.zipWithIndex.foreach { case (way, wayIdx) =>
+    way.io.w.req.valid        := writeBuffer.io.drain.valid && drainBits.entryWayMask(wayIdx) && !way.io.r.req.valid
+    way.io.w.req.bits.data(0) := drainBits.entries(wayIdx)
+    way.io.w.req.bits.setIdx  := drainBits.setIdx
   }
-  // counter
-  counterSram.io.w.req.valid := counterWriteBuffer.io.read.head.valid && !counterSram.io.r.req.valid
-  counterSram.io.w.req.bits.data :=
-    VecInit(counterWriteBuffer.io.read.head.bits.wayData.get.map(_.asTypeOf(TakenCounter())))
-  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.read.head.bits.setIdx
-  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.read.head.bits.wayMask.get.asUInt
-  counterWriteBuffer.io.read.head.ready := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
+  counterSram.io.w.req.valid := writeBuffer.io.drain.valid && drainBits.counterMask.orR && !counterSram.io.r.req.valid
+  counterSram.io.w.req.bits.data        := drainBits.counters
+  counterSram.io.w.req.bits.setIdx      := drainBits.setIdx
+  counterSram.io.w.req.bits.waymask.get := drainBits.counterMask
+  private val entrySramReady = VecInit((0 until NumWay).map { wayIdx =>
+    !drainBits.entryWayMask(wayIdx) || entrySrams(wayIdx).io.w.req.ready
+  }).asUInt.andR
+  private val counterSramReady = !drainBits.counterMask.orR || counterSram.io.w.req.ready
+  writeBuffer.io.drain.ready := entrySramReady && counterSramReady && !read.req.valid
 
   /* *** io -> writeBuffer *** */
-  // entry
-  private val conflict =
-    writeEntry.req.valid &&
-      writeEntry.req.bits.setIdx === flush.req.bits.setIdx &&
-      writeEntry.req.bits.entry.tag === 0.U
+  // single write port: training (entry + counter) takes priority over a multi-hit flush. A flush
+  // that loses arbitration is dropped; it is re-detected on the next access to that set.
+  private val trainingValid = writeEntry.req.valid || writeCounter.req.valid
 
-  entryWriteBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
-    val writeValid = writeEntry.req.valid && writeEntry.req.bits.wayMask(i)
-    val flushValid = flush.req.valid && flush.req.bits.wayMask(i) && !conflict
-    val valid      = writeValid || flushValid
-    bufWrite.valid := RegNext(valid, false.B)
-    bufWrite.bits.setIdx := RegEnable(
-      Mux(
-        writeValid,
-        writeEntry.req.bits.setIdx,
-        flush.req.bits.setIdx
-      ),
-      valid
-    )
-    bufWrite.bits.entry := RegEnable(
-      Mux(
-        writeValid,
-        writeEntry.req.bits.entry,
-        0.U.asTypeOf(new MainBtbEntry)
-      ),
-      valid
-    )
-  }
-  // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.write.head.valid            := writeCounter.req.valid
-  counterWriteBuffer.io.write.head.bits.setIdx      := writeCounter.req.bits.setIdx
-  counterWriteBuffer.io.write.head.bits.wayMask.get := VecInit(writeCounter.req.bits.wayMask.asBools)
-  counterWriteBuffer.io.write.head.bits.wayData.get := VecInit(writeCounter.req.bits.counters.map(_.asUInt))
-
-  private val perfEntryOverwrite = entryWriteBuffer.io.overwrite.reduce(_ || _)
-
-  XSPerfAccumulate(
-    "multihit_write_conflict",
-    writeEntry.req.valid && flush.req.valid && writeEntry.req.bits.setIdx === flush.req.bits.setIdx &&
-      (writeEntry.req.bits.wayMask & flush.req.bits.wayMask).orR
+  writeBuffer.io.write.valid := trainingValid || flush.req.valid
+  writeBuffer.io.write.bits.setIdx := Mux(
+    trainingValid,
+    Mux(writeEntry.req.valid, writeEntry.req.bits.setIdx, writeCounter.req.bits.setIdx),
+    flush.req.bits.setIdx
+  )
+  writeBuffer.io.write.bits.entryWayMask := Mux(
+    trainingValid,
+    Mux(writeEntry.req.valid, writeEntry.req.bits.wayMask, 0.U),
+    flush.req.bits.wayMask
+  )
+  writeBuffer.io.write.bits.entry := Mux(
+    trainingValid,
+    writeEntry.req.bits.entry,
+    0.U.asTypeOf(new MainBtbEntry)
+  )
+  writeBuffer.io.write.bits.counterMask := Mux(
+    trainingValid,
+    Mux(writeCounter.req.valid, writeCounter.req.bits.wayMask, 0.U),
+    0.U
+  )
+  writeBuffer.io.write.bits.counters := Mux(
+    trainingValid,
+    writeCounter.req.bits.counters,
+    0.U.asTypeOf(Vec(NumWay, TakenCounter()))
   )
 
-  XSPerfAccumulate(
-    "counter_writebuffer_overwrite",
-    counterWriteBuffer.io.overwrite.head
-  )
-  XSPerfAccumulate(
-    "entry_writebuffer_overwrite",
-    perfEntryOverwrite
-  )
+  XSPerfAccumulate("multihit_flush_dropped", flush.req.valid && trainingValid)
 }

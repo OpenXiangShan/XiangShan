@@ -25,7 +25,6 @@ import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
-import xiangshan.frontend.bpu.WriteReqBundle
 
 object TakenCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -52,22 +51,6 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val targetLowerBits: UInt                = UInt(TargetWidth.W)
 
 //  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
-}
-
-class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx:       UInt         = UInt(SetIdxLen.W)
-  val entry:        MainBtbEntry = new MainBtbEntry
-  override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
-  override def compareBits: Option[UInt] = {
-    val base = Cat(entry.attribute.asUInt, entry.targetLowerBits)
-    Some(entry.targetCarry.map(carry => Cat(base, carry.value)).getOrElse(base))
-  }
-}
-
-class MainBtbCounterSramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
-  val setIdx:           UInt              = UInt(SetIdxLen.W)
-  override val wayMask: Option[Vec[Bool]] = Some(Vec(NumWay, Bool()))
-  override val wayData: Option[Vec[UInt]] = Some(Vec(NumWay, UInt(TakenCntWidth.W)))
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
