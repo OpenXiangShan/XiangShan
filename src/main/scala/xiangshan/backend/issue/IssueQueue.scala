@@ -7,6 +7,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.EntryBundles._
+import xiangshan.backend.datapath.DataConfig.VlData
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
@@ -340,6 +341,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           v0SrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcV0.get
           v0SrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
       }
+      enq.bits.status.srcStatusOldVd.foreach {
+        srcStatusOldVd =>
+          srcStatusOldVd.srcState                               := s0_enqBits(enqIdx).oldVdSrcState.get
+          srcStatusOldVd.psrc                                   := s0_enqBits(enqIdx).oldVdPsrc.get
+      }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
       enq.bits.status.firstIssue                                := true.B
@@ -389,6 +395,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     vecWBIndices.map{ case i =>
       entriesIO.wakeUpFromWB(i) := io.wakeupFromWB(i)
       entriesIO.wakeUpFromWBDelayed(i) := io.wakeupFromWBDelayed(i)
+    }
+    val vlWBIndices = io.wakeupFromWB.zipWithIndex.filter(_._1.bits.dataConfig.isInstanceOf[VlData]).map(_._2)
+    if (params.readVlRf) {
+      vlWBIndices.map { case i =>
+        entriesIO.wakeUpFromWB(i) := io.wakeupFromWB(i)
+        entriesIO.wakeUpFromWBDelayed(i) := io.wakeupFromWBDelayed(i)
+      }
     }
     if (params.inVfSchd){
       entriesIO.wakeUpFromWB                                    := io.wakeupFromWB

@@ -74,6 +74,8 @@ case class IssueBlockParams(
 
   def needLoadDependency: Boolean = exuBlockParams.map(_.needLoadDependency).reduce(_ || _)
 
+  def needVPUCtrl: Boolean = exuBlockParams.exists(_.needVPUCtrl)
+
   def numExu: Int = exuBlockParams.count(!_.fakeUnit)
 
   def numIntSrc: Int = exuBlockParams.map(_.numIntSrc).max
@@ -103,6 +105,10 @@ case class IssueBlockParams(
   def readV0Rf: Boolean = numV0Src > 0
 
   def readVlRf: Boolean = numVlSrc > 0
+
+  // Vector loads are issued from the integer scheduler, but may need the old
+  // vector destination later when the load result is merged in VecRegion.
+  def needOldVdLazyRead: Boolean = exuBlockParams.exists(exu => exu.hasLoadFu && exu.writeVecRf)
 
   def writeIntRf: Boolean = exuBlockParams.map(_.writeIntRf).reduce(_ || _)
 
@@ -333,7 +339,11 @@ case class IssueBlockParams(
 
   def needWakeupFromFpWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readFpRf).groupBy(x => x.getFpWBPort.getOrElse(FpWB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromVfWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVecRf).groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromVfWBPort = backendParam.allExuParams
+    .filter(x => (this.readVecRf || this.needOldVdLazyRead) &&
+      (this.needOldVdLazyRead || !wakeUpInExuSources.map(_.name).contains(x.name)))
+    .groupBy(x => x.getVfWBPort.getOrElse(VfWB(port = -1)).port)
+    .filter(_._1 != -1)
 
   def needWakeupFromV0WBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readV0Rf).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
 
@@ -486,7 +496,7 @@ case class IssueBlockParams(
       case _ => Seq()
     }
     val vfBundle = schdType match {
-      case VecScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VecData()))).toSeq
+      case IntScheduler() | VecScheduler() => needWakeupFromVfWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VecData()))).toSeq
       case _ => Seq()
     }
     val v0Bundle = schdType match {

@@ -134,6 +134,9 @@ class LoadPipeBundle(
   val vecBaseVaddr = Option.when(param.hasVector)(UInt(VAddrBits.W))
   val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W)) // only used in s1 & s2, to generate vstart
   val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
+  val vlByteMask = Option.when(param.hasVector)(UInt((VLEN / 8).W))
+  val vlBytes = Option.when(param.hasVector)(UInt(log2Ceil(VLEN / 8 + 1).W))
+  val useVstart = Option.when(param.hasVector)(Bool())
 
   // To optimize timing, part of the combinational logic is precomputed in advance
   // S1 -> S2
@@ -188,6 +191,9 @@ class LoadPipeBundle(
     vecBaseVaddr.get := 0.U
     vecVaddrOffset.get := 0.U
     vecTriggerMask.get := 0.U
+    vlByteMask.foreach(_ := 0.U)
+    vlBytes.foreach(_ := 0.U)
+    useVstart.foreach(_ := false.B)
   }
   def isFirstIssue(): Bool = {
     LoadEntrance.isScalarIssue(entrance) || LoadEntrance.isVectorIssue(entrance)

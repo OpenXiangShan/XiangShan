@@ -30,6 +30,7 @@ case class ExeUnitParams(
   v0WB          : V0WB = null,
   vlRD          : VlRD = null,
   vlWB          : VlWB = null,
+  oldVdRD       : VfRD = null,
 )(
   implicit
   val schdType: SchedulerType,
@@ -64,6 +65,7 @@ case class ExeUnitParams(
   val readVfRf: Boolean = numVfSrc > 0
   val readV0Rf: Boolean = fuConfigs.exists(_.readV0)
   val readVlRf: Boolean = fuConfigs.exists(_.readVl)
+  val readVstart: Boolean = hasLoadFu
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)
@@ -104,6 +106,8 @@ case class ExeUnitParams(
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
+  // Vector loads keep the old vector destination for the merge in VecRegion.
+  def needOldVdLazyRead = hasLoadFu && writeVecRf
   val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)

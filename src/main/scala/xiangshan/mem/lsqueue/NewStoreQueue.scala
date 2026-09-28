@@ -1099,6 +1099,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     writeBackToRob.trigger.foreach(_ := DontCare)
     writeBackToRob.isRVC.foreach(_ := DontCare)
     writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
+    writeBackToRob.vLoadMeta.foreach(_ := 0.U.asTypeOf(new xiangshan.backend.Bundles.VLoadMeta))
     // for difftest, ref will skip mmio store
     writeBackToRob.debugInfo := DontCare
     writeBackToRob.debugInfo.vaddr.foreach(_ := dataEntries.head.debugVaddr.get)
@@ -1120,8 +1121,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     io.exceptionInfo.bits.isForVSnonLeafPTE := false.B
     io.exceptionInfo.bits.vaNeedExt    := true.B
     io.exceptionInfo.bits.uopIdx       := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
-    io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
-    io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
     io.exceptionInfo.bits.isHyper      := dataEntries.head.isHyper
 
     /*============================================ cacheable handle ==================================================*/
@@ -1926,7 +1925,6 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
     val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
-    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
 
     // !isLastRequest && cross16Byte means it is first request of cross 16B unalign  --> save paddr
     //  isLastRequest && cross16Byte means it is second request of cross 16B unalign --> not save paddr
@@ -1938,7 +1936,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
       dataEntries(stWbIdx).byteMask  := Mux(
         isVecMemContinousOp,
-        byteMaskFromSize,
+        storeAddrIn.bits.mask,
         UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
       )
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size

@@ -38,23 +38,19 @@ class MemExceptionInfo(implicit p: Parameters) extends XSBundle {
   val vaddr             = UInt(XLEN.W)
   val vaNeedExt         = Bool()
   val isHyper           = Bool()
-  val vstart            = UInt((log2Up(VLEN) + 1).W)
-  val vl                = UInt((log2Up(VLEN) + 1).W)
   val gpaddr            = UInt(GPAddrBits.W)
   val isForVSnonLeafPTE = Bool()
 }
 
 class ExceptionOut(implicit p: Parameters) extends XSBundle {
   val vaddr             = Output(UInt(XLEN.W))
-  val vstart            = Output(UInt((log2Up(VLEN) + 1).W))
-  val vl                = Output(UInt((log2Up(VLEN) + 1).W))
   val gpaddr            = Output(UInt(GPAddrBits.W))
   val isForVSnonLeafPTE = Output(Bool())
 }
 
 class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper{
-  // loadUnit, storeUnit, storeQueue Uncache, LoadQueue Uncache, Atomic
-  private val enqPortNum = StorePipelineWidth + LoadPipelineWidth + 1 + 1 + 1
+  // loadUnit, vector loadUnit, storeUnit, storeQueue Uncache, LoadQueue Uncache, Atomic
+  private val enqPortNum = StorePipelineWidth + LoadPipelineWidth * 2 + 1 + 1 + 1
   val io = IO(new Bundle{
     val redirect      = Flipped(ValidIO(new Redirect))
     val fromCsr       = Input(new TlbCsrBundle)
@@ -203,8 +199,6 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
   private val exceptionVa = GenExceptionVa(tlbcsr.priv.dmode, tlbcsr.priv.virt || currentExcp.isHyper, currentExcp.vaNeedExt,
     tlbcsr.satp, tlbcsr.vsatp, tlbcsr.hgatp, currentExcp.vaddr)
 
-  io.exceptionInfo.vstart            := currentExcp.vstart
-  io.exceptionInfo.vl                := currentExcp.vl
   io.exceptionInfo.vaddr             := exceptionVa
   io.exceptionInfo.gpaddr            := currentExcp.gpaddr
   io.exceptionInfo.isForVSnonLeafPTE := currentExcp.isForVSnonLeafPTE
