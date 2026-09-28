@@ -50,6 +50,22 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
     VecInit.fill(numOfEx)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
   )
 
+  // A load-M4 consumer can already be inside this execution pipe when the
+  // load reaches s3 and asserts ldCancel.  Keep this cancellation path
+  // separate from the ordinary FMA/FMUL M4 confirmation protocol: only a
+  // source explicitly tagged as load-produced M4 is killed here.
+  private val ldWBPort = param.backendParams.getIntRegionParam.issueParams
+    .filter(_.hasLdu).map(_.fpWbPortIds.head)
+  private def loadM4Cancel(uop: Exu.InUop): Bool = {
+    // The marker survives the ordinary load M2 wakeup.  fmaSrc3Wait is only
+    // the FMUL1 bypass selector and may already be zero when s3 cancels.
+    val tagged = uop.bypassCtrl.fmaSrc3LoadM4.get
+    val matches = ldWBPort.zip(in.ldCancel).map { case (wbIdx, cancel) =>
+      uop.bypassCtrl.bypassSource(2).idx === wbIdx.U && cancel
+    }
+    tagged && (if (matches.nonEmpty) matches.reduce(_ || _) else false.B)
+  }
+
   val inEx = Wire(ValidIO(new Exu.ExStage(param)))
   inEx.valid := in.uop.valid
   inEx.bits :<#= in.uop.bits
@@ -58,6 +74,12 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
   ex.zip(inEx +: ex).zipWithIndex.foreach {
     case ((sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]), stageIdx) =>
       sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush)
+      if (stageIdx == 1) {
+        sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush) && !(loadM4Cancel(source.bits) && source.bits.bypassCtrl.fmaSrc3Wait.get === 1.U)
+      }
+      else if (stageIdx == 2) {
+        sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush) && !(loadM4Cancel(source.bits) && source.bits.bypassCtrl.fmaSrc3Wait.get === 2.U)
+      }
       when(source.valid) {
         sink.bits := source.bits
         if (stageIdx == 0) {
@@ -78,13 +100,17 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
   val fmul1Src3 = Mux(fmul1Src3Wait === 2.U, in.fpWb0Next(fmul1Src3Port),
     Mux(fmul1Src3Wait === 1.U, in.fpWb0(fmul1Src3Port), fmulToFadd.src2))
   XSPerfAccumulate("fma_src3_fmul1_bypass", fmulToFadd.valid && fmul1Src3Wait =/= 0.U)
-  exFadd(0).valid := fmulToFadd.valid || inEx.valid && FuType.isFalu(inEx.bits.ctrl.fuType)
-  when(fmulToFadd.valid){
+  val fmulToFaddLoadM4Cancel = ex(1).valid && loadM4Cancel(ex(1).bits) && ex(1).bits.bypassCtrl.fmaSrc3Wait.get === 2.U
+  val fmulToFaddValid = fmulToFadd.valid && !ex(1).bits.ctrl.robIdx.needFlush(in.flush) && !fmulToFaddLoadM4Cancel
+  exFadd(0).valid := fmulToFaddValid || inEx.valid && FuType.isFalu(inEx.bits.ctrl.fuType)
+  when(fmulToFaddValid){
     exFadd(0).bits.data.src(0) := fmulToFadd.fpA
     exFadd(0).bits.data.src(1) := fmul1Src3
     exFadd(0).bits.ctrl := ex(1).ctrl
+    exFadd(0).bits.bypassCtrl := ex(1).bypassCtrl
     exFadd(0).bits.fuSel := VecInit(param.fuConfigs.map(_.isFAlu.B))
     exFadd(0).bits.ctrl.latency := 1.U
+    exFadd(0).bits.debug.foreach(_ := ex(1).bits.debug.get)
   }.elsewhen(inEx.valid) {
     exFadd(0).bits := inEx.bits
     exFadd(0).bits.data.src := bypass.out.src
@@ -123,8 +149,8 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
       fu.in.frm.foreach(_ := 0.U) // frm is in ctrl and in is1Next
       if (fu.cfg.isFAlu) {
         val fmulToFadd = fus.find(_.cfg.isFmul).get.out.FmulToFadd.get
-        fu.in.FmulToFadd.get.valid := RegNext(fmulToFadd.valid)
-        fu.in.FmulToFadd.get.bits := RegNext(Mux(fmulToFadd.valid, fmulToFadd.bits, 0.U.asTypeOf(fmulToFadd.bits)))
+        fu.in.FmulToFadd.get.valid := RegNext(fmulToFaddValid)
+        fu.in.FmulToFadd.get.bits := RegNext(Mux(fmulToFaddValid, fmulToFadd.bits, 0.U.asTypeOf(fmulToFadd.bits)))
         fu.in.ex.zip(exFadd).foreach { case (sink, soure) =>
           sink.valid := soure.valid
           sink.bits <#=: soure.bits
@@ -194,6 +220,9 @@ object FltExu {
   class In(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val flush = ValidIO(new Redirect)
     val uop = ValidIO(new Exu.InUop(param))
+    // Raw load-cancel pulse.  Unlike the delayed IQ cancel, this is needed
+    // while a load-M4 consumer is already in the execution pipe.
+    val ldCancel = Vec(backendParams.LdExuCnt, Bool())
     val frm = Option.when(param.readFrm)(Frm())
     val fpRdData = Vec(param.numRegSrc, UInt(XLEN.W))
     val fpWb0Next = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
