@@ -31,6 +31,7 @@ jobs:
           # NOTE: make sure the following does not contain the default nightly 0.3c checkpoints
           RESULT_LIST=$(python3 $GITHUB_WORKSPACE/.github/workflows/ckpt_select.py \
             --output list \
+            --seed ${{ github.run_number }} \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0-int.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
             --random ":${FUZZ_NUM}:${CKPT_BASE_LEGACY}/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" \
