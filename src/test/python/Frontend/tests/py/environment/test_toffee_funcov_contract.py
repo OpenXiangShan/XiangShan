@@ -75,7 +75,9 @@ from env.funcov.py.ifu.cfvec_toffee import IfuCfvecToffeeCoverage
 from env.funcov.py.ifu.cacheable_pipeline_toffee import IfuCacheablePipelineToffeeCoverage
 from env.funcov.recorder import UNCACHE_EVENT_SAMPLER_BIN_KEYS
 from env.funcov.toffee_runtime import create_toffee_runtime
-from env.funcov.native_toffee import EvaluateFlagRecorder
+from env.funcov.native_toffee import BinEvidence, EvaluateFlagRecorder
+from env.funcov.py.icache.icache_mainpipe_funcov import _mark as _mark_mainpipe
+from env.funcov.py.icache.icache_prefetchpipe_funcov import _mark_prefetch
 
 
 @dataclass
@@ -149,6 +151,28 @@ def test_toffee_sink_records_native_hit_detail(tmp_path) -> None:
         "last_cycle": 17,
         "evidence": [{"acceptance_cycle": 17}],
     }
+
+
+@pytest.mark.parametrize(
+    ("mark", "flags_attr", "evidence_attr"),
+    (
+        (_mark_mainpipe, "_pending_mainpipe_flags", "_pending_mainpipe_evidence"),
+        (_mark_prefetch, "_pending_prefetchpipe_flags", "_pending_prefetchpipe_evidence"),
+    ),
+)
+def test_icache_bin_evidence_keeps_trigger_snapshot(mark, flags_attr, evidence_attr) -> None:
+    evidence = BinEvidence()
+    recorder = type("Recorder", (), {})()
+    setattr(recorder, flags_attr, {})
+    setattr(recorder, evidence_attr, evidence)
+    snapshot = {"value": 1}
+
+    mark(recorder, "group", "first", 1, True, snapshot)
+    snapshot["value"] = 2
+    mark(recorder, "group", "second", 1, True, snapshot)
+
+    assert evidence.by_bin[("group", "first")] == {"value": 1}
+    assert evidence.by_bin[("group", "second")] == {"value": 2}
 
 
 def test_toffee_sink_samples_each_group_once_per_cycle() -> None:

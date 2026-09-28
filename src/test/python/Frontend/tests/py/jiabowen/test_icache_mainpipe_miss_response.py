@@ -787,8 +787,8 @@ def test_icache_trained_two_fetch_asymmetric_line_refill(
     detail = recorder.hit_detail_by_bin_id("BIN-887")
     assert detail is not None
     evidence = detail["evidence"][-1]
-    assert evidence["source_valids"] == [1, 1]
-    assert evidence["source_tags"] == evidence["wb_tags"]
+    assert tuple(evidence["source_valids"]) == (1, 1)
+    assert tuple(evidence["source_tags"]) == tuple(evidence["wb_tags"])
     assert len(evidence["source_tags"]) == 2
     assert not env.monitor.get_errors()
 

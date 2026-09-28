@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Optional
 
+from ...native_toffee import BinEvidence
 from .signal_contract import MAIN_PMP_INSTR, MAIN_PMP_MMIO, TO_IFU_MAP, half_aligned_cross_line
 
 from .flush_from_bpu import (
@@ -310,6 +311,31 @@ def _read_candidates(recorder, candidates: Iterable[Iterable[str]]) -> tuple[Opt
     return tuple(recorder._read_first_dut_signal(dut, names) for names in candidates)
 
 
+def _selected_aligned_maps(recorder) -> tuple[Optional[int], ...]:
+    """Read the DataHoldBypass mux output used by toIfu.maybeRvcMap."""
+    selected = []
+    for index, comb_suffix, enable_suffix in (
+        (0, "", "_1"), (1, "_3", "_4"),
+        (2, "_6", "_7"), (3, "_9", "_10"),
+    ):
+        enable = _read_candidates(recorder, ((
+            _MAIN + f"_s1_alignedMaybeRvcMapVec_T{enable_suffix}",
+        ),))[0]
+        comb = _read_candidates(recorder, ((
+            _MAIN + f"_s1_alignedMaybeRvcMapVec_T{comb_suffix}",
+        ),))[0]
+        held = _read_candidates(recorder, ((
+            _MAIN + "s1_alignedMaybeRvcMapVec_r" + ("" if index == 0 else f"_{index}"),
+        ),))[0]
+        if enable is None:
+            selected.append(_read_candidates(recorder, ((
+                _MAIN + "s1_alignedMaybeRvcMapVec_REG" + ("" if index == 0 else f"_{index}"),
+            ),))[0])
+        else:
+            selected.append(comb if int(enable) else held)
+    return tuple(selected)
+
+
 def _vec(
     recorder,
     stem: str,
@@ -497,8 +523,11 @@ def _mark(
         flags[bin_name] = bool(condition)
         pending_evidence = getattr(recorder, "_pending_mainpipe_evidence", None)
         if isinstance(pending_evidence, dict):
-            pending_evidence.clear()
-            pending_evidence.update(evidence)
+            if pending_evidence is not evidence:
+                pending_evidence.clear()
+                pending_evidence.update(evidence)
+            if condition and isinstance(pending_evidence, BinEvidence):
+                pending_evidence.capture(group, bin_name, evidence)
         return
     if condition:
         recorder.mark(
@@ -599,20 +628,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                     for req in range(2)
                 ),
             ),
-            "aligned_map_vec": _read_candidates(
-                recorder,
-                tuple(
-                    (
-                        _MAIN
-                        + "s1_alignedMaybeRvcMapVec_REG"
-                        + ("" if index == 0 else f"_{index}"),
-                        _MAIN
-                        + "s1_alignedMaybeRvcMapVec_r"
-                        + ("" if index == 0 else f"_{index}"),
-                    )
-                    for index in range(4)
-                ),
-            ),
+            "aligned_map_vec": _selected_aligned_maps(recorder),
             "bank_sram": _read_names(
                 recorder,
                 tuple(
@@ -782,7 +798,7 @@ def evaluate_icache_mainpipe_coverage(
 ) -> tuple[dict[str, bool], dict[str, Any]]:
     """Update MainPipe history and return same-cycle flags/evidence without marking."""
     flags = {bin_name: False for _, bin_name in ICACHE_MAINPIPE_SAMPLER_BIN_KEYS}
-    evidence: dict[str, Any] = {}
+    evidence: dict[str, Any] = BinEvidence()
     recorder._pending_mainpipe_flags = flags
     recorder._pending_mainpipe_evidence = evidence
     try:
@@ -822,6 +838,8 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             "mshr_valid": mshr,
             "mshr_valid_reg": mshr_reg,
             "has_send": has_send,
+            "sram_valid": tuple(s["sram_valid"]),
+            "waymask": tuple(s["waymask"]),
             "s2_corrupt": corrupt,
         }
     )
@@ -1399,6 +1417,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and _off(s["toifu_ready"])
         and mshr_reg[refill_pending["line"]] == 1
     )
+    evidence["refill_completion_stall"] = refill_completion_stall
     _mark(
         recorder,
         "icache_mainpipe_s1_backpressure",

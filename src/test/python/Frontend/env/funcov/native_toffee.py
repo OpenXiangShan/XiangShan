@@ -6,6 +6,17 @@ from typing import Any, Callable, Iterable, Mapping
 from toffee.funcov import CovGroup
 
 
+class BinEvidence(dict):
+    """Cycle evidence with the snapshot that triggered each covered bin."""
+
+    def __init__(self):
+        super().__init__()
+        self.by_bin: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def capture(self, group: str, bin_name: str, evidence: dict[str, Any]) -> None:
+        self.by_bin[(group, bin_name)] = dict(evidence)
+
+
 @dataclass
 class FlagCycleView:
     flags: dict[tuple[str, str], bool] = field(default_factory=dict)
@@ -174,18 +185,30 @@ class NativeDomainToffeeCoverage:
         for group in self.cov_groups:
             group.sample()
         if self._sink is not None:
-            self._sink.record_native_hits(
-                self._view.flags, self._coverpoints_by_key, cycle, evidence
-            )
+            for key, active in self._view.flags.items():
+                if active:
+                    bin_evidence = (
+                        evidence.by_bin.get(key, evidence)
+                        if isinstance(evidence, BinEvidence)
+                        else evidence
+                    )
+                    self._sink.record_native_hits(
+                        {key: True}, self._coverpoints_by_key, cycle, bin_evidence
+                    )
         if self._audit_recorder is not None:
             for group_name, bin_name in self._keys:
                 if not self._view.flags.get((group_name, bin_name), False):
                     continue
+                bin_evidence = (
+                    evidence.by_bin.get((group_name, bin_name), evidence)
+                    if isinstance(evidence, BinEvidence)
+                    else evidence
+                )
                 self._audit_recorder.mark(
                     group_name,
                     bin_name,
                     cycle,
-                    evidence,
+                    bin_evidence,
                     coverpoint=(
                         self._sink.point_name(group_name, bin_name)
                         if self._sink is not None
@@ -357,19 +380,32 @@ class NativeCycleToffeeCoverage:
             for key in self._keys
         }
         if self._sink is not None:
-            self._sink.record_native_hits(
-                hit_flags, self._coverpoints_by_key, cycle, evidence
-            )
+            for key, active in hit_flags.items():
+                if active:
+                    bin_evidence = (
+                        evidence.by_bin.get(key, evidence)
+                        if isinstance(evidence, BinEvidence)
+                        else evidence
+                    )
+                    self._sink.record_native_hits(
+                        {key: True}, self._coverpoints_by_key, cycle, bin_evidence
+                    )
         if self._audit_recorder is not None:
             for group_name, bin_name in self._keys:
                 if not hit_flags[(group_name, bin_name)]:
                     continue
+                key = (group_name, bin_name)
+                bin_evidence = (
+                    evidence.by_bin.get(key, evidence)
+                    if isinstance(evidence, BinEvidence)
+                    else evidence
+                )
                 self._audit_recorder.mark(
                     group_name,
                     bin_name,
                     cycle,
-                    evidence,
-                    coverpoint=self._coverpoints_by_key[(group_name, bin_name)],
+                    bin_evidence,
+                    coverpoint=self._coverpoints_by_key[key],
                     forward_to_toffee=False,
                 )
         self._view.flags = self._empty_flags()

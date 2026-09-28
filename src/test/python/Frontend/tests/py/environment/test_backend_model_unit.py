@@ -1263,6 +1263,25 @@ def test_access_fault_cfvec_queues_backend_iaf_redirect() -> None:
     assert model.golden_trace.peek().pc == 0x80003240
 
 
+def test_explicit_redirect_retires_pending_source_bound_fault() -> None:
+    model = BackendModel(random_seed=1)
+    source = _queue_instr(0x80000020, 0, 1)
+    source.exception_marked = True
+    source.exception_bits = 1 << 1
+    model._cfvec_queue = deque([source])
+    model._note_fetch_fault(0)
+
+    assert [event.payload["reason"] for event in model.pending_events] == [
+        "backend_fetch_fault_redirect"
+    ]
+    model.inject_redirect(0x80000100, "ctrl_redirect", delay_cycles=0)
+
+    assert not model._cfvec_queue
+    assert [event.payload["reason"] for event in model.pending_events] == [
+        "ctrl_redirect"
+    ]
+
+
 def test_older_mismatch_redirect_drops_younger_fetch_fault_redirect() -> None:
     model = BackendModel(random_seed=1)
     model.current_cycle = 30

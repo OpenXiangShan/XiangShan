@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ...native_toffee import BinEvidence
 from .signal_contract import ITLB_REQ_VALID, ITLB_RESP_MISS, PREFETCH_S1_FLUSH
 
 from .flush_from_bpu import BpuS3Flush, ftq_ptr_matches_or_before
@@ -352,8 +353,11 @@ def _mark_prefetch(
         flags[bin_name] = bool(condition)
         pending_evidence = getattr(recorder, "_pending_prefetchpipe_evidence", None)
         if isinstance(pending_evidence, dict):
-            pending_evidence.clear()
-            pending_evidence.update(evidence)
+            if pending_evidence is not evidence:
+                pending_evidence.clear()
+                pending_evidence.update(evidence)
+            if condition and isinstance(pending_evidence, BinEvidence):
+                pending_evidence.capture(group, bin_name, evidence)
         return
     if condition:
         recorder.mark(
@@ -428,7 +432,7 @@ def evaluate_icache_prefetchpipe_coverage(
 ) -> tuple[dict[str, bool], dict[str, Any]]:
     """Update PrefetchPipe history and return same-cycle flags/evidence without marking."""
     flags = {bin_name: False for _, bin_name in ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS}
-    evidence: dict[str, Any] = {}
+    evidence: dict[str, Any] = BinEvidence()
     recorder._pending_prefetchpipe_flags = flags
     recorder._pending_prefetchpipe_evidence = evidence
     try:

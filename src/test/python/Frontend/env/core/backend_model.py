@@ -1293,6 +1293,17 @@ class BackendModel:
             )
         )
 
+    def _drop_unbound_redirects_while_fetch_fault_pending(self) -> None:
+        """Keep a source-bound fetch fault ahead of target-only redirects."""
+        self.pending_events = deque(
+            evt
+            for evt in self.pending_events
+            if not (
+                evt.kind == "redirect"
+                and not bool(evt.payload.get("source_bound", False))
+            )
+        )
+
     def _note_fetch_fault(self, queue_index: int) -> None:
         entry = self._cfvec_queue[int(queue_index)]
         if sum((int(entry.exception_bits) & (1 << bit)) != 0 for bit, _name in _FETCH_FAULT_BITS) != 1:
@@ -1331,6 +1342,7 @@ class BackendModel:
             "ftq_value": int(entry.ftq_value),
             "ftq_offset": int(entry.ftq_offset),
         })
+        self._drop_unbound_redirects_while_fetch_fault_pending()
         fault_bits = self._fetch_fault_redirect_bits(int(entry.exception_bits))
         self._queue_redirect_event(
             target_pc=int(entry.pc),
@@ -3327,6 +3339,15 @@ class BackendModel:
                 reason=str(reason),
                 source="queue_redirect_event",
             )
+        if not bool(payload.get("source_bound", False)) and any(
+            evt.kind == "redirect"
+            and bool(evt.payload.get("source_bound", False))
+            and str(evt.payload.get("reason", "")) == "backend_fetch_fault_redirect"
+            for evt in self.pending_events
+        ):
+            # A target-only redirect must not flush the cfVec source of an
+            # older fetch fault before that fault reaches the backend.
+            return
         if "pc" in payload:
             from_pc = int(payload["pc"])
         driven_signature = self._last_driven_redirect_signature
@@ -4719,6 +4740,12 @@ class BackendModel:
             raise ValueError("non-control redirect requires source-bound FTQ context")
         if ftq_idx_ahead_flag is not None or ftq_idx_ahead_value is not None:
             raise ValueError("ftqIdxAhead requires source-bound redirect FTQ context")
+        # This explicit redirect replaces the live cfVec stream. Any queued
+        # source-bound redirect from that stream must be retired with it.
+        self.pending_events = deque(
+            evt for evt in self.pending_events
+            if evt.kind != "redirect" or not bool(evt.payload.get("source_bound", False))
+        )
         self._queue_redirect_event(
             target_pc=int(target_pc),
             reason=str(reason),
