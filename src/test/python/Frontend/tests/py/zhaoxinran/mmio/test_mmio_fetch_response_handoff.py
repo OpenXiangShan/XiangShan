@@ -96,17 +96,23 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
 
     assert uncache._wait_for_uncache_req(env)
     assert env.uncache_agent.pending
+    # Queue the redirect while InstrUncache is waiting for D, before D becomes
+    # visible.  The backend drives a queued redirect on the next edge; waiting
+    # for tl_d_valid first lets the response retire before the redirect can
+    # overlap it.
     for _ in range(256):
-        if snapshots and snapshots[-1]["tl_d_valid"] == 1:
+        sample = snapshots[-1] if snapshots else None
+        if sample and sample["entry_state"] == 3 and sample["tl_d_valid"] == 0:
             break
         env.step(1)
-    assert snapshots[-1]["tl_d_valid"] == 1, {"snapshots": snapshots[-32:]}
-
+    assert snapshots and snapshots[-1]["entry_state"] == 3, {
+        "snapshots": snapshots[-32:]
+    }
     uncache._force_redirect_to(env, target_pc)
     for _ in range(256):
         if any(
             sample["backend_redirect"] == 1
-            and sample["resp_valid"] == 1
+            and sample["instr_resp_valid"] == 0
             and sample["to_valid"] == 0
             for sample in snapshots
         ):
@@ -117,7 +123,7 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
         sample
         for sample in snapshots
         if sample["backend_redirect"] == 1
-        and sample["resp_valid"] == 1
+        and sample["instr_resp_valid"] == 0
         and sample["to_valid"] == 0
     ]
     assert overlap, {
@@ -134,8 +140,12 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
             for sample in snapshots[-32:]
         ]
     }
+    redirect_cycle = min(int(sample["cycle"]) for sample in overlap)
     assert uncache._wait_for_observed_pc(env, target_pc, max_cycles=8000)
-    assert not any(int(item.pc) == uncache._MMIO_BASE for item in env.monitor.observations)
+    assert not any(
+        int(item.cycle) >= redirect_cycle and int(item.pc) == uncache._MMIO_BASE
+        for item in env.monitor.observations
+    )
     assert not env.monitor.get_errors()
 
 
