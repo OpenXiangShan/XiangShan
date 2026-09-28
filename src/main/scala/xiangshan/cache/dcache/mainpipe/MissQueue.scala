@@ -1736,9 +1736,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.misstrack_alloc(i).bits.mshr_id := RegNext(preg.mshr_id)
   }
   for (i <- entries.indices) {
-    io.misstrack_owners(i).valid := entries(i).io.req_addr.valid
-    io.misstrack_owners(i).bits.paddr := entries(i).io.req_addr.bits
-    io.misstrack_owners(i).bits.vaddr := entries(i).io.req_vaddr.bits
+    // Register the owner handoff here to cut the MissEntry address path before
+    // it reaches MissTrack. The committed allocation is accepted first; this
+    // owner takes over PENDING liveness checks on the following cycle.
+    io.misstrack_owners(i).valid := RegNext(entries(i).io.req_addr.valid, false.B)
+    io.misstrack_owners(i).bits.paddr := RegNext(entries(i).io.req_addr.bits)
+    io.misstrack_owners(i).bits.vaddr := RegNext(entries(i).io.req_vaddr.bits)
   }
   for (i <- entries.indices; j <- 0 until i) {
     assert(!(entries(i).io.req_addr.valid && entries(j).io.req_addr.valid &&

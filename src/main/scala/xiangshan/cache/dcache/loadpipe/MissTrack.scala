@@ -121,10 +121,11 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   }
   private def sameLine(a: MissTrackEntry, b: MissTrackEntry): Bool =
     a.idx === b.idx && a.block_paddr === b.block_paddr
-  private def ownerMatches(e: MissTrackEntry): Bool = VecInit(io.owners.zipWithIndex.map { case (o, i) =>
-    o.valid && e.mshr_id === i.U && block(o.bits.paddr) === e.block_paddr &&
-      index(o.bits.vaddr) === e.idx
-  }).asUInt.orR
+  private def ownerMatches(e: MissTrackEntry): Bool = {
+    val owner = io.owners(e.mshr_id)
+    owner.valid && block(owner.bits.paddr) === e.block_paddr &&
+      index(owner.bits.vaddr) === e.idx
+  }
   private def overlaps(idx: UInt, way: UInt, inv: Valid[MissTrackInvalidate]): Bool =
     inv.valid && inv.bits.idx === idx && (inv.bits.way & way).orR
 
@@ -132,6 +133,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   // either during that observation or during the training cycle.
   val previousInvalidate = RegNext(io.invalidate, 0.U.asTypeOf(io.invalidate))
   val previousClear = RegNext(io.clear, false.B)
+  val previousAllocs = RegNext(io.alloc, 0.U.asTypeOf(io.alloc))
   val events = Wire(Vec(1 + allocPorts + LoadPipelineWidth, Valid(new MissTrackEntry)))
   val lookupEntries = Wire(Vec(cfg.missTrackEntries, new MissTrackEntry))
   events := 0.U.asTypeOf(events)
@@ -154,7 +156,17 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   for (i <- 0 until allocPorts) {
     val a = io.alloc(i)
     events(1 + i).bits := makeEntry(a.bits.vaddr, a.bits.paddr, 0.U, true.B, a.bits.mshr_id)
-    events(1 + i).valid := a.valid && ownerMatches(events(1 + i).bits)
+    // MissQueue emits alloc only after the allocation commits. The registered
+    // owner arrives one cycle later and owns liveness checks from then on.
+    events(1 + i).valid := a.valid
+  }
+  for (a <- previousAllocs) {
+    val owner = io.owners(a.bits.mshr_id)
+    when (a.valid) {
+      assert(owner.valid && block(owner.bits.paddr) === block(a.bits.paddr) &&
+        index(owner.bits.vaddr) === index(a.bits.vaddr),
+        "MissTrack allocation must match its registered owner on the following cycle")
+    }
   }
   for (w <- 0 until LoadPipelineWidth) {
     val q = io.loads(w)
