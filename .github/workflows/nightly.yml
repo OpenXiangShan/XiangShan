@@ -13,7 +13,7 @@ jobs:
     # Build + 8 checkpoints * 1-hour timeout
     name: Nightly Regression(kunminghu-v2) - Checkpoints
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -112,7 +112,7 @@ jobs:
       # Build + 8 checkpoints * 1-hour timeout
       name: Nightly Regression(kunminghu-v3) - Checkpoints
       steps:
-        - uses: actions/checkout@v4
+        - uses: actions/checkout@v7
           with:
             ref: kunminghu-v3
             fetch-depth: 0
