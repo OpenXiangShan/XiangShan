@@ -14,9 +14,8 @@ Read an additional document only when the task needs it:
 
 - DUT, monitor, or environment mismatch:
   `docs/agents/frontend-debugging.md`.
-- Backend-agent semantics or its implementation:
-  `docs/agents/frontend-backend-agent.md`, then
-  `docs/agents/frontend-backend-model-review.md`.
+- BackendModel semantics, implementation map, and maintenance checks:
+  `docs/agents/frontend-backend-model.md`.
 - `resolve`, `redirect`, `commit`, or `callRetCommit` RTL background:
   `docs/agents/frontend-backend-controlflow/README.md`.
 - Instruction-uncache or MMIO/non-MMIO boundaries:
@@ -25,7 +24,7 @@ Read an additional document only when the task needs it:
 - General testbench APIs and fixture reference: `docs/testbench/Guide_Doc/`.
 
 Before changing backend-agent semantics, run
-`frontend-backend-agent.md` section `实现一致性最小检查项` in order: `必须项`,
+`frontend-backend-model.md` section `实现一致性最小检查项` in order: `必须项`,
 then `建议项`.
 
 Before compiling Frontend or starting a real DUT regression, establish this

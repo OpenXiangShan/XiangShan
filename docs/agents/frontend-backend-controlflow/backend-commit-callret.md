@@ -171,7 +171,7 @@ instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
 对验证环境来说，这一节只提供“不要偏离真实职责分工”的一般建议。
 
 真正的 Backend Agent 语义约束以
-`docs/agents/frontend-backend-agent.md` 为准，尤其是：
+`docs/agents/frontend-backend-model.md` 为准，尤其是：
 
 - `commit` 必须保持 FTQ entry 粒度
 - `commit` 必须严格保序
@@ -183,16 +183,16 @@ instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
 除此之外，如果目标是“尽可能模拟真实 backend 行为”，当前 env 的实现还应满足下面这些更具体的约束：
 
 - `golden trace` 只负责判定 correct-path / wrong-path，不直接等价于 ROB commit
-- 环境需要维护一个独立的 instruction commit frontier，来近似 backend 的顺序提交
-- 只有这个独立 frontier 推进后，才允许派生 `callRetCommit`
-- FTQ-entry `commit` 也应从这条独立 frontier 的结果聚合出来，而不是直接从 golden trace 消费结果聚合
-- instruction commit frontier 应只从 queue 头连续推进；不能跳过更老未提交指令
+- 环境需要独立计算顺序 instruction commit，来近似 backend 的顺序提交；不需要另存一份提交队列
+- 只有指令被标记为 committed 之后，才允许派生 `callRetCommit`
+- FTQ-entry `commit` 应从 queue 头已 committed 的同一 FTQ entry 聚合出来，而不是直接从 golden trace 消费结果聚合
+- instruction commit 应只从 queue 头连续推进；不能跳过更老未提交指令
 - 对正确路径 CFI，只有在其 `resolve` 已经完成后，才允许它进入 committed
 
 也就是说，推荐的职责分层是：
 
 1. `cfVec` + golden trace：判定路径语义
-2. 独立 instruction commit frontier：近似 ROB commit
+2. 从 queue 头现场计算的 instruction commit：近似 ROB commit
 3. `callRetCommit`：从单条 committed 指令派生
 4. FTQ-entry `commit`：从 queue 头已 committed 指令聚合
 
@@ -213,12 +213,12 @@ instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
 
 若需要查看当前 Python env 的具体实现，请直接阅读
 `src/test/python/Frontend/env/` 下的代码；但代码实现细节不应覆盖
-`docs/agents/frontend-backend-agent.md` 定义的语义约束。
+`docs/agents/frontend-backend-model.md` 定义的语义约束。
 
 阅读顺序建议是：
 
 1. 先按本文理解 RTL 中 `commit` 与 `callRetCommit` 的职责差异
-2. 再按 `docs/agents/frontend-backend-agent.md` 理解验证环境必须保持的行为语义
+2. 再按 `docs/agents/frontend-backend-model.md` 理解验证环境必须保持的行为语义
 3. 最后再去核对当前 env 的具体实现是否满足这些语义
 
 ## 源文档

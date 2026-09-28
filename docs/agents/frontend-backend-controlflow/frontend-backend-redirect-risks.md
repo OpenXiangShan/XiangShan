@@ -200,8 +200,8 @@ IFU 把 backend redirect 当成最高优先级 flush 条件之一，并在 redir
 
 换句话说，env 现在会拒绝“自己已知做不对”的路径，但不会假装拥有 RTL 内部不可见状态来替 DUT 做证明。
 
-如果这里对 env 的描述与 `docs/agents/frontend-backend-agent.md` 的规范语义有冲突，以
-`docs/agents/frontend-backend-agent.md` 为准；本页只讨论 redirect 消费路径上的 RTL 风险和
+如果这里对 env 的描述与 `docs/agents/frontend-backend-model.md` 的规范语义有冲突，以
+`docs/agents/frontend-backend-model.md` 为准；本页只讨论 redirect 消费路径上的 RTL 风险和
 当前黑盒验证边界。
 
 ## 源文档

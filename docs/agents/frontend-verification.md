@@ -11,8 +11,9 @@ tree. Start here unless the task explicitly says otherwise.
 ## Entry Points
 
 Use `src/test/python/Frontend/README.md` for the source-tree layout, script
-index, and standard build/test commands. Its implementation map is the only
-directory map maintained for this environment.
+index, and standard build/test commands. It is the top-level directory map;
+`src/test/python/Frontend/env/funcov/README.md` is the implementation map for
+the functional-coverage subsystem.
 
 The harness-critical locations are:
 
@@ -23,7 +24,8 @@ The harness-critical locations are:
 - `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: single-bin
   runner that creates the run identity and artifact root.
 - `src/test/python/Frontend/docs/03_funcov_model/skills.md`: the sole
-  functional-coverage modeling and back-annotation methodology.
+  functional-coverage modeling, native-report, and read-only HIT-audit
+  methodology.
 
 ## Source Of Truth
 
@@ -31,7 +33,8 @@ Use the most direct artifact that reflects real DUT behavior:
 
 1. Observed DUT-facing IO in the Python environment and tests.
 2. Generated artifacts under the selected frontend pylib directory, especially
-   `Frontend_top.sv` and `signals.json`.
+   `Frontend_top.sv` and `signals.json`. `Frontend_offset.yaml` is a generated
+   offset table, not the signal-name contract.
 3. Generated RTL under `build-frontend/rtl/` when signal-level confirmation is needed.
 4. Reference docs under `docs/testbench/Guide_Doc/`.
 
@@ -69,7 +72,7 @@ that boundary stable.
   failure and be as short as practical. Do not add noisy, redundant, or
   narrative logging.
 - Follow `src/test/python/Frontend/docs/03_funcov_model/skills.md` for all
-  testpoint, coverage-target, functional-coverage, and back-annotation rules.
+  testpoint, coverage-target, functional-coverage, report, and HIT-audit rules.
 - Extend an existing regression when it can express the scenario without
   weakening its semantic contract; otherwise add a focused new testcase.
 - Build verification-environment APIs, monitors, and oracles around reusable
@@ -103,12 +106,16 @@ that boundary stable.
   corresponding `design_baseline_sha` from the `kunminghu-v3` merge already present in
   that commit. Do not independently synchronize from `kunminghu-v3`.
 - Before changing backend-agent semantics or related logic, run
-  `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
+  `docs/agents/frontend-backend-model.md` section `实现一致性最小检查项`
   in order: `必须项` first, then `建议项`.
 - When changing bundles, coverage points, or startup/control wiring, verify
   every signal name against the current DUT object and generated artifacts
   first. Required signals should fail fast when absent; signals not present on
   the DUT should not remain in the active contract.
+- Distinguish pre-drive observers, post-drive observers, and SampleHub's
+  per-cycle read-once snapshot. Do not combine an early cached internal value
+  with a post-drive bundle value and call them a same-phase observation without
+  an explicit timing contract.
 - After changing code, rerun the relevant tests before giving a conclusion. If
   you have not rerun the relevant tests yet, say that explicitly and do not
   present the result as a validated conclusion.
@@ -149,6 +156,12 @@ The VCS target appends the funcov SV sources after the complete RTL list in
 
 Frontend helper scripts disable `pytest_rerunfailures` in sandboxed runs. For
 direct pytest, retain that behavior unless the plugin is intentionally needed.
+
+Backend behavior is selected by `BackendConfig.backend_mode`, not by an
+environment variable. `auto_python` is the normal Python-test default;
+`manual_python` leaves golden wrong-path redirect decisions to the testcase;
+loading a golden trace switches the model to `auto_bin`, which owns automatic
+mismatch/fetch-fault recovery and rejects competing explicit injection.
 
 - `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
   existing `_RUN_DUT` pattern.
@@ -231,6 +244,10 @@ controls enabled during diagnosis before changing semantic logic.
   every case. Cases must not write into one shared live directory.
 - Non-bin tests use the run root directly; bin-trace runners separate coverage,
   waveforms, funcov, and logs into subdirectories.
+- When functional coverage is enabled, pytest writes one session-level native
+  `funcov/toffee.funcov.json`. It includes samples from failed cases and does
+  not carry per-case outcome/provenance, so it is not testcase-level HIT
+  evidence; follow the funcov methodology document for that boundary.
 - Waveform and log names identify the testcase or binary. Verilator waveforms
   use `.fst` or `.vcd` and coverage uses `.dat`; VCS waveforms use `.fsdb` and
   coverage uses run-local `Frontend.vdb`.

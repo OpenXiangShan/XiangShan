@@ -12,8 +12,9 @@ Use this order:
 1. Identify the failing test and exact reproduction command.
 2. Reconstruct the relevant cycle window from DUT-observed signals in the
    frontend environment.
-3. Align that window with the trace input under `NEMU/logs/` and the test
-   binary under `ready-to-run/`.
+3. Align that window with the exact trace and binary paths declared by the
+   current run (`TB_TRACE_PATH` / runner output), whether they are reused from
+   `NEMU/logs/` or stored under the run root.
 4. Verify the payload semantics in generated artifacts under the selected
    pylib directory, such as
    `build-frontend/pylib-verilator/Frontend/Frontend_top.sv` or
@@ -70,12 +71,18 @@ For every DUT bin-trace failure, treat the following as mandatory:
 - If a mismatch is attributed to a CFI that has already been committed, prove
   whether the env is correctly using a committed-CFI fallback record or is
   incorrectly trying to reuse a queue-resident FTQ context after retirement.
+- Confirm the active backend mode before attributing a redirect: `auto_bin`
+  owns golden mismatch/fetch-fault recovery, while directed Python modes may
+  leave recovery to explicit testcase injection.
+- Confirm the observer phase. SampleHub reuses the first coverage read of a
+  signal within a cycle; a pre-drive cached value and a post-drive bundle value
+  are not automatically a coherent same-phase snapshot.
 
 ## Bin-Case Runtime Requirements
 
 For DUT bin-trace runtime bounds, required artifacts, and observability
 requirements, follow `docs/agents/frontend-verification.md` section
-`Bin-Trace Run Requirements`.
+`Bin-Trace Requirements`.
 
 This debugging guide assumes those run requirements are already in force and
 focuses only on how to analyze the failing window once the case is reproducible.
@@ -110,16 +117,15 @@ instead of extending this guide with live incident state.
 ## Backend Reconstruction Rule
 
 For frontend functional verification, use
-`docs/agents/frontend-backend-agent.md` as the semantic contract.
+`docs/agents/frontend-backend-model.md` as the semantic and implementation contract.
 
 This debugging guide does not restate the backend-agent queue semantics.
 When the failure depends on `resolve`, `redirect`, `commit`, or
 `callRetCommit` behavior, first prove the observed DUT-facing symptom in
 waveforms or monitor output, then consult:
 
-- `docs/agents/frontend-backend-agent.md` for the normative semantic rules
-- `docs/agents/frontend-backend-model-review.md` for current implementation
-  hotspots in `backend_model.py`
+- `docs/agents/frontend-backend-model.md` for normative semantics, the current
+  implementation map, and maintenance hotspots
 - `docs/agents/frontend-backend-controlflow/README.md` for RTL/control-flow
   background
 
@@ -129,18 +135,24 @@ waveforms or monitor output, then consult:
 - Check whether the failing expectation is in the DUT, the backend model, or
   the test monitor.
 - Cross-check signal names and units against the selected
-  `build-frontend/pylib-<sim>/Frontend/signals.json`.
+  `build-frontend/pylib-<sim>/Frontend/Frontend_top.sv` and `signals.json`.
+  `Frontend_offset.yaml` only provides generated offsets.
+- Confirm whether the observation uses a pre-drive observer, post-drive
+  observer, shared SampleHub snapshot, or direct bound bundle.
+- Confirm the backend mode and which side owns redirect/resolve/commit actions.
 - Confirm that the waveform, trace, and generated DUT artifacts all come from
   the same current reproduction.
 - Confirm that the paired case log has enough verbosity for the question being
-  answered.
+  answered. `TB_ENV_LOG_LEVEL` controls the case log; `TB_LOG_CLI_LEVEL`
+  controls live terminal logging, so a quiet terminal does not imply the case
+  log lacks INFO events.
 
 ## Related References
 
 - `docs/agents/frontend-verification.md`
-- `docs/agents/frontend-backend-agent.md`
-- `docs/agents/frontend-backend-model-review.md`
+- `docs/agents/frontend-backend-model.md`
 - `docs/agents/frontend-backend-controlflow/README.md`
 - `docs/testbench/Guide_Doc/dut_bug_analysis.md`
 - `build-frontend/pylib-<sim>/Frontend/Frontend_top.sv`
 - `build-frontend/pylib-<sim>/Frontend/signals.json`
+- `build-frontend/pylib-<sim>/Frontend/Frontend_offset.yaml`

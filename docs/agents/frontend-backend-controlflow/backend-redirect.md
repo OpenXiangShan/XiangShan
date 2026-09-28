@@ -187,7 +187,7 @@ io.commits.isCommit := state === s_idle && !blockCommit
 - 让 `redirect` 穿透已经排队的更高优先级控制事件
 
 如果讨论的是 Backend Agent 的规范语义，还需要额外满足
-`docs/agents/frontend-backend-agent.md` 中的要求：
+`docs/agents/frontend-backend-model.md` 中的要求：
 
 - 第一条与 golden trace 失配的位置定义错误路径的开始
 - 之后必须在某个时刻发出 `redirect`，把路径恢复到正确路径
@@ -293,12 +293,12 @@ io.commits.isCommit := state === s_idle && !blockCommit
 
 若需要查看当前 Python env 的具体实现，请直接阅读
 `src/test/python/Frontend/env/` 下的代码；但实现细节不应覆盖
-`docs/agents/frontend-backend-agent.md` 定义的语义约束。
+`docs/agents/frontend-backend-model.md` 定义的语义约束。
 
 阅读顺序建议是：
 
 1. 先按本文理解 RTL 中 `redirect` 的来源、仲裁和 `level` 语义
-2. 再按 `docs/agents/frontend-backend-agent.md` 理解验证环境必须保持的 `redirect` 语义
+2. 再按 `docs/agents/frontend-backend-model.md` 理解验证环境必须保持的 `redirect` 语义
 3. 最后再核对当前 env 的实现是否满足这些语义
 
 ## 一个实用判断框架

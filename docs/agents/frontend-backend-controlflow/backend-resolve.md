@@ -156,7 +156,7 @@ io.toFrontendBJUResolve.get.valid := io.out.valid
 - 不要把 `resolve` 绑定成严格程序序输出
 
 如果讨论的是 Backend Agent 的规范语义，还需要额外满足
-`docs/agents/frontend-backend-agent.md` 中的要求：
+`docs/agents/frontend-backend-model.md` 中的要求：
 
 - 正确路径上的每条 CFI 都必须最终产生 `resolve`
 - 错误路径上的 CFI 在被 `redirect` flush 之前可以发，也可以不发
@@ -166,12 +166,12 @@ io.toFrontendBJUResolve.get.valid := io.out.valid
 
 若需要查看当前 Python env 的具体实现，请直接阅读
 `src/test/python/Frontend/env/` 下的代码；但实现细节不应覆盖
-`docs/agents/frontend-backend-agent.md` 定义的语义约束。
+`docs/agents/frontend-backend-model.md` 定义的语义约束。
 
 阅读顺序建议是：
 
 1. 先按本文理解 RTL 中 `resolve` 的来源、时序和与 `redirect` 的关系
-2. 再按 `docs/agents/frontend-backend-agent.md` 理解验证环境必须保持的 `resolve` 语义
+2. 再按 `docs/agents/frontend-backend-model.md` 理解验证环境必须保持的 `resolve` 语义
 3. 最后再核对当前 env 的实现是否满足这些语义
 
 ## 不要把 resolve 理解成什么
