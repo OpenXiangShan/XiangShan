@@ -147,7 +147,11 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         }
 
     cfvec_queue = list(getattr(backend_model, "_cfvec_queue", [])) if backend_model is not None else []
-    commit_queue = list(getattr(backend_model, "_commit_queue", [])) if backend_model is not None else []
+    correct_prefix_indices = []
+    for queue_index, entry in enumerate(cfvec_queue):
+        if str(getattr(entry, "path_state", "")) != "correct":
+            break
+        correct_prefix_indices.append(int(queue_index))
     recovery_target_pc = (
         backend_model._current_recovery_target_pc()  # pylint: disable=protected-access
         if backend_model is not None and hasattr(backend_model, "_current_recovery_target_pc")
@@ -355,8 +359,8 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 }
                 for entry in cfvec_queue[:4]
             ],
-            "commit_queue_len": int(len(commit_queue)),
-            "commit_queue_head": [
+            "correct_prefix_len": int(len(correct_prefix_indices)),
+            "correct_prefix_head": [
                 {
                     "queue_index": int(queue_index),
                     "pc": int(getattr(cfvec_queue[int(queue_index)], "pc", 0)),
@@ -365,7 +369,7 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                     "rob_commit_state": str(getattr(cfvec_queue[int(queue_index)], "rob_commit_state", "")),
                     "resolve_state": str(getattr(cfvec_queue[int(queue_index)], "resolve_state", "")),
                 }
-                for queue_index in commit_queue[:4]
+                for queue_index in correct_prefix_indices[:4]
                 if 0 <= int(queue_index) < len(cfvec_queue)
             ],
             "recent_redirect": recent_redirect,
@@ -538,7 +542,7 @@ def _format_stall_snapshot(snapshot: dict) -> str:
             last=int(entry["is_last_in_entry"]),
         )
 
-    def _format_commit_entry(entry):
+    def _format_correct_prefix_entry(entry):
         if entry is None:
             return "none"
         return "(idx={idx},pc={pc},ftq={flag}/{value},rob={rob},resolve={resolve})".format(
@@ -587,7 +591,7 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         "current_ftq_entry={current_ftq_entry} "
         "ftq_entries_head={ftq_entries_head} "
         "cfvec_queue_len={cfvec_queue_len} cfvec_queue_head={cfvec_queue_head} "
-        "commit_queue_len={commit_queue_len} commit_queue_head={commit_queue_head} "
+        "correct_prefix_len={correct_prefix_len} correct_prefix_head={correct_prefix_head} "
         "recent_redirect_target={recent_redirect_target} "
         "stall_reason={stall_reason} "
         "icache_req=({icache_req_valid},{icache_req_ready},0x{icache_req_addr:x},src={icache_req_source}) "
@@ -660,8 +664,11 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         ftq_entries_head="[" + ",".join(_format_ftq_entry(entry) for entry in backend_state["ftq_entries"]) + "]",
         cfvec_queue_len=int(backend_state["cfvec_queue_len"]),
         cfvec_queue_head="[" + ",".join(_format_semantic_entry(entry) for entry in backend_state["cfvec_queue_head"]) + "]",
-        commit_queue_len=int(backend_state["commit_queue_len"]),
-        commit_queue_head="[" + ",".join(_format_commit_entry(entry) for entry in backend_state["commit_queue_head"]) + "]",
+        correct_prefix_len=int(backend_state["correct_prefix_len"]),
+        correct_prefix_head="[" + ",".join(
+            _format_correct_prefix_entry(entry)
+            for entry in backend_state["correct_prefix_head"]
+        ) + "]",
         recent_redirect_target=(
             _format_optional_pc(recent_redirect["target_pc"]) if recent_redirect is not None else "none"
         ),

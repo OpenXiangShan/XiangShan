@@ -27,7 +27,6 @@ def _dirty_model():
     model._pending_resolves.append(object())
     model.pending_events.append(BackendEvent("redirect", 10, {"target_pc": 0x80002000}))
     model._cfvec_queue.append(_queue_instr(0x80200F00, 0, 21))
-    model._commit_queue.append(0)
     model._pending_queue_resolve_indices.append(0)
     model._pending_queue_call_ret_commit_indices.append(0)
     model._scheduled_queue_call_ret_commit_groups.append((10, [object()]))
@@ -59,7 +58,7 @@ def test_reset_clears_all_transaction_state_preserving_bindings_config_and_stati
     assert model.pending_work_count() == 0
     assert model.backend_empty_for_dut() == 1
     for name in ("_ftq_start_pc_by_value", "_ftq_start_pc_cache", "_ftq_group_pc_history",
-                 "_pc_group_occurrences", "_cfvec_queue", "_commit_queue",
+                 "_pc_group_occurrences", "_cfvec_queue",
                  "_current_ftq_seen_packets", "_pending_queue_resolve_indices"):
         assert not getattr(model, name), name
     for name in ("_pending_level0_target_pc", "_last_correct_cfi_context",

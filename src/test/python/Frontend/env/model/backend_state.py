@@ -139,7 +139,6 @@ class BackendState:
     pc_group_occurrences: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
     cfvec_queue: Deque[QueueInstr] = field(default_factory=deque)
-    commit_queue: Deque[int] = field(default_factory=deque)
     active_wrong_path_episode: Optional[ActiveWrongPathEpisode] = None
     pending_queue_resolve_indices: Deque[int] = field(default_factory=deque)
     pending_queue_call_ret_commit_indices: Deque[int] = field(default_factory=deque)

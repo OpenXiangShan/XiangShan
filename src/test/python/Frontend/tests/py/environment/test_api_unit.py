@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from types import SimpleNamespace
 
 from env import api as env_api
@@ -135,6 +136,37 @@ def test_stall_snapshot_uses_registered_s2_alignment_and_effective_owner() -> No
     assert "contract=ok" in formatted
     assert not any("s3_align" in name for name in dut.read_names)
     assert not any("fixedTwoFetchRange" in name for name in dut.read_names)
+
+
+def test_stall_snapshot_derives_commit_debug_view_from_correct_prefix() -> None:
+    dut = _current_s2_snapshot_dut()
+    env = _snapshot_env(dut)
+    env.backend_model = SimpleNamespace(
+        _cfvec_queue=deque(
+            [
+                SimpleNamespace(
+                    pc=0x1000, ftq_flag=0, ftq_value=1, path_state="correct",
+                    rob_commit_state="committed", resolve_state="emitted",
+                    is_last_in_entry=False,
+                ),
+                SimpleNamespace(
+                    pc=0x1004, ftq_flag=0, ftq_value=1, path_state="correct",
+                    rob_commit_state="pending", resolve_state="not_needed",
+                    is_last_in_entry=True,
+                ),
+                SimpleNamespace(
+                    pc=0x2000, ftq_flag=0, ftq_value=2, path_state="wrong",
+                    rob_commit_state="pending", resolve_state="not_needed",
+                    is_last_in_entry=True,
+                ),
+            ]
+        )
+    )
+
+    backend = env_api.api_Frontend_capture_frontend_stall_snapshot(env)["backend_state"]
+
+    assert backend["correct_prefix_len"] == 2
+    assert [entry["queue_index"] for entry in backend["correct_prefix_head"]] == [0, 1]
 
 
 def test_stall_snapshot_reports_missing_current_owner_probe() -> None:
