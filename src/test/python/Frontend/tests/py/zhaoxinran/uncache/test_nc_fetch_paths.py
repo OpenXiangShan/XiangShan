@@ -54,6 +54,14 @@ _IFU_UNCACHE_REQ_VALID_SIGNALS = (
     "Frontend_top.Frontend.inner_ifu.uncacheUnit.io_req_valid",
     "TOP.Frontend_top.Frontend.inner_ifu.uncacheUnit.io_req_valid",
 )
+_NC_TIMING_DIRECT_SIGNALS = {
+    "backend_redirect": ("Frontend_top.Frontend.inner_ftq.backendRedirect_valid",),
+    "ifu_flush": ("s2_flush",),
+    "uncache_resp_valid": ("uncacheUnit.io_resp_valid",),
+    "instr_uncache_resp_valid": ("inner_instrUncache.io_toIfu_resp_valid",),
+    "wb_path_valid": ("wbValid",),
+    "wb_redirect": ("wbRedirect_valid",),
+}
 
 
 def _register_nc_timing_observer(env) -> list[dict]:
@@ -75,6 +83,12 @@ def _register_nc_timing_observer(env) -> list[dict]:
             name: int(snapshot[snapshot_key])
             for name, snapshot_key in _NC_TIMING_SNAPSHOT_KEYS.items()
         }
+        sample.update(
+            {
+                name: uncache._require_first_dut_signal(current_env, signal_names)
+                for name, signal_names in _NC_TIMING_DIRECT_SIGNALS.items()
+            }
+        )
         sample["nc_pending"] = int(
             derive_nc_pending(snapshot, nc_active=bool(state["nc_active"]))
         )

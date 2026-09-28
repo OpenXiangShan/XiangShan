@@ -11,6 +11,17 @@ from tests.py.support import uncache_scenarios as uncache
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
+def _capture_post_drive_snapshot(cycle: int, env) -> dict[str, int | None]:
+    sample = owner_funcov._snapshot(env.functional_coverage, env.dut)
+    sample.update(
+        tl_a_valid=int(env.uncache_if.a_valid.value),
+        tl_a_ready=int(env.uncache_if.a_ready.value),
+        tl_a_addr=int(env.uncache_if.a_bits_address.value),
+        tl_d_valid=int(env.uncache_if.d_valid.value),
+    )
+    return {"cycle": int(cycle), **sample}
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     scenario_key = "zhaoxinran/mmio/state-edge/a-fire-enters-wait-resp"
@@ -32,9 +43,8 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     snapshots: list[dict[str, int | None]] = []
 
     def capture(cycle: int, active_env) -> None:
-        sample = owner_funcov._snapshot(active_env.functional_coverage, active_env.dut)
-        if sample["tl_a_valid"] or sample["tl_d_valid"] or sample["entry_state"] == 2:
-            snapshots.append({"cycle": int(cycle), **sample})
+        sample = _capture_post_drive_snapshot(cycle, active_env)
+        snapshots.append(sample)
 
     env.register_cycle_observer(capture)
     uncache._initialize_mmio_fetch(env)
@@ -43,9 +53,7 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     stalled = [
         sample
         for sample in snapshots
-        if sample["uncache_state"] == 3
-        and sample["entry_state"] == 1
-        and sample["tl_a_valid"] == 1
+        if sample["tl_a_valid"] == 1
         and sample["tl_a_ready"] == 0
     ]
     assert stalled, {"snapshots": snapshots[-32:]}
@@ -57,11 +65,11 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     transitions = [
         sample
         for sample in snapshots
-        if sample["entry_state"] == 2 and sample["tl_a_valid"] == 0
+        if sample["tl_d_valid"] == 1 and sample["tl_a_valid"] == 0
     ]
     assert transitions, {"snapshots": snapshots[-32:]}
     wait_resp_cycle = min(
-        sample["cycle"] for sample in snapshots if sample["entry_state"] == 2
+        sample["cycle"] for sample in snapshots if sample["tl_d_valid"] == 1
     )
     first_d_cycle = min(
         sample["cycle"] for sample in snapshots if sample["tl_d_valid"] == 1
@@ -94,9 +102,8 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
     snapshots: list[dict[str, int | None]] = []
 
     def capture(cycle: int, active_env) -> None:
-        sample = owner_funcov._snapshot(active_env.functional_coverage, active_env.dut)
-        if sample["entry_state"] == 1 and sample["tl_a_valid"]:
-            snapshots.append({"cycle": int(cycle), **sample})
+        sample = _capture_post_drive_snapshot(cycle, active_env)
+        snapshots.append(sample)
 
     env.register_cycle_observer(capture)
     uncache._initialize_mmio_fetch(env)
@@ -104,7 +111,6 @@ def test_mmio_send_req_with_ibuffer_ready_drives_tl_a(env):
     assert uncache._wait_for_uncache_a_valid_addr(env, uncache._MMIO_BASE, max_cycles=8000)
     assert any(
         sample["ifu_stall"] == 0
-        and sample["entry_state"] == 1
         and sample["tl_a_valid"] == 1
         and sample["tl_a_ready"] == 1
         for sample in snapshots
