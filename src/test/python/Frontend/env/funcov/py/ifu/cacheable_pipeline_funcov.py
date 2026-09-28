@@ -413,18 +413,10 @@ def _read_bin907_raw_candidate_count(
 
 
 def _read_exception_mask(recorder) -> Optional[int]:
-    mask = 0
-    for slot in range(35):
-        value = _read_first(
-            recorder,
-            (
-                f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
-            ),
-        )
-        if value is None:
-            return None
-        mask |= (int(value) & 1) << slot
-    return mask
+    return _read_first(
+        recorder,
+        (f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask",),
+    )
 
 
 def _mark_late_fault_owner(recorder, cycle: int, evidence: dict) -> None:

@@ -1689,10 +1689,7 @@ def test_cacheable_sampler_signals_match_generated_contract():
             for candidates in _LATE_FAULT_SIGNALS.values()
         ),
     }
-    required |= {
-        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}"
-        for slot in range(35)
-    }
+    required.add(f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask")
     required |= {
         f"{_IFU_PREFIX}s1_alignedInstrVec_{slot}_index"
         for slot in range(35)

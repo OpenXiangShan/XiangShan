@@ -368,8 +368,7 @@ def _set_ifu_output(
         is_for_vs_nonleaf_pte,
     )
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", gp_addr_mem_waddr)
-    for slot in range(35):
-        dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", 0)
+    exception_mask_value = 0
     for slot, pc, instr, is_rvc, end_offset, ftq_flag, ftq_value, exception_mask in entries:
         slot = int(slot)
         enq_enable |= 1 << slot
@@ -380,11 +379,11 @@ def _set_ifu_output(
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_predTaken", slot == entries[-1][0])
-        dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_fixedTaken", 0)
         dut.set(_PREFIX + f"io_toIBuffer_bits_isLastInFtqEntry_{slot}", slot == entries[-1][0])
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_flag", ftq_flag)
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_value", ftq_value)
-        dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", exception_mask)
+        exception_mask_value |= (int(exception_mask) & 1) << slot
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionMask", exception_mask_value)
     dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", enq_enable)
     dut.set(_PREFIX + "io_toIBuffer_bits_valid", valid_mask | int(valid_mask_extra))
     dut.set(_PREFIX + "s2_prevIBufEnqPtr_value", prev_ibuf_enq_ptr)
@@ -2477,8 +2476,7 @@ def _set_invalid_taken_exception_s1(
     dut.set(_PREFIX + "io_toIBuffer_bits_foldpc_0", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag", 0)
     dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 0)
-    for slot in range(35):
-        dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionMask", 0)
     dut.set(_PREFIX + "s1_valid", 1)
     dut.set(_PREFIX + "s1_fire", 1)
     dut.set(_PREFIX + "s1_invalidTaken_0", 1)
@@ -2803,7 +2801,7 @@ def _set_frontend_trigger_lane(
     dut.set(_PREFIX + "s2_alignedPdInfoVec_0_brAttribute_rasAction", 0)
     dut.set(_PREFIX + "s2_alignedJumpOffsetVec_0_addr", 0)
     dut.set(_PREFIX + "s2_expandedInstrDataVec_0", 0x0001)
-    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionMask_0", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionMask", 0)
     for slot in range(4):
         dut.set(_TRIGGER_PREFIX + f"triggerHitVec_0_{slot}", hits[slot])
         dut.set(_TRIGGER_PREFIX + f"triggerCanFireVec_{slot}", can_fire[slot])
@@ -3073,10 +3071,10 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_toIBuffer_bits_isRvc_0",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_offset",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_predTaken",
-        _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_fixedTaken",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__fixedTakenVec_0",
         _PREFIX + "io_toIBuffer_bits_isLastInFtqEntry_0",
         _PREFIX + "io_toIBuffer_bits_exceptionType_value",
-        _PREFIX + "io_toIBuffer_bits_exceptionMask_0",
+        _PREFIX + "io_toIBuffer_bits_exceptionMask",
         _PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag",
         _PREFIX + "io_toIBuffer_bits_ftqPtr_0_value",
         _PREFIX + "s1_valid",
