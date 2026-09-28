@@ -451,6 +451,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.wen := intRegion.io.cross.I2FWakeupOut.get.valid && intRegion.io.cross.I2FWakeupOut.get.bits.fpWen
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.pdest := intRegion.io.cross.I2FWakeupOut.get.bits.pdest
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency := 0.U.asTypeOf(fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency)
+  fpRegion.in.fromIntRegion.loadFpWbM4Wakeup.zip(intRegion.io.loadFpWbM4Wakeup.get).foreach {
+    case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits
+  }
   fpRegion.fromIntIQ <> intRegion.io.intIQOut.get
   fpRegion.in.fromIntRegion.fromIntIQDeqOg1Payload <> intRegion.io.intIQDeqOg1PayloadOut.get
   fpRegion.in.fromVecRegion.fpWbM3Wakeup := vecRegion.out.toFltRegion.fpWbM3Wakeup
