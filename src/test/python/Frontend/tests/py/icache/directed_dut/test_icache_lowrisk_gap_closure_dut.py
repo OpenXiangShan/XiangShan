@@ -20,6 +20,12 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
     _SIGNALS as _WAYLOOKUP_SIGNALS,
 )
 from env.support.pmp_pma import PmpPmaConfig
+from tests.py.icache.directed_dut.support import (
+    clear_soft_prefetch as _clear_soft_prefetch,
+    poll_until,
+    read_cached_signal as _try_read_internal,
+    set_predictors as _set_predictors,
+)
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
     test_icache_trained_two_fetch_asymmetric_line_refill as _run_asymmetric_refill,
@@ -35,33 +41,6 @@ _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
-
-
-def _try_read_internal(env, names: tuple[str, ...]) -> int | None:
-    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
-    if cache is None:
-        cache = {}
-        setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = tuple(str(name) for name in names)
-    if cache_key in cache:
-        signal = cache[cache_key]
-        value = None if signal is None else getattr(signal, "value", None)
-        return None if value is None else int(value)
-
-    for name in names:
-        try:
-            signal = getattr(env.dut, str(name), None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(str(name)) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                cache[cache_key] = signal
-                return int(value)
-        except Exception:
-            continue
-    cache[cache_key] = None
-    return None
 
 
 def _miss_request_snapshot(env) -> dict[str, int | None]:
@@ -285,10 +264,8 @@ def _load_same_set_jump_loop(
 
 
 def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return
-        env.step(1)
+    if poll_until(env, predicate, max_cycles=max_cycles):
+        return
     raise AssertionError(
         {
             "reason": f"timeout while waiting for {label}",
@@ -604,16 +581,6 @@ def _read_first_signal(env, names: tuple[str, ...]) -> int | None:
     return None
 
 
-def _clear_soft_prefetch(env) -> None:
-    for slot in range(3):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        address = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        if valid is not None:
-            valid.value = 0
-        if address is not None:
-            address.value = 0
-
-
 def _pulse_fencei(env) -> None:
     signal = getattr(env.clock_reset, "io_fencei", None)
     assert signal is not None, {"missing_signal": "io_fencei"}
@@ -635,18 +602,6 @@ def _drive_soft_prefetch(env, addresses: list[int]) -> None:
         value.value = int(address)
     env.step(1)
     _clear_soft_prefetch(env)
-
-
-def _set_predictors(env, enabled: bool) -> None:
-    value = 1 if enabled else 0
-    env.set_bp_ctrl_enable(
-        ubtb_enable=value,
-        abtb_enable=value,
-        mbtb_enable=value,
-        tage_enable=value,
-        sc_enable=value,
-        ittage_enable=value,
-    )
 
 
 @pytest.fixture

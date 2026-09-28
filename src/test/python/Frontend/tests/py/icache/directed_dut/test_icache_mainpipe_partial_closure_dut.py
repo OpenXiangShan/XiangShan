@@ -10,6 +10,7 @@ import os
 from collections.abc import Callable
 
 import pytest
+from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, poll_until
 
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _BASE,
@@ -32,20 +33,9 @@ from tests.py.zhaoxinran.uncache.test_instr_uncache_port_boundaries import (
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 
 
-def _cycle_limit(name: str, default: int) -> int:
-    raw = os.getenv(str(name), "").strip()
-    if not raw:
-        return int(default)
-    value = int(raw, 0)
-    assert value > 0, f"{name} must be positive"
-    return int(value)
-
-
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return
-        env.step(1)
+    if poll_until(env, predicate, max_cycles=max_cycles):
+        return
     raise AssertionError(
         {
             "reason": f"timeout while waiting for {label}",

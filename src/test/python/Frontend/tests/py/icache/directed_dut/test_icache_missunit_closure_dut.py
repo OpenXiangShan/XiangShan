@@ -18,6 +18,11 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support.pmp_pma import PmpPmaConfig
+from tests.py.icache.directed_dut.support import (
+    clear_soft_prefetch as _clear_soft_prefetch,
+    poll_until,
+    set_predictors as _set_predictors,
+)
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -129,16 +134,6 @@ def _load_nops(env, base: int, *, words: int = 4096) -> None:
     env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
 
 
-def _clear_soft_prefetch(env) -> None:
-    for slot in range(3):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        address = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        if valid is not None:
-            valid.value = 0
-        if address is not None:
-            address.value = 0
-
-
 def _set_soft_prefetch(env, addresses: list[int]) -> None:
     _clear_soft_prefetch(env)
     for slot, address in enumerate(addresses[:3]):
@@ -211,18 +206,6 @@ def _pulse_fencei_redirect(env, target: int) -> None:
     env.step(1)
     signal.value = 0
     env.step(1)
-
-
-def _set_predictors(env, enabled: bool) -> None:
-    value = 1 if enabled else 0
-    env.set_bp_ctrl_enable(
-        ubtb_enable=value,
-        abtb_enable=value,
-        mbtb_enable=value,
-        tage_enable=value,
-        sc_enable=value,
-        ittage_enable=value,
-    )
 
 
 def _mshr_present(
@@ -426,10 +409,8 @@ def _build_mshr_pressure_until(
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return
-        env.step(1)
+    if poll_until(env, predicate, max_cycles=max_cycles):
+        return
     raise AssertionError(
         {
             "reason": f"timeout while waiting for {label}",

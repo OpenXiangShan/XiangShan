@@ -15,6 +15,7 @@ from tests.py.jiabowen.test_functional_coverage_baremode import (
 from tests.py.zhaoxinran.test_multi_branch import (
     test_multi_branch_random_positions as _run_multi_branch_positions,
 )
+from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, poll_until
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -101,15 +102,6 @@ for _index in range(4):
     )
 
 
-def _cycle_limit(name: str, default: int) -> int:
-    raw = os.getenv(str(name), "").strip()
-    if not raw:
-        return int(default)
-    value = int(raw, 0)
-    assert value > 0, f"{name} must be positive"
-    return int(value)
-
-
 def _try_read(env, names: Sequence[str]) -> int | None:
     recorder = getattr(env, "functional_coverage", None)
     if recorder is not None:
@@ -169,10 +161,8 @@ def _register_observer(env) -> list[dict[str, int]]:
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return
-        env.step(1)
+    if poll_until(env, predicate, max_cycles=max_cycles):
+        return
     raise AssertionError(
         {
             "reason": f"timeout while waiting for {label}",

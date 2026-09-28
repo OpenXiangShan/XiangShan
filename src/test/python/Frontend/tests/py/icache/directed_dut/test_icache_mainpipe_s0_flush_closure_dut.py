@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
 
 import pytest
 
@@ -18,6 +17,11 @@ from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
 from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
     _load_and_reset as _load_two_fetch_loop,
     _warm_frontend_execution as _warm_two_fetch_execution,
+)
+from tests.py.icache.directed_dut.support import (
+    cycle_limit as _cycle_limit,
+    read_cached_signal as _try_read,
+    restore_predictors as _restore_predictors,
 )
 
 
@@ -73,42 +77,6 @@ _SIGNALS = {
         _ICACHE + "__Vtogcov__io_fromFtq_toMainPipe_ready",
     ),
 }
-
-
-def _cycle_limit(name: str, default: int) -> int:
-    raw = os.getenv(str(name), "").strip()
-    if not raw:
-        return int(default)
-    value = int(raw, 0)
-    assert value > 0, f"{name} must be positive"
-    return int(value)
-
-
-def _try_read(env, names: Sequence[str]) -> int | None:
-    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
-    if cache is None:
-        cache = {}
-        setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = tuple(str(name) for name in names)
-    if cache_key in cache:
-        signal = cache[cache_key]
-        value = None if signal is None else getattr(signal, "value", None)
-        return None if value is None else int(value)
-
-    for name in names:
-        try:
-            signal = getattr(env.dut, str(name), None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(str(name)) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                cache[cache_key] = signal
-                return int(value)
-        except Exception:
-            continue
-    cache[cache_key] = None
-    return None
 
 
 def _read(env, key: str, default: int = 0) -> int:
@@ -262,17 +230,6 @@ def _initialize_bpu_s3_stream(env) -> None:
         miss_rate=0.0,
         seed=0x6605,
     )
-    env.set_bp_ctrl_enable(
-        ubtb_enable=1,
-        abtb_enable=1,
-        mbtb_enable=1,
-        tage_enable=1,
-        sc_enable=1,
-        ittage_enable=1,
-    )
-
-
-def _restore_predictors(env) -> None:
     env.set_bp_ctrl_enable(
         ubtb_enable=1,
         abtb_enable=1,

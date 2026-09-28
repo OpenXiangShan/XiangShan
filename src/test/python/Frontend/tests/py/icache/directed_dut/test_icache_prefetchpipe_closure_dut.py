@@ -28,6 +28,7 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
     _s0_sampling_window,
     _trigger_bpu_s3_flush,
 )
+from tests.py.icache.directed_dut.support import clear_soft_prefetch as _clear_soft_prefetch
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -138,16 +139,6 @@ def _prepare_nops(
     env.initialize(reset_vector=int(base), bare_mode=True, reset_cycles=20)
     env.monitor.clear()
     env.monitor.set_expected_pc(int(base))
-
-
-def _clear_soft_prefetch(env) -> None:
-    for slot in range(3):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        address = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        if valid is not None:
-            valid.value = 0
-        if address is not None:
-            address.value = 0
 
 
 def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, allow_fault: bool = False) -> None:
