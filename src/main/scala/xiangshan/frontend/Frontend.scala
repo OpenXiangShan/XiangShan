@@ -257,7 +257,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.backendRedirectTopdown     := ftq.io.backendRedirectTopdown
   ibuffer.io.backendRedirectTopdown := ftq.io.backendRedirectTopdown
 
-  io.backend.cfVec <> ibuffer.io.out
+  io.backend.cfVec := ibuffer.io.out
   io.backend.stallReason <> ibuffer.io.stallReason
 
   instrUncache.io.fromIfu <> ifu.io.toUncache

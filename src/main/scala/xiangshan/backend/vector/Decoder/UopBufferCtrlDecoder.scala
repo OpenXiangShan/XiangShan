@@ -34,8 +34,9 @@ class UopBufferCtrlDecoder(
     val bufferValids = Vec(uopBufferLength, Bool())
     val uopBufferNum = UInt(3.W)
     val acceptVec = Vec(mopWidth, Bool())
+    val accNum = UInt(mopWidth.U.getWidth.W)
     val selForUop = Vec(uopWidth, new UopSelectBundle(mopWidth))
-    val selForBufffer = Vec(uopBufferLength, new UopSelectBundle(mopWidth))
+    val selForBuffer = Vec(uopBufferLength, new UopSelectBundle(mopWidth))
   }))
 
   val alluops: ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = genUopNumPatterns2(mopWidth, numM2M4M8Channel)
@@ -72,12 +73,14 @@ class UopBufferCtrlDecoder(
 
   val uopBufferNumField = new UopBufferNumField(uopWidth)
   val acceptVecField = new AcceptVecField(mopWidth, uopWidth, uopBufferLength)
+  val acceptNumField = new AcceptNumField(mopWidth, uopWidth, uopBufferLength)
   val uopValidsField = new UopValidsField(uopWidth)
   val bufferValidsField = new BufferValidsField(uopWidth, uopBufferLength)
 
   val fields = Seq(
     uopBufferNumField,
     acceptVecField,
+    acceptNumField,
     uopValidsField,
     bufferValidsField,
   )
@@ -92,6 +95,7 @@ class UopBufferCtrlDecoder(
   out.bufferValids := decodeResult(bufferValidsField)
 
   out.uopBufferNum := decodeResult(uopBufferNumField)
+  out.accNum := decodeResult(acceptNumField)
   for (i <- out.acceptVec.indices) {
     out.acceptVec(i) := acceptVec(i) &&
       ((i < MaxM2UopIdx).B || (i >= MaxM2UopIdx).B && !in.channelUopNum(i)(1)) &&
@@ -106,7 +110,7 @@ class UopBufferCtrlDecoder(
   }
 
   for (i <- 0 until uopBufferLength) {
-    out.selForBufffer(i) := selForBufferDecodeTables(i)
+    out.selForBuffer(i) := selForBufferDecodeTables(i)
       .decode(in.uopBufferNum ## in.channelUopNum.reverse.reduce(_ ## _))
       .apply(selForBufferFields(i))
   }
@@ -225,6 +229,24 @@ object UopBufferCtrlDecoderUtil extends HasVectorSettings {
         BitPat.N(mopWidth)
       } else
         BitPat.Y(acceptLastIdx).pad0To(mopWidth)
+    }
+  }
+
+  class AcceptNumField(mopWidth: Int, uopWidth: Int, uopBufferSize: Int) extends DecodeField[UopNumWithChannelUopNum, UInt] {
+
+    override def name: String = "acceptNum"
+
+    override def chiselType: UInt = UInt(log2Up(mopWidth + 1).W)
+
+    override def genTable(op: UopNumWithChannelUopNum): BitPat = {
+      val UopNumWithChannelUopNum(uopBufferNum, uopNumOHs) = op
+      val scanSum = uopNumOHs.scan(uopBufferNum)(_ + _)
+      val acceptLastIdx = scanSum.lastIndexWhere(_ <= uopWidth + uopBufferSize, Int.MaxValue)
+      if (acceptLastIdx <= 0) {
+        0.U(log2Up(mopWidth + 1).W).toBitPat
+      } else {
+        acceptLastIdx.U(mopWidth.U.getWidth.W).toBitPat
+      }
     }
   }
 

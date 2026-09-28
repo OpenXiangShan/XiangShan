@@ -31,7 +31,7 @@ class VectorDecodeChannel(
   instSeq: Seq[VecInstPattern],
 ) (
   implicit val p: Parameters
-) extends Module with HasVectorSettings {
+) extends Module with HasVectorSettings with HasXSParameter {
   import VectorDecodeChannel._
 
   @public val in = IO(Input(new DecodeChannelInput))
