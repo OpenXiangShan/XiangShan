@@ -136,7 +136,17 @@ class MainBtbWriteBuffer(implicit p: Parameters) extends MainBtbModule with Help
   private val alloc  = w.valid && !hit && !isFull
 
   XSError(w.valid && PopCount(hitVec) > 1.U, "MainBtbWriteBuffer should hit at most one slot")
-  XSPerfAccumulate("mbtb_writebuffer_drop", w.valid && !hit && isFull)
+
+  // A full miss normally drops the write. An entry-bearing write, however, evicts a counter-only slot
+  // instead (losing that counter update), so frequent counter traffic never takes entry capacity.
+  private val counterOnlyVec = VecInit((0 until WriteBufferSize).map(s => valid(s) && !entryWayMask(s).orR))
+  private val replace =
+    w.valid && !hit && isFull && w.bits.entryWayMask.orR && counterOnlyVec.asUInt.orR
+  private val victimIdx  = PriorityEncoder(counterOnlyVec)
+  private val replaceVec = VecInit((0 until WriteBufferSize).map(s => replace && victimIdx === s.U))
+  private val drop       = w.valid && !hit && isFull && !replace
+  XSPerfAccumulate("mbtb_writebuffer_drop", drop)
+  XSPerfAccumulate("mbtb_writebuffer_replace", replace)
 
   // The training metadata can be stale: it may miss a branch that is already pending in this slot and
   // pick a fresh victim way, which would write the same (tag, position) into two ways. If the entry is
@@ -155,32 +165,34 @@ class MainBtbWriteBuffer(implicit p: Parameters) extends MainBtbModule with Help
   // slot (do not advance head): the current SRAM write carries the older value, the merged one drains
   // next cycle.
   private val drainedHit  = io.drain.fire && w.valid && hit && hitIdx === drainIdx
-  private val advanceHead = io.drain.fire && !drainedHit
+  private val replaceHead = replace && victimIdx === head
+  private val advanceHead = io.drain.fire && !drainedHit && !replaceHead
   private val mergeVec    = VecInit((0 until WriteBufferSize).map(s => w.valid && hitVec(s) && !duplicate))
   private val allocVec    = VecInit((0 until WriteBufferSize).map(s => alloc && tail === s.U))
+  private val writeVec    = VecInit((0 until WriteBufferSize).map(s => allocVec(s) || replaceVec(s)))
 
   valid := VecInit((0 until WriteBufferSize).map { s =>
-    Mux(advanceHead && head === s.U, false.B, Mux(allocVec(s), true.B, valid(s)))
+    Mux(advanceHead && head === s.U, false.B, Mux(writeVec(s), true.B, valid(s)))
   })
   head := Mux(advanceHead, wrapInc(head), head)
   tail := Mux(alloc, wrapInc(tail), tail)
 
-  setIdx := VecInit((0 until WriteBufferSize).map(s => Mux(allocVec(s), w.bits.setIdx, setIdx(s))))
+  setIdx := VecInit((0 until WriteBufferSize).map(s => Mux(writeVec(s), w.bits.setIdx, setIdx(s))))
   entryWayMask := VecInit((0 until WriteBufferSize).map { s =>
-    Mux(allocVec(s), w.bits.entryWayMask, Mux(mergeVec(s), entryWayMask(s) | w.bits.entryWayMask, entryWayMask(s)))
+    Mux(writeVec(s), w.bits.entryWayMask, Mux(mergeVec(s), entryWayMask(s) | w.bits.entryWayMask, entryWayMask(s)))
   })
   counterMask := VecInit((0 until WriteBufferSize).map { s =>
-    Mux(allocVec(s), w.bits.counterMask, Mux(mergeVec(s), counterMask(s) | w.bits.counterMask, counterMask(s)))
+    Mux(writeVec(s), w.bits.counterMask, Mux(mergeVec(s), counterMask(s) | w.bits.counterMask, counterMask(s)))
   })
   entries := VecInit((0 until WriteBufferSize).map { s =>
     VecInit((0 until NumWay).map { i =>
-      Mux(allocVec(s), w.bits.entry, Mux(mergeVec(s) && w.bits.entryWayMask(i), w.bits.entry, entries(s)(i)))
+      Mux(writeVec(s), w.bits.entry, Mux(mergeVec(s) && w.bits.entryWayMask(i), w.bits.entry, entries(s)(i)))
     })
   })
   counters := VecInit((0 until WriteBufferSize).map { s =>
     VecInit((0 until NumWay).map { i =>
       Mux(
-        allocVec(s),
+        writeVec(s),
         w.bits.counters(i),
         Mux(mergeVec(s) && w.bits.counterMask(i), w.bits.counters(i), counters(s)(i))
       )
