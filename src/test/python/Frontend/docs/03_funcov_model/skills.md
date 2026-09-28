@@ -1,6 +1,6 @@
 ---
 name: frontend-bt-verification-closure
-description: 统一 Frontend BT 从设计分析、测试点、环境与 checker、汇编和 agent 激励、功能覆盖率建模、真实 DUT 回归、代码覆盖率到自动反标和人工验收的工作流。
+description: 统一 Frontend BT 从设计分析、测试点、环境与 checker、汇编和 agent 激励、功能覆盖率建模、真实 DUT 回归、代码覆盖率到只读 HIT 审计和人工验收的工作流。
 ---
 
 # Frontend BT 测试点驱动验证与覆盖率闭环规范
@@ -9,7 +9,7 @@ description: 统一 Frontend BT 从设计分析、测试点、环境与 checker�
 
 Frontend BT 的唯一主流程是：
 
-`设计分析 -> 叶子测试点 -> 环境与 checker -> testcase -> 功能覆盖率 -> 真实 DUT 回归 -> artifact -> 自动反标 -> 人工 CLOSED`
+`设计分析 -> 叶子测试点 -> 环境与 checker -> testcase -> 功能覆盖率 -> 真实 DUT 回归 -> artifact -> 只读 HIT 审计 -> 人工 CLOSED`
 
 测试点是所有验证活动的输入。功能覆盖率用于证明目标场景已经被激励并采样；当前阶段的 `HIT` 只以这一激励与采样证据为目标。checker、assertion、协议检查或 trace/reference 对比用于证明 DUT 行为正确，属于后续 `CLOSED` 的语义验收证据。已启用的检查不得出现未豁免错误，但某个叶子尚未建设 checker、assertion 或 reference，不得阻塞其 `HIT`。
 
@@ -43,22 +43,21 @@ AI 可以分析代码、提出测试点和预期，但不能独立批准从 DUT 
 
 - 测试点主表：`../02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`
 - coverage registry：`frontend_bt_functional_coverage_pilot.csv`
-- 功能覆盖率 recorder、调度和 event 采样：`../../env/funcov/recorder.py`
-- 模块级周期采样 predicate：`../../env/funcov/__init__.py`、
-  `../../env/funcov/py/icache/__init__.py`、
-  `../../env/funcov/py/icache/icache_mainpipe_funcov.py`、
-  `../../env/funcov/py/icache/icache_prefetchpipe_funcov.py` 和
-  `../../env/funcov/py/icache/icache_missunit_funcov.py`、
-  `../../env/funcov/py/icache/icache_waylookup_funcov.py` 和
-  `../../env/funcov/py/icache/icache_hitmiss_funcov.py`
-- 自动反标：`../../tools/backannotate_funcov.py`
+- 功能覆盖率实现地图：`../../env/funcov/README.md`
 - Python testcase：`../../tests/`
 - 汇编 testcase：`../../tests/asm_cases/`
-- 回归入口：`../../scripts/`
+- 环境、artifact 布局和回归入口：`../../README.md`
 
 `pilot` 仅为历史兼容文件名，不表示仍处于试点阶段。原 `docs/frontend_bt_functional_coverage_pilot.csv` 重复副本已删除，不得重新建立平行 registry。
 
-功能覆盖率只允许一套 runtime 链：fixture 装配一个 `FunctionalCoverageRecorder`，由 `funcov/recorder.py` 统一调度 event/cycle 采样，通用模块 predicate 放在 `funcov/__init__.py`，ICache MainPipe、PrefetchPipe、MissUnit、WayLookup 与 hit/miss predicate 放在 `funcov/py/icache/` 子包中，并通过其 `__init__.py` 注册到同一个 recorder。不得再通过 `coverage_def.py`、toffee `CovGroup`、SV covergroup 或其他 Python 文件并行维护相同 group/point/bin 的第二份命中逻辑。VCS/Verdi 功能覆盖率可以用于临时调试和交叉检查，但不能作为 canonical 反标证据。
+功能覆盖率只允许一套正式 runtime 链：fixture 装配 `FrontendFuncovSampleHub`，挂接
+`ToffeeCoverageSink` / native `CovGroup`，各功能域共用一个周期级 DUT snapshot。每个 case
+的 native groups 在 teardown 累计到同一 pytest session；启用 functional coverage 时只在 session finish 写出
+`funcov/toffee.funcov.json`。失败 case 的已采样 bin 同样计入该原生 aggregate。旧 `FunctionalCoverageRecorder` JSON
+ledger、`merge_funcov.py` 以及 `TB_ENABLE_TOFFEE_FUNCOV` / `TB_ENABLE_FUNCOV_AUDIT` /
+`TB_ENABLE_TOFFEE_FUNCOV_PILOT` 已删除，不得再恢复为正式路径。不得通过其他 Python 文件或
+SV covergroup 并行维护相同 group/point/bin 的第二套正式命中逻辑。VCS/Verdi 功能覆盖率
+可以用于临时调试和交叉检查，但不能与 Toffee functional coverage 合并为同一个分子。
 
 registry 中只有 `Coverpoint` 完整、已反标到唯一叶子且已有 sampler 映射的行才是 active model。保留的历史规划行在迁移完成前只算 `UNMAPPED`，即使旧 predicate 偶然命中也不能自动反标或计入闭环分子。
 
@@ -111,7 +110,15 @@ Condition 只描述如何构成场景，Checkpoint 只描述如何证明结果�
 
 一个 testcase 可以覆盖多个叶子，但每个叶子必须有一个主责任 testcase。testcase 必须显式列出目标 TP_ID/Bin_ID，不能依赖运行后偶然命中解释覆盖意图。Python directed test 使用 `@pytest.mark.funcov_bins(...)` / `funcov_tps(...)`；通用 bin-trace testcase 由 registry 中 `建议试点用例` 与汇编/bin stem 的精确匹配生成目标，必要时通过 `TB_FUNCOV_TARGET_BINS` 显式覆盖。
 
-对已知 Bin_ID/TP_ID 范围的 run，artifact 必须记录 `coverage_targets`；Python directed testcase 通过上述 marker 声明，或通过 `TB_FUNCOV_TARGET_BINS`、`TB_FUNCOV_TARGET_TP_IDS`、`TB_FUNCOV_TARGET_TESTCASES` 显式声明。通用 bin-trace 可以不声明 `bin_ids`，不得仅根据 bin 文件名推断 coverage 所有权；一旦声明目标，未知 Bin_ID 或 testcase 名必须使 run 失败。directed testcase 可以专门覆盖目标 bin，但必须按叶子测试点定义构造真实 DUT 场景，不得伪造 coverage event、force 内部状态，或绕过该 run 中已启用的检查；`HIT` 阶段不要求每个叶子已有完整 reference model 或语义 checker。
+Python directed testcase 通过上述 marker 声明目标，也可以通过
+`TB_FUNCOV_TARGET_BINS`、`TB_FUNCOV_TARGET_TP_IDS`、`TB_FUNCOV_TARGET_TESTCASES`
+为当前运行补充目标。当前 runtime 使用这些声明校验目标并配置 sampler，但原生
+`toffee.funcov.json` 不保存 `coverage_targets`，因此不能仅从该报告反推出 testcase
+归属。通用 bin-trace 可以不声明 `bin_ids`，不得仅根据 bin 文件名推断 coverage 所有权；
+一旦声明目标，未知 Bin_ID 或 testcase 名必须使 run 失败。directed testcase 可以专门覆盖
+目标 bin，但必须按叶子测试点定义构造真实 DUT 场景，不得伪造 coverage event、force 内部
+状态，或绕过该 run 中已启用的检查；`HIT` 阶段不要求每个叶子已有完整 reference model
+或语义 checker。
 
 标准场景由两部分共同构成：
 
@@ -141,7 +148,10 @@ Python testcase 使用 `env/sequences/`、`env/api/` 和现有 agent 构造额�
 
 ## 7. 功能覆盖率建模
 
-coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，`funcov/recorder.py` 负责加载定义、统一调度、event 采样、记录命中和输出 artifact，`funcov/__init__.py` 及其 ICache 子模块维护模块级周期采样 predicate。它们共同组成唯一可执行功能覆盖率实现。
+coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`。
+`FrontendFuncovSampleHub` 加载定义、协调 event/cycle 采样并维护共享 snapshot；Toffee sink /
+native `CovGroup` 负责命中记账和 canonical coverage report。原有功能域 predicate 继续复用，避免
+在迁移中建立第二份判定逻辑。
 
 建模规则：
 
@@ -156,14 +166,26 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 - cross 条件必须来自同一事务或有明确的跨周期关联状态。
 - reset、redirect、flush 和 recovery 后按真实寄存时序 gating。
 - 不得用缺失信号的默认值制造 hit 或永久 unhit。
-- sampler 必须保存首次命中 cycle 和关键事务 evidence。
+- sampler 可以在运行时保留首次命中 cycle 和关键事务 evidence 供 checker/诊断查询，但原生
+  Toffee report 不输出这些字段，不能把内存中的 detail 当作持久签核证据。
 - `bins` 按需独立记账的可观察场景划分；单 bin coverpoint 合法，不得为形式完整加入补集或占位 bin。
 - event encoding 只用于天然互斥的类别。独立并发条件必须使用独立 coverpoint 或 bin，不得因 `if`/`else if` 优先级丢失低优先级观察。
 - 优先使用直接、可读的 coverpoint predicate；不得仅为减少 coverpoint 数量引入难以审查的 `always_comb` event selector。
 
+### 7.1 Snapshot 与采样相位
+
+SampleHub 在每个 DUT cycle 建立共享 read-once snapshot；同一周期内对同一内部信号的 coverage
+读取复用首次值，避免多个 predicate 重复访问 DUT。该 snapshot 表示 coverage callback 所在的
+固定采样相位，不是任意时刻都重新读取的 runtime view。
+
+testcase 或时序 canary 若需要观察 agent drive 之后的 TL、redirect、ready/valid 等边界，必须从
+已绑定 bundle 或当前生成 DUT inventory 中验证过的 runtime alias 直接读取，并明确使用
+pre-drive 或 post-drive observer。禁止把 SampleHub 的早期缓存值与同周期 post-drive 接口值混合
+后声称它们天然同相；跨相位组合必须有明确的时序合同。
+
 模型单测负责证明 predicate、状态机和边界判定可执行；生成 DUT 的 signal contract 测试负责证明采样信号存在；真实 DUT testcase 负责证明场景可达。
 
-### 7.1 Condition 可观察性与跨周期关联
+### 7.2 Condition 可观察性与跨周期关联
 
 - 统计和审查测试点时使用 `csv.reader` 读取逻辑记录。物理行号只用于定位文件位置；只有层级末端且同时具有 `Condition`、`Checkpoint`、`Object` 的记录才计为可执行叶子，不能把标题行或继承行计入分母。
 - 在标记 `MODELED` 前，将 `Condition` 的每个必要子条件逐项映射到当前选定 simulator 的 DUT object、generated RTL 或 signal contract。源 RTL 中存在、但当前生成 DUT package/bind 未暴露的信号，不得用同名猜测、默认值或旁路信号替代；应保持 `UNMAPPED` 或 `BLOCKED`，并记录具体缺失接口。
@@ -171,7 +193,7 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 - 跨周期场景必须保存并匹配最小充分的事务身份，例如 requestor/source、FTQ pointer 与 offset、VPN 或 transaction tag，再将 response、fault 或 redirect 归属于同一事务。全局 pending bit、任意下一次 `valid` response 或仅凭相邻周期不能证明事务关联。
 - 将 `PARTIAL` 或 `UNMAPPED` 时，说明缺失的是哪一个 Condition 信号、时序关系或事务身份；不要把尚未证明的 Checkpoint 当作模型缺口。Condition 建模完成但尚无真实 DUT 命中时应为 `MODELED`，只有同一版本、同一 run 的完整证据才能升级为 `HIT`。
 
-### 7.2 Producer 审计与诊断边界
+### 7.3 Producer 审计与诊断边界
 
 场景已描述、registry 已映射、runtime producer 可执行、当前 DUT 场景命中是不同证据。审计必须沿 `Bin_ID -> registry -> sampler/event source -> 实际采样条件` 检查，包括动态循环和跨周期 pending 状态；只搜索 registry key 或存在 `mark` 调用不能证明合法运行路径可达。已有 producer 缺口检查位于 `tests/py/jiabowen/test_functional_coverage_pilot_schema.py`，不在过程文档里另维护一份数量清单。
 
@@ -183,13 +205,16 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 
 ### 8.1 功能覆盖率
 
-`FunctionalCoverageRecorder` 输出：
+正式 runtime 启用 functional coverage 时，每个 pytest session 只输出一份原生 Toffee report：
 
-- `<tag>.funcov.json`
-- `<tag>.funcov.summary.csv`
-- `<tag>.funcov.unhit.csv`
+- `funcov/toffee.funcov.json`
 
-只有通过真实 DUT 证据门禁的 JSON artifact 可以自动反标测试点。
+该 report 只统计 CovGroup bin hints，不包含 per-case outcome、checker、provenance、Bin_ID 或
+cycle evidence；失败 case 也会贡献 hints。因此它不能作为 `HIT` 审计证据。
+`scripts/run_pytest_with_log.sh` 默认在同一 `funcov/` 目录再写一份 toffee-test
+`funcov.html`，用于按用例查看 bin hints；它同样不是 `HIT` 证据，可用
+`TB_ENABLE_TOFFEE_HTML_REPORT=0` 关闭。旧 `<tag>.funcov.json` / summary / unhit
+ledger 已退出正式路径。
 
 ### 8.2 代码覆盖率
 
@@ -200,35 +225,35 @@ python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir <
 src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 ```
 
-功能覆盖率主链不依赖 toffee `CovGroup`。删除 toffee 功能覆盖率不得删除 `dut.SetCoverage()`、`set_line_coverage()`、`.dat` 或 HTML 生成链路。
+Toffee functional coverage 与 Verilator code coverage 是两条独立链路。关闭或重构 Toffee
+`CovGroup` 不得删除 `dut.SetCoverage()`、`set_line_coverage()`、`.dat` 或 HTML 生成链路。
 
 代码覆盖率只用于发现 RTL 空洞和评估回归广度，不能直接修改测试点状态。Verilator `.dat` 与 VCS VDB 不能混合，不同 DUT build 的 `.dat` 也不能合并。
 
 ## 9. 标准 artifact 与版本门禁
 
-每次回归必须使用唯一 `run_id` 目录。可用于反标的 run 至少保存：
+每次回归必须使用唯一 `run_id` 目录。当前 runner 分别保存：
 
-- testcase、汇编/bin 路径和目标 TP_ID/Bin_ID。
-- 目标声明 `coverage_targets`（至少包含 `bin_ids`，必要时含 `tp_ids`）。
-- design source SHA、DUT build SHA 和 generated RTL hash。
-- registry SHA、sampler SHA、testcase SHA 和 signal contract hash。
-- build config、工具版本、命令、退出码、pytest outcome 和 seed。
-- funcov JSON、summary、unhit。
-- `.dat`、代码覆盖率 summary、case log 和波形。
-- checker、monitor、reference/trace 统计。
-- 首次命中 cycle 和关键 evidence。
+- session 级原生 `funcov/toffee.funcov.json`，以及可选的 `funcov.html`；
+- pytest 总日志和每个 DUT case 的 case log；
+- Verilator `.dat` 与 FST/VCD，或 VCS VDB 与 FSDB；
+- bin-trace runner 声明的 bin、golden trace、运行命令、seed 和 pipeline 结果。
 
-只有以下兼容性签名完全一致的 artifact 才允许默认合并：
+这些产物彼此独立。原生 Toffee JSON 只包含 Toffee group、point、bin、hints 和采样统计，
+不包含 `coverage_targets`、pytest outcome、checker/monitor 结果、manifest、版本 SHA、路径 hash、
+first/last cycle 或 evidence。`funcov.html` 也是查看页，不补充这些签核字段。
 
-`design SHA + DUT build hash + build config + registry SHA + sampler SHA + signal contract hash + toolchain`
+`merge_toffee_funcov.py` 只读取各输入的 `groups` 并通过 Toffee reporter 聚合，不执行旧
+Frontend sidecar 的 compatibility/provenance gate，也不排除失败 case 已产生的采样。因此 suite
+aggregate 只能回答“这些子进程累计观察到哪些 bin”，不能回答“哪个通过的 testcase 对哪个
+测试点形成 HIT”。不同 DUT build、registry 或 sampler 的报告不得因为工具当前未检查这些身份
+就被当作可签核合并；需要跨版本比较时，必须在报告之外人工核对版本和模型语义。
 
-不同版本默认拒绝合并。显式迁移必须证明旧 bin 语义未变、给出一对一映射、保留新增 bin 为 unhit，并记录迁移审计信息。
-
-当前 JSON 已记录 registry、定义、sampler、完整验证环境、DUT 模型库/Python 扩展、generated RTL tree、signal contract、build config 和 toolchain 签名；`merge_raw_files()` 会重新计算每个输入的 compatibility signature 和 definitions hash，签名不一致或字段被静默修改时直接失败。`make frontend` 成功后生成 design-build manifest，运行时重新核对 manifest 与实际产物哈希；DUT 编译输入脏、manifest 缺失或产物不匹配均不得进入自动 `HIT`。测试点文档、coverage registry、driver、monitor、checker、sampler 和 Python testcase 的变化不要求重新编译 DUT；registry、验证环境和 testcase 分别通过内容 hash 重新验证 artifact，验证实现变化只要求重新回归。纯文档变化不改变 DUT 或验证环境身份。标准 runner 同时生成唯一 run 目录并保存 pytest outcome/退出码和 checker 状态。汇编 suite 会对逐 case artifact 执行只读反标审计，并输出明确标记为 diagnostic `observed` 的合并报告；该 aggregate 不能代替逐 case DUT evidence。
-
-反标门禁必须实际检查同一 run 下声明的 waveform、raw `.dat`、case log 和 funcov 文件，而不是只检查路径字符串。waveform、`.dat` 和 funcov 文件为空或不存在时不得进入自动 `HIT`；安静用例允许 case log 为空，但文件必须存在。
-反标时还必须重算当前 canonical registry 和 sampler 的 SHA，并重算 artifact 内 definitions hash。registry/sampler 已更新或 definitions 被改写的历史 artifact 只能作诊断证据，不得对当前测试点升级为 `HIT`。
-反标时必须从声明路径重读 testcase、汇编源（存在时）、bin 和 golden trace，并与 artifact 记录的 SHA 逐项比较。输入文件丢失、路径非绝对路径或内容漂移时不得自动 `HIT`。
+`make frontend` 仍生成 design-build manifest；pytest outcome、checker/monitor、日志、波形、
+代码覆盖率和输入文件仍是判断运行有效性的独立证据。当前 runner 不会把这些证据封装进原生
+Toffee report，也不会自动生成 testcase 级 HIT audit artifact。需要 HIT 审计时，必须从同一
+run 的独立产物重新核对真实 DUT、manifest、pytest/checker 结果、目标声明和输入身份；不能把
+session aggregate 本身当作签核结论。
 
 ## 10. 状态与反标
 
@@ -242,18 +267,19 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 - `BLOCKED`：明确的 DUT、design 或 environment blocker。
 - `N-A`：评审确认当前设计不适用。
 
-自动升级到 `HIT` 必须同时满足：
+人工或独立只读审计判定 `HIT` 必须同时满足：
 
 1. 使用编译后的真实 DUT。
-2. 版本兼容性签名完整且匹配。
+2. 从独立 manifest、registry 和 sampler 证据核对的 DUT/覆盖率模型身份完整且匹配。
 3. pytest PASS，退出码为 0。
 4. 该 run 中已启用且适用的 monitor、checker、assertion、reference 或 trace 检查无未豁免错误；未建设或未适用某类检查本身不阻塞 `HIT`。
-5. 同一 run 中，point 级目标至少产生一次有效子 bin 采样，或 bin 级目标的指定 `(group, point, bin)` 命中。
+5. 同一 run 的原生 Toffee report 中，point 级目标至少产生一次有效子 bin 采样，或 bin 级目标的指定 `(group, point, bin)` 命中。
 6. 日志、波形、funcov 和 codecov artifact 属于同一 run。
+7. 若结论需要归属到具体 testcase，另有 testcase marker/目标声明及同 run 运行证据；session aggregate 本身不能证明该归属。
 
-bin 被触发但 testcase 失败时不得标记 `HIT`。`CLOSED` 只能人工写入，自动工具不得生成、降级或覆盖。
+bin 被触发但 testcase 失败时不得判定为 `HIT`。`CLOSED` 只能人工写入；审计工具不得修改测试点 CSV 的 `status/testcase/evidence`。
 
-全局基线自动反标必须处理整个 active registry，不得写死 `BIN-5*` 等批次前缀，并对重复叶子、重复 bin、registry 漂移、版本不一致和缺失 artifact 直接失败。模块级覆盖率刷新可以使用 `--level1` 与 `--level2` 限定主表写回范围；写回后必须按继承层级审计逻辑记录，确认目标层级之外没有字段变化，且不得借模块级刷新修复或改写其他层级的结构错误。
+全局基线只读审计必须处理整个 active registry，不得写死 `BIN-5*` 等批次前缀，并对重复叶子、重复 bin、registry 漂移、版本不一致和缺失 artifact 直接失败。测试点主表只保存静态映射；动态 HIT 结论和运行 evidence 不写入原生 Toffee report。如需机器可读结论，应由独立只读 audit/projection artifact 承载，且不得修改测试点 CSV 的动态状态。
 
 ## 11. 每周设计刷新
 
@@ -268,7 +294,7 @@ Frontend 设计每周更新时执行固定流程：
 7. 执行全量 signal contract、模型单测和受影响 testcase。
 8. 运行当前版本 active 回归，独立生成 funcov 和 codecov 报告。
 9. 旧版本受影响的 `HIT/CLOSED` 在重验前标记 `PARTIAL`，evidence 注明版本失效原因。
-10. 自动反标后由人工完成新版本验收。
+10. 只读 HIT 审计后由人工完成新版本验收。
 
 设计新增测试点会改变分母，覆盖率短期下降是正常现象。不得为了保持百分比单调而沿用失效证据或删除有效未覆盖点。
 
@@ -280,11 +306,11 @@ Frontend 设计每周更新时执行固定流程：
 
 ## 12. 三人协作与代码组织
 
-IFU、ICache、iTLB/PTW/BPU/FTQ 等模块按负责人推进，各自维护对应 testcase、checker 和 sampler；公共 fixture、artifact schema、registry、Bin_ID 分配和最终反标由 ctrl 统一收口。
+IFU、ICache、iTLB/PTW/BPU/FTQ 等模块按负责人推进，各自维护对应 testcase、checker 和 sampler；公共 fixture、artifact 布局与证据规则、registry、Bin_ID 分配和最终审计由 ctrl 统一收口。
 
 协作规则：
 
-- 三人使用同一测试点主表、registry、runner、状态和 artifact schema。
+- 三人使用同一测试点主表、registry、runner、状态、artifact 布局和证据规则。
 - 不建立个人平行测试点表或个人 coverage registry。
 - 模块代码可以分文件维护，但必须注册到唯一 recorder。
 - Bin_ID 由统一 registry 分配，禁止个人占用重叠区间。
@@ -314,12 +340,11 @@ IFU、ICache、iTLB/PTW/BPU/FTQ 等模块按负责人推进，各自维护对应
 
 ## 14. 当前收口顺序
 
-1. 保留唯一 JSON funcov 主链，移除重复的 toffee/SV 功能覆盖率采样。
-2. 将 Coverpoint 纳入运行时定义、artifact key 和一致性检查。
-3. 补齐唯一 run_id、build/registry/sampler manifest 和严格合并门禁。
-4. 将 signal contract 扩展到所有 active 模型，缺失信号直接失败。
-5. 将 funcov merge、代码覆盖率汇总和反标接入统一 regression runner。
-6. 迁移三人现有模型和 testcase，隔离旧 registry 与历史 artifact。
-7. 固化每周设计刷新和量化报告生成。
+1. 正式路径固定为 SampleHub + Toffee；启用 functional coverage 时，每个 pytest session 只输出原生 `toffee.funcov.json`。
+2. 失败 case 的采样与通过 case 同样累计；不再维护逐 case Frontend signoff gate 或 sidecar merge。
+3. 不恢复 CSV 动态写回。
+4. 在目标规模 DUT 回归中取得完整 pytest summary 和 session report。
+5. 清理文档与入口中对已删除 legacy recorder / audit / fallback 开关的残留描述。
+6. 固化每周设计刷新和量化报告生成。
 
 任何阶段都不得为提高命中率放宽 checker、伪造 hit、复用失败 artifact、合并不兼容版本，或把代码覆盖率当成功能闭环证据。

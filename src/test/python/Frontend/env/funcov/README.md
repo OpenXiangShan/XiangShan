@@ -1,25 +1,29 @@
 # Frontend Functional Coverage Code
 
-This directory contains implementation predicates registered by
-`env/funcov/recorder.py`. It does not define a second functional-coverage
-methodology or coverage registry.
+This directory implements the formal Frontend functional-coverage path:
+`FrontendFuncovSampleHub` + Toffee. It does not define a second coverage
+methodology or a parallel coverage registry.
 
 ## Implementation map
 
-- `env/funcov/recorder.py`: loads the canonical registry, coordinates
-  recorder sampling, and writes functional-coverage artifacts.
-- `env/funcov/__init__.py`: shared registration and common predicate entry
-  points.
-- `env/funcov/py/`: Python predicate packages, organized by observation
+- `recorder.py`: `FrontendFuncovSampleHub` loads the canonical registry,
+  coordinates event/cycle sampling, keeps shared snapshot/state, and forwards
+  hits to an attached Toffee sink.
+- `sample_hub.py` / `runtime_context.py`: stable import aliases for
+  `FrontendFuncovSampleHub`.
+- `toffee_bridge.py`: maps the active registry to Toffee `CovGroup`s and, when
+  functional coverage is enabled, writes one native `funcov/toffee.funcov.json`
+  at pytest session finish.
+- `__init__.py`: shared registration and common predicate entry points.
+- `py/`: Python predicate and native Toffee packages, organized by observation
   domain.
-- `env/funcov/sv/`: SystemVerilog observation/bind sources used by the
-  simulator-specific coverage flow; they do not create a second canonical
-  registry.
+- `sv/`: SystemVerilog observation/bind sources used by simulator-specific
+  coverage flows; they do not create a second canonical registry.
 
-Use `src/test/python/Frontend/docs/03_funcov_model/skills.md` for the
-canonical testpoint, recorder, testcase, artifact, and back-annotation rules.
-Use `src/test/python/Frontend/README.md` for the source-tree layout and script
-entrypoints.
+The legacy JSON ledger and fallback/audit runtime have been removed. Use
+`src/test/python/Frontend/docs/03_funcov_model/skills.md` for testpoint,
+sampling, report and HIT-evidence rules; use `src/test/python/Frontend/README.md`
+for setup, artifact layout and script entrypoints.
 
 ## IFU maintenance checks
 

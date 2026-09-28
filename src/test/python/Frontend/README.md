@@ -31,8 +31,9 @@
     `tests/asm_cases/generated/` 保持共享。
 - `webui/`
   - Web UI 服务端与静态资源。
-- `data/`
-  - 波形、覆盖率和测试产物目录。
+- `build-frontend/artifacts/`
+  - 当前默认运行产物根目录；每次 invocation 使用独立 `<run_id>/` 保存日志、波形、
+    code coverage 和 funcov 报告。
 - `scripts/`
   - Frontend 目录下的 shell 脚本入口。
   - 包含 `run_pytest_with_log.sh`、`run_web_console.sh`、
@@ -53,14 +54,8 @@
 - `env/core/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
 - `env/runtime/dut_factory.py` 负责真实 DUT 构造。
 - `env/nemu/trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
-- `env/funcov/recorder.py` 负责功能覆盖率事件记录与产物输出。
-- `env/funcov/__init__.py` 负责通用 canonical group/coverpoint/bin 的 DUT 周期级采样，
-  `env/funcov/py/icache/` 下的
-  `icache_mainpipe_funcov.py`、`icache_prefetchpipe_funcov.py`、
-  `icache_missunit_funcov.py`、`icache_waylookup_funcov.py` 和
-  `icache_hitmiss_funcov.py` 分别负责 ICache MainPipe、PrefetchPipe、
-  MissUnit、WayLookup 与 hit/miss 路径功能覆盖率模型；
-  不再维护平行的 toffee 功能覆盖率定义。
+- `env/funcov/` 实现 SampleHub + Toffee 功能覆盖率主链；详细源码职责见
+  `env/funcov/README.md`，建模和证据规则见 `docs/03_funcov_model/skills.md`。
 - `env/monitors/` 承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
@@ -109,6 +104,7 @@
   - 当前只 waive 已评审的 MBIST/DFT wiring 行，包括 `io_dft`、`inner_bd`、`inner_childBd`、`childBd`、`boreChildrenBd`、`sigFromSrams`。
   - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
+  - `TB_ENABLE_FUNCTIONAL_COVERAGE=0` 可关闭正式 SampleHub + Toffee 功能覆盖率装配；默认 `1`。
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir build-frontend/artifacts/<run_id>/coverage`
   - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
@@ -116,8 +112,8 @@
   - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
 - `scripts/run_baremode_asm_suite.sh`
   - 每次启动固定写入 `build-frontend/artifacts/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`；其中 `cases/<case_stem>/` 是单个用例的独立目录，`report/` 是 suite 汇总。`TB_SUITE_DATE`、`TB_SUITE_TIME` 可用于受控复现，已存在的 suite 目录会直接拒绝，避免覆盖或混写证据。
-  - 随后自动生成逐 artifact gate audit、只读反标结果和同签名 `observed` funcov aggregate。
-  - `observed` aggregate 只用于批量 summary/unhit；自动 `HIT` 仍只认逐 case、真实 DUT 且通过全部门禁的原始 artifact。
+  - 汇总各子进程的原生 Toffee report；失败 case 的已采样 bin 也计入 aggregate。
+  - raw code coverage summary 独立生成，不得视为 Frontend HIT 签核证据。
 - `scripts/asm_to_jsonl.sh`
   - 用法: `src/test/python/Frontend/scripts/asm_to_jsonl.sh <case.S> [bin_path] [trace_jsonl_path]`
   - 默认把 `.S` 链接到 `0x10001000`，按 NEMU memory base `0x10000000`
@@ -179,6 +175,21 @@ make frontend-vcs \
 `Frontend` 为 source top；VCS 额外使用
 `build-frontend/full-rtl-picker.funcov.f`，在完整 RTL filelist 后追加
 funcov SystemVerilog 文件。
+
+### Backend model 模式
+
+Backend 行为模式由 testcase/environment 的 `BackendConfig.backend_mode` 配置，不使用命令行
+环境变量：
+
+- `auto_python`：普通 Python testcase 的默认模式；环境自动维护 backend queue、resolve、
+  commit 等行为，testcase 仍可显式构造所需刺激。
+- `manual_python`：Python testcase 手动控制关键 backend 动作；模型保留 queue 和合法性检查，
+  不自动排 golden wrong-path redirect。
+- `auto_bin`：bin-trace 模式；加载 golden trace 时由 `set_golden_trace()` 切换，使用 golden
+  trace 自动处理 mismatch 和 fetch-fault recovery，并禁止额外显式注入与自动策略竞争。
+
+Python testcase 需要非默认模式时，通过 `EnvConfig(backend=BackendConfig(...))` 配置，或在
+场景 setup 中调用 `env.backend_model.set_backend_mode(...)`。
 
 - non-DUT 默认回归入口：
 
@@ -253,7 +264,7 @@ bin runner 会为 DUT 阶段使用 `TB_PYTEST_TIMEOUT_SECS`；NEMU trace 生成�
 功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明
 DUT 行为正确；代码覆盖率用于发现 RTL 空洞，三者不能互相替代。
 
-功能覆盖率建模、artifact 门禁、反标和人工 `CLOSED` 的唯一规则见
+功能覆盖率建模、报告边界、HIT 审计和人工 `CLOSED` 的唯一规则见
 `src/test/python/Frontend/docs/03_funcov_model/skills.md`。Verilator `.dat` 的汇总和 HTML 入口见上文
 `scripts/report_raw_code_coverage.py` 与 `scripts/gen_coverage_html.sh`。
 
