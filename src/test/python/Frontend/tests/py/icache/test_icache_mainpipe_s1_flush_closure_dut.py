@@ -19,7 +19,7 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
     _load_and_reset as _load_two_fetch_loop,
     _warm_frontend_execution as _warm_two_fetch_execution,
 )
-from tests.py.ruierhan.test_icache_mainpipe_s0_flush_closure_dut import (
+from tests.py.icache.test_icache_mainpipe_s0_flush_closure_dut import (
     _trigger_bpu_s3_flush,
 )
 

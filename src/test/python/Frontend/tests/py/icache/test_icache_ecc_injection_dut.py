@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from tests.py.ruierhan.test_icache_lowrisk_gap_closure_dut import (
+from tests.py.icache.test_icache_lowrisk_gap_closure_dut import (
     _drive_soft_prefetch,
     _initialize_cacheable_stream,
 )

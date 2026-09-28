@@ -7,7 +7,7 @@ from env.funcov.py.icache import icache_mainpipe_funcov as mainpipe
 from env.funcov.py.icache import icache_prefetchpipe_funcov as prefetch
 from env.funcov.py.icache import icache_waylookup_funcov as waylookup
 from env.funcov.py.icache.signal_contract import half_aligned_cross_line, validate_target_probes
-from tests.py.ruierhan.test_icache_functional_coverage import _Recorder, _hit
+from tests.py.icache.test_icache_functional_coverage import _Recorder, _hit
 
 
 @pytest.mark.parametrize("module,key,path", [
