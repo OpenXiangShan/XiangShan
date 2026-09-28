@@ -28,6 +28,7 @@ import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
 import utility.{ChiselDB, Constantin, FileRegisters, GTimer, XSLog}
+import utility.Xstatistics.XstatsMgr
 import xiangshan.DebugOptionsKey
 import system._
 import device._
@@ -204,5 +205,6 @@ object XiangShanSim extends App {
   // tools: write cpp files
   ChiselDB.addToFileRegisters
   Constantin.addToFileRegisters
+  XstatsMgr.addToFileRegisters
   FileRegisters.write(fileDir = "./build")
 }
