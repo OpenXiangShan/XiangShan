@@ -64,6 +64,7 @@ class BackendModel:
         commit_min_delay: int = 3,
         commit_max_delay: int = 10,
         auto_redirect_on_golden_mispredict: bool = True,
+        backend_mode: str = "auto_python",
         random_seed: Optional[int] = None,
     ) -> None:
         self.logger = logging.getLogger("env.backend_model")
@@ -107,6 +108,8 @@ class BackendModel:
         self.golden_trace: Optional[GoldenTrace] = None
         self._explicit_injection_enabled = True
         self._explicit_injection_block_reason = ""
+        self.backend_mode = "auto_python"
+        self.set_backend_mode(backend_mode)
         self._initialize_epoch_state()
 
     def _initialize_epoch_state(self) -> None:
@@ -1681,6 +1684,8 @@ class BackendModel:
             return
 
     def _queue_active_wrong_path_redirect(self) -> bool:
+        if self.backend_mode == "manual_python":
+            return False
         episode = self._active_wrong_path_episode()
         if episode is None or bool(episode["redirect_driven"]):
             return False
@@ -3120,6 +3125,7 @@ class BackendModel:
         self._cycle_start_golden_pc = None
         self._cycle_start_golden_cursor = None
         if self.golden_trace is not None:
+            self.set_backend_mode("auto_bin")
             self.resolve_min_delay = _GOLDEN_TRACE_RESOLVE_MIN_DELAY
             self.resolve_max_delay = _GOLDEN_TRACE_RESOLVE_MAX_DELAY
             self.golden_trace.reset(int(start_cursor))
@@ -3133,6 +3139,21 @@ class BackendModel:
             self.resolve_min_delay = int(self._default_resolve_min_delay)
             self.resolve_max_delay = int(self._default_resolve_max_delay)
             self.logger.info("golden trace detached")
+
+    def set_backend_mode(self, mode: str) -> None:
+        normalized = str(mode).strip().lower()
+        if normalized not in {"auto_bin", "auto_python", "manual_python"}:
+            raise ValueError(
+                f"unsupported backend mode: {mode}; expected auto_bin, auto_python, manual_python"
+            )
+        self.backend_mode = normalized
+        self._explicit_injection_enabled = normalized != "auto_bin"
+        self._explicit_injection_block_reason = (
+            "auto_bin mode uses automatic golden-trace policy"
+            if normalized == "auto_bin"
+            else ""
+        )
+        self.logger.info("backend mode set: %s", normalized)
 
     def _publish(self, event_type: str, payload: Dict, level: str = "INFO") -> None:
         if self.event_sink is None:
@@ -4029,7 +4050,16 @@ class BackendModel:
                     hit_recovery_target = True
                 else:
                     self._cfvec_queue_mark_recovery_residual(int(queue_index))
-            elif int(exception_bits) != 0 and episode is None:
+            elif (
+                int(exception_bits) != 0
+                and episode is None
+                and self.golden_trace is not None
+                and self.backend_mode == "auto_bin"
+            ):
+                # Bin-trace mode needs an autonomous backend policy to recover
+                # from a frontend fetch fault. Directed tests without a golden
+                # trace keep the exception cfVec live and choose recovery
+                # explicitly when that is part of the scenario.
                 self._note_fetch_fault(int(queue_index))
             elif episode is None and int(exception_bits) == 0:
                 golden_entry = self._consume_golden_entry(int(pc))

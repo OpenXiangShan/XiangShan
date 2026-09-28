@@ -58,6 +58,7 @@ class BackendConfig:
     commit_min_delay: int = 3
     commit_max_delay: int = 10
     auto_redirect_on_golden_mispredict: bool = True
+    backend_mode: str = "auto_python"
 
 
 @dataclass(frozen=True)

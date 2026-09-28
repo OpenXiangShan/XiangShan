@@ -1238,8 +1238,8 @@ def test_access_fault_cfvec_queues_backend_iaf_redirect() -> None:
     interface = _ObserveIf()
     model.observe_if = interface
     model.current_cycle = 20
-    model.golden_trace = GoldenTrace(
-        [TraceEntry(index=0, pc=0x80003240, instr=0x10050663, size=4)]
+    model.set_golden_trace(
+        GoldenTrace([TraceEntry(index=0, pc=0x80003240, instr=0x10050663, size=4)])
     )
 
     _set_first_cfvec(model, interface, 0x40, ftq_value=3)

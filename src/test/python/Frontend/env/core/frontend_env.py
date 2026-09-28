@@ -149,6 +149,7 @@ class FrontendEnv:
                 commit_min_delay=self.config.backend.commit_min_delay,
                 commit_max_delay=self.config.backend.commit_max_delay,
                 auto_redirect_on_golden_mispredict=self.config.backend.auto_redirect_on_golden_mispredict,
+                backend_mode=self.config.backend.backend_mode,
                 random_seed=int(backend_random_seed or "1", 0),
             ),
         }
