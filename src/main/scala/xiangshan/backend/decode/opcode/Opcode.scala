@@ -959,6 +959,8 @@ object Opcode {
   object I2fOpcodes extends Opcodes.FCvtOpcode
 
   trait FDivOpcodes extends Opcodes with DataType {
+    val FixedLatency = 15
+
     private val FDIV  = bb"0"
     private val FSQRT = bb"1"
 
@@ -977,6 +979,11 @@ object Opcode {
     val vfsqrt_fp64: Opcode = DvSvlS2vS1(FSQRT, FP64, V)
 
     def getFormat(implicit op: UInt): UInt = op(2, 1)
+
+    override def getLat(opcode: Opcode): Int = {
+      require(all.contains(opcode))
+      FixedLatency
+    }
   }
 
   object FDivOpcodes extends FDivOpcodes

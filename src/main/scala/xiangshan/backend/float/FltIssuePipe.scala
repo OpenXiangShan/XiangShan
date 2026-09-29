@@ -192,7 +192,6 @@ class FltIssuePipe(
 
   exu.in.flush := in.flush
   exu.in.uop := ex0Next
-  exu.in.busyTableEmpty.foreach(_ := in.busyTableEmpty.get)
   exu.in.frm.zip(in.frm).foreach { case (sink, source) => sink := source }
   for ((rdCfgs, srcIdx) <- param.readPortCfgs.zipWithIndex) {
     exu.in.fpRdData(srcIdx) := Mux(
@@ -234,7 +233,7 @@ class FltIssuePipe(
   }
   else {
     exu.out.outFuWakeUp.foreach { wakeups =>
-      nonFixedLatWakeUp.wen := wakeups.map(_.wen).reduce(_ || _) && in.busyTableEmpty.get
+      nonFixedLatWakeUp.wen := wakeups.map(_.wen).reduce(_ || _)
       nonFixedLatWakeUp.pdest := Mux1H(wakeups.map(wakeup => wakeup.wen -> wakeup.pdest))
       nonFixedLatWakeUp.loadDependency := 0.U.asTypeOf(nonFixedLatWakeUp.loadDependency)
     }
@@ -298,7 +297,6 @@ object FltIssuePipe {
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb1 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val frm = Option.when(param.readFrm)(Frm())
-    val busyTableEmpty = Option.when(param.fuConfigs.find(_.isFdiv).nonEmpty)(Bool())
     val busyTableI2F = Option.when(param.fuConfigs.contains(VecFuConfig.FcvtCfg))(UInt(3.W)) // i2f latency = 3
   }
 

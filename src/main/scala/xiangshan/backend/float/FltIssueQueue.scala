@@ -705,8 +705,7 @@ object FltIssueQueue {
     sink.foreach { in =>
       in.fromIssueQueue.zip(wbPortIds).foreach { case (portIn, portId) =>
         val matches = matchedDeqOps(portId).map { case (deqPort, deqIdx) =>
-          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.fDivSqrt)
-          val valid = deqPort.valid && deqWen(deqIdx) && !isNonFixedLatFu
+          val valid = deqPort.valid && deqWen(deqIdx)
           val slot = WbFuBusyTable.writebackSlot(deqPort.bits.latency, busyTableInsertLatencyOffset)
           WbIssueMatch(valid, slot)
         }

@@ -209,8 +209,6 @@ class FltRegionImp(
       pipe.in.fpWb0Next := fpWbDataPath.out.wb0Next.map(_.data)
       pipe.in.fpWb0 := fpWbDataPath.out.wb0.map(_.data)
       pipe.in.fpWb1 := fpWbDataPath.out.wb1.map(_.data)
-      // for div
-      pipe.in.busyTableEmpty.foreach(_ := !iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead.get.head(4))
       pipe.in.busyTableI2F.foreach(_ := in.fromIntRegion.busyTableI2F)
       pipe.in.is1FpRdDataNext.foreach { case rdata =>
         rdata.data := fpRdata(rdata.rdConfig.port)

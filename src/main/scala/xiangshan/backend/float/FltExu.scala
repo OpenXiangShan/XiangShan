@@ -122,7 +122,6 @@ class FltExu(val param: ExuParam)(implicit val p: Parameters) extends Module wit
           sink.bits <#=: soure.bits
         }
       }
-      fu.in.busyTableEmpty.foreach(_ := in.busyTableEmpty.get)
   }
 
   val outFuUopEx = Wire(Vec(latencyMax + 1, ValidIO(new Exu.OutUop(param))))
@@ -191,7 +190,6 @@ object FltExu {
     val fpWb0Next = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     val fpWb1 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
-    val busyTableEmpty = Option.when(param.fuConfigs.find(_.isFdiv).nonEmpty)(Bool())
   }
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
