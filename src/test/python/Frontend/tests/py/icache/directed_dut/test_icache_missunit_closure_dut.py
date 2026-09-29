@@ -280,21 +280,27 @@ def _wait_mshr_state(
     max_cycles: int,
     label: str,
 ) -> dict[str, int | None]:
-    for _ in range(int(max_cycles)):
+    sample: dict[str, int | None] = {}
+
+    def state_ready() -> bool:
+        nonlocal sample
         sample = _snapshot(env)
-        if predicate(sample):
-            return sample
-        env.step(1)
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-                "last_snapshot": _snapshot(env),
-                "coverage_state": getattr(
-                    env.functional_coverage, "_icache_missunit_cov_state", None
-                ),
-                "stats": env.get_stats(),
-        }
+        return bool(predicate(sample))
+
+    wait_until(
+        env,
+        state_ready,
+        max_cycles=max_cycles,
+        label=label,
+        snapshot=lambda: sample or _snapshot(env),
+        diagnostics=lambda: {
+            "coverage_state": getattr(
+                env.functional_coverage, "_icache_missunit_cov_state", None
+            ),
+            "stats": env.get_stats(),
+        },
     )
+    return sample
 
 
 def _pulse_fencei_when(

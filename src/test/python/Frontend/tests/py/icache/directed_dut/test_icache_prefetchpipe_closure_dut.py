@@ -28,7 +28,11 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
     _s0_sampling_window,
     _trigger_bpu_s3_flush,
 )
-from tests.py.icache.directed_dut.support import clear_soft_prefetch as _clear_soft_prefetch
+from tests.py.icache.directed_dut.support import (
+    clear_soft_prefetch as _clear_soft_prefetch,
+    wait_coverage_hits,
+    wait_until,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -85,27 +89,52 @@ def _internal_signal(env, *names: str) -> int | None:
 
 def _wait_icache_request(env, address: int, *, max_cycles: int = 4096) -> dict:
     line = int(address) & ~0x3F
-    for _ in range(int(max_cycles)):
+    result = {}
+
+    def request_seen() -> bool:
+        nonlocal result
         matches = [
             record
             for record in env.icache_agent.get_stats()["request_records"]
             if int(record["address"]) == line
         ]
         if matches:
-            return matches[-1]
-        env.step(1)
-    raise AssertionError({"reason": "ICache request was not observed", "line": line})
+            result = matches[-1]
+            return True
+        return False
+
+    wait_until(
+        env,
+        request_seen,
+        max_cycles=max_cycles,
+        label=f"ICache request for line 0x{line:x}",
+        diagnostics=lambda: {"line": line},
+    )
+    return result
 
 
 def _wait_refill_waymask(env, address: int, *, max_cycles: int = 4096) -> int:
     block = (int(address) & ~0x3F) >> 6
-    for _ in range(int(max_cycles)):
+    result: int | None = None
+
+    def refill_seen() -> bool:
+        nonlocal result
         if _signal(env, "refill_valid") == 1 and _signal(env, "refill_paddr") == block:
             waymask = _signal(env, "refill_waymask")
             assert waymask is not None and int(waymask).bit_count() == 1
-            return int(waymask)
-        env.step(1)
-    raise AssertionError({"reason": "ICache refill was not observed", "block": block})
+            result = int(waymask)
+            return True
+        return False
+
+    wait_until(
+        env,
+        refill_seen,
+        max_cycles=max_cycles,
+        label=f"ICache refill block {block}",
+        diagnostics=lambda: {"block": block},
+    )
+    assert result is not None
+    return result
 
 
 def _load_nops(env, base: int, *, words: int = 8192) -> None:

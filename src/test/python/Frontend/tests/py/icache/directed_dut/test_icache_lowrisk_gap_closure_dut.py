@@ -24,6 +24,8 @@ from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
     read_cached_signal as _try_read_internal,
     set_predictors as _set_predictors,
+    wait_coverage_hit,
+    wait_coverage_hits,
     wait_until,
 )
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
@@ -288,24 +290,21 @@ def _wait_funcov_hit(
     label: str | None = None,
 ) -> None:
     max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
-    target = (group, bin_name)
-    for _ in range(max_cycles):
-        if env.functional_coverage.key_hit(*target):
-            return
-        env.step(1)
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label or f'{group}.{bin_name}'}",
-            "missing": [f"{group}.{bin_name}"],
-            "max_cycles": max_cycles,
-            "current_cycle": int(env.current_cycle),
+    wait_coverage_hit(
+        env,
+        group,
+        bin_name,
+        max_cycles=max_cycles,
+        snapshot=lambda: {
             "waylookup": _waylookup_snapshot(env),
             "miss_request": _miss_request_snapshot(env),
+        },
+        diagnostics=lambda: {
             "coverage_state": getattr(
                 env.functional_coverage, "_icache_hitmiss_cov_state", None
             ),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -318,25 +317,22 @@ def _wait_funcov_hit_checker_clean(
     label: str,
 ) -> None:
     """Stop a closure probe as soon as its evidence becomes ineligible."""
-    for _ in range(int(max_cycles)):
-        if env.functional_coverage.key_hit(group, bin_name):
-            return
+    def no_checker_error() -> bool:
         errors = env.monitor.get_errors()
         if errors:
-            raise AssertionError(
-                {
-                    "reason": f"checker error while waiting for {label}",
-                    "first_monitor_error": errors[0],
-                    "current_cycle": int(env.current_cycle),
-                }
-            )
-        env.step(1)
-    _wait_funcov_hit(
+            raise AssertionError({
+                "reason": f"checker error while waiting for {label}",
+                "first_monitor_error": errors[0],
+                "current_cycle": int(env.current_cycle),
+            })
+        return bool(env.functional_coverage.key_hit(group, bin_name))
+
+    wait_until(
         env,
-        group,
-        bin_name,
+        no_checker_error,
         max_cycles=1,
         label=label,
+        snapshot=lambda: _waylookup_snapshot(env),
     )
 
 
@@ -348,25 +344,15 @@ def _wait_funcov_hits(
     label: str,
 ) -> None:
     max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
-    for _ in range(max_cycles):
-        missing = [
-            (group, name)
-            for group, name in targets
-            if not env.functional_coverage.key_hit(group, name)
-        ]
-        if not missing:
-            return
-        env.step(1)
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "missing": [f"{group}.{name}" for group, name in missing],
-            "max_cycles": max_cycles,
-            "current_cycle": int(env.current_cycle),
+    wait_coverage_hits(
+        env,
+        targets,
+        max_cycles=max_cycles,
+        snapshot=lambda: {
             "waylookup": _waylookup_snapshot(env),
             "miss_request": _miss_request_snapshot(env),
-            "monitor_errors": env.monitor.get_errors(),
-        }
+        },
+        diagnostics=lambda: {"monitor_errors": env.monitor.get_errors()},
     )
 
 
