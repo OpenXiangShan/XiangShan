@@ -226,7 +226,7 @@ case class XSCoreParameters
   EnsbufferWidth: Int = 2,
   LoadDependencyWidth: Int = 2,
   // ============ VLSU ============
-  VlMergeBufferSize: Int = 16,
+  VlMergeBufferSize: Int = 24,
   VsMergeBufferSize: Int = 16,
   UopWritebackWidth: Int = 2,
   VLUopWritebackWidth: Int = 2,
