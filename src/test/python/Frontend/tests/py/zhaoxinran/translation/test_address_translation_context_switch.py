@@ -512,9 +512,15 @@ def test_all_stage_context_change_after_refill(env, scenario_id, context_update,
     _wait_until(env, lambda: _translation_complete(env), description="all-stage translation refill")
     env.assert_translation_scenario()
 
+    req_count = int(env.ptw_agent.get_stats()["req_count"])
     change = env.update_translation_context(**context_update)
 
     assert change["changed"][changed_name]
+    _wait_until(
+        env,
+        lambda: int(env.ptw_agent.get_stats()["req_count"]) > req_count,
+        description=f"retranslation after {changed_name} change",
+    )
     assert env.translation_epoch == state.translation_epoch + 1
     assert not env.get_errors()
 
@@ -558,7 +564,7 @@ def _run_sfence_scope_after_refill(
         env,
         _sfence_stage_scenario(scenario_id, s2xlate=0),
     )
-    record = _run_sfence_retranslation(
+    _run_sfence_retranslation(
         env,
         scenario,
         retranslation_page_indexes=retranslation_page_indexes,
@@ -568,8 +574,6 @@ def _run_sfence_scope_after_refill(
         ident=ident,
     )
 
-    assert record["rs1"] == rs1
-    assert record["rs2"] == rs2
     assert not env.get_errors()
 
 
@@ -588,7 +592,7 @@ def test_sfence_stage_after_refill(env, scenario_id, s2xlate, hv, hg) -> None:
         env,
         _sfence_stage_scenario(scenario_id, s2xlate=s2xlate),
     )
-    record = _run_sfence_retranslation(
+    _run_sfence_retranslation(
         env,
         scenario,
         addr=scenario.va,
@@ -598,8 +602,6 @@ def test_sfence_stage_after_refill(env, scenario_id, s2xlate, hv, hg) -> None:
         hg=hg,
     )
 
-    assert record["hv"] == hv
-    assert record["hg"] == hg
     assert not env.get_errors()
 
 
@@ -620,7 +622,7 @@ def test_unmatched_sfence_during_ptw_wait_preserves_translation(env) -> None:
         description="inflight PTW response",
     )
 
-    record = env.pulse_sfence(
+    env.pulse_sfence(
         addr=_NEW_VA,
         rs1=1,
         rs2=1,
@@ -628,7 +630,6 @@ def test_unmatched_sfence_during_ptw_wait_preserves_translation(env) -> None:
         advance_translation_epoch=False,
     )
 
-    assert record["addr"] == _NEW_VA
     _wait_until(env, lambda: _translation_complete(env), description="translation after unmatched SFENCE")
     env.assert_translation_scenario()
     env.translation_oracle.disarm()

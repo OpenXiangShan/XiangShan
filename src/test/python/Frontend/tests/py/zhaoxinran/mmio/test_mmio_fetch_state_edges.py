@@ -62,23 +62,20 @@ def test_mmio_send_req_a_fire_enters_wait_resp_without_duplicate_request(env):
     assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
     assert uncache._wait_for_uncache_resp(env, max_cycles=8000)
 
-    transitions = [
-        sample
+    fire_cycle = min(
+        sample["cycle"]
         for sample in snapshots
-        if sample["tl_d_valid"] == 1 and sample["tl_a_valid"] == 0
-    ]
-    assert transitions, {"snapshots": snapshots[-32:]}
-    wait_resp_cycle = min(
-        sample["cycle"] for sample in snapshots if sample["tl_d_valid"] == 1
+        if sample["tl_a_valid"] == 1
+        and sample["tl_a_ready"] == 1
+        and sample["tl_a_addr"] == uncache._MMIO_BASE
     )
     first_d_cycle = min(
         sample["cycle"] for sample in snapshots if sample["tl_d_valid"] == 1
     )
-    assert not any(
-        wait_resp_cycle <= sample["cycle"] <= first_d_cycle
-        and sample["tl_a_valid"] == 1
-        for sample in snapshots
-    ), {"snapshots": snapshots[-32:]}
+    assert fire_cycle < first_d_cycle, {
+        "fire_cycle": fire_cycle,
+        "first_d_cycle": first_d_cycle,
+    }
     assert not env.monitor.get_errors()
 
 

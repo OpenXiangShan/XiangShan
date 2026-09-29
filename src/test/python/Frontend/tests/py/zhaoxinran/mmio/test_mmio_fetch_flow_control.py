@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from env.support import record_scenario, scenario_rng
+from env.support import record_scenario, require_sig, scenario_rng
 from tests.py.support import uncache_scenarios as uncache
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -27,46 +27,32 @@ def _configure_random_latency(
     return base_seed, seed, rng, latency
 
 
-def _read_dut_signal(env, name: str) -> int:
-    signal = getattr(env.dut, str(name), None)
-    if signal is None:
-        signal = env.dut.GetInternalSignal(str(name))
-    assert signal is not None, {"missing_dut_signal": name}
-    value = getattr(signal, "value", None)
-    assert value is not None, {"unreadable_dut_signal": name}
-    return int(value)
-
-
 def _flow_snapshot(env) -> dict[str, int]:
     prefix = "Frontend_top.Frontend."
     ibuffer = f"{prefix}inner_ibuffer."
     enq_ptr = (
-        _read_dut_signal(env, f"{ibuffer}enqPtrDup_0_flag"),
-        _read_dut_signal(env, f"{ibuffer}enqPtrDup_0_value"),
+        require_sig(env.dut, f"{ibuffer}enqPtrDup_0_flag"),
+        require_sig(env.dut, f"{ibuffer}enqPtrDup_0_value"),
     )
     deq_ptr = (
-        _read_dut_signal(env, f"{ibuffer}deqPtrVec_0_flag"),
-        _read_dut_signal(env, f"{ibuffer}deqPtrVec_0_value"),
+        require_sig(env.dut, f"{ibuffer}deqPtrVec_0_flag"),
+        require_sig(env.dut, f"{ibuffer}deqPtrVec_0_value"),
     )
     return {
-        "uncache_state": _read_dut_signal(
-            env, f"{prefix}inner_ifu.uncacheUnit.uncacheState"
+        "uncache_state": require_sig(env.dut, f"{prefix}inner_ifu.uncacheUnit.uncacheState"
         ),
-        "empty_after": _read_dut_signal(
-            env, f"{prefix}inner_ifu.uncacheUnit.io_emptyAfter"
+        "empty_after": require_sig(env.dut, f"{prefix}inner_ifu.uncacheUnit.io_emptyAfter"
         ),
         "ifu_stall": 1
-        - _read_dut_signal(env, f"{ibuffer}allowEnq"),
+        - require_sig(env.dut, f"{ibuffer}allowEnq"),
         "ibuffer_empty": int(
             enq_ptr == deq_ptr
-            and _read_dut_signal(env, f"{ibuffer}outputEntries_0_valid") == 0
+            and require_sig(env.dut, f"{ibuffer}outputEntries_0_valid") == 0
         ),
-        "backend_empty": _read_dut_signal(env, "io_backend_backendEmpty"),
-        "backend_accept": _read_dut_signal(
-            env, "io_backend_toIBuf_decodeCanAccept"
+        "backend_empty": require_sig(env.dut, "io_backend_backendEmpty"),
+        "backend_accept": require_sig(env.dut, "io_backend_toIBuf_decodeCanAccept"
         ),
-        "tl_a_valid": _read_dut_signal(
-            env, "Frontend_top.auto_inner_instrUncache_client_out_a_valid"
+        "tl_a_valid": require_sig(env.dut, "Frontend_top.auto_inner_instrUncache_client_out_a_valid"
         ),
     }
 
@@ -102,17 +88,7 @@ def test_mmio_wait_last_commit_holds_request_while_ibuffer_is_nonempty(env):
     )
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(0)
-    snapshots: list[dict[str, int]] = []
-
-    def capture(cycle: int, active_env) -> None:
-        sample = _flow_snapshot(active_env)
-        sample["cycle"] = int(cycle)
-        sample["cfvec_valid"] = int(
-            any(int(signal.value) for signal in active_env.backend_observe_if.cfvec_valid)
-        )
-        snapshots.append(sample)
-
-    env.register_cycle_observer(capture)
+    snapshots = _register_flow_snapshot_observer(env)
     uncache._initialize_mmio_fetch(env)
 
     assert uncache._wait_for_uncache_req(env)
@@ -177,6 +153,7 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
 
     assert uncache._wait_for_uncache_req(env)
     assert uncache._wait_for_uncache_resp(env)
+    start_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
     for _ in range(256):
         if any(
             sample["uncache_state"] == _WAIT_LAST_COMMIT
@@ -187,12 +164,16 @@ def test_mmio_wait_last_commit_keeps_request_when_backend_nonempty_and_ibuffer_e
             break
         env.step(1)
 
-    assert any(
-        sample["uncache_state"] == _WAIT_LAST_COMMIT
+    matching = [
+        sample
+        for sample in snapshots
+        if sample["uncache_state"] == _WAIT_LAST_COMMIT
         and sample["backend_empty"] == 0
         and sample["ibuffer_empty"] == 1
-        for sample in snapshots
-    ), {"snapshots": snapshots[-64:]}
+    ]
+    assert matching, {"snapshots": snapshots[-64:]}
+    assert all(sample["tl_a_valid"] == 0 for sample in matching)
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == start_req_count
     assert not env.monitor.get_errors()
 
 
@@ -280,6 +261,8 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
         env.step(1)
     assert snapshots[-1]["backend_accept"] == 0
     assert snapshots[-1]["cfvec_valid"] == 1
+    assert snapshots[-1]["tl_a_valid"] == 0
+    held_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(1)
     for _ in range(512):
         if any(
@@ -299,6 +282,7 @@ def test_mmio_backend_can_accept_rise_coincides_with_cfvec_valid(env):
         and sample["cfvec_valid"] == 1
         for index, sample in enumerate(snapshots)
     ), {"snapshots": snapshots[-64:]}
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == held_req_count
     assert not env.monitor.get_errors()
 
 
@@ -338,6 +322,7 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
         env.step(1)
     assert snapshots[-1]["uncache_state"] != 0
     assert snapshots[-1]["cfvec_valid"] == 0, {"snapshots": snapshots[-64:]}
+    held_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
     env.backend_model.set_can_accept(0)
     for _ in range(512):
         if any(
@@ -354,9 +339,12 @@ def test_mmio_backend_can_accept_fall_happens_without_cfvec(env):
         index > 0
         and snapshots[index - 1]["backend_accept"] == 1
         and sample["backend_accept"] == 0
+        and sample["uncache_state"] != 0
+        and sample["tl_a_valid"] == 0
         and sample["cfvec_valid"] == 0
         for index, sample in enumerate(snapshots)
     ), {"snapshots": snapshots[-64:]}
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == held_req_count
     env.backend_model.set_can_accept(1)
     assert uncache._wait_for_uncache_resp(env)
     assert not env.monitor.get_errors()
