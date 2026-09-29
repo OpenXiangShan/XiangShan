@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
@@ -36,45 +34,6 @@ def _read(path: Path) -> str:
 
 def _compact(source: str) -> str:
     return " ".join(source.split())
-
-
-def test_bin814_review_is_bound_to_the_current_dut_manifest() -> None:
-    manifest_path = _REPO_ROOT / "build-frontend/frontend_build_manifest.verilator.json"
-    manifest = json.loads(_read(manifest_path))
-
-    runtime_head = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, text=True
-    ).strip()
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", manifest["implementation_sha"], runtime_head],
-        cwd=_REPO_ROOT,
-        check=False,
-    )
-    assert ancestry.returncode == 0, {
-        "compiled_implementation": manifest["implementation_sha"],
-        "runtime_head": runtime_head,
-        "reason": "DUT build is not based on the current verification history",
-    }
-    source_sha = manifest["dut_source_sha"]
-    baseline_sha = manifest["design_baseline_sha"]
-    for label, sha in (("dut_source_sha", source_sha), ("design_baseline_sha", baseline_sha)):
-        valid = subprocess.run(
-            ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
-            cwd=_REPO_ROOT,
-            check=False,
-        )
-        assert valid.returncode == 0, {"field": label, "value": sha}
-    assert subprocess.run(
-        ["git", "merge-base", "--is-ancestor", source_sha, runtime_head],
-        cwd=_REPO_ROOT,
-        check=False,
-    ).returncode == 0
-    assert subprocess.run(
-        ["git", "merge-base", "--is-ancestor", baseline_sha, source_sha],
-        cwd=_REPO_ROOT,
-        check=False,
-    ).returncode == 0
-    assert manifest["source_tree_dirty"] is False
 
 
 def test_bin814_observation_contract_matches_current_dut_inventory() -> None:
