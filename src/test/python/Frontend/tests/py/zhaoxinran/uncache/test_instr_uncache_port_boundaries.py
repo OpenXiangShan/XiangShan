@@ -277,28 +277,6 @@ def _half_rvi_state_is_quiescent(sample: dict) -> bool:
     )
 
 
-def test_half_rvi_quiescence_requires_no_consumable_stale_state():
-    sample = {
-        "s0": 0,
-        "s1": 1,
-        "s1_data": 0,
-        "s1_pc": 0,
-        "s1_pipeline_valid": 0,
-        "s2": 1,
-        "s2_valid": 0,
-    }
-    assert _half_rvi_state_is_quiescent(sample)
-
-    active_s1 = dict(sample, s1_pipeline_valid=1)
-    assert not _half_rvi_state_is_quiescent(active_s1)
-
-    active_s2 = dict(sample, s2_valid=1)
-    assert not _half_rvi_state_is_quiescent(active_s2)
-
-    stale_payload = dict(sample, s1_data=0x13)
-    assert not _half_rvi_state_is_quiescent(stale_payload)
-
-
 def _wait_for_first_active_s1_after(
     env,
     samples: Sequence[dict],

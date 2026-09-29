@@ -58,10 +58,10 @@ tests/py/
 | 位置 | 文件数 | 展开用例数 | 范围 |
 | --- | ---: | ---: | --- |
 | `translation/` | 8 | 132 | 地址翻译、PTE 权限、PTW 时序、上下文切换和随机回归 |
-| `uncache/` | 2 | 88 | InstrUncache 端口边界和 PBMT.NC 路径 |
+| `uncache/` | 2 | 87 | InstrUncache 端口边界和 PBMT.NC 路径 |
 | `mmio/` | 9 | 53 | MMIO 属性、边界、控制流、流控、flush 和 fault |
 | 根目录 | 4 | 34 | bin-trace、cacheable exception、multi-branch 和跨域恢复 |
-| 合计 | 23 | 307 | 不含 `__init__.py` |
+| 合计 | 23 | 306 | 不含 `__init__.py` |
 
 分组以数据路径或机制为主，不单独建立 `exceptions/`。translation、MMIO、NC
 和 cacheable 路径都包含异常行为，按异常类型拆分会把同一场景的正常流、边界流
