@@ -441,11 +441,13 @@ object TlbCmd {
 
   def atom_read  = "b100".U // lr
   def atom_write = "b101".U // sc / amo
+  def read_exec  = "b111".U // HLVX final physical permission check
 
   def apply() = UInt(3.W)
   def isRead(a: UInt) = a(1,0)===read
   def isWrite(a: UInt) = a(1,0)===write
   def isExec(a: UInt) = a(1,0)===exec
+  def isReadExec(a: UInt) = a===read_exec
 
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
@@ -617,6 +619,7 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
+  val frm_mabuf = Output(Bool())
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val robIdx = Output(new RobPtr)
@@ -744,7 +747,9 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
+  val pmpMode = Vec(Width, Output(UInt(2.W)))
   val tlbreplay = Vec(Width, Output(Bool()))
+  val robPendingPtr = Input(new RobPtr)
 }
 
 class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
@@ -1085,10 +1090,14 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      val denyNapotInSector = if (hasPerm && level == 0) pte.isNapot(levelUInt) else false.B
+      val isRefillEntry = pte.canRefill(levelUInt, s2xlate, pbmte, mode) &&
+        (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      val onlyPf = (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.getPPN()
-      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
-      ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
+      ps.vs(i)   := (isRefillEntry || onlyPf) && !denyNapotInSector
+      ps.onlypf(i) := onlyPf && !denyNapotInSector
       ps.perms.map(_(i) := pte.perm)
       when (s2xlate === onlyStage2) {
         // g bit in G-stage PTEs should be ignored by hardware

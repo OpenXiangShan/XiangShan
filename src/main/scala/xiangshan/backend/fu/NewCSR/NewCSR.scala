@@ -127,6 +127,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
       val l2FlushDone = Input(Bool())
+      val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
       val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
@@ -440,6 +441,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.trapInfo.bits.irToVS := irToVS
   trapHandleMod.io.in.privState := privState
   trapHandleMod.io.in.mstatus  := mstatus.regOut
+  trapHandleMod.io.in.sstatus   := mstatus.sstatus
   trapHandleMod.io.in.vsstatus := vsstatus.regOut
   trapHandleMod.io.in.mnstatus := mnstatus.regOut
   trapHandleMod.io.in.mideleg  := mideleg.regOut
@@ -599,6 +601,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   mhartid.hartid := this.io.fromTop.hartId
+  mhartid.dmode  := debugMode
+  mtvec.reset_mtvec.foreach(_ := this.io.fromTop.reset_mtvec.get)
 
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)
@@ -838,8 +842,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryMEvent .valid  := hasTrap && entryPrivState.isModeM && !dbltrpToMN && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
-  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
-  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
+  trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
+  trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && !nmi && mnstatus.regOut.NMIE
 
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
@@ -1481,6 +1485,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
   io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+  io.status.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
 
   io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
@@ -1618,6 +1623,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // Rename
   io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
   io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg

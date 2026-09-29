@@ -816,8 +816,8 @@ class Sbuffer(implicit p: Parameters)
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getVWordOffset(s1Paddr))
 
-    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, s1ReqValid))
-    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, s1ReqValid))
+    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, false.B, s1ReqValid))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, false.B, s1ReqValid))
     val forward_mask_candidate_reg = RegEnable(
       VecInit(mask.map(entry => entry(getVWordOffset(s1Paddr)))),
       s1ReqValid

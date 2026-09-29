@@ -412,6 +412,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
       val teemsiInfo   = Option.when(soc.IMSICParams.HasTEEIMSIC)(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val clintTime = ValidIO(UInt(64.W))
+      val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
@@ -665,11 +666,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ptwio = Wire(new VectorTlbPtwIO(DTlbSize))
   val dtlb_reqs = dtlb.map(_.requestor).flatten
   val dtlb_pmps = dtlb.map(_.pmp).flatten
+  val dtlb_pmp_modes = dtlb.map(_.pmpMode).flatten
   dtlb.map(_.hartId := io.hartId)
   dtlb.map(_.sfence := sfence)
   dtlb.map(_.csr := tlbcsr)
   dtlb.map(_.flushPipe.map(a => a := false.B)) // non-block doesn't need
   dtlb.map(_.redirect := redirect)
+  dtlb.map(_.robPendingPtr := io.ooo_to_mem.lsqio.pendingPtr)
   if (refillBothTlb) {
     require(ldtlbParams.outReplace == sttlbParams.outReplace)
     require(ldtlbParams.outReplace == hytlbParams.outReplace)
@@ -751,15 +754,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val pmp_checkers = Seq.fill(DTlbSize)(Module(new PMPChecker(4, leaveHitMux = true)))
   val pmp_check = pmp_checkers.map(_.io)
-  for ((p,d) <- pmp_check zip dtlb_pmps) {
+  for (((p, d), pmpMode) <- pmp_check.zip(dtlb_pmps).zip(dtlb_pmp_modes)) {
     if (HasBitmapCheck) {
       if (KeyIDBits > 0) {
-        p.apply(tlbcsr.mbmc.KEYIDEN.asBool, tlbcsr.mbmc.CMODE.asBool, tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+        p.apply(tlbcsr.mbmc.KEYIDEN.asBool, tlbcsr.mbmc.CMODE.asBool, pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
       } else {
-        p.apply(tlbcsr.mbmc.CMODE.asBool, tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+        p.apply(tlbcsr.mbmc.CMODE.asBool, pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
       }
     } else {
-      p.apply(tlbcsr.priv.dmode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
+      p.apply(pmpMode, tlbcsr.priv.debug, pmp.io.pmp, pmp.io.pma, d)
     }
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
@@ -1276,6 +1279,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       x_teemsiInfo        := DelayNWithValid(io_teemsiInfo, 1)
     }
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
+    x.reset_mtvec.foreach(_ := io.fromTopToBackend.reset_mtvec.get)
   }
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)
@@ -1287,7 +1291,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_cpu_wfi := RegNext(io.ooo_to_mem.backendToTopBypass.cpuWfi)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
-  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError)
+  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError, false.B)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
     teemsi_ack := teemsiAck
@@ -1339,7 +1343,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   )
   traceToL2Top.toEncoder.mstatus := RegNext(traceFromBackend.toEncoder.mstatus)
   (0 until TraceGroupNum).foreach { i =>
-    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid)
+    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid, false.B)
     traceToL2Top.toEncoder.groups(i).bits.iretire := RegNext(traceFromBackend.toEncoder.groups(i).bits.iretire)
     traceToL2Top.toEncoder.groups(i).bits.itype := RegNext(traceFromBackend.toEncoder.groups(i).bits.itype)
     traceToL2Top.toEncoder.groups(i).bits.ilastsize := RegEnable(

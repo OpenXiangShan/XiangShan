@@ -98,6 +98,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val safeFromFrontend = Input(Bool())
     }
     val wfi_enable = Input(Bool())
+    val commit_stuck_check_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
       val walkToArchVType = Output(Bool())
@@ -610,13 +611,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
-  val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && RegNext(RegNext(deqPtrEntry.commit_w))
-  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && RegNext(RegNext(deqPtrEntry.commit_w))
+  val commit_w_delay = RegNext(deqPtrEntry.commit_w)
+  val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && commit_w_delay
+  val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && commit_w_delay
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
   val deqIsVlsException = deqHasException && deqPtrEntry.isVls && !exceptionDataRead.bits.isEnqExcp
+  val deqIsVlsFlushPipe = deqHasFlushPipe && deqPtrEntry.isVls
+  val deqCanException = deqHasException && (!deqIsVlsException || deqVlsCanCommit)
+  val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
   // delay 2 cycle wait exceptionGen out
   // vls exception can be committed only when RAB commit all its reg pairs
-  deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w)) && rab.io.status.commitEnd
+  deqVlsCanCommit := RegNext(RegNext(deqPtrEntry.commit_w)) && rab.io.status.commitEnd
 
   // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
@@ -673,7 +678,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
-  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
+  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException || deqCanFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   io.flushOut.bits.isRVC := deqPtrEntry.isRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
@@ -688,7 +693,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit)) && !lastCycleFlush
+  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.debug_pc.getOrElse(0.U), exceptionHappen)
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
@@ -1184,7 +1189,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) &&
                              !FuType.isFence(io.enq.req(i).bits.fuType) &&
                              !FuType.isCsr(io.enq.req(i).bits.fuType) &&
-                             !FuType.isVset(io.enq.req(i).bits.fuType) &&
+                             !io.enq.req(i).bits.isVset &&
                              !FuType.isAMO(io.enq.req(i).bits.fuType)
       robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
     }
@@ -1863,15 +1868,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // max commit-stuck cycle
   val mmioBusy = io.lsq.mmioBusy // lsq know uncache request is rob head
-  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy
-  val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))
-  when(commitStuck) {
-    commitStuckCycle := commitStuckCycle + 1.U
-  }.elsewhen(!commitStuck && RegNext(commitStuck)) {
-    commitStuckCycle := 0.U
-  }
+  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy && (wfiResume.B || !hasWFI)
+  val commitStuckCounter = Module(new CommitStuckCounter(
+    width = log2Up(maxCommitStuck),
+    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
+  ))
+  val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
+  commitStuckCounter.io.stuck := commitStuck
+  commitStuckCounter.io.runtimeEnable := io.commit_stuck_check_enable
+  commitStuckCounter.io.overflowEnabled := commitStuckOverflowEnabled
+  val commitStuckCycle = commitStuckCounter.io.count
   // check if stuck > 2^maxCommitStuckCycle
-  val commitStuck_overflow = commitStuckCycle.andR && (if (wfiResume) true.B else (!hasWFI))
+  val commitStuck_overflow = commitStuckCounter.io.overflow
   val criticalErrors = Seq(
     ("rob_commit_stuck  ", commitStuck_overflow),
   )

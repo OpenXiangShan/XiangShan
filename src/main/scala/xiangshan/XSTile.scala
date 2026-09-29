@@ -111,6 +111,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
       val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
+      val reset_mtvec  = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
       val cpu_wfi = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
@@ -140,6 +141,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     l2top.module.io.hartId.fromTile := io.hartId
     core.module.io.hartId := l2top.module.io.hartId.toCore
     core.module.io.reset_vector := l2top.module.io.reset_vector.toCore
+    core.module.io.reset_mtvec.foreach(_ := l2top.module.io.reset_mtvec.get.toCore)
     core.module.io.msiInfo := l2top.module.io.msiInfo.toCore
     l2top.module.io.msiInfo.fromTile := io.msiInfo
     core.module.io.teemsiInfo zip l2top.module.io.teemsiInfo foreach { case (core_teemsiInfo, l2top_teemsiInfo) =>
@@ -151,6 +153,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     core.module.io.clintTime := l2top.module.io.clintTime.toCore
     l2top.module.io.clintTime.fromTile := io.clintTime
     l2top.module.io.reset_vector.fromTile := io.reset_vector
+    l2top.module.io.reset_mtvec.foreach(x => x.fromTile := io.reset_mtvec.get)
     l2top.module.io.cpu_wfi.fromCore := core.module.io.cpu_wfi
     io.cpu_wfi := l2top.module.io.cpu_wfi.toTile
     l2top.module.io.cpu_critical_error.fromCore := core.module.io.cpu_critical_error
