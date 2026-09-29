@@ -3,7 +3,7 @@ package xiangshan.backend.rename.freelist
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.ParallelPriorityEncoder
+import utility.{ParallelPriorityEncoder, ParallelPosteriorityEncoder}
 import xiangshan.{XSBundle, XSModule}
 
 class NewFLManager(
@@ -27,8 +27,10 @@ class NewFLManager(
 
   private val bankCount = renameWidth / 2
   private val phyRegIdxWidth = log2Up(numPhyRegs)
+  private val bankIndexWidth = log2Ceil(bankCount)
   private val s1PtrWidth = math.max(1, log2Ceil(s1QueueSize))
   private val s1CountWidth = log2Ceil(s1QueueSize + 1)
+  private val s1QueueSizeIsPow2 = (s1QueueSize & (s1QueueSize - 1)) == 0
 
   /** Stage 1: a configurable circular queue of physical-register candidates. */
   val s1Queue = RegInit(VecInit(Seq.fill(s1QueueSize)(0.U(phyRegIdxWidth.W))))
@@ -40,7 +42,13 @@ class NewFLManager(
 
   private def addS1Ptr(ptr: UInt, increment: UInt): UInt = {
     val sum = ptr +& increment
-    Mux(sum >= s1QueueSize.U, sum - s1QueueSize.U, sum)(s1PtrWidth - 1, 0)
+    if (s1QueueSizeIsPow2) {
+      // The default queue has 16 entries, so truncation is exact modulo
+      // arithmetic and removes a compare/subtract mux from every pointer use.
+      sum(s1PtrWidth - 1, 0)
+    } else {
+      Mux(sum >= s1QueueSize.U, sum - s1QueueSize.U, sum)(s1PtrWidth - 1, 0)
+    }
   }
 
   // Candidates in s1 remain free in the owner's bitmap until rename really
@@ -55,25 +63,28 @@ class NewFLManager(
   val s1EnqueueCapacity = s1FreeCount +& s1DequeueCount
 
   /** Stage 0: select up to two candidates from every bank. */
-  val s0CanEnqueue = !in.flush && s1EnqueueCapacity =/= 0.U
-  val s0AllocBitmap = Mux(s0CanEnqueue, in.freeBitmap & ~reservedBitmap, 0.U)
+  // Keep flush/capacity control out of the bitmap and bank priority encoders.
+  // Capacity is applied by enqueueValid after selection; flush only masks the
+  // selected candidates, so it does not drive a 160-bit search network.
+  val s0AllocBitmap = in.freeBitmap & ~reservedBitmap
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
+  val s0BankCandidateCount = Wire(Vec(bankCount, UInt(2.W)))
   for (bankIndex <- 0 until bankCount) {
     // Match IntRegFileBank: the low-order preg bits select the bank
     // (preg % bankCount), while the remaining bits select the bank-local row.
     // Build each bank bitmap from interleaved physical-register indices rather
     // than slicing four contiguous ranges.
     val bankPRegs = (bankIndex until numPhyRegs by bankCount).toSeq
-    val bankWidth = bankPRegs.size
     val bankBitmap = VecInit(bankPRegs.map(s0AllocBitmap(_))).asUInt
-    val bankPRegIndices = VecInit(bankPRegs.map(_.U(phyRegIdxWidth.W)))
-    val reverseBankPRegIndices = VecInit(bankPRegs.reverse.map(_.U(phyRegIdxWidth.W)))
-    val firstInBank = ParallelPriorityEncoder(Cat(1.U(1.W), bankBitmap))
-    val lastFromBankEnd = ParallelPriorityEncoder(Cat(1.U(1.W), Reverse(bankBitmap)))
-    val firstCandidate = bankPRegIndices(firstInBank)
-    val lastCandidate = reverseBankPRegIndices(lastFromBankEnd)
-    val bankHasCandidate = firstInBank < bankWidth.U
+    // With low-bit interleaving, preg = row << bankIndexWidth | bankIndex.
+    // Form the physical index arithmetically instead of dynamically indexing
+    // a 32/40-entry constant vector after priority encoding.
+    val firstInBank = ParallelPriorityEncoder(bankBitmap)
+    val lastInBank = ParallelPosteriorityEncoder(bankBitmap)
+    val firstCandidate = (firstInBank << bankIndexWidth) | bankIndex.U
+    val lastCandidate = (lastInBank << bankIndexWidth) | bankIndex.U
+    val bankHasCandidate = bankBitmap.orR
 
     // Keep a fixed bank order for the first candidates, then walk the banks
     // in reverse order for the last candidates:
@@ -81,36 +92,21 @@ class NewFLManager(
     val lastCandidateIdx = renameWidth - 1 - bankIndex
     s0Candidates(bankIndex) := firstCandidate
     s0Candidates(lastCandidateIdx) := lastCandidate
-    s0CandidateValid(bankIndex) := bankHasCandidate
-    s0CandidateValid(lastCandidateIdx) := bankHasCandidate && firstCandidate =/= lastCandidate
-  }
-
-  val s0CandidateBitmap = (0 until renameWidth).map { candidateIdx =>
-    Mux(
-      s0CandidateValid(candidateIdx),
-      UIntToOH(s0Candidates(candidateIdx), numPhyRegs),
-      0.U(numPhyRegs.W)
+    s0CandidateValid(bankIndex) := !in.flush && bankHasCandidate
+    s0CandidateValid(lastCandidateIdx) :=
+      !in.flush && bankHasCandidate && firstCandidate =/= lastCandidate
+    s0BankCandidateCount(bankIndex) := Mux(
+      !in.flush && bankHasCandidate,
+      Mux(firstInBank === lastInBank, 1.U, 2.U),
+      0.U
     )
-  }.reduce(_ | _)
+  }
 
   // Newly released registers are not yet in this cycle's bitmap. Append
-  // them after the s0-selected candidates so they can refill s1 immediately.
-  // Commit frees remain valid during recovery, while bitmap selection stops.
-  // Filter duplicates against s1 reservations, s0 candidates, and earlier
-  // free requests before compacting the combined enqueue stream.
-  val freeCandidateValid = Wire(Vec(freeWidth, Bool()))
-  for (freeIdx <- 0 until freeWidth) {
-    val freeReg = in.freePhyReg(freeIdx)
-    val duplicateFree = if (freeIdx == 0) {
-      false.B
-    } else {
-      in.freeReq.take(freeIdx).zip(in.freePhyReg.take(freeIdx)).map {
-        case (valid, previousReg) => valid && previousReg === freeReg
-      }.reduce(_ || _)
-    }
-    freeCandidateValid(freeIdx) := in.freeReq(freeIdx) &&
-      !reservedBitmap(freeReg) && !s0CandidateBitmap(freeReg) && !duplicateFree
-  }
+  // Append commit frees after the bitmap candidates. As in StdFreeList, the
+  // free interface guarantees distinct, not-currently-free physical regs;
+  // keep this validity path independent of the preg values.
+  val freeCandidateValid = in.freeReq
 
   val enqueueWidth = renameWidth + freeWidth
   val enqueueCandidates = VecInit(s0Candidates ++ in.freePhyReg)
@@ -122,7 +118,17 @@ class NewFLManager(
     enqueueValid(candidateIdx) := enqueueCandidateValid(candidateIdx) &&
       enqueueOffset(candidateIdx) < s1EnqueueCapacity
   }
-  val enqueueCount = PopCount(enqueueValid)
+  // The accepted stream is a stable prefix of the valid candidates. Count the
+  // raw valids once and clamp to FIFO capacity, instead of PopCount-ing the
+  // per-candidate capacity comparisons again on the tail-pointer path.
+  val s0CandidateCount = s0BankCandidateCount.reduce(_ +& _)
+  val freeCandidateCount = PopCount(freeCandidateValid)
+  val rawCandidateCount = s0CandidateCount +& freeCandidateCount
+  val enqueueCount = Mux(
+    rawCandidateCount > s1EnqueueCapacity,
+    s1EnqueueCapacity,
+    rawCandidateCount
+  )
   val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
     Mux(
       enqueueValid(candidateIdx),
@@ -154,6 +160,9 @@ class NewFLManager(
   val s1CanAllocateNext = s1ValidCountNext >= renameWidth.U
   val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
   val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
+  val enqueueWritePtr = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+    addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
+  })
 
   val selectedBitmap = (0 until renameWidth).map { laneIdx =>
     Mux(
@@ -176,10 +185,14 @@ class NewFLManager(
   s1CanAllocateReg := s1CanAllocateNext
   s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
   s1ValidCount := s1ValidCountNext
-  for (candidateIdx <- 0 until enqueueWidth) {
-    when(enqueueValid(candidateIdx)) {
-      val writePtr = addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
-      s1Queue(writePtr) := enqueueCandidates(candidateIdx)
+  // Select each physical FIFO slot once instead of lowering every candidate
+  // to a dynamic Vec write address.
+  for (queueIdx <- 0 until s1QueueSize) {
+    val writeCandidateOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+      enqueueValid(candidateIdx) && enqueueWritePtr(candidateIdx) === queueIdx.U
+    })
+    when(writeCandidateOH.asUInt.orR) {
+      s1Queue(queueIdx) := Mux1H(writeCandidateOH, enqueueCandidates)
     }
   }
 
