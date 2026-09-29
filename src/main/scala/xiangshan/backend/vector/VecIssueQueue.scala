@@ -157,9 +157,15 @@ class VecIssueQueue(
         vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
       )
   })
+  // Vector STD may only issue when its sqIdx is inside the StoreQueue physical window
+  private def vstdInSqWindow(sqIdx: Option[SqPtr]): Bool = (in.sqDeqPtr, sqIdx) match {
+    case (Some(deqPtr), Some(idx)) => idx.withInPhysicalQueue(deqPtr)
+    case _ => true.B
+  }
+
   private val enqEntryCanIssueVec: Vec[UInt] = VecInit(
     (0 until param.numDeq).map(deqIdx => VecInit(enqEntries.zip(enqEntryCanIssue).map {
-      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue, deqIdx)
+      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue && vstdInSqWindow(ety.bits.payload.sqIdx), deqIdx)
     }).asUInt)
   )
   private val fastEntryCanIssue = VecInit(fastEntries.zipWithIndex.map {
@@ -176,7 +182,7 @@ class VecIssueQueue(
   })
   private val fastEntryCanIssueVec: Vec[UInt] = VecInit(
     (0 until param.numDeq).map(deqIdx => VecInit(fastEntries.zip(fastEntryCanIssue).map {
-      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue, deqIdx)
+      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue && vstdInSqWindow(ety.bits.payload.sqIdx), deqIdx)
     }).asUInt)
   )
 
@@ -812,6 +818,7 @@ object VecIssueQueue {
     val resps = new InResp
     val fromWbFuBusyTable = new WbFuBusyTableReadBundle()
     val wakeup = new InWakeUp()
+    val sqDeqPtr = Option.when(param.hasVStd)(new SqPtr)
   }
 
   class Out(implicit p: Parameters, param: IssueParam) extends XSBundle {
