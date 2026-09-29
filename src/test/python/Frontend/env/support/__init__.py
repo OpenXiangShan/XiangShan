@@ -14,7 +14,7 @@ from .pmp_pma import (
 )
 from .pc_utils import fold_pc, pc_from_ftq_start, require_matching_foldpc
 from .random_regression import derive_seed, read_seed, record_scenario, scenario_rng
-from .signal_utils import read_internal_signal
+from .signal_utils import read_internal_signal, require_sig
 
 __all__ = [
     "PMA_ADDR_BASE",
@@ -34,5 +34,6 @@ __all__ = [
     "reconstruct_pmp_request_addr",
     "require_matching_foldpc",
     "read_internal_signal",
+    "require_sig",
     "scenario_rng",
 ]

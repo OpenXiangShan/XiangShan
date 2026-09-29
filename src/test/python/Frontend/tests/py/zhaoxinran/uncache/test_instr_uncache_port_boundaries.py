@@ -24,7 +24,7 @@ from env.sequences import (
     TranslationSfenceAction,
 )
 from env.core.transactions import BackendRedirectClass, CommitTarget, ProgramImage, RedirectTxn
-from env.support import PmpPmaConfig, record_scenario, scenario_rng
+from env.support import PmpPmaConfig, record_scenario, require_sig, scenario_rng
 from tests.py.support.uncache_scenarios import (
     _ADDI_X0_X0_0,
     _CNOP,
@@ -69,7 +69,6 @@ from tests.py.support.uncache_scenarios import (
     _register_prev_half_rvi_observer,
     _remap_sv39_page_pbmt,
     _require_first_dut_signal,
-    _try_read_dut_signal,
     _wait_for_icache_req,
     _wait_for_monitor_exception,
     _wait_for_observed_pc,
@@ -224,25 +223,20 @@ def _collect_cfvec_cycles(env, *, max_cycles: int) -> list[dict]:
         env.step(1)
         slots = []
         for slot in range(8):
-            if _read_dut_signal(env, f"io_backend_cfVec_{slot}_valid", 0) != 1:
+            if require_sig(env.dut, f"io_backend_cfVec_{slot}_valid") != 1:
                 continue
             slots.append(
                 {
                     "slot": int(slot),
                     "pc": env.observed_cfvec_pc(slot),
-                    "foldpc": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_foldpc", 0),
-                    "instr": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_instr", 0),
-                    "is_rvc": _read_dut_signal(env, f"io_backend_cfVec_{slot}_bits_isRvc", 0),
+                    "foldpc": require_sig(env.dut, f"io_backend_cfVec_{slot}_bits_foldpc"),
+                    "instr": require_sig(env.dut, f"io_backend_cfVec_{slot}_bits_instr"),
+                    "is_rvc": require_sig(env.dut, f"io_backend_cfVec_{slot}_bits_isRvc"),
                 }
             )
         if slots:
             cycles.append({"cycle": int(env.current_cycle), "slots": slots})
     return cycles
-
-
-def _read_dut_signal(env, name: str, default: int = 0) -> int:
-    value = _try_read_dut_signal(env, name)
-    return int(default) if value is None else int(value)
 
 
 _IFU_UNCACHE_STATE_SIGNALS = (
@@ -549,7 +543,7 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
     saw_not_safe = False
     for _ in range(64):
         env.step(1)
-        if _read_dut_signal(env, "io_backend_wfi_wfiSafe", 1) == 0:
+        if require_sig(env.dut, "io_backend_wfi_wfiSafe") == 0:
             saw_not_safe = True
             break
     env.backend_model.set_wfi_req(0)
@@ -604,7 +598,7 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
     assert req_during_wfi == req_before
     assert int(env.uncache_if.a_bits_address.value) == stalled_addr
     assert int(env.uncache_if.a_valid.value) == 0
-    assert _read_dut_signal(env, "io_backend_wfi_wfiSafe", 0) == 1
+    assert require_sig(env.dut, "io_backend_wfi_wfiSafe") == 1
 
     env.backend_model.set_wfi_req(0)
     env.uncache_agent.set_a_ready(None)
