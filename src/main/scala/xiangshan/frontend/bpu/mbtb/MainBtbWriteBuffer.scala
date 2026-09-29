@@ -158,7 +158,8 @@ class MainBtbWriteBuffer(implicit p: Parameters) extends MainBtbModule with Help
       entries(hitIdx)(j).tag === w.bits.entry.tag &&
       entries(hitIdx)(j).position === w.bits.entry.position
   ))
-  private val duplicate = w.valid && w.bits.entry.valid && duplicateVec.asUInt.orR
+  private val duplicate =
+    w.valid && w.bits.entryWayMask.orR && w.bits.entry.valid && duplicateVec.asUInt.orR
   XSPerfAccumulate("mbtb_writebuffer_duplicate", duplicate)
 
   // A write hitting the oldest slot also drains it to SRAM this cycle. Fold the update in and keep the

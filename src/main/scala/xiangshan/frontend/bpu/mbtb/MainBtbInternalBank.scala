@@ -172,8 +172,10 @@ class MainBtbInternalBank(
     Mux(writeEntry.req.valid, writeEntry.req.bits.wayMask, 0.U),
     flush.req.bits.wayMask
   )
+  // A counter-only write (or a flush) must carry entry = 0 so the write buffer's duplicate check
+  // never treats it as an entry write; only a real writeEntry request may forward its entry.
   writeBuffer.io.write.bits.entry := Mux(
-    trainingValid,
+    writeEntry.req.valid,
     writeEntry.req.bits.entry,
     0.U.asTypeOf(new MainBtbEntry)
   )
