@@ -280,6 +280,11 @@ class _CountingDut:
         self.shared_signal = signal
 
 
+class _CandidateDut:
+    def __init__(self, signal: _CountingSignal) -> None:
+        self.selected_signal = signal
+
+
 def test_recorder_cycle_snapshot_reads_each_dut_value_once() -> None:
     hub = FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub)
     hub._dut_signal_cache = {}
@@ -297,6 +302,28 @@ def test_recorder_cycle_snapshot_reads_each_dut_value_once() -> None:
 
     hub.begin_cycle_snapshot(13)
     assert hub._try_read_dut_signal(dut, "shared_signal") == 7
+    assert signal.reads == 2
+
+
+def test_recorder_first_signal_caches_available_candidate_order() -> None:
+    hub = FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub)
+    hub._dut_signal_cache = {}
+    hub._missing_dut_signals = set()
+    hub._first_signal_candidate_cache = {}
+    hub._cycle_snapshot_cycle = None
+    hub._cycle_snapshot_values = {}
+    signal = _CountingSignal(9)
+    dut = _CandidateDut(signal)
+
+    hub.begin_cycle_snapshot(1)
+    candidates = ("missing_signal", "selected_signal")
+    assert hub._read_first_dut_signal(dut, candidates) == 9
+    assert hub._read_first_dut_signal(dut, candidates) == 9
+    assert hub._first_signal_candidate_cache[candidates] == ("selected_signal",)
+    assert signal.reads == 1
+
+    hub.begin_cycle_snapshot(2)
+    assert hub._read_first_dut_signal(dut, candidates) == 9
     assert signal.reads == 2
 
 

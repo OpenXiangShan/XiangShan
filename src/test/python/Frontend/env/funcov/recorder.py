@@ -386,6 +386,7 @@ class FrontendFuncovSampleHub:
         initialize_mmio_nc_owner_coverage_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
+        self._first_signal_candidate_cache: Dict[tuple[str, ...], tuple[str, ...]] = {}
 
     @staticmethod
     def _optional_int(value: Any) -> Optional[int]:
@@ -1001,8 +1002,25 @@ class FrontendFuncovSampleHub:
         return result
 
     def _read_first_dut_signal(self, dut, names: Iterable[str]) -> Optional[int]:
-        for name in names:
-            value = self._try_read_dut_signal(dut, str(name))
+        candidate_names = tuple(str(name) for name in names)
+        if not candidate_names:
+            return None
+
+        cache = getattr(self, "_first_signal_candidate_cache", None)
+        if cache is None:
+            cache = {}
+            self._first_signal_candidate_cache = cache
+        available = cache.get(candidate_names)
+        if available is None:
+            available = tuple(
+                name
+                for name in candidate_names
+                if self._lookup_dut_signal(dut, name) is not None
+            )
+            cache[candidate_names] = available
+
+        for name in available:
+            value = self._try_read_dut_signal(dut, name)
             if value is not None:
                 return int(value)
         return None
