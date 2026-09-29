@@ -249,6 +249,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // the offset of the start pc within the cache line
   private val s1_offset = VecInit(s1_req.map(_.startVAddr(blockOffBits - 1, 0)))
 
+  private val s1_blkEndOffset = VecInit(s1_req.map { req =>
+    val (_, endLineOffset) = getFetchBlockEndLineOffset(req.startVAddr, req.endPosition)
+    Cat(endLineOffset, 0.U(instOffsetBits.W))
+  })
+
   private val s1_lineSel = VecInit(s1_offset.map(getLineSel))
 
   /* *******************************************************************
@@ -488,6 +493,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_sramDatas      = RegEnable(s1_sramDatas, s1_fire)
   private val s2_sramCodes      = RegEnable(s1_sramCodes, s1_fire)
   private val s2_offset         = RegEnable(s1_offset, s1_fire)
+  private val s2_blkEndOffset   = RegEnable(s1_blkEndOffset, s1_fire)
   private val s2_bankSramValid  = RegEnable(s1_bankSramValid, s1_fire)
   private val s2_sramHits       = RegEnable(s1_sramHits, s1_fire)
   private val s2_isCrossLine    = RegEnable(s1_isCrossLine, s1_fire)
@@ -514,7 +520,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       s2_sramDatas(reqIdx),
       s2_sramCodes(reqIdx),
       eccEnable,
-      getBankSel(s2_offset(reqIdx), s2_valid, s2_isCrossLine(reqIdx)),
+      getBankSel(s2_offset(reqIdx), s2_blkEndOffset(reqIdx), s2_isCrossLine(reqIdx)),
       s2_bankSramValid(reqIdx),
       s2_sramHits(reqIdx)
     )
