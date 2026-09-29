@@ -53,8 +53,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   val io: IttageIO = IO(new IttageIO)
 
-  io.trainReady := true.B
-
   private val s0_startPc = io.startPc
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
   private val s1_fire    = io.stageCtrl.s1_fire && io.enable
@@ -113,10 +111,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
   io.meta := ittageMeta
 
-  private val t0_fire = io.enable && io.stageCtrl.t0_fire
+  private val t0_fire = io.enable && io.train.valid
 
   private val t1_train = Wire(new Train)
-  t1_train := RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
+  t1_train := RegEnable(io.train.bits, 0.U.asTypeOf(new Train), t0_fire)
 
   private val t1_meta = Wire(new IttageMeta)
   t1_train.meta.ittage := t1_meta
@@ -127,7 +125,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val updateFoldedPhr = t1_trainFoldedPhr
 
   // To improve Clock Gating Efficiency
-  private val t0_meta = io.train.meta.ittage
+  private val t0_meta = io.train.bits.meta.ittage
   t1_meta := RegEnable(t0_meta, t0_fire)
   t1_meta.provider.bits := RegEnable(
     t0_meta.provider.bits,
