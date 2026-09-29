@@ -2,6 +2,10 @@
 test_run_dir/*
 # BPU is developed as a standalone repo, not tracked as a submodule
 /XiangShan-BPU/
+# Track only Markdown files under emu_versions, including subdirectories.
+/emu_versions/**
+!/emu_versions/**/
+!/emu_versions/**/*.md
 ### XilinxISE template
 # intermediate build files
 *.bgn

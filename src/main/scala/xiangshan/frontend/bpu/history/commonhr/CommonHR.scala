@@ -42,7 +42,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
 
     // Context flush ports (SPEC 12 §4.1): CommonHR is all registers so the clear finishes in
-    // one cycle; bpuFlushing blocks updates and pipeline advance for the whole flush window.
+    // one cycle; bpuFlushing only isolates the S3 metadata outputs for the whole flush window,
+    // while the pipeline itself keeps advancing (SPEC 12 §4.3).
     // CommonHR has no CSR flush-enable bit and joins every accepted flush transaction. None of
     // these ports is generated when HasBpuFlush is off.
     val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
@@ -56,15 +57,17 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
   // stage ctrl
-  // The six control signals below are gated for the whole flush window, not just the single
-  // contextFlush cycle: old-context redirect/override/pipeline activity can keep arriving while
-  // the BPU waits for the SRAM-based predictors to finish clearing (SPEC 12 §4.3).
-  private val s0_fire = io.stageCtrl.s0_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
-  private val s1_fire = io.stageCtrl.s1_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
-  private val s2_fire = io.stageCtrl.s2_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
-  private val s3_fire = io.stageCtrl.s3_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
+  // CommonHR is an companion-state module of the S0~S3 pipeline: it must allocate a queue slot
+  // for every S0 request the BPU accepts and service the matching slot for every S3 writeback.
+  // The fires therefore always follow io.stageCtrl directly — including across the flush
+  // window — so only the events that trigger the flush are masked on the single contextFlush
+  // cycle (SPEC 12 §4.3).
+  private val s0_fire = io.stageCtrl.s0_fire
+  private val s1_fire = io.stageCtrl.s1_fire
+  private val s2_fire = io.stageCtrl.s2_fire
+  private val s3_fire = io.stageCtrl.s3_fire
 
-  private val s3_override = io.update.s3Override && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s3_override = io.update.s3Override && (if (HasBpuFlush) !contextFlush else true.B)
 
   // common history register
   private val s0_imli                = WireInit(0.U(ImliHistoryLength.W))
@@ -181,9 +184,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   /*
    * ghr/bw is not involved in prediction during redirect; used here as a placeholder
    */
-  // r1_valid is derived from the gated r0_valid so a redirect arriving on the flush cycle
+  // The redirect that triggers the flush carries pre-flush recovery history; it is masked on
+  // the single contextFlush cycle, and r1_valid is derived from the filtered r0_valid so it
   // cannot re-inject old-context state one cycle later (SPEC 12 §4.3).
-  private val r0_valid    = io.redirect.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val r0_valid    = io.redirect.valid && (if (HasBpuFlush) !contextFlush else true.B)
   private val r1_valid    = RegNext(r0_valid, false.B)
   private val r0_taken    = io.redirect.taken
   private val r0_isCond   = io.redirect.attribute.isConditional
@@ -417,18 +421,28 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     }
 
     // Last-connect clear of every register holding old-context state, with priority over the
-    // same-cycle updates (§4.2): core history state and the four pointers (the pointers must
-    // return to their RegInit state or the queue realigns from stale positions), S1~S3 history
-    // snapshots, and the S3 candidate latches written by s2_fire. debugCommonHR joins the clear
-    // because it feeds the equality XSError against commonHR. s0_commonHR/s0_imli are Wires and
-    // rely on the output isolation above; the r1 payload registers are only consumed under
-    // r1_valid, which the window gating keeps false, so they need no clear.
+    // same-cycle updates (§4.2): core history state and the four pointers, S1~S3 history
+    // snapshots, and the S3 candidate latches written by s2_fire. contextFlush coincides with
+    // the redirect that triggers it, and s0_fire can still be high on that cycle — the new S0
+    // request must survive, so the queue is rebuilt from flushedHistQueue with its placeholder
+    // in slot 0 (enqPtr=1 marks it allocated, writePtr=0 is where it will be written back at
+    // S3); with no new request everything returns to the all-zero initial state.
+    // The S1 snapshots hold the zero history that the retained request uses; S2/S3 snapshots
+    // carry pipeline content discarded by the redirect. debugCommonHR joins the clear because
+    // it feeds the equality XSError against commonHR. s0_commonHR/s0_imli are Wires and rely on
+    // the output isolation above; the r1 payload registers are only consumed under r1_valid,
+    // and any stale r1_valid's writes are overridden by this clear, so they need no clear.
+    val flushedHistQueue = WireInit(0.U.asTypeOf(histQueue))
+    when(s0_fire) {
+      flushedHistQueue(0) := initCommonHR
+    }
+
     when(contextFlush) {
       commonHR      := 0.U.asTypeOf(new CommonHREntry)
       debugCommonHR := 0.U.asTypeOf(new CommonHREntry)
       imli          := 0.U
-      histQueue     := 0.U.asTypeOf(histQueue)
-      enqPtr        := HistPtr(false.B, 0.U)
+      histQueue     := flushedHistQueue
+      enqPtr        := Mux(s0_fire, HistPtr(false.B, 1.U), HistPtr(false.B, 0.U))
       predPtr       := HistPtr(false.B, 0.U)
       writePtr      := HistPtr(false.B, 0.U)
       recoverPtr    := HistPtr(false.B, 0.U)
