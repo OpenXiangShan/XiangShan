@@ -10,10 +10,7 @@ import xiangshan.backend.vector.fu.{Func, VecFuConfig}
 
 private[wrapper] class FDivSqrtDpiBlackBox extends BlackBox with HasBlackBoxInline {
   val io = IO(new Bundle {
-    val clock = Input(Clock())
-    val reset = Input(Reset())
     val in = Input(UInt(FDivSqrtDpiBlackBox.InputWidth.W))
-    val valid = Input(Bool())
     val out = Output(UInt(FDivSqrtDpiBlackBox.OutputWidth.W))
   })
 
@@ -24,33 +21,21 @@ private[wrapper] class FDivSqrtDpiBlackBox extends BlackBox with HasBlackBoxInli
     s"$desiredName.v",
     s"""
        |module $desiredName (
-       |  input             clock,
-       |  input             reset,
        |  input  [${FDivSqrtDpiBlackBox.InputWidth - 1}:0] in,
-       |  input             valid,
-       |  output [${FDivSqrtDpiBlackBox.OutputWidth - 1}:0] out
+       |  output reg [${FDivSqrtDpiBlackBox.OutputWidth - 1}:0] out
        |);
-       |  reg [${FDivSqrtDpiBlackBox.OutputWidth - 1}:0] dpi_out;
-       |  reg [${FDivSqrtDpiBlackBox.OutputWidth - 1}:0] dpi_result;
        |`ifndef SYNTHESIS
        |  import "DPI-C" function void $dpiFuncName(
        |    input bit [${FDivSqrtDpiBlackBox.InputWidth - 1}:0] in_bits,
        |    output bit [${FDivSqrtDpiBlackBox.OutputWidth - 1}:0] out_bits
        |  );
        |`endif
-       |  always @(posedge clock or posedge reset) begin
-       |    if (reset) begin
-       |      dpi_out <= '0;
-       |      dpi_result = '0;
-       |    end else if (valid) begin
-       |      dpi_result = '0;
+       |  always @(*) begin
+       |    out = '0;
        |`ifndef SYNTHESIS
-       |      $dpiFuncName(in, dpi_result);
+       |    $dpiFuncName(in, out);
        |`endif
-       |      dpi_out <= dpi_result;
-       |    end
        |  end
-       |  assign out = dpi_out;
        |endmodule
        |""".stripMargin,
   )
@@ -71,6 +56,20 @@ private[wrapper] class FDivSqrtDpiBlackBox extends BlackBox with HasBlackBoxInli
        |}
        |""".stripMargin,
   )
+
+  private val cppExtModule =
+    s"""
+       |extern "C" void fdivsqrt_dpic(const uint32_t *in_bits, uint32_t *out_bits);
+       |
+       |void $desiredName(unsigned _BitInt(192) in, unsigned _BitInt(128)& out) {
+       |  uint32_t in_bits[6];
+       |  uint32_t out_bits[4] = {};
+       |  std::memcpy(in_bits, &in, sizeof(in_bits));
+       |  fdivsqrt_dpic(in_bits, out_bits);
+       |  std::memcpy(&out, out_bits, sizeof(out_bits));
+       |}
+       |""".stripMargin
+  DifftestModule.createCppExtModule(desiredName, cppExtModule, Some("<cstring>"))
 }
 
 private[wrapper] object FDivSqrtDpiBlackBox {
@@ -108,13 +107,14 @@ private[wrapper] class FDivSqrtDpi(implicit p: Parameters) extends Module {
   )
 
   private val dpi = Module(new FDivSqrtDpiBlackBox)
-  dpi.io.clock := clock
-  dpi.io.reset := reset
   dpi.io.in := packedIn
-  dpi.io.valid := io.valid
+  private val dpiOut = RegInit(0.U(FDivSqrtDpiBlackBox.OutputWidth.W))
+  when(io.valid) {
+    dpiOut := dpi.io.out
+  }
 
-  io.result := dpi.io.out(63, 0)
-  io.fflags := dpi.io.out(68, 64)
+  io.result := dpiOut(63, 0)
+  io.fflags := dpiOut(68, 64)
 }
 
 private[wrapper] class FDivSqrtFltDpiPipe(cfg: VecFuConfig, latency: Int = FDivOpcodes.FixedLatency - 1)(implicit p: Parameters) extends Module {
