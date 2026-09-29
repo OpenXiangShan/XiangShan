@@ -188,7 +188,6 @@ class CtrlBlockImp(
   val vecScheNonStoreWbData = vfScheWbData.filterNot(_.bits.params.hasStoreFu)
   val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
-  val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
   private val delayedNotFlushedWriteBackNums = wbData.map(x => {
     val valid = x.valid
     val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
@@ -199,14 +198,11 @@ class CtrlBlockImp(
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
     val isi2v = i2vWbData.contains(x)
-    val isf2v = f2vWbData.contains(x)
     val isStore = storeWbData.contains(x)
 
     val canSameRobidxWbData = if(isVfSche && !isStore) {
-      i2vWbData ++ f2vWbData ++ vecScheNonStoreWbData
+      i2vWbData ++ vecScheNonStoreWbData
     } else if(isi2v) {
-      intScheNonStoreWbData ++ fpScheNonStoreWbData ++ vecScheNonStoreWbData
-    } else if (isf2v) {
       intScheNonStoreWbData ++ fpScheNonStoreWbData ++ vecScheNonStoreWbData
     } else if (isIntSche && !isStore) {
       intScheNonStoreWbData ++ fpScheNonStoreWbData
