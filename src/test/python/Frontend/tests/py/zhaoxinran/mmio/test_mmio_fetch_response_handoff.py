@@ -4,7 +4,9 @@ import os
 
 import pytest
 
+from env.core.transactions import ProgramImage
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
+from env.sequences import LoadProgramSequence
 from tests.py.support import uncache_scenarios as uncache
 from tests.py.zhaoxinran.uncache import test_nc_fetch_paths as nc_paths
 from env.support import PmpPmaConfig, record_scenario, scenario_rng
@@ -150,50 +152,61 @@ def test_mmio_backend_redirect_wins_over_uncache_response(env):
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(env, tmp_path):
-    """Cancel a stale prediction's MMIO request before it becomes pending."""
-    source_va = uncache._NORMAL_BASE
-    target_va = source_va + uncache._SV39_PAGE_SIZE
-    source_branch_offset = 26
-    target_branch_offset = uncache._SV39_PAGE_SIZE + uncache._FETCH_BLOCK_SIZE + 26
-    source_branch_pc = source_va + source_branch_offset
-    target_branch_pc = source_va + target_branch_offset
+def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(env):
+    """An older JAL redirect cancels a younger MMIO request before TL-A."""
+    source_page = uncache._NORMAL_BASE
+    mmio_page = source_page + uncache._SV39_PAGE_SIZE
+    recovery_page = mmio_page + uncache._SV39_PAGE_SIZE
+    cacheable_start = mmio_page - uncache._FETCH_BLOCK_SIZE
+    branch_pc = mmio_page - 4
+    recovery_cfi_pc = recovery_page + 0x140
 
-    payload = bytearray(
-        int(uncache._CNOP).to_bytes(2, "little") * uncache._SV39_PAGE_SIZE
+    source_payload = bytearray(
+        int(uncache._CNOP).to_bytes(2, "little")
+        * (uncache._SV39_PAGE_SIZE // 2)
     )
-    payload[source_branch_offset : source_branch_offset + 4] = (
-        nc_paths._encode_jal_x0(target_va - source_branch_pc).to_bytes(4, "little")
+    source_payload[-4:] = int(
+        nc_paths._encode_jal_x0(recovery_page - branch_pc)
+    ).to_bytes(4, "little")
+    mmio_payload = bytes(
+        int(uncache._CNOP).to_bytes(2, "little")
+        * (uncache._SV39_PAGE_SIZE // 2)
     )
-    payload[target_branch_offset : target_branch_offset + 4] = (
-        nc_paths._encode_jal_x0(source_va - target_branch_pc).to_bytes(4, "little")
+    recovery_payload = bytearray(mmio_payload)
+    recovery_payload[0x140:0x144] = int(uncache._JAL_X0_PLUS_4).to_bytes(
+        4, "little"
     )
-    bin_path = tmp_path / "mmio_predchecker_overlap.bin"
-    bin_path.write_bytes(bytes(payload))
 
-    _expected_block, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
-        env,
-        vaddr=source_va,
-        paddr_pages=(
-            uncache._NORMAL_PHYS_BASE,
-            uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE,
-        ),
-        pbmt=uncache._PBMT_PMA,
-        bin_path=bin_path,
-    )
-    target_pa = mapping.paddr_pages[1]
+    LoadProgramSequence(
+        image=ProgramImage(payload=bytes(source_payload), base_addr=source_page),
+        step_cycles=0,
+    ).run(env)
+    LoadProgramSequence(
+        image=ProgramImage(payload=mmio_payload, base_addr=mmio_page),
+        step_cycles=0,
+    ).run(env)
+    LoadProgramSequence(
+        image=ProgramImage(payload=bytes(recovery_payload), base_addr=recovery_page),
+        step_cycles=0,
+    ).run(env)
+
+    env.memory.mmio_ranges.append((mmio_page, mmio_page + uncache._SV39_PAGE_SIZE))
     env.icache_agent.configure(hit_latency=8, miss_latency=8, miss_rate=0.0, seed=17)
     env.uncache_agent.configure(latency=24, mmio_latency=24)
-    snapshots = _register_snapshot_observer(env)
-    uncache._initialize_sv39_fetch(env, reset_vector=source_va)
-    for index, page_pa in enumerate(mapping.paddr_pages):
-        env.write_pmp_entry(
-            index,
-            PmpPmaConfig(match="napot", read=True, write=True, execute=True),
-            int(page_pa),
-            size=uncache._SV39_PAGE_SIZE,
-            settle_cycles=4,
-        )
+    env.initialize(reset_vector=cacheable_start, bare_mode=True, reset_cycles=20)
+    env.write_pmp_entry(
+        0,
+        PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+        source_page,
+        size=4 * uncache._SV39_PAGE_SIZE,
+        settle_cycles=4,
+    )
+    pma_regions = (
+        (mmio_page, False),
+        (source_page, True),
+        (recovery_page, True),
+    )
+    for index, (page_addr, cacheable) in enumerate(pma_regions):
         env.write_pma_entry(
             index,
             PmpPmaConfig(
@@ -201,105 +214,117 @@ def test_mmio_request_selection_overlaps_natural_predchecker_writeback_redirect(
                 read=True,
                 write=True,
                 execute=True,
-                cacheable=True,
-                atomic=True,
+                cacheable=cacheable,
+                atomic=cacheable,
             ),
-            int(page_pa),
+            page_addr,
             size=uncache._SV39_PAGE_SIZE,
             settle_cycles=4,
         )
 
-    uncache._force_redirect_to(env, source_va)
+    env.backend_model.commit_min_delay = 4096
+    env.backend_model.commit_max_delay = 4096
+    icache_line_baseline = int(env.icache_agent.get_stats()["resp_line_count"])
+    uncache._force_redirect_to(env, cacheable_start)
+    setup_branch_reached_s1 = False
+    setup_checker_redirect = False
+    for _ in range(4000):
+        env.step(1)
+        setup = owner_funcov._snapshot(env.functional_coverage, env.dut)
+        setup_branch_reached_s1 |= bool(
+            setup["s1_valid"] == 1
+            and setup["s1_pc"] == (cacheable_start >> 1)
+        )
+        setup_checker_redirect |= bool(
+            setup["checker_redirect"] == 1
+            and setup["wb_pc"] == (cacheable_start >> 1)
+        )
+        if int(env.icache_agent.get_stats()["resp_line_count"]) > icache_line_baseline:
+            break
+    assert int(env.icache_agent.get_stats()["resp_line_count"]) > icache_line_baseline
+    assert not setup_branch_reached_s1
+    assert not setup_checker_redirect
+    uncache._force_redirect_to(env, recovery_page)
 
-    assert nc_paths._wait_for_taken_prediction(
-        env, source_branch_pc, max_cycles=24000
-    ), {
-        "source_branch_pc": hex(source_branch_pc),
-        "backend": env.backend_model.get_stats(),
-    }
-
-    env.memory.mmio_ranges.append(
-        (target_pa, target_pa + uncache._SV39_PAGE_SIZE)
-    )
-    env.write_pma_entry(
-        1,
-        PmpPmaConfig(
-            match="napot",
-            read=True,
-            write=True,
-            execute=True,
-            cacheable=False,
-        ),
-        int(target_pa),
-        size=uncache._SV39_PAGE_SIZE,
-        settle_cycles=4,
-    )
-    source_branch_pa = mapping.paddr_pages[0] + source_branch_offset
-    uncache._pulse_sfence(env, addr=target_va, rs1=1, rs2=0)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(source_va)
-    snapshots.clear()
-    request_count_before_fault = int(
-        env.uncache_agent.get_stats().get("req_count", 0)
-    )
-    uncache._replace_u32_after_redirect_flush(
-        env,
-        source_branch_pa,
-        uncache._ADDI_X0_X0_0,
-        redirect_target=source_va,
-        reason="mmio_predchecker_overlap",
-    )
-    snapshots.clear()
-    observations_after_replacement = len(env.monitor.observations)
-
-    overlap = None
-    for _ in range(12000):
-        overlap = next(
+    redirect_source = None
+    for _ in range(8000):
+        env.step(1)
+        setup = owner_funcov._snapshot(env.functional_coverage, env.dut)
+        setup_checker_redirect |= bool(
+            setup["checker_redirect"] == 1
+            and setup["wb_pc"] == (cacheable_start >> 1)
+        )
+        redirect_source = next(
             (
-                sample
-                for sample in snapshots
-                if sample["wb_path_valid"] == 1
-                and sample["wb_redirect"] == 1
-                and sample["s2_req_uncache"] == 1
-                and sample["s2_pmp_mmio"] == 1
-                and sample["req_valid"] == 1
+                entry
+                for entry in env.backend_model._cfvec_queue
+                if int(entry.pc) == recovery_cfi_pc and bool(entry.is_cfi)
             ),
             None,
         )
+        if redirect_source is not None:
+            break
+    assert not setup_checker_redirect
+    assert redirect_source is not None, {
+        "reason": "cacheable recovery page did not provide a live redirect source",
+        "backend": env.backend_model.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+    }
+
+    owner_funcov.reset_mmio_nc_owner_coverage_state(env.functional_coverage)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(cacheable_start)
+    snapshots = _register_snapshot_observer(env)
+    request_baseline = int(env.uncache_agent.get_stats()["req_count"])
+    env.backend_model.inject_redirect_from_cfvec(
+        source_pc=int(redirect_source.pc),
+        source_ftq_flag=int(redirect_source.ftq_flag),
+        source_ftq_value=int(redirect_source.ftq_value),
+        source_ftq_offset=int(redirect_source.ftq_offset),
+        target_pc=cacheable_start,
+        reason="mmio_checker_redirect_measurement_start",
+        taken=1,
+        level=0,
+        delay_cycles=3,
+    )
+
+
+    overlap = None
+    checked_snapshot_count = 0
+    for _ in range(4000):
+        overlap = next(
+            (
+                sample
+                for sample in snapshots[checked_snapshot_count:]
+                if sample["backend_redirect"] == 0
+                and sample["checker_redirect"] == 1
+                and sample["wb_path_valid"] == 1
+                and sample["wb_redirect"] == 1
+                and sample["ifu_flush"] == 1
+                and sample["s2_valid"] == 1
+                and sample["s2_req_uncache"] == 1
+                and sample["s2_pmp_mmio"] == 1
+                and sample["s2_wb_not_flush"] != 1
+                and (sample["s2_ftq_flag"], sample["s2_ftq_value"])
+                != (sample["wb_ftq_flag"], sample["wb_ftq_value"])
+                and sample["req_valid"] == 1
+                and sample["req_ready"] == 1
+            ),
+            None,
+        )
+        checked_snapshot_count = len(snapshots)
         if overlap is not None:
             break
         env.step(1)
 
     assert overlap is not None, {
-        "source_branch_pc": hex(source_branch_pc),
-        "target_va": hex(target_va),
+        "reason": "older JAL redirect did not overlap the younger MMIO request",
+        "branch_pc": hex(branch_pc),
+        "mmio_page": hex(mmio_page),
         "snapshots": snapshots[-64:],
     }
     assert overlap["uncache_state"] == uncache._IFU_UNCACHE_INVALID
     assert overlap["tl_a_valid"] == 0
-    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == request_count_before_fault
-    for _ in range(12000):
-        if any(
-            int(item.pc) == source_branch_pc
-            for item in env.monitor.observations[observations_after_replacement:]
-        ):
-            break
-        env.step(1)
-    post_replacement_observations = env.monitor.observations[
-        observations_after_replacement:
-    ]
-    assert any(
-        int(item.pc) == source_branch_pc for item in post_replacement_observations
-    ), {
-        "source_branch_pc": hex(source_branch_pc),
-        "observed": [hex(int(item.pc)) for item in post_replacement_observations[-32:]],
-    }
-    source_observation = next(
-        item
-        for item in post_replacement_observations
-        if int(item.pc) == source_branch_pc
-    )
-    assert int(source_observation.instr) == uncache._ADDI_X0_X0_0
-    assert not bool(source_observation.is_rvc)
-    assert not any(int(item.pc) == target_va for item in post_replacement_observations)
+    assert int(env.uncache_agent.get_stats()["req_count"]) == request_baseline
+    assert uncache._wait_for_observed_pc(env, recovery_cfi_pc, max_cycles=4000)
     assert not env.monitor.get_errors()
