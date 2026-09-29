@@ -233,10 +233,11 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
-  io.exception.valid := RegNext(writeback)
-  io.exception.bits := RegEnable(req, writeback)
-  io.exception.bits.uop.exceptionVec(loadAccessFault) := RegEnable(nderr, writeback)
-  io.exception.bits.uop.exceptionVec(hardwareError) := RegEnable(derr, writeback)
+  val hasBusError = writeback && (nderr || derr)
+  io.exception.valid := RegNext(hasBusError)
+  io.exception.bits := RegEnable(req, hasBusError)
+  io.exception.bits.uop.exceptionVec(loadAccessFault) := RegEnable(nderr, hasBusError)
+  io.exception.bits.uop.exceptionVec(hardwareError) := RegEnable(derr, hasBusError)
 
   /* debug log */
   XSDebug(io.uncache.req.fire,
@@ -462,10 +463,20 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   arbiter(entries.map(_.io.mmioWakeup), mmioWakeup, Some("mmioWakeup"))
   arbiter(entries.map(_.io.ncWakeup), ncWakeup, Some("ncWakeup"))
   // uncache exception
-  val exceptionEntry = ParallelPriorityMux(entries.map(e =>
-    (e.io.exception.valid, e.io.exception.bits)
-  ))
-  io.exceptionInfo.valid := Cat(entries.map(_.io.exception.valid)).orR
+  def isOlderUncacheException(left: LqWriteBundle, right: LqWriteBundle): Bool = {
+    isBefore(left.uop.robIdx, right.uop.robIdx) ||
+      (left.uop.robIdx === right.uop.robIdx && left.uop.uopIdx < right.uop.uopIdx)
+  }
+  private val uncacheExceptionSel = Module(
+    new SelectOldest(new LqWriteBundle, LoadUncacheBufferSize, isOlderUncacheException)
+      .suggestName("uncacheExceptionSel")
+  )
+  uncacheExceptionSel.io.in.zipWithIndex.foreach { case (sink, i) =>
+    sink.valid := entries(i).io.exception.valid
+    sink.bits := entries(i).io.exception.bits
+  }
+  private val exceptionEntry = uncacheExceptionSel.io.out.bits
+  io.exceptionInfo.valid := uncacheExceptionSel.io.out.valid
   io.exceptionInfo.bits.robIdx       := exceptionEntry.uop.robIdx
   io.exceptionInfo.bits.exceptionVec extendFrom exceptionEntry.uop.exceptionVec.selectByFu(LduCfg)
   io.exceptionInfo.bits.vaddr        := exceptionEntry.fullva
