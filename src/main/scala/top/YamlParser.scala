@@ -45,6 +45,7 @@ case class YamlConfig(
   DebugAttachProtocals: Option[List[String]],
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
+  EnableCommitStuckCheck: Option[Boolean],
   SeperateDM: Option[Boolean],
   SeperateBus: Option[String],
   SeperateBusRanges: Option[List[AddressSet]],
@@ -126,6 +127,11 @@ object YamlParser {
     yamlConfig.WFIResume.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = enable))
+      })
+    }
+    yamlConfig.EnableCommitStuckCheck.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(enableCommitStuckCheck = enable))
       })
     }
     yamlConfig.SeperateDM.foreach { enable =>

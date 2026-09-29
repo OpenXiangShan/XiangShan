@@ -299,6 +299,7 @@ case class XSCoreParameters
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
+  enableCommitStuckCheck : Boolean = false, // when enable, commit stuck cause critical error
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -939,4 +940,6 @@ trait HasXSParameter {
   def hasMbist               = p(DFTOptionsKey).EnableMbist
   def hasSramCtl             = p(DFTOptionsKey).EnableSramCtl
   def hasDFT                 = hasMbist || hasSramCtl
+
+  def enableCommitStuckCheck = coreParams.enableCommitStuckCheck
 }
