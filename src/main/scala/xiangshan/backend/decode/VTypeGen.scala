@@ -87,9 +87,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   // prevVlmax(i) = vlmax BEFORE instruction i (i.e., after all vsets before i)
   private val prevVlmax = specVlmax +: cumVlmax.take(DecodeWidth - 1)
 
-  // Detect keepVl vsets: rd == 0 && rs1 == 0
+  // Only vsetvli can keep VL here; vsetivli's RS1 field encodes an AVL immediate.
   private val keepVlMask = VecInit((0 until DecodeWidth).map { i =>
-    isVsetiVec(i) && instFieldVec(i).RD === 0.U && instFieldVec(i).RS1 === 0.U
+    isVsetvli(i) && instFieldVec(i).RD === 0.U && instFieldVec(i).RS1 === 0.U
   })
 
   // For keepVl vsets, compute the correct vlmaxChange against the true prevVlmax
