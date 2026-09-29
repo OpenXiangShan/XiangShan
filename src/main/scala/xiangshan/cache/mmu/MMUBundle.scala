@@ -111,6 +111,21 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     this
   }
 
+  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
+    this.pf := pf
+    this.af := af
+    this.v := entryValid
+    this.d := pte.perm.d
+    this.a := pte.perm.a
+    this.g := pte.perm.g
+    this.u := pte.perm.u
+    this.x := pte.perm.x
+    this.w := pte.perm.w
+    this.r := pte.perm.r
+
+    this
+  }
+
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
@@ -144,6 +159,21 @@ class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
 
     this
   }
+  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
+    this.pf := pf
+    this.af := af
+    this.v := entryValid
+    this.d := pte.perm.d
+    this.a := pte.perm.a
+    this.g := pte.perm.g
+    this.u := pte.perm.u
+    this.x := pte.perm.x
+    this.w := pte.perm.w
+    this.r := pte.perm.r
+
+    this
+  }
+
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
   }
