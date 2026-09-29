@@ -31,6 +31,50 @@ import re
 import pathlib
 from typing import List, Tuple, Set
 
+TIMEOUT_EXIT_CODE = 124
+INTERRUPT_EXIT_CODE = 128 + signal.SIGINT
+PROCESS_GROUP_GRACE_SECONDS = 5
+
+
+def terminate_process_group(proc, process_group, grace_seconds=None):
+    """Stop *process_group* and reap *proc*, even after repeated interrupts.
+
+    SIGINT gives the emulator a chance to run its existing signal cleanup.
+    SIGKILL is still sent after the grace period (or after the group leader
+    exits) because a shell's background descendants may ignore SIGINT and
+    outlive their leader.
+    """
+    if grace_seconds is None:
+        grace_seconds = PROCESS_GROUP_GRACE_SECONDS
+    try:
+        try:
+            os.killpg(process_group, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+
+        try:
+            proc.wait(timeout=grace_seconds)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            pass
+    finally:
+        # Keep both operations in one retry loop so another Ctrl-C cannot land
+        # in an unprotected gap between escalation and reaping.
+        kill_sent = False
+        reaped = False
+        while not reaped:
+            try:
+                if not kill_sent:
+                    try:
+                        os.killpg(process_group, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    kill_sent = True
+                proc.wait()
+                reaped = True
+            except KeyboardInterrupt:
+                continue
+
+
 def find_files_with_suffix(root_dir, suffixes):
     matching_files = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -311,6 +355,8 @@ class XiangShan(object):
         diff_args = "$NOOP_HOME/"+ args.diff
         assert_args = "-assert finish_maxfail=30 -assert global_finish_maxfail=10000"
         return_code = self.__exec_cmd(f'cd $NOOP_HOME/build && ./simv +workload={workload} +diff={diff_args} +dump-wave=fsdb {assert_args} | tee simv.log')
+        if return_code != 0:
+            return return_code
         with open(f"{self.args.noop_home}/build/simv.log") as f:
             content = f.read()
             if "Offending" in content or "HIT GOOD TRAP" not in content:
@@ -343,16 +389,21 @@ class XiangShan(object):
         env.update(self.args.get_env_variables())
         print("subprocess call cmd:", cmd)
         start = time.time()
-        proc = subprocess.Popen(cmd, shell=True, env=env, preexec_fn=os.setsid)
+        proc = subprocess.Popen(cmd, shell=True, env=env, start_new_session=True)
+        process_group = proc.pid
         try:
             return_code = proc.wait(self.timeout)
             end = time.time()
             print(f"Elapsed time: {end - start} seconds")
             return return_code
-        except (KeyboardInterrupt, subprocess.TimeoutExpired):
-            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-            print(f"KeyboardInterrupt or TimeoutExpired.")
-            return 0
+        except subprocess.TimeoutExpired:
+            print(f"Command timed out after {self.timeout} seconds.")
+            terminate_process_group(proc, process_group)
+            return TIMEOUT_EXIT_CODE
+        except KeyboardInterrupt:
+            print("Command interrupted by user.")
+            terminate_process_group(proc, process_group)
+            return INTERRUPT_EXIT_CODE
 
     def __get_ci_cputest(self, name=None):
         # base_dir = os.path.join(self.args.am_home, "tests/cputest/build")
