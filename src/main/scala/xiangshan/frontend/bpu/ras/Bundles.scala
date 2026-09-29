@@ -26,14 +26,12 @@ import xiangshan.frontend.bpu.BranchAttribute
 
 class RasEntry(implicit p: Parameters) extends RasBundle {
   val retAddr: GuardedPc = GuardedPc()
-  val ctr:     UInt      = UInt(StackCounterWidth.W) // layer of nested call functions
 }
 
 object RasEntry {
-  def apply(retAddr: GuardedPc, ctr: UInt)(implicit p: Parameters): RasEntry = {
+  def apply(retAddr: GuardedPc)(implicit p: Parameters): RasEntry = {
     val e = Wire(new RasEntry)
     e.retAddr := retAddr
-    e.ctr     := ctr
     e
   }
 }
@@ -54,31 +52,52 @@ object RasPtr {
 }
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
-  val sctr: UInt   = UInt(StackCounterWidth.W)
-  val tosw: RasPtr = new RasPtr
-  val tosr: RasPtr = new RasPtr
-  val nos:  RasPtr = new RasPtr
+  val ssp:        UInt   = UInt(StackPtrWidth.W)
+  val tosw:       RasPtr = new RasPtr
+  val tosr:       RasPtr = new RasPtr
+  val nos:        RasPtr = new RasPtr
+  val tosrInSpec: Bool   = Bool()
+  val nosInSpec:  Bool   = Bool()
 }
 
 object RasInternalMeta {
-  def apply(ssp: UInt, sctr: UInt, tosw: RasPtr, tosr: RasPtr, nos: RasPtr)(implicit p: Parameters): RasInternalMeta = {
-    val e = Wire(new RasInternalMeta)
-    e.ssp  := ssp
-    e.sctr := sctr
-    e.tosw := tosw
-    e.tosr := tosr
-    e.nos  := nos
-    e
+  def apply(
+      ssp:        UInt,
+      tosw:       RasPtr,
+      tosr:       RasPtr,
+      nos:        RasPtr,
+      tosrInSpec: Bool = false.B,
+      nosInSpec:  Bool = false.B
+  )(implicit p: Parameters): RasInternalMeta = {
+    val entry = Wire(new RasInternalMeta)
+    entry.ssp        := ssp
+    entry.tosw       := tosw
+    entry.tosr       := tosr
+    entry.nos        := nos
+    entry.tosrInSpec := tosrInSpec
+    entry.nosInSpec  := nosInSpec
+    entry
   }
 }
 
 class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
-  val topRetAddr: GuardedPc = GuardedPc()
+  // Only used by the FTQ return-address diagnostic; drop it in release to save the meta storage.
+  val topRetAddr: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
+}
+
+class RasSpecReadReq(implicit p: Parameters) extends RasBundle {
+  val tosr:       RasPtr = new RasPtr
+  val ssp:        UInt   = UInt(StackPtrWidth.W)
+  val tosrInSpec: Bool   = Bool()
+}
+
+class ReadRetAddr(implicit p: Parameters) extends RasBundle {
+  val req:     RasSpecReadReq = Input(new RasSpecReadReq)
+  val retAddr: GuardedPc      = Output(GuardedPc())
 }
 
 class RasCommitMeta(implicit p: Parameters) extends RasBundle {
-  val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
+  val ssp:  UInt   = UInt(StackPtrWidth.W)
   val tosw: RasPtr = new RasPtr
 }
 
