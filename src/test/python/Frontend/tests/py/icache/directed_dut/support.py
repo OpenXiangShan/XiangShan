@@ -7,7 +7,7 @@ test module. These helpers only centralize operations with identical behavior.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 
 def cycle_limit(name: str, default: int) -> int:
@@ -53,6 +53,50 @@ def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
             return True
         env.step(1)
     return False
+
+
+def wait_until(
+    env,
+    predicate: Callable[[], bool],
+    *,
+    max_cycles: int,
+    label: str,
+    snapshot: Callable[[], object] | None = None,
+    diagnostics: Callable[[], Mapping[str, object]] | None = None,
+) -> None:
+    """Wait with a consistent timeout report while preserving local timing."""
+    if poll_until(env, predicate, max_cycles=max_cycles):
+        return
+    detail: dict[str, object] = {
+        "reason": f"timeout while waiting for {label}",
+        "cycle": int(env.current_cycle),
+        "max_cycles": int(max_cycles),
+    }
+    if snapshot is not None:
+        detail["last"] = snapshot()
+    if diagnostics is not None:
+        detail.update(dict(diagnostics()))
+    raise AssertionError(detail)
+
+
+def wait_coverage_hit(
+    env,
+    group: str,
+    bin_name: str,
+    *,
+    max_cycles: int,
+    snapshot: Callable[[], object] | None = None,
+    diagnostics: Callable[[], Mapping[str, object]] | None = None,
+) -> None:
+    """Wait for one functional-coverage key using the common timeout format."""
+    wait_until(
+        env,
+        lambda: bool(env.functional_coverage.key_hit(group, bin_name)),
+        max_cycles=max_cycles,
+        label=f"{group}.{bin_name}",
+        snapshot=snapshot,
+        diagnostics=diagnostics,
+    )
 
 
 def clear_soft_prefetch(env) -> None:

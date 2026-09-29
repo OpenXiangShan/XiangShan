@@ -15,10 +15,13 @@ from tests.py.jiabowen.test_functional_coverage_baremode import (
 from tests.py.zhaoxinran.test_multi_branch import (
     test_multi_branch_random_positions as _run_multi_branch_positions,
 )
-from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, poll_until
+from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, wait_until
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _BASE = 0x8008_0000
 _CROSS_BASE = 0x8009_0000
 _MULTI_BRANCH_BASE = 0x8000_0000
@@ -161,17 +164,17 @@ def _register_observer(env) -> list[dict[str, int]]:
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "max_cycles": int(max_cycles),
-            "last": _snapshot(env),
+    wait_until(
+        env,
+        predicate,
+        max_cycles=max_cycles,
+        label=label,
+        snapshot=lambda: _snapshot(env),
+        diagnostics=lambda: {
             "icache": env.icache_agent.get_stats(),
             "backend": env.backend_model.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -247,7 +250,6 @@ def _initialize_loop(env, base: int, *, target_offset: int, latency: int) -> lis
 
 
 @pytest.mark.funcov_bins("BIN-608")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
     samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)
     _wait_hit(env, "icache_mainpipe_s1_sram", "single_line_sram_hit")
@@ -267,7 +269,6 @@ def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-609", "BIN-1133")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
     samples = _initialize_loop(env, _CROSS_BASE, target_offset=0x34, latency=8)
     _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
@@ -315,7 +316,6 @@ def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
         "the dual-request stimulus needs retargeting"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
     samples = _register_observer(env)
     random_state = random.getstate()
@@ -367,7 +367,6 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-628")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -420,7 +419,6 @@ def test_tc_icache_mainpipe_four_line_fixed_priority(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-1138")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     """Train varied dual requests, then replay them through MainPipe refills."""
     env.icache_agent.configure(
@@ -469,7 +467,6 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-613")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_hit_response_stall(env) -> None:
     samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)
     _wait_hit(env, "icache_mainpipe_s1_sram", "single_line_sram_hit")
@@ -519,7 +516,6 @@ def test_tc_icache_mainpipe_hit_response_stall(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-614")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_refill_completion_stall(env) -> None:
     samples = _register_observer(env)
     _load_nop_program(env, words=2048)

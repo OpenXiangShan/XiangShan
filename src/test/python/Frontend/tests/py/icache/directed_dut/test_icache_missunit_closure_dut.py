@@ -20,12 +20,15 @@ from env.sequences import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
-    poll_until,
     set_predictors as _set_predictors,
+    wait_until,
 )
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _BASE = 0x8010_0000
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
@@ -409,15 +412,16 @@ def _build_mshr_pressure_until(
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "cycle": int(env.current_cycle),
+    wait_until(
+        env,
+        predicate,
+        max_cycles=max_cycles,
+        label=label,
+        snapshot=lambda: _snapshot(env),
+        diagnostics=lambda: {
             "stats": env.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -512,7 +516,6 @@ def _assert_clean(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-690")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_request_and_concurrent_dut(env) -> None:
     samples = _prepare(
         env,
@@ -546,7 +549,6 @@ def test_icache_missunit_request_and_concurrent_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-691")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -596,7 +598,6 @@ def test_icache_missunit_distinct_parallel_allocate_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-688")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fetch_capacity_dut(env) -> None:
     """Fill all demand MSHRs and hold one distinct request under backpressure."""
     _prepare(
@@ -637,7 +638,6 @@ def test_icache_missunit_fetch_capacity_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-689")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_prefetch_capacity_dut(env) -> None:
     samples = _prepare(env, latency=16384)
     for base_offset in range(0x100, 0x380, 0xC0):
@@ -660,7 +660,6 @@ def test_icache_missunit_prefetch_capacity_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-625", "BIN-693", "BIN-694", "BIN-698")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_acquire_priority_dut(env) -> None:
     _prepare(
         env,
@@ -712,7 +711,6 @@ def test_icache_missunit_acquire_priority_dut(env) -> None:
         "duplicate soft-prefetch probe; stimulus timing needs retargeting"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_dedup_dut(env) -> None:
     _prepare(
         env,
@@ -835,7 +833,6 @@ def test_icache_missunit_dedup_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-702", "BIN-703", "BIN-705")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -925,7 +922,6 @@ def test_icache_missunit_redirect_unissued_prefetch_dut(env) -> None:
         "the current directed timing; redirect-flush stimulus needs retargeting"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_redirect_flush_dut(env) -> None:
     samples = _prepare(
         env,
@@ -994,7 +990,6 @@ def test_icache_missunit_redirect_flush_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-686")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fetch_allocate_dut(env) -> None:
     """Observe an uncontended demand allocation with prefetch disabled."""
     _prepare(env, latency=128, prefetch_enabled=False)
@@ -1008,7 +1003,6 @@ def test_icache_missunit_fetch_allocate_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-709", "BIN-710", "BIN-1005")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fencei_dut(env) -> None:
     samples = _prepare(env, latency=128)
     _wait_initial_refill(env)
@@ -1033,7 +1027,6 @@ def test_icache_missunit_fencei_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-629", "BIN-707", "BIN-708", "BIN-711")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fencei_unissued_dut(env) -> None:
     samples = _prepare(
         env,
@@ -1091,7 +1084,6 @@ def test_icache_missunit_fencei_unissued_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-712", "BIN-1007")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fencei_redirect_unissued_dut(env) -> None:
     samples = _prepare(
         env,
@@ -1129,7 +1121,6 @@ def test_icache_missunit_fencei_redirect_unissued_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-1006", "BIN-1008")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fencei_redirect_issued_dut(env) -> None:
     samples = _prepare(
         env,

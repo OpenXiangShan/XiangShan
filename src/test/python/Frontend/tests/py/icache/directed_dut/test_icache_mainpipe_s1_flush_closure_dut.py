@@ -24,13 +24,16 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
 )
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
-    poll_until,
     read_cached_signal as _try_read,
     restore_predictors as _restore_predictors,
+    wait_until,
 )
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _BASE = 0x8004_0000
 _REDIRECT_BASE = 0x8005_0000
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
@@ -149,17 +152,17 @@ def _register_s1_observer(env) -> list[dict]:
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "max_cycles": int(max_cycles),
-            "last": _snapshot(env),
+    wait_until(
+        env,
+        predicate,
+        max_cycles=max_cycles,
+        label=label,
+        snapshot=lambda: _snapshot(env),
+        diagnostics=lambda: {
             "icache": env.icache_agent.get_stats(),
             "backend": env.backend_model.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -420,7 +423,6 @@ def _drive_bpu_s3_until_s2_hit(
 
 
 @pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
@@ -463,7 +465,6 @@ def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-769")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_cacheable_stream(env, _BASE, latency=48, samples=samples)
@@ -486,7 +487,6 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-618")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     return _run_tc_icache_mainpipe_s1_bpu_miss(env)
 
@@ -511,7 +511,6 @@ def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-620")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
     _initialize_cacheable_stream(env, _BASE, latency=64)
 
@@ -551,7 +550,6 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-621", "BIN-706")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
@@ -594,7 +592,6 @@ def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-675")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_cacheable_stream(env, _BASE, latency=32, samples=samples)
@@ -628,7 +625,6 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-645")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
@@ -677,7 +673,6 @@ def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-776")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_bpu_s3_keeps_s2(env) -> None:
     samples = _register_s1_observer(env)
     _initialize_bpu_s3_stream(env)

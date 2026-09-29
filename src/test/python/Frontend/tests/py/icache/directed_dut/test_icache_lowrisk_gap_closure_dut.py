@@ -22,9 +22,9 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
-    poll_until,
     read_cached_signal as _try_read_internal,
     set_predictors as _set_predictors,
+    wait_until,
 )
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
@@ -37,7 +37,10 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
 )
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
@@ -264,16 +267,15 @@ def _load_same_set_jump_loop(
 
 
 def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "max_cycles": int(max_cycles),
-            "current_cycle": int(env.current_cycle),
+    wait_until(
+        env,
+        predicate,
+        max_cycles=max_cycles,
+        label=label,
+        diagnostics=lambda: {
             "stats": env.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -617,7 +619,6 @@ def lowrisk_cleanup(env):
 
 
 @pytest.mark.funcov_bins("BIN-685")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000
     redirect = base + 0x100
@@ -650,7 +651,6 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     "BIN-655", "BIN-656", "BIN-657", "BIN-663", "BIN-677",
     "BIN-661", "BIN-778", "BIN-779", "BIN-780"
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
@@ -684,7 +684,6 @@ def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-674", "BIN-602")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     recorder = env.functional_coverage
@@ -719,7 +718,6 @@ def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-674", "BIN-603")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_mainpipe_s0_entry_data_backpressure_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8000_0000
@@ -752,7 +750,6 @@ def test_icache_mainpipe_s0_entry_data_backpressure_dut(lowrisk_cleanup) -> None
 
 
 @pytest.mark.funcov_bins("BIN-610")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_mainpipe_single_bank_range_dut(env) -> None:
     base = 0x8008_0000
     target = base + 0x08
@@ -797,7 +794,6 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
     "BIN-686", "BIN-690", "BIN-691", "BIN-692", "BIN-699", "BIN-705", "BIN-1005",
     "BIN-707", "BIN-708", "BIN-709", "BIN-710", "BIN-711", "BIN-712", "BIN-1006", "BIN-1007", "BIN-1008",
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     return _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup)
 
@@ -826,7 +822,6 @@ def _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-746")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8006_0000
@@ -855,7 +850,6 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
 @pytest.mark.funcov_bins(
     "BIN-720", "BIN-726", "BIN-727", "BIN-728", "BIN-735", "BIN-777",
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     """Build normal WayLookup entries, then exercise read-side backpressure."""
     env = lowrisk_cleanup
@@ -911,7 +905,6 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-733")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     _run_asymmetric_refill(env, expected_pattern="hit_miss", evict_req=1)
@@ -925,7 +918,6 @@ def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-731")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
     """Keep the old tag queued while a same-set replacement refill returns."""
     env = lowrisk_cleanup
@@ -1064,7 +1056,6 @@ def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-734")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> None:
     """Update wins over a pending write, which resumes after the update."""
     env = lowrisk_cleanup
@@ -1090,7 +1081,6 @@ def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> Non
 
 
 @pytest.mark.funcov_bins("BIN-744")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
     """Flush immediately after an accepted write and discard the old entry."""
     env = lowrisk_cleanup
@@ -1133,7 +1123,6 @@ def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
 @pytest.mark.funcov_bins(
     "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741", "BIN-762",
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     """Drive a cacheable instruction page fault through the existing PTW model."""
     env = lowrisk_cleanup
@@ -1238,7 +1227,6 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-763")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     """Present a cacheable line with execute permission denied by the PMP model."""
     env = lowrisk_cleanup
@@ -1318,7 +1306,6 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
 @pytest.mark.funcov_bins(
     "BIN-753", "BIN-757", "BIN-758", "BIN-1011"
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -1381,7 +1368,6 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-759", "BIN-760")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
     """Fill adjacent lines, then let the normal sequential stream exercise clean hits."""
     env = lowrisk_cleanup
@@ -1421,7 +1407,6 @@ def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-761")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
     """Train the existing two-fetch loop with both requested lines resident."""
     env = lowrisk_cleanup
@@ -1454,7 +1439,6 @@ def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-765", "BIN-767", "BIN-768")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
@@ -1601,7 +1585,6 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         "SRAM/MSHR cross-line transaction is formed; retain for ICache owner review"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
     """Fetch one cross-line transaction from SRAM (line 0) and MSHR (line 1).
 
@@ -1710,7 +1693,6 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-759")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.xfail(
     strict=True,
     reason=(
@@ -1759,7 +1741,6 @@ def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-812", "BIN-816")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.xfail(
     strict=True,
     reason=(

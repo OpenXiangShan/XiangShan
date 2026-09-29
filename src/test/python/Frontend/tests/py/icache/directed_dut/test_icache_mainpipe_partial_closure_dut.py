@@ -10,7 +10,7 @@ import os
 from collections.abc import Callable
 
 import pytest
-from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, poll_until
+from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, wait_until
 
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _BASE,
@@ -30,20 +30,23 @@ from tests.py.zhaoxinran.uncache.test_instr_uncache_port_boundaries import (
     _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests
     as _run_pbmt_nc_redirect,
 )
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    raise AssertionError(
-        {
-            "reason": f"timeout while waiting for {label}",
-            "max_cycles": int(max_cycles),
+    wait_until(
+        env,
+        predicate,
+        max_cycles=max_cycles,
+        label=label,
+        diagnostics=lambda: {
             "icache": env.icache_agent.get_stats(),
             "backend": env.backend_model.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
@@ -65,7 +68,6 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
     ids=("first-beat-corrupt", "second-beat-denied"),
 )
 @pytest.mark.funcov_bins("BIN-624", "BIN-636", "BIN-715", "BIN-1009")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
     env.icache_agent.inject_response_fault_at(_BASE, **fault)
     _initialize_cacheable_stream(env, _BASE, latency=12)
@@ -81,7 +83,6 @@ def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-626")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     samples = _register_mainpipe_observer(env)
     _load_two_fetch_loop(env, _DUAL_BASE)
@@ -114,7 +115,6 @@ def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-623")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_nonmatching_refill_dut(env) -> None:
     _run_sector_lane_refill(env)
     _wait_hit(
@@ -128,7 +128,6 @@ def test_tc_icache_mainpipe_nonmatching_refill_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-634")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
     _run_pmp_execute_denied(env)
     _wait_hit(env, "icache_mainpipe_s1_protection", "pmp_exception_suppresses_miss")
@@ -136,7 +135,6 @@ def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-635")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_pma_mmio_suppress_dut(env) -> None:
     _run_cross_page_pma_path(env)
     _wait_hit(env, "icache_mainpipe_s1_protection", "pmp_mmio_suppresses_refill")
@@ -145,7 +143,6 @@ def test_tc_icache_mainpipe_pma_mmio_suppress_dut(env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-638")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_uncache_suppress_dut(env) -> None:
     _run_pbmt_nc_redirect(env)
     _wait_hit(env, "icache_mainpipe_s1_protection", "pbmt_uncache_suppresses_refill")

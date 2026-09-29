@@ -10,7 +10,11 @@ from tests.py.icache.directed_dut.test_icache_lowrisk_gap_closure_dut import (
 )
 
 
-@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
+
 @pytest.mark.parametrize("kind,bin_name", [
     pytest.param("meta", "meta_code_mismatch_single_way", marks=pytest.mark.funcov_bins("BIN-641")),
     pytest.param("data", "data_ecc_selected_valid_sram_bank", marks=pytest.mark.funcov_bins("BIN-642")),

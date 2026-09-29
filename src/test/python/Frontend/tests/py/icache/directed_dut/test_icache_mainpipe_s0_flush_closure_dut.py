@@ -25,7 +25,10 @@ from tests.py.icache.directed_dut.support import (
 )
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _BASE = 0x8004_0000
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
@@ -177,7 +180,6 @@ def _wait_hit(env, bin_name: str, *, max_cycles: int) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-605")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
     samples: list[dict] = []
     env.register_cycle_observer(
@@ -372,7 +374,6 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-607", "BIN-749")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples: list[dict] = []

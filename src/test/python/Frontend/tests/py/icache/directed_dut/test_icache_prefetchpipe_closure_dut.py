@@ -31,7 +31,10 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
 from tests.py.icache.directed_dut.support import clear_soft_prefetch as _clear_soft_prefetch
 
 
-_RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
+pytestmark = pytest.mark.skipif(
+    os.getenv("TB_ENABLE_DUT_TESTS") != "1",
+    reason="requires compiled DUT",
+)
 _NOP = 0x0000_0013
 _SOFT_BASE = 0x8004_0000
 
@@ -193,7 +196,6 @@ def prefetchpipe_env(env):
 
 
 @pytest.mark.funcov_bins("BIN-656", "BIN-657", "BIN-663", "BIN-677")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _prepare_nops(env, _SOFT_BASE, latency=48, seed=0x6657)
@@ -230,7 +232,6 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-654")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
@@ -267,7 +268,6 @@ def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-653")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
@@ -308,7 +308,6 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-655")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
@@ -344,7 +343,6 @@ def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-664")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_disabled(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _prepare_nops(env, _SOFT_BASE, latency=32, seed=0x6664)
@@ -406,7 +404,6 @@ def _translation_state(
 
 
 @pytest.mark.funcov_bins("BIN-658", "BIN-678", "BIN-738", "BIN-740")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     pa0 = 0x8040_0F00
@@ -458,7 +455,6 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-679")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> None:
     """Hold MetaArray behind fence.i while a translated retry completes."""
     env = prefetchpipe_env
@@ -523,7 +519,6 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
 
 
 @pytest.mark.funcov_bins("BIN-661", "BIN-666", "BIN-700")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_trained_refill(env)
@@ -537,7 +532,6 @@ def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-683")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) -> None:
     """A clean response for an existing MSHR cancels an unissued s2 miss."""
     env = prefetchpipe_env
@@ -575,7 +569,6 @@ def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) 
 
 
 @pytest.mark.funcov_bins("BIN-659")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> None:
     """Keep an exact prefetch probe live across its clean refill window."""
     env = prefetchpipe_env
@@ -635,7 +628,6 @@ def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> N
 
 
 @pytest.mark.funcov_bins("BIN-660")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     base = _SOFT_BASE
@@ -694,7 +686,6 @@ def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-667")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     target = _SOFT_BASE + 0x6000
@@ -722,7 +713,6 @@ def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
         "layout/randomization needs retargeting"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_large_loop(env)
@@ -741,7 +731,6 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-779")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -799,7 +788,6 @@ def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-681")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_s2_pressure(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_trained_refill(env)
@@ -822,7 +810,6 @@ def test_tc_icache_prefetchpipe_s2_pressure(prefetchpipe_env) -> None:
         "icache_waylookup_flush.bpu_flush_empty"
     ),
 )
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_flush_boundaries(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_trained_refill(env)
@@ -839,7 +826,6 @@ def test_tc_icache_prefetchpipe_flush_boundaries(prefetchpipe_env) -> None:
 
 
 @pytest.mark.funcov_bins("BIN-668")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_protection(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     pa = 0x8044_0F00
