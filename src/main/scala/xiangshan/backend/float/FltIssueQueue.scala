@@ -438,7 +438,7 @@ class FltIssueQueue(
     sink = out.toWbFuBusyTable.fpWbFuBusyTableIn,
     wbPortIds = param.fpWbPortIds,
     deqWbPortIds = param.exuParams.map(_.getFpWriteCfg.map(_.port)),
-    deqWen = out.deq.map(x => x.bits.fpWen || x.bits.gpWen), // TODO, merge FuBusyTable
+    deqWen = out.deq.map(x => x.valid), // TODO, merge FuBusyTable
     deq = out.deq,
   )
   connectWbFuBusyTableIn(
