@@ -212,8 +212,8 @@ class MainBtbAlignBank(
 
   r.resp.metas.last := s2_vbtbMeta
 
-  // add an alias for hitMask for later use & debug purpose
-  private val s2_hitMask = VecInit(r.resp.predictions.take(NumWay).map(_.valid))
+  // Keep the hit mask aligned directly with the MainBtb predictions.
+  private val s2_hitMask = VecInit(s2_predictions.map(_.valid))
   victimBtb.io.s2_mainBtbHitMask   := s2_hitMask
   victimBtb.io.s2_mainBtbPositions := s2_rawPositions
 
@@ -371,7 +371,7 @@ class MainBtbAlignBank(
   victimBtb.io.trainEntry.req.bits.counters := t1_vbtbNewCounters
 
   /* *** victim btb train and snapshot insertion *** */
-  private val snapshotArbiter = Module(new RRArbiter(new MainBtbSnapshotResp, NumInternalBanks))
+  private val snapshotArbiter = Module(new RRArbiter(new MainBtbSnapshotResp, NumInternalBanks, initLastGrant = true))
   snapshotArbiter.io.in.zip(internalBanks).foreach { case (in, bank) => in <> bank.io.snapshot.resp }
   snapshotArbiter.io.out.ready := true.B
   private val snapshotWriteReqCount = PopCount(snapshotArbiter.io.in.map(_.valid))
