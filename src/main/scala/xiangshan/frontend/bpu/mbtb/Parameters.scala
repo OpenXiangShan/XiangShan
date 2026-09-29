@@ -15,7 +15,6 @@
 
 package xiangshan.frontend.bpu.mbtb
 
-import chisel3._
 import chisel3.util._
 import xiangshan.frontend.bpu.HasBpuParameters
 
@@ -33,7 +32,10 @@ case class MainBtbParameters(
     TargetWidth:     Int = 20, // 2B aligned
     TakenCntWidth:   Int = 2,
     // Mbtb write trace
-    EnableMainbtbTrace: Boolean = false
+    EnableMainbtbTrace: Boolean = false,
+    // Vbtb
+    NumVictimBtbEntries: Int = 32, // 16 entries per align bank
+    VictimBtbReplacer:   String = "plru"
 ) {}
 
 trait HasMainBtbParameters extends HasBpuParameters {
@@ -63,4 +65,15 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
 
   def EnableMainbtbTrace: Boolean = mbtbParameters.EnableMainbtbTrace
+
+  // Victim Btb
+  def NumVictimBtbEntries:     Int    = mbtbParameters.NumVictimBtbEntries
+  def NumVictimBtbWays:        Int    = NumVictimBtbEntries / NumAlignBanks
+  def VictimBtbReplacerPolicy: String = mbtbParameters.VictimBtbReplacer
+
+  require(
+    NumVictimBtbEntries % NumAlignBanks == 0,
+    "VBTB entries must be evenly distributed across align banks"
+  )
+  require(NumVictimBtbWays > 0)
 }
