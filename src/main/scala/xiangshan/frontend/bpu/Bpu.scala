@@ -128,6 +128,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s2_override = WireDefault(false.B)
   private val s3_override = WireDefault(false.B)
+  private val s1_misPred  = WireDefault(false.B)
 
   private val s1_prediction = Wire(new Prediction)
   private val s2_prediction = Wire(new Prediction)
@@ -169,7 +170,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val fastTrain = Wire(Valid(new FastTrain))
   fastTrain.valid        := s3_valid
   fastTrain.bits.startPc := s3_startPc.get.unGuard
-  fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
+  fastTrain.bits.branch.fromPrediction(s3_prediction, s1_misPred)
   fastTrain.bits.abtbMeta  := s3_abtbMeta
   fastTrain.bits.utageMeta := s3_utageMeta
 
@@ -471,6 +472,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val firstTakenBranchDiff = !(s3_firstTakenBranchOH === s3_s2FirstTakenBranchOH)
 
     s3_valid && (takenDiff || firstTakenBranchDiff || s3_targetDiff)
+  }
+
+  s1_misPred := {
+    val takenDiff       = s3_prediction.taken =/= s3_s1Prediction.taken
+    val cfiPositionDiff = s3_prediction.cfiPosition =/= s3_s1Prediction.cfiPosition
+    val targetDiff      = s3_prediction.target =/= s3_s1Prediction.target
+
+    s3_valid && (takenDiff || cfiPositionDiff || targetDiff)
   }
 
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
