@@ -17,6 +17,7 @@ object CommitTypeField extends DecodeField[InstPattern, UInt] {
       case intInst: IntInstPattern => intInst match {
         case _: IntRTypePattern => CommitType.NORMAL
         case iType: IntITypePattern => iType match {
+          case _: CboInstPattern => CommitType.STORE
           case IntLoadInstPattern() => CommitType.LOAD
           case HyperLoadInstPattern() => CommitType.LOAD
           case _ => CommitType.NORMAL
