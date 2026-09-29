@@ -398,6 +398,39 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.g_pbmt := item.s2.entry.pbmt
     this.g_perm.applyS2(item.s2)
     this.s2xlate := item.s2xlate
+
+    // G-stage candidates are indexed by GPA, while the combined entry is indexed by GVA.
+    // Compare the full intermediate PPN before selecting the G-stage subpage.
+    val ordinaryS1 = item.s1.entry.level.get === 0.U && item.s1.entry.n.get === 0.U &&
+      item.s1.isLeaf() && !item.s1.pf && !item.s1.af
+    val ordinaryS2 = item.s2.entry.n.get === 0.U && item.s2.entry.v && !item.s2.gpf && !item.s2.gaf
+    val sameGpaSector = item.s1.entry.ppn === (item.s2.entry.tag >> sectortlbwidth)
+    val sameVmid = item.s1.entry.vmid.getOrElse(0.U) === item.s2.entry.vmid.getOrElse(0.U)
+    val composeSector = (!HasMptCheck).B && item.s2xlate === allStage &&
+      ordinaryS1 && ordinaryS2 && sameGpaSector && sameVmid
+    val combinedValid = Wire(Vec(tlbcontiguous, Bool()))
+    for (i <- 0 until tlbcontiguous) {
+      val gLane = item.s1.ppn_low(i)
+      combinedValid(i) := composeSector && item.s1.valididx(i) && item.s2.valididx(gLane)
+      when(combinedValid(i)) {
+        this.ppn_low(i) := item.s2.ppn_low(gLane)
+      }
+    }
+    when((!HasMptCheck).B && item.s2xlate === allStage && !isSuperPage) {
+      this.valididx := (combinedValid.asUInt | item.s1.pteidx.asUInt).asBools
+      this.pteidx := (combinedValid.asUInt | item.s1.pteidx.asUInt).asBools
+    }
+    when((!HasMptCheck).B && item.s2xlate === onlyStage2 && !isSuperPage) {
+      val demandMask = UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0), tlbcontiguous)
+      val sectorMask = Mux((!HasMptCheck).B && ordinaryS2, item.s2.valididx.asUInt, 0.U)
+      this.valididx := (sectorMask | demandMask).asBools
+      this.pteidx := (sectorMask | demandMask).asBools
+      for (i <- 0 until tlbcontiguous) {
+        when(sectorMask(i)) {
+          this.ppn_low(i) := item.s2.ppn_low(i)
+        }
+      }
+    }
     this
   }
   // 4KB is normal entry, 2MB/1GB is considered as super entry
@@ -1207,12 +1240,16 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = gvpnLen, hasPerm = true, hasLevel = true, hasNapot = true)
   val gpf = Bool()
   val gaf = Bool()
+  // Verified subpages in the GPA sector containing entry.tag; attributes and PPN high bits are shared.
+  val valididx = Vec(tlbcontiguous, Bool())
+  val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
   def apply(gpf: Bool, gaf: Bool, level: UInt, pte: PteBundle, vpn: UInt, vmid: UInt) = {
     val resp_pte = Mux(gaf, 0.U.asTypeOf(pte), pte)
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := resp_pte.getPerm())
+    this.entry.perm.foreach(_.g := false.B)
     this.entry.ppn := resp_pte.ppn
     this.entry.n.map(_ := resp_pte.n === true.B && resp_pte.ppn(3, 0) === 8.U && level === 0.U)
     this.entry.pbmt := resp_pte.pbmt
@@ -1222,6 +1259,25 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.v := !gpf
     this.gpf := gpf
     this.gaf := gaf
+    this.valididx := VecInit.fill(tlbcontiguous)(false.B)
+    this.ppn_low := VecInit.fill(tlbcontiguous)(resp_pte.ppn(sectortlbwidth - 1, 0))
+  }
+
+  def setSector(ptes: Vec[PteBundle], eligible: Vec[Bool], pbmte: Bool, enable: Bool): Unit = {
+    val demandPerm = WireInit(entry.perm.get)
+    demandPerm.g := false.B
+    val validLeaf = entry.v && (demandPerm.r || demandPerm.x) && demandPerm.u && demandPerm.a &&
+      !(demandPerm.w && !demandPerm.r) && !gpf && !gaf && entry.n.get === 0.U
+    for (i <- 0 until tlbcontiguous) {
+      val candidatePerm = WireInit(ptes(i).getPerm())
+      candidatePerm.g := false.B
+      val compatible = ptes(i).getPPN() >> sectortlbwidth === entry.ppn >> sectortlbwidth &&
+        candidatePerm.asUInt === demandPerm.asUInt && ptes(i).pbmt === entry.pbmt
+      val validPte = eligible(i) && ptes(i).isLeaf() && ptes(i).n === 0.U &&
+        !ptes(i).isGpf(0.U, pbmte) && !ptes(i).isAf()
+      valididx(i) := enable && validLeaf && (entry.level.get =/= 0.U || (validPte && compatible))
+      ppn_low(i) := Mux(entry.level.get =/= 0.U, i.U, ptes(i).ppn(sectortlbwidth - 1, 0))
+    }
   }
 
   def genPPNS2(vpn: UInt): UInt = {
@@ -1386,6 +1442,42 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
     for (i <- 0 until tlbcontiguous) {
       this.entry(i) := ptw_resp
     }
+  }
+
+  def toSectorResp: PtwSectorResp = {
+    val sector = Wire(new PtwSectorResp)
+    val demand = entry(OHToUInt(pteidx))
+    sector.entry.tag := demand.tag
+    sector.entry.asid := demand.asid
+    sector.entry.vmid.map(_ := demand.vmid.getOrElse(0.U))
+    sector.entry.ppn := demand.ppn
+    sector.entry.pbmt := demand.pbmt
+    sector.entry.n.map(_ := demand.n.getOrElse(0.U))
+    sector.entry.perm.map(_ := demand.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
+    sector.entry.level.map(_ := demand.level.getOrElse(0.U(log2Up(Level + 1).W)))
+    sector.entry.prefetch := demand.prefetch
+    sector.entry.v := demand.v
+    sector.af := demand.af
+    sector.pf := demand.pf
+    sector.addr_low := OHToUInt(pteidx)
+    sector.pteidx := pteidx
+    for (i <- 0 until tlbcontiguous) {
+      val candidate = entry(i)
+      val ppnEqual = candidate.ppn === demand.ppn
+      val pbmtEqual = candidate.pbmt === demand.pbmt
+      val permEqual = candidate.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt ===
+        demand.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
+      val vEqual = candidate.v === demand.v
+      val afEqual = candidate.af === demand.af
+      val pfEqual = candidate.pf === demand.pf
+      val cfEqual = if (HasBitmapCheck) candidate.cf === demand.cf else true.B
+      val ordinaryCandidate = candidate.n.getOrElse(0.U) === 0.U
+      sector.valididx(i) := ((ppnEqual && pbmtEqual && permEqual && vEqual && afEqual && pfEqual && cfEqual &&
+        ordinaryCandidate) || !not_super) && !not_merge
+      sector.ppn_low(i) := candidate.ppn_low
+    }
+    sector.valididx(OHToUInt(pteidx)) := true.B
+    sector
   }
 
   def genPPN(): UInt = {

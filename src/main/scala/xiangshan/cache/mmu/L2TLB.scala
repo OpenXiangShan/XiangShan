@@ -653,6 +653,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> hptw
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
   hptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 1)
+  hptw.io.mem.sector := resp_pte_sector(l2tlbParams.llptwsize + 1).asTypeOf(hptw.io.mem.sector)
 
   if (HasMptCheck) {
     mptc.get.io.mem.resp.valid := RegNext(mem_resp_done && mem_resp_from_mptc) // fix later extra delay reg which is unnecessary
@@ -701,7 +702,10 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       difftest.g_pbmt := io.tlb(i).resp.bits.s2.entry.pbmt
       for (j <- 0 until tlbcontiguous) {
         difftest.ppn(j) := Cat(io.tlb(i).resp.bits.s1.entry.ppn, io.tlb(i).resp.bits.s1.ppn_low(j))
-        difftest.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j)
+        // This event contains one G-stage PTE; sibling translations need separate validation when accessed.
+        difftest.valididx(j) := io.tlb(i).resp.bits.s1.valididx(j) &&
+          (io.tlb(i).resp.bits.s2xlate === noS2xlate ||
+            io.tlb(i).resp.bits.s2xlate === onlyStage1 || io.tlb(i).resp.bits.s1.pteidx(j))
         difftest.pteidx(j) := io.tlb(i).resp.bits.s1.pteidx(j)
       }
       difftest.perm := io.tlb(i).resp.bits.s1.entry.perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
@@ -835,6 +839,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
           outArb(i).in(0).bits.s2.entry.level.map(_ := 0.U(2.W))
           outArb(i).in(0).bits.s2.entry.ppn := get_4kppn(mergeArb(i).out.bits.s2.entry.ppn, mergeArb(i).out.bits.s2.entry.tag, mergeArb(i).out.bits.s2.entry.level.get, mergeArb(i).out.bits.s2.entry.n.get.asBool)
           outArb(i).in(0).bits.s2.entry.n.map(_ := false.B)
+          outArb(i).in(0).bits.s2.valididx := VecInit.fill(tlbcontiguous)(false.B)
         }
       }
     } else {
@@ -947,40 +952,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     ptw_merge_resp.pteidx := UIntToOH(vpn(sectortlbwidth - 1, 0)).asBools
     val napot = ptw_merge_resp.entry(vpn(sectortlbwidth - 1, 0)).n.getOrElse(0.U)
     ptw_merge_resp.not_super := not_super.B && !napot
-    ptw_merge_resp.not_merge := hasS2xlate
+    val sectorAllowed = !HasMptCheck &&
+      p(xiangshan.PMParameKey).PlatformGrain >= log2Ceil(l2tlbParams.blockBytes)
+    val bitmapEnabled = if (HasBitmapCheck) csr_dup(0).mbmc.BME === 1.U && csr_dup(0).mbmc.CMODE === 0.U
+      else false.B
+    ptw_merge_resp.not_merge := hasS2xlate && (!sectorAllowed.B || bitmapEnabled || gpf)
     ptw_merge_resp
   }
 
   def merge_ptwResp_to_sector_ptwResp(pte: PtwMergeResp) : PtwSectorResp = {
     assert(tlbcontiguous == 8, "Only support tlbcontiguous = 8!")
-    val ptw_sector_resp = Wire(new PtwSectorResp)
-    ptw_sector_resp.entry.tag := pte.entry(OHToUInt(pte.pteidx)).tag
-    ptw_sector_resp.entry.asid := pte.entry(OHToUInt(pte.pteidx)).asid
-    ptw_sector_resp.entry.vmid.map(_ := pte.entry(OHToUInt(pte.pteidx)).vmid.getOrElse(0.U))
-    ptw_sector_resp.entry.ppn := pte.entry(OHToUInt(pte.pteidx)).ppn
-    ptw_sector_resp.entry.pbmt := pte.entry(OHToUInt(pte.pteidx)).pbmt
-    ptw_sector_resp.entry.n.map(_ := pte.entry(OHToUInt(pte.pteidx)).n.getOrElse(0.U))
-    ptw_sector_resp.entry.perm.map(_ := pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)))
-    ptw_sector_resp.entry.level.map(_ := pte.entry(OHToUInt(pte.pteidx)).level.getOrElse(0.U(log2Up(Level + 1).W)))
-    ptw_sector_resp.entry.prefetch := pte.entry(OHToUInt(pte.pteidx)).prefetch
-    ptw_sector_resp.entry.v := pte.entry(OHToUInt(pte.pteidx)).v
-    ptw_sector_resp.af := pte.entry(OHToUInt(pte.pteidx)).af
-    ptw_sector_resp.pf := pte.entry(OHToUInt(pte.pteidx)).pf
-    ptw_sector_resp.addr_low := OHToUInt(pte.pteidx)
-    ptw_sector_resp.pteidx := pte.pteidx
-    for (i <- 0 until tlbcontiguous) {
-      val ppn_equal = pte.entry(i).ppn === pte.entry(OHToUInt(pte.pteidx)).ppn
-      val pbmt_equal = pte.entry(i).pbmt === pte.entry(OHToUInt(pte.pteidx)).pbmt
-      val perm_equal = pte.entry(i).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt === pte.entry(OHToUInt(pte.pteidx)).perm.getOrElse(0.U.asTypeOf(new PtePermBundle)).asUInt
-      val v_equal = pte.entry(i).v === pte.entry(OHToUInt(pte.pteidx)).v
-      val af_equal = pte.entry(i).af === pte.entry(OHToUInt(pte.pteidx)).af
-      val pf_equal = pte.entry(i).pf === pte.entry(OHToUInt(pte.pteidx)).pf
-      val cf_equal = if (HasBitmapCheck) pte.entry(i).cf === pte.entry(OHToUInt(pte.pteidx)).cf else true.B
-      ptw_sector_resp.valididx(i) := ((ppn_equal && pbmt_equal && perm_equal && v_equal && af_equal && pf_equal && cf_equal) || !pte.not_super) && !pte.not_merge
-      ptw_sector_resp.ppn_low(i) := pte.entry(i).ppn_low
-    }
-    ptw_sector_resp.valididx(OHToUInt(pte.pteidx)) := true.B
-    ptw_sector_resp
+    pte.toSectorResp
   }
 
   def ptwResp_to_sector_4kptwResp(pte: PtwMergeResp) : PtwSectorResp = {

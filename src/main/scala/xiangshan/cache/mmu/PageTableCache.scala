@@ -580,7 +580,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l0HitPPN = l0HitData.ppns
   val l0HitPbmt = l0HitData.pbmts
   val l0HitPerm = l0HitData.perms.getOrElse(0.U.asTypeOf(Vec(PtwL0SectorSize, new PtePermBundle)))
-  val l0HitValid = VecInit(l0HitData.onlypf.map(!_))
+  val l0HitValid = VecInit(l0HitData.vs.zip(l0HitData.onlypf).map { case (valid, onlyPf) => valid && !onlyPf })
   val l0Ptes = WireInit(VecInit(Seq.fill(tlbcontiguous)(0.U(XLEN.W)))) // L0 lavel Page Table Entry Vector
   val l0cfs = WireInit(VecInit(Seq.fill(tlbcontiguous)(false.B))) // L0 lavel Bitmap Check Failed Vector
   if (HasBitmapCheck) {
@@ -742,6 +742,18 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   io.resp.bits.toHptw.resp.entry.v := Mux(resp_res.l0.hit, resp_res.l0.v(idx), resp_res.sp.v)
   io.resp.bits.toHptw.resp.gpf := !io.resp.bits.toHptw.resp.entry.v
   io.resp.bits.toHptw.resp.gaf := false.B
+  val gSectorPtes = Wire(Vec(tlbcontiguous, new PteBundle))
+  for (i <- 0 until tlbcontiguous) {
+    gSectorPtes(i) := 0.U.asTypeOf(new PteBundle)
+    gSectorPtes(i).ppn := resp_res.l0.ppn(i)
+    gSectorPtes(i).ppn_high := resp_res.l0.ppn(i) >> ppnLen
+    gSectorPtes(i).pbmt := resp_res.l0.pbmt(i)
+    gSectorPtes(i).perm := Cat(resp_res.l0.perm(i).asUInt, resp_res.l0.v(i)).asTypeOf(gSectorPtes(i).perm)
+  }
+  val gSectorAllowed = (!HasMptCheck && p(xiangshan.PMParameKey).PlatformGrain >=
+    log2Ceil(l2tlbParams.blockBytes)).B &&
+    !(HasBitmapCheck.B && bitmapEnable) && (resp_res.l0.hit || resp_res.sp.hit)
+  io.resp.bits.toHptw.resp.setSector(gSectorPtes, resp_res.l0.v, io.csr_dup(0).mPBMTE, gSectorAllowed)
   if (HasBitmapCheck) {
     io.resp.bits.toHptw.bitmapCheck.get.jmp_bitmap_check := resp_res.l0.bitmapCheck.get.jmp_bitmap_check || resp_res.sp.bitmapCheck.get.jmp_bitmap_check
     io.resp.bits.toHptw.bitmapCheck.get.hitway := resp_res.l0.bitmapCheck.get.hitway
@@ -974,7 +986,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(l1Refill, p"[l1 refill] l1g:${Binary(l1g)} -> ${Binary(l1g & ~l1RfvOH | Mux(Cat(memPtes.map(_.perm.g)).andR, l1RfvOH, 0.U))}\n")
 
   // L0 refill
-  val l0Refill = !flush_dup(0) && refill.levelOH.l0 && !memPte(0).isNapot(refill.level_dup(0))
+  // L0 entries do not retain N; a mixed line must be handled from the original PTEs.
+  val l0HasNapot = memPtes.map(_.n =/= 0.U).reduce(_ || _)
+  val l0Refill = !flush_dup(0) && refill.levelOH.l0 && !l0HasNapot
   val l0RefillIdx = genPtwL0SetIdx(refill.req_info_dup(0).vpn).suggestName(s"l0_refillIdx")
   val l0VictimWay = replaceWrapper(getl0vSet(refill.req_info_dup(0).vpn), ptwl0replace.way(l0RefillIdx)).suggestName(s"l0_victimWay")
   val l0VictimWayOH = UIntToOH(l0VictimWay).asUInt.suggestName(s"l0_victimWayOH")

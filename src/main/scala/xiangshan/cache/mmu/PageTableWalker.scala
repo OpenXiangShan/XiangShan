@@ -1365,6 +1365,7 @@ class HPTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
+    val sector = Input(Vec(tlbcontiguous, UInt(XLEN.W)))
     val mask = Input(Bool())
   }
   val refill = Output(new Bundle {
@@ -1493,6 +1494,13 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     vpn = vpn,
     vmid = hgatp.vmid
   )
+  // A PTE cache line lies inside one PMP/PMA region at this platform grain.
+  // Fine-grained configurations and per-page extension checks retain demand-only responses.
+  val sectorPtes = VecInit(io.mem.sector.map(_.asTypeOf(new PteBundle)))
+  val sectorAllowed = (!HasMptCheck && p(xiangshan.PMParameKey).PlatformGrain >=
+    log2Ceil(l2tlbParams.blockBytes)).B &&
+    !bitmap_enable
+  resp.setSector(sectorPtes, VecInit.fill(tlbcontiguous)(true.B), mpbmte, sectorAllowed)
   io.resp.valid := resp_valid
   io.resp.bits.id := id
   io.resp.bits.resp := resp
