@@ -387,6 +387,7 @@ class FrontendFuncovSampleHub:
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
         self._first_signal_candidate_cache: Dict[tuple[str, ...], tuple[str, ...]] = {}
+        self._cycle_first_signal_values: Dict[tuple[str, ...], Optional[int]] = {}
 
     @staticmethod
     def _optional_int(value: Any) -> Optional[int]:
@@ -944,6 +945,11 @@ class FrontendFuncovSampleHub:
         if self._cycle_snapshot_cycle != cycle:
             self._cycle_snapshot_cycle = cycle
             self._cycle_snapshot_values.clear()
+            cycle_values = getattr(self, "_cycle_first_signal_values", None)
+            if cycle_values is None:
+                self._cycle_first_signal_values = {}
+            else:
+                cycle_values.clear()
 
     @cached_property
     def _registered_internal_signals(self) -> Optional[set[str]]:
@@ -1006,6 +1012,15 @@ class FrontendFuncovSampleHub:
         if not candidate_names:
             return None
 
+        cycle_active = getattr(self, "_cycle_snapshot_cycle", None) is not None
+        cycle_values = getattr(self, "_cycle_first_signal_values", None)
+        if cycle_active:
+            if cycle_values is None:
+                cycle_values = {}
+                self._cycle_first_signal_values = cycle_values
+            if candidate_names in cycle_values:
+                return cycle_values[candidate_names]
+
         cache = getattr(self, "_first_signal_candidate_cache", None)
         if cache is None:
             cache = {}
@@ -1022,7 +1037,12 @@ class FrontendFuncovSampleHub:
         for name in available:
             value = self._try_read_dut_signal(dut, name)
             if value is not None:
-                return int(value)
+                result = int(value)
+                if cycle_active:
+                    cycle_values[candidate_names] = result
+                return result
+        if cycle_active:
+            cycle_values[candidate_names] = None
         return None
 
     def _translate_fetch_addr(self, env, va: int) -> tuple[Optional[int], dict]:

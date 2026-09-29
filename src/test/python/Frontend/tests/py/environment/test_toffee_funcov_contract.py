@@ -310,6 +310,7 @@ def test_recorder_first_signal_caches_available_candidate_order() -> None:
     hub._dut_signal_cache = {}
     hub._missing_dut_signals = set()
     hub._first_signal_candidate_cache = {}
+    hub._cycle_first_signal_values = {}
     hub._cycle_snapshot_cycle = None
     hub._cycle_snapshot_values = {}
     signal = _CountingSignal(9)
@@ -320,10 +321,28 @@ def test_recorder_first_signal_caches_available_candidate_order() -> None:
     assert hub._read_first_dut_signal(dut, candidates) == 9
     assert hub._read_first_dut_signal(dut, candidates) == 9
     assert hub._first_signal_candidate_cache[candidates] == ("selected_signal",)
+    assert hub._cycle_first_signal_values[candidates] == 9
     assert signal.reads == 1
 
     hub.begin_cycle_snapshot(2)
     assert hub._read_first_dut_signal(dut, candidates) == 9
+    assert signal.reads == 2
+
+
+def test_recorder_first_signal_does_not_cache_without_active_cycle() -> None:
+    hub = FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub)
+    hub._dut_signal_cache = {}
+    hub._missing_dut_signals = set()
+    hub._first_signal_candidate_cache = {}
+    hub._cycle_snapshot_cycle = None
+    hub._cycle_snapshot_values = {}
+    hub.toffee_direct_domains = set()
+    signal = _CountingSignal(11)
+    dut = _CandidateDut(signal)
+
+    candidates = ("selected_signal",)
+    assert hub._read_first_dut_signal(dut, candidates) == 11
+    assert hub._read_first_dut_signal(dut, candidates) == 11
     assert signal.reads == 2
 
 
