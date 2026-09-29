@@ -9,7 +9,7 @@
 #   TB_REG_LOG_DIR=<dir>             Log directory (default: Frontend/logs).
 #   TB_REG_LOG_FILE=<path>           Explicit log path; overrides the timestamped default.
 #   TB_ENV_LOG_LEVEL=<level>         Environment log level (default: INFO).
-#   TB_LOG_CLI_LEVEL=<level>         Pytest CLI log level (default: TB_ENV_LOG_LEVEL, then INFO).
+#   TB_LOG_CLI_LEVEL=<level>         Pytest CLI log level (default: TB_ENV_LOG_LEVEL, then WARNING).
 #   TB_PYTEST_DISABLE_RERUNFAILURES=0
 #                                     Keep pytest rerunfailures enabled (default: disabled).
 #   TB_INCLUDE_FUNCOV_CLOSURE_PENDING=1
