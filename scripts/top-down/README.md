@@ -9,6 +9,7 @@ Top-down 分析工具目录结构如下：
 ```shell
 # tree top-down
 top-down
+├── check_metadata.py
 ├── configs.py
 ├── draw.py
 ├── README.md
@@ -16,8 +17,16 @@ top-down
 │   └── spec06_rv64gcb_o2_20m.json
 ├── top_down.py
 └── utils.py
+```
 
-1 directories, 6 files
+### TopDown 元数据
+
+L1/L2 分组定义在 `TopDownCounters`（`src/main/scala/xiangshan/TopDownCounters.scala`）。JSON 由 mill 生成到 `out/topdown-metadata.json`，不入库。当前 `top_down.py` / `draw.py` 仍使用 `configs.py`。
+
+```shell
+mill topdownMeta.exportMetadata
+mill topdownMeta.checkMetadata
+python3 scripts/top-down/check_metadata.py
 ```
 
 ### top_down.py 使用方法
@@ -136,6 +145,7 @@ The directory structure of the Top-down analysis tool is shown below:
 ```shell
 # tree top-down
 top-down
+├── check_metadata.py
 ├── configs.py
 ├── draw.py
 ├── README.md
@@ -143,8 +153,16 @@ top-down
 │   └── spec06_rv64gcb_o2_20m.json
 ├── top_down.py
 └── utils.py
+```
 
-1 directories, 6 files
+### TopDown metadata
+
+L1/L2 grouping is defined on `TopDownCounters` (`src/main/scala/xiangshan/TopDownCounters.scala`). mill writes `out/topdown-metadata.json`; it is not checked in. `top_down.py` / `draw.py` still use `configs.py`.
+
+```shell
+mill topdownMeta.exportMetadata
+mill topdownMeta.checkMetadata
+python3 scripts/top-down/check_metadata.py
 ```
 
 ### How to use top_down.py
