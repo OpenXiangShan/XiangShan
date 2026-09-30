@@ -252,10 +252,145 @@ class NativeDomainToffeeCoverage:
         }
 
 
+class NativeCycleToffeeCoverage:
+    """Shared native wrapper for cycle evaluators with configurable flag keys."""
+
+    def __init__(
+        self,
+        runtime,
+        *,
+        keys: Iterable[tuple[str, str]],
+        coverpoints: Mapping[str, str],
+        evaluate: Callable[..., tuple[Mapping[Any, bool], dict[str, Any]]],
+        reset=None,
+        sink=None,
+        audit_recorder=None,
+        flag_key: Callable[[tuple[str, str]], Any] | None = None,
+    ) -> None:
+        self._runtime = runtime
+        self._sink = sink
+        self._audit_recorder = audit_recorder
+        self.env = runtime.env
+        self._keys = tuple(
+            sorted((str(group), str(bin_name)) for group, bin_name in keys)
+        )
+        self._coverpoints = {str(group): str(point) for group, point in coverpoints.items()}
+        self._coverpoints_by_key = {
+            key: (
+                sink.point_name(*key)
+                if sink is not None
+                else self._coverpoints[key[0]]
+            )
+            for key in self._keys
+        }
+        self._flag_key = flag_key or (lambda key: key)
+        self._evaluate = evaluate
+        self._reset = reset
+        self._view = FlagCycleView(flags=self._empty_flags())
+        self._groups: dict[str, CovGroup] = {}
+        self.cov_groups: list[CovGroup] = []
+        self._build_native_groups()
+        if sink is not None and hasattr(sink, "install_native_groups"):
+            sink.install_native_groups(self.cov_groups, model=self)
+
+    def _empty_flags(self) -> dict[Any, bool]:
+        return {self._flag_key(key): False for key in self._keys}
+
+    def _build_native_groups(self) -> None:
+        grouped: dict[str, dict[str, list[str]]] = {}
+        for group_name, bin_name in self._keys:
+            point_name = self._coverpoints_by_key[(group_name, bin_name)]
+            grouped.setdefault(group_name, {}).setdefault(point_name, []).append(bin_name)
+        for group_name, point_specs in grouped.items():
+            group = CovGroup(group_name, disable_sample_when_point_hinted=False)
+            for point_name, bin_names in point_specs.items():
+                predicates = {
+                    bin_name: (
+                        lambda view, expected=(group_name, bin_name): bool(
+                            view.flags.get(self._flag_key(expected), False)
+                        )
+                    )
+                    for bin_name in bin_names
+                }
+                group.add_watch_point(
+                    self._view,
+                    predicates,
+                    name=point_name,
+                    once=False,
+                )
+            self._groups[group_name] = group
+            self.cov_groups.append(group)
+
+    def _read_first_dut_signal(self, dut, names):
+        return self._runtime._read_first_dut_signal(dut, names)
+
+    def _read_dut_signal(self, dut, name, default=0):
+        return self._runtime._read_dut_signal(dut, name, default)
+
+    def _try_read_dut_signal(self, dut, name):
+        return self._runtime._try_read_dut_signal(dut, name)
+
+    def domain_cycle_view(self, domain, builder):
+        return self._runtime.domain_cycle_view(domain, builder)
+
+    def __getattr__(self, name):
+        return getattr(self._runtime, name)
+
+    def on_cycle(self, cycle: int) -> None:
+        if self._runtime._read_dut_signal(self.env.dut, "reset", 0) == 1:
+            if self._reset is not None:
+                self._reset(self)
+            self._view.flags = self._empty_flags()
+            return
+        self.sample(cycle)
+
+    def sample(self, cycle: int) -> None:
+        flags, evidence = self._evaluate(self, self.env, int(cycle))
+        self._view.flags = {
+            self._flag_key(key): bool(flags.get(self._flag_key(key), False))
+            for key in self._keys
+        }
+        for group in self.cov_groups:
+            group.sample()
+        hit_flags = {
+            key: bool(self._view.flags.get(self._flag_key(key), False))
+            for key in self._keys
+        }
+        if self._sink is not None:
+            self._sink.record_native_hits(
+                hit_flags, self._coverpoints_by_key, cycle, evidence
+            )
+        if self._audit_recorder is not None:
+            for group_name, bin_name in self._keys:
+                if not hit_flags[(group_name, bin_name)]:
+                    continue
+                self._audit_recorder.mark(
+                    group_name,
+                    bin_name,
+                    cycle,
+                    evidence,
+                    coverpoint=self._coverpoints_by_key[(group_name, bin_name)],
+                    forward_to_toffee=False,
+                )
+        self._view.flags = self._empty_flags()
+
+    def report(self):
+        return [group.as_dict() for group in self.cov_groups]
+
+    def hit_counts(self):
+        return {
+            (group["name"], point["name"], item["name"]): int(item["hints"])
+            for group in self.report()
+            for point in group["points"]
+            for item in point["bins"]
+        }
+
+
 __all__ = [
     "EvaluateFlagRecorder",
     "FlagCycleView",
     "FlagMarkTarget",
     "NativeDomainToffeeCoverage",
+    "NativeCycleToffeeCoverage",
     "point_definitions_from_keys",
 ]

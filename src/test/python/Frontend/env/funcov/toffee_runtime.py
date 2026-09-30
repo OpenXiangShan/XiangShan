@@ -42,21 +42,8 @@ def create_toffee_runtime(recorder, sink, *, audit_recorder=None) -> ToffeeRunti
     cfvec = create(IfuCfvecToffeeCoverage)
     cacheable = create(IfuCacheablePipelineToffeeCoverage)
 
-    domains = (
-        "icache_hitmiss",
-        "icache_mainpipe",
-        "icache_prefetchpipe",
-        "icache_missunit",
-        "icache_waylookup",
-        "ftq_two_fetch",
-        "ifu_mmio_v3",
-        "ifu_mmio_nc_owner",
-        "uncache_event",
-        "ifu_cfvec",
-        "ifu_cacheable_pipeline",
-    )
-    for domain in domains:
-        recorder.enable_toffee_direct_domain(domain)
+    recorder.native_toffee_runtime_enabled = True
+    recorder.attach_toffee_mmio_model(mmio_v3)
 
     return ToffeeRuntime(
         cycle_models=(

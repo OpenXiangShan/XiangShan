@@ -32,9 +32,11 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
 from ..api import api_Frontend_load_program
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from ..support.env_config import DEFAULT_ENV_CONFIG
-from ..funcov.recorder import default_pilot_csv_path
+from ..funcov.runtime_context import (
+    FrontendFuncovSampleHub,
+    default_pilot_csv_path,
+)
 from ..runtime.artifact_provenance import file_sha256
-from ..funcov.sample_hub import FrontendFuncovSampleHub
 from ..core.frontend_env import FrontendEnv
 from ..support.logging_utils import configure_env_logging
 
@@ -591,7 +593,9 @@ def env(dut, request):
     tb = FrontendEnv(
         dut,
         event_sink=(
-            None if runtime_context is None else runtime_context.handle_event
+            None
+            if runtime_context is None
+            else lambda event: runtime_context.handle_event(event, legacy_events=False)
         ),
         config=DEFAULT_ENV_CONFIG,
     )
@@ -611,7 +615,9 @@ def env(dut, request):
 
             validate_target_probes(runtime_context)
 
-        toffee_sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+        toffee_sink = ToffeeCoverageSink.from_registry(
+            default_pilot_csv_path(), native_only=True
+        )
         runtime_context.attach_toffee_sink(toffee_sink)
         tb.toffee_functional_coverage = toffee_sink
 
@@ -628,7 +634,7 @@ def env(dut, request):
         tb.functional_coverage = toffee_sink
 
         def sample_functional_coverage(cycle):
-            runtime_context.on_cycle(cycle, tb)
+            runtime_context.on_cycle(cycle, tb, sample_legacy=False)
             toffee_sink.on_cycle(cycle)
             for model in toffee_direct_models:
                 model.on_cycle(cycle)

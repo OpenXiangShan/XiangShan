@@ -247,8 +247,18 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     source = (
         Path(__file__).resolve().parents[3] / "env" / "runtime" / "fixtures.py"
     ).read_text(encoding="utf-8")
+    runtime_source = (
+        Path(__file__).resolve().parents[3] / "env" / "funcov" / "toffee_runtime.py"
+    ).read_text(encoding="utf-8")
+    recorder_source = (
+        Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
+    ).read_text(encoding="utf-8")
     assert "FrontendFuncovSampleHub.from_pilot_csv" in source
+    assert "runtime_context.handle_event(event, legacy_events=False)" in source
     assert "ToffeeCoverageSink.from_registry" in source
+    assert "native_only=True" in source
+    assert "enable_toffee_direct_domain" not in runtime_source
+    assert "toffee_direct_domains" not in recorder_source
     assert "create_toffee_runtime(" in source
     assert "session_coverage.add(toffee_sink.cov_groups)" in source
     assert "session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))" in source
@@ -337,7 +347,7 @@ def test_recorder_first_signal_does_not_cache_without_active_cycle() -> None:
     hub._first_signal_candidate_cache = {}
     hub._cycle_snapshot_cycle = None
     hub._cycle_snapshot_values = {}
-    hub.toffee_direct_domains = set()
+    hub.native_toffee_runtime_enabled = False
     signal = _CountingSignal(11)
     dut = _CandidateDut(signal)
 
@@ -483,11 +493,11 @@ def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
     ).read_text(encoding="utf-8")
     callback_start = source.index("def sample_functional_coverage(cycle):")
     callback = source[callback_start : source.index("dut.StepRis(sample_functional_coverage)")]
-    assert "runtime_context.on_cycle(cycle, tb)" in callback
+    assert "runtime_context.on_cycle(cycle, tb, sample_legacy=False)" in callback
     assert "begin_cycle_snapshot" in (
         Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
     ).read_text(encoding="utf-8")
-    assert callback.index("runtime_context.on_cycle(cycle, tb)") < callback.index(
+    assert callback.index("runtime_context.on_cycle(cycle, tb, sample_legacy=False)") < callback.index(
         "for model in toffee_direct_models:"
     )
 
@@ -665,6 +675,33 @@ def test_all_573_bins_are_native_installed(tmp_path) -> None:
     assert native_bins == all_bins
     assert all_bins == set(sink.bin_ids)
     assert len(runtime.cycle_models) == 12
+
+
+def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) -> None:
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name="native-only-sink",
+        artifact_tag="native-only-sink",
+        output_dir=tmp_path,
+    )
+    hub.env = type("Env", (), {"dut": object()})()
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=True
+    )
+
+    assert sink.cov_groups == []
+    assert sink._point_targets == {}
+
+    create_toffee_runtime(hub, sink)
+
+    installed_bins = {
+        (group["name"], point["name"], item["name"])
+        for group in sink.report()
+        for point in group["points"]
+        for item in point["bins"]
+    }
+    assert len(installed_bins) == 573
+    assert len(sink._native_group_names) == len(sink.cov_groups)
 
 def test_toffee_merge_cli_is_available() -> None:
     from pathlib import Path

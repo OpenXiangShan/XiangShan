@@ -25,7 +25,7 @@ if str(_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_IMPORT_ROOT))
 
 from env.runtime.artifact_provenance import load_frontend_build_manifest  # noqa: E402
-from env.funcov.recorder import (  # noqa: E402
+from env.funcov.runtime_context import (  # noqa: E402
     current_funcov_sampler_sha256,
     current_verification_environment_sha256,
     funcov_sampler_paths,

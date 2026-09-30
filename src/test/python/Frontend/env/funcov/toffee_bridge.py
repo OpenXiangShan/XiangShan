@@ -69,6 +69,7 @@ class ToffeeCoverageSink:
         points: Mapping[tuple[str, str], Iterable[str]],
         *,
         bin_ids: Mapping[tuple[str, str, str], str] | None = None,
+        native_only: bool = False,
     ) -> None:
         self._sample_hub = None
         self.cov_groups: list[CovGroup] = []
@@ -80,6 +81,7 @@ class ToffeeCoverageSink:
         self._native_group_names: set[str] = set()
         self._native_models_by_group: dict[str, Any] = {}
         self._owner_model = None
+        self._native_only = bool(native_only)
         self._hit_details: dict[tuple[str, str, str], dict[str, Any]] = {}
         self.bin_ids = {
             (str(group), str(point), str(bin_name)): str(bin_id)
@@ -95,15 +97,20 @@ class ToffeeCoverageSink:
             grouped.setdefault(str(group_name), []).append((str(point_name), bins))
 
         for group_name, point_specs in grouped.items():
+            for point_name, bin_names in point_specs:
+                for bin_name in bin_names:
+                    key = (group_name, bin_name)
+                    if key in self._point_by_group_bin:
+                        raise ValueError(f"duplicate Toffee coverage bin: {key}")
+                    self._point_by_group_bin[key] = point_name
+            if self._native_only:
+                continue
             group = CovGroup(group_name, disable_sample_when_point_hinted=False)
             for point_name, bin_names in point_specs:
                 target = _PointPulse()
                 predicates = {}
                 for bin_name in bin_names:
                     key = (group_name, bin_name)
-                    if key in self._point_by_group_bin:
-                        raise ValueError(f"duplicate Toffee coverage bin: {key}")
-                    self._point_by_group_bin[key] = point_name
                     predicates[bin_name] = (
                         lambda current, expected=bin_name: expected in current.active_bins
                     )
@@ -207,7 +214,9 @@ class ToffeeCoverageSink:
         return True
 
     @classmethod
-    def from_registry(cls, csv_path: Path) -> "ToffeeCoverageSink":
+    def from_registry(
+        cls, csv_path: Path, *, native_only: bool = False
+    ) -> "ToffeeCoverageSink":
         points: dict[tuple[str, str], list[str]] = {}
         bin_ids: dict[tuple[str, str, str], str] = {}
         with Path(csv_path).open(encoding="utf-8-sig", newline="") as handle:
@@ -221,7 +230,7 @@ class ToffeeCoverageSink:
                 key = (group, point)
                 points.setdefault(key, []).append(bin_name)
                 bin_ids[(group, point, bin_name)] = bin_id
-        return cls(points, bin_ids=bin_ids)
+        return cls(points, bin_ids=bin_ids, native_only=native_only)
 
     def mark(
         self,

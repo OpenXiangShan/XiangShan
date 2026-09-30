@@ -358,9 +358,10 @@ class FrontendFuncovSampleHub:
         self._contract_error_keys: deque[tuple[str, int, str]] = deque(maxlen=128)
         self.env = None
         self.toffee_sink = None
-        self.toffee_direct_domains: set[str] = set()
+        self.native_toffee_runtime_enabled = False
         self.toffee_event_models = []
         self.toffee_owner_model = None
+        self.toffee_mmio_model = None
         self.toffee_uncache_model = None
         self._cycle_snapshot_cycle: Optional[int] = None
         self._cycle_snapshot_values: Dict[str, Optional[int]] = {}
@@ -661,14 +662,14 @@ class FrontendFuncovSampleHub:
             return None
         return self.toffee_sink.hit_detail_by_bin_id(bin_id)
 
-    def enable_toffee_direct_domain(self, domain: str) -> None:
-        self.toffee_direct_domains.add(str(domain).strip().lower())
-
     def attach_toffee_event_model(self, model) -> None:
         self.toffee_event_models.append(model)
 
     def attach_toffee_owner_model(self, model) -> None:
         self.toffee_owner_model = model
+
+    def attach_toffee_mmio_model(self, model) -> None:
+        self.toffee_mmio_model = model
 
     def attach_toffee_uncache_model(self, model) -> None:
         self.toffee_uncache_model = model
@@ -754,7 +755,7 @@ class FrontendFuncovSampleHub:
             return definition.key
         return (str(coverage_group), "", str(bin_name))
 
-    def handle_event(self, event: Dict[str, Any]) -> None:
+    def handle_event(self, event: Dict[str, Any], *, legacy_events: bool = True) -> None:
         evt = _sanitize(event)
         self.events_tail.append(evt)
 
@@ -770,10 +771,10 @@ class FrontendFuncovSampleHub:
         if not event_sampling_enabled:
             return
 
-        if self.sampler_domain_enabled("ifu"):
+        if legacy_events and self.sampler_domain_enabled("ifu"):
             if self.toffee_owner_model is None:
                 handle_owner_v3_event(self, evt)
-            if "ifu_mmio_v3" not in self.toffee_direct_domains:
+            if self.toffee_mmio_model is None:
                 handle_mmio_v3_checked_event(self, evt)
         for model in self.toffee_event_models:
             model.handle_event(evt)
@@ -870,7 +871,7 @@ class FrontendFuncovSampleHub:
         reset_icache_waylookup_coverage_state(self)
         reset_icache_hitmiss_coverage_state(self)
 
-    def on_cycle(self, cycle: int, env) -> None:
+    def on_cycle(self, cycle: int, env, *, sample_legacy: bool = True) -> None:
         dut = env.dut
         cycle = int(cycle)
         self.begin_cycle_snapshot(cycle)
@@ -882,40 +883,28 @@ class FrontendFuncovSampleHub:
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
-        if self.sampler_domain_enabled("ftq"):
-            if "ftq_two_fetch" not in self.toffee_direct_domains:
-                sample_two_fetch_coverage(self, env, cycle)
-        if self.sampler_domain_enabled("ifu"):
-            if "ifu_cfvec" not in self.toffee_direct_domains:
-                sample_cfvec_coverage(self, env, cycle)
+        if sample_legacy and self.sampler_domain_enabled("ftq"):
+            sample_two_fetch_coverage(self, env, cycle)
+        if sample_legacy and self.sampler_domain_enabled("ifu"):
+            sample_cfvec_coverage(self, env, cycle)
             # Keep the cross-path half-RVI producer on the recorder's canonical
             # cycle clock. cfVec sampling may return early when no lane is valid,
             # while BIN-922 observes redirect state in valid-hole cycles.
-            _sample_uncache_half_isolation(self, dut, cycle)
-            if "ifu_cacheable_pipeline" not in self.toffee_direct_domains:
-                sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
-            if "ifu_mmio_v3" not in self.toffee_direct_domains:
-                sample_mmio_v3_coverage(self, env, cycle)
-            if "ifu_mmio_nc_owner" not in self.toffee_direct_domains:
-                sample_mmio_nc_owner_coverage(self, env, cycle)
-        if self.sampler_domain_enabled("icache"):
-            if "icache_mainpipe" not in self.toffee_direct_domains:
-                sample_icache_mainpipe_coverage(self, env, cycle)
-            if "icache_prefetchpipe" not in self.toffee_direct_domains:
-                sample_icache_prefetchpipe_coverage(self, env, cycle)
-            if "icache_missunit" not in self.toffee_direct_domains:
-                sample_icache_missunit_coverage(self, env, cycle)
-            if "icache_waylookup" not in self.toffee_direct_domains:
-                sample_icache_waylookup_coverage(self, env, cycle)
-            if "icache_hitmiss" not in self.toffee_direct_domains:
-                sample_icache_hitmiss_coverage(self, env, cycle)
+            if sample_legacy:
+                _sample_uncache_half_isolation(self, dut, cycle)
+            sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
+            sample_mmio_v3_coverage(self, env, cycle)
+            sample_mmio_nc_owner_coverage(self, env, cycle)
+        if sample_legacy and self.sampler_domain_enabled("icache"):
+            sample_icache_mainpipe_coverage(self, env, cycle)
+            sample_icache_prefetchpipe_coverage(self, env, cycle)
+            sample_icache_missunit_coverage(self, env, cycle)
+            sample_icache_waylookup_coverage(self, env, cycle)
+            sample_icache_hitmiss_coverage(self, env, cycle)
 
         if self.sampler_domain_enabled("ibuffer"):
             self._sample_ibuffer_contract(dut, cycle)
-        if (
-            self.sampler_domain_enabled("uncache")
-            and "uncache_event" not in self.toffee_direct_domains
-        ):
+        if sample_legacy and self.sampler_domain_enabled("uncache"):
             self._sample_uncache_cycle_state(dut, cycle, env)
 
     def _lookup_dut_signal(self, dut, name: str):
@@ -1004,7 +993,7 @@ class FrontendFuncovSampleHub:
         name = str(name)
         if self._cycle_snapshot_cycle is not None and name in self._cycle_snapshot_values:
             return self._cycle_snapshot_values[name]
-        if self._cycle_snapshot_cycle is None and self.toffee_direct_domains:
+        if self._cycle_snapshot_cycle is None and self.native_toffee_runtime_enabled:
             raise RuntimeError(
                 "DUT signal reads require an active cycle snapshot once Toffee "
                 f"direct domains are enabled (signal={name})"
