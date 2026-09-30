@@ -20,6 +20,7 @@ from env.sequences import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
+    read_dut_signal,
     set_predictors as _set_predictors,
     wait_until,
 )
@@ -38,28 +39,7 @@ _TOP = "Frontend_top."
 
 
 def _read(env, name: str, *aliases: str) -> int | None:
-    cache = getattr(env, "_missunit_signal_cache", None)
-    if cache is None:
-        cache = {}
-        setattr(env, "_missunit_signal_cache", cache)
-    names = (name, *aliases)
-    key = tuple(names)
-    if key in cache:
-        signal = cache[key]
-        return None if signal is None else int(getattr(signal, "value", 0))
-    for candidate in names:
-        try:
-            signal = getattr(env.dut, candidate, None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(candidate) if callable(getter) else None
-            if signal is not None and getattr(signal, "value", None) is not None:
-                cache[key] = signal
-                return int(signal.value)
-        except Exception:
-            continue
-    cache[key] = None
-    return None
+    return read_dut_signal(env, (name, *aliases))
 
 
 def _snapshot(env) -> dict[str, int | None]:

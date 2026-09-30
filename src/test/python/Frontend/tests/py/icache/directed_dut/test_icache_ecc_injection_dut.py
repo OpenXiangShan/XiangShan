@@ -8,6 +8,7 @@ from tests.py.icache.directed_dut.test_icache_lowrisk_gap_closure_dut import (
     _drive_soft_prefetch,
     _initialize_cacheable_stream,
 )
+from tests.py.icache.directed_dut.support import read_dut_signal
 
 
 pytestmark = pytest.mark.skipif(
@@ -30,13 +31,16 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
     beu_samples = []
 
     def observe_error(cycle, active_env):
-        beu_valid = getattr(active_env.dut, "io_error_ecc_error_valid", None)
-        beu_addr = getattr(active_env.dut, "io_error_ecc_error_bits", None)
-        assert beu_valid is not None and beu_addr is not None
-        if int(beu_valid.value) == 1:
+        beu_valid = read_dut_signal(
+            active_env, ("io_error_ecc_error_valid",), required=True
+        )
+        beu_addr = read_dut_signal(
+            active_env, ("io_error_ecc_error_bits",), required=True
+        )
+        if int(beu_valid) == 1:
             beu_samples.append({
                 "cycle": cycle,
-                "paddr": int(beu_addr.value),
+                "paddr": int(beu_addr),
             })
 
     env.register_cycle_observer(observe_error)

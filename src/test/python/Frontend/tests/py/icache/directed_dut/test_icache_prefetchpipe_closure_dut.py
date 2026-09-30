@@ -30,6 +30,7 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
 )
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
+    read_dut_signal,
     wait_coverage_hits,
     wait_until,
 )
@@ -84,7 +85,7 @@ def _signal(env, key: str) -> int | None:
 
 
 def _internal_signal(env, *names: str) -> int | None:
-    return _recorder(env)._read_first_dut_signal(env.dut, names)
+    return read_dut_signal(env, names, prefer_recorder=True)
 
 
 def _wait_icache_request(env, address: int, *, max_cycles: int = 4096) -> dict:

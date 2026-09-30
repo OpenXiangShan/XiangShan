@@ -11,10 +11,11 @@ follow in this order when practical:
 5. Restore changed test inputs in a fixture teardown or `finally` block.
 
 `support.py` contains operations whose behavior is shared across scenarios:
-cycle-limit parsing, cached signal lookup, bounded polling, soft-prefetch
-cleanup, and predictor controls. Keep scenario-specific signal paths, sampling
-windows, timeout diagnostics, and assertions in their test modules. A single
-scenario may target bins from more than one ICache block.
+cycle-limit parsing, unified DUT signal lookup (`read_dut_signal`), bounded
+polling, soft-prefetch cleanup, and predictor controls. Keep scenario-specific
+signal paths, sampling windows, timeout diagnostics, and assertions in their
+test modules. A single scenario may target bins from more than one ICache
+block.
 
 When editing a test, preserve its pytest node ID, parameter cases, markers,
 stimulus timing, and failure conditions unless the change explicitly intends

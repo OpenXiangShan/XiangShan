@@ -19,18 +19,56 @@ def cycle_limit(name: str, default: int) -> int:
     return int(value)
 
 
-def read_cached_signal(env, names: Sequence[str]) -> int | None:
+def read_dut_signal(
+    env,
+    names: Sequence[str] | str,
+    *,
+    default: int | None = None,
+    required: bool = False,
+    prefer_recorder: bool = False,
+) -> int | None:
+    """Read the first available DUT signal from an ordered alias list.
+
+    ``prefer_recorder`` preserves the cycle-snapshot behavior used by tests
+    that sample through the functional-coverage recorder.  All other tests
+    use the same direct DUT lookup and cache below.
+    """
+    if isinstance(names, str):
+        names = (names,)
+    aliases = tuple(str(name) for name in names)
+
+    if prefer_recorder:
+        recorder = getattr(env, "functional_coverage", None)
+        reader = getattr(recorder, "_read_first_dut_signal", None)
+        if callable(reader):
+            value = reader(env.dut, aliases)
+            if value is not None:
+                return int(value)
+            if required:
+                raise AssertionError({
+                    "reason": "required DUT signal is unavailable",
+                    "candidates": aliases,
+                })
+            return default
+
     cache = getattr(env, "_ruierhan_internal_signal_cache", None)
     if cache is None:
         cache = {}
         setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = tuple(str(name) for name in names)
+    cache_key = aliases
     if cache_key in cache:
         signal = cache[cache_key]
         value = None if signal is None else getattr(signal, "value", None)
-        return None if value is None else int(value)
+        if value is not None:
+            return int(value)
+        if required:
+            raise AssertionError({
+                "reason": "required DUT signal is unavailable",
+                "candidates": aliases,
+            })
+        return default
 
-    for name in names:
+    for name in aliases:
         try:
             signal = getattr(env.dut, str(name), None)
             if signal is None:
@@ -43,7 +81,17 @@ def read_cached_signal(env, names: Sequence[str]) -> int | None:
         except Exception:
             continue
     cache[cache_key] = None
-    return None
+    if required:
+        raise AssertionError({
+            "reason": "required DUT signal is unavailable",
+            "candidates": aliases,
+        })
+    return default
+
+
+def read_cached_signal(env, names: Sequence[str]) -> int | None:
+    """Compatibility wrapper for callers using the old helper name."""
+    return read_dut_signal(env, names)
 
 
 def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:

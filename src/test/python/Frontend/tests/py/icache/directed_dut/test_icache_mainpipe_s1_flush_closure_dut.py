@@ -24,7 +24,7 @@ from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut impo
 )
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
-    read_cached_signal as _try_read,
+    read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
     wait_until,
 )

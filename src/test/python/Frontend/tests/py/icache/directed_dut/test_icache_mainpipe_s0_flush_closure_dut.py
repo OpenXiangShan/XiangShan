@@ -20,7 +20,7 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
 )
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
-    read_cached_signal as _try_read,
+    read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
 )
 

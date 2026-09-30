@@ -22,7 +22,7 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
-    read_cached_signal as _try_read_internal,
+    read_dut_signal as _try_read_internal,
     set_predictors as _set_predictors,
     wait_coverage_hit,
     wait_coverage_hits,
@@ -552,21 +552,6 @@ def _collect_target_refill_waymasks(
             "waylookup": _waylookup_snapshot(env),
         }
     )
-
-
-def _read_first_signal(env, names: tuple[str, ...]) -> int | None:
-    for name in names:
-        try:
-            signal = getattr(env.dut, name, None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(name) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                return int(value)
-        except Exception:
-            continue
-    return None
 
 
 def _pulse_fencei(env) -> None:
@@ -1759,7 +1744,7 @@ def test_ifu_cacheable_backend_redirect_blocks_pending_response(lowrisk_cleanup)
                 )
                 assert not env.monitor.get_errors()
                 return
-            req_valid = _read_first_signal(env, _IFU_CACHEABLE_REQ_VALID)
+            req_valid = _try_read_internal(env, _IFU_CACHEABLE_REQ_VALID)
             if req_valid == 1:
                 env.backend_model.inject_redirect(
                     base + 0x100 + ((attempt & 0x1F) * 0x40),

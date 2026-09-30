@@ -15,7 +15,11 @@ from tests.py.jiabowen.test_functional_coverage_baremode import (
 from tests.py.zhaoxinran.test_multi_branch import (
     test_multi_branch_random_positions as _run_multi_branch_positions,
 )
-from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, wait_until
+from tests.py.icache.directed_dut.support import (
+    cycle_limit as _cycle_limit,
+    read_dut_signal,
+    wait_until,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -106,33 +110,7 @@ for _index in range(4):
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
-    recorder = getattr(env, "functional_coverage", None)
-    if recorder is not None:
-        return recorder._read_first_dut_signal(env.dut, names)
-    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
-    if cache is None:
-        cache = {}
-        setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = tuple(str(name) for name in names)
-    if cache_key in cache:
-        signal = cache[cache_key]
-        value = None if signal is None else getattr(signal, "value", None)
-        return None if value is None else int(value)
-
-    for name in names:
-        try:
-            signal = getattr(env.dut, str(name), None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(str(name)) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                cache[cache_key] = signal
-                return int(value)
-        except Exception:
-            continue
-    cache[cache_key] = None
-    return None
+    return read_dut_signal(env, names, prefer_recorder=True)
 
 
 def _read(env, key: str) -> int:
