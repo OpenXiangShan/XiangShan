@@ -14,14 +14,13 @@ from env.funcov.py.icache.flush_from_bpu import (
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
-from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
-    _load_and_reset as _load_two_fetch_loop,
-    _warm_frontend_execution as _warm_two_fetch_execution,
-)
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
+    initialize_bpu_s3_stream,
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
+    s0_sampling_window,
+    trigger_bpu_s3_flush,
 )
 
 
@@ -112,11 +111,7 @@ def _snapshot(env) -> dict:
 
 
 def _s0_sampling_window(env) -> bool:
-    return (
-        _read(env, "from_valid") == 1
-        and _read(env, "data_ready") == 1
-        and _read(env, "s1_ready") == 1
-    )
+    return s0_sampling_window(env)
 
 
 def _bpu_is_after_s0(sample: dict) -> bool:
@@ -224,27 +219,12 @@ def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
 
 
 def _initialize_bpu_s3_stream(env) -> None:
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=0.0,
-        seed=0x6605,
-    )
-    env.set_bp_ctrl_enable(
-        ubtb_enable=1,
-        abtb_enable=1,
-        mbtb_enable=1,
-        tage_enable=1,
-        sc_enable=1,
-        ittage_enable=1,
-    )
+    initialize_bpu_s3_stream(env)
 
 
 def _trigger_bpu_s3_flush(env) -> None:
     """Compatibility helper used by the s1 closure module."""
-    env.bpu_ftq_scheduler.pulse_predictor_transition()
+    trigger_bpu_s3_flush(env)
 
 
 def _bpu_miss_s0_candidate(sample: dict) -> bool:

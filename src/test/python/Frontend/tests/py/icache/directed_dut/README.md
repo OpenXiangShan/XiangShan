@@ -10,12 +10,22 @@ follow in this order when practical:
 4. Check the hardware behavior, checker errors, and intended coverage evidence.
 5. Restore changed test inputs in a fixture teardown or `finally` block.
 
-`support.py` contains operations whose behavior is shared across scenarios:
-cycle-limit parsing, unified DUT signal lookup (`read_dut_signal`), bounded
-polling, soft-prefetch cleanup, and predictor controls. Keep scenario-specific
-signal paths, sampling windows, timeout diagnostics, and assertions in their
-test modules. A single scenario may target bins from more than one ICache
-block.
+The shared code is split into two public support files. The generic DUT layer
+at `tests/py/support/dut_support.py` owns cycle-limit parsing, ordered DUT
+signal lookup, and bounded polling/waits. It has no dependency on ICache or
+coverage. The ICache layer in this directory's `support.py` adds coverage
+waits, soft-prefetch operations, predictor controls, and ICache-specific DUT
+adapters. Test modules keep scenario signal maps, sampling windows, stimulus
+timing, timeout evidence, and assertions.
+
+Keep the dependency direction as `test scenario -> ICache support -> generic
+DUT support`. Do not make the generic layer import an ICache module. A test
+module may retain a small compatibility wrapper when its public helper name is
+part of the existing test surface, but the implementation belongs in the
+appropriate support layer. An integration test may compose stage-specific
+snapshot and match predicates from its sibling scenarios when those predicates
+are the evidence under test; those scenario modules are not general support.
+A single scenario may target bins from more than one ICache block.
 
 When editing a test, preserve its pytest node ID, parameter cases, markers,
 stimulus timing, and failure conditions unless the change explicitly intends

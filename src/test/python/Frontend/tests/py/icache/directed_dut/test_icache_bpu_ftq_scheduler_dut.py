@@ -6,6 +6,10 @@ import pytest
 
 from tests.py.icache.directed_dut import test_icache_mainpipe_s0_flush_closure_dut as s0
 from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1
+from tests.py.icache.directed_dut.support import (
+    initialize_bpu_s3_stream,
+    restore_predictors,
+)
 
 
 pytestmark = pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")
@@ -62,7 +66,7 @@ def test_bpu_scheduler_drives_live_identity_resolve(env):
 def test_icache_scheduled_bpu_matching_flush(env, stage, bin_name):
     module = s0 if stage == 0 else s1
     module._require_bpu_s3_ftq_observable(env)
-    s0._initialize_bpu_s3_stream(env)
+    initialize_bpu_s3_stream(env)
     scheduler = env.bpu_ftq_scheduler
     samples = []
     env.register_cycle_observer(lambda _, active: samples.append(module._snapshot(active)))
@@ -82,9 +86,9 @@ def test_icache_scheduled_bpu_matching_flush(env, stage, bin_name):
                     assert any(s["bpu_valid"] == 1 and match(s) for s in samples)
                     assert not env.get_errors()
                     return
-            s0._restore_predictors(env)
+            restore_predictors(env)
         raise AssertionError({"reason": "BPU matching flush not observed", "stage": stage,
                               "tail": samples[-8:], "checker": env.get_errors()[:8]})
     finally:
-        s0._restore_predictors(env)
+        restore_predictors(env)
         env.backend_model.set_can_accept(1)

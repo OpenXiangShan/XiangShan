@@ -22,6 +22,7 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
+    drive_soft_prefetch as _drive_soft_prefetch_common,
     read_dut_signal as _try_read_internal,
     set_predictors as _set_predictors,
     wait_coverage_hit,
@@ -564,17 +565,7 @@ def _pulse_fencei(env) -> None:
 
 
 def _drive_soft_prefetch(env, addresses: list[int]) -> None:
-    _clear_soft_prefetch(env)
-    for slot, address in enumerate(addresses[:3]):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        value = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        assert valid is not None and value is not None, {
-            "missing_signal": f"io_softPrefetch_{slot}"
-        }
-        valid.value = 1
-        value.value = int(address)
-    env.step(1)
-    _clear_soft_prefetch(env)
+    _drive_soft_prefetch_common(env, addresses)
 
 
 @pytest.fixture

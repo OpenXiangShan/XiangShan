@@ -22,15 +22,14 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import _c_j
 from tests.py.zhaoxinran.test_multi_branch import (
     test_large_loop_multi_segment as _run_large_loop,
 )
-from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut import (
-    _initialize_bpu_s3_stream,
-    _restore_predictors,
-    _s0_sampling_window,
-    _trigger_bpu_s3_flush,
-)
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
+    initialize_bpu_s3_stream as _initialize_bpu_s3_stream,
     read_dut_signal,
+    restore_predictors as _restore_predictors,
+    s0_sampling_window as _s0_sampling_window,
+    set_soft_prefetch as _set_soft_prefetch_common,
+    trigger_bpu_s3_flush as _trigger_bpu_s3_flush,
     wait_coverage_hits,
     wait_until,
 )
@@ -190,15 +189,7 @@ def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, all
 
 
 def _set_soft_prefetch(env, addresses: Iterable[int]) -> None:
-    _clear_soft_prefetch(env)
-    for slot, address in enumerate(tuple(addresses)[:3]):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        value = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        assert valid is not None and value is not None, {
-            "missing_signal": f"io_softPrefetch_{slot}"
-        }
-        valid.value = 1
-        value.value = int(address)
+    _set_soft_prefetch_common(env, addresses)
 
 
 def _present_soft_prefetch(env, addresses: Iterable[int]) -> None:

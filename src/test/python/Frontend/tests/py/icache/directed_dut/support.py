@@ -6,17 +6,30 @@ test module. These helpers only centralize operations with identical behavior.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
+from tests.py.support.dut_support import (
+    cycle_limit,
+    poll_until,
+    read_dut_signal as _read_generic_dut_signal,
+    wait_until,
+)
 
-def cycle_limit(name: str, default: int) -> int:
-    raw = os.getenv(str(name), "").strip()
-    if not raw:
-        return int(default)
-    value = int(raw, 0)
-    assert value > 0, f"{name} must be positive"
-    return int(value)
+
+_BPU_S0_WINDOW_SIGNALS = {
+    "from_valid": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.io_fromWayLookup_valid",
+        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_fromWayLookup_valid",
+    ),
+    "data_ready": (
+        "Frontend_top.Frontend.inner_icache.dataArray.io_read_req_ready",
+        "Frontend_top.Frontend.inner_icache.dataArray.__Vtogcov__io_read_req_ready",
+    ),
+    "s1_ready": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_ready",
+        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s1_ready",
+    ),
+}
 
 
 def read_dut_signal(
@@ -51,80 +64,17 @@ def read_dut_signal(
                 })
             return default
 
-    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
-    if cache is None:
-        cache = {}
-        setattr(env, "_ruierhan_internal_signal_cache", cache)
-    cache_key = aliases
-    if cache_key in cache:
-        signal = cache[cache_key]
-        value = None if signal is None else getattr(signal, "value", None)
-        if value is not None:
-            return int(value)
-        if required:
-            raise AssertionError({
-                "reason": "required DUT signal is unavailable",
-                "candidates": aliases,
-            })
-        return default
-
-    for name in aliases:
-        try:
-            signal = getattr(env.dut, str(name), None)
-            if signal is None:
-                getter = getattr(env.dut, "GetInternalSignal", None)
-                signal = getter(str(name)) if callable(getter) else None
-            value = None if signal is None else getattr(signal, "value", None)
-            if value is not None:
-                cache[cache_key] = signal
-                return int(value)
-        except Exception:
-            continue
-    cache[cache_key] = None
-    if required:
-        raise AssertionError({
-            "reason": "required DUT signal is unavailable",
-            "candidates": aliases,
-        })
-    return default
+    return _read_generic_dut_signal(
+        env,
+        aliases,
+        default=default,
+        required=required,
+    )
 
 
 def read_cached_signal(env, names: Sequence[str]) -> int | None:
     """Compatibility wrapper for callers using the old helper name."""
     return read_dut_signal(env, names)
-
-
-def poll_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
-    """Check before each step, exactly as the directed wait loops do."""
-    for _ in range(int(max_cycles)):
-        if predicate():
-            return True
-        env.step(1)
-    return False
-
-
-def wait_until(
-    env,
-    predicate: Callable[[], bool],
-    *,
-    max_cycles: int,
-    label: str,
-    snapshot: Callable[[], object] | None = None,
-    diagnostics: Callable[[], Mapping[str, object]] | None = None,
-) -> None:
-    """Wait with a consistent timeout report while preserving local timing."""
-    if poll_until(env, predicate, max_cycles=max_cycles):
-        return
-    detail: dict[str, object] = {
-        "reason": f"timeout while waiting for {label}",
-        "cycle": int(env.current_cycle),
-        "max_cycles": int(max_cycles),
-    }
-    if snapshot is not None:
-        detail["last"] = snapshot()
-    if diagnostics is not None:
-        detail.update(dict(diagnostics()))
-    raise AssertionError(detail)
 
 
 def wait_coverage_hit(
@@ -194,6 +144,55 @@ def clear_soft_prefetch(env) -> None:
             valid.value = 0
         if address is not None:
             address.value = 0
+
+
+def set_soft_prefetch(env, addresses: Iterable[int]) -> None:
+    """Present up to three soft-prefetch inputs without advancing the DUT."""
+    clear_soft_prefetch(env)
+    for slot, address in enumerate(tuple(addresses)[:3]):
+        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
+        value = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
+        assert valid is not None and value is not None, {
+            "missing_signal": f"io_softPrefetch_{slot}"
+        }
+        valid.value = 1
+        value.value = int(address)
+
+
+def drive_soft_prefetch(env, addresses: Iterable[int]) -> None:
+    """Present soft-prefetch inputs for one cycle and then clear them."""
+    set_soft_prefetch(env, addresses)
+    env.step(1)
+    clear_soft_prefetch(env)
+
+
+def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
+    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
+    from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
+        _load_and_reset as _load_two_fetch_loop,
+        _warm_frontend_execution as _warm_two_fetch_execution,
+    )
+
+    _load_two_fetch_loop(env)
+    _warm_two_fetch_execution(env)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=0.0,
+        seed=int(seed),
+    )
+    set_predictors(env, True)
+
+
+def trigger_bpu_s3_flush(env) -> None:
+    env.bpu_ftq_scheduler.pulse_predictor_transition()
+
+
+def s0_sampling_window(env) -> bool:
+    return all(
+        read_dut_signal(env, aliases) == 1
+        for aliases in _BPU_S0_WINDOW_SIGNALS.values()
+    )
 
 
 def set_predictors(env, enabled: bool) -> None:

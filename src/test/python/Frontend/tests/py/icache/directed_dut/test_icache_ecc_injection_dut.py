@@ -4,11 +4,13 @@ import os
 
 import pytest
 
-from tests.py.icache.directed_dut.test_icache_lowrisk_gap_closure_dut import (
-    _drive_soft_prefetch,
+from tests.py.icache.directed_dut.support import (
+    drive_soft_prefetch as _drive_soft_prefetch,
+    read_dut_signal,
+)
+from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
-from tests.py.icache.directed_dut.support import read_dut_signal
 
 
 pytestmark = pytest.mark.skipif(

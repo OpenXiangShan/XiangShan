@@ -21,6 +21,7 @@ from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
     read_dut_signal,
+    set_soft_prefetch as _set_soft_prefetch_common,
     set_predictors as _set_predictors,
     wait_until,
 )
@@ -118,15 +119,7 @@ def _load_nops(env, base: int, *, words: int = 4096) -> None:
 
 
 def _set_soft_prefetch(env, addresses: list[int]) -> None:
-    _clear_soft_prefetch(env)
-    for slot, address in enumerate(addresses[:3]):
-        valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
-        value = getattr(env.dut, f"io_softPrefetch_{slot}_bits_vaddr", None)
-        assert valid is not None and value is not None, {
-            "missing_signal": f"io_softPrefetch_{slot}"
-        }
-        valid.value = 1
-        value.value = int(address)
+    _set_soft_prefetch_common(env, addresses)
 
 
 def _drive_soft_prefetch(env, addresses: list[int]) -> None:

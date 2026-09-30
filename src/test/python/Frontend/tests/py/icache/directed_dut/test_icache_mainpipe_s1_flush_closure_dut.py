@@ -19,13 +19,11 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
     _load_and_reset as _load_two_fetch_loop,
     _warm_frontend_execution as _warm_two_fetch_execution,
 )
-from tests.py.icache.directed_dut.test_icache_mainpipe_s0_flush_closure_dut import (
-    _trigger_bpu_s3_flush,
-)
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
+    trigger_bpu_s3_flush,
     wait_until,
 )
 
@@ -268,7 +266,7 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
             if int(sample["s1_valid"]) == 1:
                 s1_windows += 1
                 if int(sample["s1_flush"]) == 0:
-                    _trigger_bpu_s3_flush(env)
+                    trigger_bpu_s3_flush(env)
                     elapsed += 1
                     for _ in range(min(40, int(max_cycles) - elapsed)):
                         sample = _snapshot(env)
