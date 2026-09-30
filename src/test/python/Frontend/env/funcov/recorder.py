@@ -6,7 +6,7 @@ import json
 import os
 import platform
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, field
 from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -38,6 +38,15 @@ from . import (
     sample_mmio_nc_owner_coverage,
     sample_cfvec_coverage,
 )
+from .registry import (
+    _frontend_root,
+    CoverageBinDef,
+    decode_signal_inventory_name,
+    default_pilot_csv_path,
+)
+
+# Compatibility name for older direct recorder consumers.
+_decode_signal_inventory_name = decode_signal_inventory_name
 from .py.ifu.compact_funcov import _sample_uncache_half_isolation
 from .py.ftq.sampler import (
     TWO_FETCH_SAMPLER_BIN_KEYS,
@@ -65,26 +74,6 @@ from .py.icache import (
 )
 from ..runtime.pylib import frontend_build_root_path, frontend_pylib_path
 from ..support.rvc_decoder import expand_rvc
-
-
-def _frontend_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-def default_pilot_csv_path() -> Path:
-    return _frontend_root() / "docs" / "03_funcov_model" / "frontend_bt_functional_coverage_pilot.csv"
-
-
-def _decode_signal_inventory_name(value: str) -> str:
-    raw = str(value).strip()
-    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
-        try:
-            return str(json.loads(raw))
-        except ValueError:
-            return raw
-    if len(raw) >= 2 and raw[0] == raw[-1] == "'":
-        return raw[1:-1].replace("''", "'")
-    return raw
 
 
 def _sanitize(value: Any) -> Any:
@@ -115,6 +104,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
     root = Path(__file__).resolve().parent
     return {
         "funcov/recorder.py": root / "recorder.py",
+        "funcov/registry.py": root / "registry.py",
         "funcov/__init__.py": root / "__init__.py",
         "funcov/py/ftq/sampler.py": root / "py" / "ftq" / "sampler.py",
         "funcov/py/ftq/two_fetch_funcov.py": root / "py" / "ftq" / "two_fetch_funcov.py",
@@ -262,30 +252,6 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     | set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)
     | set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)
 )
-
-
-@dataclass(frozen=True)
-class CoverageBinDef:
-    bin_id: str
-    stage: str
-    coverage_type: str
-    coverage_group: str
-    coverpoint: str
-    bin_name: str
-    mapped_path: str
-    sample_event: str
-    observe_object: str
-    hit_rule: str
-    priority: str
-    suggested_testcase: str
-
-    @property
-    def key(self) -> Tuple[str, str, str]:
-        return (self.coverage_group, self.coverpoint, self.bin_name)
-
-    @property
-    def group_bin_key(self) -> Tuple[str, str]:
-        return (self.coverage_group, self.bin_name)
 
 
 class FrontendFuncovSampleHub:
@@ -975,7 +941,7 @@ class FrontendFuncovSampleHub:
                 for line in f:
                     if line.startswith(prefix):
                         signals.add(
-                            _decode_signal_inventory_name(line[len(prefix) :])
+                            decode_signal_inventory_name(line[len(prefix) :])
                         )
         except OSError:
             return None
