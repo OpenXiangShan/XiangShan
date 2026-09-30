@@ -3,7 +3,7 @@ package xiangshan.backend.rename.freelist
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{ParallelPriorityEncoder, ParallelPosteriorityEncoder}
+import utility.{ParallelPriorityEncoder, ParallelPosteriorityEncoder, ParallelSelectTwo, SelectTwoInterRes}
 import xiangshan.{XSBundle, XSModule}
 
 class NewFLManager(
@@ -84,7 +84,17 @@ class NewFLManager(
     val lastInBank = ParallelPosteriorityEncoder(bankBitmap)
     val firstCandidate = (firstInBank << bankIndexWidth) | bankIndex.U
     val lastCandidate = (lastInBank << bankIndexWidth) | bankIndex.U
-    val bankHasCandidate = bankBitmap.orR
+    // The count path only needs to know whether a second bit exists.  Avoid
+    // comparing the two encoder outputs here: the posteriority encoder is
+    // still needed for the last candidate, but feeding it into the count
+    // path adds its full search depth to s1ValidCountNext.  A balanced
+    // saturating two-entry reduction keeps this decision independent of both
+    // binary encoder results.
+    val bankSelect = ParallelSelectTwo(
+      bankBitmap.asBools.map(bit => SelectTwoInterRes(bit, 0.U(1.W)))
+    )
+    val bankHasCandidate = bankSelect.hasOne
+    val bankHasTwoCandidates = bankSelect.hasTwo
 
     // Keep a fixed bank order for the first candidates, then walk the banks
     // in reverse order for the last candidates:
@@ -94,10 +104,10 @@ class NewFLManager(
     s0Candidates(lastCandidateIdx) := lastCandidate
     s0CandidateValid(bankIndex) := !in.flush && bankHasCandidate
     s0CandidateValid(lastCandidateIdx) :=
-      !in.flush && bankHasCandidate && firstCandidate =/= lastCandidate
+      !in.flush && bankHasCandidate && bankHasTwoCandidates
     s0BankCandidateCount(bankIndex) := Mux(
       !in.flush && bankHasCandidate,
-      Mux(firstInBank === lastInBank, 1.U, 2.U),
+      Mux(bankHasTwoCandidates, 2.U, 1.U),
       0.U
     )
   }
