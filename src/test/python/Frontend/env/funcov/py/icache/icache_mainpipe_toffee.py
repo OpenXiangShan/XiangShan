@@ -69,6 +69,9 @@ class ICacheMainpipeToffeeCoverage:
     def _try_read_dut_signal(self, dut, name):
         return self._runtime._try_read_dut_signal(dut, name)
 
+    def domain_cycle_view(self, domain, builder):
+        return self._runtime.domain_cycle_view(domain, builder)
+
     def on_cycle(self, cycle: int) -> None:
         dut = self.env.dut
         if self._runtime._read_dut_signal(dut, "reset", 0) == 1:

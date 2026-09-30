@@ -250,7 +250,8 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "FrontendFuncovSampleHub.from_pilot_csv" in source
     assert "ToffeeCoverageSink.from_registry" in source
     assert "create_toffee_runtime(" in source
-    assert "_session_toffee_coverage(request).add(toffee_sink.cov_groups)" in source
+    assert "session_coverage.add(toffee_sink.cov_groups)" in source
+    assert "session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))" in source
     assert 'request.config.getoption("--toffee-report")' in source
     assert "set_func_coverage(request, toffee_sink.cov_groups)" in source
     assert "audit_recorder=None" in source
@@ -344,6 +345,24 @@ def test_recorder_first_signal_does_not_cache_without_active_cycle() -> None:
     assert hub._read_first_dut_signal(dut, candidates) == 11
     assert hub._read_first_dut_signal(dut, candidates) == 11
     assert signal.reads == 2
+
+
+def test_recorder_domain_cycle_view_is_built_once_per_cycle() -> None:
+    hub = FrontendFuncovSampleHub.__new__(FrontendFuncovSampleHub)
+    hub._cycle_snapshot_cycle = None
+    hub._domain_cycle_views = {}
+    calls = []
+    build = lambda: calls.append(len(calls)) or object()
+
+    hub.begin_cycle_snapshot(5)
+    first = hub.domain_cycle_view("icache.mainpipe", build)
+    assert hub.domain_cycle_view("icache.mainpipe", build) is first
+    assert len(calls) == 1
+
+    hub.begin_cycle_snapshot(6)
+    second = hub.domain_cycle_view("icache.mainpipe", build)
+    assert second is not first
+    assert len(calls) == 2
 
 
 def test_funcov_modules_do_not_bypass_snapshot_dut_reads() -> None:

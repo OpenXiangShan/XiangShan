@@ -647,7 +647,9 @@ def env(dut, request):
         set_line_coverage(request, str(coverage), ignore=_expanded_coverage_ignore_path())
     if runtime_context is not None and toffee_sink is not None:
         toffee_sink.flush_pending()
-        _session_toffee_coverage(request).add(toffee_sink.cov_groups)
+        session_coverage = _session_toffee_coverage(request)
+        session_coverage.add(toffee_sink.cov_groups)
+        session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))
         if request.config.getoption("--toffee-report"):
             from toffee_test.reporter import set_func_coverage
 

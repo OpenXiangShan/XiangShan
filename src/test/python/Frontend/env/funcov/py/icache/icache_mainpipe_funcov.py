@@ -307,7 +307,7 @@ def _read_candidates(recorder, candidates: Iterable[Iterable[str]]) -> tuple[Opt
     dut = getattr(getattr(recorder, "env", None), "dut", None)
     if dut is None:
         return tuple(None for _ in candidates)
-    return tuple(recorder._read_first_dut_signal(dut, tuple(names)) for names in candidates)
+    return tuple(recorder._read_first_dut_signal(dut, names) for names in candidates)
 
 
 def _vec(
@@ -772,6 +772,11 @@ def _snapshot(recorder) -> dict[str, Any]:
     return scalar
 
 
+def shared_icache_cycle_view(recorder) -> dict[str, Any]:
+    """Build the main-pipe view once for this cycle."""
+    return recorder.domain_cycle_view("icache.mainpipe", lambda: _snapshot(recorder))
+
+
 def evaluate_icache_mainpipe_coverage(
     recorder, env, cycle: int
 ) -> tuple[dict[str, bool], dict[str, Any]]:
@@ -795,7 +800,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         reset_icache_mainpipe_coverage_state(recorder)
         state = recorder._icache_mainpipe_cov_state
 
-    s = _snapshot(recorder)
+    s = shared_icache_cycle_view(recorder)
     prev = state["prev"]
     should = _bits(s["should"])
     hits = _bits(s["hits"])

@@ -364,6 +364,7 @@ class FrontendFuncovSampleHub:
         self.toffee_uncache_model = None
         self._cycle_snapshot_cycle: Optional[int] = None
         self._cycle_snapshot_values: Dict[str, Optional[int]] = {}
+        self._domain_cycle_views: Dict[str, tuple[int, object]] = {}
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
         self._last_fetch_path = "icache_seq"
@@ -944,12 +945,33 @@ class FrontendFuncovSampleHub:
         cycle = int(cycle)
         if self._cycle_snapshot_cycle != cycle:
             self._cycle_snapshot_cycle = cycle
-            self._cycle_snapshot_values.clear()
+            cycle_values = getattr(self, "_cycle_snapshot_values", None)
+            if cycle_values is None:
+                self._cycle_snapshot_values = {}
+            else:
+                cycle_values.clear()
+            getattr(self, "_domain_cycle_views", {}).clear()
             cycle_values = getattr(self, "_cycle_first_signal_values", None)
             if cycle_values is None:
                 self._cycle_first_signal_values = {}
             else:
                 cycle_values.clear()
+
+    def domain_cycle_view(self, domain: str, builder):
+        """Return one lazily-built domain view for the active sample cycle."""
+        cycle = self._cycle_snapshot_cycle
+        if cycle is None:
+            return builder()
+        views = getattr(self, "_domain_cycle_views", None)
+        if views is None:
+            views = {}
+            self._domain_cycle_views = views
+        cached = views.get(str(domain))
+        if cached is not None and cached[0] == cycle:
+            return cached[1]
+        view = builder()
+        views[str(domain)] = (cycle, view)
+        return view
 
     @cached_property
     def _registered_internal_signals(self) -> Optional[set[str]]:
@@ -1008,7 +1030,7 @@ class FrontendFuncovSampleHub:
         return result
 
     def _read_first_dut_signal(self, dut, names: Iterable[str]) -> Optional[int]:
-        candidate_names = tuple(str(name) for name in names)
+        candidate_names = names if isinstance(names, tuple) else tuple(str(name) for name in names)
         if not candidate_names:
             return None
 

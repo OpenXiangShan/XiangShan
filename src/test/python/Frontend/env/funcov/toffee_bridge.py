@@ -18,6 +18,10 @@ class ToffeeSessionCoverage:
 
     def __init__(self) -> None:
         self._groups: list[str] = []
+        self._run_metadata: dict[str, Any] = {}
+
+    def set_run_metadata(self, metadata: Mapping[str, Any]) -> None:
+        self._run_metadata.update(dict(metadata))
 
     def add(self, groups: Iterable[CovGroup]) -> None:
         self.add_groups(group.as_dict() for group in groups)
@@ -31,7 +35,10 @@ class ToffeeSessionCoverage:
     def report(self) -> dict[str, Any]:
         from toffee_test.reporter import __update_func_coverage__
 
-        return __update_func_coverage__(self._groups)
+        report = __update_func_coverage__(self._groups)
+        if self._run_metadata:
+            report["run_metadata"] = self._run_metadata
+        return report
 
     def write(self, path: Path) -> Path:
         output = Path(path)
