@@ -122,7 +122,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    req.uop.robIdx === pendingPtr
+    req.uop.robIdx.isNotAfterSlot(pendingPtr)
   )
   switch (uncacheState) {
     is (s_idle) {
@@ -332,7 +332,9 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *    ready: freelist can allocate
    ******************************************************************/
 
-  val s1_sortedVec = HwSort(VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
+  val s1_sortedVec = HwSort(
+    VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) })
+  )((a, b) => a.isBeforeSlot(b))
   val s1_req = VecInit(s1_sortedVec.map(_.bits))
   val s1_valid = VecInit(s1_sortedVec.map(_.valid))
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))

@@ -32,11 +32,11 @@ class TrapTvalMod(implicit p: Parameters) extends XSModule with HasCircularQueue
     tval := io.targetPc.bits.pc
     robIdx := io.fromCtrlBlock.robDeqPtr
   }.elsewhen(valid) {
-    when(updateFromFlush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx)) {
+    when(updateFromFlush && io.fromCtrlBlock.flush.bits.robIdx.isBeforeSlot(robIdx)) {
       valid := true.B
       tval := io.fromCtrlBlock.flush.bits.fullTarget
       robIdx := io.fromCtrlBlock.flush.bits.robIdx
-    }.elsewhen(clearFromFlush && isBefore(io.fromCtrlBlock.flush.bits.robIdx, robIdx) || io.clear) {
+    }.elsewhen(clearFromFlush && io.fromCtrlBlock.flush.bits.robIdx.isBeforeSlot(robIdx) || io.clear) {
       valid := false.B
     }
   }.otherwise {
