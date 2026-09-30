@@ -4,6 +4,8 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions
 import oceanus.compactchi._
+// CCHIParametersKey lives in xscache.oceanus.compactchi (see that package's Flit.scala)
+import xscache.oceanus.compactchi.CCHIParametersKey
 import org.chipsalliance.cde.config.Parameters
 
 /*
@@ -40,8 +42,27 @@ class CCHIType4Port(implicit p: Parameters) extends Bundle {
  * DCache-side Compact CHI helpers: phase-1 pinned params, TX builders, RX decoders.
  */
 object DCacheCCHI {
+  /** Width of a downstream (L2) node ID: the SrcID on Comp/CompData/DBIDResp/Snp,
+    * echoed back as TgtID on CompAck/SnpResp/SnpRespData/CopyBackWrData. Read from
+    * the compactchi parameter behind Flit*Dn.SrcID / Flit*Up.TgtID so these IDs can
+    * never drift from the flit fields they mirror (a mismatch truncates silently).
+    */
+  def dnNodeIdWidth(implicit p: Parameters): Int = p(CCHIParametersKey).DownstreamNodeID_Width
+
+  /** Width of an L2-issued transaction ID: DBID on FlitDnRSP/FlitDnDAT and TxnID on
+    * FlitSNP, echoed back as TxnID on FlitUpRSP/FlitUpDAT. All of those flit fields
+    * take DBID_Width (the L1's own REQ TxnID is the separate TxnID_Width).
+    */
+  def dnTxnIdWidth(implicit p: Parameters): Int = p(CCHIParametersKey).DBID_Width
+
+  /** Width of FlitREQ.TagAlias (TagAlias_Width). */
+  def tagAliasWidth(implicit p: Parameters): Int = p(CCHIParametersKey).TagAlias_Width
+
   object Params {
-    // REQ/EVT TgtID is rewritten by L2 eSAM; CompAck/SnpResp still need a placeholder.
+    // REQ/EVT TgtID is rewritten by L2 eSAM, so the placeholder below is fine for them.
+    // Upstream RSP/DAT (CompAck/SnpResp/SnpRespData/CopyBackWrData) is NOT rewritten:
+    // L2 routes UpRSP/UpDAT to slices by TgtID (L2Top postSAM), so those helpers take
+    // the responding node's SrcID as an explicit tgtId argument instead of this value.
     val tgtId: UInt = 0.U
     // CHI MemAttr[3:0] = {Allocate, Cacheable, Device, EWA}; cacheable DCache: 0b1101
     val memAttr: UInt = "b1101".U(4.W)
@@ -73,25 +94,29 @@ object DCacheCCHI {
       evt.TraceTag := 0.U(1.W)
     }
 
-    private def fillUpRsp(rsp: FlitUpRSP, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
+    // tgtId: SrcID of the flit being answered (grant / DBIDResp / Snp) — L2 routes by it.
+    private def fillUpRsp(rsp: FlitUpRSP, tgtId: UInt, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
       rsp.SrcID := srcId
-      rsp.TgtID := Params.tgtId
+      rsp.TgtID := tgtId
       rsp.RespErr := 0.U
       rsp.TraceTag := traceTag
     }
 
-    def fillUpDat(dat: FlitUpDAT, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
+    def fillUpDat(dat: FlitUpDAT, tgtId: UInt, srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
       dat.SrcID := srcId
-      dat.TgtID := Params.tgtId
+      dat.TgtID := tgtId
       dat.RespErr := 0.U
       dat.TraceTag := traceTag
     }
 
     def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, growParam: UInt, fullOverwrite: Bool, srcId: UInt): Unit = {
+      // alias is at most TagAlias_Width bits; a wider one would truncate silently below
+      require(alias.getWidth <= req.paramCCHI.TagAlias_Width,
+        s"alias is ${alias.getWidth}b but FlitREQ.TagAlias is ${req.paramCCHI.TagAlias_Width}b")
       fillReq(req, expCompData = !fullOverwrite, srcId)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.TagAlias := alias(1, 0)
+      req.TagAlias := alias
       // fullOverwrite: whole-line store miss → MakeUnique (NtoT/BtoT grow unused)
       // growParam NtoB: load miss from Invalid → ReadShared; else NtoT/BtoT → ReadUnique
       req.Opcode := Mux(fullOverwrite, CCHIOpcode.MakeUnique.U,
@@ -102,13 +127,14 @@ object DCacheCCHI {
       fillReq(req, expCompData = false.B, srcId)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
-      req.TagAlias := 0.U(2.W)
+      req.TagAlias := 0.U(req.paramCCHI.TagAlias_Width.W)
       req.Opcode := Mux(cmoOpcode === 1.U, CCHIOpcode.CleanInvalid.U,
         Mux(cmoOpcode === 2.U, CCHIOpcode.MakeInvalid.U, CCHIOpcode.CleanShared.U))
     }
 
-    def compAck(rsp: FlitUpRSP, dbid: UInt, srcId: UInt): Unit = {
-      fillUpRsp(rsp, srcId)
+    // tgtId = grant/Comp SrcID, dbid = grant/Comp DBID (both echoed back).
+    def compAck(rsp: FlitUpRSP, dbid: UInt, tgtId: UInt, srcId: UInt): Unit = {
+      fillUpRsp(rsp, tgtId, srcId)
       rsp.Opcode := CCHIOpcode.CompAck.U
       rsp.TxnID := dbid
       rsp.Resp := 0.U(3.W)
@@ -138,33 +164,37 @@ object DCacheCCHI {
       evt.Addr := addr(47, 0)
     }
 
-    def snpResp(rsp: FlitUpRSP, txnId: UInt, tlParam: UInt, dirty: Bool, traceTag: UInt, srcId: UInt): Unit = {
-      fillUpRsp(rsp, srcId, traceTag)
+    // tgtId = Snp SrcID, txnId = Snp TxnID (both echoed back).
+    def snpResp(rsp: FlitUpRSP, txnId: UInt, tgtId: UInt, tlParam: UInt, dirty: Bool, traceTag: UInt, srcId: UInt): Unit = {
+      fillUpRsp(rsp, tgtId, srcId, traceTag)
       rsp.Opcode := CCHIOpcode.SnpResp.U
       rsp.TxnID := txnId
       rsp.Resp := probeResp(tlParam, dirty)
     }
 
-    def snpRespData(dat: FlitUpDAT, txnId: UInt, tlParam: UInt, dirty: Bool, dataId: UInt,
+    def snpRespData(dat: FlitUpDAT, txnId: UInt, tgtId: UInt, tlParam: UInt, dirty: Bool, dataId: UInt,
       beatData: UInt, corrupt: Bool, traceTag: UInt, srcId: UInt): Unit = {
-      fillUpDat(dat, srcId, traceTag)
+      fillUpDat(dat, tgtId, srcId, traceTag)
       dat.Opcode := CCHIOpcode.SnpRespData.U
       dat.TxnID := txnId
       dat.Resp := probeResp(tlParam, dirty)
       dat.DataID := dataId
       dat.Data := beatData
-      dat.BE := Mux(corrupt, 0.U, ~0.U(32.W))
+      // FlitUpDAT.BE is one bit per byte of a Data_Width beat
+      dat.BE := Mux(corrupt, 0.U, ~0.U((dat.paramCCHI.Data_Width / 8).W))
     }
 
-    def copyBackWrData(dat: FlitUpDAT, dbid: UInt, dataId: UInt, beatData: UInt, corrupt: Bool,
+    // tgtId = DBIDResp/CompDBIDResp SrcID, dbid = its DBID (both echoed back).
+    def copyBackWrData(dat: FlitUpDAT, dbid: UInt, tgtId: UInt, dataId: UInt, beatData: UInt, corrupt: Bool,
       srcId: UInt, traceTag: UInt = 0.U(1.W)): Unit = {
-      fillUpDat(dat, srcId, traceTag)
+      fillUpDat(dat, tgtId, srcId, traceTag)
       dat.Opcode := CCHIOpcode.CopyBackWrData.U
       dat.TxnID := dbid
       dat.Resp := 0.U(3.W)
       dat.DataID := dataId
       dat.Data := beatData
-      dat.BE := Mux(corrupt, 0.U, ~0.U(32.W))
+      // FlitUpDAT.BE is one bit per byte of a Data_Width beat
+      dat.BE := Mux(corrupt, 0.U, ~0.U((dat.paramCCHI.Data_Width / 8).W))
     }
   }
 
@@ -192,13 +222,16 @@ object ICacheCCHI {
 
   object Tx {
     def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, srcId: UInt): Unit = {
+      // alias is at most TagAlias_Width bits; a wider one would truncate silently below
+      require(alias.getWidth <= req.paramCCHI.TagAlias_Width,
+        s"alias is ${alias.getWidth}b but FlitREQ.TagAlias is ${req.paramCCHI.TagAlias_Width}b")
       req.TxnID := txnId
       req.SrcID := srcId
       req.TgtID := Params.tgtId
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
       req.Addr := addr(47, 0)
-      req.TagAlias := alias(1, 0)
+      req.TagAlias := alias
       req.NS := false.B
       req.Order := 0.U
       req.MemAttr := Params.memAttr
@@ -231,7 +264,7 @@ object PtwCCHI {
       req.Opcode := CCHIOpcode.ReadOnce.U
       req.Size := Params.size64
       req.Addr := addr(47, 0)
-      req.TagAlias := 0.U(2.W)
+      req.TagAlias := 0.U(req.paramCCHI.TagAlias_Width.W)
       req.NS := false.B
       req.Order := 0.U
       req.MemAttr := Params.memAttr

@@ -39,7 +39,8 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
-  val probe_snp_txn_id = UInt(8.W)
+  val probe_snp_txn_id = UInt(DCacheCCHI.dnTxnIdWidth.W)
+  val probe_snp_src_id = UInt(DCacheCCHI.dnNodeIdWidth.W)
   val probe_snp_trace_tag = UInt(1.W)
   val probe_snp_make_invalid = Bool()
   val probe_snp_channel = UInt(memChannelBits.W)
@@ -1105,6 +1106,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.data := s3_data_line
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
   io.wb.bits.chi_txn_id := Mux(s3_req.probe, s3_req.probe_snp_txn_id, 0.U)
+  io.wb.bits.chi_tgt_id := Mux(s3_req.probe, s3_req.probe_snp_src_id, 0.U)
   io.wb.bits.trace_tag := Mux(s3_req.probe, s3_req.probe_snp_trace_tag, 0.U)
   io.wb.bits.chi_channel := Mux(s3_req.probe, s3_req.probe_snp_channel, 0.U)
 

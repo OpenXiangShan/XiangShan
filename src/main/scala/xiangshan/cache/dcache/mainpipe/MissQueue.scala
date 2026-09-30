@@ -557,7 +557,9 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
   val got_dataid0 = RegInit(false.B)
   val got_dataid1 = RegInit(false.B)
-  val dbid = Reg(UInt(8.W))
+  val dbid = Reg(UInt(DCacheCCHI.dnTxnIdWidth.W))
+  // L2 slice SrcID from the CompData/Comp; echoed as CompAck TgtID (L2 routes UpRSP by it)
+  val grant_src_id = Reg(UInt(DCacheCCHI.dnNodeIdWidth.W))
   val grant_param = Reg(UInt(TLPermissions.bdWidth.W))
 
   // refill data with store data, this reg will be used to store:
@@ -763,6 +765,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   when (io.rxdat.fire) {
     w_grantfirst := true.B
     dbid := io.rxdat.bits.DBID
+    grant_src_id := io.rxdat.bits.SrcID
     grant_param := DCacheCCHI.Rx.grantParam(io.rxdat.bits.Resp)
     isDirty := DCacheCCHI.Rx.dirty(io.rxdat.bits.Resp)
     got_dataid0 := next_dataid0
@@ -786,6 +789,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   when (comp_fire) {
     w_grantfirst := true.B
     dbid := io.rxrsp.bits.DBID
+    grant_src_id := io.rxrsp.bits.SrcID
     grant_param := DCacheCCHI.Rx.grantParam(io.rxrsp.bits.Resp)
     isDirty := DCacheCCHI.Rx.dirty(io.rxrsp.bits.Resp)
     w_grantlast := true.B
@@ -959,7 +963,7 @@ for(i <- 0 until reqNum) {
   assert(!(io.rxrsp.valid && !(!w_grantlast && s_acquire)), p"dcache should always be ready for Comp now:${io.id}")
 
   io.txrsp.valid := !s_grantack && w_grantfirst
-  DCacheCCHI.Tx.compAck(io.txrsp.bits, dbid, cchiDcacheSrcId(channel_sel))
+  DCacheCCHI.Tx.compAck(io.txrsp.bits, dbid, grant_src_id, cchiDcacheSrcId(channel_sel))
 
   // Send mainpipe_req when receive hint from L2 or receive data without hint
   io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)

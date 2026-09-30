@@ -25,7 +25,8 @@ import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
-  val source = UInt(8.W) // Compact CHI SNP TxnID
+  val source = UInt(DCacheCCHI.dnTxnIdWidth.W) // Compact CHI SNP TxnID
+  val src_id = UInt(DCacheCCHI.dnNodeIdWidth.W) // Compact CHI SNP SrcID, echoed as SnpResp TgtID
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W) // l2 uses vaddr index to probe l1
@@ -101,6 +102,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.addr   := req.addr
     pipe_req.vaddr  := req.vaddr
     pipe_req.probe_snp_txn_id := req.source
+    pipe_req.probe_snp_src_id := req.src_id
     pipe_req.probe_snp_trace_tag := req.trace_tag
     pipe_req.probe_snp_make_invalid := CCHIOpcode.SnpMakeInvalid.is(req.opcode, true.B)
     pipe_req.probe_snp_channel := req.snp_channel
@@ -149,6 +151,7 @@ class ProbeQueue()(implicit p: Parameters) extends DCacheModule with HasPerfEven
   val snp_addr = Cat(snp.Addr, 0.U(3.W))
   val alias_addr_frag = snp.alias
   req.source := snp.TxnID
+  req.src_id := snp.SrcID
   req.opcode := snp.Opcode
   req.addr := snp_addr
   if (DCacheAboveIndexOffset > DCacheTagOffset) {

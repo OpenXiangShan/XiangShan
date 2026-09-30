@@ -21,6 +21,7 @@ import difftest.DiffRefillEvent
 import difftest.DifftestModule
 import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.cache.DCacheCCHI
 import xiangshan.cache.ICacheCCHI
 import utility.ChiselDB
 import utility.XSPerfAccumulate
@@ -92,7 +93,7 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
   // vSetIdx is vAddr(untagBits, blockOffBits); TagAlias = vSetIdx high AliasTagBits -> FlitREQ.TagAlias
   private def aliasFromVSetIdx(vSetIdx: UInt): UInt =
-    AliasTagBits.map(w => vSetIdx.head(w)).getOrElse(0.U(2.W))
+    AliasTagBits.map(w => vSetIdx.head(w)).getOrElse(0.U(DCacheCCHI.tagAliasWidth.W))
 
   // TXREQ (was mem_acquire on TileLink)
   io.txreq.valid := acquireArb.io.out.valid

@@ -25,14 +25,15 @@ package xiangshan.frontend.icache
 
 import freechips.rocketchip.diplomacy.LazyModule
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.cache.DCacheCCHI
 
 class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  // currently, L2 cache supports only 2 bits alias tag
+  // L2's FlitREQ.TagAlias carries only TagAlias_Width bits
   require(
-    AliasTagBits.isEmpty || AliasTagBits.get <= 2,
-    s"L2 cache supports only 2bits alias tag, ICache with ${nSets}sets * ${blockBytes}B need ${AliasTagBits.get}bits"
+    AliasTagBits.isEmpty || AliasTagBits.get <= DCacheCCHI.tagAliasWidth,
+    s"L2 cache supports only ${DCacheCCHI.tagAliasWidth}bits alias tag, ICache with ${nSets}sets * ${blockBytes}B need ${AliasTagBits.get}bits"
   )
 
   val ctrlUnitOpt: Option[ICacheAXICtrlUnit] = Option.when(EnableCtrlUnit)(LazyModule(new ICacheAXICtrlUnit))
