@@ -160,9 +160,15 @@ def wait_coverage_hits(
     remaining = set(expected)
 
     def all_hit() -> bool:
-        remaining.difference_update(
-            target for target in remaining if env.functional_coverage.key_hit(*target)
-        )
+        # Evaluate the predicate against a stable snapshot before mutating the
+        # set of outstanding targets. Updating ``remaining`` while its own
+        # iterator is active raises ``RuntimeError`` for multi-target waits.
+        hit_targets = {
+            target
+            for target in tuple(remaining)
+            if env.functional_coverage.key_hit(*target)
+        }
+        remaining.difference_update(hit_targets)
         return not remaining
 
     if all_hit():
