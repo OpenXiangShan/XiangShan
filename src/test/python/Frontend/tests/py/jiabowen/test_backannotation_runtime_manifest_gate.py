@@ -10,7 +10,7 @@ from env.runtime.artifact_provenance import (
     load_frontend_build_manifest,
     write_frontend_build_manifest,
 )
-from env.funcov.recorder import CoverageBinDef, FrontendFuncovSampleHub
+from env.funcov.runtime_context import CoverageBinDef, FrontendFuncovSampleHub
 from tools import backannotate_funcov
 
 

@@ -51,7 +51,7 @@ from env.funcov.py.icache import (
     ICACHE_HITMISS_SAMPLER_BIN_KEYS,
 )
 from env.runtime.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
-from env.funcov.recorder import (
+from env.funcov.runtime_context import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
     FrontendFuncovSampleHub,
     current_funcov_sampler_sha256,

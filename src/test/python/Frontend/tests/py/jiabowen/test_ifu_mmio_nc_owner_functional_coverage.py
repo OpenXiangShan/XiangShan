@@ -1,5 +1,5 @@
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
-from env.funcov.recorder import _decode_signal_inventory_name
+from env.funcov.runtime_context import _decode_signal_inventory_name
 from env.support import fold_pc
 
 

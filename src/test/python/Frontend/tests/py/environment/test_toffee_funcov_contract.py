@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 from toffee.funcov import CovGroup
-from env.funcov.recorder import default_pilot_csv_path
+from env.funcov.runtime_context import default_pilot_csv_path
 from env.funcov.toffee_bridge import (
     ToffeeCoverageSink,
     ToffeeSessionCoverage,
     merge_native_toffee_reports,
 )
-from env.funcov.sample_hub import FrontendFuncovSampleHub
+from env.funcov.runtime_context import FrontendFuncovSampleHub
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     ICACHE_HITMISS_COVERPOINTS,
     ICACHE_HITMISS_SAMPLER_BIN_KEYS,
@@ -73,7 +73,7 @@ from env.funcov.py.ifu.uncache_event_toffee import (
 )
 from env.funcov.py.ifu.cfvec_toffee import IfuCfvecToffeeCoverage
 from env.funcov.py.ifu.cacheable_pipeline_toffee import IfuCacheablePipelineToffeeCoverage
-from env.funcov.recorder import UNCACHE_EVENT_SAMPLER_BIN_KEYS
+from env.funcov.runtime_context import UNCACHE_EVENT_SAMPLER_BIN_KEYS
 from env.funcov.toffee_runtime import create_toffee_runtime
 from env.funcov.native_toffee import BinEvidence, EvaluateFlagRecorder
 from env.funcov.py.icache.icache_mainpipe_funcov import _mark as _mark_mainpipe

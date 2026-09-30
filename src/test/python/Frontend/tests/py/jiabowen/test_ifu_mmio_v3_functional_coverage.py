@@ -4,7 +4,7 @@ from env.funcov.py.ifu.mmio_v3_funcov import (
     MMIO_V3_CHECKED_EVENT_TYPE,
     sample_mmio_v3_coverage,
 )
-from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 
 

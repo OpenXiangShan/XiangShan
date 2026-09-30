@@ -13,7 +13,7 @@ from env.funcov.py.ifu.compact_funcov import (
     _sample_frontend_trigger,
     _sample_reset_release_state,
 )
-from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.support.pc_utils import fold_pc
 from env.support.rvc_decoder import expand_rvc

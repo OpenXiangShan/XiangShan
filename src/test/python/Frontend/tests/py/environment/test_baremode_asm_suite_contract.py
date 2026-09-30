@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 
 
 def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> None:

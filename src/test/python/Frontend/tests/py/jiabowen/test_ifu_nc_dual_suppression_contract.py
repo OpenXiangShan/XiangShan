@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 from env.funcov.toffee_runtime import create_toffee_runtime
 from tests.py.jiabowen.test_ifu_nc_dual_suppression_v3_dut import (

@@ -15,7 +15,7 @@ from env.funcov.py.ifu.cacheable_pipeline_funcov import (
     _req_signal_names,
     sample_ifu_cacheable_pipeline_coverage,
 )
-from env.funcov.recorder import FrontendFuncovSampleHub, default_pilot_csv_path
+from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 
 
