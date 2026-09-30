@@ -169,73 +169,101 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
 
   /**
     ******************************************************************************
-    * RXDAT CompData (DataID 0/1 may arrive out of order)
+    * RXDAT CompData
+    * - A CompData line is 2 beats (DataID 0/1), which may arrive out of order.
+    * - Beats of different TxnIDs may interleave arbitrarily (TxnID is the MSHR id),
+    *   so each MSHR owns its receive state (gotData / beatHalf / err flags) instead
+    *   of a single shared pair collector.
+    * - At most one line completes per cycle (only 1 beat per cycle), so the single
+    *   assembly registers below are reloaded at most once per cycle. io.resp pulses
+    *   may be back-to-back on consecutive completions; consumers snoop by address
+    *   and tolerate that (mainPipe holds per bank, wayLookup composes per cycle).
+    * - io.rxdat.ready is always true: the SRAM write port accepts 1 full line per
+    *   cycle and the sustained completion rate is at most 1 line per 2 beats.
     ******************************************************************************
     */
-  // cacheline register
+  require(refillCycles == 2, "CompData refill uses DataID 0/1")
+  // assembled cacheline registers, loaded at complete
   private val respDataReg = Reg(Vec(refillCycles, UInt(beatBits.W)))
-  private val gotDataId0  = RegInit(false.B)
-  private val gotDataId1  = RegInit(false.B)
-  private val refillTxnId = Reg(UInt(log2Ceil(NumAllMshr).W))
+  private val corruptReg  = RegInit(false.B)
+  private val deniedReg   = RegInit(false.B)
+
+  // per-MSHR receive state
+  private val gotData    = RegInit(VecInit(Seq.fill(NumAllMshr)(VecInit(Seq.fill(refillCycles)(false.B)))))
+  private val beatHalf   = Reg(Vec(NumAllMshr, UInt(beatBits.W))) // the first-arrived half beat
+  private val errCorrupt = RegInit(VecInit(Seq.fill(NumAllMshr)(false.B)))
+  private val errDenied  = RegInit(VecInit(Seq.fill(NumAllMshr)(false.B)))
+
+  private val txnId  = io.rxdat.bits.TxnID(log2Ceil(NumAllMshr) - 1, 0)
+  private val dataId = io.rxdat.bits.DataID(log2Ceil(refillCycles) - 1, 0)
 
   private val compDataValid =
     io.rxdat.valid && CCHIOpcode.CompData.is(io.rxdat.bits.Opcode, io.rxdat.valid)
   private val compDataFire = io.rxdat.fire && compDataValid
-  private val beatMatches =
-    (!gotDataId0 && !gotDataId1) || io.rxdat.bits.TxnID === refillTxnId
 
-  when(compDataFire && beatMatches) {
-    when(!gotDataId0 && !gotDataId1) {
-      refillTxnId := io.rxdat.bits.TxnID
-    }
-    when(io.rxdat.bits.DataID === 0.U) {
-      gotDataId0     := true.B
-      respDataReg(0) := io.rxdat.bits.Data
-    }
-    when(io.rxdat.bits.DataID === 1.U) {
-      gotDataId1     := true.B
-      respDataReg(1) := io.rxdat.bits.Data
+  // this beat completes the pair: the other half has already arrived
+  private val complete   = compDataFire && gotData(txnId)(dataId ^ 1.U)
+  private val completeId = txnId
+
+  (0 until NumAllMshr).foreach { i =>
+    when(compDataFire && txnId === i.U) {
+      gotData(i)(dataId) := true.B
+      beatHalf(i)        := io.rxdat.bits.Data
+      errCorrupt(i)      := errCorrupt(i) || ICacheCCHI.Rx.corrupt(io.rxdat.bits.RespErr)
+      errDenied(i)       := errDenied(i) || ICacheCCHI.Rx.denied(io.rxdat.bits.RespErr)
     }
   }
-
-  // last transition finish or corrupt/denied accumulation done
-  private val lastFire = compDataFire && beatMatches && (
-    (io.rxdat.bits.DataID === 0.U && gotDataId1) ||
-      (io.rxdat.bits.DataID === 1.U && gotDataId0)
-  )
 
   io.rxdat.ready := true.B
 
-  private val lastFireNext = RegNext(lastFire)
-  private val idNext       = RegEnable(refillTxnId, lastFire)
+  private val completeNext   = RegNext(complete)
+  private val completeIdNext = RegEnable(completeId, complete)
 
-  when(lastFireNext) {
-    gotDataId0 := false.B
-    gotDataId1 := false.B
+  // Load the assembly registers from the completing entry: beatHalf still holds the
+  // first-arrived half (updated at end of this cycle), the arriving beat is the other.
+  when(complete) {
+    respDataReg(dataId)       := io.rxdat.bits.Data
+    respDataReg(dataId ^ 1.U) := beatHalf(completeId)
+    corruptReg := errCorrupt(completeId) || ICacheCCHI.Rx.corrupt(io.rxdat.bits.RespErr)
+    deniedReg  := errDenied(completeId) || ICacheCCHI.Rx.denied(io.rxdat.bits.RespErr)
   }
 
-  private val corruptReg = RegInit(false.B)
-  private val deniedReg  = RegInit(false.B)
-  when(compDataFire && beatMatches) {
-    // Set corruptReg / deniedReg when any beat is corrupt / denied
-    corruptReg := corruptReg || ICacheCCHI.Rx.corrupt(io.rxdat.bits.RespErr)
-    deniedReg  := deniedReg || ICacheCCHI.Rx.denied(io.rxdat.bits.RespErr)
-  }.elsewhen(lastFireNext) {
-    // Clear corruptReg / deniedReg when response it sent to mainPipe
-    // This used to be io.resp.valid (lastFireNext && mshrValid) but when mshr is flushed by io.flush/fencei,
-    // mshrValid is false.B and corruptReg will never be cleared, that's not correct
-    // so we remove mshrValid here, and the condition leftover is lastFireNext
-    // or, actually, io.resp.valid || (lastFireNext && !mshrValid)
-    corruptReg := false.B
-    deniedReg  := false.B
+  // Per-entry state clears 1 cycle after complete (when the entry is invalidated),
+  // unconditionally (not gated by mshrValid): a flush/fencei-killed MSHR must not
+  // leak its error flags into the next allocation. Since corruptReg/deniedReg are
+  // fully reloaded at every complete, no cross-transaction leak is possible.
+  when(completeNext) {
+    (0 until refillCycles).foreach(j => gotData(completeIdNext)(j) := false.B)
+    errCorrupt(completeIdNext) := false.B
+    errDenied(completeIdNext)  := false.B
   }
+  // defensive: clear on allocation so a reallocated entry never inherits stale state
+  (0 until NumAllMshr).foreach { i =>
+    when(allMshr(i).io.req.fire) {
+      (0 until refillCycles).foreach(j => gotData(i)(j) := false.B)
+      errCorrupt(i) := false.B
+      errDenied(i)  := false.B
+    }
+  }
+
+  assert(!compDataFire || io.rxdat.bits.TxnID < NumAllMshr.U, "DnDAT CompData TxnID must be a MSHR id")
+  assert(!compDataFire || io.rxdat.bits.DataID < refillCycles.U, "DnDAT CompData DataID out of range")
+  assert(
+    !compDataFire || !VecInit(allMshr.map(_.io.wfi.wfiSafe))(txnId),
+    "DnDAT CompData beat for MSHR with no outstanding txn"
+  )
+  // L2 must never resend a beat: assert the contract instead of masking it in hardware
+  assert(
+    !(compDataFire && gotData(txnId)(dataId)),
+    "DnDAT CompData duplicate beat (DataID already received for this TxnID)"
+  )
 
   /**
     ******************************************************************************
     * invalid mshr when finish transition
     ******************************************************************************
     */
-  (0 until NumAllMshr).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
+  (0 until NumAllMshr).foreach(i => allMshr(i).io.invalid := completeNext && (completeIdNext === i.U))
 
   /* *****************************************************************************
    * respond to fetch and write SRAM
@@ -244,10 +272,10 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   private val allMshrInfo = VecInit(allMshr.map(_.io.info))
   // select MSHR info 1 cycle before sending response to mainPipe/prefetchPipe for better timing
   private val mshrInfo =
-    RegEnable(allMshrInfo(refillTxnId).bits, 0.U.asTypeOf(allMshrInfo(0).bits), lastFire)
+    RegEnable(allMshrInfo(completeId).bits, 0.U.asTypeOf(allMshrInfo(0).bits), complete)
   // we can latch mshr.io.info.bits since they are set on req.fire or acquire.fire, and keeps unchanged during response
   // however, we should not latch mshr.io.info.valid, since io.flush/fencei may clear it at any time
-  private val mshrValid = allMshrInfo(idNext).valid
+  private val mshrValid = allMshrInfo(completeIdNext).valid
 
   // get waymask from replacer when acquire fire
   io.victim.req.valid        := acquireArb.io.out.fire
@@ -259,7 +287,7 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   // NOTE: when flush/fencei, missUnit will still send response to mainPipe/prefetchPipe
   //       this is intentional to fix timing (io.flush -> mainPipe/prefetchPipe s2_miss -> s2_ready -> ftq ready)
   //       unnecessary response will be dropped by mainPipe/prefetchPipe/wayLookup since their sx_valid is set to false
-  private val respValid = mshrValid && lastFireNext
+  private val respValid = mshrValid && completeNext
   // NOTE: but we should not write meta/dataArray when flush/fencei
   private val writeSramValid = respValid && !corruptReg && !io.flush && !io.fencei
 
@@ -369,13 +397,13 @@ class ICacheMissUnit(implicit p: Parameters) extends ICacheModule with ICacheAdd
   prefetchTable.log(data = prefetchTrace, en = io.prefetchReq.fire, clock = clock, reset = reset)
 
   private val respTrace = Wire(new RespTrace)
-  respTrace.mshr     := idNext
+  respTrace.mshr     := completeIdNext
   respTrace.victim   := mshrInfo.way
-  respTrace.latency  := VecInit(allMshr.map(_.io.perf_latency))(idNext)
+  respTrace.latency  := VecInit(allMshr.map(_.io.perf_latency))(completeIdNext)
   respTrace.corrupt  := corruptReg
   respTrace.denied   := deniedReg
   respTrace.canceled := !mshrValid // fence.i or flushed
-  respTable.log(data = respTrace, en = lastFireNext, clock = clock, reset = reset)
+  respTable.log(data = respTrace, en = completeNext, clock = clock, reset = reset)
 
   /**
     ******************************************************************************
