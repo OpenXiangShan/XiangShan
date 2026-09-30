@@ -31,7 +31,8 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val corrupt = Bool()
   val dirty = Bool()
 
-  val chi_txn_id = UInt(8.W) // SNP TxnID for probe response; unused for voluntary EVT
+  val chi_txn_id = UInt(DCacheCCHI.dnTxnIdWidth.W) // SNP TxnID for probe response; unused for voluntary EVT
+  val chi_tgt_id = UInt(DCacheCCHI.dnNodeIdWidth.W) // SNP SrcID, echoed as SnpResp/SnpRespData TgtID
   val trace_tag = UInt(1.W)
   val chi_channel = UInt(memChannelBits.W) // snoop resp only
 }
@@ -115,8 +116,12 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   val got_dbid = RegInit(false.B)
   val got_comp = RegInit(false.B)
-  val copyback_dbid = Reg(UInt(8.W))
-  val snp_txn_id = Reg(UInt(8.W))
+  val copyback_dbid = Reg(UInt(DCacheCCHI.dnTxnIdWidth.W))
+  // DBIDResp SrcID / Snp SrcID, echoed as CopyBackWrData / SnpResp(SnpRespData) TgtID
+  // (L2 routes UpRSP/UpDAT to slices by TgtID)
+  val copyback_tgt_id = Reg(UInt(DCacheCCHI.dnNodeIdWidth.W))
+  val snp_txn_id = Reg(UInt(DCacheCCHI.dnTxnIdWidth.W))
+  val snp_tgt_id = Reg(UInt(DCacheCCHI.dnNodeIdWidth.W))
   val trace_tag = Reg(UInt(1.W))
   val resp_channel = Reg(UInt(memChannelBits.W))
 
@@ -143,6 +148,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     assert(remain === 0.U)
     req := io.req.bits
     snp_txn_id := io.req.bits.chi_txn_id
+    snp_tgt_id := io.req.bits.chi_tgt_id
     trace_tag := io.req.bits.trace_tag
     resp_channel := Mux(io.req.bits.voluntary,
       selectMemChannel(io.req.bits.addr),
@@ -177,7 +183,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   when (phase === phase_probe_rsp) {
     io.txrsp.valid := busy
-    DCacheCCHI.Tx.snpResp(io.txrsp.bits, snp_txn_id, req.param, req.dirty, trace_tag,
+    DCacheCCHI.Tx.snpResp(io.txrsp.bits, snp_txn_id, snp_tgt_id, req.param, req.dirty, trace_tag,
       cchiDcacheSrcId(resp_channel))
     when (io.txrsp.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
@@ -189,7 +195,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   when (phase === phase_probe_dat) {
     io.txdat.valid := busy
-    DCacheCCHI.Tx.snpRespData(io.txdat.bits, snp_txn_id, req.param, req.dirty, beat, beat_data(beat),
+    DCacheCCHI.Tx.snpRespData(io.txdat.bits, snp_txn_id, snp_tgt_id, req.param, req.dirty, beat, beat_data(beat),
       req.corrupt, trace_tag, cchiDcacheSrcId(resp_channel))
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
@@ -218,7 +224,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   when (phase === phase_copyback) {
     io.txdat.valid := busy
-    DCacheCCHI.Tx.copyBackWrData(io.txdat.bits, copyback_dbid, beat, beat_data(beat), req.corrupt,
+    DCacheCCHI.Tx.copyBackWrData(io.txdat.bits, copyback_dbid, copyback_tgt_id, beat, beat_data(beat), req.corrupt,
       cchiDcacheSrcId(resp_channel), trace_tag)
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
@@ -257,6 +263,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
         assert(req.hasData)
         got_dbid := true.B
         copyback_dbid := io.rxrsp.bits.DBID
+        copyback_tgt_id := io.rxrsp.bits.SrcID
         when (CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode)) {
           got_comp := true.B
         }
