@@ -25,7 +25,7 @@ import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{CompressedSlotUopNumWidth, DecodeOutUop, NormalUopNumWidth, RenameOutUop, connectSamePort}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z}
 import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
@@ -337,7 +337,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }) // number of physical ROB entries allocated by the emitted uops
   val robIdxHead = RegInit(RobPtr(false.B, 0.U))
   val robIdxHeadNext = Mux(io.redirect.valid,
-      Mux(io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
+      Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
            Mux(canOut, robIdxHead.addEntries(validCount).asFormer, // instructions successfully entered next stage: increase robIdx
                       /* default */  robIdxHead)) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
@@ -349,13 +349,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   rat.io.snapshotEnds.foreach { snapshotEnds =>
     snapshotEnds.zipWithIndex.foreach { case (snapshotEnd, i) =>
-      snapshotEnd.valid := canOut && io.validVec(i) && io.in(i).bits.lastUop &&
-        needRobFlags(i) && !io.redirect.valid
+      val slotMask = Mux(slotIsFormer(i), formerSlotMaskVec(i), latterSlotMaskVec(i))
+      val actualSlotMask = slotMask & Cat(io.in.map(_.valid).reverse)
+      val isSlotTail = if (i == RenameWidth - 1) true.B else !actualSlotMask(RenameWidth - 1, i + 1).orR
+      snapshotEnd.valid := canOut && io.in(i).valid && io.in(i).bits.lastUop &&
+        isSlotTail && !io.redirect.valid
       snapshotEnd.bits := uops(i).robIdx
     }
     when(canOut && !io.redirect.valid) {
-      assert(PopCount(snapshotEnds.map(_.valid)) === validCount,
-        "diff RAT snapshots do not match allocated ROB entries")
+      val latterSlotCount = PopCount(io.in.zip(isEntryTailLane).zip(entryPairType).map {
+        case ((in, isEntryTail), pairType) =>
+          in.valid && in.bits.lastUop && isEntryTail && CompressType.isNotNORMAL(pairType)
+      })
+      assert(PopCount(snapshotEnds.map(_.valid)) === validCount +& latterSlotCount,
+        "diff RAT snapshots do not match allocated ROB segments")
     }
   }
 
@@ -365,11 +372,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uopDbg.pc := inDbg.pc
       uopDbg.debug_seqNum := inDbg.debug_seqNum
       uopDbg.instr := in.instr
-      uopDbg.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse))
+      val slotMask = Mux(slotIsFormer(i), formerSlotMaskVec(i), latterSlotMaskVec(i))
+      uopDbg.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse))
       // Only assign performance counters in debugInfo
       uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
       uopDbg.perfDebugInfo.renameTime := GTimer()
-      uopDbg.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
+      uopDbg.debug_sim_trig := (slotMask & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
     }
   }
   private val fuType       = uops.map(_.fuType)
@@ -407,16 +415,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   isMove zip io.in.map(_.bits) foreach {
     case (move, in) => move := Mux(in.exceptionVec.orR, false.B, in.isMove)
   }
-  val isJmp = Wire(Vec(RenameWidth, Bool()))
-  isJmp zip io.in.map(_.bits) foreach {
-    case (auij, in) => auij := Mux(in.exceptionVec.asUInt.orR, false.B, ALUOpType.isJmp(in.fuOpType) && (in.numWB === 2.U))
-  }
-
-  val isStore = Wire(Vec(RenameWidth, Bool()))
-  isStore zip io.in.map(_.bits) foreach {
-    case (st, in) => st := Mux(in.exceptionVec.asUInt.orR, false.B, FuType.isStore(in.fuType))
-  }
-
   val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
   val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
   def compactSlotNumWB(mask: UInt): UInt = {
@@ -437,8 +435,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkIntSpecWen = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
-
-  val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
 
   // Cross-cycle psrc(0) forwarding for JALR/JAL:
   // When link uop is at RenameWidth-1, capture its lsrc(0) RAT value.
@@ -499,7 +495,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).robIdx := robIdxHead.addEntries(PopCount(io.in.zip(isEntryTailLane).take(i).map { case (in, isEntryTail) =>
       in.valid && in.bits.lastUop && isEntryTail
     })).asFormer
-    uops(i).robIdx.slotIsFormer := slotIsFormer(i)
+    uops(i).robIdx.isFormer := slotIsFormer(i)
     uops(i).chanelIdx := i.U
     uops(i).firstUop := io.in(i).bits.firstUop && isEntryHeadLane(i)
     uops(i).lastUop := io.in(i).bits.lastUop && isEntryTailLane(i)
@@ -552,22 +548,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // make a latter-slot flag appear to belong to the former RobPtr and break
     // redirect cancellation in the current CSR dirty-state trackers.
     uops(i).commitType := io.in(i).bits.commitType
-    uops(i).wfflags := io.in(i).bits.wfflags
+    uops(i).fflagsWen := io.in(i).bits.fflagsWen
     uops(i).dirtyFs := io.in(i).bits.fpWen
-    uops(i).dirtyVs := (
-      // vector instructions' uopSplitType cannot be UopSplitType.SCA_SIM
-      io.in(i).bits.uopSplitType =/= UopSplitType.SCA_SIM &&
-      !UopSplitType.isAMOCAS(io.in(i).bits.uopSplitType) &&
-      // vfmv.f.s, vcpop.m, vfirst.m and vmv.x.s don't change vector state
-      !Seq(
-        (FuType.vmove, VmoveType.vfmv_f_s), // vfmv.f.s
-        (FuType.vipu, VipuType.vcpop_m),    // vcpop.m
-        (FuType.vipu, VipuType.vfirst_m),   // vfirst.m
-        (FuType.vmove, VmoveType.vmv_x_s)  // vmv.x.s
-      ).map(x => FuTypeOrR(io.in(i).bits.fuType, x._1) && io.in(i).bits.fuOpType === x._2).reduce(_ || _)
-    )
-    val simTrigMask = Cat(io.in.map(in => in.bits.instr === XSDebugDecode.SIM_TRIG).reverse)
-    uops(i).debug.foreach(_.debug_sim_trig := (slotMask & simTrigMask).orR)
+    uops(i).dirtyVs := io.in(i).bits.dirtyVs
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(intReadPortsData(i)(1), fpReadPortsData(i)(1), vecReadPortsData(i)(1)))
@@ -607,8 +590,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.srcType(0) := SrcType.no
     }
 
-    XSInfo(io.out(i).fire && (uops(i).formerInstrCnt > 1.U || uops(i).latterInstrCnt > 1.U),
-      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${uops(i).formerInstrCnt} latter=${uops(i).latterInstrCnt} mask=0x${Hexadecimal(compressMaskVec(i))}\n")
+    XSInfo(io.out(i).fire && (formerInstrCount(i) > 1.U || latterInstrCount(i) > 1.U),
+      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${formerInstrCount(i)} latter=${latterInstrCount(i)} mask=0x${Hexadecimal(compressMaskVec(i))}\n")
     // dirty code
     if (i == 0) {
       val jrFollowsLink = (io.in(0).bits.isJ || io.in(0).bits.isJr) && io.in(0).bits.lastUop && !io.in(0).bits.firstUop
@@ -690,8 +673,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       isXret,
       Itype.ExpIntReturn,
       Itype.jumpTypeGen(
-        inVec(i).fuType,
-        inVec(i).fuOpType,
+        inVec(i).isJ,
+        inVec(i).isJr,
+        FuType.isBrh(inVec(i).fuType),
         inVec(i).ldest.asTypeOf(new OpRegType),
         inVec(i).lsrc(0).asTypeOf(new OpRegType)
       )

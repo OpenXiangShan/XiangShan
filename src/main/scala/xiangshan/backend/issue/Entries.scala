@@ -55,7 +55,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   //entries status
   val entries             = Wire(Vec(params.numEntries, ValidIO(new EntryBundle(isDeq = true))))
   val robIdxVec           = Wire(Vec(params.numEntries, new RobPtr))
-  val chanelIdxVec        = Wire(Vec(params.numEntries, UInt(log2Up(RenameWidth).W)))
   val validVec            = Wire(Vec(params.numEntries, Bool()))
   val issuedVec           = Wire(Vec(params.numEntries, Bool()))
   val validForTrans       = VecInit(validVec.zip(issuedVec).map(x => x._1 && !x._2))
@@ -339,10 +338,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
 
     when (subDeqPolicyValidVec(0)) {
-      assert(Mux1H(io.subDeqSelOH.get(0), entries).bits.status.robIdx.isSameEntry(subDeqPolicyEntryVec(0).bits.status.robIdx), "subDeqSelOH(0) is not the same\n")
+      assert(Mux1H(io.subDeqSelOH.get(0), entries).bits.status.robIdx === subDeqPolicyEntryVec(0).bits.status.robIdx, "subDeqSelOH(0) is not the same\n")
     }
     when (subDeqPolicyValidVec(1)) {
-      assert(Mux1H(io.subDeqSelOH.get(1), entries).bits.status.robIdx.isSameEntry(subDeqPolicyEntryVec(1).bits.status.robIdx), "subDeqSelOH(1) is not the same\n")
+      assert(Mux1H(io.subDeqSelOH.get(1), entries).bits.status.robIdx === subDeqPolicyEntryVec(1).bits.status.robIdx, "subDeqSelOH(1) is not the same\n")
     }
   }
   else {
@@ -389,8 +388,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.simpEntryEnqSelVec.foreach(_   := finalSimpTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(SimpEntryNum, x._2.valid)))
   io.compEntryEnqSelVec.foreach(_   := finalCompTransSelVec.get.zip(compEnqVec.get).map(x => x._1 & Fill(CompEntryNum, x._2.valid)))
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
-  io.robIdx.foreach(_               := robIdxVec)
-  io.chanelIdx                      := chanelIdxVec
   io.validRegNext                   := validVecRegNext.asUInt
   io.issuedRegNext                  := issuedVecRegNext.asUInt
   io.debugRobIdxVec.foreach(_       := robIdxVec)
@@ -418,7 +415,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
-    chanelIdxVec(entryIdx)      := out.chanelIdx
     isFirstIssueVec(entryIdx)   := out.isFirstIssue
     entries(entryIdx)           := out.entry
     deqPortIdxReadVec(entryIdx) := out.deqPortIdxRead
@@ -563,15 +559,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true)))
   val deqOg1Payload       = Output(MixedVec(params.exuBlockParams.map(x => new IssueQueueDeqOg1Payload(x))))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
-  val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
-
-  // vec mem only
-  val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {
-    val sqDeqPtr          = Input(new SqPtr)
-    val lqDeqPtr          = Input(new LqPtr)
-  })
-  val robIdx = OptionWrapper(params.isVecMemIQ, Output(Vec(params.numEntries, new RobPtr)))
-  val chanelIdx = Output(Vec(params.numEntries, UInt(log2Up(RenameWidth).W)))
 
   // trans
   val simpEntryDeqSelVec = OptionWrapper(params.hasCompAndSimp, Vec(params.numEnq, Input(UInt(params.numSimp.W))))

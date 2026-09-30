@@ -120,6 +120,9 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val isLastInFtqEntry = Bool()
+    val vtype = new VType()
+    val specvtype = new VType()
     val instr = UInt(32.W)
     val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
@@ -150,6 +153,7 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
     val instr = UInt(32.W)
     // commitType will be used in rob to calculate lsq commit count
@@ -239,7 +243,6 @@ object Bundles {
     val trigger = TriggerAction()
     val isRVC = Bool()
     val slotHeadRvcMask = UInt(2.W)
-    val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -283,7 +286,6 @@ object Bundles {
     val lastUop = Bool()
     val numWB = NumWB() // rob need this
     val latency = Latency()
-    val numUops = UInt(log2Up(MaxUopSize).W) // rob need this
     val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
     val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
     // rename
@@ -661,7 +663,6 @@ object Bundles {
     val isVset          = Bool()
     val firstUop        = Bool()
     val lastUop         = Bool()
-    val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = NumWB() // rob need this
     val latency         = Latency()
     val formerNumWB     = UInt(log2Up(MaxUopSize + 1).W) // rob need this
@@ -1751,7 +1752,7 @@ object Bundles {
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
     // Identifies the faulting slot when two instructions share one ROB entry.
-    val slotIsFormer = Bool()
+    val isFormer = Bool()
   }
 
   object UopIdx extends NamedUInt(3)

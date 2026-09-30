@@ -148,6 +148,7 @@ class FltIssuePipe(
       readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx) && readRf
       readBundle.addr := is1Next.bits.psrc(srcIdx)
       readBundle.robIdx := is1Next.bits.robIdx
+      readBundle.chanelIdx := is1Next.bits.chanelIdx
   }
 
   is1Next.valid := is0.valid && !is0Flush && !is0Failed && !is1RespSrcCancelNext.reduce(_ || _)

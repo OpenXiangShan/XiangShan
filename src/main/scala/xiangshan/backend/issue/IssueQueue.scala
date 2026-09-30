@@ -10,7 +10,6 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
 import xiangshan.backend.rob.RobPtr

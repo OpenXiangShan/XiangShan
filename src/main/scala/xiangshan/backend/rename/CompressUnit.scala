@@ -34,6 +34,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 
 object CompressType {
   def NORMAL = "b00".U // Complex/Simple/Simplesss
@@ -94,15 +95,19 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     !CommitType.isLoadStore(x.bits.commitType) && !FuType.isFence(x.bits.fuType) && !FuType.isCsr(x.bits.fuType) && !FuType.isVset(x.bits.fuType) && !FuType.isAMO(x.bits.fuType)
   }
 
-  val cannotCompressVec = VecInit(io.in.map{ x =>
-    // The current VTypeBuffer tracks one commit token per vector-state uop,
-    // while a compressed ROB entry exposes only one entry-level needVTB bit.
-    // Keep vset and vector-memory instructions in independent entries so no
-    // VTypeBuffer token can be hidden in the latter slot. A split instruction
-    // must also keep the target ROB's existing firstUop/lastUop allocation
-    // semantics instead of treating each emitted uop as an architectural slot.
+  val isVectorInstrVec = VecInit(io.in.map { x =>
+    // OP-V includes scalar-result vector operations and vset; OP-VE contains
+    // vector crypto. Decode's legacy vlsInstr is not populated by the current
+    // decoder, so identify vector memory from the architectural instruction.
+    val inst = x.bits.instr.asTypeOf(new XSInstBitFields)
+    inst.isVecArith || inst.isVecLoad || inst.isVecStore ||
+      inst.OPCODE === "b1110111".U
+  })
+  val cannotCompressVec = VecInit(io.in.zip(isVectorInstrVec).map { case (x, isVectorInstr) =>
+    // All vector instructions retain the mainline retirement/exception path.
+    // Split instructions also keep its firstUop/lastUop allocation semantics.
     x.valid && (x.bits.waitForward || x.bits.blockBackward ||
-      FuType.isVset(x.bits.fuType) || FuType.isVArithMem(x.bits.fuType) ||
+      isVectorInstr ||
       !x.bits.firstUop || !x.bits.lastUop)
   })
 
@@ -126,8 +131,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val isCboVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType) && LSUOpType.isCboAll(x.bits.fuOpType)))
   val rawNoCompressTypeVec = VecInit(io.in.zip(isCboVec).zip(cannotCompressVec).zip(slotNeedsFlushVec).map { case (((x, isCbo), cannotCompress), slotNeedsFlush) =>
     x.valid && (io.forceNoCompress ||
-      FuType.isVArithMem(x.bits.fuType) ||
-      FuType.isVset(x.bits.fuType) ||
       FuType.isCsr(x.bits.fuType) ||
       FuType.isFence(x.bits.fuType) ||
       FuType.isAMO(x.bits.fuType) ||

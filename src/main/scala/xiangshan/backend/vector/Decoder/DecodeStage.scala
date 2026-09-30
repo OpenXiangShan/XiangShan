@@ -8,6 +8,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -160,6 +161,13 @@ class DecodeStageImp(
         bits.blockBackward := uopInfo.blockBack
         bits.flushPipe := uopInfo.flushPipe
         bits.canRobCompress := uopInfo.canRobCompress
+        // Simple instructions may share a high-density CROB segment. Complex
+        // scalar instructions retain their own segment and observation slot.
+        bits.simple := uopInfo.canRobCompress && in.fromCSR.custom.high_density_rob_compression_enable &&
+          !FuType.isLoadStore(uopInfo.fuType) && !FuType.isBJU(uopInfo.fuType) &&
+          !FuType.isAMO(uopInfo.fuType) && !FuType.isFence(uopInfo.fuType) &&
+          !FuType.isCsr(uopInfo.fuType) && !FuType.isVset(uopInfo.fuType) &&
+          !uopInfo.vpWen && !uopInfo.dirtyVs
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
         bits.src12Rev := uopInfo.src12Rev

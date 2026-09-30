@@ -143,6 +143,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
   csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
   csrMod.io.fromRob.trap.bits.isFormer := csrIn.exception.bits.isFormer
+  csrMod.io.fromRob.diffCommitForTrap.zip(csrIn.diffCommitForTrap).foreach { case (sink, source) =>
+    sink := source
+  }
+  csrIn.diffArchEvent.zip(csrMod.io.diffArchEvent).foreach { case (sink, source) =>
+    sink := source
+  }
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -598,6 +604,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val custom = new Bundle {
     // Rename
     val fusion_enable = Bool()
+    val high_density_rob_compression_enable = Bool()
     val wfi_enable = Bool()
   }
 
