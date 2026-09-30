@@ -262,8 +262,7 @@ class MainBtbAlignBank(
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
-
-    t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
+    t1_counterWayMask(i) := entryOverridden || (hitMask.reduce(_ || _) && !meta.counter.shouldHold(actualTaken))
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
   private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
