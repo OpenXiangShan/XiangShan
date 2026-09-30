@@ -509,7 +509,7 @@ def _wait_initial_refill(env) -> None:
     )
 
 
-def _assert_clean(env) -> None:
+def _cleanup_missunit(env) -> None:
     _clear_soft_prefetch(env)
     env.icache_agent.set_a_ready(None)
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
@@ -518,7 +518,20 @@ def _assert_clean(env) -> None:
     if fencei is not None:
         fencei.value = 0
     _set_predictors(env, True)
+
+
+def _assert_clean(env) -> None:
+    _cleanup_missunit(env)
     assert not env.monitor.get_errors()
+
+
+@pytest.fixture(autouse=True)
+def missunit_cleanup(env):
+    """Restore MissUnit controls even when a scenario fails mid-sequence."""
+    try:
+        yield
+    finally:
+        _cleanup_missunit(env)
 
 
 @pytest.mark.funcov_bins("BIN-690")

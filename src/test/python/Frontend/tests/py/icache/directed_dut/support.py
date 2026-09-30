@@ -7,7 +7,7 @@ test module. These helpers only centralize operations with identical behavior.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 
 def cycle_limit(name: str, default: int) -> int:
@@ -96,6 +96,39 @@ def wait_coverage_hit(
         label=f"{group}.{bin_name}",
         snapshot=snapshot,
         diagnostics=diagnostics,
+    )
+
+
+def wait_coverage_hits(
+    env,
+    targets: Iterable[tuple[str, str]],
+    *,
+    max_cycles: int,
+    snapshot: Callable[[], object] | None = None,
+    diagnostics: Callable[[], Mapping[str, object]] | None = None,
+) -> None:
+    """Wait until every requested functional-coverage key is hit."""
+    expected = tuple((str(group), str(name)) for group, name in targets)
+    remaining = set(expected)
+
+    def all_hit() -> bool:
+        remaining.difference_update(
+            target for target in remaining if env.functional_coverage.key_hit(*target)
+        )
+        return not remaining
+
+    if all_hit():
+        return
+    wait_until(
+        env,
+        all_hit,
+        max_cycles=max_cycles,
+        label="functional coverage targets",
+        snapshot=snapshot,
+        diagnostics=lambda: {
+            "missing": sorted(f"{group}.{name}" for group, name in remaining),
+            **(dict(diagnostics()) if diagnostics is not None else {}),
+        },
     )
 
 

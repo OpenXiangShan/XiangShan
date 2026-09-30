@@ -330,7 +330,7 @@ def _wait_funcov_hit_checker_clean(
     wait_until(
         env,
         no_checker_error,
-        max_cycles=1,
+        max_cycles=int(max_cycles),
         label=label,
         snapshot=lambda: _waylookup_snapshot(env),
     )
