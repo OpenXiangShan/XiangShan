@@ -3,7 +3,7 @@ package xiangshan.backend.rename.freelist
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.{ParallelPriorityEncoder, ParallelPosteriorityEncoder, ParallelSelectTwo, SelectTwoInterRes}
+import utility.{ParallelPosteriorityEncoder, ParallelPosteriorityMux, ParallelPriorityEncoder, ParallelPriorityMux, ParallelSelectTwo, SelectTwoInterRes}
 import xiangshan.{XSBundle, XSModule}
 
 class NewFLManager(
@@ -58,9 +58,12 @@ class NewFLManager(
   val allocateCount = PopCount(in.allocateReq)
   val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
   val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
-  // Head entries consumed this cycle free slots that can be reused by the
-  // append stream at tail, including when the queue was full at cycle start.
-  val s1EnqueueCapacity = s1FreeCount +& s1DequeueCount
+  // Do not put the dequeue control signal on the refill/write-address cone.
+  // A queue that starts full is allowed to refill on the following cycle;
+  // with renameWidth entries available after the dequeue, this preserves the
+  // steady-state refill rate while removing in.doAllocate from the critical
+  // path to every s1Queue D pin.
+  val s1EnqueueCapacity = s1FreeCount
 
   /** Stage 0: select up to two candidates from every bank. */
   // Keep flush/capacity control out of the bitmap and bank priority encoders.
@@ -68,6 +71,10 @@ class NewFLManager(
   // selected candidates, so it does not drive a 160-bit search network.
   val s0AllocBitmap = in.freeBitmap & ~reservedBitmap
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
+  // Keep a one-hot form alongside the binary candidate index.  The binary
+  // form is needed by the queue data path, while the reservation bitmap can
+  // consume the one-hot form directly and avoid an encoder/decoder round trip.
+  val s0CandidateOH = Wire(Vec(renameWidth, UInt(numPhyRegs.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
   val s0BankCandidateCount = Wire(Vec(bankCount, UInt(2.W)))
   for (bankIndex <- 0 until bankCount) {
@@ -82,8 +89,22 @@ class NewFLManager(
     // a 32/40-entry constant vector after priority encoding.
     val firstInBank = ParallelPriorityEncoder(bankBitmap)
     val lastInBank = ParallelPosteriorityEncoder(bankBitmap)
+    val firstInBankOH = ParallelPriorityMux(
+      bankBitmap.asBools,
+      (0 until bankPRegs.length).map(row => UIntToOH(row.U, bankPRegs.length))
+    )
+    val lastInBankOH = ParallelPosteriorityMux(
+      bankBitmap.asBools,
+      (0 until bankPRegs.length).map(row => UIntToOH(row.U, bankPRegs.length))
+    )
     val firstCandidate = (firstInBank << bankIndexWidth) | bankIndex.U
     val lastCandidate = (lastInBank << bankIndexWidth) | bankIndex.U
+    val firstCandidateOH = VecInit(Seq.tabulate(numPhyRegs) { preg =>
+      if (preg % bankCount == bankIndex) firstInBankOH(preg / bankCount) else false.B
+    }).asUInt
+    val lastCandidateOH = VecInit(Seq.tabulate(numPhyRegs) { preg =>
+      if (preg % bankCount == bankIndex) lastInBankOH(preg / bankCount) else false.B
+    }).asUInt
     // The count path only needs to know whether a second bit exists.  Avoid
     // comparing the two encoder outputs here: the posteriority encoder is
     // still needed for the last candidate, but feeding it into the count
@@ -102,6 +123,8 @@ class NewFLManager(
     val lastCandidateIdx = renameWidth - 1 - bankIndex
     s0Candidates(bankIndex) := firstCandidate
     s0Candidates(lastCandidateIdx) := lastCandidate
+    s0CandidateOH(bankIndex) := firstCandidateOH
+    s0CandidateOH(lastCandidateIdx) := lastCandidateOH
     s0CandidateValid(bankIndex) := !in.flush && bankHasCandidate
     s0CandidateValid(lastCandidateIdx) :=
       !in.flush && bankHasCandidate && bankHasTwoCandidates
@@ -140,9 +163,14 @@ class NewFLManager(
     rawCandidateCount
   )
   val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
+    val candidateOH = if (candidateIdx < renameWidth) {
+      s0CandidateOH(candidateIdx)
+    } else {
+      UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs)
+    }
     Mux(
       enqueueValid(candidateIdx),
-      UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs),
+      candidateOH,
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
