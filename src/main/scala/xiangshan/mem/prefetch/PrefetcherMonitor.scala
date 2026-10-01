@@ -102,8 +102,9 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val nack_prefetch_raw = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _) || io.maininfo.nack_prefetch
   val pf_late_in_cache = io.loadinfo.map(t => t.pf_late_in_cache).reduce(_ || _) || io.maininfo.pf_late_in_cache
   val pf_late_in_mshr = io.missinfo.pf_late_in_mshr
-  val nack_prefetch = nack_prefetch_raw && !pf_late_in_mshr
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
+  val nack_prefetch = nack_prefetch_raw && !pf_late_in_mshr
+
   // demand accesses from different ldu may hit different prefetch blocks
   val hit_pf_in_cache = PopCount(prefetch_info.loadinfo.map(t => t.hit_pf_in_cache) ++
     Seq(prefetch_info.maininfo.hit_pf_in_cache) ++ io.bufferinfo.first_use.map(_.valid))
@@ -178,32 +179,21 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val enable = RegInit(true.B)
   val confidence = RegInit(param.confidence.U(1.W))
 
-  // TODO: mshr number
-  // mshr full && load miss && load send mshr req && !load match,  -> decr nmax prefetch
-  // mshr free
-
   io.pf_ctrl.dynamic_depth := depth
   io.pf_ctrl.flush := flush
   io.pf_ctrl.enable := enable
   io.pf_ctrl.confidence := confidence
 
-  val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
-
-  val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
-  val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
-  val pf_late_in_mshr_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
-
-  val hit_pf_in_cache_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
-  val pf_useless_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
-
   val back_off_cnt = RegInit(0.U((log2Up(param.BACK_OFF_INTERVAL) + 1).W))
   val low_conf_cnt = RegInit(0.U((log2Up(param.LOW_CONF_INTERVAL) + 1).W))
-
-  val timely_reset = (total_prefetch_cnt === param.TIMELY_CHECK_INTERVAL.U) || (pf_late_in_cache_cnt >= param.TIMELY_CHECK_INTERVAL.U)
-  val validity_reset = (hit_pf_in_cache_cnt +& pf_useless_cnt) >= param.VALIDITY_CHECK_INTERVAL.U
   val back_off_reset = back_off_cnt === param.BACK_OFF_INTERVAL.U
   val conf_reset = low_conf_cnt === param.LOW_CONF_INTERVAL.U
+  back_off_cnt := Mux(back_off_reset, 0.U, back_off_cnt + !enable)
+  low_conf_cnt := Mux(confidence.asBool, 0.U, low_conf_cnt + 1.U)
+
+  enable := Mux(back_off_reset, true.B, enable)
+  confidence := Mux(conf_reset, 1.U(1.W), confidence)
+  flush := Mux(flush, false.B, flush)
 
   val total_prefetch = io.prefetch_info.loadinfo.map(t => t.total_prefetch && param.isMyType(t.pf_source)).reduce(_ || _) || (io.prefetch_info.maininfo.total_prefetch && param.isMyType(io.prefetch_info.maininfo.pf_source))
   val pf_late_in_cache = io.prefetch_info.loadinfo.map(t => t.pf_late_in_cache && param.isMyType(t.pf_source)).reduce(_ || _) || (io.prefetch_info.maininfo.pf_late_in_cache && param.isMyType(io.prefetch_info.maininfo.pf_source))
@@ -221,58 +211,181 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val hit_pf = hit_pf_in_cache + hit_pf_in_mshr
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr
 
-  total_prefetch_cnt := Mux(timely_reset, 0.U, total_prefetch_cnt + total_prefetch)
-  pf_late_in_cache_cnt := Mux(timely_reset, 0.U, pf_late_in_cache_cnt + pf_late_in_cache)
-  pf_late_in_mshr_cnt := Mux(timely_reset, 0.U, pf_late_in_mshr_cnt + pf_late_in_mshr)
-  hit_pf_in_cache_cnt := Mux(validity_reset, 0.U, hit_pf_in_cache_cnt + hit_pf_in_cache)
-  pf_useless_cnt := Mux(validity_reset, 0.U, pf_useless_cnt + pf_useless)
+  // DynamicPrefetcher
+  val base_depth = Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 4)
+  val MAX_BITS = 7
+  val max_depth = (1 << (MAX_BITS-1)).U(DEPTH_BITS.W)
+  val at_base_depth = depth === base_depth
+  val at_max_depth = depth === max_depth
 
-  back_off_cnt := Mux(back_off_reset, 0.U, back_off_cnt + !enable)
-  low_conf_cnt := Mux(conf_reset, 0.U, low_conf_cnt + !confidence.asBool)
+  // stat
+  val sent_cnt = RegInit(0.U((log2Up(2*param.WINDOW_SIZE)).W))
+  val cur_late = RegInit(0.U((log2Up(4*param.WINDOW_SIZE)).W))
+  val cur_hit_pf_in_cache = RegInit(0.U((log2Up(2*param.WINDOW_SIZE)).W))
+  val cur_useless = RegInit(0.U((log2Up(2*param.WINDOW_SIZE)).W))
+  val prev_late = RegInit(0.U((log2Up(4*param.WINDOW_SIZE)).W))
+  val prev_hit_pf_in_cache = RegInit(0.U((log2Up(2*param.WINDOW_SIZE)).W))
+  val prev_useless = RegInit(0.U((log2Up(2*param.WINDOW_SIZE)).W))
 
-  val trigger_late_hit = timely_reset && (pf_late_in_cache_cnt >= param.LATE_HIT_THRESHOLD.U)
-  val trigger_late_miss = timely_reset && (pf_late_in_mshr_cnt >= param.LATE_MISS_THRESHOLD.U)
-  val trigger_pf_useless = validity_reset && (pf_useless_cnt >= param.BAD_THRESHOLD.U)
-  val trigger_disable = validity_reset && (pf_useless_cnt >= param.DISABLE_THRESHOLD.U)
+  val window_end = sent_cnt === param.WINDOW_SIZE.U
+  val window_fire = window_end && enable
 
-  flush := Mux(flush, false.B, flush)
-  enable := Mux(back_off_reset, true.B, enable)
-  confidence := Mux(conf_reset, 1.U(1.W), confidence)
+  sent_cnt := Mux(window_end, 0.U, sent_cnt + total_prefetch)
+  cur_late := Mux(window_end, 0.U, cur_late + pf_late + hit_pf_in_mshr)
+  cur_hit_pf_in_cache := Mux(window_end, 0.U, cur_hit_pf_in_cache + hit_pf_in_cache)
+  cur_useless := Mux(window_end, 0.U, cur_useless + pf_useless)
 
-  when(trigger_pf_useless) {
-    depth := Mux(depth === 1.U, depth, depth >> 1)
+  val window_fire_interval = RegInit(0.U(32.W))
+  val window_fire_seen = RegInit(false.B)
+  val window_fire_interval_sample = window_fire && window_fire_seen
+  val window_fire_interval_value = window_fire_interval
+  when(window_fire) {
+    window_fire_interval := 1.U
+    window_fire_seen := true.B
+  }.elsewhen(window_fire_interval =/= "hffffffff".U(32.W)) {
+    window_fire_interval := window_fire_interval + 1.U
   }
-  when(trigger_disable) {
-    confidence := 0.U(1.W)
-    enable := false.B
-    flush := true.B
-  }
 
-  when(trigger_late_miss) {
-    depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
-  }.elsewhen(trigger_late_hit) {
-    // for now, late hit will disable the prefether
-    confidence := 0.U(1.W)
-    enable := false.B
-  }
+  // disable
+  val disable_request = RegInit(false.B)
+  val down_request = RegInit(false.B)
+  val validity_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
+  val useless_cnt = RegInit(0.U((log2Up(param.VALIDITY_CHECK_INTERVAL) + 1).W))
+  val validity_check = validity_cnt >= param.VALIDITY_CHECK_INTERVAL.U
+  val trigger_disable = validity_check && useless_cnt >= param.DISABLE_THRESHOLD.U
+  val trigger_down = validity_check && useless_cnt >= param.BAD_THRESHOLD.U
+  val old_depth = RegNext(depth, init = base_depth)
+  val depth_change_fire = old_depth =/= depth
 
-  // Keep automatic prefetcher shutoff disabled by default; allow explicit opt-in.
-  val enableDynamicPrefetcher_const = Constantin.createRecord(s"${param.name}_enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 0)
-  val enableDynamicPrefetcher = (enableDynamicPrefetcher_const === 1.U)
-
-  when(!enableDynamicPrefetcher) {
-    depth := depth_const
-    flush := false.B
-    enable := true.B
-    confidence := 1.U
+  when(depth_change_fire) {
+    validity_cnt := 0.U
+    useless_cnt := 0.U
+    disable_request := false.B
+    down_request := false.B
   }.otherwise {
-    // for now, only dynamically disable prefetcher, without depth and flush
-    depth := depth_const
-    flush := false.B
+    validity_cnt := Mux(validity_check, 0.U, validity_cnt + hit_pf + pf_useless)
+    useless_cnt := Mux(validity_check, 0.U, useless_cnt + pf_useless)
+    disable_request := Mux(validity_check, trigger_disable, disable_request)
+    down_request := Mux(validity_check, trigger_down, down_request)
   }
 
+  // block
+  val up_blocked_depth = RegInit(0.U(DEPTH_BITS.W))
+  val up_back_off_cnt = RegInit(0.U(5.W))
+  val up_target = depth << 1
+  val up_blocked = up_back_off_cnt =/= 0.U && up_target === up_blocked_depth
+  val high_depth_backoff = Mux(depth >= 64.U(DEPTH_BITS.W), 16.U(5.W),
+    Mux(depth >= 32.U(DEPTH_BITS.W), 8.U(5.W), 2.U(5.W))
+  )
+
+  // State
+  val s_idle :: s_buffer :: s_decision :: s_skip1 :: s_skip2 :: Nil = Enum(5)
+  val state = RegInit(s_idle)
+
+  val cur_late_high = cur_late >= param.LATE_HIT_THRESHOLD.U
+  val bad_return_by_hit = cur_hit_pf_in_cache + param.HIT_MARGIN.U <= prev_hit_pf_in_cache
+  val bad_return_by_useless = cur_useless >= prev_useless + param.HIT_MARGIN.U
+  val bad_return = bad_return_by_hit || bad_return_by_useless
+  val pending_disable_request = disable_request || trigger_disable
+  val pending_down_request = down_request || trigger_down
+  val up = cur_late_high && !up_blocked && !pending_disable_request && !pending_down_request && !at_max_depth
+  val block = cur_late_high && up_blocked && !pending_disable_request && !pending_down_request && !at_max_depth
+  val bad_down = pending_down_request && !pending_disable_request && !at_base_depth
+  val disable_down = pending_disable_request && !at_base_depth
+  val disable = pending_disable_request && at_base_depth
+
+  val in_idle = state === s_idle
+  val in_buffer = state === s_buffer
+  val in_decision = state === s_decision
+  val up_fire = window_fire && in_idle && up
+  val block_fire = window_fire && in_idle && block
+  val bad_down_fire = window_fire && in_idle && bad_down
+  val disable_down_fire = window_fire && in_idle && disable_down
+  val disable_fire = window_fire && in_idle && disable
+  val decision_accept_fire = window_fire && in_decision && !bad_return
+  val bad_return_fire = window_fire && in_decision && bad_return
+  val bad_return_by_hit_fire = window_fire && in_decision && bad_return_by_hit
+  val bad_return_by_useless_fire = window_fire && in_decision && bad_return_by_useless
+  val bad_return_by_both_fire = bad_return_by_hit_fire && bad_return_by_useless
+  val bad_return_by_hit_only_fire = bad_return_fire && bad_return_by_hit && !bad_return_by_useless
+  val bad_return_by_useless_only_fire = bad_return_fire && !bad_return_by_hit && bad_return_by_useless
+
+  val idle_late_high_fire = window_fire && in_idle && cur_late_high
+  val idle_no_action_fire = window_fire && in_idle && !(up || block || disable_down || bad_down || disable)
+  val up_suppressed_by_at_max_fire = idle_late_high_fire && at_max_depth
+  val up_suppressed_by_pending_disable_fire = idle_late_high_fire && !at_max_depth && pending_disable_request
+  val up_suppressed_by_pending_down_fire = idle_late_high_fire && !at_max_depth && !pending_disable_request && pending_down_request
+  val up_suppressed_by_backoff_fire = idle_late_high_fire && !at_max_depth && !pending_disable_request && !pending_down_request && up_blocked
+  val pending_down_at_base_fire = window_fire && in_idle && at_base_depth && pending_down_request && !pending_disable_request
+  val pending_disable_at_base_fire = window_fire && in_idle && at_base_depth && pending_disable_request
+  val late_high_pending_down_at_base_fire = idle_late_high_fire && at_base_depth && pending_down_request && !pending_disable_request
+  val late_high_pending_disable_at_base_fire = idle_late_high_fire && at_base_depth && pending_disable_request
+
+  val validity_check_fire = validity_check && enable && !depth_change_fire
+  val trigger_down_fire = trigger_down && validity_check_fire
+  val trigger_disable_fire = trigger_disable && validity_check_fire
+  val bad_down_by_reg_fire = bad_down_fire && down_request
+  val bad_down_by_trigger_fire = bad_down_fire && trigger_down
+  val disable_down_by_reg_fire = disable_down_fire && disable_request
+  val disable_down_by_trigger_fire = disable_down_fire && trigger_disable
+  val disable_by_reg_fire = disable_fire && disable_request
+  val disable_by_trigger_fire = disable_fire && trigger_disable
+  val trigger_down_and_disable_fire = trigger_down_fire && trigger_disable_fire
+  val hit_loss = Mux(prev_hit_pf_in_cache > cur_hit_pf_in_cache, prev_hit_pf_in_cache - cur_hit_pf_in_cache, 0.U)
+  val hit_gain = Mux(cur_hit_pf_in_cache > prev_hit_pf_in_cache, cur_hit_pf_in_cache - prev_hit_pf_in_cache, 0.U)
+  val late_reduction = Mux(prev_late > cur_late, prev_late - cur_late, 0.U)
+  val late_increase = Mux(cur_late > prev_late, cur_late - prev_late, 0.U)
+  val useless_increase = Mux(cur_useless > prev_useless, cur_useless - prev_useless, 0.U)
+  val useless_decrease = Mux(prev_useless > cur_useless, prev_useless - cur_useless, 0.U)
+
+  when(window_fire) {
+    switch(state) {
+      is(s_idle) {
+        when (up) {
+          depth := depth << 1
+          state := s_buffer
+          prev_late := cur_late
+          prev_hit_pf_in_cache := cur_hit_pf_in_cache
+          prev_useless := cur_useless
+        }.elsewhen(block) {
+          up_back_off_cnt := up_back_off_cnt - 1.U
+        }.elsewhen(disable_down) {
+          depth := base_depth
+          state := s_skip1
+        }.elsewhen(bad_down) {
+          depth := depth >> 1
+          state := s_skip1
+          up_blocked_depth := depth
+          up_back_off_cnt := high_depth_backoff
+        }.elsewhen(disable) {
+          enable := false.B
+          flush := true.B
+          confidence := 0.U(1.W)
+          up_back_off_cnt := 0.U
+        }
+      }
+      is(s_buffer) {
+        state := s_decision
+      }
+      is(s_decision) {
+        when (bad_return) {
+          up_back_off_cnt := high_depth_backoff
+          up_blocked_depth := depth
+          depth := Mux(at_base_depth, base_depth, depth >> 1)
+        }
+        state := s_idle
+      }
+      is(s_skip1) {
+        state := s_skip2
+      }
+      is(s_skip2) {
+        state := s_idle
+      }
+    }
+  }
   when(reset.asBool) {
-    depth := depth_const
+    depth := base_depth
+    up_blocked_depth := base_depth
   }
 
   val pfTypes: Seq[(String, UInt => Bool)] = Seq(
@@ -302,15 +415,125 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   XSPerfAccumulate(s"l1prefetchUseless${param.name}", pf_useless)
   XSPerfAccumulate(s"l1prefetchDropByNack${param.name}", nack_prefetch)
   XSPerfAccumulate(s"mshr_count_Prefetch${param.name}", prefetch_miss)
-  for(i <- (0 until DEPTH_BITS)) {
-    val t = (1 << i)
-    XSPerfAccumulate(s"${param.name}_depth${t}", depth === t.U)
+  XSPerfAccumulate(s"${param.name}_window_fire", window_fire)
+  XSPerfAccumulate(s"${param.name}_state_idle_window", window_fire && in_idle)
+  XSPerfAccumulate(s"${param.name}_state_buffer_window", window_fire && in_buffer)
+  XSPerfAccumulate(s"${param.name}_state_decision_window", window_fire && in_decision)
+  XSPerfAccumulate(s"${param.name}_state_skip1_window", window_fire && state === s_skip1)
+  XSPerfAccumulate(s"${param.name}_state_skip2_window", window_fire && state === s_skip2)
+  XSPerfAccumulate(s"${param.name}_late_high_window", window_fire && cur_late_high)
+  XSPerfAccumulate(s"${param.name}_up_fire", up_fire)
+  XSPerfAccumulate(s"${param.name}_up_blocked_fire", block_fire)
+  XSPerfAccumulate(s"${param.name}_bad_down_fire", bad_down_fire)
+  XSPerfAccumulate(s"${param.name}_down_to_base_fire", disable_down_fire)
+  XSPerfAccumulate(s"${param.name}_disable_request_fire", window_fire && in_idle && disable_request)
+  XSPerfAccumulate(s"${param.name}_disable_at_base_fire", disable_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_fire", bad_return_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_by_hit_fire", bad_return_by_hit_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_by_useless_fire", bad_return_by_useless_fire)
+  XSPerfAccumulate(s"${param.name}_decision_accept_fire", decision_accept_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_by_hit_only_fire", bad_return_by_hit_only_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_by_useless_only_fire", bad_return_by_useless_only_fire)
+  XSPerfAccumulate(s"${param.name}_bad_return_by_both_fire", bad_return_by_both_fire)
+  XSPerfAccumulate(s"${param.name}_idle_no_action_fire", idle_no_action_fire)
+  XSPerfAccumulate(s"${param.name}_up_suppressed_by_at_max_fire", up_suppressed_by_at_max_fire)
+  XSPerfAccumulate(s"${param.name}_up_suppressed_by_pending_disable_fire", up_suppressed_by_pending_disable_fire)
+  XSPerfAccumulate(s"${param.name}_up_suppressed_by_pending_down_fire", up_suppressed_by_pending_down_fire)
+  XSPerfAccumulate(s"${param.name}_up_suppressed_by_backoff_fire", up_suppressed_by_backoff_fire)
+  XSPerfAccumulate(s"${param.name}_pending_down_at_base_fire", pending_down_at_base_fire)
+  XSPerfAccumulate(s"${param.name}_pending_disable_at_base_fire", pending_disable_at_base_fire)
+  XSPerfAccumulate(s"${param.name}_late_high_pending_down_at_base_fire", late_high_pending_down_at_base_fire)
+  XSPerfAccumulate(s"${param.name}_late_high_pending_disable_at_base_fire", late_high_pending_disable_at_base_fire)
+  XSPerfAccumulate(s"${param.name}_validity_check_fire", validity_check_fire)
+  XSPerfAccumulate(s"${param.name}_trigger_down_fire", trigger_down_fire)
+  XSPerfAccumulate(s"${param.name}_trigger_disable_fire", trigger_disable_fire)
+  XSPerfAccumulate(s"${param.name}_trigger_down_and_disable_fire", trigger_down_and_disable_fire)
+  XSPerfAccumulate(s"${param.name}_bad_down_by_reg_fire", bad_down_by_reg_fire)
+  XSPerfAccumulate(s"${param.name}_bad_down_by_trigger_fire", bad_down_by_trigger_fire)
+  XSPerfAccumulate(s"${param.name}_down_to_base_by_reg_fire", disable_down_by_reg_fire)
+  XSPerfAccumulate(s"${param.name}_down_to_base_by_trigger_fire", disable_down_by_trigger_fire)
+  XSPerfAccumulate(s"${param.name}_disable_by_reg_fire", disable_by_reg_fire)
+  XSPerfAccumulate(s"${param.name}_disable_by_trigger_fire", disable_by_trigger_fire)
+  XSPerfAccumulate(s"${param.name}_window_fire_interval_sample", window_fire_interval_sample)
+  XSPerfAccumulate(s"${param.name}_window_fire_interval_sum", Mux(window_fire_interval_sample, window_fire_interval_value, 0.U))
+  XSPerfAccumulate(s"${param.name}_window_late_sum", Mux(window_fire, cur_late, 0.U))
+  XSPerfAccumulate(s"${param.name}_window_hit_cache_sum", Mux(window_fire, cur_hit_pf_in_cache, 0.U))
+  XSPerfAccumulate(s"${param.name}_window_useless_sum", Mux(window_fire, cur_useless, 0.U))
+  XSPerfAccumulate(s"${param.name}_up_prev_late_sum", Mux(up_fire, cur_late, 0.U))
+  XSPerfAccumulate(s"${param.name}_up_prev_hit_cache_sum", Mux(up_fire, cur_hit_pf_in_cache, 0.U))
+  XSPerfAccumulate(s"${param.name}_up_prev_useless_sum", Mux(up_fire, cur_useless, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_prev_late_sum", Mux(window_fire && in_decision, prev_late, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_prev_hit_cache_sum", Mux(window_fire && in_decision, prev_hit_pf_in_cache, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_prev_useless_sum", Mux(window_fire && in_decision, prev_useless, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_cur_late_sum", Mux(window_fire && in_decision, cur_late, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_cur_hit_cache_sum", Mux(window_fire && in_decision, cur_hit_pf_in_cache, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_cur_useless_sum", Mux(window_fire && in_decision, cur_useless, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_late_reduction_sum", Mux(window_fire && in_decision, late_reduction, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_late_increase_sum", Mux(window_fire && in_decision, late_increase, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_hit_loss_sum", Mux(window_fire && in_decision, hit_loss, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_hit_gain_sum", Mux(window_fire && in_decision, hit_gain, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_useless_increase_sum", Mux(window_fire && in_decision, useless_increase, 0.U))
+  XSPerfAccumulate(s"${param.name}_decision_useless_decrease_sum", Mux(window_fire && in_decision, useless_decrease, 0.U))
+  XSPerfAccumulate(s"${param.name}_validity_useless_sum", Mux(validity_check_fire, useless_cnt, 0.U))
+  XSPerfAccumulate(s"${param.name}_validity_total_sum", Mux(validity_check_fire, validity_cnt, 0.U))
+  XSPerfAccumulate(s"${param.name}_bad_down_useless_cnt_sum", Mux(bad_down_fire, useless_cnt, 0.U))
+  XSPerfAccumulate(s"${param.name}_bad_down_validity_cnt_sum", Mux(bad_down_fire, validity_cnt, 0.U))
+
+  def perfCountHistogram(name: String, value: UInt, sample: Bool): Unit = {
+    XSPerfHistogram(s"${param.name}_${name}_0_64", value, sample, 0, 64, 4, true, true)
+    XSPerfHistogram(s"${param.name}_${name}_64_256", value, sample, 64, 256, 16, true, true)
+    XSPerfHistogram(s"${param.name}_${name}_256_1024", value, sample, 256, 1024, 64, true, false)
+    XSPerfMax(s"${param.name}_${name}", value, sample)
   }
-  XSPerfAccumulate(s"${param.name}_trigger_disable", trigger_disable)
-  XSPerfAccumulate(s"${param.name}_trigger_late_hit", trigger_late_hit)
-  XSPerfAccumulate(s"${param.name}_trigger_late_miss", trigger_late_miss)
-  XSPerfAccumulate(s"${param.name}_trigger_pf_useless", trigger_pf_useless)
+
+  def perfIntervalHistogram(name: String, value: UInt, sample: Bool): Unit = {
+    XSPerfHistogram(s"${param.name}_${name}_0_1024", value, sample, 0, 1024, 64, true, true)
+    XSPerfHistogram(s"${param.name}_${name}_1024_8192", value, sample, 1024, 8192, 512, true, true)
+    XSPerfHistogram(s"${param.name}_${name}_8192_65536", value, sample, 8192, 65536, 4096, true, false)
+    XSPerfMax(s"${param.name}_${name}", value, sample)
+  }
+
+  perfIntervalHistogram("window_fire_interval_cycle", window_fire_interval_value, window_fire_interval_sample)
+  perfCountHistogram("window_cur_late", cur_late, window_fire)
+  perfCountHistogram("window_cur_hit_cache", cur_hit_pf_in_cache, window_fire)
+  perfCountHistogram("window_cur_useless", cur_useless, window_fire)
+  perfCountHistogram("idle_cur_useless", cur_useless, window_fire && in_idle)
+  perfCountHistogram("decision_cur_useless", cur_useless, window_fire && in_decision)
+  perfCountHistogram("up_prev_late", cur_late, up_fire)
+  perfCountHistogram("up_prev_hit_cache", cur_hit_pf_in_cache, up_fire)
+  perfCountHistogram("up_prev_useless", cur_useless, up_fire)
+  perfCountHistogram("decision_prev_late", prev_late, window_fire && in_decision)
+  perfCountHistogram("decision_cur_late", cur_late, window_fire && in_decision)
+  perfCountHistogram("decision_late_reduction", late_reduction, window_fire && in_decision)
+  perfCountHistogram("decision_late_increase", late_increase, window_fire && in_decision)
+  perfCountHistogram("decision_hit_loss", hit_loss, window_fire && in_decision)
+  perfCountHistogram("decision_hit_gain", hit_gain, window_fire && in_decision)
+  perfCountHistogram("decision_useless_increase", useless_increase, window_fire && in_decision)
+  perfCountHistogram("decision_useless_decrease", useless_decrease, window_fire && in_decision)
+  perfCountHistogram("bad_return_hit_loss", hit_loss, bad_return_fire)
+  perfCountHistogram("bad_return_useless_increase", useless_increase, bad_return_fire)
+  perfCountHistogram("validity_useless_cnt", useless_cnt, validity_check_fire)
+  perfCountHistogram("validity_total_cnt", validity_cnt, validity_check_fire)
+  perfCountHistogram("bad_down_useless_cnt", useless_cnt, bad_down_fire)
+  perfCountHistogram("bad_down_validity_cnt", validity_cnt, bad_down_fire)
+  for(i <- (0 until MAX_BITS)) {
+    val t = (1 << i)
+    val at_depth = depth === t.U
+    XSPerfAccumulate(s"${param.name}_depth${t}", at_depth && total_prefetch)
+    XSPerfAccumulate(s"${param.name}_late_high_at_depth${t}", window_fire && at_depth && cur_late_high)
+    XSPerfAccumulate(s"${param.name}_disable_request_at_depth${t}", window_fire && at_depth && disable_request)
+    XSPerfAccumulate(s"${param.name}_up_from_depth${t}", up_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_up_blocked_from_depth${t}", block_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_bad_down_from_depth${t}", bad_down_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_down_to_base_from_depth${t}", disable_down_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_bad_return_at_depth${t}", bad_return_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_bad_return_by_hit_at_depth${t}", bad_return_by_hit_fire && at_depth)
+    XSPerfAccumulate(s"${param.name}_bad_return_by_useless_at_depth${t}", bad_return_by_useless_fire && at_depth)
+  }
+  XSPerfAccumulate(s"${param.name}_trigger_disable", RegNext(enable) && !enable)
   XSPerfAccumulate(s"${param.name}_disable_time", !enable)
+  XSPerfAccumulate(s"${param.name}_trigger_depth_up", old_depth < depth)
+  XSPerfAccumulate(s"${param.name}_trigger_depth_down", old_depth > depth)
 
   assert(depth =/= 0.U, s"${param.name}_depth should not be zero")
 }
@@ -319,13 +542,13 @@ abstract class PrefetcherMonitorParam {
   val name: String
   def isMyType(value: UInt): Bool
 
-  val TIMELY_CHECK_INTERVAL = 1000
-  val VALIDITY_CHECK_INTERVAL = 1000
-
-  val BAD_THRESHOLD = 400
+  val VALIDITY_CHECK_INTERVAL = 1024
   val DISABLE_THRESHOLD = 900
-  val LATE_HIT_THRESHOLD = 900
-  val LATE_MISS_THRESHOLD = 200
+  val BAD_THRESHOLD = 256
+
+  val WINDOW_SIZE = 512
+  val LATE_HIT_THRESHOLD = 24
+  val HIT_MARGIN = 24
 
   val BACK_OFF_INTERVAL = 100000
   val LOW_CONF_INTERVAL = 200000
