@@ -863,7 +863,9 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.iMode.PRVM := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.PRVM, PRVM)
         in.iMode.V := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.V, V)
-        in.ZicfilpELP.foreach(_ := io.ZicfilpELP.getOrElse(false.B))
+        in.ZicfilpELP.foreach { sink =>
+          sink := Mux(hasTrap, io.fromRob.trap.bits.ZicfilpELP.get, io.ZicfilpELP.getOrElse(false.B))
+        }
         // when NMIE is zero, force to behave as MPRV is zero
         in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool && mnstatus.regOut.NMIE.asBool, mstatus.regOut.MPP, PRVM)
         in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && mnstatus.regOut.NMIE.asBool && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV

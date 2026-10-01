@@ -70,6 +70,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
     val exception = ValidIO(new ExceptionInfo)
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
     // exu + brq
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
@@ -691,6 +692,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit)) && !lastCycleFlush
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.debug_pc.getOrElse(0.U), exceptionHappen)
+  io.exception.bits.ZicfilpELP.foreach(_ := RegEnable(io.ZicfilpELP.get, exceptionHappen))
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(debug_deqUop.debug_instr.getOrElse(0.U), exceptionHappen)
