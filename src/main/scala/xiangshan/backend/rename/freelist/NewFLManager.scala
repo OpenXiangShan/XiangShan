@@ -33,7 +33,10 @@ class NewFLManager(
   private val s1QueueSizeIsPow2 = (s1QueueSize & (s1QueueSize - 1)) == 0
 
   /** Stage 1: a configurable circular queue of physical-register candidates. */
-  val s1Queue = RegInit(VecInit(Seq.fill(s1QueueSize)(0.U(phyRegIdxWidth.W))))
+  // Queue data are invalid while s1ValidCount is zero and are overwritten
+  // before they can be consumed.  They therefore do not need a reset value;
+  // keeping this as a plain Reg avoids reset/init logic on the queue payload.
+  val s1Queue = Reg(Vec(s1QueueSize, UInt(phyRegIdxWidth.W)))
   val s1HeadPtr = RegInit(0.U(s1PtrWidth.W))
   val s1HeadPtrOH = RegInit(1.U(s1QueueSize.W))
   val s1TailPtr = RegInit(0.U(s1PtrWidth.W))

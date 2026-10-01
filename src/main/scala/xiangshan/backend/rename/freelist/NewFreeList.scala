@@ -105,7 +105,9 @@ class NewFreeList(
   }.reduce(_ | _)
 
   val lastCycleRedirect = RegNext(redirectReg, false.B)
-  val lastCycleSnpt     = RegNext(RegNext(io.snpt, 0.U.asTypeOf(io.snpt)))
+  // Snapshot metadata are only consumed when lastCycleRedirect is true.
+  // Its reset value masks both pipeline stages until they contain valid data.
+  val lastCycleSnpt     = RegNext(RegNext(io.snpt))
   val snapshots = FreeListSnapshotGenerator(specfreeListReg.asUInt|freePhyRegOHOR, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec, freePhyRegOHOR,numPhyRegs)
 
   val redirectedFreeList = Mux(
