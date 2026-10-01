@@ -73,6 +73,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exception = ValidIO(new ExceptionInfo)
     val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Bool()))
     val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Valid(Bool())))
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
     // exu + brq
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
@@ -915,6 +916,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionDebug = debugMeta(exceptionUop)
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
+  io.exception.bits.ZicfilpELP.foreach(_ := RegEnable(io.ZicfilpELP.get, exceptionHappen))
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(exceptionDebug.instr, exceptionHappen)

@@ -8,6 +8,7 @@ import xiangshan._
 class ArchZicfilpIO(implicit p: Parameters) extends XSBundle {
   val commitValid = Input(Vec(CommitWidth, Bool()))
   val commitJalr = Input(Vec(CommitWidth, Bool()))
+  val commitLPAD = Input(Vec(CommitWidth, Bool()))
   val enable = Input(Bool())
   val trap = Input(Bool())
   val xret = Flipped(ValidIO(Bool()))
@@ -19,9 +20,10 @@ class ArchZicfilp(implicit p: Parameters) extends XSModule {
 
   val archELP = RegInit(false.B)
   val hasCommit = io.commitValid.asUInt.orR
-  val lastCommitIsJalr = PriorityMux(
-    io.commitValid.reverse.zip(io.commitJalr.reverse) :+ (true.B -> false.B)
-  )
+  val commitELP = io.commitValid.zip(io.commitJalr).zip(io.commitLPAD).foldLeft(archELP) {
+    case (elp, ((valid, jalr), lpad)) =>
+      Mux(io.enable && valid && jalr, true.B, Mux(io.enable && valid && lpad, false.B, elp))
+  }
 
   when(io.trap) {
     archELP := false.B
@@ -30,7 +32,7 @@ class ArchZicfilp(implicit p: Parameters) extends XSModule {
   }.elsewhen(!io.enable) {
     archELP := false.B
   }.elsewhen(hasCommit) {
-    archELP := lastCommitIsJalr
+    archELP := commitELP
   }
 
   io.archELP := archELP && io.enable
