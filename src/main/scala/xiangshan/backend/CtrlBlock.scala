@@ -447,12 +447,14 @@ class CtrlBlockImp(
     for (i <- 0 until CommitWidth) {
       arch.io.commitValid(i) := rob.out.commits.isCommit && rob.out.commits.commitValid(i)
       arch.io.commitJalr(i) := rob.out.commits.info(i).ZicfilpJalr.get
+      arch.io.commitLPAD(i) := rob.out.commits.info(i).ZicfilpLPAD.get
     }
     arch.io.enable := io.fromCSR.toDecode.enableZicfilp.get
     arch.io.trap := rob.out.exception.valid
     arch.io.xret.valid := s1_s3_redirect.valid && s1_s3_redirect.bits.ZicfilpXRetValid.get
     arch.io.xret.bits := s1_s3_redirect.bits.ZicfilpRetELP.get
     io.toCSR.ZicfilpELP.get := arch.io.archELP
+    rob.in.ZicfilpELP.get := arch.io.archELP
   }
 
   // Be careful here:

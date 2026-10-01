@@ -838,6 +838,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionDebug = debugMeta(Mux(exceptionIsFormer,
     debug_microOp(deqPtr.value)(0), debug_microOp(deqPtr.value)(1)))
   out.exception.valid := RegNext(exceptionHappen)
+  out.exception.bits.ZicfilpELP.foreach(_ := RegEnable(in.ZicfilpELP.get, exceptionHappen))
   out.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
   out.exception.bits.gpaddr := out.readGPAMemData.gpaddr
   out.exception.bits.isForVSnonLeafPTE := out.readGPAMemData.isForVSnonLeafPTE
@@ -2460,6 +2461,7 @@ object Rob {
   private val CriticalErrorCount = 1
 
   class In(params: BackendParams)(implicit p: Parameters) extends XSBundle {
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
     // Core identity.
     val hartId = Input(UInt(hartIdLen.W))
 
