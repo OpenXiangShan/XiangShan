@@ -248,14 +248,9 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val enableDynamicPrefetcher = (enableDynamicPrefetcher_const === 1.U)
 
   when(!enableDynamicPrefetcher) {
-    depth := depth_const
     flush := false.B
     enable := true.B
     confidence := 1.U
-  }.otherwise {
-    // for now, only dynamically disable prefetcher, without depth and flush
-    depth := depth_const
-    flush := false.B
   }
 
   when(reset.asBool) {
