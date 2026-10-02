@@ -345,10 +345,11 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
           up_blocked_depth := depth
           up_back_off_cnt := high_depth_backoff
         }.elsewhen(disable) {
-          enable := false.B
-          flush := true.B
-          confidence := 0.U(1.W)
-          up_back_off_cnt := 0.U
+          // tmp close disable 
+          // enable := false.B
+          // flush := true.B
+          // confidence := 0.U(1.W)
+          // up_back_off_cnt := 0.U
         }
       }
       is(s_buffer) {
