@@ -327,7 +327,13 @@ case class L2CacheConfig
   nl: Boolean = false,
   cdp: Boolean = true,
   enablePC: Boolean = false, // Enable PC field for L1Param
-  enableFlush: Boolean = false
+  enableFlush: Boolean = false,
+  offloadLowAccuracy: Boolean = false,
+  offloadStreamOnly: Boolean = false,
+  cdpRatioNumerator: Int = 1,
+  cdpRatioDenominator: Int = 2,
+  accuracyNumerator: Int = 1,
+  accuracyDenominator: Int = 2
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -363,7 +369,14 @@ case class L2CacheConfig
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (nl) Seq(NLParameters()) else Nil) ++
           (if (cdp) Seq(CDPParameters()) else Nil) ++
-          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams(
+            offloadLowAccuracy = offloadLowAccuracy,
+            offloadStreamOnly = offloadStreamOnly,
+            cdpRatioNumerator = cdpRatioNumerator,
+            cdpRatioDenominator = cdpRatioDenominator,
+            accuracyNumerator = accuracyNumerator,
+            accuracyDenominator = accuracyDenominator
+          )) else Nil),
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
@@ -583,7 +596,15 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
-    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
+    ++ L2CacheConfig(
+      "2MB", inclusive = true, banks = 4, tp = false,
+      offloadLowAccuracy = true,
+      offloadStreamOnly = true,
+      cdpRatioNumerator = 1,
+      cdpRatioDenominator = 5,
+      accuracyNumerator = 4,
+      accuracyDenominator = 5
+    )
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
 )
