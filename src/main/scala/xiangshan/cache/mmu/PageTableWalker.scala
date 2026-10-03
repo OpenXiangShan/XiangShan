@@ -1169,13 +1169,16 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (io.hptw.resp.fire) {
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
+        val duplicateMemFire = mem_arb.io.out.fire &&
+          entries(i).req_info.s2xlate === mem_arb.io.out.bits.req_info.s2xlate &&
+          dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)
         val check_g_perm_fail = !io.hptw.resp.bits.h_resp.gaf && (!io.hptw.resp.bits.h_resp.entry.perm.get.r && !(io.csr.priv.mxr && io.hptw.resp.bits.h_resp.entry.perm.get.x))
         when (check_g_perm_fail || io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
           entries(i).hptw_resp.gpf := io.hptw.resp.bits.h_resp.gpf || check_g_perm_fail
           entries(i).first_s2xlate_fault := io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf || check_g_perm_fail
-        }.otherwise{ // change the entry that is waiting hptw resp
+        }.elsewhen (!duplicateMemFire) { // Keep the same-cycle memory broadcast's state and wait_id.
           val need_to_waiting_vec = state.indices.map(i => state(i) === state_mem_waiting &&
             dup(entries(i).req_info.vpn, entries(io.hptw.resp.bits.id).req_info.vpn) &&
             entries(i).req_info.s2xlate === entries(io.hptw.resp.bits.id).req_info.s2xlate)
