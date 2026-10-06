@@ -188,7 +188,11 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
+  private val streamDepth = p(StreamDepthKey)
+  private val controlsStreamDepth = param.name == "Stream" && streamDepth.useMonitor
+  private val legacyDepthEnabled = controlsStreamDepth && streamDepth.enableLegacyControl
+  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",
+    initValue = if (controlsStreamDepth) streamDepth.initial else 32)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
   val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
@@ -261,14 +265,17 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val enableDynamicPrefetcher = (enableDynamicPrefetcher_const === 1.U)
 
   when(!enableDynamicPrefetcher) {
-    depth := depth_const
     flush := false.B
     enable := true.B
     confidence := 1.U
   }.otherwise {
-    // for now, only dynamically disable prefetcher, without depth and flush
-    depth := depth_const
+    // Automatic shutoff is independent of the selected depth source.
     flush := false.B
+  }
+
+  // Explicit opt-in for the pre-existing monitor algorithm; competitive control is separate.
+  if (!legacyDepthEnabled) {
+    depth := depth_const
   }
 
   when(reset.asBool) {
