@@ -96,6 +96,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val isRvc = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
+  val teaPsv = UInt(xiangshan.TeaEvent.width.W)
   val storeSetHit = Bool() // inst has been allocated an store set
   val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
   // Load wait is needed

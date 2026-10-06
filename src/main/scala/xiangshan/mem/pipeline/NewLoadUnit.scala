@@ -2218,7 +2218,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.debugInfo.s1_isTlbFirstMiss := s1.io.debugInfo.isTlbFirstMiss
   io.debugInfo.s1_isLoadToLoadForward := s1.io.debugInfo.isLoadToLoadForward
   io.debugInfo.s2_isBankConflict := s2.io.debugInfo.isBankConflict
-  io.debugInfo.s2_isDcacheFirstMiss := s2.io.debugInfo.isDCacheMiss
+  io.debugInfo.s2_isDcacheFirstMiss := s2.io.debugInfo.isDCacheFirstMiss
   io.debugInfo.s2_isForwardFail := s2.io.debugInfo.isForwardFail
   io.debugInfo.s3_isReplayFast := s3.io.debugInfo.isReplayFast
   io.debugInfo.s3_isReplaySlow := s3.io.debugInfo.isReplaySlow
