@@ -380,8 +380,10 @@ class PrefetchDataBufferTest extends AnyFlatSpec with ChiselSim with PBTestDrive
       c.clock.step(); c.io.load(0).s1_paddr.valid.poke(false.B)
       c.io.mshr.refillReq.bits.corrupt.poke(true.B)
       for (i <- 1 until c.io.mshr.status.size) {
-        val id = reserve(c, address + i * 64, owner = i)
-        refill(c, id, owner = i, seed = i)
+        // Completed refills release their MSHR even when the PB has more entries.
+        val owner = i % c.io.mshr.cancelReq.size
+        val id = reserve(c, address + i * 64, owner = owner)
+        refill(c, id, owner = owner, seed = i)
       }
       c.io.mshr.refillReq.bits.corrupt.poke(false.B)
       awaitRelease(c)
