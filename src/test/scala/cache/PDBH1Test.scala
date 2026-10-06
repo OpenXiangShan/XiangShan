@@ -15,6 +15,7 @@ class PDBConfigurationTest extends AnyFlatSpec {
   it should "change only capacity and replacement in every configured core" in {
     val base = new DefaultConfig(2)
     for ((config, entries, policy) <- Seq(
+      (new DefaultConfig(2), 64, "lru"),
       (new NoPDBConfig(2), 0, "rr"), (new PDB16Config(2), 16, "rr"),
       (new PDB64Config(2), 64, "rr"), (new PDB16LRUConfig(2), 16, "lru"),
       (new PDB64LRUConfig(2), 64, "lru"))) {
@@ -22,12 +23,16 @@ class PDBConfigurationTest extends AnyFlatSpec {
         val cache = actual.dcacheParametersOpt.get
         assert(cache.nPBEntries == entries && cache.pbReplacer == policy)
         assert(actual.copy(dcacheParametersOpt = original.dcacheParametersOpt) == original)
-        assert(cache.copy(nPBEntries = 16, pbReplacer = "rr") == original.dcacheParametersOpt.get)
+        val originalCache = original.dcacheParametersOpt.get
+        assert(cache.copy(nPBEntries = originalCache.nPBEntries,
+          pbReplacer = originalCache.pbReplacer) == originalCache)
       }
       assert(config(StreamDepthKey) == StreamDepthParameters())
     }
     assert(new PDB64MonitorDepthConfig()(StreamDepthKey).useMonitor)
     assert(!new PDB64MonitorDepthConfig()(StreamDepthKey).enableLegacyControl)
+    assert(base(XSTileKey) == new PDB64LRUConfig(2)(XSTileKey))
+    assert(base(StreamDepthKey) == StreamDepthParameters(useMonitor = false, fixedL1 = 64))
   }
   it should "reject invalid depth sources and unsafe legacy starting depths" in {
     intercept[IllegalArgumentException] { StreamDepthParameters(fixedL1 = 0) }

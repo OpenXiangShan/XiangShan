@@ -7,13 +7,17 @@ later handoffs. No RTL performance workload has been run for H1.
 
 ## Build configurations
 
-All configurations inherit `DefaultConfig`: the core, four-way DCache geometry,
-L2/L3, and other prefetchers are unchanged. PDB capacities count 64-byte blocks.
+`DefaultConfig` selects the user's baseline: PDB64, LRU, fixed L1 depth64, and
+background move off. This supports runners that only accept `DefaultConfig`;
+`PDB64LRUConfig` remains an equivalent named preset. The diagnostic presets below
+override capacity/replacement explicitly. The core, four-way DCache geometry,
+L2/L3, and other prefetchers retain their original settings. PDB capacities count 64-byte blocks.
 `enablePDBMoveToDCache<hartId>` remains false by default; Store-required movement
 is still available. Use the same Constantin file and workload setup across A/B.
 
 | CONFIG | PDB blocks | Release selection | L1 depth source/default |
 |---|---:|---|---|
+| `DefaultConfig` | 64 | LRU | fixed / 64 |
 | `PDB16Config` | 16 | RR | fixed / 64 |
 | `PDB64Config` | 64 | RR | fixed / 64 |
 | `PDB16LRUConfig` | 16 | LRU | fixed / 64 |
@@ -25,7 +29,7 @@ Example release-RTL generation:
 
 ```sh
 export NOOP_HOME=/path/to/XiangShan
-make verilog CONFIG=PDB64LRUConfig BUILD_DIR=build/h1/PDB64LRUConfig JVM_XMX=40G
+make verilog CONFIG=DefaultConfig BUILD_DIR=build/h1-default/DefaultConfig JVM_XMX=40G
 ```
 
 Use a distinct `BUILD_DIR` for each configuration. The Makefile's file target does
@@ -36,6 +40,10 @@ SystemVerilog-generation check, not a functional full-system or timing result.
 `NOOP_HOME` must point to this checkout for Difftest auxiliary-file generation.
 After a failed generation, remove that configuration's generated output directory
 before retrying: a partial `XSTop.sv` can otherwise satisfy the Makefile target.
+
+For the existing simulation runner, keep `CONFIG=DefaultConfig` in its normal
+`make emu` or `make simv` build. Capacity/replacement are selected at build time,
+so an already built simulator must be rebuilt to acquire the new default.
 
 ## Depth source
 
@@ -63,7 +71,8 @@ Constantin record/configuration and actual generated addresses when validating H
 
 ## PDB replacement contract
 
-The default remains RR. LRU is an explicit alternative using one recency bit per
+The experiment default is LRU. `PDB16Config` and `PDB64Config` explicitly retain
+RR as optional diagnostics. LRU uses one recency bit per
 unordered entry pair (120 bits at 16 entries; 2016 at 64). It does not store cycle
 timestamps. Successful, non-denied refill and valid S2 demand consumption refresh
 recency, including repeat use. Simultaneous touches are ordered by entry index,
@@ -81,12 +90,12 @@ it does not promise the instantaneous eviction ordering of the Gem5 model. The
 victim-history FIFO discussed for H2 is a separate structure and is absent here.
 LRU hardware area/frequency is not established by `make verilog`.
 
-## Recommended first user-run comparisons
+## User-selected baseline
 
-1. `PDB16Config` vs `PDB64Config`, both fixed depth64 and background move off:
-   isolate capacity while retaining the original RR policy.
-2. `PDB64Config` vs `PDB64LRUConfig`: isolate replacement at the target capacity.
-3. `PDB16LRUConfig` vs `PDB64LRUConfig`: isolate capacity under demand-use-aware LRU.
+Run `DefaultConfig`: PDB64/LRU, fixed depth64, only release. This is the baseline
+for subsequent dynamic-depth and move experiments. The user does not need to run
+the RR, PDB16, no-PDB, or monitor presets to proceed. Later compare fixed-depth
+release with dynamic-depth release first, then isolate used/unused move gains.
 
 Suggested diagnostic workloads are bwaves, GemsFDTD, dealII, wrf, xalancbmk, and
 leslie3d, using the user's RTL-compatible checkpoint set and runner. Gem5 checkpoint
@@ -97,9 +106,8 @@ refill/use/release/full occupancy and background move count. Background move mus
 remain zero; Store-required moves should be distinguished. Observer hit counters
 are unavailable until H2.
 
-Freeze the PDB replacement policy after this comparison and before H2. The working
-target is LRU; RR remains the controlled reference until user results and hardware
-cost justify the choice.
+The mainline replacement policy is LRU. RR presets remain available for optional
+diagnosis. Hardware timing/area is still unvalidated by this handoff.
 
 ## Directed verification
 
@@ -117,7 +125,7 @@ these checks. Build/test/review evidence is recorded in the selected H1 plan.
 
 ## H1 validation record (2026-10-06)
 
-All six presets in the configuration table passed `make verilog` with
+At commit `9ed6c9c1b`, all six named PDB presets passed `make verilog` with
 `NOOP_HOME` pointing to this checkout, `JVM_XMX=40G`, and a fresh
 `BUILD_DIR=build/h1-final/<Config>`. Generated module presence and the printed
 capacity/replacement/depth settings were checked against each preset.
@@ -136,3 +144,18 @@ they were reviewed manually, and `git diff --cached --check` passed.
 Logs and command/output hashes are retained locally in `.planning/h1-config/`.
 No full-system difftest, performance workload, or physical timing/area experiment
 was run. User review and the comparisons above are the next gate before H2.
+
+## DefaultConfig entry-point validation (2026-10-06)
+
+After selecting PDB64/LRU in `DefaultConfig`, all 10 configuration and PB protocol
+cases passed. The tests verify named preset overrides, two-core configuration
+isolation, and the default fixed L1 depth64 with monitor control disabled.
+The corrupt-refill test reuses legal MSHR IDs when filling more PB entries than
+there are MSHRs.
+
+The `make verilog CONFIG=DefaultConfig` command above passed in a fresh output
+directory. Its log confirms 64 entries, LRU, background move default-off and fixed
+L1 depth64; generated RTL includes `PDBLRU`. The repository formatting task and
+source review also passed. Validation logs and source/output hashes are retained
+in `.planning/h1-default/`. This verifies generation and directed behavior;
+workload validation remains with the user after rebuilding the simulator.
