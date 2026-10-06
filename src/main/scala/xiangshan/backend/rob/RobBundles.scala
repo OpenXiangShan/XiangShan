@@ -131,6 +131,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
     val needVTB = Bool()
+    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // Preserve the former slot's exact trace metadata so a latter-slot squash
@@ -225,6 +226,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.rfWen := robEnq.rfWen
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
+    robEntry.teaPsv := robEnq.teaPsv
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.formerTraceBlockInPipe := robEnq.traceBlockInPipe
