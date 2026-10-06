@@ -74,6 +74,7 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val slotHeadRvcMask = UInt(2.W)
   val predTaken = Bool()
   val needVTB = Bool()
+  val teaPsv = UInt(xiangshan.TeaEvent.width.W)
 
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
   // Preserve the former slot's exact trace metadata so a latter-slot squash
@@ -179,6 +180,7 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.rfWen := robEnq.rfWen
     this.interruptSafe := robEnq.interruptSafe
     this.slotNeedFlushMask := robEnq.slotNeedFlushMask
+    this.teaPsv := robEnq.teaPsv
     // trace
     this.traceBlockInPipe := robEnq.traceBlockInPipe
     this.formerTraceBlockInPipe := robEnq.traceBlockInPipe
