@@ -43,7 +43,7 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
 
   val ENABLE_DECR_MODE = true
   val ENABLE_STRICT_ACTIVE_DETECTION = true
-  val USE_STREAM_FIXED_DEPTH = true
+  val USE_STREAM_FIXED_DEPTH = !p(StreamDepthKey).useMonitor
 
   // constraints
   require((DEPTH_BYTES >= REGION_SIZE) && ((DEPTH_BYTES % REGION_SIZE) == 0) && ((DEPTH_BYTES / REGION_SIZE) > 0))
@@ -261,13 +261,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s0_req_valid", io.train_req.valid)
   XSPerfAccumulate("s0_req_cannot_accept", io.train_req.valid && !io.train_req.ready)
 
-  val ratio_const = Constantin.createRecord(s"l2DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L2_DEPTH_RATIO)
-  val ratio = ratio_const(3, 0)
-
-  val l3_ratio_const = Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
-  val l3_ratio = l3_ratio_const(3, 0)
-
-  val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
+  val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = p(StreamDepthKey).fixedL1)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
   val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) 
 
@@ -276,13 +270,13 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val l3_depth = Wire(UInt(DEPTH_BITS.W))
   if (USE_STREAM_FIXED_DEPTH) {
     l1_depth := l1_depth_const
-    l2_depth := l2_depth_const
-    l3_depth := l3_depth_const
   } else {
     l1_depth := io.dynamic_depth
-    l2_depth := io.dynamic_depth << ratio
-    l3_depth := io.dynamic_depth << l3_ratio
   }
+  // L1-only experiments must not change the L2/L3 prefetch distance at the same time.
+  l2_depth := l2_depth_const
+  l3_depth := l3_depth_const
+  println(s"Stream depth: monitor=${p(StreamDepthKey).useMonitor}, fixedL1=${p(StreamDepthKey).fixedL1}, initial=${p(StreamDepthKey).initial}")
 
   // s1: alloc or update
   val s1_valid = GatedValidRegNext(s0_valid)

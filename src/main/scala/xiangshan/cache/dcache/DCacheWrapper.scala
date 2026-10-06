@@ -54,6 +54,7 @@ case class DCacheParameters
   blockBytes: Int = 64,
   nMaxPrefetchEntry: Int = 1,
   nPBEntries: Int = 16,
+  pbReplacer: String = "rr",
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
@@ -71,6 +72,8 @@ case class DCacheParameters
   // false = select by MSHR ID
   channelSelByAddr: Boolean = true
 ) extends L1CacheParameters {
+  require(nPBEntries >= 0)
+  require(Set("rr", "lru").contains(pbReplacer), "Unsupported PDB replacement policy")
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
   // we need to avoid this by recoding additional bits in L2 cache

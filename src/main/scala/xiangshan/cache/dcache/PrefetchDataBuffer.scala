@@ -28,6 +28,7 @@ class PrefetchDataBuffer(
   private val entryCount = PBEntries
   private val lineRows = cfg.blockBytes * 8 / DCacheSRAMRowBits
   private val windowRows = VLEN / DCacheSRAMRowBits
+  println(s"PDB: entries=$entryCount, replacement=${cfg.pbReplacer}, backgroundMoveDefault=false")
 
   val io = IO(new Bundle {
     val load = Vec(LoadPipelineWidth, new PBLoadIO)
@@ -202,30 +203,43 @@ class PrefetchDataBuffer(
   when (moveSelFire) { moveSelId := moveArb.io.out.bits }
 
   // Release
-  val relArb = Module(new RRArbiter(UInt(PBIdBits.W), entryCount))
   val relMask = VecInit(entryMeta.indices.map(i =>
     releaseScheduleEnable && entryCanSelect(i) && entryNeedRel(i)))
   val relSelReady = Wire(Bool())
+  val relChoice = Wire(Valid(UInt(PBIdBits.W)))
 
-  for (i <- entryMeta.indices) {
-    relArb.io.in(i).valid := relMask(i)
-    relArb.io.in(i).bits := i.U
+  if (cfg.pbReplacer == "lru") {
+    val replacement = Module(new PDBLRU(entryCount))
+    replacement.io.eligible := relMask
+    // Refresh on a published refill or actual S2 demand consumption, including repeated use.
+    replacement.io.touch := VecInit(entryMeta.indices.map(i =>
+      entryUsedNow(i) || (refillFire && !refillDenied && refillId === i.U)))
+    relChoice := replacement.io.victim
+  } else {
+    val relArb = Module(new RRArbiter(UInt(PBIdBits.W), entryCount))
+    for (i <- entryMeta.indices) {
+      relArb.io.in(i).valid := relMask(i)
+      relArb.io.in(i).bits := i.U
+    }
+    relArb.io.out.ready := relSelReady
+    relChoice.valid := relArb.io.out.valid
+    relChoice.bits := relArb.io.out.bits
   }
-  relArb.io.out.ready := relSelReady
 
   val relValid = relSelValid && entryNeedRel(relSelId) && releaseScheduleEnable
   val relFire = relValid && io.releaseReq.ready
   val relTaken = entryProbeLock(relSelId) || entryStoreLock(relSelId)
-  val relSelFire = relSelReady && relArb.io.out.valid
+  val relSelFire = relSelReady && relChoice.valid
 
   relSelReady := !relSelValid || !relValid || relTaken
 
   when (relFire) {
     relSelValid := false.B
   }.elsewhen (relSelReady) {
-    relSelValid := relArb.io.out.valid
+    relSelValid := relChoice.valid
   }
-  when (relSelFire) { relSelId := relArb.io.out.bits }
+  // Selection uses registered recency. Keep the candidate stable while WBQueue stalls.
+  when (relSelFire) { relSelId := relChoice.bits }
 
   assert(!moveS0Fire || enableMoveToDCache,
     "PDB background move fired while move-to-dcache is disabled")
