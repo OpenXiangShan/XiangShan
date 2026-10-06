@@ -701,6 +701,17 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
+  val sqHasRoomLane0 = fromRename(0).bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+  val drSqBlock = io.enqRob.isEmpty && fromRename(0).valid &&
+    FuType.isStore(fromRename(0).bits.fuType) && !sqHasRoomLane0
+  val drSqPending = RegInit(false.B)
+  when (io.redirect.valid) {
+    drSqPending := false.B
+  }.elsewhen (drSqPending && fromRename(0).fire) {
+    drSqPending := false.B
+  }.elsewhen (drSqBlock) {
+    drSqPending := true.B
+  }
 
   /*
   * how to allow dispatch lsu uop:
@@ -788,6 +799,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
+    if (i == 0) {
+      when (drSqPending && fromRename(0).valid && FuType.isStore(fromRename(0).bits.fuType)) {
+        updatedUop(0).teaPsv := TeaPsvOps.setBit(fromRename(0).bits.teaPsv, TeaEvent.DR_SQ)
+      }
+    }
     XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")
