@@ -492,6 +492,15 @@ class PrefetchDataBuffer(
   val perfLockCycle = RegInit(VecInit(Seq.fill(entryCount)(0.U(64.W))))
   val perfAliasMove = RegInit(VecInit(Seq.fill(entryCount)(false.B)))
   val perfPrevMoveFire = RegInit(false.B)
+  val perfVictimValid = RegNext(relFire && entryReadable(relSelId), false.B)
+  val perfVictimId = RegEnable(relSelId, relFire)
+  val perfVictim = RegEnable({
+    val victim = Wire(new PDBVictim(PAddrBits - blockOffBits))
+    victim.blockAddr := blockAddr(entryMeta(relSelId).paddr)
+    victim.used := entryMeta(relSelId).used || entryUsedNow(relSelId)
+    victim.stream := isFromStream(entryMeta(relSelId).prefetchSource)
+    victim
+  }, relFire)
 
   val perfUnusedQueueDepth = entryCount + 2
   val perfUnusedQueue = RegInit(VecInit(
@@ -572,6 +581,21 @@ class PrefetchDataBuffer(
   }
   io.dcache.perf.unusedExit.valid := perfUnusedPop
   io.dcache.perf.unusedExit.bits := perfUnusedQueue(0)
+  // A Load authorized in S1 on the Release edge can consume its data in S2 one
+  // cycle later. Finalize used before publishing the victim, while that slot is
+  // still released and cannot have been allocated to another block. This is an
+  // observation-only correction: do not change the existing PB used/exit logic.
+  val perfVictimLastUse = (0 until LoadPipelineWidth).map(lane =>
+    io.load(lane).s2_use && loadS2Valid(lane) && loadS2Hit(lane) &&
+      loadS2EntryId(lane) === perfVictimId).reduce(_ || _)
+  io.dcache.perf.capacityVictim.valid := perfVictimValid
+  io.dcache.perf.capacityVictim.bits := perfVictim
+  io.dcache.perf.capacityVictim.bits.used := perfVictim.used || perfVictimLastUse
+  when (perfVictimValid) {
+    assert(entryReleasedDone(perfVictimId), "Victim classification must precede PB slot reuse")
+  }
+  // Probe, Store/background promotion, poison and cancellation are excluded.
+  // H4 capacity moves must produce this same event once, after final Load use.
 
   XSPerfAccumulate("reservation", allocFire)
   XSPerfAccumulate("reservation_cancel", PopCount(entryCancel))

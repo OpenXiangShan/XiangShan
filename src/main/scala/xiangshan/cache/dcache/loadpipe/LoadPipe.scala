@@ -35,6 +35,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
     val pb = Flipped(new PBLoadIO)
+    // Passive S2 physical-demand event; no ready and no cache/MSHR result filter.
+    val victimDemand = Output(Valid(UInt((PAddrBits - blockOffBits).W)))
     val dwpu = Flipped(new DwpuBaseIO(nWays = nWays, nPorts = 1))
     val load128Req = Input(Bool())
     // req got nacked in stage 0?
@@ -423,6 +425,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
+  io.victimDemand.valid := s2_valid && !io.lsu.s2_kill && s2_req.instrtype === LOAD_SOURCE.U
+  io.victimDemand.bits := s2_paddr(PAddrBits - 1, blockOffBits)
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
