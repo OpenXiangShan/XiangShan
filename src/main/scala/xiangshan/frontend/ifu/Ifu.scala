@@ -28,6 +28,9 @@ import utility.XORFold
 import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
+import xiangshan.TeaEvent
+import xiangshan.TeaPsvOps
+import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
@@ -412,6 +415,19 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
   private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
   private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
+  private val packetTeaPsv = Mux(
+    perfAnalyzer.io.topdownOut.topdown.reasons(TopDownCounters.ICacheMissBubble.id),
+    TeaEvent.bit(TeaEvent.DR_L1),
+    TeaPsvOps.empty
+  )
+  private val s2_teaPsv = RegEnable(
+    Mux(
+      perfAnalyzer.io.topdownOut.topdown.reasons(TopDownCounters.ITLBMissBubble.id),
+      TeaPsvOps.setBit(packetTeaPsv, TeaEvent.DR_TLB),
+      packetTeaPsv
+    ),
+    s1_fire
+  )
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 
@@ -814,6 +830,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(0) := s2_fetchBlock(0).startVAddr.toUInt
   perfAnalyzer.io.perfInfo.toIBufferInfo.startVAddr(1) := s2_fetchBlock(1).startVAddr.toUInt
+  io.toIBuffer.bits.teaPsv                             := s2_teaPsv
   io.toIBuffer.bits.topdownInfo                        := perfAnalyzer.io.topdownOut.topdown
 
   XSPerfAccumulate("2fetch_to_ibuffer", io.toIBuffer.fire && s2_secondValid)
