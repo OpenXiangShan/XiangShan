@@ -7,7 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import top._
 import utility._
 import xiangshan.{XSCoreParamsKey, XSTileKey}
-import xiangshan.cache.PDBLRU
+import xiangshan.cache.{PDBLRU, PDBVictimObserverKey, PDBVictimObserverParameters}
 import xiangshan.mem.prefetch.{StreamDepthKey, StreamDepthParameters}
 
 class PDBConfigurationTest extends AnyFlatSpec {
@@ -33,6 +33,7 @@ class PDBConfigurationTest extends AnyFlatSpec {
     assert(!new PDB64MonitorDepthConfig()(StreamDepthKey).enableLegacyControl)
     assert(base(XSTileKey) == new PDB64LRUConfig(2)(XSTileKey))
     assert(base(StreamDepthKey) == StreamDepthParameters(useMonitor = false, fixedL1 = 64))
+    assert(base(PDBVictimObserverKey) == PDBVictimObserverParameters(entries = 256, bankEntries = 32))
   }
   it should "reject invalid depth sources and unsafe legacy starting depths" in {
     intercept[IllegalArgumentException] { StreamDepthParameters(fixedL1 = 0) }
