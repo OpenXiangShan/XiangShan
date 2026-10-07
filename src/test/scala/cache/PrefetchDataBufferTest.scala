@@ -80,6 +80,7 @@ trait PBTestDriver extends ChiselSim { this: AnyFlatSpec =>
     c.io.releaseReq.ready.poke(false.B)
     c.io.dcache.wfi.wfiReq.poke(false.B)
     c.io.dcache.usedMove.poke(false.B)
+    c.io.dcache.unusedMove.poke(false.B)
     c.reset.poke(true.B); c.clock.step(2); c.reset.poke(false.B); c.clock.step()
   }
 

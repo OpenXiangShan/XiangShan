@@ -69,6 +69,7 @@ class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with Ha
 
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
   val pdb_used_move = Output(Bool())
+  val pdb_unused_move = Output(Bool())
 
   val debugRolling = Flipped(new RobDebugRollingIO)
 }
@@ -101,6 +102,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
   io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
   io.pdb_used_move := StreamMonitor.io.pdb_used_move
+  io.pdb_unused_move := StreamMonitor.io.pdb_unused_move
 
   // ldu 0, 1, 2 can only have one prefetch request at a time
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _) || io.maininfo.total_prefetch
@@ -174,6 +176,7 @@ class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {
 
   val pf_ctrl = Output(new PrefetchControlBundle)
   val pdb_used_move = Output(Bool())
+  val pdb_unused_move = Output(Bool())
 }
 
 class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
@@ -193,6 +196,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.enable := enable
   io.pf_ctrl.confidence := confidence
   io.pdb_used_move := false.B
+  io.pdb_unused_move := false.B
 
   private val streamDepth = p(StreamDepthKey)
   private val controlsStreamDepth = param.name == "Stream" && streamDepth.useMonitor
@@ -289,10 +293,13 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     aligned.io.raw.used := io.prefetch_info.bufferinfo.stream_used_victim_hits
     aligned.io.raw.unused := io.prefetch_info.bufferinfo.stream_unused_victim_hits
     val events = aligned.io.completed
-    val control = PDBDepthControl(params, stream.initial, enabled, fixed, events)
+    val allowUnusedMove = Constantin.createRecord(s"enablePDBUnusedVictimMove$hart",
+      initValue = params.unusedMoveEnabled)
+    val control = PDBDepthControl(params, stream.initial, enabled, fixed, events, allowUnusedMove)
     val allowUsedMove = Constantin.createRecord(s"enablePDBUsedVictimMove$hart",
       initValue = params.usedMoveEnabled)
     io.pdb_used_move := allowUsedMove && control.usedMoveShadow
+    io.pdb_unused_move := allowUnusedMove && control.unusedMoveShadow
     assert(enabled || VecInit(PDBDepthPolicy.levels.map(d => fixed === d.U)).asUInt.orR,
       "The fixed-depth control must select an existing depth level")
     depth := control.depth
@@ -308,6 +315,9 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     XSPerfAccumulate("used_move_shadow_windows", window.valid && report.usedMoveShadow)
     XSPerfAccumulate("used_move_enabled_cycles", io.pdb_used_move)
     XSPerfAccumulate("unused_move_shadow_windows", window.valid && report.unusedMoveShadow)
+    XSPerfAccumulate("unused_move_enabled_cycles", io.pdb_unused_move)
+    XSPerfAccumulate("unused_pressure_consumed_windows", window.valid &&
+      report.unusedMoveActive && report.unusedPressure =/= 0.U)
     for (level <- PDBDepthPolicy.levels) {
       XSPerfAccumulate(s"cycles_at_depth_$level", depth === level.U)
       XSPerfAccumulate(s"windows_at_depth_$level", window.valid && report.depthBefore === level.U)
@@ -434,7 +444,8 @@ class PDBDepthEventAligner extends Module {
   */
 object PDBDepthControl {
   def apply(params: PDBDepthParameters, initialDepth: Int,
-            enabled: Bool, fixedDepth: UInt, events: PDBDepthEvents): PDBDepthState = {
+            enabled: Bool, fixedDepth: UInt, events: PDBDepthEvents,
+            allowUnusedMove: Bool = false.B): PDBDepthState = {
     import PDBDepthPolicy._
     require(levels.contains(initialDepth))
     val result = Wire(new PDBDepthState)
@@ -471,6 +482,13 @@ object PDBDepthControl {
     result.refills := refills
     result.usedMoveShadow := usedMove
     result.unusedMoveShadow := unusedMove
+    // Only the physical unused policy owns this pressure. Shadow-only runs
+    // retain the original depth competition and credit threshold.
+    val unusedMoveActive = allowUnusedMove && unusedMove
+    val depthUnusedPressure = Mux(unusedMoveActive, 0.U, unusedPressure)
+    val moveUpThreshold = params.creditHalfUnits.max(3)
+    val upThreshold = Mux(unusedMoveActive && index === 0.U,
+      moveUpThreshold.U, params.creditHalfUnits.U)
 
     val nextIndex = WireDefault(index)
     val nextUp = WireDefault(0.U(4.W))
@@ -479,16 +497,16 @@ object PDBDepthControl {
     when (enabled) {
       when (settle =/= 0.U) {
         nextSettle := settle - 1.U
-      }.elsewhen (latePressure > unusedPressure) {
-        val credit = upCredit +& (latePressure - unusedPressure)
-        when (credit >= params.creditHalfUnits.U) {
+      }.elsewhen (latePressure > depthUnusedPressure) {
+        val credit = upCredit +& (latePressure - depthUnusedPressure)
+        when (credit >= upThreshold) {
           when (index < (levels.size - 1).U) {
             nextIndex := index + 1.U
             nextSettle := params.settleWindows.U
           }
         }.otherwise { nextUp := credit }
-      }.elsewhen (unusedPressure > latePressure) {
-        val credit = downCredit +& (unusedPressure - latePressure)
+      }.elsewhen (depthUnusedPressure > latePressure) {
+        val credit = downCredit +& (depthUnusedPressure - latePressure)
         when (credit >= params.creditHalfUnits.U) {
           when (index =/= 0.U) {
             nextIndex := index - 1.U
@@ -499,8 +517,8 @@ object PDBDepthControl {
     }
     val nextDepth = Mux(enabled, depths(nextIndex), fixedDepth)
 
-    // Shadow state remains active with both physical move policies absent. In
-    // particular it never consumes unused pressure or changes the credit limit.
+    // State transitions always use raw pressure, including when physical
+    // permissions are disabled. Used reuse never participates in depth.
     val nextUsedMove = WireDefault(usedMove)
     val nextUsedOn = WireDefault(0.U(4.W))
     val nextUsedOff = WireDefault(0.U(4.W))
@@ -559,6 +577,9 @@ object PDBDepthControl {
     result.window.bits.unused := totalUnused
     result.window.bits.latePressure := latePressure
     result.window.bits.unusedPressure := unusedPressure
+    result.window.bits.depthUnusedPressure := depthUnusedPressure
+    result.window.bits.unusedMoveActive := unusedMoveActive
+    result.window.bits.upThreshold := upThreshold
     result.window.bits.upCredit := nextUp
     result.window.bits.downCredit := nextDown
     result.window.bits.settle := nextSettle
@@ -566,7 +587,9 @@ object PDBDepthControl {
     result.window.bits.unusedMoveShadow := nextUnusedMove
     assert(index < levels.size.U)
     assert(refills < windowRefills.U)
-    assert(upCredit < params.creditHalfUnits.U && downCredit < params.creditHalfUnits.U)
+    // A runtime permission may change while credit is retained from a prior
+    // window. Bound stored credit by the largest possible threshold.
+    assert(upCredit < moveUpThreshold.U && downCredit < params.creditHalfUnits.U)
     val previousIndex = RegNext(index, levels.indexOf(initialDepth).U)
     assert(index === previousIndex || RegNext(windowEnd, false.B),
       "Depth may change only after a complete 500-refill window")

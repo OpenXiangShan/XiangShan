@@ -1126,6 +1126,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   if (PBEntries > 0) {
     val pb = Module(new PrefetchDataBuffer())
     pb.io.dcache.usedMove := prefetcherMonitor.io.pdb_used_move
+    pb.io.dcache.unusedMove := prefetcherMonitor.io.pdb_unused_move
     val victimMonitor = Module(new PDBVictimMonitor)
     victimMonitor.io.victim := pb.io.dcache.perf.capacityVictim
     victimMonitor.io.demand.zip(ldu).foreach { case (event, pipe) => event := pipe.io.victimDemand }

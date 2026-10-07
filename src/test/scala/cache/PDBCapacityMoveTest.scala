@@ -55,6 +55,51 @@ class PDBCapacityMoveTest extends AnyFlatSpec with PBTestDriver {
   }
 
   behavior of "PDB capacity victim move"
+  for ((usedPolicy, unusedPolicy) <- Seq((false, false), (true, false), (false, true), (true, true))) {
+    it should s"route both victim classes with usedPermission=$usedPolicy unusedPermission=$unusedPolicy" in {
+      simulate(new PBVictimTestTop) { c =>
+        for (used <- Seq(false, true)) {
+          initialize(c, usedMove = usedPolicy); c.io.dcache.unusedMove.poke(unusedPolicy.B)
+          if (used) fillUsedOldest(c)
+          else for (i <- c.io.mshr.status.indices) { val id = reserve(c, address + i * 64); refill(c, id) }
+          if (if (used) usedPolicy else unusedPolicy) {
+            val id = awaitMove(c); acceptMove(c)
+            c.io.pipe.s2_dataResp.bits.used.expect(used.B)
+            c.io.pipe.s2_dataResp.ready.poke(true.B); c.clock.step()
+            c.io.pipe.s2_dataResp.ready.poke(false.B)
+            c.io.pipe.s3_moveDone.valid.poke(true.B); c.io.pipe.s3_moveDone.bits.poke(id.U)
+            c.clock.step(); c.io.pipe.s3_moveDone.valid.poke(false.B)
+          } else {
+            assert(awaitRelease(c) == address)
+            c.io.releaseReq.ready.poke(true.B); c.clock.step(); c.io.releaseReq.ready.poke(false.B)
+          }
+          c.io.mshr.refillWait.poke(false.B); c.clock.step(5)
+          c.results.victims.expect(1.U)
+          query(c); c.results.usedHits.expect((if (used) 1 else 0).U)
+          c.results.unusedHits.expect((if (used) 0 else 1).U)
+        }
+      }
+    }
+  }
+
+  it should "include a final S2 use when an unused victim starts moving on the Load authorization edge" in {
+    simulate(new PBVictimTestTop) { c =>
+      initialize(c, usedMove = false); c.io.dcache.unusedMove.poke(true.B)
+      for (i <- c.io.mshr.status.indices) { val id = reserve(c, address + i * 64); refill(c, id) }
+      val id = awaitMove(c)
+      loadS1(c); c.io.load(0).s1_hit.expect(true.B)
+      c.io.pipe.s0_moveReq.ready.poke(true.B); c.clock.step()
+      c.io.pipe.s0_moveReq.ready.poke(false.B)
+      use(c); pipeS1(c); c.io.load(0).s2_use.poke(false.B)
+      c.io.pipe.s2_dataResp.bits.used.expect(true.B)
+      c.io.pipe.s2_dataResp.ready.poke(true.B); c.clock.step()
+      c.io.pipe.s2_dataResp.ready.poke(false.B); c.io.mshr.refillWait.poke(false.B)
+      c.io.pipe.s3_moveDone.valid.poke(true.B); c.io.pipe.s3_moveDone.bits.poke(id.U)
+      c.clock.step(); c.io.pipe.s3_moveDone.valid.poke(false.B); c.clock.step(5)
+      c.results.victims.expect(1.U); c.results.lastUsed.expect(true.B)
+      query(c); c.results.usedHits.expect(1.U); c.results.unusedHits.expect(0.U)
+    }
+  }
   it should "move only the chosen used LRU victim, retain stalled ownership and publish reuse after completion" in {
     simulate(new PBVictimTestTop) { c =>
       initialize(c); fillUsedOldest(c)

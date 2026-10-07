@@ -15,6 +15,7 @@ class PDBCapacityMainTop(implicit p: Parameters) extends PBMainTestTop(backgroun
     val allocAddr, useAddr = Input(UInt(PAddrBits.W))
     val fillByte = Input(UInt(8.W))
     val use, pressure, usedMove = Input(Bool())
+    val unusedMove = Input(Bool())
     val issue = Output(Valid(UInt(PAddrBits.W)))
     val done, victim = Output(Bool())
     val victimUsed = Output(Bool())
@@ -27,6 +28,7 @@ class PDBCapacityMainTop(implicit p: Parameters) extends PBMainTestTop(backgroun
   pb.io.mshr.refillReq.bits.data := Fill(cfg.blockBytes, capacity.fillByte)
   pb.io.mshr.refillWait := capacity.pressure
   pb.io.dcache.usedMove := capacity.usedMove
+  pb.io.dcache.unusedMove := capacity.unusedMove
   pb.io.load(0).s1_paddr.valid := capacity.use
   pb.io.load(0).s1_paddr.bits := capacity.useAddr
   pb.io.load(0).s2_use := pb.io.load(0).s2_dataResp.valid && pb.io.load(0).s2_dataResp.bits.hit
@@ -49,8 +51,8 @@ class PDBCapacityMainPipeTest extends AnyFlatSpec with ChiselSim {
   }
   behavior of "Capacity move through the real MainPipe"
 
-  for (abort <- Seq(false, true)) {
-    it should s"transfer the chosen used line with a stalled dirty DCache victim${if (abort) " after an abort" else ""}" in {
+  for ((used, abort) <- Seq((true, false), (true, true), (false, true))) {
+    it should s"transfer the chosen ${if (used) "used" else "unused"} line with a stalled dirty DCache victim${if (abort) " after an abort" else ""}" in {
       simulate(new PDBCapacityMainTop) { c =>
         c.io.alloc.poke(false.B); c.io.fill.poke(false.B)
         c.io.store.poke(false.B); c.io.probe.poke(false.B)
@@ -58,7 +60,8 @@ class PDBCapacityMainPipeTest extends AnyFlatSpec with ChiselSim {
         c.io.dirty.poke(true.B); c.io.block.poke(abort.B)
         c.io.readReady.poke(true.B); c.io.commit.poke(true.B); c.io.wbStall.poke(true.B)
         c.capacity.use.poke(false.B); c.capacity.pressure.poke(false.B)
-        c.capacity.usedMove.poke(true.B); c.capacity.allocAddr.poke(0.U)
+        c.capacity.usedMove.poke(used.B); c.capacity.allocAddr.poke(0.U)
+        c.capacity.unusedMove.poke((!used).B)
         c.capacity.useAddr.poke(0.U); c.capacity.fillByte.poke(0.U)
         c.reset.poke(true.B); c.clock.step(2); c.reset.poke(false.B); c.clock.step()
         val addr = BigInt("80001000", 16)
@@ -67,8 +70,10 @@ class PDBCapacityMainPipeTest extends AnyFlatSpec with ChiselSim {
           c.io.alloc.poke(true.B); c.clock.step(); c.io.alloc.poke(false.B)
           c.capacity.fillByte.poke((0x30 + i).U)
           c.io.fill.poke(true.B); c.clock.step(); c.io.fill.poke(false.B)
-          c.capacity.useAddr.poke((addr + 64 * i).U)
-          c.capacity.use.poke(true.B); c.clock.step(); c.capacity.use.poke(false.B); c.clock.step(2)
+          if (used) {
+            c.capacity.useAddr.poke((addr + 64 * i).U)
+            c.capacity.use.poke(true.B); c.clock.step(); c.capacity.use.poke(false.B); c.clock.step(2)
+          }
         }
         c.capacity.pressure.poke(true.B)
         var aborted = false
@@ -88,8 +93,8 @@ class PDBCapacityMainPipeTest extends AnyFlatSpec with ChiselSim {
           if (c.io.write.peek().litToBoolean) {
             c.io.data.expect(BigInt("30" * 64, 16).U)
             c.io.coh.expect(ClientStates.Trunk)
-            c.capacity.installedUsed.expect(true.B); c.capacity.accessed.expect(true.B)
-            c.capacity.installedSource.expect(1.U) // CLEAR, consumed Stream lifetime.
+            c.capacity.installedUsed.expect(used.B); c.capacity.accessed.expect(used.B)
+            c.capacity.installedSource.expect((if (used) 1 else 3).U)
             writes += 1
           }
           if (c.io.wb.peek().litToBoolean) {
@@ -99,7 +104,7 @@ class PDBCapacityMainPipeTest extends AnyFlatSpec with ChiselSim {
           }
           if (c.capacity.done.peek().litToBoolean) completed += 1
           if (c.capacity.victim.peek().litToBoolean) {
-            c.capacity.victimUsed.expect(true.B); victims += 1
+            c.capacity.victimUsed.expect(used.B); victims += 1
           }
           c.clock.step()
         }

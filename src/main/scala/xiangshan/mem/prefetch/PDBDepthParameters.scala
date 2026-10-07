@@ -7,6 +7,7 @@ import org.chipsalliance.cde.config.Field
 case class PDBDepthParameters(
   enabled: Boolean = false,
   usedMoveEnabled: Boolean = false,
+  unusedMoveEnabled: Boolean = false,
   lateLow: Int = 20, lateHigh: Int = 40,
   unusedLow: Int = 40, unusedHigh: Int = 80,
   creditHalfUnits: Int = 2, settleWindows: Int = 1,
@@ -41,6 +42,9 @@ class PDBDepthWindow extends Bundle {
   val late, used, unused = UInt(16.W)
   // Integer half units: 0, 1, 2 represent pressures 0, 0.5, 1.
   val latePressure, unusedPressure = UInt(2.W)
+  val depthUnusedPressure = UInt(2.W)
+  val unusedMoveActive = Bool()
+  val upThreshold = UInt(4.W)
   val upCredit, downCredit, settle = UInt(4.W)
   val usedMoveShadow, unusedMoveShadow = Bool()
 }

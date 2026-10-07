@@ -142,6 +142,7 @@ class PBPerfIO(implicit p: Parameters) extends DCacheBundle {
 
 class PBDCacheIO(implicit p: Parameters) extends DCacheBundle {
   val usedMove = Input(Bool())
+  val unusedMove = Input(Bool())
   val wfi = new PBPowerIO
   val error = new PBErrorIO
   val perf = new PBPerfIO

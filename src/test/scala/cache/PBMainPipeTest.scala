@@ -117,6 +117,7 @@ class PBMainTestTop(backgroundMove: Boolean = true)(implicit p: Parameters) exte
   pb.io.mshr.refillWait := false.B
   pb.io.dcache.wfi.wfiReq := false.B
   pb.io.dcache.usedMove := false.B
+  pb.io.dcache.unusedMove := false.B
   pb.io.mshr.preAcquire.foreach(_ := true.B)
 
   io.miss := mp.io.miss_req.fire

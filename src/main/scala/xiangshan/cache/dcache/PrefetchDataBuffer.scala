@@ -255,8 +255,9 @@ class PrefetchDataBuffer(
   when (relSelFire) {
     relSelId := relChoice.bits
     val victim = entryMeta(relChoice.bits)
+    val used = victim.used || entryUsedNow(relChoice.bits)
     relSelMove := entryReadable(relChoice.bits) && isFromStream(victim.prefetchSource) &&
-      (victim.used || entryUsedNow(relChoice.bits)) && io.dcache.usedMove
+      Mux(used, io.dcache.usedMove, io.dcache.unusedMove)
   }
 
   val capacityMoveDone = capacityMoveBusy && io.pipe.s3_moveDone.valid &&
@@ -662,6 +663,7 @@ class PrefetchDataBuffer(
   XSPerfAccumulate("move_request", moveS0Fire)
   XSPerfAccumulate("capacity_move_request", capacityMoveFire)
   XSPerfAccumulate("capacity_used_move", capacityMoveDone && entryMeta(capacityMoveId).used)
+  XSPerfAccumulate("capacity_unused_move", capacityMoveDone && !entryMeta(capacityMoveId).used)
   XSPerfAccumulate("capacity_move_abort", capacityMoveAbort)
   XSPerfAccumulate("move_request_back_to_back", moveS0Fire && perfPrevMoveFire)
   XSPerfAccumulate("move_release_parallel", moveS0Fire && relFire)
