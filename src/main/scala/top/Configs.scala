@@ -20,6 +20,7 @@ package top
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.mem.prefetch.PDBDepthParameters
 import utils._
 import utility._
 import system._
@@ -539,7 +540,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithPDBDepth()
+  new WithPDBDepth(PDBDepthParameters(enabled = true, usedMoveEnabled = true))
     ++ new WithPDB(64, "lru")
     ++ OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false, cdp = false)

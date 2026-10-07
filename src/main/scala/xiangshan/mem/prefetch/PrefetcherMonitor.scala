@@ -68,6 +68,7 @@ class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with Ha
   val clear_flag = Input(Vec(LoadPipelineWidth, Bool()))
 
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
+  val pdb_used_move = Output(Bool())
 
   val debugRolling = Flipped(new RobDebugRollingIO)
 }
@@ -99,6 +100,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
   io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
+  io.pdb_used_move := StreamMonitor.io.pdb_used_move
 
   // ldu 0, 1, 2 can only have one prefetch request at a time
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _) || io.maininfo.total_prefetch
@@ -171,6 +173,7 @@ class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {
   val prefetch_info = Input(new L1PrefetchStatisticBundle)
 
   val pf_ctrl = Output(new PrefetchControlBundle)
+  val pdb_used_move = Output(Bool())
 }
 
 class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
@@ -189,6 +192,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.flush := flush
   io.pf_ctrl.enable := enable
   io.pf_ctrl.confidence := confidence
+  io.pdb_used_move := false.B
 
   private val streamDepth = p(StreamDepthKey)
   private val controlsStreamDepth = param.name == "Stream" && streamDepth.useMonitor
@@ -286,6 +290,9 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     aligned.io.raw.unused := io.prefetch_info.bufferinfo.stream_unused_victim_hits
     val events = aligned.io.completed
     val control = PDBDepthControl(params, stream.initial, enabled, fixed, events)
+    val allowUsedMove = Constantin.createRecord(s"enablePDBUsedVictimMove$hart",
+      initValue = params.usedMoveEnabled)
+    io.pdb_used_move := allowUsedMove && control.usedMoveShadow
     assert(enabled || VecInit(PDBDepthPolicy.levels.map(d => fixed === d.U)).asUInt.orR,
       "The fixed-depth control must select an existing depth level")
     depth := control.depth
@@ -299,6 +306,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     XSPerfAccumulate("depth_increases", window.valid && report.depthAfter > report.depthBefore)
     XSPerfAccumulate("depth_decreases", window.valid && report.depthAfter < report.depthBefore)
     XSPerfAccumulate("used_move_shadow_windows", window.valid && report.usedMoveShadow)
+    XSPerfAccumulate("used_move_enabled_cycles", io.pdb_used_move)
     XSPerfAccumulate("unused_move_shadow_windows", window.valid && report.unusedMoveShadow)
     for (level <- PDBDepthPolicy.levels) {
       XSPerfAccumulate(s"cycles_at_depth_$level", depth === level.U)
@@ -307,7 +315,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     val table = ChiselDB.createTable(s"PDBDepthWindow$hart", chiselTypeOf(report), basicDB = true)
     table.log(report, window.valid && trace, s"StreamMonitor$hart", clock, reset)
     println(s"PDB depth: enabled=${params.enabled}, initial=${stream.initial}, fixed=${stream.fixedL1}, " +
-      s"window=500, levels=${PDBDepthPolicy.levels.mkString(",")}, parameters=$params, physicalMove=false")
+      s"window=500, levels=${PDBDepthPolicy.levels.mkString(",")}, parameters=$params")
   } else {
     val legacyDepth = Reg(UInt(DEPTH_BITS.W))
     val depthConst = Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",

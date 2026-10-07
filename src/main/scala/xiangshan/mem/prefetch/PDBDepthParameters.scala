@@ -6,6 +6,7 @@ import org.chipsalliance.cde.config.Field
 
 case class PDBDepthParameters(
   enabled: Boolean = false,
+  usedMoveEnabled: Boolean = false,
   lateLow: Int = 20, lateHigh: Int = 40,
   unusedLow: Int = 40, unusedHigh: Int = 80,
   creditHalfUnits: Int = 2, settleWindows: Int = 1,

@@ -158,13 +158,18 @@ class PrefetchDataBuffer(
   val moveSelId = RegInit(0.U(PBIdBits.W))
   val relSelValid = RegInit(false.B)
   val relSelId = RegInit(0.U(PBIdBits.W))
+  val relSelMove = RegInit(false.B)
+  // Serialize capacity transactions until ownership is transferred or restored.
+  // Background/Store moves keep their existing independent pipeline.
+  val capacityMoveBusy = RegInit(false.B)
+  val capacityMoveId = RegInit(0.U(PBIdBits.W))
 
   val entryProbeLock = Wire(Vec(entryCount, Bool()))
   val entryStoreLock = Wire(Vec(entryCount, Bool()))
 
   val releasePressure = io.mshr.refillWait && !allocReady
   val moveScheduleEnable = enableMoveToDCache && (!io.dcache.wfi.wfiReq || releasePressure)
-  val releaseScheduleEnable = releasePressure && !entryReleased.asUInt.orR
+  val releaseScheduleEnable = releasePressure && !entryReleased.asUInt.orR && !capacityMoveBusy
   val entryNeedMove = VecInit(entryMeta.indices.map(i =>
     entryReadable(i) && entryMeta(i).movePending
   ))
@@ -191,13 +196,22 @@ class PrefetchDataBuffer(
   }
   moveArb.io.out.ready := moveSelReady
 
-  val moveS0Valid = moveSelValid && entryNeedMove(moveSelId) && moveScheduleEnable
+  val capacityValid = relSelValid && entryNeedRel(relSelId) && releaseScheduleEnable
+  val relTaken = entryProbeLock(relSelId) || entryStoreLock(relSelId)
+  // MainPipe already arbitrates Probe and excludes same-block S1 Store/S0
+  // move overlap. Do not feed its accepted claim back into request valid.
+  val capacityMoveValid = capacityValid && relSelMove
+  val backgroundMoveValid = moveSelValid && entryNeedMove(moveSelId) && moveScheduleEnable
+  val moveS0Valid = capacityMoveValid || backgroundMoveValid
+  val moveS0Id = Mux(capacityMoveValid, relSelId, moveSelId)
   val moveS0Fire = moveS0Valid && io.pipe.s0_moveReq.ready
+  val capacityMoveFire = capacityMoveValid && io.pipe.s0_moveReq.ready
+  val backgroundMoveFire = backgroundMoveValid && !capacityMoveValid && io.pipe.s0_moveReq.ready
   val moveTaken = entryProbeLock(moveSelId) || entryStoreLock(moveSelId)
   val moveSelFire = moveSelReady && moveArb.io.out.valid
-  val entryMoveLock = VecInit(entryMeta.indices.map(i => moveS0Fire && moveSelId === i.U))
+  val entryMoveLock = VecInit(entryMeta.indices.map(i => moveS0Fire && moveS0Id === i.U))
 
-  moveSelReady := !moveSelValid || !moveS0Valid || moveS0Fire || moveTaken
+  moveSelReady := !moveSelValid || !backgroundMoveValid || backgroundMoveFire || moveTaken
 
   when (moveSelReady) { moveSelValid := moveArb.io.out.valid }
   when (moveSelFire) { moveSelId := moveArb.io.out.bits }
@@ -226,27 +240,46 @@ class PrefetchDataBuffer(
     relChoice.bits := relArb.io.out.bits
   }
 
-  val relValid = relSelValid && entryNeedRel(relSelId) && releaseScheduleEnable
+  val relValid = capacityValid && !relSelMove
   val relFire = relValid && io.releaseReq.ready
-  val relTaken = entryProbeLock(relSelId) || entryStoreLock(relSelId)
   val relSelFire = relSelReady && relChoice.valid
 
-  relSelReady := !relSelValid || !relValid || relTaken
+  relSelReady := !relSelValid || !capacityValid || relTaken
 
-  when (relFire) {
+  when (relFire || capacityMoveFire) {
     relSelValid := false.B
   }.elsewhen (relSelReady) {
     relSelValid := relChoice.valid
   }
   // Selection uses registered recency. Keep the candidate stable while WBQueue stalls.
-  when (relSelFire) { relSelId := relChoice.bits }
+  when (relSelFire) {
+    relSelId := relChoice.bits
+    val victim = entryMeta(relChoice.bits)
+    relSelMove := entryReadable(relChoice.bits) && isFromStream(victim.prefetchSource) &&
+      (victim.used || entryUsedNow(relChoice.bits)) && io.dcache.usedMove
+  }
 
-  assert(!moveS0Fire || enableMoveToDCache,
+  val capacityMoveDone = capacityMoveBusy && io.pipe.s3_moveDone.valid &&
+    io.pipe.s3_moveDone.bits === capacityMoveId
+  val capacityMoveAbort = capacityMoveBusy && io.pipe.s2_moveAbort.valid &&
+    io.pipe.s2_moveAbort.bits.entryId === capacityMoveId
+  when (capacityMoveFire) {
+    capacityMoveBusy := true.B
+    capacityMoveId := relSelId
+  }.elsewhen (capacityMoveDone || capacityMoveAbort) {
+    capacityMoveBusy := false.B
+  }
+
+  assert(!backgroundMoveFire || enableMoveToDCache,
     "PDB background move fired while move-to-dcache is disabled")
   assert(!relSelFire || releasePressure,
     "PDB release selected without a completed MissQueue refill waiting for space")
   assert(!relFire || releasePressure,
     "PDB release fired without a completed MissQueue refill waiting for space")
+  assert(!capacityMoveFire || releasePressure && !capacityMoveBusy,
+    "PDB capacity move requires a completed refill and exclusive capacity ownership")
+  assert(!capacityMoveFire || !relTaken,
+    "MainPipe must arbitrate a capacity move against Probe/Store claims")
 
   val relData = entryData(relSelId)
   val relDataBad = entryMeta(relSelId).dataBad
@@ -286,7 +319,7 @@ class PrefetchDataBuffer(
 
   when (moveS0Fire) {
     pipeS1IsMove := true.B
-    pipeS1MoveId := moveSelId
+    pipeS1MoveId := moveS0Id
   }.elsewhen (pipeS1Fire) {
     pipeS1IsMove := false.B
   }
@@ -455,9 +488,9 @@ class PrefetchDataBuffer(
     io.mshr.status(i).bits := entryMeta(i).paddr
   }
   io.pipe.s0_moveReq.valid := moveS0Valid
-  io.pipe.s0_moveReq.bits.entryId := moveSelId
-  io.pipe.s0_moveReq.bits.paddr := entryMeta(moveSelId).paddr
-  io.pipe.s0_moveReq.bits.vaddr := entryMeta(moveSelId).vaddr
+  io.pipe.s0_moveReq.bits.entryId := moveS0Id
+  io.pipe.s0_moveReq.bits.paddr := entryMeta(moveS0Id).paddr
+  io.pipe.s0_moveReq.bits.vaddr := entryMeta(moveS0Id).vaddr
   io.pipe.s1_hit := pipeS1Hit
   io.pipe.s1_paddr.ready := pipeS1Ready
   io.pipe.s1_probeResp.valid := pipeS1IsProbe
@@ -492,15 +525,19 @@ class PrefetchDataBuffer(
   val perfLockCycle = RegInit(VecInit(Seq.fill(entryCount)(0.U(64.W))))
   val perfAliasMove = RegInit(VecInit(Seq.fill(entryCount)(false.B)))
   val perfPrevMoveFire = RegInit(false.B)
-  val perfVictimValid = RegNext(relFire && entryReadable(relSelId), false.B)
-  val perfVictimId = RegEnable(relSelId, relFire)
+  val capacityRelease = relFire && entryReadable(relSelId)
+  val capacityExit = capacityRelease || capacityMoveDone
+  val capacityExitId = Mux(capacityMoveDone, capacityMoveId, relSelId)
+  val perfVictimValid = RegNext(capacityExit, false.B)
+  val perfVictimRelease = RegNext(capacityRelease, false.B)
+  val perfVictimId = RegEnable(capacityExitId, capacityExit)
   val perfVictim = RegEnable({
     val victim = Wire(new PDBVictim(PAddrBits - blockOffBits))
-    victim.blockAddr := blockAddr(entryMeta(relSelId).paddr)
-    victim.used := entryMeta(relSelId).used || entryUsedNow(relSelId)
-    victim.stream := isFromStream(entryMeta(relSelId).prefetchSource)
+    victim.blockAddr := blockAddr(entryMeta(capacityExitId).paddr)
+    victim.used := entryMeta(capacityExitId).used || entryUsedNow(capacityExitId)
+    victim.stream := isFromStream(entryMeta(capacityExitId).prefetchSource)
     victim
-  }, relFire)
+  }, capacityExit)
 
   val perfUnusedQueueDepth = entryCount + 2
   val perfUnusedQueue = RegInit(VecInit(
@@ -591,12 +628,12 @@ class PrefetchDataBuffer(
       loadS2EntryId(lane) === perfVictimId).reduce(_ || _)
   io.dcache.perf.capacityVictim.valid := perfVictimValid
   io.dcache.perf.capacityVictim.bits := perfVictim
-  io.dcache.perf.capacityVictim.bits.used := perfVictim.used || perfVictimLastUse
-  when (perfVictimValid) {
+  io.dcache.perf.capacityVictim.bits.used := perfVictim.used || perfVictimRelease && perfVictimLastUse
+  when (perfVictimRelease) {
     assert(entryReleasedDone(perfVictimId), "Victim classification must precede PB slot reuse")
   }
   // Probe, Store/background promotion, poison and cancellation are excluded.
-  // H4 capacity moves must produce this same event once, after final Load use.
+  // Capacity moves publish only on successful MainPipe completion, never abort.
 
   XSPerfAccumulate("reservation", allocFire)
   XSPerfAccumulate("reservation_cancel", PopCount(entryCancel))
@@ -623,6 +660,9 @@ class PrefetchDataBuffer(
   XSPerfAccumulate("line_response_wait_cycles", pipeS2Valid && !io.pipe.s2_dataResp.ready)
   XSPerfAccumulate("promotion_abort", moveS2Abort)
   XSPerfAccumulate("move_request", moveS0Fire)
+  XSPerfAccumulate("capacity_move_request", capacityMoveFire)
+  XSPerfAccumulate("capacity_used_move", capacityMoveDone && entryMeta(capacityMoveId).used)
+  XSPerfAccumulate("capacity_move_abort", capacityMoveAbort)
   XSPerfAccumulate("move_request_back_to_back", moveS0Fire && perfPrevMoveFire)
   XSPerfAccumulate("move_release_parallel", moveS0Fire && relFire)
   XSPerfAccumulate("probe_release_overlap", probeS0Fire && relFire && probeS0MatchOH(relSelId))
