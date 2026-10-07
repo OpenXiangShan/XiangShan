@@ -153,6 +153,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isInterrupt = Bool()
         val isHls = Bool()
         val isFetchMalAddr = Bool()
+        val ZicfilpELP = OptionWrapper(HasZicfilp, Bool())
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
       })

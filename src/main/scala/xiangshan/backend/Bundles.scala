@@ -1072,6 +1072,9 @@ object Bundles {
 
       this.lqIdx.foreach(_ := source.lqIdx.get)
       this.sqIdx.foreach(_ := source.sqIdx.get)
+
+      // Zicfilp metadata is carried by the issue-queue dequeue payload.
+      this.ZicfilpInfos.foreach(_ := source.ZicfilpInfos.get)
     }
   }
 
