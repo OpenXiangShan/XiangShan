@@ -30,6 +30,12 @@ correctness-required store transfers keep the existing protocol.
   demand accepted while allocation is in the pipeline clear the source exactly
   once, preventing a second count after the handoff. Terminal PF hits use the
   existing `pf_late_in_mshr` and matched source, without requiring MQ ready.
+- Demand-only allocations retain `L1_HW_PREFETCH_NULL`, including compressed
+  demands and later merges during the allocation handoff. `L1_HW_PREFETCH_CLEAR`
+  is written only when an actual prefetch is consumed by an accepted demand;
+  ordinary demand refills must not acquire prefetch-related L1 metadata.
+  The software-prefetch source ambiguity is outside this correction: the target
+  workloads are assumed to contain no software data prefetches.
 - Stream unused victim hits come from the persistent 256-entry FIFO observer.
   Used hits only update the used-move shadow; they never reduce depth. FIFO entries
   remain observable until first demand hit, duplicate refresh or full FIFO
@@ -107,7 +113,7 @@ to a phase rather than assuming each phase starts at an empty control window.
 
 ## Validation and requested next data
 
-The monitor integration revision passed 37 tests in nine suites (252 seconds),
+The preceding monitor integration revision (`69f3a563a`) passed 37 tests in nine suites (252 seconds),
 `xiangshan.checkFormat`, debug DefaultConfig generation (9m31s), and fresh release
 `make verilog` (6m37s). All 561 Scala source hashes remained unchanged throughout
 generation. Generated RTL confirms inline StreamMonitor control and the original
@@ -115,6 +121,17 @@ generation. Generated RTL confirms inline StreamMonitor control and the original
 The revision removes 82 production source lines net relative to its parent.
 Results are recorded in `h3-monitor-regression.log`, `h3-monitor-sim-verilog.log`,
 `h3-monitor-verilog.log` and `tmp/h3-monitor-validation.json`.
+The demand-source correction passed eight relevant tests across three suites,
+format checks and fresh DefaultConfig `make verilog` (6m26s). Coverage includes
+load/store demand-only allocation, compression and pending/resident merges,
+consumed hardware-prefetch CLEAR tags, PB protocol and monitor-to-Stream depth.
+The pre-fix regression observed CLEAR (1) where NULL (0) was required. One initial
+test incorrectly retained a probing PF as the demand's compression leader; after
+correcting that test setup, the MQ suite passed. Production source was unchanged.
+Evidence is in `h3-demand-source-tests.log`, `h3-demand-source-mq-tests.log`,
+`h3-demand-source-verilog.log` and `tmp/h3-demand-source-validation.json`.
+All 561 source hashes were checked; H1 references are unchanged. This correction
+adds no state or interface and does not change depth policy or parameters.
 Coverage includes exact thresholds/window boundaries, saturation, all seven
 levels, settle 0/1, credit resets, fixed-mode observation and shadow isolation;
 real MissQueue lane bitmap/source/acceptance/compression/pipe handoff; real PDB

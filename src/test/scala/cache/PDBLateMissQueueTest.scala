@@ -17,13 +17,14 @@ class PDBLateMissQueueTop(implicit p: Parameters) extends DCacheModule {
   Constantin.init(false); ChiselDB.init(false)
   val io = IO(new Bundle {
     val valid, cancel, blocked = Input(Vec(4, Bool()))
-    // 0: Load, 1: Stream PF, 2: another PF source, 3: Store.
+    // 0: Load, 1: Stream PF, 2: Stride PF, 3: Store.
     val kind = Input(Vec(4, UInt(2.W)))
     val address = Input(Vec(4, UInt(PAddrBits.W)))
     val ready, handled = Output(Vec(4, Bool()))
     val late = Output(UInt(4.W))
     val hitMask = Output(UInt(4.W))
     val hitSource = Output(Vec(4, UInt(L1PfSourceBits.W)))
+    val matchedSource = Output(UInt(L1PfSourceBits.W))
   })
   val edge = new TLEdgeOut(
     TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
@@ -42,7 +43,7 @@ class PDBLateMissQueueTop(implicit p: Parameters) extends DCacheModule {
       Mux(io.kind(i) === 3.U, STORE_SOURCE.U, LOAD_SOURCE.U))
     req.bits.cmd := Mux(pf, MemoryOpConstants.M_PFR,
       Mux(io.kind(i) === 3.U, MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD))
-    req.bits.pf_source := Mux(io.kind(i) === 1.U, 3.U, 1.U)
+    req.bits.pf_source := Mux(io.kind(i) === 1.U, 3.U, Mux(io.kind(i) === 2.U, 2.U, 0.U))
     req.bits.pbEligible := pf
     req.bits.addr := io.address(i)
     req.bits.vaddr := io.address(i)
@@ -80,6 +81,7 @@ class PDBLateMissQueueTop(implicit p: Parameters) extends DCacheModule {
   val stat = mq.io.prefetch_stat
   io.hitMask := stat.hit_pf_in_mshr
   io.hitSource := stat.hit_pf_in_mshr_source
+  io.matchedSource := stat.pf_late_in_mshr_source
   io.late := PopCount((0 until 4).map(i => stat.hit_pf_in_mshr(i) && isFromStream(stat.hit_pf_in_mshr_source(i)))) +&
     (stat.pf_late_in_mshr && isFromStream(stat.pf_source) && isDemand(stat.pf_late_in_mshr_source)).asUInt
 }
@@ -106,6 +108,33 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
   }
 
   behavior of "Real MissQueue PDB late evidence"
+  it should "preserve NULL on demand-only allocations and merges" in {
+    simulate(new PDBLateMissQueueTop) { c =>
+      for (kind <- Seq(0, 3); mergeAt <- Seq(-1, 0, 1, 3)) {
+        reset(c)
+        request(c, 1, address, kind)
+        if (mergeAt == 0) {
+          request(c, 2, address, 0); c.io.handled(2).expect(true.B)
+        }
+        c.io.handled(1).expect(true.B); c.clock.step(); clear(c)
+        request(c, 0, address, 1)
+        c.io.matchedSource.expect(0.U); c.io.late.expect(1.U)
+        // Do not let the probing PF become the demand's compression leader.
+        c.io.valid(0).poke(false.B)
+        if (mergeAt == 1) {
+          request(c, 2, address, 0); c.io.handled(2).expect(true.B)
+        }
+        c.clock.step(); clear(c); c.clock.step(2)
+        if (mergeAt == 3) {
+          request(c, 2, address, 0); c.io.handled(2).expect(true.B)
+          c.clock.step(); clear(c)
+        }
+        request(c, 0, address, 1)
+        c.io.matchedSource.expect(0.U); c.io.late.expect(1.U)
+      }
+    }
+  }
+
   it should "handle pipe and entry merges, cancellations, compressed lanes, sources and full drops" in {
     simulate(new PDBLateMissQueueTop) { c =>
       reset(c)
@@ -118,6 +147,7 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
       c.clock.step(); c.io.late.expect(0.U); clear(c); c.clock.step()
       request(c, 0, address, 1)
       c.io.ready(0).expect(false.B); c.io.late.expect(1.U)
+      c.io.matchedSource.expect(1.U)
       c.clock.step(); clear(c)
       request(c, 0, address, 2); c.io.late.expect(0.U)
       clear(c); request(c, 0, address, 1); c.io.cancel(0).poke(true.B); c.io.late.expect(0.U)
@@ -132,12 +162,14 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
       c.io.blocked(1).poke(false.B)
       c.io.handled(1).expect(true.B); c.io.late.expect(1.U); c.clock.step()
       c.io.late.expect(0.U)
+      clear(c); request(c, 0, address, 1); c.io.matchedSource.expect(1.U)
 
       reset(c)
       request(c, 0, address, 1); request(c, 1, address, 0); request(c, 2, address, 0)
       c.io.handled(0).expect(true.B); c.io.handled(1).expect(true.B)
       c.io.late.expect(1.U); c.clock.step(); clear(c); c.clock.step(2)
       request(c, 1, address, 0); c.io.late.expect(0.U)
+      clear(c); request(c, 0, address, 1); c.io.matchedSource.expect(1.U)
 
       reset(c)
       for (i <- 0 until 3) {
