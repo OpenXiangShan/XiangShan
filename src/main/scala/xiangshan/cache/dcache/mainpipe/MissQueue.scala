@@ -730,7 +730,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     corrupt := false.B
     // An accepted demand can already merge while this allocation is in the pipe.
     prefetch := input_req_is_prefetch && !isDemand(miss_req_pipe_reg_bits.pf_source) && !acceptedDemand
-    when (acceptedDemand) { req.pf_source := L1_HW_PREFETCH_CLEAR }
+    when (miss_req_pipe_reg_bits.isFromPrefetch && acceptedDemand) {
+      req.pf_source := L1_HW_PREFETCH_CLEAR
+    }
     access := false.B
     secondary_fired := false.B
 
@@ -1693,7 +1695,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val groupDemand = (0 until reqNum).map(j =>
         query_fire(j) && !io.queryMQ(j).req.bits.cancel && !io.queryMQ(j).req.bits.isFromPrefetch &&
           analysis.compress_group(j) === i.U).reduce(_ || _)
-      when (!io.queryMQ(i).req.bits.isFromPrefetch || groupDemand) {
+      // CLEAR marks a consumed prefetch; demand-only allocations retain NULL.
+      when (io.queryMQ(i).req.bits.isFromPrefetch && groupDemand) {
         parallel_pipe_regs(i).req.pf_source := L1_HW_PREFETCH_CLEAR
       }
       parallel_pipe_regs(i).toPB := pbCand(i)
