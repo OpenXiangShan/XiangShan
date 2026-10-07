@@ -1330,6 +1330,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mshr_store_empty = Output(Bool())
 
     val prefetch_stat = Output(new MissPrefetchStatBundle)
+    val pdbLate = Output(UInt(4.W))
 
     val wfi = Flipped(new WfiReqBundle)
 
@@ -1739,6 +1740,42 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.resp(i).handled := query_fire(i) && !io.queryMQ(i).req.bits.cancel
     io.resp(i).merged := (analysis.strategy(i) & 2.U) =/= 0.U
   }
+
+  // Dedicated Stream evidence for H3. Legacy prefetch flags/statistics retain
+  // their old behavior and do not define the competitive controller's events.
+  val pdbLateTracker = Module(new PDBLateTracker(cfg.nMissEntries))
+  for (e <- 0 until cfg.nMissEntries) {
+    val allocations = VecInit((0 until reqNum).map(r =>
+      query_fire(r) && !io.queryMQ(r).req.bits.cancel && analysis.strategy(r)(0) &&
+        analysis.compress_group(r) === r.U && analysis.target_mshr(r) === e.U))
+    val allocatingPipe = parallel_pipe_regs.map(r =>
+      r.alloc && !r.cancel && r.mshr_id === e.U)
+    pdbLateTracker.io.allocate(e).valid := allocations.asUInt.orR
+    pdbLateTracker.io.allocate(e).bits.stream := (0 until reqNum).map(r =>
+      allocations(r) && io.queryMQ(r).req.bits.isFromPrefetch &&
+        isFromStream(io.queryMQ(r).req.bits.pf_source)).reduce(_ || _)
+    pdbLateTracker.io.allocate(e).bits.demand := (0 until reqNum).map(r =>
+      allocations(r) && !io.queryMQ(r).req.bits.isFromPrefetch).reduce(_ || _)
+    pdbLateTracker.io.live(e) := entries(e).io.req_addr.valid || allocatingPipe.reduce(_ || _)
+    pdbLateTracker.io.demandHit(e) := (0 until reqNum).map(r =>
+      query_fire(r) && !io.queryMQ(r).req.bits.cancel &&
+        !io.queryMQ(r).req.bits.isFromPrefetch && actual_target_mshr_for_group(r) === e.U
+    ).reduce(_ || _)
+    val pf = io.queryMQ(0).req
+    val hitPipe = parallel_pipe_regs.zip(allocatingPipe).map { case (r, alloc) =>
+      alloc && get_block(r.req.addr) === get_block(pf.bits.addr)
+    }.reduce(_ || _)
+    val hitEntry = entries(e).io.matched
+    // MainPipe drops a terminal PF miss even when MQ is not ready. Such a
+    // PF->demand-MSHR hit is late, whereas rejection alone is not evidence.
+    pdbLateTracker.io.streamHit(e) := pf.valid && !pf.bits.cancel &&
+      pf.bits.isFromPrefetch && isFromStream(pf.bits.pf_source) && (hitPipe || hitEntry)
+    assert(PopCount(allocations) <= 1.U)
+  }
+  io.pdbLate := pdbLateTracker.io.demandLate +& pdbLateTracker.io.prefetchLate
+  assert(io.pdbLate <= reqNum.U)
+  XSPerfAccumulate("pdb_stream_demand_hit_prefetch_mshr", pdbLateTracker.io.demandLate)
+  XSPerfAccumulate("pdb_stream_prefetch_hit_demand_mshr", pdbLateTracker.io.prefetchLate)
 
   val source_except_load_cnt = RegInit(0.U(10.W))
   for(i <- 0 until reqNum) {

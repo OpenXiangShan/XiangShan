@@ -8,7 +8,7 @@ import top._
 import utility._
 import xiangshan.{XSCoreParamsKey, XSTileKey}
 import xiangshan.cache.{PDBLRU, PDBVictimObserverKey, PDBVictimObserverParameters}
-import xiangshan.mem.prefetch.{StreamDepthKey, StreamDepthParameters}
+import xiangshan.mem.prefetch.{PDBDepthKey, StreamDepthKey, StreamDepthParameters}
 
 class PDBConfigurationTest extends AnyFlatSpec {
   behavior of "PDB experiment configurations"
@@ -27,12 +27,14 @@ class PDBConfigurationTest extends AnyFlatSpec {
         assert(cache.copy(nPBEntries = originalCache.nPBEntries,
           pbReplacer = originalCache.pbReplacer) == originalCache)
       }
-      assert(config(StreamDepthKey) == StreamDepthParameters())
+      assert(config(StreamDepthKey) == StreamDepthParameters(useMonitor = config(PDBDepthKey).enabled))
     }
     assert(new PDB64MonitorDepthConfig()(StreamDepthKey).useMonitor)
     assert(!new PDB64MonitorDepthConfig()(StreamDepthKey).enableLegacyControl)
     assert(base(XSTileKey) == new PDB64LRUConfig(2)(XSTileKey))
-    assert(base(StreamDepthKey) == StreamDepthParameters(useMonitor = false, fixedL1 = 64))
+    assert(base(StreamDepthKey) == StreamDepthParameters(useMonitor = true, fixedL1 = 64))
+    assert(base(PDBDepthKey).enabled)
+    assert(!new PDB64LRUConfig()(PDBDepthKey).enabled)
     assert(base(PDBVictimObserverKey) == PDBVictimObserverParameters(entries = 256, bankEntries = 32))
   }
   it should "reject invalid depth sources and unsafe legacy starting depths" in {

@@ -118,23 +118,26 @@ class PDBVictimObserver(
   assert(!fullEviction || remaining(0), "FIFO must evict a valid oldest entry")
 }
 
-/** Statistics and optional trace only. None of these outputs feeds cache control. */
+/** Persistent observation, statistics and optional trace. H3 consumes Stream hits. */
 class PDBVictimMonitor(implicit p: Parameters) extends DCacheModule {
   private val params = p(PDBVictimObserverKey)
   private val addressBits = PAddrBits - blockOffBits
   val io = IO(new Bundle {
     val victim = Input(Valid(new PDBVictim(addressBits)))
     val demand = Input(Vec(LoadPipelineWidth, Valid(UInt(addressBits.W))))
+    val streamUsedHits, streamUnusedHits = Output(UInt(log2Ceil(LoadPipelineWidth + 1).W))
   })
   val hart = p(XSCoreParamsKey).HartId
   val enabled = Constantin.createRecord(s"enablePDBVictimObserver$hart", initValue = true)
-  val traceEnabled = Constantin.createRecord(s"tracePDBVictimObserver$hart", initValue = false)
+  val traceEnabled = Constantin.createRecord(s"tracePDBVictimObserver$hart", initValue = true)
   val observer = Module(new PDBVictimObserver(params.entries, addressBits, LoadPipelineWidth, params.bankEntries))
   observer.io.victim := io.victim
   observer.io.victim.valid := enabled && io.victim.valid
   observer.io.demand := io.demand
   observer.io.demand.zip(io.demand).foreach { case (out, in) => out.valid := enabled && in.valid }
   val result = observer.io.result
+  io.streamUsedHits := result.streamUsedHits
+  io.streamUnusedHits := result.streamUnusedHits
   // Preserve the hardware observer even when performance printing is disabled.
   dontTouch(result.usedHits)
   dontTouch(result.unusedHits)
