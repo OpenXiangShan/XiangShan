@@ -135,6 +135,7 @@ class PBErrorIO(implicit p: Parameters) extends DCacheBundle {
 class PBPerfIO(implicit p: Parameters) extends DCacheBundle {
   val firstUse = Output(Vec(PBEntries, Valid(UInt(L1PfSourceBits.W))))
   val unusedExit = Output(Valid(UInt(L1PfSourceBits.W)))
+  val streamRefill = Output(Bool())
   // Published one cycle after a clean WBQueue release, after the last S2 use.
   val capacityVictim = Output(Valid(new PDBVictim(PAddrBits - blockOffBits)))
 }

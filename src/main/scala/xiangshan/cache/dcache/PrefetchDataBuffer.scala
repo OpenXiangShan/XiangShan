@@ -508,6 +508,7 @@ class PrefetchDataBuffer(
   val perfUnusedCount = RegInit(0.U(log2Ceil(perfUnusedQueueDepth + 1).W))
 
   val refillGood = refillFire && !refillDenied && !refillCorrupt
+  io.dcache.perf.streamRefill := refillGood && isFromStream(refillMeta.prefetchSource)
   val refillAccepted = refillFire && !refillDenied
   val entryFirstUse = VecInit(entryMeta.indices.map(i =>
     entryUsedNow(i) && !entryMeta(i).used && !entryMeta(i).dataBad))
