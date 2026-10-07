@@ -245,10 +245,6 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     signals.block_match && reg_valid()
   }
 
-  def prefetch_late_en(signals: MatchSignals, new_req: MissReqWoStoreData, new_req_valid: Bool): Bool = {
-    new_req_valid && alloc && signals.block_match && req.isFromPrefetch && !new_req.isFromPrefetch
-  }
-
   def reject_req(signals: MatchSignals): Bool = {
     Mux(
         alloc,
@@ -578,13 +574,14 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val miss_req_pipe_reg_bits = io.miss_req_pipe_reg.req
 
   val signals_vec = WireInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MatchSignals))))
-  val signals_pipe_prefetch = computeMatchSignals(miss_req_pipe_reg_bits, io.queryME(0).req.bits)
 
   for(i <- 0 until reqNum) {
     signals_vec(i) := computeMatchSignals(req, io.queryME(i).req.bits)
   }
 
   val input_req_is_prefetch = isPrefetch(miss_req_pipe_reg_bits.cmd)
+  val acceptedDemand = (0 until reqNum).map(i =>
+    io.accepted(i) && !io.queryME(i).req.bits.isFromPrefetch).reduce(_ || _)
 
   val s_acquire = RegInit(true.B)
   val s_grantack = RegInit(true.B)
@@ -731,7 +728,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     error := false.B
     denied := false.B
     corrupt := false.B
-    prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(signals_pipe_prefetch, io.queryME(0).req.bits, io.queryME(0).req.valid)
+    // An accepted demand can already merge while this allocation is in the pipe.
+    prefetch := input_req_is_prefetch && !isDemand(miss_req_pipe_reg_bits.pf_source) && !acceptedDemand
+    when (acceptedDemand) { req.pf_source := L1_HW_PREFETCH_CLEAR }
     access := false.B
     secondary_fired := false.B
 
@@ -1201,7 +1200,7 @@ for(i <- 0 until reqNum) {
   // But the miss_req that hits prefetch_req is more than one!
   val hit_prefetch_vec = Wire(Vec(reqNum, Bool()))
   for(i <- 0 until reqNum) {
-    hit_prefetch_vec(i) := io.queryME(i).req.valid && !io.queryME(i).req.bits.isFromPrefetch &&
+    hit_prefetch_vec(i) := io.accepted(i) && !io.queryME(i).req.bits.isFromPrefetch &&
                             req_valid && signals_vec(i).block_match && prefetch
   }
   io.matched := req_valid && signals_vec(0).block_match
@@ -1330,7 +1329,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mshr_store_empty = Output(Bool())
 
     val prefetch_stat = Output(new MissPrefetchStatBundle)
-    val pdbLate = Output(UInt(4.W))
 
     val wfi = Flipped(new WfiReqBundle)
 
@@ -1692,6 +1690,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for (i <- 0 until reqNum) {
     when (query_fire(i) && !io.queryMQ(i).req.bits.cancel) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      val groupDemand = (0 until reqNum).map(j =>
+        query_fire(j) && !io.queryMQ(j).req.bits.cancel && !io.queryMQ(j).req.bits.isFromPrefetch &&
+          analysis.compress_group(j) === i.U).reduce(_ || _)
+      when (!io.queryMQ(i).req.bits.isFromPrefetch || groupDemand) {
+        parallel_pipe_regs(i).req.pf_source := L1_HW_PREFETCH_CLEAR
+      }
       parallel_pipe_regs(i).toPB := pbCand(i)
       parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
                                       (analysis.compress_group(i) === i.U) &&
@@ -1740,42 +1744,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.resp(i).handled := query_fire(i) && !io.queryMQ(i).req.bits.cancel
     io.resp(i).merged := (analysis.strategy(i) & 2.U) =/= 0.U
   }
-
-  // Dedicated Stream evidence for H3. Legacy prefetch flags/statistics retain
-  // their old behavior and do not define the competitive controller's events.
-  val pdbLateTracker = Module(new PDBLateTracker(cfg.nMissEntries))
-  for (e <- 0 until cfg.nMissEntries) {
-    val allocations = VecInit((0 until reqNum).map(r =>
-      query_fire(r) && !io.queryMQ(r).req.bits.cancel && analysis.strategy(r)(0) &&
-        analysis.compress_group(r) === r.U && analysis.target_mshr(r) === e.U))
-    val allocatingPipe = parallel_pipe_regs.map(r =>
-      r.alloc && !r.cancel && r.mshr_id === e.U)
-    pdbLateTracker.io.allocate(e).valid := allocations.asUInt.orR
-    pdbLateTracker.io.allocate(e).bits.stream := (0 until reqNum).map(r =>
-      allocations(r) && io.queryMQ(r).req.bits.isFromPrefetch &&
-        isFromStream(io.queryMQ(r).req.bits.pf_source)).reduce(_ || _)
-    pdbLateTracker.io.allocate(e).bits.demand := (0 until reqNum).map(r =>
-      allocations(r) && !io.queryMQ(r).req.bits.isFromPrefetch).reduce(_ || _)
-    pdbLateTracker.io.live(e) := entries(e).io.req_addr.valid || allocatingPipe.reduce(_ || _)
-    pdbLateTracker.io.demandHit(e) := (0 until reqNum).map(r =>
-      query_fire(r) && !io.queryMQ(r).req.bits.cancel &&
-        !io.queryMQ(r).req.bits.isFromPrefetch && actual_target_mshr_for_group(r) === e.U
-    ).reduce(_ || _)
-    val pf = io.queryMQ(0).req
-    val hitPipe = parallel_pipe_regs.zip(allocatingPipe).map { case (r, alloc) =>
-      alloc && get_block(r.req.addr) === get_block(pf.bits.addr)
-    }.reduce(_ || _)
-    val hitEntry = entries(e).io.matched
-    // MainPipe drops a terminal PF miss even when MQ is not ready. Such a
-    // PF->demand-MSHR hit is late, whereas rejection alone is not evidence.
-    pdbLateTracker.io.streamHit(e) := pf.valid && !pf.bits.cancel &&
-      pf.bits.isFromPrefetch && isFromStream(pf.bits.pf_source) && (hitPipe || hitEntry)
-    assert(PopCount(allocations) <= 1.U)
-  }
-  io.pdbLate := pdbLateTracker.io.demandLate +& pdbLateTracker.io.prefetchLate
-  assert(io.pdbLate <= reqNum.U)
-  XSPerfAccumulate("pdb_stream_demand_hit_prefetch_mshr", pdbLateTracker.io.demandLate)
-  XSPerfAccumulate("pdb_stream_prefetch_hit_demand_mshr", pdbLateTracker.io.prefetchLate)
 
   val source_except_load_cnt = RegInit(0.U(10.W))
   for(i <- 0 until reqNum) {
@@ -2070,38 +2038,40 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   io.full := ~Cat(entries.map(_.io.primary_ready)).andR
 
-  // prefetch related. The prefetch_req only in mainPipe, Now!
-  val late_in_reg = match_from_pipe(0)
-  io.prefetch_stat.pf_late_in_mshr := io.queryMQ(0).req.valid && io.queryMQ(0).req.bits.isFromPrefetch && 
-                                        (late_in_reg || Cat(entries.map(_.io.matched)).orR)
-  io.prefetch_stat.pf_late_in_mshr_source := ParallelMux(
-    Seq(late_in_reg) ++ entries.map(_.io.matched)
-    zip
-    Seq(parallel_pipe_regs(match_from_ith_pipe).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
-  )
+  // Prefetch requests are terminal in MainPipe even if MQ is not ready.
+  val lateInPipe = parallel_pipe_regs.map(r =>
+    r.alloc && !r.cancel && get_block(r.req.addr) === get_block(io.queryMQ(0).req.bits.addr))
+  io.prefetch_stat.pf_late_in_mshr := io.queryMQ(0).req.valid && !io.queryMQ(0).req.bits.cancel &&
+    io.queryMQ(0).req.bits.isFromPrefetch && (lateInPipe.reduce(_ || _) || entries.map(_.io.matched).reduce(_ || _))
+  io.prefetch_stat.pf_late_in_mshr_source := Mux1H(
+    lateInPipe ++ entries.map(_.io.matched),
+    parallel_pipe_regs.map(_.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source))
 
   io.prefetch_stat.prefetch_miss := query_fire(0) && io.queryMQ(0).req.bits.isFromPrefetch
   io.prefetch_stat.pf_source := io.queryMQ(0).req.bits.pf_source
   io.prefetch_stat.load_miss := PopCount((0 until reqNum).map(j => query_fire(j) && io.queryMQ(j).req.bits.isFromLoad))
 
-  // compute all miss_req hit prefetch_req or not
-  val prefetch_hit_in_reg_vec = Wire(Vec(reqNum, Bool()))
-  val prefetch_hit_in_mshr_vec = Wire(Vec(reqNum, Bool()))
-  for(i <- 0 until reqNum) {
-    val signals_ = (0 until reqNum).map(j => computeMatchSignals(parallel_pipe_regs(j).req, io.queryMQ(i).req.bits))
-    val hit_in_reg = (0 until reqNum).map(j => parallel_pipe_regs(j).prefetch_late_en(signals_(j), io.queryMQ(i).req.bits.toMissReqWoStoreData(), io.queryMQ(i).req.valid))
-    
-    prefetch_hit_in_reg_vec(i) := hit_in_reg.asUInt.orR
-    prefetch_hit_in_mshr_vec(i) := io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.isFromPrefetch && Cat(entries.map(_.io.prefetch_info.hit_prefetch(i))).orR
+  val hitPrefetch = Wire(Vec(reqNum, Bool()))
+  val firstHitPrefetch = Wire(Vec(reqNum, Bool()))
+  for (i <- 0 until reqNum) {
+    val demand = query_fire(i) && !io.queryMQ(i).req.bits.cancel && !io.queryMQ(i).req.bits.isFromPrefetch
+    val pipeHits = parallel_pipe_regs.map(r => demand && r.alloc && !r.cancel &&
+      r.req.isFromPrefetch && !isDemand(r.req.pf_source) && r.mshr_id === actual_target_mshr_for_group(i))
+    val entryHits = entries.map(_.io.prefetch_info.hit_prefetch(i))
+    // Include a demand compressed with a newly accepted prefetch allocation.
+    val allocationHits = (0 until reqNum).map(j => demand && query_fire(j) &&
+      !io.queryMQ(j).req.bits.cancel && io.queryMQ(j).req.bits.isFromPrefetch &&
+      analysis.strategy(j)(0) && analysis.compress_group(j) === j.U && analysis.compress_group(i) === j.U)
+    val matches = pipeHits ++ entryHits ++ allocationHits
+    hitPrefetch(i) := matches.reduce(_ || _)
+    io.prefetch_stat.hit_pf_in_mshr_source(i) := Mux1H(matches,
+      parallel_pipe_regs.map(_.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source) ++
+        io.queryMQ.map(_.req.bits.pf_source))
+    firstHitPrefetch(i) := hitPrefetch(i) && !(0 until i).map(j =>
+      hitPrefetch(j) && actual_target_mshr_for_group(j) === actual_target_mshr_for_group(i)).foldLeft(false.B)(_ || _)
   }
-  io.prefetch_stat.hit_pf_in_mshr := PopCount((0 until reqNum).map(i => prefetch_hit_in_reg_vec(i) || prefetch_hit_in_mshr_vec(i)))
-  for(i <- 0 until reqNum) {
-    io.prefetch_stat.hit_pf_in_mshr_source(i) := ParallelMux(
-      Seq(prefetch_hit_in_reg_vec(i)) ++ entries.map(_.io.prefetch_info.hit_prefetch(i))
-      zip
-      Seq(parallel_pipe_regs(i).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
-    )
-  }
+  // Consumers interpret this as one bit per request lane, not a binary count.
+  io.prefetch_stat.hit_pf_in_mshr := firstHitPrefetch.asUInt
 
   // L1MissTrace Chisel DB - support multiple enqueue ports
   val debug_miss_trace_vec = Wire(Vec(reqNum, new L1MissTrace))

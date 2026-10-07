@@ -1084,7 +1084,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
-  val pdbDepth = WireDefault(0.U(12.W))
   if (p(PDBDepthKey).enabled) {
     require(PBEntries > 0 && p(StreamDepthKey).useMonitor && !p(StreamDepthKey).enableLegacyControl,
       "PDB depth control requires a PDB and the non-legacy Stream monitor input")
@@ -1130,14 +1129,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     victimMonitor.io.victim := pb.io.dcache.perf.capacityVictim
     victimMonitor.io.demand.zip(ldu).foreach { case (event, pipe) => event := pipe.io.victimDemand }
     if (p(PDBDepthKey).enabled) {
-      val depthMonitor = Module(new PDBDepthMonitor)
-      val depthEvents = Module(new PDBDepthEventAligner)
-      depthEvents.io.raw.refill := pb.io.dcache.perf.streamRefill
-      depthEvents.io.raw.late := missQueue.io.pdbLate
-      depthEvents.io.raw.used := victimMonitor.io.streamUsedHits
-      depthEvents.io.raw.unused := victimMonitor.io.streamUnusedHits
-      depthMonitor.io.events := depthEvents.io.completed
-      pdbDepth := depthMonitor.io.depth
+      prefetcherMonitor.io.bufferinfo.stream_refill := pb.io.dcache.perf.streamRefill
+      prefetcherMonitor.io.bufferinfo.stream_used_victim_hits := victimMonitor.io.streamUsedHits
+      prefetcherMonitor.io.bufferinfo.stream_unused_victim_hits := victimMonitor.io.streamUnusedHits
     }
 
     for (lane <- 0 until LoadPipelineWidth) {
@@ -1558,9 +1552,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     PopCount(prefetcherMonitor.io.loadinfo.map(_.hit_pf_in_cache)) +&
       PopCount(prefetcherMonitor.io.bufferinfo.first_use.map(_.valid)))
   io.pf_ctrl <> prefetcherMonitor.io.pf_ctrl
-  if (p(PDBDepthKey).enabled) {
-    io.pf_ctrl(0).dynamic_depth := pdbDepth
-  }
 
   /** LoadMissDB: record load miss state */
   val hartId = p(XSCoreParamsKey).HartId

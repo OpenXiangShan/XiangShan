@@ -36,12 +36,32 @@ class PDBAlignedDepthTop extends Module {
 
 class PDBControlledStreamTop(implicit p: Parameters) extends StreamDepthTestTop {
   val events = IO(Input(new PDBDepthEvents))
+  val prefetchLate = IO(Input(Bool()))
   val selectedDepth = IO(Output(UInt(12.W)))
-  val controller = Module(new PDBDepthController(p(PDBDepthKey)))
-  controller.io.enabled := true.B; controller.io.fixedDepth := 64.U
-  controller.io.events := events
-  stream.io.dynamic_depth := controller.io.depth
-  selectedDepth := controller.io.depth
+  ChiselDB.init(false)
+  val monitor = Module(new PrefetcherMonitor)
+  monitor.io.loadinfo := 0.U.asTypeOf(monitor.io.loadinfo)
+  monitor.io.maininfo := 0.U.asTypeOf(monitor.io.maininfo)
+  monitor.io.missinfo := 0.U.asTypeOf(monitor.io.missinfo)
+  monitor.io.replinfo := 0.U.asTypeOf(monitor.io.replinfo)
+  monitor.io.bufferinfo := 0.U.asTypeOf(monitor.io.bufferinfo)
+  monitor.io.clear_flag := 0.U.asTypeOf(monitor.io.clear_flag)
+  monitor.io.debugRolling := 0.U.asTypeOf(monitor.io.debugRolling)
+  for (lane <- 0 until MissReqPortCount) {
+    monitor.io.missinfo.hit_pf_in_mshr_source(lane) := 3.U
+  }
+  monitor.io.missinfo.hit_pf_in_mshr := ((1.U((MissReqPortCount + 1).W) << events.late) - 1.U)(MissReqPortCount - 1, 0)
+  monitor.io.missinfo.pf_late_in_mshr := prefetchLate
+  monitor.io.missinfo.pf_source := 3.U
+  monitor.io.missinfo.pf_late_in_mshr_source := 0.U
+  monitor.io.bufferinfo.stream_refill := events.refill
+  monitor.io.bufferinfo.stream_used_victim_hits := events.used
+  monitor.io.bufferinfo.stream_unused_victim_hits := events.unused
+  stream.io.dynamic_depth := monitor.io.pf_ctrl(0).dynamic_depth
+  stream.io.enable := monitor.io.pf_ctrl(0).enable
+  stream.io.flush := monitor.io.pf_ctrl(0).flush
+  stream.io.confidence := monitor.io.pf_ctrl(0).confidence
+  selectedDepth := monitor.io.pf_ctrl(0).dynamic_depth
 }
 
 class PDBDepthIntegrationTest extends AnyFlatSpec with ChiselSim {
@@ -86,18 +106,23 @@ class PDBDepthIntegrationTest extends AnyFlatSpec with ChiselSim {
     simulate(new PDBControlledStreamTop) { c =>
       c.io.valid.poke(false.B); c.io.address.poke(0.U); c.io.depth.poke(16.U)
       c.events.refill.poke(false.B); c.events.late.poke(0.U)
+      c.prefetchLate.poke(false.B)
       c.events.used.poke(0.U); c.events.unused.poke(0.U)
       c.reset.poke(true.B); c.clock.step(3); c.reset.poke(false.B)
       def window(up: Boolean): Unit = {
-        for (count <- (if (up) Seq(15, 15, 10) else Seq.fill(26)(3) :+ 2)) {
+        // Exercise both existing MSHR late classes through the production monitor.
+        c.prefetchLate.poke(up.B)
+        for (count <- (if (up) Seq.fill(20)(1) else Seq.fill(26)(3) :+ 2)) {
           if (up) c.events.late.poke(count.U) else c.events.unused.poke(count.U)
           c.clock.step()
         }
         c.events.late.poke(0.U); c.events.unused.poke(0.U)
+        c.prefetchLate.poke(false.B)
         c.events.refill.poke(true.B); c.clock.step(500)
         c.events.refill.poke(false.B)
         // Observe the configured full settling window without additional pressure.
         c.events.refill.poke(true.B); c.clock.step(500); c.events.refill.poke(false.B)
+        c.clock.step(2)
       }
       window(up = false); window(up = false); c.selectedDepth.expect(4.U)
       var block = BigInt("80000", 16)
