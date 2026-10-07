@@ -5,6 +5,25 @@ import chisel3.simulator.scalatest.ChiselSim
 import org.scalatest.flatspec.AnyFlatSpec
 import xiangshan.mem.prefetch._
 
+/** Test-only shell around the state generator used directly by L1PrefetchMonitor. */
+class PDBDepthController(params: PDBDepthParameters, initialDepth: Int = 16) extends Module {
+  val io = IO(new Bundle {
+    val enabled = Input(Bool())
+    val fixedDepth = Input(UInt(12.W))
+    val events = Input(new PDBDepthEvents)
+    val depth = Output(UInt(12.W))
+    val refills = Output(UInt(9.W))
+    val usedMoveShadow, unusedMoveShadow = Output(Bool())
+    val window = Output(chisel3.util.Valid(new PDBDepthWindow))
+  })
+  val state = PDBDepthControl(params, initialDepth, io.enabled, io.fixedDepth, io.events)
+  io.depth := state.depth
+  io.refills := state.refills
+  io.usedMoveShadow := state.usedMoveShadow
+  io.unusedMoveShadow := state.unusedMoveShadow
+  io.window := state.window
+}
+
 class PDBDepthControllerTest extends AnyFlatSpec with ChiselSim {
   behavior of "PDB competitive depth"
 

@@ -42,6 +42,9 @@ class ReplPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 class BufferPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val first_use = Vec(LoadPipelineWidth, Valid(UInt(L1PfSourceBits.W)))
   val unused_exit = Valid(UInt(L1PfSourceBits.W))
+  val stream_refill = Bool()
+  val stream_used_victim_hits = UInt(2.W)
+  val stream_unused_victim_hits = UInt(2.W)
 }
 
 class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
@@ -73,7 +76,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val io = IO(new PrefetcherMonitorBundle)
 
   val prefetch_info = Wire(new L1PrefetchStatisticBundle)
-  prefetch_info.loadinfo := io.loadinfo 
+  prefetch_info.loadinfo := io.loadinfo
   prefetch_info.missinfo := io.missinfo
   prefetch_info.maininfo := io.maininfo
   prefetch_info.replinfo := io.replinfo
@@ -92,7 +95,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   StreamMonitor.io.prefetch_info:= prefetch_info
   StrideMonitor.io.prefetch_info := prefetch_info
   BertiMonitor.io.prefetch_info := prefetch_info
-  
+
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
   io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
@@ -115,7 +118,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   // ldu 0, 1, 2 can have multiple demand accesses at a time
   val demand_miss_in_ldu = PopCount(io.loadinfo.map(t => t.demand_miss))
   val pollution = PopCount(io.loadinfo.map(t => t.pollution))
-  
+
   XSPerfAccumulate("l1DemandMiss", demand_miss_in_ldu)
   XSPerfAccumulate("l1prefetchSent", total_prefetch)
   XSPerfAccumulate("l1prefetchHit", hit_pf)
@@ -136,7 +139,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
     hit_pf_in_cache, total_prefetch,
     1000, io.debugRolling.robTrueCommit, clock, reset
   )
-  
+
   XSPerfRolling(
     "L1PrefetchLatenessIns",
     hit_pf_in_mshr, prefetch_miss,
@@ -173,7 +176,7 @@ class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {
 class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
   val io = IO(new L1PrefetchMonitorBundle)
 
-  val depth = Reg(UInt(DEPTH_BITS.W))
+  val depth = Wire(UInt(DEPTH_BITS.W))
   val flush = RegInit(false.B)
   val enable = RegInit(true.B)
   val confidence = RegInit(param.confidence.U(1.W))
@@ -187,12 +190,12 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.enable := enable
   io.pf_ctrl.confidence := confidence
 
-  val depth_const = Wire(UInt(DEPTH_BITS.W))
   private val streamDepth = p(StreamDepthKey)
   private val controlsStreamDepth = param.name == "Stream" && streamDepth.useMonitor
   private val legacyDepthEnabled = controlsStreamDepth && streamDepth.enableLegacyControl
-  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",
-    initValue = if (controlsStreamDepth) streamDepth.initial else 32)
+  private val competitiveDepthEnabled = param.name == "Stream" && p(PDBDepthKey).enabled
+  require(!competitiveDepthEnabled || (controlsStreamDepth && !legacyDepthEnabled),
+    "Competitive Stream depth requires the non-legacy monitor depth source")
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
   val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
@@ -243,18 +246,13 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   enable := Mux(back_off_reset, true.B, enable)
   confidence := Mux(conf_reset, 1.U(1.W), confidence)
 
-  when(trigger_pf_useless) {
-    depth := Mux(depth === 1.U, depth, depth >> 1)
-  }
   when(trigger_disable) {
     confidence := 0.U(1.W)
     enable := false.B
     flush := true.B
   }
 
-  when(trigger_late_miss) {
-    depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
-  }.elsewhen(trigger_late_hit) {
+  when(!trigger_late_miss && trigger_late_hit) {
     // for now, late hit will disable the prefether
     confidence := 0.U(1.W)
     enable := false.B
@@ -273,13 +271,56 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     flush := false.B
   }
 
-  // Explicit opt-in for the pre-existing monitor algorithm; competitive control is separate.
-  if (!legacyDepthEnabled) {
-    depth := depth_const
-  }
-
-  when(reset.asBool) {
-    depth := depth_const
+  if (competitiveDepthEnabled) {
+    val params = p(PDBDepthKey)
+    val stream = p(StreamDepthKey)
+    val hart = p(XSCoreParamsKey).HartId
+    val enabled = Constantin.createRecord(s"enablePDBAutoDepth$hart", initValue = params.enabled)
+    val fixed = Constantin.createRecord(s"pdbFixedDepth$hart", initValue = stream.fixedL1)
+    val trace = Constantin.createRecord(s"tracePDBDepth$hart", initValue = true)
+    val aligned = Module(new PDBDepthEventAligner)
+    aligned.io.raw.refill := io.prefetch_info.bufferinfo.stream_refill
+    aligned.io.raw.late := hit_pf_in_mshr +&
+      (pf_late_in_mshr && isDemand(io.prefetch_info.missinfo.pf_late_in_mshr_source)).asUInt
+    aligned.io.raw.used := io.prefetch_info.bufferinfo.stream_used_victim_hits
+    aligned.io.raw.unused := io.prefetch_info.bufferinfo.stream_unused_victim_hits
+    val events = aligned.io.completed
+    val control = PDBDepthControl(params, stream.initial, enabled, fixed, events)
+    assert(enabled || VecInit(PDBDepthPolicy.levels.map(d => fixed === d.U)).asUInt.orR,
+      "The fixed-depth control must select an existing depth level")
+    depth := control.depth
+    val window = control.window
+    val report = window.bits
+    XSPerfAccumulate("refills", events.refill)
+    XSPerfAccumulate("late", events.late)
+    XSPerfAccumulate("usedVictimHits", events.used)
+    XSPerfAccumulate("unusedVictimHits", events.unused)
+    XSPerfAccumulate("windows", window.valid)
+    XSPerfAccumulate("depth_increases", window.valid && report.depthAfter > report.depthBefore)
+    XSPerfAccumulate("depth_decreases", window.valid && report.depthAfter < report.depthBefore)
+    XSPerfAccumulate("used_move_shadow_windows", window.valid && report.usedMoveShadow)
+    XSPerfAccumulate("unused_move_shadow_windows", window.valid && report.unusedMoveShadow)
+    for (level <- PDBDepthPolicy.levels) {
+      XSPerfAccumulate(s"cycles_at_depth_$level", depth === level.U)
+      XSPerfAccumulate(s"windows_at_depth_$level", window.valid && report.depthBefore === level.U)
+    }
+    val table = ChiselDB.createTable(s"PDBDepthWindow$hart", chiselTypeOf(report), basicDB = true)
+    table.log(report, window.valid && trace, s"StreamMonitor$hart", clock, reset)
+    println(s"PDB depth: enabled=${params.enabled}, initial=${stream.initial}, fixed=${stream.fixedL1}, " +
+      s"window=500, levels=${PDBDepthPolicy.levels.mkString(",")}, parameters=$params, physicalMove=false")
+  } else {
+    val legacyDepth = Reg(UInt(DEPTH_BITS.W))
+    val depthConst = Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",
+      initValue = if (controlsStreamDepth) streamDepth.initial else 32)
+    when(trigger_pf_useless) {
+      legacyDepth := Mux(legacyDepth === 1.U, legacyDepth, legacyDepth >> 1)
+    }
+    when(trigger_late_miss) {
+      legacyDepth := Mux(legacyDepth === (1 << (DEPTH_BITS - 1)).U, legacyDepth, legacyDepth << 1)
+    }
+    if (!legacyDepthEnabled) { legacyDepth := depthConst }
+    when(reset.asBool) { legacyDepth := depthConst }
+    depth := legacyDepth
   }
 
   val pfTypes: Seq[(String, UInt => Bool)] = Seq(
@@ -365,4 +406,162 @@ class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSource
 class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
   override val name: String = "Berti"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
+}
+
+/** Reuse hits already passed the observer's two capture edges. Delay the raw
+  * PB refill and MQ late events equally so a window has one physical boundary.
+  */
+class PDBDepthEventAligner extends Module {
+  val io = IO(new Bundle {
+    val raw = Input(new PDBDepthEvents)
+    val completed = Output(new PDBDepthEvents)
+  })
+  io.completed := io.raw
+  io.completed.refill := ShiftRegister(io.raw.refill, 2, false.B, true.B)
+  io.completed.late := ShiftRegister(io.raw.late, 2, 0.U(4.W), true.B)
+}
+
+/** Elaborate the competitive state directly in the Stream L1PrefetchMonitor.
+  * This helper has no module boundary or extra output register.
+  */
+object PDBDepthControl {
+  def apply(params: PDBDepthParameters, initialDepth: Int,
+            enabled: Bool, fixedDepth: UInt, events: PDBDepthEvents): PDBDepthState = {
+    import PDBDepthPolicy._
+    require(levels.contains(initialDepth))
+    val result = Wire(new PDBDepthState)
+    val index = RegInit(levels.indexOf(initialDepth).U(3.W))
+    val refills = RegInit(0.U(9.W))
+    val late = RegInit(0.U(16.W))
+    val used = RegInit(0.U(16.W))
+    val unused = RegInit(0.U(16.W))
+    val upCredit = RegInit(0.U(4.W))
+    val downCredit = RegInit(0.U(4.W))
+    val settle = RegInit(0.U(4.W))
+    val usedMove = RegInit(false.B)
+    val unusedMove = RegInit(false.B)
+    val usedOnStreak = RegInit(0.U(4.W))
+    val usedOffStreak = RegInit(0.U(4.W))
+    val unusedOffStreak = RegInit(0.U(4.W))
+    val wholeWindowAtMin = RegInit(true.B)
+
+    def saturatedAdd(count: UInt, increment: UInt): UInt = {
+      val sum = count +& increment
+      Mux(sum > 65535.U, 65535.U(16.W), sum(15, 0))
+    }
+    def pressure(count: UInt, low: Int, high: Int): UInt =
+      Mux(count <= low.U, 0.U(2.W), Mux(count < high.U, 1.U(2.W), 2.U(2.W)))
+
+    val totalLate = saturatedAdd(late, events.late)
+    val totalUsed = saturatedAdd(used, events.used)
+    val totalUnused = saturatedAdd(unused, events.unused)
+    val latePressure = pressure(totalLate, params.lateLow, params.lateHigh)
+    val unusedPressure = pressure(totalUnused, params.unusedLow, params.unusedHigh)
+    val windowEnd = events.refill && refills === (windowRefills - 1).U
+    val depths = VecInit(levels.map(_.U(12.W)))
+    result.depth := Mux(enabled, depths(index), fixedDepth)
+    result.refills := refills
+    result.usedMoveShadow := usedMove
+    result.unusedMoveShadow := unusedMove
+
+    val nextIndex = WireDefault(index)
+    val nextUp = WireDefault(0.U(4.W))
+    val nextDown = WireDefault(0.U(4.W))
+    val nextSettle = WireDefault(0.U(4.W))
+    when (enabled) {
+      when (settle =/= 0.U) {
+        nextSettle := settle - 1.U
+      }.elsewhen (latePressure > unusedPressure) {
+        val credit = upCredit +& (latePressure - unusedPressure)
+        when (credit >= params.creditHalfUnits.U) {
+          when (index < (levels.size - 1).U) {
+            nextIndex := index + 1.U
+            nextSettle := params.settleWindows.U
+          }
+        }.otherwise { nextUp := credit }
+      }.elsewhen (unusedPressure > latePressure) {
+        val credit = downCredit +& (unusedPressure - latePressure)
+        when (credit >= params.creditHalfUnits.U) {
+          when (index =/= 0.U) {
+            nextIndex := index - 1.U
+            nextSettle := params.settleWindows.U
+          }
+        }.otherwise { nextDown := credit }
+      }
+    }
+    val nextDepth = Mux(enabled, depths(nextIndex), fixedDepth)
+
+    // Shadow state remains active with both physical move policies absent. In
+    // particular it never consumes unused pressure or changes the credit limit.
+    val nextUsedMove = WireDefault(usedMove)
+    val nextUsedOn = WireDefault(0.U(4.W))
+    val nextUsedOff = WireDefault(0.U(4.W))
+    when (!usedMove) {
+      when (totalUsed >= params.usedOnHits.U) {
+        when (usedOnStreak === (params.usedOnWindows - 1).U) {
+          nextUsedMove := true.B
+        }.otherwise { nextUsedOn := usedOnStreak + 1.U }
+      }
+    }.otherwise {
+      when (totalUsed <= params.usedOffHits.U) {
+        when (usedOffStreak === (params.usedOffWindows - 1).U) {
+          nextUsedMove := false.B
+        }.otherwise { nextUsedOff := usedOffStreak + 1.U }
+      }
+    }
+    val nextUnusedMove = WireDefault(unusedMove)
+    val nextUnusedOff = WireDefault(0.U(4.W))
+    val unusedEligible = wholeWindowAtMin && result.depth === 4.U && nextDepth === 4.U &&
+      unusedPressure =/= 0.U && unusedPressure >= latePressure
+    when (!unusedMove) {
+      when (unusedEligible) { nextUnusedMove := true.B }
+    }.otherwise {
+      when (unusedPressure === 0.U) {
+        when (unusedOffStreak === (params.unusedOffWindows - 1).U) {
+          nextUnusedMove := false.B
+        }.otherwise { nextUnusedOff := unusedOffStreak + 1.U }
+      }
+    }
+
+    // The closing edge includes all events on that edge. No extra cycle is
+    // inserted between windows, and no FIFO entry is cleared at a boundary.
+    late := Mux(windowEnd, 0.U, totalLate)
+    used := Mux(windowEnd, 0.U, totalUsed)
+    unused := Mux(windowEnd, 0.U, totalUnused)
+    when (events.refill) { refills := Mux(windowEnd, 0.U, refills + 1.U) }
+    wholeWindowAtMin := Mux(windowEnd, true.B, wholeWindowAtMin && result.depth === 4.U)
+    when (windowEnd) {
+      index := nextIndex
+      upCredit := nextUp
+      downCredit := nextDown
+      settle := nextSettle
+      usedMove := nextUsedMove
+      usedOnStreak := nextUsedOn
+      usedOffStreak := nextUsedOff
+      unusedMove := nextUnusedMove
+      unusedOffStreak := nextUnusedOff
+    }
+
+    result.window.valid := windowEnd
+    result.window.bits.enabled := enabled
+    result.window.bits.depthBefore := result.depth
+    result.window.bits.depthAfter := nextDepth
+    result.window.bits.late := totalLate
+    result.window.bits.used := totalUsed
+    result.window.bits.unused := totalUnused
+    result.window.bits.latePressure := latePressure
+    result.window.bits.unusedPressure := unusedPressure
+    result.window.bits.upCredit := nextUp
+    result.window.bits.downCredit := nextDown
+    result.window.bits.settle := nextSettle
+    result.window.bits.usedMoveShadow := nextUsedMove
+    result.window.bits.unusedMoveShadow := nextUnusedMove
+    assert(index < levels.size.U)
+    assert(refills < windowRefills.U)
+    assert(upCredit < params.creditHalfUnits.U && downCredit < params.creditHalfUnits.U)
+    val previousIndex = RegNext(index, levels.indexOf(initialDepth).U)
+    assert(index === previousIndex || RegNext(windowEnd, false.B),
+      "Depth may change only after a complete 500-refill window")
+    result
+  }
 }

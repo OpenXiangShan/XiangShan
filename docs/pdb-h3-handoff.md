@@ -4,6 +4,9 @@ DefaultConfig selects PDB64/LRU with competitive L1 Stream depth, initially 16.
 The seven levels are 4, 8, 16, 24, 32, 48 and 64 cache blocks. Each control window
 contains exactly 500 successful clean Stream refills into the PDB. Every decision
 can move at most one level. Outer prefetch levels retain their existing behavior.
+The policy is implemented in `PrefetcherMonitor.scala`, inside the existing
+Stream `L1PrefetchMonitor`. DCache provides events through `bufferinfo` and
+`missinfo`; the normal `pf_ctrl` output is the sole depth control path.
 Physical used/unused capacity moves and background load promotion remain off;
 correctness-required store transfers keep the existing protocol.
 
@@ -19,11 +22,14 @@ correctness-required store transfers keep the existing protocol.
   cancelled demands do not produce these events. Multiple accepted lanes for one
   lifetime count once. Compressed demands with a Stream allocation count once on
   that allocation edge. Separate MSHR lifetimes can each count on the same edge.
-- The late tracker keeps two bits per MSHR (original Stream and demand present),
-  covering the allocation pipeline and the actual entry. It uses existing owner
-  address matches. It does not use or modify legacy prefetch flags, which can be
-  cleared by raw rejected queries. Subsequent terminal Stream PF requests against
-  a demand owner each count as a new PF attempt.
+- The existing MSHR statistics are reused; there is no separate LateTracker or
+  extra per-MSHR state. `hit_pf_in_mshr` is a lane bitmap, with multiple accepted
+  demands for the same lifetime counted once. Its source comes from the actual
+  matched entry/pipeline slot. Cancelled or rejected queries do not consume the
+  existing prefetch flag/source. Compressed prefetch+demand allocation and a
+  demand accepted while allocation is in the pipeline clear the source exactly
+  once, preventing a second count after the handoff. Terminal PF hits use the
+  existing `pf_late_in_mshr` and matched source, without requiring MQ ready.
 - Stream unused victim hits come from the persistent 256-entry FIFO observer.
   Used hits only update the used-move shadow; they never reduce depth. FIFO entries
   remain observable until first demand hit, duplicate refresh or full FIFO
@@ -86,68 +92,73 @@ simulation build and the runner's database option. Performance-only runs can
 disable trace dumping. Check the actual run initialization and preserve the
 binary hash, checkpoint profile, warmup/ROI and DRAM/reference settings for A/B.
 
-Counters under `depthMonitor` include refills, both reuse classes, late events,
-completed windows, increases/decreases, depth residency in cycles/windows and
-shadow-active windows. MissQueue separately reports
-`pdb_stream_demand_hit_prefetch_mshr` and
-`pdb_stream_prefetch_hit_demand_mshr`. Legacy `l1prefetchLate` is a different
-counter and must not be substituted for competitive late evidence.
+Counters now reside under `prefetcherMonitor.StreamMonitor`, including refills,
+late events, both reuse classes, windows, depth changes/residency and shadows.
+The two existing per-Stream MSHR metrics are `l1prefetchHitInMSHRStream` and
+`l1prefetchLateInMSHRStream_HitDemand`. Their events feed competitive late pressure.
+The separate `pdb_stream_*` MissQueue counters were removed with the tracker.
+Legacy aggregate `l1prefetchLate` also includes cache hits and must not be used
+as the competitive late count. Existing power-of-two `Stream_depth*` counters
+now reflect the selected output depth; `cycles_at_depth_*` covers all seven levels.
+`PDBDepthWindow0` keeps its schema; its trace site is now `StreamMonitor0`.
 Performance dump/reset does not reset the controller or FIFO. A window may
 cross the warmup/ROI boundary; use the window trace when attributing its counts
 to a phase rather than assuming each phase starts at an empty control window.
 
 ## Validation and requested next data
 
-Local regression passed all 36 tests in 10 suites (`h3-regression-tests.log`).
-Coverage includes exact threshold and window boundaries; no-refill intervals and
-saturation; all seven depth levels and settle 0/1; tie/direction credit resets;
-fixed-mode observation; shadow isolation; real MissQueue compression, pending
-allocation, cancellation, rejection and source ownership; clean accepted PDB
-refills; FIFO persistence; and actual Stream addresses at every depth.
+The monitor integration revision passed 37 tests in nine suites (252 seconds),
+`xiangshan.checkFormat`, debug DefaultConfig generation (9m31s), and fresh release
+`make verilog` (6m37s). All 561 Scala source hashes remained unchanged throughout
+generation. Generated RTL confirms inline StreamMonitor control and the original
+`pf_ctrl` path, with no separate tracker, monitor or controller instance.
+The revision removes 82 production source lines net relative to its parent.
+Results are recorded in `h3-monitor-regression.log`, `h3-monitor-sim-verilog.log`,
+`h3-monitor-verilog.log` and `tmp/h3-monitor-validation.json`.
+Coverage includes exact thresholds/window boundaries, saturation, all seven
+levels, settle 0/1, credit resets, fixed-mode observation and shadow isolation;
+real MissQueue lane bitmap/source/acceptance/compression/pipe handoff; real PDB
+refills; FIFO persistence; and actual PrefetcherMonitor-to-Stream address generation.
+Stride/Berti and the explicit legacy Stream branch are checked separately.
 
-The repository `mill -i xiangshan.checkFormat` passed. Its configured scope is
-frontend/utils, so this is not an automated backend format certification. The
-changed backend files were reviewed manually and `git diff --check` passed.
-The H2 predecessor's complete bwaves validation is in
-`pdb-h2-bwaves-validation.md`. H3 has not run a performance workload.
+The repository formatter covers configured frontend/utils paths; changed backend
+files also require manual review and `git diff --check`. The predecessor's H2
+bwaves validation is in `pdb-h2-bwaves-validation.md`.
 
-Generation uses the existing `build/` directory and `NOOP_HOME` set to this
-repository root. The simulation command passed in 11m00s:
+Generation uses the existing `build/` directory, with `NOOP_HOME` set to this
+repository root. Required commands are:
 
 ```sh
 make sim-verilog CONFIG=DefaultConfig JVM_XMX=40G WITH_CONSTANTIN=1 WITH_CHISELDB=1
+make -W src/main/scala/xiangshan/mem/prefetch/PrefetcherMonitor.scala verilog CONFIG=DefaultConfig JVM_XMX=40G
 ```
 
-Generated RTL was checked for the PB refill/MissQueue late/FIFO reuse inputs,
-the controller-to-Stream depth output, compiled Constantin defaults, and the
-complete `PDBDepthWindow0` writer/schema. Selected generated evidence is under
-`tmp/h3-sim-rtl-evidence/`; all 563 main/test Scala file hashes match
-`tmp/h3-source-manifest.json`. Final release generation passed in 6m39s, recorded
-in `h3-verilog.log` and `tmp/h3-validation.json`. It was explicitly forced because
-simulation generation also writes `build/rtl/XSTop.sv`:
-
-```sh
-make -W src/main/scala/xiangshan/mem/prefetch/PDBDepthController.scala verilog CONFIG=DefaultConfig JVM_XMX=40G
-```
-
-Release RTL retains the functional competitive depth path. Debug layers are
-disabled in this build, so unused shadow/debug-only state is optimized away.
-The simulation build retains it for observation. Release evidence and hashes are
-under `tmp/h3-release-rtl-evidence/`; source hashes still match the frozen set.
+The release command is forced because simulation generation also writes
+`build/rtl/XSTop.sv`. Generated integration checks must follow the existing
+PrefetcherMonitor/StreamMonitor hierarchy; there is no standalone PDBDepthMonitor
+or PDBDepthController instance. Debug-only shadow state may be optimized away
+in release, while the functional competitive state remains in StreamMonitor.
 
 The shared `build/emu` still refers to the H2 executable. Rebuild the H3 emulator
 from the delivered commit before running data; successful RTL generation alone
 does not update that executable. Preserve the result directory's H2 executable
 and validation database for the predecessor evidence.
 
-After reviewing the commit, run the fixed64 and dynamic configurations above
-with DefaultConfig, the same emulator and the same representative checkpoint
-profile. Start with the planned P set: bwaves, GemsFDTD, dealII, wrf, xalancbmk
-and leslie3d examples, using the user's actual RTL checkpoint mapping. Verify
-difftest/RTL assertions, exact 500-refill windows, pressure/depth transitions,
-and zero policy/background moves. Compare IPC and demand misses, then compare
-depth residency with the fixed-depth oracle where available. Broader A/C runs
-and parameter changes depend on those user-run results.
+After reviewing the commit, first run the dynamic DefaultConfig on bwaves_13153
+with the existing 20M warmup + 20M ROI profile and window trace. Then expand to
+the planned representative P set using the user's actual RTL checkpoint mapping.
+The user has already run R2 (PDB64/LRU, fixed64, release) at H1: reuse those results
+as the primary performance reference after checking checkpoint/profile/configuration.
+There is no default requirement to rerun R2. Same-binary fixed controls above
+remain available if a discrepancy requires isolating the bookkeeping fixes from
+dynamic depth, or if historical run settings do not match.
+
+Verify difftest/RTL assertions, exact 500-refill windows, pressure/depth transitions,
+and zero policy/background moves. Compare IPC, demand misses and depth residency.
+H1 comparisons include the subsequent MSHR statistic/source fixes; they alone
+cannot attribute every difference to depth. Full victim trace is useful for a
+focused diagnostic, not required for every performance run. Broader A/C runs and
+parameter changes depend on user-run results.
 
 The controller is a sideband implementation. Successful generation and directed
 simulation do not prove physical timing/area or a workload performance benefit.

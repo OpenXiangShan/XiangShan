@@ -35,17 +35,18 @@ class StreamDepthTestTop(implicit p: Parameters) extends XSModule {
   io.l3 := stream.io.l3_prefetch_req
 }
 
-class StreamMonitorDepthTestTop(implicit p: Parameters) extends XSModule {
+class StreamMonitorDepthTestTop(kind: String = "stream")(implicit p: Parameters) extends XSModule {
   Constantin.init(false)
   val io = IO(new Bundle {
     val event = Input(Bool())
     val depth = Output(UInt(12.W))
     val enabled = Output(Bool())
   })
-  val monitor = Module(new L1PrefetchMonitor(new StreamMonitorParam {
+  val monitorParam = if (kind == "stream") new StreamMonitorParam {
     override val TIMELY_CHECK_INTERVAL = 4
     override val LATE_MISS_THRESHOLD = 2
-  }))
+  } else PrefetcherMonitorParam.fromString(kind)
+  val monitor = Module(new L1PrefetchMonitor(monitorParam))
   monitor.io.prefetch_info := 0.U.asTypeOf(monitor.io.prefetch_info)
   monitor.io.prefetch_info.loadinfo(0).total_prefetch := io.event
   monitor.io.prefetch_info.loadinfo(0).pf_source := 3.U
@@ -60,6 +61,7 @@ class StreamDepthConfigTest extends AnyFlatSpec with ChiselSim {
     val base = new WithStreamDepth(depth) ++ new DefaultConfig
     base.alterPartial {
       case XSCoreParamsKey => base(XSTileKey).head
+      case PDBDepthKey => PDBDepthParameters()
       case PerfCounterOptionsKey => PerfCounterOptions(false, false, XSPerfLevel.VERBOSE, 0)
       case LogUtilsOptionsKey => LogUtilsOptions(false, false, false, false)
     }
@@ -117,6 +119,20 @@ class StreamDepthConfigTest extends AnyFlatSpec with ChiselSim {
         c.io.event.poke(false.B); c.clock.step()
         c.io.depth.expect((if (legacy) 32 else 16).U)
         c.io.enabled.expect(true.B)
+      }
+    }
+  }
+
+  for (kind <- Seq("stride", "berti")) {
+    it should s"keep $kind control independent of competitive Stream depth" in {
+      implicit val p: Parameters = parameters(StreamDepthParameters(useMonitor = true)).alterPartial {
+        case PDBDepthKey => PDBDepthParameters(enabled = true)
+      }
+      simulate(new StreamMonitorDepthTestTop(kind)) { c =>
+        c.io.event.poke(false.B)
+        c.reset.poke(true.B); c.clock.step(2); c.reset.poke(false.B)
+        c.io.event.poke(true.B); c.clock.step(1002)
+        c.io.depth.expect(32.U); c.io.enabled.expect(true.B)
       }
     }
   }

@@ -1,6 +1,7 @@
 package cache
 
 import chisel3._
+import chisel3.util._
 import chisel3.experimental.UnlocatableSourceInfo
 import chisel3.simulator.scalatest.ChiselSim
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, RegionType, TransferSizes}
@@ -21,6 +22,8 @@ class PDBLateMissQueueTop(implicit p: Parameters) extends DCacheModule {
     val address = Input(Vec(4, UInt(PAddrBits.W)))
     val ready, handled = Output(Vec(4, Bool()))
     val late = Output(UInt(4.W))
+    val hitMask = Output(UInt(4.W))
+    val hitSource = Output(Vec(4, UInt(L1PfSourceBits.W)))
   })
   val edge = new TLEdgeOut(
     TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
@@ -74,7 +77,11 @@ class PDBLateMissQueueTop(implicit p: Parameters) extends DCacheModule {
   mq.io.wfi.wfiReq := false.B
   mq.io.debugTopDown.robHeadVaddr := 0.U.asTypeOf(mq.io.debugTopDown.robHeadVaddr)
   mq.io.debugTopDown.robHeadOtherReplay := false.B
-  io.late := mq.io.pdbLate
+  val stat = mq.io.prefetch_stat
+  io.hitMask := stat.hit_pf_in_mshr
+  io.hitSource := stat.hit_pf_in_mshr_source
+  io.late := PopCount((0 until 4).map(i => stat.hit_pf_in_mshr(i) && isFromStream(stat.hit_pf_in_mshr_source(i)))) +&
+    (stat.pf_late_in_mshr && isFromStream(stat.pf_source) && isDemand(stat.pf_late_in_mshr_source)).asUInt
 }
 
 class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
@@ -107,6 +114,7 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
       // Hit the allocation pipeline before the MSHR entry has become valid.
       request(c, 1, address, 0); request(c, 2, address, 0)
       c.io.handled(1).expect(true.B); c.io.handled(2).expect(true.B); c.io.late.expect(1.U)
+      c.io.hitMask.expect(2.U); c.io.hitSource(1).expect(3.U)
       c.clock.step(); c.io.late.expect(0.U); clear(c); c.clock.step()
       request(c, 0, address, 1)
       c.io.ready(0).expect(false.B); c.io.late.expect(1.U)
@@ -120,8 +128,7 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
       c.io.handled(1).expect(false.B); c.io.late.expect(0.U); c.clock.step()
       c.io.cancel(1).poke(false.B); c.io.blocked(1).poke(true.B)
       c.io.handled(1).expect(false.B); c.io.late.expect(0.U); c.clock.step()
-      // Legacy raw-query flags have already been cleared, but H3 must retain
-      // the original Stream lifetime until a demand is actually accepted.
+      // Rejected queries must preserve the existing prefetch tag until acceptance.
       c.io.blocked(1).poke(false.B)
       c.io.handled(1).expect(true.B); c.io.late.expect(1.U); c.clock.step()
       c.io.late.expect(0.U)
@@ -139,7 +146,9 @@ class PDBLateMissQueueTest extends AnyFlatSpec with ChiselSim {
       }
       for (i <- 0 until 3) request(c, i + 1, address + i * 64, 0)
       for (i <- 1 until 4) c.io.handled(i).expect(true.B)
-      c.io.late.expect(3.U); c.clock.step(); c.io.late.expect(0.U)
+      c.io.late.expect(3.U); c.io.hitMask.expect(14.U)
+      for (i <- 1 until 4) c.io.hitSource(i).expect(3.U)
+      c.clock.step(); c.io.late.expect(0.U)
 
       reset(c)
       request(c, 1, address, 0); c.clock.step(); clear(c)
