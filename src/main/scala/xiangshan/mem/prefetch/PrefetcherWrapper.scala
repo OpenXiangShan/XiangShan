@@ -168,7 +168,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   val smsOpt: Option[SMSPrefetcher] = if(HasSMS) Some(Module(new SMSPrefetcher())) else None
   smsOpt.foreach (pf => {
-    val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
+    val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableSMS && l1D_pf_enable
     pf.io_agt_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_agt, 2, Some(false.B))
@@ -218,7 +218,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val streamStrideOpt: Option[L1Prefetcher] = if(HasStreamStride) Some(Module(new L1Prefetcher())) else None
   streamStrideOpt.foreach(pf => {
     val enableL1StreamPrefetcher = Constantin.createRecord(s"pf_enableL1StreamPrefetcher$hartId", initValue = true)
-    val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = true)
+    val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = false)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := l1D_pf_enable
 
