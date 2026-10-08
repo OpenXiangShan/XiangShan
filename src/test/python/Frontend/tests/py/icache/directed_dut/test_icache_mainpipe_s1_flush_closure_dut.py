@@ -15,12 +15,9 @@ from env.funcov.py.icache.flush_from_bpu import (
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
-from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
-    _load_and_reset as _load_two_fetch_loop,
-    _warm_frontend_execution as _warm_two_fetch_execution,
-)
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
+    initialize_bpu_s3_stream,
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
     trigger_bpu_s3_flush,
@@ -230,25 +227,6 @@ def _pending_miss(sample: dict) -> bool:
 def _raw_refill_match(sample: dict) -> bool:
     return int(sample["miss_resp_valid"]) == 1 and any(
         int(sample[f"mshr_valid_{index}"]) for index in range(4)
-    )
-
-
-def _initialize_bpu_s3_stream(env) -> None:
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=0.0,
-        seed=0x6617,
-    )
-    env.set_bp_ctrl_enable(
-        ubtb_enable=1,
-        abtb_enable=1,
-        mbtb_enable=1,
-        tage_enable=1,
-        sc_enable=1,
-        ittage_enable=1,
     )
 
 
@@ -492,7 +470,7 @@ def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
 def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples = _register_s1_observer(env)
-    _initialize_bpu_s3_stream(env)
+    initialize_bpu_s3_stream(env, seed=0x6617)
     _drive_bpu_s3_until_s1_hit(
         env,
         "bpu_miss_keeps_s1",
@@ -673,7 +651,7 @@ def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
 @pytest.mark.funcov_bins("BIN-776")
 def test_tc_icache_mainpipe_bpu_s3_keeps_s2(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_bpu_s3_stream(env)
+    initialize_bpu_s3_stream(env, seed=0x6617)
     _drive_bpu_s3_until_s2_hit(
         env,
         samples,

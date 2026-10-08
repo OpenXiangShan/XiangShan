@@ -10,7 +10,6 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from tests.py.support.dut_support import (
     cycle_limit,
-    poll_until,
     read_dut_signal as _read_generic_dut_signal,
     wait_until,
 )
@@ -72,11 +71,6 @@ def read_dut_signal(
     )
 
 
-def read_cached_signal(env, names: Sequence[str]) -> int | None:
-    """Compatibility wrapper for callers using the old helper name."""
-    return read_dut_signal(env, names)
-
-
 def wait_coverage_hit(
     env,
     group: str,
@@ -87,11 +81,10 @@ def wait_coverage_hit(
     diagnostics: Callable[[], Mapping[str, object]] | None = None,
 ) -> None:
     """Wait for one functional-coverage key using the common timeout format."""
-    wait_until(
+    wait_coverage_hits(
         env,
-        lambda: bool(env.functional_coverage.key_hit(group, bin_name)),
+        ((group, bin_name),),
         max_cycles=max_cycles,
-        label=f"{group}.{bin_name}",
         snapshot=snapshot,
         diagnostics=diagnostics,
     )
@@ -123,17 +116,43 @@ def wait_coverage_hits(
 
     if all_hit():
         return
-    wait_until(
-        env,
-        all_hit,
-        max_cycles=max_cycles,
-        label="functional coverage targets",
-        snapshot=snapshot,
-        diagnostics=lambda: {
-            "missing": sorted(f"{group}.{name}" for group, name in remaining),
-            **(dict(diagnostics()) if diagnostics is not None else {}),
-        },
+    label = (
+        f"{expected[0][0]}.{expected[0][1]}"
+        if len(expected) == 1
+        else "functional coverage targets"
     )
+    def timeout_diagnostics() -> dict[str, object]:
+        # Rebuild from the targets still outstanding after the last checked
+        # cycle. A hit produced by that final step is not visible to the
+        # predicate that just timed out.
+        detail = {
+            "missing": sorted(f"{group}.{name}" for group, name in remaining),
+        }
+        if diagnostics is not None:
+            detail.update(dict(diagnostics()))
+        return detail
+
+    try:
+        wait_until(
+            env,
+            all_hit,
+            max_cycles=max_cycles,
+            label=label,
+            snapshot=snapshot,
+            diagnostics=timeout_diagnostics,
+        )
+    except AssertionError as error:
+        # One target may be sampled by the last step itself. Re-check without
+        # advancing again so a hit on that cycle still counts. Refresh the
+        # reported remainder too: the timeout was built before this re-check.
+        if all_hit():
+            return
+        detail = error.args[0] if error.args else None
+        if isinstance(detail, dict):
+            detail["missing"] = sorted(
+                f"{group}.{name}" for group, name in remaining
+            )
+        raise
 
 
 def clear_soft_prefetch(env) -> None:

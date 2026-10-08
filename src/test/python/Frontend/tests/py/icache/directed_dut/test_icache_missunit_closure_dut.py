@@ -23,6 +23,7 @@ from tests.py.icache.directed_dut.support import (
     read_dut_signal,
     set_soft_prefetch as _set_soft_prefetch_common,
     set_predictors as _set_predictors,
+    wait_coverage_hits,
     wait_until,
 )
 
@@ -409,31 +410,18 @@ def _wait_bins(env, targets: list[tuple[str, str]], *, max_cycles: int = 6000) -
     # diagnosis runs to override the polling window without changing DUT or
     # environment behavior.
     max_cycles = int(os.getenv("TB_ICACHE_MISSUNIT_MAX_CYCLES", str(max_cycles)), 0)
-    remaining = set(targets)
-    for _ in range(int(max_cycles)):
-        remaining = {
-            target for target in remaining if not env.functional_coverage.key_hit(*target)
-        }
-        if not remaining:
-            return
-        env.step(1)
-    remaining = {
-        target for target in remaining if not env.functional_coverage.key_hit(*target)
-    }
-    if not remaining:
-        return
-    raise AssertionError(
-        {
-            "reason": "functional coverage targets were not reached",
-            "missing": sorted(f"{group}.{name}" for group, name in remaining),
-            "cycle": int(env.current_cycle),
-            "last_snapshot": _snapshot(env),
+    wait_coverage_hits(
+        env,
+        targets,
+        max_cycles=max_cycles,
+        snapshot=lambda: _snapshot(env),
+        diagnostics=lambda: {
             "coverage_state": getattr(
                 env.functional_coverage, "_icache_missunit_cov_state", None
             ),
             "stats": env.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 

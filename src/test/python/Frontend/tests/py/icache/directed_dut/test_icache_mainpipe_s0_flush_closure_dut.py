@@ -20,7 +20,7 @@ from tests.py.icache.directed_dut.support import (
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
     s0_sampling_window,
-    trigger_bpu_s3_flush,
+    wait_coverage_hit,
 )
 
 
@@ -110,10 +110,6 @@ def _snapshot(env) -> dict:
     }
 
 
-def _s0_sampling_window(env) -> bool:
-    return s0_sampling_window(env)
-
-
 def _bpu_is_after_s0(sample: dict) -> bool:
     return ftq_ptr_is_strictly_after_current(
         BpuS3Flush(
@@ -140,7 +136,7 @@ def _wait_for_s0_sampling_window(env, *, max_cycles: int) -> dict:
     last = None
     for _ in range(int(max_cycles)):
         last = _snapshot(env)
-        if _s0_sampling_window(env):
+        if s0_sampling_window(env):
             return last
         env.step(1)
     raise AssertionError(
@@ -155,23 +151,18 @@ def _wait_for_s0_sampling_window(env, *, max_cycles: int) -> dict:
 
 
 def _wait_hit(env, bin_name: str, *, max_cycles: int) -> None:
-    group = "icache_mainpipe_s0_flush"
-    last = None
-    for _ in range(int(max_cycles)):
-        if env.functional_coverage.key_hit(group, bin_name):
-            return
-        last = _snapshot(env)
-        env.step(1)
-    assert env.functional_coverage.key_hit(group, bin_name), {
-        "reason": "coverage bin did not hit",
-        "group": group,
-        "bin": bin_name,
-        "max_cycles": int(max_cycles),
-        "last": last,
-        "icache": env.icache_agent.get_stats(),
-        "backend": env.backend_model.get_stats(),
-        "monitor_errors": env.monitor.get_errors(),
-    }
+    wait_coverage_hit(
+        env,
+        "icache_mainpipe_s0_flush",
+        bin_name,
+        max_cycles=max_cycles,
+        snapshot=lambda: _snapshot(env),
+        diagnostics=lambda: {
+            "icache": env.icache_agent.get_stats(),
+            "backend": env.backend_model.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        },
+    )
 
 
 @pytest.mark.funcov_bins("BIN-605")
@@ -218,15 +209,6 @@ def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
                 )
 
 
-def _initialize_bpu_s3_stream(env) -> None:
-    initialize_bpu_s3_stream(env)
-
-
-def _trigger_bpu_s3_flush(env) -> None:
-    """Compatibility helper used by the s1 closure module."""
-    trigger_bpu_s3_flush(env)
-
-
 def _bpu_miss_s0_candidate(sample: dict) -> bool:
     """Return whether one sample has every BIN-607 input predicate."""
     return (
@@ -253,7 +235,7 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
                 return
 
             sample = _snapshot(env)
-            if _s0_sampling_window(env):
+            if s0_sampling_window(env):
                 s0_windows += 1
                 env.backend_model.set_can_accept(0)
                 remaining = int(max_cycles) - elapsed
@@ -358,7 +340,7 @@ def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples: list[dict] = []
     env.register_cycle_observer(lambda _cycle, active_env: samples.append(_snapshot(active_env)))
-    _initialize_bpu_s3_stream(env)
+    initialize_bpu_s3_stream(env)
     _drive_bpu_s3_until_hit(
         env,
         "bpu_miss_allows_entry",

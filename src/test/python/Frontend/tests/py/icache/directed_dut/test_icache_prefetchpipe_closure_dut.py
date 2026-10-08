@@ -59,23 +59,15 @@ def _wait_bins(
     *,
     max_cycles: int = 6000,
 ) -> None:
-    remaining = set(targets)
-    for _ in range(int(max_cycles)):
-        remaining = {
-            target for target in remaining if not _hit(env, target[0], target[1])
-        }
-        if not remaining:
-            return
-        env.step(1)
-    raise AssertionError(
-        {
-            "reason": "PrefetchPipe functional coverage targets were not reached",
-            "missing": sorted(f"{group}.{name}" for group, name in remaining),
-            "cycle": int(env.current_cycle),
+    wait_coverage_hits(
+        env,
+        targets,
+        max_cycles=max_cycles,
+        diagnostics=lambda: {
             "icache": env.icache_agent.get_stats(),
             "backend": env.backend_model.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
-        }
+        },
     )
 
 
