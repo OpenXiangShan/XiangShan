@@ -86,7 +86,9 @@ class RasStack(implicit p: Parameters) extends RasModule
   private val tosr       = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
   private val tosw       = RegInit(RasPtr(false.B, 0.U))
   private val bos        = RegInit(RasPtr(false.B, 0.U))
+  private val nos        = RegInit(RasPtr(false.B, 0.U))
   private val tosrInSpec = RegInit(false.B)
+  private val nosInSpec  = RegInit(false.B)
 
   private val writeBypassEntry    = Reg(new RasEntry)
   private val writeBypassNosEntry = Reg(new NosEntry)
@@ -127,6 +129,22 @@ class RasStack(implicit p: Parameters) extends RasModule
     ret
   }
 
+  def getNextNos(
+      currNos:        RasPtr,
+      currTosr:       RasPtr,
+      currTosw:       RasPtr,
+      currTosrInSpec: Bool,
+      currNosInSpec:  Bool
+  ): NosEntry = {
+    val ret = Wire(new NosEntry)
+    when(tosrInRange(currTosr, currTosw, currTosrInSpec) && tosrInRange(currNos, currTosw, currNosInSpec)) {
+      ret := specNosList(currNos.value)
+    }.otherwise {
+      ret := 0.U.asTypeOf(new NosEntry)
+    }
+    ret
+  }
+
   def getTop(
       currSsp:     UInt,
       currTosr:    RasPtr,
@@ -153,26 +171,32 @@ class RasStack(implicit p: Parameters) extends RasModule
     ret
   }
 
-  def specPush(currSsp: UInt, currTosw: RasPtr): Unit = {
+  def specPush(currSsp: UInt, currTosr: RasPtr, currInSpec: Bool, currTosw: RasPtr): Unit = {
+    nos        := currTosr
     tosr       := currTosw
     tosw       := specPtrInc(currTosw)
+    nosInSpec  := currInSpec
     tosrInSpec := true.B
     // spec sp should always be maintained
     ssp := ptrInc(currSsp)
   }
 
   def specPop(
-      currSsp:       UInt,
-      currTosr:      RasPtr,
-      currTosw:      RasPtr,
-      currTopNos:    RasPtr,
-      currNosInSpec: Bool,
-      currInSpec:    Bool
+      currSsp:        UInt,
+      currTosr:       RasPtr,
+      currTosw:       RasPtr,
+      currTopNos:     RasPtr,
+      currNosInSpec:  Bool,
+      currTosrInSpec: Bool,
+      nextNos:        RasPtr,
+      nextNosInSpec:  Bool
   ): Unit = {
     // tosr is only maintained when spec queue is not empty
-    when(tosrInRange(currTosr, currTosw, currInSpec)) {
+    when(tosrInRange(currTosr, currTosw, currTosrInSpec)) {
       tosr       := currTopNos
       tosrInSpec := currNosInSpec
+      nos        := nextNos
+      nosInSpec  := nextNosInSpec
     }
     // spec sp should always be maintained
     ssp := ptrDec(currSsp)
@@ -193,9 +217,16 @@ class RasStack(implicit p: Parameters) extends RasModule
     writeBypassValid     := false.B
   }
 
-  private val topEntry    = getTop(ssp, tosr, tosw, allowBypass = true, tosrInSpec)
-  private val topNosEntry = getTopNos(tosr, tosw, tosrInSpec, allowBypass = true)
-  private val topNos      = topNosEntry.nos
+  private val topEntry     = getTop(ssp, tosr, tosw, allowBypass = true, tosrInSpec)
+  private val nextNosEntry = getNextNos(nos, tosr, tosw, tosrInSpec, nosInSpec)
+  private val redirectNextNosEntry =
+    getNextNos(
+      io.redirect.meta.nos,
+      io.redirect.meta.tosr,
+      io.redirect.meta.tosw,
+      io.redirect.meta.tosrInSpec,
+      io.redirect.meta.nosInSpec
+    )
 
   private val redirectTopNos = io.redirect.meta.nos
 
@@ -250,12 +281,12 @@ class RasStack(implicit p: Parameters) extends RasModule
   }.elsewhen(io.spec.popValid) {
     // getTop using current Nos as tosr
     val popSsp  = Wire(UInt(StackPtrWidth.W))
-    val popTosr = topNos
+    val popTosr = nos
     val popTosw = tosw
 
     popSsp := ptrDec(ssp)
     // We are deciding top for the next cycle, no need to use bypass here
-    timingTop := getTop(popSsp, popTosr, popTosw, allowBypass = false, topNosEntry.inSpec)
+    timingTop := getTop(popSsp, popTosr, popTosw, allowBypass = false, nosInSpec)
   }.elsewhen(realPush) {
     // just updating spec queue, cannot read from there
     timingTop := realWriteEntry
@@ -291,25 +322,26 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   when(io.spec.pushValid) {
-    specPush(ssp, tosw)
+    specPush(ssp, tosr, tosrInSpec, tosw)
   }
 
   when(io.spec.popValid) {
-    specPop(ssp, tosr, tosw, topNos, topNosEntry.inSpec, tosrInSpec)
+    specPop(ssp, tosr, tosw, nos, nosInSpec, tosrInSpec, nextNosEntry.nos, nextNosEntry.inSpec)
   }
 
   private val specQueueRetAddr  = specQueue(io.specRead.req.tosr.value).retAddr
   private val specCommitRetAddr = commitStack(commitStackIdx(io.specRead.req.ssp)).retAddr
   private val isInQueue         = tosrInRange(io.specRead.req.tosr, tosw, io.specRead.req.tosrInSpec)
   private val specReadRetAddr   = Mux(isInQueue, specQueueRetAddr, specCommitRetAddr)
-  io.spec.popAddr     := timingTop.retAddr
-  io.specRead.retAddr := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr))
+  io.spec.popAddr := timingTop.retAddr
+  // One register per output port, duplicated on purpose for timing / placement.
+  io.specRead.retAddr.foreach(_ := RegNext(specReadRetAddr, init = 0.U.asTypeOf(specReadRetAddr)))
 
   io.meta.tosw       := tosw
   io.meta.tosr       := tosr
-  io.meta.nos        := topNos
+  io.meta.nos        := nos
   io.meta.tosrInSpec := tosrInSpec
-  io.meta.nosInSpec  := topNosEntry.inSpec
+  io.meta.nosInSpec  := nosInSpec
   io.meta.ssp        := ssp
 
   // The stack is empty iff the top is not in the spec queue and the committed stack has been
@@ -324,7 +356,7 @@ class RasStack(implicit p: Parameters) extends RasModule
   ): Bool = {
     val speculativeDepth = commitDepth.zext.asSInt + (currSsp.asSInt - nsp.asSInt)
     !tosrInRange(currTosr, currTosw, currInSpec) && speculativeDepth <= 0.S
-  }
+  } // ---- 判空逻辑存在问题，待修改
 
   // `resolvedEmpty` is exact, but this flag is registered for timing and is only forced non-empty
   // on push / redirect-call. A valid top is therefore never reported empty, while a pop or ret
@@ -390,16 +422,18 @@ class RasStack(implicit p: Parameters) extends RasModule
     tosrInSpec := io.redirect.meta.tosrInSpec
 
     when(io.redirect.isCall) {
-      specPush(io.redirect.meta.ssp, io.redirect.meta.tosw)
+      specPush(io.redirect.meta.ssp, io.redirect.meta.tosr, io.redirect.meta.tosrInSpec, io.redirect.meta.tosw)
     }
     when(io.redirect.isRet) {
       specPop(
         io.redirect.meta.ssp,
         io.redirect.meta.tosr,
         io.redirect.meta.tosw,
-        redirectTopNos,
+        io.redirect.meta.nos,
         io.redirect.meta.nosInSpec,
-        io.redirect.meta.tosrInSpec
+        io.redirect.meta.tosrInSpec,
+        redirectNextNosEntry.nos,
+        redirectNextNosEntry.inSpec
       )
     }
   }

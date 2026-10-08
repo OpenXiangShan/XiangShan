@@ -93,7 +93,7 @@ class RasSpecReadReq(implicit p: Parameters) extends RasBundle {
 
 class ReadRetAddr(implicit p: Parameters) extends RasBundle {
   val req:     RasSpecReadReq = Input(new RasSpecReadReq)
-  val retAddr: GuardedPc      = Output(GuardedPc())
+  val retAddr: Vec[GuardedPc] = Output(Vec(SpecReadPorts, GuardedPc()))
 }
 
 class RasCommitMeta(implicit p: Parameters) extends RasBundle {

@@ -87,7 +87,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val commit   = io.fromFtq.commit
   private val redirect = Wire(Valid(new BpuRedirect))
   redirect             := io.fromFtq.redirect
-  redirect.bits.target := Mux(io.fromFtq.needChangeTarget, ras.io.specRead.retAddr, io.fromFtq.redirect.bits.target)
+  redirect.bits.target := Mux(io.fromFtq.needChangeTarget, ras.io.specRead.retAddr(0), io.fromFtq.redirect.bits.target)
 
   /* *** CSR ctrl sub-predictor enable *** */
   private val csrCtrl   = DelayN(io.ctrl, 2) // delay 2 cycle for timing
@@ -230,7 +230,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
   ras.io.specRead.req            := io.fromFtq.specReadReq
-  io.toFtq.specRead              := ras.io.specRead.retAddr
+  io.toFtq.specRead              := ras.io.specRead.retAddr(1)
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
