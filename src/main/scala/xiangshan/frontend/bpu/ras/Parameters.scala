@@ -20,9 +20,11 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class RasParameters(
     CommitStackSize: Int = 16, // Size of the RAS stack
-    SpecQueueSize:   Int = 64  // Size of the RAS speculative queue
+    SpecQueueSize:   Int = 64, // Size of the RAS speculative queue
+    SpecReadPorts:   Int = 2   // Number of returned return-address copies read out of the spec RAS
 ) {
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
+  require(SpecReadPorts >= 1, "SpecReadPorts must be at least 1")
 }
 
 trait HasRasParameters extends HasBpuParameters {
@@ -30,6 +32,7 @@ trait HasRasParameters extends HasBpuParameters {
 
   def CommitStackSize: Int = rasParameters.CommitStackSize
   def SpecQueueSize:   Int = rasParameters.SpecQueueSize
+  def SpecReadPorts:   Int = rasParameters.SpecReadPorts
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
   require(isPow2(CommitStackSize), "CommitStackSize must be a power of 2")
 

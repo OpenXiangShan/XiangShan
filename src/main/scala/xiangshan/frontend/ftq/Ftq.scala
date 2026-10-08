@@ -34,6 +34,7 @@ import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import utility.XSPerfSeqRolling
 import xiangshan.RedirectLevel
+import xiangshan.Resolve
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
 import xiangshan.frontend.BackendRedirectTopdown
@@ -128,29 +129,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val perfQueue = Reg(Vec(FtqSize, new PerfMeta))
 
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
-
-  private val ifuFtqPtrsEarlyByTwoCycles = io.fromIfu.advanceFtqIdx
-  private val (ifuFtqPtrsEarlyByOneCycles, ifuRedirect, ifuResolve, ifuBlockSelEarlyByOneCycle) = receiveIfuRedirect(
-    io.fromIfu.wbRedirect,
-    backendRedirect.valid
-  )
-  private val ifuRedirectMetaEarlyByOneCycle = ifuFtqPtrsEarlyByTwoCycles.map {
-    case ftqIdx => RegNext(metaQueueRedirect(ftqIdx.value)).ras
-  }
-  private val ifuAdvanceRedirectMeta =
-    Mux(ifuBlockSelEarlyByOneCycle, ifuRedirectMetaEarlyByOneCycle(1), ifuRedirectMetaEarlyByOneCycle(0))
-
-  private val specReadReq = Wire(new RasSpecReadReq)
-  specReadReq.tosr       := ifuAdvanceRedirectMeta.tosr
-  specReadReq.ssp        := ifuAdvanceRedirectMeta.ssp
-  specReadReq.tosrInSpec := ifuAdvanceRedirectMeta.tosrInSpec
-
-  private val specRead    = io.fromBpu.specRead
-  private val specRetAddr = ifuAdvanceRedirectMeta.topRetAddr.map(x => RegNext(x))
-
-  // Fix the target fed to the training path with the fresh RAS address (BPU fixes its own redirect target itself).
-  private val ifuResolveCorrect = WireInit(ifuResolve)
-  ifuResolveCorrect.bits.target := Mux(ifuResolve.bits.attribute.isReturn, specRead.unGuard, ifuResolve.bits.target)
+  private val (ifuFtqPtrsEarlyByOneCycles, ifuRedirect, rawIfuResolve, ifuBlockSelEarlyByOneCycle) =
+    receiveIfuRedirect(io.fromIfu.wbRedirect, backendRedirect.valid)
+  private val ifuResolve       = Wire(Valid(new Resolve))
+  private val needChangeTarget = Wire(Bool())
 
   // redirectFtqIdxInAdvance is always one cycle ahead of redirect
   private val redirectFtqIdxInAdvance = Mux(
@@ -399,15 +381,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
   io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
-  io.toBpu.needChangeTarget        := ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn
-  io.toBpu.specReadReq             := specReadReq
-
-  // How often the return address stored in the FTQ meta differs from the value freshly read out of the RAS.
-  private val diffRetAddr = specRetAddr.fold(false.B) { retAddr =>
-    ifuRedirect.valid && !backendRedirect.valid && ifuRedirect.bits.attribute.isReturn && (specRead =/= retAddr)
-  }
-  if (ifuAdvanceRedirectMeta.topRetAddr.nonEmpty) { dontTouch(diffRetAddr) }
-  XSPerfAccumulate("bpu_redirect_from_ifu_retDiff", diffRetAddr)
+  io.toBpu.needChangeTarget        := needChangeTarget
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
@@ -415,9 +389,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
   // --------------------------------------------------------------------------------
-
   resolveQueue.io.backendResolve := io.fromBackend.resolve
-  resolveQueue.io.ifuResolve     := ifuResolveCorrect
+  resolveQueue.io.ifuResolve     := ifuResolve
 
   private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
   private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
@@ -537,6 +510,34 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.commit.bits.attribute.branchType := DontCare
   io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
 
+  // --------------------------------------------------------------------------------
+  // Get Return Address from RAS
+  // --------------------------------------------------------------------------------
+  private val ifuFtqPtrsEarlyByTwoCycles = io.fromIfu.advanceFtqIdx
+  private val ifuRedirectMetaEarlyByOneCycle = ifuFtqPtrsEarlyByTwoCycles.map {
+    case ftqIdx => RegNext(metaQueueRedirect(ftqIdx.value)).ras
+  }
+  private val ifuAdvanceRedirectMeta =
+    Mux(ifuBlockSelEarlyByOneCycle, ifuRedirectMetaEarlyByOneCycle(1), ifuRedirectMetaEarlyByOneCycle(0))
+
+  private val specReadReq = Wire(new RasSpecReadReq)
+  specReadReq.tosr       := ifuAdvanceRedirectMeta.tosr
+  specReadReq.ssp        := ifuAdvanceRedirectMeta.ssp
+  specReadReq.tosrInSpec := ifuAdvanceRedirectMeta.tosrInSpec
+
+  private val specRead    = io.fromBpu.specRead
+  private val specRetAddr = ifuAdvanceRedirectMeta.topRetAddr.map(x => RegNext(x))
+  // Fix the target fed to the training path with the fresh RAS address (BPU fixes its own redirect target itself).
+  ifuResolve             := rawIfuResolve
+  ifuResolve.bits.target := Mux(rawIfuResolve.bits.attribute.isReturn, specRead.unGuard, rawIfuResolve.bits.target)
+  private val isIfuReturn = io.fromIfu.wbRedirect.valid && io.fromIfu.wbRedirect.bits.attribute.isReturn
+  needChangeTarget := RegNext(isIfuReturn, init = false.B) && !backendRedirect.valid
+
+  io.toBpu.specReadReq := specReadReq
+
+  // How often the return address stored in the FTQ meta differs from the value freshly read out of the RAS.
+  private val diffRetAddr = specRetAddr.fold(false.B)(retAddr => needChangeTarget && (specRead =/= retAddr))
+  XSPerfAccumulate("bpu_redirect_from_ifu_retDiff", diffRetAddr)
   // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
