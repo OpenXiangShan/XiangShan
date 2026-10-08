@@ -34,12 +34,11 @@ import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.backend.vector.{ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue}
+import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue, VecRegionModule}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, Enq, WakeUpBundle}
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.float.FltWbDataPath
-import xiangshan.backend.vector.Exu
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.IntScheduler
 
@@ -160,7 +159,7 @@ class FltRegionImp(
   // TODO, use M3 to arbiter
   val fpWbM2WakeUpThisRegion = issuePipes.flatten.filter(_.param.needFpWen).map(_.out.fpWbM2Wakeup)
   val fpWbM2WakeUpThisRegionIs1Lat = issuePipes.flatten.filter(_.param.needFpWen).map(_.out.fpWbM2WakeupIs1Lat)
-  val fpWbM2WakeupOBeforeArbiter = RegNext(in.fromIntRegion.fpWbM3Wakeup) ++ fpWbM2WakeUpThisRegion ++ RegNext(in.fromVecRegion.fpWbM3Wakeup)
+  val fpWbM2WakeupOBeforeArbiter = RegNext(in.fromIntRegion.fpWbM3Wakeup) ++ fpWbM2WakeUpThisRegion ++ RegNext(in.fromVecRegion.wbM3Wakeup)
   val writeFpRfIssueParams = backendParams.allIssueParams.filter(_.writeFpRf)
   assert(writeFpRfIssueParams.size == fpWbM2WakeupOBeforeArbiter.size)
   val fpWbM2WakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams)))
@@ -230,7 +229,7 @@ class FltRegionImp(
     .zip(Seq(
       fpWbFromIntRegion,
       issuePipes.map(_.map(_.out.fpWbNext).collect { case x if x.nonEmpty => x.get }),
-      in.fromVecRegion.fpWbNext
+      in.fromVecRegion.wbNext
     ).flatten.flatten)
     .foreach { case (sink, source) => sink := source }
 
@@ -256,6 +255,16 @@ class FltRegionImp(
     }
   }
   vecRFReadArbiterIn := 0.U.asTypeOf(vecRFReadArbiterIn)
+  vecRFReadArbiterIn.lazyZip(in.fromVecRegion.is1RdAddrNext).foreach { case (iqArb, iqAddr) =>
+    iqArb.lazyZip(iqAddr).foreach { case (exuArb, pipeAddr) =>
+      pipeAddr.foreach { raddr =>
+        exuArb(raddr.srcIdx).valid := raddr.ren
+        exuArb(raddr.srcIdx).bits.issueValid := false.B
+        exuArb(raddr.srcIdx).bits.addr := raddr.addr
+        exuArb(raddr.srcIdx).bits.robIdx := raddr.robIdx
+      }
+    }
+  }
   fltRFReadArbiterIn.zipWithIndex.foreach { case (iq, iqIdx) =>
     iq.zipWithIndex.foreach { case (exu, exuIdx) =>
       exu.zipWithIndex.foreach { case (src, srcIdx) =>
@@ -332,10 +341,32 @@ class FltRegionImp(
     }
   }
   out.toIntRegion.og0CancelForStd := issuePipes.flatten.map(_.out.ex0RespFailLat1Next)
-  out.toVecRegion.is0FpRdDataFail := 0.U.asTypeOf(out.toVecRegion.is0FpRdDataFail)
-  out.toVecRegion.is1FpRdDataNext := 0.U.asTypeOf(out.toVecRegion.is1FpRdDataNext)
-  out.toVecRegion.fpWbWakeUp := 0.U.asTypeOf(out.toVecRegion.fpWbWakeUp)
-  out.toVecRegion.fpWb0 := fpWbDataPath.out.wb0.map(_.data)
+  private val vecFpRdGrant = in.fromVecRegion.is1RdAddrNext.zip(vecRFReadArbiterIn).map { case (iqAddr, iqArb) =>
+    MixedVecInit(iqAddr.zip(iqArb).map { case (pipeAddr, exuArb) =>
+      MixedVecInit(pipeAddr.map(raddr => exuArb(raddr.srcIdx).ready))
+    })
+  }
+  out.toVecRegion.is2RdDataNext.lazyZip(in.fromVecRegion.is1RdAddrNext).lazyZip(vecFpRdGrant).foreach { case (iqRdata, iqAddr, iqGrant) =>
+    iqRdata.lazyZip(iqAddr).lazyZip(iqGrant).foreach { case (pipeRdata, pipeAddr, pipeGrant) =>
+      pipeRdata.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (rdata, raddr, grant) =>
+        rdata.data := fpRdata(rdata.rdConfig.port)
+      }
+    }
+  }
+  out.toVecRegion.is1RdDataFailNext.lazyZip(in.fromVecRegion.is1RdAddrNext).lazyZip(vecFpRdGrant).foreach { case (iqFail, iqAddr, iqGrant) =>
+    iqFail.lazyZip(iqAddr).lazyZip(iqGrant).foreach { case (pipeFail, pipeAddr, pipeGrant) =>
+      pipeFail.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (fail, raddr, grant) =>
+        fail := RegNext(raddr.ren && !grant)
+      }
+    }
+  }
+  out.toVecRegion.wbWakeUp zip fpWbDataPath.out.wb0 foreach {
+    case (sink, source) =>
+      sink.wen := source.wen
+      sink.pdest := source.pdest
+      sink.delay := BypassDelay.delay1
+  }
+  out.toVecRegion.wb0 := fpWbDataPath.out.wb0.map(_.data)
   out.toRob.debugIQDeqRobIdxVec.foreach(_ := 0.U.asTypeOf(out.toRob.debugIQDeqRobIdxVec.get))
   out.toTopDownMod := 0.U.asTypeOf(out.toTopDownMod)
   out.fpWb := fpWbDataPath.out.wb0
@@ -427,6 +458,7 @@ object FltRegionModule {
   class In(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val intRegion = backendParams.getIntRegionParam
     val fltRegion = backendParams.getFltRegionParam
+    val vecRegion = backendParams.getVecRegionParam
 
     val fpSchdParam = backendParams.fpSchdParams.get
 
@@ -450,11 +482,7 @@ object FltRegionModule {
         Input(MixedVec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle)))
     }
 
-    val fromVecRegion = new Bundle {
-      val fromVecFpRdAddr = backendParams.getVecRegionParam.genRfRdAddrBundle(backendParams.fpPregParams)
-      val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = backendParams.getVecRegionParam.genExuToRfBundle(backendParams.fpPregParams)
-      val fpWbM3Wakeup = Vec(backendParams.getVecRegionParam.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
-    }
+    val fromVecRegion = new VecRegionModule.ToFltRegion()(p, vecRegion)
 
     val fromCSR = new Bundle {
       val frm = Frm()
@@ -467,6 +495,7 @@ object FltRegionModule {
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
     private val intRegion = backendParams.getIntRegionParam
+    private val vecRegion = backendParams.getVecRegionParam
 
     val numDeq: Int = param.issueParams.map(_.numDeq).sum
     val numEntry: Int = param.issueParams.map(_.numEntry).max
@@ -503,12 +532,7 @@ object FltRegionModule {
       val og0CancelForStd = Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())
     }
 
-    val toVecRegion = new Bundle {
-      val is0FpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = backendParams.getVecRegionParam.genRfRdFailBundle(backendParams.fpPregParams)
-      val is1FpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = backendParams.getVecRegionParam.genRfRdDataBundle(backendParams.fpPregParams)
-      val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
-      val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
-    }
+    val toVecRegion = new VecRegionModule.FromFltRegion()(p, vecRegion)
 
     val toRob = new Bundle {
       val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_))

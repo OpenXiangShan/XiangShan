@@ -22,3 +22,6 @@
 [submodule "XSCache"]
 	path = XSCache
 	url = https://github.com/OpenXiangShan/XSCache.git
+[submodule "OpenIOMMU"]
+	path = OpenIOMMU
+	url = https://github.com/OpenXiangShan/OpenIOMMU.git

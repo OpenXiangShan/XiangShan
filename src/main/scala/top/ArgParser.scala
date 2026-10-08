@@ -41,6 +41,7 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
+      |--with-iommu
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
@@ -104,6 +105,10 @@ object ArgParser {
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
+          }), tail)
+        case "--with-iommu" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case EnableIommuKey => true
           }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {

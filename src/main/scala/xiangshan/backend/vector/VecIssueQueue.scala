@@ -100,6 +100,15 @@ class VecIssueQueue(
   // Comparing use many register in BusyTable to record bypass source info, delaying them has less cost at area.
   // Since there are 3 stages between vis0 and vex0, the waking up signal should be sent out 3 cycles ahead of it
   // writing back. The delay1 signal stores an aged bypassDelay because the entry will be aged again before deq.
+  private val fpWbD1WakeUp: Vec[WakeUpBundle] = Reg(chiselTypeOf(wakeup.fpWbVec))
+  fpWbD1WakeUp zip wakeup.fpWbVec foreach {
+    case (delay1, delay0) =>
+      delay1.wen := delay0.wen
+      when(delay0.wen) {
+        delay1.pdest := delay0.pdest
+        delay1.delay := delay0.delay
+      }
+  }
   private val vpWbM3D1WakeUp: Vec[WakeUpBundle] = Reg(chiselTypeOf(wakeup.vpWbM3Vec))
   vpWbM3D1WakeUp zip wakeup.vpWbM3Vec foreach {
     case (delay1, delay0) =>
@@ -115,6 +124,7 @@ class VecIssueQueue(
   private val enqEntryEnqV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
   private val enqEntryEnqVlWbWakeUpMatchVec = in.wakeup.vlWb0Vec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
   private val enqEntryEnqVpWbM3WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
+  private val enqEntryEnqFpWbD1WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.fpWbVec.size, Bool()))))
   private val enqEntryEnqVpWbM3D1WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
 
   private val fastEntryEnqGpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
@@ -148,7 +158,9 @@ class VecIssueQueue(
       )
   })
   private val enqEntryCanIssueVec: Vec[UInt] = VecInit(
-    (0 until param.numDeq).map(deqIdx => VecInit(enqEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
+    (0 until param.numDeq).map(deqIdx => VecInit(enqEntries.zip(enqEntryCanIssue).map {
+      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue, deqIdx)
+    }).asUInt)
   )
   private val fastEntryCanIssue = VecInit(fastEntries.zipWithIndex.map {
     case (ety, fastIdx) =>
@@ -163,7 +175,9 @@ class VecIssueQueue(
       )
   })
   private val fastEntryCanIssueVec: Vec[UInt] = VecInit(
-    (0 until param.numDeq).map(deqIdx => VecInit(fastEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
+    (0 until param.numDeq).map(deqIdx => VecInit(fastEntries.zip(fastEntryCanIssue).map {
+      case (ety, canIssue) => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, canIssue, deqIdx)
+    }).asUInt)
   )
 
   private val enqEntryDeqSel = Wire(Vec(param.numEnq, Bool()))
@@ -239,6 +253,7 @@ class VecIssueQueue(
       enqEntryEnqGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryEnqFpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.fpWbVec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryEnqVpWbM3WakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbM3Vec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
+      enqEntryEnqFpWbD1WakeUpMatchVec(etyIdx)(srcIdx) := fpWbD1WakeUp.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryEnqVpWbM3D1WakeUpMatchVec(etyIdx)(srcIdx) := vpWbM3D1WakeUp.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
       enqEntryFpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.fpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
@@ -324,6 +339,7 @@ class VecIssueQueue(
         vpWbM3WakeUpMatchVec = enqEntryEnqVpWbM3WakeUpMatchVec(enqIdx),
         v0WbWakeUpMatchVec = enqEntryEnqV0WbWakeUpMatchVec.map(_(enqIdx)),
         vlWbWakeUpMatchVec = enqEntryEnqVlWbWakeUpMatchVec.map(_(enqIdx)),
+        fpWbD1WakeUpMatchVec = Some(enqEntryEnqFpWbD1WakeUpMatchVec(enqIdx)),
         vpWbM3D1WakeUpMatchVec = Some(enqEntryEnqVpWbM3D1WakeUpMatchVec(enqIdx)),
       )
     }
@@ -349,6 +365,7 @@ class VecIssueQueue(
       vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
       deqSel = enqEntryDeqSel(enqIdx),
       cancel = enqEntryCancel(enqIdx),
+      fpWbD1WakeUpMatchVec = None,
       vpWbM3D1WakeUpMatchVec = None,
     )
   }
@@ -381,6 +398,7 @@ class VecIssueQueue(
         vpWbM3WakeUpMatchVec = fastEntryEnqVpWbM3WakeUpMatchVec(fastIdx),
         v0WbWakeUpMatchVec = fastEntryEnqV0WbWakeUpMatchVec.map(_(fastIdx)),
         vlWbWakeUpMatchVec = fastEntryEnqVlWbWakeUpMatchVec.map(_(fastIdx)),
+        fpWbD1WakeUpMatchVec = None,
         vpWbM3D1WakeUpMatchVec = None,
       )
     }
@@ -406,6 +424,7 @@ class VecIssueQueue(
       vlWbWakeUpMatchVec = fastEntryVlWbWakeUpMatchVec.map(_(fastIdx)),
       deqSel = fastEntryDeqSel(fastIdx),
       cancel = fastEntryCancel(fastIdx),
+      fpWbD1WakeUpMatchVec = None,
       vpWbM3D1WakeUpMatchVec = None,
     )
   }
@@ -512,6 +531,7 @@ class VecIssueQueue(
     gpWbWakeUpMatchVec    : Seq[Bool],
     fpWbWakeUpMatchVec    : Seq[Bool],
     vpWbM3WakeUpMatchVec  : Seq[Bool],
+    fpWbD1WakeUpMatchVec  : Option[Seq[Bool]],
     vpWbM3D1WakeUpMatchVec: Option[Seq[Bool]],
   ): Unit = {
     val gpWbWakeUpVec = gpWbWakeUpMatchVec.map(_ && status.gpRen)
@@ -519,18 +539,19 @@ class VecIssueQueue(
     val vpWbM3WakeUpVec = vpWbM3WakeUpMatchVec.map(_ && status.vpRen)
     // Only used to set bypassDelay and bypassSource
     // Only used between enqEntryEnq and enqEntries. Otherwise, this bundle should be None
+    val fpWbD1WakeUpVec: Seq[Bool] = fpWbD1WakeUpMatchVec.map(_.map(_ && status.fpRen)).getOrElse(Seq())
     val vpWbM3D1WakeUpVec: Seq[Bool] = vpWbM3D1WakeUpMatchVec.map(_.map(_ && status.vpRen)).getOrElse(Seq())
     val gpWakeUp = Cat(gpWbWakeUpVec).orR
     val fpWakeUp = Cat(fpWbWakeUpVec).orR
     val vpWbM3WakeUp = Cat(vpWbM3WakeUpVec).orR
+    val fpD1WakeUp = fpWbD1WakeUpVec.fold(false.B)(_ || _)
     val vpD1WakeUp = vpWbM3D1WakeUpVec.fold(false.B)(_ || _)
 
     val wakeUp: Bool = gpWakeUp || fpWakeUp || vpWbM3WakeUp
-    val delayWakeUp: Bool = vpD1WakeUp
+    val scalarD1WakeUp: Bool = fpD1WakeUp
+    val delayWakeUp: Bool = scalarD1WakeUp || vpD1WakeUp
 
-    statusNext.srcState := status.srcState || wakeUp
-
-    // Only wb wakeup is support for gp and fp, so set it as maximum delay.
+    statusNext.srcState := status.srcState || wakeUp || scalarD1WakeUp
 
     when (!wakeUp && !delayWakeUp) {
       if (isKeep) {
@@ -546,8 +567,13 @@ class VecIssueQueue(
       statusNext.bypassDelay := Mux1H(
         Seq(
           gpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
-          fpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
+          fpWbWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
           vpWbM3WakeUpVec zip in.wakeup.vpWbM3Vec.map(_.delay),
+          fpWbD1WakeUpVec zip fpWbD1WakeUp.map(wakeup => Mux(
+            wakeup.delay === BypassDelay.delay3,
+            BypassDelay.delay3,
+            wakeup.delay + 1.U
+          )),
           vpWbM3D1WakeUpVec zip vpWbM3D1WakeUp.map(wakeup => Mux(
             wakeup.delay === BypassDelay.delay3,
             BypassDelay.delay3,
@@ -566,6 +592,7 @@ class VecIssueQueue(
           gpWbWakeUpVec.zipWithIndex,
           fpWbWakeUpVec.zipWithIndex,
           vpWbM3WakeUpVec.zipWithIndex,
+          fpWbD1WakeUpVec.zipWithIndex,
           vpWbM3D1WakeUpVec.zipWithIndex,
         ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
       )
@@ -580,6 +607,7 @@ class VecIssueQueue(
     vpWbM3WakeUpMatchVec  : Seq[Seq[Bool]],
     v0WbWakeUpMatchVec    : Option[Seq[Bool]],
     vlWbWakeUpMatchVec    : Option[Seq[Bool]],
+    fpWbD1WakeUpMatchVec  : Option[Seq[Seq[Bool]]],
     vpWbM3D1WakeUpMatchVec: Option[Seq[Seq[Bool]]],
   ): Unit = {
     (statusSink.srcStatus zip statusSource.srcStatus).zipWithIndex.foreach {
@@ -592,6 +620,7 @@ class VecIssueQueue(
           gpWbWakeUpMatchVec = gpWbWakeUpMatchVec(srcIdx),
           fpWbWakeUpMatchVec = fpWbWakeUpMatchVec(srcIdx),
           vpWbM3WakeUpMatchVec = vpWbM3WakeUpMatchVec(srcIdx),
+          fpWbD1WakeUpMatchVec = fpWbD1WakeUpMatchVec.map(_(srcIdx)),
           vpWbM3D1WakeUpMatchVec = vpWbM3D1WakeUpMatchVec.map(_(srcIdx)),
         )
     }
@@ -620,6 +649,7 @@ class VecIssueQueue(
     vpWbM3WakeUpMatchVec  : Seq[Seq[Bool]],
     v0WbWakeUpMatchVec    : Option[Seq[Bool]],
     vlWbWakeUpMatchVec    : Option[Seq[Bool]],
+    fpWbD1WakeUpMatchVec  : Option[Seq[Seq[Bool]]],
     vpWbM3D1WakeUpMatchVec: Option[Seq[Seq[Bool]]],
     deqSel                : Bool,
     cancel                : Bool,
@@ -634,6 +664,7 @@ class VecIssueQueue(
           gpWbWakeUpMatchVec = gpWbWakeUpMatchVec(srcIdx),
           fpWbWakeUpMatchVec = fpWbWakeUpMatchVec(srcIdx),
           vpWbM3WakeUpMatchVec = vpWbM3WakeUpMatchVec(srcIdx),
+          fpWbD1WakeUpMatchVec = fpWbD1WakeUpMatchVec.map(_(srcIdx)),
           vpWbM3D1WakeUpMatchVec = vpWbM3D1WakeUpMatchVec.map(_(srcIdx)),
         )
     }
@@ -658,7 +689,9 @@ class VecIssueQueue(
       (!deqSel && !cancel) -> statusSource.issued,
     ))
 
-    when(entryValid && statusSource.issued) {
+    when(cancel) {
+      statusSink.issuedTimer := IssuedTimer.init
+    }.elsewhen(entryValid && statusSource.issued) {
       statusSink.issuedTimer := Mux(
         statusSource.issuedTimer =/= IssuedTimer.maxValue,
         statusSource.issuedTimer + 1.U,
@@ -1322,10 +1355,11 @@ object VecIssueQueue {
     param: IssueParam,
     entryValid: Bool,
     entry: Entry,
+    canIssue: Bool,
     deqIdx: Int,
   ): Bool = {
     entryValid &&
-      entry.status.canIssue &&
+      canIssue &&
       entry.status.deqPortIdx === deqIdx.U &&
       !WbFuBusyTable.entryWbConflict(
         fromWbFuBusyTable,

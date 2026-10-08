@@ -58,10 +58,10 @@ object Src1SelectField extends DecodeField[
     }
   }
 
-  private def fpWideSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
+  private def fpWideSrc1Sel(pattern: VecFpArithInstPattern, default: Src1Val): Src1Val = {
     pattern.category.rawString match {
       case VecInstPattern.Category.OPFVF => CONST
-      case _ => INCF2
+      case _ => default
     }
   }
 
@@ -131,9 +131,9 @@ object Src1SelectField extends DecodeField[
               case VecFpOp3VVVPattern() => fpSrc1Sel(vfi, INC1)
               case VecFpRedPattern() => S2MAXx1_DCONST
               case VecFpWRedPattern() => S2MAXF2x1_DCONST
-              case VecFpOp2VVWPattern() => fpWideSrc1Sel(vfi)
-              case VecFpOp2WVWPattern() => fpWideSrc1Sel(vfi)
-              case VecFpOp3VVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp2VVWPattern() => fpWideSrc1Sel(vfi, INCF2)
+              case VecFpOp2WVWPattern() => fpWideSrc1Sel(vfi, INCF2)
+              case VecFpOp3VVWPattern() => fpWideSrc1Sel(vfi, INCF2)
               case VecFpS2VPattern() => NONE
               case VecFpS2VVWPattern() => NONE
               case VecFpS2WVIntPattern() => S2INC2P1

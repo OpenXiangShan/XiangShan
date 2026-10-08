@@ -49,7 +49,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(Vstart())
   val vxrm = Input(UInt(2.W))
 
-  val vl = Output(Vl())
+  val diffVl = Option.when(backendParams.basicDebugEn)(Output(Vl()))
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))

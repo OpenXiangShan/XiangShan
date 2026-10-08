@@ -370,8 +370,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     }
   }
 
+  private val redirectRecoverCommonHR = WireInit(r1_commonHR)
+  redirectRecoverCommonHR.valid := true.B
   when(r1_valid) {
-    histQueue(recoverPtr.value) := r1_commonHR
+    histQueue(recoverPtr.value) := redirectRecoverCommonHR
   }
 
   io.s3DedupHitMask := s3_hitMask
