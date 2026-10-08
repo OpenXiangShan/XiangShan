@@ -595,7 +595,7 @@ def env(dut, request):
         event_sink=(
             None
             if runtime_context is None
-            else lambda event: runtime_context.handle_event(event, legacy_events=False)
+            else runtime_context.handle_event
         ),
         config=DEFAULT_ENV_CONFIG,
     )
@@ -634,7 +634,7 @@ def env(dut, request):
         tb.functional_coverage = toffee_sink
 
         def sample_functional_coverage(cycle):
-            runtime_context.on_cycle(cycle, tb, sample_legacy=False)
+            runtime_context.on_cycle(cycle, tb)
             toffee_sink.on_cycle(cycle)
             for model in toffee_direct_models:
                 model.on_cycle(cycle)

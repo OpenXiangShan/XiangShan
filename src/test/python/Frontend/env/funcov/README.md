@@ -9,8 +9,8 @@ methodology or a parallel coverage registry.
 - `recorder.py`: `FrontendFuncovSampleHub` loads the canonical registry,
   coordinates event/cycle sampling, keeps shared snapshot/state, and forwards
   hits to an attached Toffee sink.
-- `sample_hub.py` / `runtime_context.py`: stable import aliases for
-  `FrontendFuncovSampleHub`.
+- `runtime_context.py`: stable public imports for `FrontendFuncovSampleHub`,
+  registry definitions and provenance helpers.
 - `toffee_bridge.py`: maps the active registry to Toffee `CovGroup`s and, when
   functional coverage is enabled, writes one native `funcov/toffee.funcov.json`
   at pytest session finish.

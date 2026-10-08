@@ -17,19 +17,12 @@ from .provenance import (
     verification_environment_paths,
 )
 
-_decode_signal_inventory_name = decode_signal_inventory_name
-
-# Compatibility alias for the first SampleHub extraction cut.
-FrontendFuncovRuntimeContext = FrontendFuncovSampleHub
-
 __all__ = [
     "CoverageBinDef",
     "FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS",
-    "FrontendFuncovRuntimeContext",
     "FrontendFuncovSampleHub",
     "UNCACHE_EVENT_SAMPLER_BIN_KEYS",
     "decode_signal_inventory_name",
-    "_decode_signal_inventory_name",
     "default_pilot_csv_path",
     "current_funcov_sampler_sha256",
     "current_verification_environment_sha256",

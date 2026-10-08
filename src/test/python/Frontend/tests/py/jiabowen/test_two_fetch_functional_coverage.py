@@ -22,6 +22,7 @@ from env.funcov.py.ftq.sampler import (
     sample_two_fetch_coverage,
 )
 from env.funcov.py.ftq.two_fetch_funcov import _tf_ptr_at_or_after
+from env.funcov.py.ifu.cfvec_toffee import IfuCfvecToffeeCoverage
 from env.support.pc_utils import fold_pc
 from env.funcov.py.ftq.checker_funcov import (
     COVERAGE_GROUPS as CHECKER_COVERAGE_GROUPS,
@@ -952,21 +953,23 @@ def test_cfvec_redirect_invalidates_current_and_next_cycle(tmp_path):
     assert recorder.key_hit("ifu_instr_size_type", "rvi_seen")
 
 
-def test_on_cycle_gates_sampling_during_reset_and_resumes_after_release(tmp_path):
+def test_native_cfvec_model_gates_sampling_during_reset_and_resumes_after_release(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
+    model = IfuCfvecToffeeCoverage(recorder, sink=recorder.toffee_sink)
     _set_cfvec_entries(dut, [(0, 0x80000000, 0, 0x00000013)])
     dut.set("reset", 1)
     recorder._ifu_last_cfvec = {"pc": 0xDEADBEEF, "is_rvc": 0, "slot": 0}
 
-    recorder.on_cycle(1, env)
+    recorder.begin_cycle_snapshot(1)
+    model.on_cycle(1)
 
-    assert recorder._ifu_last_cfvec is None
+    assert model._ifu_last_cfvec is None
     assert not recorder.key_hit("ifu_instr_size_type", "rvi_seen")
 
     dut.set("reset", 0)
-    recorder.on_cycle(2, env)
+    recorder.begin_cycle_snapshot(2)
+    model.on_cycle(2)
 
-    assert recorder._reset_release_cycle == 2
     assert recorder.key_hit("ifu_instr_size_type", "rvi_seen")
 
 

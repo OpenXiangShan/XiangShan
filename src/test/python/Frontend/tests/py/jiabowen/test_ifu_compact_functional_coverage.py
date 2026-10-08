@@ -8,6 +8,7 @@ from env.funcov.py.ifu.owner_v3_funcov import (
     OWNER_V3_BIN_SPECS,
     OWNER_V3_EVENT_TYPE,
 )
+from env.funcov.py.ifu.owner_v3_toffee import OwnerV3ToffeeCoverage
 from env.funcov.py.ifu.sampler import sample_cfvec_coverage
 from env.funcov.py.ifu.compact_funcov import (
     _sample_frontend_trigger,
@@ -145,8 +146,9 @@ def test_reset_release_owner_leaf_rejects_nonzero_or_missing_probe(
 
 def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
     recorder, _env, _dut, _memory = _make_recorder(tmp_path)
+    model = OwnerV3ToffeeCoverage(recorder, sink=recorder.toffee_sink)
     first = OWNER_V3_BIN_SPECS[0]
-    recorder.handle_event(
+    model.handle_event(
         {
             "type": OWNER_V3_EVENT_TYPE,
             "cycle": 1,
@@ -161,7 +163,7 @@ def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
     assert not recorder.key_hit(first.coverage_group, first.bin_name)
 
     for cycle, spec in enumerate(OWNER_V3_BIN_SPECS, start=2):
-        recorder.handle_event(
+        model.handle_event(
             {
                 "type": OWNER_V3_EVENT_TYPE,
                 "cycle": cycle,

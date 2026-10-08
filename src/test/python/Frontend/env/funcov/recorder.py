@@ -23,18 +23,12 @@ from . import (
     MMIO_V3_SAMPLER_BIN_KEYS,
     MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
     INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS,
-    handle_mmio_v3_checked_event,
-    handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
     initialize_mmio_v3_coverage_state,
     initialize_mmio_nc_owner_coverage_state,
     reset_ifu_cacheable_pipeline_state,
     reset_mmio_v3_coverage_state,
     reset_mmio_nc_owner_coverage_state,
-    sample_ifu_cacheable_pipeline_coverage,
-    sample_mmio_v3_coverage,
-    sample_mmio_nc_owner_coverage,
-    sample_cfvec_coverage,
 )
 from .registry import (
     _frontend_root,
@@ -51,14 +45,10 @@ from .provenance import (
     verification_environment_paths,
 )
 
-# Compatibility name for older direct recorder consumers.
-_decode_signal_inventory_name = decode_signal_inventory_name
-from .py.ifu.compact_funcov import _sample_uncache_half_isolation
 from .py.ftq.sampler import (
     TWO_FETCH_SAMPLER_BIN_KEYS,
     initialize_ftq_coverage_state,
     reset_ftq_coverage_state,
-    sample_two_fetch_coverage,
 )
 from .py.ifu.owner_v3_funcov import derive_owner_v3_from_source
 from .py.icache import (
@@ -70,13 +60,8 @@ from .py.icache import (
     reset_icache_missunit_coverage_state,
     reset_icache_mainpipe_coverage_state,
     reset_icache_prefetchpipe_coverage_state,
-    sample_icache_missunit_coverage,
-    sample_icache_mainpipe_coverage,
-    sample_icache_prefetchpipe_coverage,
     reset_icache_waylookup_coverage_state,
-    sample_icache_waylookup_coverage,
     reset_icache_hitmiss_coverage_state,
-    sample_icache_hitmiss_coverage,
 )
 from ..runtime.pylib import frontend_build_root_path, frontend_pylib_path
 from ..support.rvc_decoder import expand_rvc
@@ -249,7 +234,6 @@ class FrontendFuncovSampleHub:
         self.native_toffee_runtime_enabled = False
         self.toffee_event_models = []
         self.toffee_owner_model = None
-        self.toffee_mmio_model = None
         self.toffee_uncache_model = None
         self._cycle_snapshot_cycle: Optional[int] = None
         self._cycle_snapshot_values: Dict[str, Optional[int]] = {}
@@ -556,9 +540,6 @@ class FrontendFuncovSampleHub:
     def attach_toffee_owner_model(self, model) -> None:
         self.toffee_owner_model = model
 
-    def attach_toffee_mmio_model(self, model) -> None:
-        self.toffee_mmio_model = model
-
     def attach_toffee_uncache_model(self, model) -> None:
         self.toffee_uncache_model = model
 
@@ -643,7 +624,7 @@ class FrontendFuncovSampleHub:
             return definition.key
         return (str(coverage_group), "", str(bin_name))
 
-    def handle_event(self, event: Dict[str, Any], *, legacy_events: bool = True) -> None:
+    def handle_event(self, event: Dict[str, Any]) -> None:
         evt = _sanitize(event)
         self.events_tail.append(evt)
 
@@ -659,11 +640,6 @@ class FrontendFuncovSampleHub:
         if not event_sampling_enabled:
             return
 
-        if legacy_events and self.sampler_domain_enabled("ifu"):
-            if self.toffee_owner_model is None:
-                handle_owner_v3_event(self, evt)
-            if self.toffee_mmio_model is None:
-                handle_mmio_v3_checked_event(self, evt)
         for model in self.toffee_event_models:
             model.handle_event(evt)
 
@@ -759,7 +735,7 @@ class FrontendFuncovSampleHub:
         reset_icache_waylookup_coverage_state(self)
         reset_icache_hitmiss_coverage_state(self)
 
-    def on_cycle(self, cycle: int, env, *, sample_legacy: bool = True) -> None:
+    def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
         cycle = int(cycle)
         self.begin_cycle_snapshot(cycle)
@@ -771,29 +747,8 @@ class FrontendFuncovSampleHub:
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
-        if sample_legacy and self.sampler_domain_enabled("ftq"):
-            sample_two_fetch_coverage(self, env, cycle)
-        if sample_legacy and self.sampler_domain_enabled("ifu"):
-            sample_cfvec_coverage(self, env, cycle)
-            # Keep the cross-path half-RVI producer on the recorder's canonical
-            # cycle clock. cfVec sampling may return early when no lane is valid,
-            # while BIN-922 observes redirect state in valid-hole cycles.
-            if sample_legacy:
-                _sample_uncache_half_isolation(self, dut, cycle)
-            sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
-            sample_mmio_v3_coverage(self, env, cycle)
-            sample_mmio_nc_owner_coverage(self, env, cycle)
-        if sample_legacy and self.sampler_domain_enabled("icache"):
-            sample_icache_mainpipe_coverage(self, env, cycle)
-            sample_icache_prefetchpipe_coverage(self, env, cycle)
-            sample_icache_missunit_coverage(self, env, cycle)
-            sample_icache_waylookup_coverage(self, env, cycle)
-            sample_icache_hitmiss_coverage(self, env, cycle)
-
         if self.sampler_domain_enabled("ibuffer"):
             self._sample_ibuffer_contract(dut, cycle)
-        if sample_legacy and self.sampler_domain_enabled("uncache"):
-            self._sample_uncache_cycle_state(dut, cycle, env)
 
     def _lookup_dut_signal(self, dut, name: str):
         name = str(name)

@@ -15,6 +15,9 @@ from env.funcov.py.ifu.cacheable_pipeline_funcov import (
     _req_signal_names,
     sample_ifu_cacheable_pipeline_coverage,
 )
+from env.funcov.py.ifu.cacheable_pipeline_toffee import (
+    IfuCacheablePipelineToffeeCoverage,
+)
 from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 
@@ -778,12 +781,16 @@ def test_cacheable_single_block_transfer_requires_matching_s1_metadata(tmp_path)
     assert not recorder.key_hit("ifu_cacheable_metadata", "second_ftq_preserved")
 
 
-def test_recorder_on_cycle_invokes_cacheable_pipeline_sampler(tmp_path):
+def test_native_cacheable_pipeline_model_samples_cycle(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set("reset", 0)
     _set_request(dut)
+    model = IfuCacheablePipelineToffeeCoverage(
+        recorder, sink=recorder.toffee_sink
+    )
 
-    recorder.on_cycle(1, env)
+    recorder.begin_cycle_snapshot(1)
+    model.on_cycle(1)
 
     assert recorder.key_hit("ifu_cacheable_ingress", "accepted")
 

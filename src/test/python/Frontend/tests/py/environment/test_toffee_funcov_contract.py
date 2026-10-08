@@ -278,7 +278,7 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
         Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
     ).read_text(encoding="utf-8")
     assert "FrontendFuncovSampleHub.from_pilot_csv" in source
-    assert "runtime_context.handle_event(event, legacy_events=False)" in source
+    assert "else runtime_context.handle_event" in source
     assert "ToffeeCoverageSink.from_registry" in source
     assert "native_only=True" in source
     assert "enable_toffee_direct_domain" not in runtime_source
@@ -517,11 +517,11 @@ def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
     ).read_text(encoding="utf-8")
     callback_start = source.index("def sample_functional_coverage(cycle):")
     callback = source[callback_start : source.index("dut.StepRis(sample_functional_coverage)")]
-    assert "runtime_context.on_cycle(cycle, tb, sample_legacy=False)" in callback
+    assert "runtime_context.on_cycle(cycle, tb)" in callback
     assert "begin_cycle_snapshot" in (
         Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
     ).read_text(encoding="utf-8")
-    assert callback.index("runtime_context.on_cycle(cycle, tb, sample_legacy=False)") < callback.index(
+    assert callback.index("runtime_context.on_cycle(cycle, tb)") < callback.index(
         "for model in toffee_direct_models:"
     )
 

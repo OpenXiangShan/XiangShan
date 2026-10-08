@@ -43,7 +43,6 @@ def create_toffee_runtime(recorder, sink, *, audit_recorder=None) -> ToffeeRunti
     cacheable = create(IfuCacheablePipelineToffeeCoverage)
 
     recorder.native_toffee_runtime_enabled = True
-    recorder.attach_toffee_mmio_model(mmio_v3)
 
     return ToffeeRuntime(
         cycle_models=(

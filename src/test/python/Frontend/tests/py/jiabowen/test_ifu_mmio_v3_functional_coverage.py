@@ -4,6 +4,7 @@ from env.funcov.py.ifu.mmio_v3_funcov import (
     MMIO_V3_CHECKED_EVENT_TYPE,
     sample_mmio_v3_coverage,
 )
+from env.funcov.py.ifu.mmio_v3_toffee import MmioV3ToffeeCoverage
 from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
 
@@ -110,6 +111,7 @@ def test_page_tail_rvc_progress_uses_halfword_pc_units(tmp_path):
 
 def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
     recorder, _env, _dut = _make_recorder(tmp_path)
+    model = MmioV3ToffeeCoverage(recorder, sink=recorder.toffee_sink)
     base_payload = {
         "bin_id": "BIN-1014",
         "condition_met": True,
@@ -121,7 +123,7 @@ def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
             "illegal_instruction": False,
         },
     }
-    recorder.handle_event(
+    model.handle_event(
         {"type": MMIO_V3_CHECKED_EVENT_TYPE, "cycle": 1, "payload": base_payload}
     )
     assert not recorder.key_hit(
@@ -129,7 +131,7 @@ def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
     )
 
     base_payload["observations"]["second_page_execute"] = True
-    recorder.handle_event(
+    model.handle_event(
         {"type": MMIO_V3_CHECKED_EVENT_TYPE, "cycle": 2, "payload": base_payload}
     )
     assert recorder.key_hit(
