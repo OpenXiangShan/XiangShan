@@ -213,11 +213,12 @@ class IttageTable(
     val bankUpdate = io.update.valid && updateBankMask(bankIdx)
     needReset(bankIdx) && !bankRead && !bankUpdate
   })
+  private val bankCanResetUseful = WireInit(VecInit(Seq.fill(NumBanks)(false.B)))
   // Each bank keeps its own sweep pointer; it clears itself over NumSetsPerBank non-busy cycles.
   private val resetSet    = Wire(Vec(NumBanks, UInt(SetIdxWidth.W)))
   private val resetFinish = Wire(Vec(NumBanks, Bool()))
   for (bankIdx <- 0 until NumBanks) {
-    val (set, finish) = Counter(bankCanReset(bankIdx), NumSetsPerBank)
+    val (set, finish) = Counter(bankCanResetUseful(bankIdx), NumSetsPerBank)
     resetSet(bankIdx)    := set
     resetFinish(bankIdx) := finish
   }
@@ -226,7 +227,7 @@ class IttageTable(
     needReset := VecInit(Seq.fill(NumBanks)(true.B))
   }.otherwise {
     for (bankIdx <- 0 until NumBanks) {
-      when(resetFinish(bankIdx)) { needReset(bankIdx) := false.B }
+      when(resetFinish(bankIdx))(needReset(bankIdx) := false.B)
     }
   }
   private val updateBitmask = Mux(
@@ -241,21 +242,27 @@ class IttageTable(
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
     val writePort = writeBuffer.io.write.head
-    val canReset  = bankCanReset(bankIdx)
-    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || canReset
-    writePort.bits.entry   := Mux(canReset, resetEntry, updateWdata)
-    writePort.bits.setIdx  := Mux(canReset, resetSet(bankIdx), updateIdx)
-    writePort.bits.bitmask := Mux(canReset, updateUsefulBitmask, updateBitmask)
+    writePort.valid        := io.update.valid && updateBankMask(bankIdx)
+    writePort.bits.entry   := updateWdata
+    writePort.bits.setIdx  := updateIdx
+    writePort.bits.bitmask := updateBitmask
   }
 
   // read the stored write req from write buffer and push into the matching bank SRAM
   tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
-    val readPort     = writeBuffer.io.read.head
-    val writeValid   = readPort.valid && !bank.io.r.req.valid
-    val writeEntry   = readPort.bits.entry
-    val writeSetIdx  = readPort.bits.setIdx
-    val writeBitMask = readPort.bits.bitmask
-    bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
+    val readPort         = writeBuffer.io.read.head
+    val writeValid       = readPort.valid && !bank.io.r.req.valid
+    val writeEntry       = readPort.bits.entry
+    val writeSetIdx      = readPort.bits.setIdx
+    val writeBitMask     = readPort.bits.bitmask
+    val usefulRestValid  = !readPort.valid && !bank.io.r.req.valid && needReset(bankIdx)
+    val sramWriteValid   = writeValid || usefulRestValid
+    val sramWriteEntry   = Mux(writeValid, writeEntry, resetEntry)
+    val sramWriteSetIdx  = Mux(writeValid, writeSetIdx, resetSet(bankIdx))
+    val sramWriteBitMask = Mux(writeValid, writeBitMask, updateUsefulBitmask)
+    bankCanResetUseful(bankIdx) := usefulRestValid
+
+    bank.io.w.apply(sramWriteValid, sramWriteEntry, sramWriteSetIdx, true.B, sramWriteBitMask)
     readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
   }
 
@@ -278,7 +285,7 @@ class IttageTable(
     ConfidenceCounter.WeakPositive, // reset to neutral (weak positive) when allocate
     oldCtr.getUpdate(io.update.correct)
   )
-  updateWdata.tag := updateTag
+  updateWdata.tag       := updateTag
   updateWdata.usefulCnt := io.update.usefulCnt
   // only when ctr is null
   updateWdata.targetOffset := Mux(
