@@ -151,16 +151,39 @@ class IttageTable(
 
   io.sramResetDone := tables.map(_.io.resetDone).reduce(_ && _)
 
+  /**
+    Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
+    Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
+  */
+  private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
+    Module(new WriteBuffer(
+      gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
+      numEntries = TableWriteBufferSize,
+      numPorts = 1,
+      hasReadBypass = true,
+      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
+    )).suggestName(s"ittage_write_buffer_bank$bankIdx")
+  }
+  private val readBypassPorts = writeBuffers.map(_.io.readBypass.get)
+  readBypassPorts.zipWithIndex.foreach { case (readBypass, bankIdx) =>
+    readBypass.req.valid := io.req.fire && s0_bankMask(bankIdx)
+    readBypass.req.bits  := s0_setIdx
+  }
+
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
     bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)
     bank.io.r.req.bits.setIdx := s0_setIdx
   }
 
-  private val tableReadData =
+  private val sramReadData =
     Mux1H(s1_bankMask, tables.map(_.io.r.resp.data.head))
-
-  private val s1_reqReadHit = tableReadData.valid && (if (tagLen != 0) tableReadData.tag === s1_tag else true.B)
+  private val s1_sramReadHit = sramReadData.valid && (if (tagLen != 0) sramReadData.tag === s1_tag else true.B)
+  private val bufferReadData =
+    Mux1H(s1_bankMask, readBypassPorts.map(_.resp.head.bits.entry))
+  private val s1_bufferReadHit = bufferReadData.valid && (if (tagLen != 0) bufferReadData.tag === s1_tag else true.B)
+  private val s1_reqReadHit    = s1_sramReadHit || s1_bufferReadHit
+  private val tableReadData    = Mux(s1_reqReadHit, sramReadData, bufferReadData)
 
   io.resp.valid             := s1_reqReadHit && s1_valid // && s1_mask(b)
   io.resp.bits.cnt          := tableReadData.confidenceCnt
@@ -196,19 +219,6 @@ class IttageTable(
     updateAllBitmask,
     Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
   )
-
-  /**
-    Bypass write data from per-bank WriteBuffer to SRAM when that bank's read port is idle.
-    Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
-  */
-  private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
-    Module(new WriteBuffer(
-      gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
-      numEntries = TableWriteBufferSize,
-      numPorts = 1,
-      nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
-    )).suggestName(s"ittage_write_buffer_bank$bankIdx")
-  }
 
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
