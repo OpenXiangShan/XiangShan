@@ -1434,9 +1434,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.brqRedirect         <> rawRedirect
   lsq.io.flushAfterRedirect  <> flushAfterRedirect
 
-  //  violation rollback
+  // Violation rollback: same-ROB redirects that flush themselves take priority.
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    // If one instruction generates both a replay and a flush-after rollback,
+    // select the replay so the instruction is fetched again with the right data.
+    // compareVec expects whether the left redirect is newer than the right one.
+    def isRedirectAfter(left: Redirect, right: Redirect): Bool = Mux(
+      left.robIdx === right.robIdx,
+      !left.flushItself() && right.flushItself(),
+      isAfter(left.robIdx, right.robIdx)
+    )
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isRedirectAfter(xs(j).bits, xs(i).bits)))
     val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
       (if (j < i) !xs(j).valid || compareVec(i)(j)
       else if (j == i) xs(i).valid
