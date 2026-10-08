@@ -58,6 +58,10 @@ class _Recorder:
                 return int(signal.value)
         return None
 
+    def domain_cycle_view(self, domain, builder):
+        del domain
+        return builder()
+
     def mark(
         self,
         group,
