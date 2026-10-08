@@ -578,7 +578,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.error.bits.source.data := s3_data_correctable || s3_data_uncorrectable
   io.error.bits.source.l2 := s3_flag_error
   io.error.bits.opType.load := true.B
-  // A correctable error follows the existing load replay path.
+  // CE is consumed by RERI while the load itself follows the existing replay path.
   io.error.valid := (s3_ce || s3_uec || s3_flag_error) && s3_valid
 
   io.replace_access.valid := s3_valid && s3_hit && !s3_kill

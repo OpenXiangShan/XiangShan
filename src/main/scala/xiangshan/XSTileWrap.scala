@@ -46,7 +46,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   val clintIntNode = Option.when(!UsePrivateClint)(IntIdentityNode()) // interrupt from CHI or (TL & async)
   val debugIntNode = IntIdentityNode()
   val plicIntNode = IntIdentityNode()
-  val beuIntNode = IntIdentityNode()
   val nmiIntNode = IntIdentityNode()
   // instance clint timer
   val timer = Option.when(UsePrivateClint)(LazyModule(new TIMER(TIMERParams(IsSelfTest=false,soc.TIMERRange.base), 8))) // TL & sync
@@ -54,7 +53,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
   tile.debug_int_node := IntBuffer(3, cdc = true) := debugIntNode
   tile.plic_int_node :*= IntBuffer(3, cdc = true) :*= plicIntNode
   tile.nmi_int_node := IntBuffer(3, cdc = true) := nmiIntNode
-  beuIntNode := IntBuffer() := tile.beu_int_source
 
   // seperate TL bus
   println(s"SeperateBus = $SeperateBus")

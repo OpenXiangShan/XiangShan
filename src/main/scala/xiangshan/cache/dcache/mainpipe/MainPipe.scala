@@ -1195,7 +1195,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)
   XSError(s2_valid && s2_way_en.andR, "s2_way_en should not be all 1")
 
-  // Report the error one cycle after the data response.
+  // Report the error to RERI and the cache-error CSR one cycle after the data response.
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   val s3_ce_event = s3_valid && !s3_req.miss &&
     (s3_tag_correctable.orR || s3_data_ce) && !s3_tag_uncorrectable.orR &&

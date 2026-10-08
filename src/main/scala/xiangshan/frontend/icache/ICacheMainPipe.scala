@@ -64,7 +64,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val pmp: PmpCheckBundle = new PmpCheckBundle
     // Ifu
     val toIfu: MainPipeToIfuIO = new MainPipeToIfuIO
-    // ECC error reporting
+    // RERI error reporting
     val error: Valid[L1CacheErrorInfo] = Output(ValidIO(new L1CacheErrorInfo))
 
     val perf: MainPipePerfInfo = Output(new MainPipePerfInfo)
@@ -569,7 +569,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     println("Warn: ICache corrupt re-fetch is being rewritten, not working now")
   }
 
-  // Report one ICache event per cycle, selecting the first corrupt port.
+  // RERI accepts one ICache event per cycle, so select the first corrupt port.
   private val s2_firstCorruptPortInfo = PriorityMux(s2_firstCorruptReqInfo.map(info => info.valid -> info))
   io.error.valid              := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
   io.error.bits.ce            := false.B

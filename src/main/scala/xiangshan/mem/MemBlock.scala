@@ -350,7 +350,7 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val debug_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
   val plic_int_sink = IntSinkNode(IntSinkPortSimple(2, 1))
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
-  val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
+  val reri_nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
   if (!coreParams.softPTW) {
     ptw_to_l2_buffer.node := ptw.node
@@ -383,8 +383,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
 
     // misc
-    val dcacheError = Output(new L1BusErrorUnitInfo())
-    val uncacheError = Output(new L1BusErrorUnitInfo())
+    val dcacheError = Output(new RERIErrorInfo())
+    val uncacheError = Output(new RERIErrorInfo())
     val memInfo = new Bundle {
       val sqFull = Output(Bool())
       val lqFull = Output(Bool())
@@ -419,8 +419,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_cpu_critical_error = Output(Bool())
     val outer_msi_ack = Output(Bool())
     val outer_teemsi_ack = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
-    val inner_beu_errors_icache = Input(new L1BusErrorUnitInfo)
-    val outer_beu_errors_icache = Output(new L1BusErrorUnitInfo)
+    val inner_reri_errors_icache = Input(new RERIErrorInfo)
+    val outer_reri_errors_icache = Output(new RERIErrorInfo)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
@@ -483,8 +483,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.outer_l2_flush_en)
   dontTouch(io.outer_power_down_en)
   dontTouch(io.outer_cpu_critical_error)
-  dontTouch(io.inner_beu_errors_icache)
-  dontTouch(io.outer_beu_errors_icache)
+  dontTouch(io.inner_reri_errors_icache)
+  dontTouch(io.outer_reri_errors_icache)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
@@ -499,8 +499,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
   dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
   val dcacheError = DelayNWithValid(dcache.io.error, 2)
-  io.dcacheError <> dcacheError.bits.toL1BusErrorUnitInfo(dcacheError.valid)
-  io.uncacheError.ecc_error <> DelayNWithValid(uncache.io.busError.ecc_error, 2)
+  io.dcacheError <> dcacheError.bits.toRERIErrorInfo(dcacheError.valid)
+  io.uncacheError.ecc_error <> DelayNWithValid(uncache.io.reriError.ecc_error, 2)
+  io.uncacheError.ce := false.B
+  io.uncacheError.uec := io.uncacheError.ecc_error.valid
+  io.uncacheError.tag := false.B
+  io.uncacheError.data := io.uncacheError.ecc_error.valid
   when(!csrCtrl.cache_error_enable){
     io.dcacheError.ecc_error.valid := false.B
     io.uncacheError.ecc_error.valid := false.B
@@ -1264,7 +1268,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     x.externalInterrupt.meip  := RegNext(outer.plic_int_sink.in.head._1(0))
     x.externalInterrupt.seip  := RegNext(outer.plic_int_sink.in.last._1(0))
     x.externalInterrupt.debug := RegNext(outer.debug_int_sink.in.head._1(0))
-    x.externalInterrupt.nmi.nmi_31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.beu_local_int_sink.in.head._1(0))
+    x.externalInterrupt.nmi.nmi_31 := RegNext(outer.nmi_int_sink.in.head._1(0) | outer.reri_nmi_int_sink.in.head._1(0))
     x.externalInterrupt.nmi.nmi_43 := RegNext(outer.nmi_int_sink.in.head._1(1))
     x.msiInfo           := DelayNWithValid(io.fromTopToBackend.msiInfo, 1)
     x.teemsiInfo zip io.fromTopToBackend.teemsiInfo foreach { case (x_teemsiInfo, io_teemsiInfo) =>
@@ -1287,7 +1291,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
     teemsi_ack := teemsiAck
   }
-  io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
+  io.outer_reri_errors_icache := RegNext(io.inner_reri_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 

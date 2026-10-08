@@ -23,7 +23,7 @@ import chisel3.util.{Valid, ValidIO}
 import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
-import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
+import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.tilelink._
 import xscache.coupledL2.{EnableL2DecoupledDownstreamCHI, L2ParamKey, L2ToL1PfCtrl, PrefetchCtrlFromCore}
 import xscache.chi.{CHIDataCheckKey, CHIIssue, CHIAddrWidthKey, CHIPoisonKey, DecoupledPortIO, NonSecureKey, PortIO}
@@ -32,28 +32,25 @@ import xscache.common.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
 import utility._
+import device.RERI.{RERIAddress, TLRERIErrorAdapter}
 import utility.sram.SramBroadcastBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 
-class L1BusErrorUnitInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
+class RERIErrorInfo(implicit val p: Parameters) extends Bundle with HasSoCParameter {
   val ecc_error = Valid(UInt(soc.PAddrBits.W))
+  val ce = Bool()
+  val uec = Bool()
+  val tag = Bool()
+  val data = Bool()
 }
 
-class XSL1BusErrors()(implicit val p: Parameters) extends BusErrors {
-  val icache = new L1BusErrorUnitInfo
-  val dcache = new L1BusErrorUnitInfo
-  val uncache = new L1BusErrorUnitInfo
-  val l2 = new L1BusErrorUnitInfo
-
-  override def toErrorList: List[Option[(ValidIO[UInt], String, String)]] =
-    List(
-      Some(icache.ecc_error, "I_ECC", "Icache ecc error"),
-      Some(dcache.ecc_error, "D_ECC", "Dcache ecc error"),
-      Some(uncache.ecc_error, "U_ECC", "Uncache ecc error"),
-      Some(l2.ecc_error, "L2_ECC", "L2Cache ecc error")
-    )
+class XSRERIErrors()(implicit val p: Parameters) extends Bundle {
+  val icache = new RERIErrorInfo
+  val dcache = new RERIErrorInfo
+  val uncache = new RERIErrorInfo
+  val l2 = new RERIErrorInfo
 }
 
 /**
@@ -79,10 +76,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
   val memory_port = if (enableL2) None else Some(TLIdentityNode())
-  val beu = LazyModule(new BusErrorUnit(
-    new XSL1BusErrors(),
-    BusErrorUnitParams(soc.BEURange.base, soc.BEURange.mask.toInt + 1)
-  ))
+  require(soc.RERIRange.base == RERIAddress.BaseAddress)
+  val reri = LazyModule(new TLRERIErrorAdapter(soc.RERIRange.base, soc.RERIRange.mask.toInt + 1))
 
   val i_mmio_port = TLTempNode()
   val d_mmio_port = TLTempNode()
@@ -105,8 +100,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   val debug_int_node = IntIdentityNode()
   val plic_int_node = IntIdentityNode()
   val nmi_int_node = IntIdentityNode()
-  val beu_local_int_source = IntSourceNode(IntSourcePortSimple())
-  val beu_local_int_source_buffer = IntBuffer()
+  val reri_nmi_int_source = IntSourceNode(IntSourcePortSimple())
+  val reri_nmi_int_source_buffer = IntBuffer()
 
   val l2cache = if (enableL2) {
     val sliceCoherentClientMap =
@@ -152,7 +147,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   mmio_xbar := TLBuffer.chainNode(2) := i_mmio_port
   mmio_xbar := TLBuffer.chainNode(2) := d_mmio_port
-  beu.node := TLBuffer.chainNode(1) := mmio_xbar
+  reri.node := TLBuffer.chainNode(1) := mmio_xbar
   if (icacheCtrlEnabled) {
     icachectrl_port_opt.get := TLBuffer.chainNode(1) := mmio_xbar
   }
@@ -161,19 +156,20 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   }
 
   // filter out in-core addresses before sent to mmio_port
+  // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
   private def icacheCtrlAddressOpt: Option[AddressSet] = Option.when(icacheCtrlEnabled)(icacheCtrlAddress)
   private def cacheAddressSet: Seq[AddressSet] = icacheCtrlAddressOpt.toSeq
-  private def mmioFilters = (if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet) :+ soc.BEURange
+  private def mmioFilters = (if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet) :+ soc.RERIRange
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
     mmio_xbar
 
-  beu_local_int_source_buffer := beu_local_int_source
+  reri_nmi_int_source_buffer := reri_nmi_int_source
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
     val io = IO(new Bundle {
-      val beu_errors = Input(chiselTypeOf(beu.module.io.errors))
+      val reri_errors = Input(new XSRERIErrors)
       val reset_vector = new Bundle {
         val fromTile = Input(UInt(PAddrBits.W))
         val toCore = Output(UInt(PAddrBits.W))
@@ -250,12 +246,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
 
-    val (beu_int_out, _) = beu_local_int_source.out(0)
-    beu_int_out(0) := beu.module.io.interrupt
-
-    beu.module.io.errors.icache := io.beu_errors.icache
-    beu.module.io.errors.dcache := io.beu_errors.dcache
-    beu.module.io.errors.uncache := io.beu_errors.uncache
+    val (reri_nmi_out, _) = reri_nmi_int_source.out(0)
+    val reriErrors = Wire(chiselTypeOf(io.reri_errors))
+    reriErrors := io.reri_errors
+    reri.module.io.errors := reriErrors
+    reri_nmi_out(0) := reri.module.io.nmi
     resetDelayN.io.in := io.reset_vector.fromTile
     io.reset_vector.toCore := resetDelayN.io.out
     io.hartId.toCore := io.hartId.fromTile
@@ -370,8 +365,12 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           l2.io.cpu_wfi.foreach { _ := io.cpu_wfi.fromCore }
       }
 
-      beu.module.io.errors.l2.ecc_error.valid := l2.io.error.valid
-      beu.module.io.errors.l2.ecc_error.bits := l2.io.error.address
+      reriErrors.l2.ecc_error.valid := l2.io.error.valid
+      reriErrors.l2.ecc_error.bits := l2.io.error.address
+      reriErrors.l2.ce := false.B
+      reriErrors.l2.uec := l2.io.error.valid
+      reriErrors.l2.tag := false.B
+      reriErrors.l2.data := true.B
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
       io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
@@ -384,7 +383,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.resp.ready := true.B
       io.perfEvents := DontCare
 
-      beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
+      reriErrors.l2 := 0.U.asTypeOf(reriErrors.l2)
     }
   }
 

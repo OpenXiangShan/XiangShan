@@ -204,17 +204,14 @@ trait HasXSTile { this: BaseXSSoc =>
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))
   val plicIntNode = IntSourceNode(IntSourcePortSimple(1, 2, 1))
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, 1, (new NonmaskableInterruptIO).elements.size))
-  val beuIntNode = IntSinkNode(IntSinkPortSimple(1, 1))
   core_with_l2.clintIntNode.map(_ := clintIntNode.get) //from soc
   core_with_l2.debugIntNode := debugIntNode
   core_with_l2.plicIntNode :*= plicIntNode
   core_with_l2.nmiIntNode := nmiIntNode
-  beuIntNode := core_with_l2.beuIntNode
   val clint = InModuleBody(clintIntNode.map(_.makeIOs()))
   val debug = InModuleBody(debugIntNode.makeIOs())
   val plic = InModuleBody(plicIntNode.makeIOs())
   val nmi = InModuleBody(nmiIntNode.makeIOs())
-  val beu = InModuleBody(beuIntNode.makeIOs())
 
   // reset nodes
   val core_rst_node = BundleBridgeSource(() => Reset())
