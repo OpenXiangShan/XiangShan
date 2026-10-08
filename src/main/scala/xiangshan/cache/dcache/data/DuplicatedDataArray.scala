@@ -162,7 +162,8 @@ class DuplicatedDataArray(implicit p: Parameters) extends AbstractDataArray {
           data
         }
       }.toSeq)
-      io.errors(j).bits.report_to_beu := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
+      io.errors(j).bits.ce := false.B
+      io.errors(j).bits.uec := RegNext(io.read(j).fire) && Cat(row_error.flatten).orR
       io.errors(j).bits.paddr := RegEnable(io.read(j).bits.addr, io.read(j).fire)
     }
 

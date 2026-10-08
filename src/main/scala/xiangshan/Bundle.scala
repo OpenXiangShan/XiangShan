@@ -742,13 +742,15 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   })
   val paddr = Output(UInt(PAddrBits.W))
 
-  // report error and paddr to beu
-  // bus error unit will receive error info iff ecc_error.valid
-  val report_to_beu = Output(Bool())
+  // ECC classification. CE and UEC are mutually exclusive for one event.
+  val ce = Output(Bool())
+  val uec = Output(Bool())
+
+  def report_to_beu: Bool = uec
 
   def toL1BusErrorUnitInfo(valid: Bool): L1BusErrorUnitInfo = {
     val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := valid && report_to_beu
+    beu_info.ecc_error.valid := valid && uec
     beu_info.ecc_error.bits := paddr
     beu_info
   }
