@@ -19,6 +19,22 @@ software-only fault smoke在注入fault writeback后还会调用既有`exception
 `exception_event_q`中的fault recovery event。该调用只复用`handle_fault_event()`的队列消费职责，不重复
 `mark_target_fault()`，避免测试结束时把合法已提交的fault event遗留在runtime drain检查中。
 
+## 0.1 STA/STD 双真实写回异常屏障（2026-09-22）
+
+普通 scalar store 的 STA/STD fault 不再在单个 target fault 到达时立即进入 fault ROB 生命周期。
+writeback handler 先把 target writeback 和异常证据保存到 pending record；只有同一 UID、同一动态实例的
+`sta_writeback && std_writeback` 同时成立后，`finalize_pending_store_faults()` 才设置
+`sta_fault/std_fault/fault/exception_pending`。随后 fault candidate、ROB commit、terminal 和 redirect
+按原有顺序继续。
+
+real dispatch 中，DUT fault sideband redirect 仍由既有 recovery queue 单飞仲裁；它不能绕过 fault token，
+但不是 STA/STD 双写回屏障的状态真源。
+
+SQ deq 释放 store owner 时，普通未 fire STD 仍删除且不得在无 `active_sq_mapped` 时重新路由。唯一例外是
+当前动态实例已有 pending store fault、STA 已 real-WB、STD 尚未 real-WB 的 barrier STD：map 删除后保留已有
+queue item 和历史 SQ key，scheduler/adapter 以 ROB、issue epoch、flush epoch 和该 key 完成一次 STD 发射/WB。
+STD WB 到达后，该例外立即失效，fault 才能 finalize。
+
 ## 术语与抽象功能说明
 
 | 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
@@ -30,6 +46,7 @@ software-only fault smoke在注入fault writeback后还会调用既有`exception
 | `terminal skip` | redirect 扫描遇到已 terminal 的 fault 时不重新建立动态实例的既有规则。 | `apply_redirect_flush_range()`。 | UID5 被扫描跳过。 |
 | `re-admission` | younger 旧动态实例被 cancel 后，既有 admission 路径重新构造同一 UID。 | `prepare_uid_for_redirect_reissue()`。 | UID6 是第一个重新 admission UID。 |
 | `active redirect` | 已取得 cancel record、正在 drive/anchor/apply 的唯一 recovery owner。 | `data.active_redirect`。 | fault token 不能与其并发申请新 record。 |
+| `barrier STD` | pending store fault 已建立后、SQ deq 先于 STD WB 时必须继续完成的一项 STD。 | `std_issue_q`、保存的 SQ key。 | UID31 的 STD 在 map 删除后仍须 WB。 |
 
 抽象功能描述：fault 状态、RM compare 和 fault terminal 仍由原有路径负责；本 flow 仅在 real dispatch topology 中把已 terminal 的 fault head 转为一次 `level=1` redirect。既有 redirect owner 负责 driver、monitor anchor、LSQ cancel 和 younger UID re-admission，fault UID 只作为 terminal skip，不会再次发射。
 
@@ -52,36 +69,39 @@ flowchart TD
     L --> M[event_has_fault]
     M --> N[mark_target_fault]
     N --> O[conditional_set_target_status_field target_writeback]
-    N --> P[conditional_set_target_status_field target_fault]
+    N --> P[capture_pending_store_fault or target_fault]
     O --> Q[target_dispatched / target_replay_seq_match / set_status_field]
     P --> Q
-    N --> R[status.fault/exception_pending set]
-    R --> S[push_feedback_event]
-    S --> T[normalize_feedback_event again]
-    T --> U[exception_event_q]
-    U --> V[process_pending_events]
-    V --> W{oldest redirect exists?}
-    W -->|yes| Y[redirect-first: request_redirect_flush / requeue or drop]
-    W -->|no| Z[handle_fault_event]
-    Z --> AA[resolve_uid_for_event]
-    Z --> AB[get_event_issue_epoch/get_event_replay_seq]
-    AB --> AC[consume only, no mark_target_fault]
-    R --> AD[select_fault_head_candidate]
-    AD --> AE[fault_uid_is_store_exception]
-    AE --> AF[lsqcommit driver sends sideband]
-    AF --> AG[mark_fault_rob_commit_uid latches type and token]
-    AG --> AH[wait LQ or SQ deq]
-    AH --> AI[consume_fault_retire]
-    AI --> AJ[sync_modeled_head_after_fault_terminal]
-    AJ --> AK{real dispatch topology?}
-    AK -->|no| AL[finish fault terminal and rebase]
-    AK -->|yes| AM{pending or active redirect?}
-    AM -->|yes| AN[defer or record covered redirect]
-    AM -->|no| AO[request_fault_head_redirect]
-    AO --> AP[request_redirect_flush and push_redirect_drive]
-    AP --> AQ[redirect driver plus monitor anchor]
-    AQ --> AR[apply_redirect_flush_range]
-    AR --> AS[skip terminal fault and re-admit UID6+]
+    P --> R{scalar store dual real-WB complete?}
+    R -->|yes| S[finalize_pending_store_fault]
+    R -->|no| T[keep pending fault and barrier STD]
+    S --> U[status.fault/exception_pending set]
+    U --> V[push_feedback_event]
+    V --> W[normalize_feedback_event again]
+    W --> X[exception_event_q]
+    X --> Y[process_pending_events]
+    Y --> Z{oldest redirect exists?}
+    Z -->|yes| AA[redirect-first: request_redirect_flush / requeue or drop]
+    Z -->|no| AB[handle_fault_event]
+    AB --> AC[resolve_uid_for_event]
+    AB --> AD[get_event_issue_epoch/get_event_replay_seq]
+    AD --> AE[consume only, no mark_target_fault]
+    U --> AF[select_fault_head_candidate]
+    AF --> AG[fault_uid_is_store_exception]
+    AG --> AH[lsqcommit driver sends sideband]
+    AH --> AI[mark_fault_rob_commit_uid latches type and token]
+    AI --> AJ[wait LQ or SQ deq]
+    AJ --> AK[consume_fault_retire]
+    AK --> AL[sync_modeled_head_after_fault_terminal]
+    AL --> AM{real dispatch topology?}
+    AM -->|no| AN[finish fault terminal and rebase]
+    AM -->|yes| AO{pending or active redirect?}
+    AO -->|yes| AP[defer or record covered redirect]
+    AO -->|no| AQ[request_fault_head_redirect]
+    AQ --> AR[request_redirect_flush and push_redirect_drive]
+    AR --> AS[redirect driver plus monitor anchor]
+    AS --> AT[apply_redirect_flush_range]
+    AT --> AU[skip terminal fault and re-admit UID6+]
 ```
 
 ## 1.1 函数调用 Flow 图整体文字伪代码
@@ -102,11 +122,12 @@ Fault / Exception 主流程：
 
 3. fault 状态落表：
    handle_real_writeback_event 判断 event_has_fault；
-   调用 mark_target_fault：先设置 target writeback，再设置 target fault，并置 status.fault/exception_pending；
-   fault 状态在这里已经完成，后续 recovery handler 不重复写 fault。
+   scalar store 的 mark_target_fault 先设置 target writeback 并保存 pending fault，不能立即设置 UID fault；
+   同一动态实例的 STA/STD real WB 都完成后，finalize_pending_store_faults 设置 status.fault/exception_pending；
+   pending 期间若 SQ deq 已到，唯一 barrier STD 保留并继续发射，后续 recovery handler 不重复写 fault。
 
 4. recovery queue 消费：
-   mark_target_fault 后调用 push_feedback_event；
+   fault event 在目标证据记录后调用 push_feedback_event；
    push_feedback_event 再次 normalize，成功后写入 exception_event_q；
    process_pending_events 出队后如果没有 redirect 抢占，调用 handle_fault_event；
    handle_fault_event 只解析 uid/issue_epoch/replay_seq 并消费事件，不重新调用 mark_target_fault。
@@ -125,7 +146,6 @@ Fault / Exception 主流程：
    无冲突时 request_fault_head_redirect 创建 `level=1`、`flush_itself=1`、`is_vls_exception=0` 的 payload，并交给既有 drive FIFO；
    monitor anchor 后 apply_redirect_flush_range 跳过 terminal fault，cancel/reissue UID6 及更年轻的 active 实例。
 ```
-
 
 ## 2. `convert_raw_int_wb()` fault event 生成
 

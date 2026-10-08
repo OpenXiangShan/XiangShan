@@ -73,13 +73,17 @@ task memblock_redirect_dispatch_base_sequence::body();
             idle_count = 0;
         end else begin
             drive_idle_once($sformatf("redirect_idle_tr_%0d", idle_count));
-            idle_count++;
-            if (drive_timeout != 0 && idle_count >= drive_timeout &&
-                data.active_redirect.valid && !data.redirect_drive_done_for(data.active_redirect)) begin
-                `uvm_fatal(get_type_name(),
-                           $sformatf("timeout waiting redirect payload rob=%0d/%0d",
-                                     data.active_redirect.rob_key.flag,
-                                     data.active_redirect.rob_key.value))
+            if (data.active_redirect.valid && !data.redirect_drive_done_for(data.active_redirect)) begin
+                idle_count++;            
+                if (drive_timeout != 0 && idle_count >= drive_timeout ) begin
+                    `uvm_fatal(get_type_name(),
+                            $sformatf("timeout waiting redirect payload rob=%0d/%0d",
+                                        data.active_redirect.rob_key.flag,
+                                        data.active_redirect.rob_key.value))
+                end
+            end
+            else begin
+                idle_count = 0;
             end
         end
     end

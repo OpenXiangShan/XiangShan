@@ -260,6 +260,9 @@ class lsq_commit_handler extends uvm_object;
             !status.load_fault && !status.sta_fault && !status.std_fault) begin
             return 1'b0;
         end
+        if (data.is_scalar_store_uid(uid) && !data.store_real_writebacks_done(uid)) begin
+            return 1'b0;
+        end
         return status.fault ||
                status.exception_pending ||
                status.load_fault ||
@@ -514,6 +517,18 @@ class lsq_commit_handler extends uvm_object;
         return memblock_op_behavior_util::is_scalar_rob_store_commit(behavior);
     endfunction:fault_uid_is_store_exception
 
+    function bit head_pending_ptr_blocked(input memblock_uid_t uid);
+        status_transaction status;
+
+        ensure_handles();
+        status = data.get_status(uid);
+        // 中文注释：StoreQueue 会依据 pendingPtr 推进 committed/deq，因此所有 scalar
+        // store 在 STA/STD 两个 real-WB 完成前都不能发布当前 ROB head；不能等 STA fault
+        // raw 到达后才开始门控，否则前一拍已发送的 level pointer 仍可能触发 SQ deq。
+        return data.is_scalar_store_uid(uid) &&
+               !data.store_real_writebacks_done(uid);
+    endfunction:head_pending_ptr_blocked
+
     function void clear_lsqcommit_xaction(input lsqcommit_agent_agent_xaction tr);
         if (tr == null) begin
             `uvm_fatal("LSQ_COMMIT", "clear_lsqcommit_xaction got null transaction")
@@ -522,12 +537,33 @@ class lsq_commit_handler extends uvm_object;
         // 中文注释：modeled head 有效时无条件发布其完整 key；active-map 命中只由
         // build_lsqcommit_xaction() 用于 pendingst/pendingMMIOld，不能反向决定 pendingPtr。
         // modeled head 无效时才允许发布 final committed watermark。
-        if (modeled_head_valid) begin
+        if (modeled_head_valid && !head_pending_ptr_blocked(commit_cursor_uid)) begin
             tr.io_ooo_to_mem_lsqio_pendingPtr_flag  = modeled_rob_deq_ptr.flag;
             tr.io_ooo_to_mem_lsqio_pendingPtr_value = modeled_rob_deq_ptr.value;
         end else if (committed_watermark_publishable()) begin
             tr.io_ooo_to_mem_lsqio_pendingPtr_flag  = committed_rob_watermark.flag;
             tr.io_ooo_to_mem_lsqio_pendingPtr_value = committed_rob_watermark.value;
+        end else if (modeled_head_valid) begin
+            // 中文注释：没有已提交 watermark 的初始 pending fault 使用当前 head 的
+            // 前一 ROB key，确保 StoreQueue 的 isNotAfter 比较不会把 fault SQ entry
+            // 当成已提交项；该 pointer 仅为保持 level sideband 合法，不表示 commit。
+            memblock_rob_key_t previous_head;
+            previous_head = modeled_rob_deq_ptr;
+            if (previous_head.value == 0) begin
+                previous_head.value = MEMBLOCK_ROB_SIZE - 1;
+                previous_head.flag = ~previous_head.flag;
+            end else begin
+                previous_head.value--;
+            end
+            tr.io_ooo_to_mem_lsqio_pendingPtr_flag  = previous_head.flag;
+            tr.io_ooo_to_mem_lsqio_pendingPtr_value = previous_head.value;
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("hold pendingPtr before scalar fault dual real-WB uid=%0d head=%0d/%0d hold=%0d/%0d sta_wb=%0d std_wb=%0d",
+                                commit_cursor_uid,
+                                modeled_rob_deq_ptr.flag, modeled_rob_deq_ptr.value,
+                                previous_head.flag, previous_head.value,
+                                data.get_status(commit_cursor_uid).sta_writeback,
+                                data.get_status(commit_cursor_uid).std_writeback), UVM_LOW)
         end else begin
             tr.io_ooo_to_mem_lsqio_pendingPtr_flag  = 1'b0;
             tr.io_ooo_to_mem_lsqio_pendingPtr_value = '0;
@@ -570,6 +606,7 @@ class lsq_commit_handler extends uvm_object;
         // Fault head 的 pendingPtr 仍需保持，但 fault token 不是 normal commit，
         // 不得把该指令解释成 pending store/MMIO load。
         if (has_head && !has_fault_head && !fault_head_waiting &&
+            !head_pending_ptr_blocked(head_uid) &&
             !is_control_op_class(data.get_main_transaction(head_uid).op_class)) begin
             memblock_op_behavior_t head_behavior;
 
@@ -745,6 +782,13 @@ class lsq_commit_handler extends uvm_object;
             data.get_status(uid).get_rob_key() != modeled_rob_deq_ptr) begin
             `uvm_fatal("LSQ_COMMIT", "fault token uid does not match modeled ROB head")
         end
+        if (data.is_scalar_store_uid(uid) && !data.store_real_writebacks_done(uid)) begin
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("defer fault commit uid=%0d until STA/STD real writeback sta=%0d std=%0d",
+                                uid, data.get_status(uid).sta_writeback,
+                                data.get_status(uid).std_writeback), UVM_LOW)
+            return 1'b0;
+        end
         fault_is_store_exception = fault_uid_is_store_exception(uid);
         status = data.get_status(uid);
         status.rob_commit = 1'b1;
@@ -776,6 +820,13 @@ class lsq_commit_handler extends uvm_object;
             return 1'b0;
         end
         status = data.get_status(fault_head_uid);
+        if (data.is_scalar_store_uid(fault_head_uid) &&
+            !data.store_real_writebacks_done(fault_head_uid)) begin
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("defer fault terminal/redirect uid=%0d until STA/STD real writeback sta=%0d std=%0d",
+                                fault_head_uid, status.sta_writeback, status.std_writeback), UVM_LOW)
+            return 1'b0;
+        end
         if (status.dynamic_epoch != fault_head_dynamic_epoch ||
             status.flushed || status.issue_killed ||
             !status.rob_commit) begin

@@ -121,6 +121,9 @@ class writeback_status_handler extends uvm_object;
                 `uvm_info("WB_STATUS", $sformatf("drop stale pass uid=%0d target=%0d", uid, wb_event.target), UVM_LOW)
                 return 1'b0;
             end
+            // 中文注释：pending STA/STD fault 的 target normal WB 只完成对应 real-WB
+            // 记录；UID 级异常仍由 batch finalize 在双 real-WB 屏障后统一提交。
+            void'(data.finalize_pending_store_fault(uid));
             `uvm_info("WB_STATUS",
                       $sformatf("normal pass uid=%0d target=%0d source=%0d port=%0d rob=%0d/%0d lq_valid=%0d lq=%0d/%0d sq_valid=%0d sq=%0d/%0d",
                                 uid,

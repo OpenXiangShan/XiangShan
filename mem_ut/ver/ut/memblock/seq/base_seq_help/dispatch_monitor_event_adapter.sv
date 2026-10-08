@@ -239,7 +239,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
             MEMBLOCK_ISSUE_TARGET_STA,
             MEMBLOCK_ISSUE_TARGET_STD: begin
                 if (!status.active_sq_mapped) begin
-                    if (strict_candidate) `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE uid=%0d has no active SQ mapping", uid))
+                    if (strict_candidate) begin
+                        `uvm_fatal("INT_WB_ATTACH",
+                                   $sformatf("STORE uid=%0d has no active SQ mapping", uid))
+                    end
                     return 1'b0;
                 end
                 sq_key.flag = status.sqIdx_flag;
@@ -247,8 +250,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 if (!data.is_valid_sq_key(sq_key)) begin
                     `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE uid=%0d has incomplete SQ key", uid))
                 end
-                if (!data.lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
-                    `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE SQ owner mismatch uid=%0d", uid))
+                if (status.active_sq_mapped) begin
+                    if (!data.lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
+                        `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE SQ owner mismatch uid=%0d", uid))
+                    end
                 end
                 wb_event.sq_key = sq_key;
                 wb_event.has_sq = 1'b1;

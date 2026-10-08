@@ -36,6 +36,23 @@ class common_data_transaction extends uvm_object;
         longint unsigned    complete_sample_seq;
     } memblock_l2tlb_ppn_history_record_t;
 
+    // 中文注释：普通 scalar store 的 target fault 在 STA/STD 两个真实 writeback
+    // 都到达前只保存在这里；它不是 fault terminal，也不拥有 ROB/LSQ 生命周期。
+    typedef struct {
+        bit                 valid;
+        memblock_uid_t      uid;
+        int unsigned        dynamic_epoch;
+        int unsigned        sta_issue_epoch;
+        int unsigned        std_issue_epoch;
+        int unsigned        sta_replay_seq;
+        int unsigned        std_replay_seq;
+        bit                 sta_fault_seen;
+        bit                 std_fault_seen;
+        bit [23:0]          sta_exception_vec;
+        bit [23:0]          std_exception_vec;
+        longint unsigned    cycle;
+    } memblock_pending_store_fault_t;
+
     static common_data_transaction m_inst;
 
     int unsigned   main_trans_num;
@@ -108,6 +125,9 @@ class common_data_transaction extends uvm_object;
     memblock_issue_q_item_t  load_issue_q[$];
     memblock_issue_q_item_t  sta_issue_q[$];
     memblock_issue_q_item_t  std_issue_q[$];
+    // 中文注释：以 UID 为索引的有限 pending fault 表；动态实例失效、terminal 或 reset
+    // 时清除，正式 fault 状态只能由 finalize_pending_store_fault() 写入。
+    memblock_pending_store_fault_t pending_store_fault_by_uid[memblock_uid_t];
     memblock_wb_event_t      exception_event_q[$];
     memblock_redirect_payload_t pending_redirect_drive_q[$];
     memblock_ptw_wait_replay_t  ptw_wait_replay_q[$];
@@ -232,6 +252,7 @@ class common_data_transaction extends uvm_object;
         redirect_deleted_lq_owner_by_key.delete();
         redirect_deleted_sq_owner_by_key.delete();
         std_late_raw_tombstone_by_rob.delete();
+        pending_store_fault_by_uid.delete();
         redirect_deleted_owner_window_active = 1'b0;
         redirect_deleted_owner_epoch = 0;
         redirect_deleted_owner_record_id = 0;
@@ -346,6 +367,7 @@ class common_data_transaction extends uvm_object;
         redirect_deleted_lq_owner_by_key.delete();
         redirect_deleted_sq_owner_by_key.delete();
         std_late_raw_tombstone_by_rob.delete();
+        pending_store_fault_by_uid.delete();
         redirect_deleted_owner_window_active = 1'b0;
         redirect_deleted_owner_epoch = 0;
         redirect_deleted_owner_record_id = 0;
@@ -1936,6 +1958,150 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:target_replay_seq_match
 
+    function bit is_scalar_store_uid(input memblock_uid_t uid);
+        main_control_transaction main_tr;
+
+        main_tr = get_main_transaction(uid);
+        return main_tr.fuType == MEMBLOCK_FUTYPE_STU ||
+               main_tr.fuType == MEMBLOCK_FUTYPE_MOU;
+    endfunction:is_scalar_store_uid
+
+    function bit store_real_writebacks_done(input memblock_uid_t uid);
+        status_transaction status;
+
+        status = get_status(uid);
+        if (is_scalar_store_uid(uid)) begin
+            return status.sta_writeback && status.std_writeback;
+        end
+        if (get_main_transaction(uid).fuType == MEMBLOCK_FUTYPE_LDU) begin
+            return status.load_writeback;
+        end
+        `uvm_fatal("COMMON_DATA", $sformatf("store_real_writebacks_done unsupported fuType uid=%0d fuType=0x%0h",
+                                             uid, get_main_transaction(uid).fuType))
+        return 1'b0;
+    endfunction:store_real_writebacks_done
+
+    function bit pending_store_fault_matches(input memblock_uid_t uid);
+        status_transaction status;
+
+        if (!pending_store_fault_by_uid.exists(uid) ||
+            !pending_store_fault_by_uid[uid].valid) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        return status.active &&
+               is_scalar_store_uid(uid) &&
+               pending_store_fault_by_uid[uid].uid == uid &&
+               pending_store_fault_by_uid[uid].dynamic_epoch == status.dynamic_epoch;
+    endfunction:pending_store_fault_matches
+
+    function void clear_pending_store_fault(input memblock_uid_t uid);
+        if (pending_store_fault_by_uid.exists(uid)) begin
+            pending_store_fault_by_uid.delete(uid);
+        end
+    endfunction:clear_pending_store_fault
+
+    function bit capture_pending_store_fault(input memblock_uid_t uid,
+                                             input memblock_issue_target_e target,
+                                             input int unsigned issue_epoch,
+                                             input int unsigned replay_seq,
+                                             input bit [23:0] exception_vec,
+                                             input longint unsigned cycle);
+        status_transaction              status;
+        memblock_pending_store_fault_t  pending;
+
+        status = get_status(uid);
+        if (!status.active || !is_scalar_store_uid(uid) ||
+            (target != MEMBLOCK_ISSUE_TARGET_STA && target != MEMBLOCK_ISSUE_TARGET_STD)) begin
+            return 1'b0;
+        end
+        if (!pending_store_fault_matches(uid)) begin
+            pending = '{default:'0};
+            pending.valid = 1'b1;
+            pending.uid = uid;
+            pending.dynamic_epoch = status.dynamic_epoch;
+            pending_store_fault_by_uid[uid] = pending;
+        end
+        pending = pending_store_fault_by_uid[uid];
+        if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
+            if (pending.sta_fault_seen &&
+                (pending.sta_issue_epoch != issue_epoch || pending.sta_replay_seq != replay_seq ||
+                 pending.sta_exception_vec != exception_vec)) begin
+                `uvm_fatal("STORE_FAULT_BARRIER", $sformatf("STA pending fault identity mismatch uid=%0d", uid))
+            end
+            pending.sta_fault_seen = 1'b1;
+            pending.sta_issue_epoch = issue_epoch;
+            pending.sta_replay_seq = replay_seq;
+            pending.sta_exception_vec = exception_vec;
+        end else begin
+            if (pending.std_fault_seen &&
+                (pending.std_issue_epoch != issue_epoch || pending.std_replay_seq != replay_seq ||
+                 pending.std_exception_vec != exception_vec)) begin
+                `uvm_fatal("STORE_FAULT_BARRIER", $sformatf("STD pending fault identity mismatch uid=%0d", uid))
+            end
+            pending.std_fault_seen = 1'b1;
+            pending.std_issue_epoch = issue_epoch;
+            pending.std_replay_seq = replay_seq;
+            pending.std_exception_vec = exception_vec;
+        end
+        pending.cycle = cycle;
+        pending_store_fault_by_uid[uid] = pending;
+        return 1'b1;
+    endfunction:capture_pending_store_fault
+
+    function bit finalize_pending_store_fault(input memblock_uid_t uid);
+        status_transaction              status;
+        memblock_pending_store_fault_t  pending;
+        bit [23:0]                      exception_vec;
+
+        if (!pending_store_fault_matches(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        if (!status.sta_writeback || !status.std_writeback) begin
+            return 1'b0;
+        end
+        pending = pending_store_fault_by_uid[uid];
+        exception_vec = pending.sta_fault_seen ? pending.sta_exception_vec : pending.std_exception_vec;
+        status.sta_fault = status.sta_fault || pending.sta_fault_seen;
+        status.std_fault = status.std_fault || pending.std_fault_seen;
+        status.fault = 1'b1;
+        status.exception_pending = 1'b1;
+        status.exception_vec = exception_vec;
+        status.pass = 1'b0;
+        status.success = 1'b0;
+        status.terminal_done = 1'b0;
+        // 中文注释：双 real-WB 屏障通过后才进入 fault 生命周期；redirect 前仍保留
+        // 尚未 fire 的 STD，避免把异常落表误当成 DUT redirect flush 边界。
+        quiesce_fault_uid_pending_work(uid, 1'b0);
+        release_ptw_wait_replay(uid);
+        status.clear_sta_late_fault_tombstones();
+        clear_pending_store_fault(uid);
+        status.last_event_cycle = pending.cycle;
+        `uvm_info("STORE_FAULT_BARRIER",
+                  $sformatf("finalize store fault uid=%0d sta_wb=%0d std_wb=%0d sta_fault=%0d std_fault=%0d",
+                            uid, status.sta_writeback, status.std_writeback,
+                            status.sta_fault, status.std_fault), UVM_LOW)
+        return 1'b1;
+    endfunction:finalize_pending_store_fault
+
+    function void finalize_pending_store_faults();
+        memblock_uid_t uid;
+        memblock_uid_t pending_uids[$];
+
+        foreach (pending_store_fault_by_uid[uid]) begin
+            pending_uids.push_back(uid);
+        end
+        foreach (pending_uids[idx]) begin
+            uid = pending_uids[idx];
+            if (!pending_store_fault_matches(uid)) begin
+                clear_pending_store_fault(uid);
+                continue;
+            end
+            void'(finalize_pending_store_fault(uid));
+        end
+    endfunction:finalize_pending_store_faults
+
     function bit required_targets_done(input memblock_uid_t uid);
         status_transaction       status;
         main_control_transaction main_tr;
@@ -1982,7 +2148,8 @@ class common_data_transaction extends uvm_object;
         status_transaction status;
 
         status = get_status(uid);
-        if (status.fault || status.exception_pending ||
+        if (((status.fault || status.exception_pending) &&
+             !(target == MEMBLOCK_ISSUE_TARGET_STD && pending_store_fault_matches(uid))) ||
             status.redirect_pending ||
             target_entry_done(status, target)) begin
             return 1'b0;
@@ -1998,7 +2165,8 @@ class common_data_transaction extends uvm_object;
         end
         status = get_status(uid);
         status.last_event_cycle = cycle;
-        if (required_targets_done(uid) && !status.fault &&
+        if (required_targets_done(uid) && store_real_writebacks_done(uid) &&
+            !pending_store_fault_matches(uid) && !status.fault &&
             !status.exception_pending && !status.replay_pending && !status.redirect_pending) begin
             status.writeback = 1'b1;
             status.pass      = 1'b1;
@@ -2242,16 +2410,23 @@ class common_data_transaction extends uvm_object;
         status.sta_writeback = 1'b1;
         status.sta_issue_feedback_success = 1'b0;
         status.sta_pass = 1'b0;
-        status.sta_fault = 1'b1;
+        // target-level late fault 只作为 pending record 的证据，UID 级 fault 由 finalize
+        // helper 在 STA/STD 双 real-WB 屏障满足后统一设置。
+        status.sta_fault = 1'b0;
         status.writeback = 1'b0;
         status.pass = 1'b0;
         status.success = 1'b0;
         status.terminal_done = 1'b0;
-        status.fault = 1'b1;
-        status.exception_pending = 1'b1;
-        status.exception_vec = exception_vec;
+        status.fault = 1'b0;
+        status.exception_pending = 1'b0;
+        status.exception_vec = '0;
         status.clear_sta_late_fault_tombstones();
         status.last_event_cycle = cycle;
+        if (!capture_pending_store_fault(uid, MEMBLOCK_ISSUE_TARGET_STA,
+                                         issue_epoch, replay_seq, exception_vec, cycle)) begin
+            return 1'b0;
+        end
+        void'(finalize_pending_store_fault(uid));
         `uvm_info("STA_LATE_TOMBSTONE",
                   $sformatf("consume late fault uid=%0d issue_epoch=%0d replay_seq=%0d exception_vec=0x%0h",
                             uid, issue_epoch, replay_seq, exception_vec),
@@ -2283,18 +2458,27 @@ class common_data_transaction extends uvm_object;
         if (!conditional_set_target_status_field(uid, target_writeback_field(target), 1'b1, target, issue_epoch, replay_seq)) begin
             return 1'b0;
         end
+        status = get_status(uid);
+        if (is_scalar_store_uid(uid) &&
+            (target == MEMBLOCK_ISSUE_TARGET_STA || target == MEMBLOCK_ISSUE_TARGET_STD)) begin
+            if (!capture_pending_store_fault(uid, target, issue_epoch, replay_seq,
+                                             exception_vec, cycle)) begin
+                return 1'b0;
+            end
+            // 中文注释：target fault/writeback 已记录，但 UID 级 fault 必须等两个
+            // real-WB bit 都成立后再 finalize，避免 STA-only 或 STD-only 异常提前进入 commit。
+            void'(finalize_pending_store_fault(uid));
+            return 1'b1;
+        end
         if (!conditional_set_target_status_field(uid, target_fault_field(target), 1'b1, target, issue_epoch, replay_seq)) begin
             return 1'b0;
         end
-        status = get_status(uid);
         status.fault             = 1'b1;
         status.exception_pending = 1'b1;
         status.exception_vec     = exception_vec;
         status.pass              = 1'b0;
         status.success           = 1'b0;
         status.terminal_done     = 1'b0;
-        // STA 与 STD 在真实 V2 后端独立 issue。STA fault 到达还不是 STD IQ
-        // flush 边界：只撤销 LOAD/STA/replay，保留未 fire STD 到 fault redirect 生效。
         quiesce_fault_uid_pending_work(uid, 1'b0);
         if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
             release_ptw_wait_replay(uid);
@@ -2540,6 +2724,36 @@ class common_data_transaction extends uvm_object;
         status.clear_target_instance_flush_epochs();
         status.clear_lsq_reservation_visibility();
     endfunction:clear_uid_dispatch_result
+
+    function void reset_uid_after_older_redirect(input memblock_uid_t uid);
+        status_transaction status;
+
+        status = get_status(uid);
+        if (status.rob_commit || status.terminal_done) begin
+            `uvm_fatal("REDIRECT_REISSUE",
+                       $sformatf("reset pending-fault uid=%0d with rob_commit=%0d terminal_done=%0d",
+                                 uid, status.rob_commit, status.terminal_done))
+        end
+        if (pending_store_fault_by_uid.exists(uid)) begin
+            pending_store_fault_by_uid.delete(uid);
+        end
+        clear_uid_dispatch_result(uid);
+        status.fault           = 1'b0;
+        status.exception_pending = 1'b0;
+        status.sta_fault       = 1'b0;
+        status.std_fault       = 1'b0;
+        status.exception_vec   = '0;
+        status.redirect_pending = 1'b1;
+        status.flushed          = 1'b1;
+        status.dynamic_epoch++;
+        status.active           = 1'b0;
+        status.success         = 1'b0;
+        status.terminal_done   = 1'b0;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        `uvm_info("REDIRECT_REISSUE",
+                  $sformatf("reset older-redirect pending-fault uid=%0d new_dynamic_epoch=%0d; next admission remains uid=%0d",
+                            uid, status.dynamic_epoch, uid), UVM_LOW)
+    endfunction:reset_uid_after_older_redirect
 
     function int find_cancel_record_index(input int unsigned redirect_epoch);
         foreach (cancel_record_q[idx]) begin
@@ -3503,7 +3717,23 @@ class common_data_transaction extends uvm_object;
         capture_redirect_deleted_owner(uid, memblock_sync_pkg::dispatch_flush_epoch);
         note_lsq_cancel_for_uid(uid, memblock_sync_pkg::dispatch_flush_epoch);
         cancel_waiting_uid_tlb_record_for_uid(uid, "redirect_flush");
-        // redirect命中的旧动态实例不再等待writeback/commit；清queue/map后等待同uid重新admission。
+        // redirect命中的旧动态实例不再等待writeback/commit；pending fault 未 commit 时
+        // 必须完整清理 fault 证据与所有 target 状态，之后从同一 UID 重新 admission。
+        if ((status.fault || status.exception_pending || status.sta_fault || status.std_fault) &&
+            !status.rob_commit) begin
+            if (status.active) begin
+                // apply_redirect_flush_range() 已经冻结旧 owner 并登记 cancel；这里
+                // 只释放 live map，避免对同一 generation 重复 capture owner。
+                release_uid_lq_mapping(uid);
+                release_uid_sq_mapping(uid);
+                uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
+                status.active = 1'b0;
+            end else begin
+                remove_uid_from_issue_queues(uid);
+            end
+            reset_uid_after_older_redirect(uid);
+            return;
+        end
         if (status.active) begin
             retire_active_uid(uid);
         end else begin
@@ -4360,6 +4590,20 @@ class common_data_transaction extends uvm_object;
         if (!uid_by_sq.exists(sq_map_key) || uid_by_sq[sq_map_key] != uid) begin
             `uvm_fatal("COMMON_DATA", $sformatf("release_uid_sq_mapping uid=%0d has inconsistent sq mapping", uid))
         end
+        if (is_scalar_store_uid(uid) && !status.std_writeback) begin
+            `uvm_info("STORE_FAULT_BARRIER",
+                      $sformatf("SQ deq before STD real-WB uid=%0d epoch=%0d sta_dispatch/wb=%0d/%0d std_dispatch/queued/wb/pass=%0d/%0d/%0d/%0d sta_fault=%0d pending_fault=%0d",
+                                uid, status.dynamic_epoch,
+                                status.sta_dispatched, status.sta_writeback,
+                                status.std_dispatched, status.queued_std,
+                                status.std_writeback, status.std_pass,
+                                status.sta_fault, pending_store_fault_matches(uid)),
+                      UVM_LOW)
+        end
+        // 中文注释：SQ deq 后统一删除未 fire 的 STD item，避免无 owner 的 stale item
+        // 被重新路由或发射；若 pending fault 仍未完成双 WB，保留诊断并等待上游时序修正。
+        delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_STD, uid, 0, 1'b0);
+        status.queued_std = 1'b0;
         uid_by_sq.delete(sq_map_key);
         status.active_sq_mapped = 1'b0;
         status.lsq_deq = !status.active_lq_mapped && !status.active_sq_mapped;
@@ -4402,6 +4646,9 @@ class common_data_transaction extends uvm_object;
         end
         if (status.fault || status.exception_pending ||
             status.load_fault || status.sta_fault || status.std_fault) begin
+            if (is_scalar_store_uid(uid) && !store_real_writebacks_done(uid)) begin
+                return;
+            end
             if (fault_redirect_resource_blocks_retire(uid)) begin
                 return;
             end
@@ -7033,6 +7280,13 @@ class common_data_transaction extends uvm_object;
                                            input memblock_uid_t uid,
                                            input int unsigned replay_seq,
                                            input bit match_replay_seq = 1'b1);
+        if (uid == 31 && target == MEMBLOCK_ISSUE_TARGET_STD) begin
+            `uvm_info("UID31_STD_TRACE",
+                      $sformatf("delete STD replay=%0d match=%0d queue_before=%0d queued/dispatched/wb/active_sq=%0d/%0d/%0d/%0d",
+                                replay_seq, match_replay_seq, std_issue_q.size(),
+                                status_by_uid[uid].queued_std, status_by_uid[uid].std_dispatched,
+                                status_by_uid[uid].std_writeback, status_by_uid[uid].active_sq_mapped), UVM_LOW)
+        end
         case (target)
             MEMBLOCK_ISSUE_TARGET_LOAD: begin
                 for (int idx = load_issue_q.size(); idx > 0; idx--) begin
@@ -7065,6 +7319,13 @@ class common_data_transaction extends uvm_object;
     endfunction:delete_issue_queue_entry
 
     function void remove_uid_from_issue_queues(input memblock_uid_t uid);
+        if (uid == 31) begin
+            `uvm_info("UID31_STD_TRACE",
+                      $sformatf("remove UID queues load/sta/std=%0d/%0d/%0d queued/dispatched/wb/active_sq=%0d/%0d/%0d/%0d",
+                                load_issue_q.size(), sta_issue_q.size(), std_issue_q.size(),
+                                status_by_uid[uid].queued_std, status_by_uid[uid].std_dispatched,
+                                status_by_uid[uid].std_writeback, status_by_uid[uid].active_sq_mapped), UVM_LOW)
+        end
         delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_LOAD, uid, 0, 1'b0);
         delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_STA, uid, 0, 1'b0);
         delete_issue_queue_entry(MEMBLOCK_ISSUE_TARGET_STD, uid, 0, 1'b0);

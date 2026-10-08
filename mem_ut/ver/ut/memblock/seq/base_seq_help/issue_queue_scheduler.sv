@@ -177,6 +177,12 @@ class issue_queue_scheduler extends uvm_object;
 
         ensure_data();
         status = data.get_status(uid);
+        // 中文注释：STA/STD 只有在 live SQ owner 存在时才能 route；SQ deq 后的
+        // 未 fire item 属于 stale 状态，不允许重新创建、重路由或发射。
+        if ((target == MEMBLOCK_ISSUE_TARGET_STA && !status.active_sq_mapped) ||
+            (target == MEMBLOCK_ISSUE_TARGET_STD && !status.active_sq_mapped)) begin
+            return;
+        end
         if (target_already_queued_or_done(status, target)) begin
             return;
         end
@@ -279,7 +285,7 @@ class issue_queue_scheduler extends uvm_object;
 
     function bit is_issue_item_state_eligible(input memblock_issue_q_item_t item);
         status_transaction status;
-
+        bit                eligible;
         ensure_data();
         if (item.target == MEMBLOCK_ISSUE_TARGET_NONE || !data.is_valid_uid(item.uid)) begin
             return 1'b0;
@@ -303,18 +309,29 @@ class issue_queue_scheduler extends uvm_object;
             return 1'b0;
         end
         case (item.target)
-            MEMBLOCK_ISSUE_TARGET_LOAD: return !status.load_dispatched && !status.writeback && !status.pass;
-            MEMBLOCK_ISSUE_TARGET_STA:  return !status.sta_dispatched;
-            MEMBLOCK_ISSUE_TARGET_STD:  return !status.std_dispatched &&
-                                               status.queued_std &&
-                                               !status.std_writeback &&
-                                               !status.std_fault &&
-                                               status.active_sq_mapped &&
-                                               item.has_sqIdx &&
-                                               item.sq_key.flag == status.sqIdx_flag &&
-                                               item.sq_key.value == status.sqIdx_value;
-            default: return 1'b0;
+            MEMBLOCK_ISSUE_TARGET_LOAD: eligible = !status.load_dispatched && !status.writeback && !status.pass;
+            MEMBLOCK_ISSUE_TARGET_STA:  eligible = !status.sta_dispatched;
+            MEMBLOCK_ISSUE_TARGET_STD:  eligible = !status.std_dispatched &&
+                                                    status.queued_std &&
+                                                    !status.std_writeback &&
+                                                    !status.std_fault &&
+                                                    status.active_sq_mapped &&
+                                                    item.has_sqIdx &&
+                                                    item.sq_key.flag == status.sqIdx_flag &&
+                                                    item.sq_key.value == status.sqIdx_value;
+            default: eligible = 1'b0;
         endcase
+        if (item.uid == 31 && item.target == MEMBLOCK_ISSUE_TARGET_STD && !eligible) begin
+            `uvm_info("UID31_STD_TRACE",
+                      $sformatf("STD eligibility=0 item dyn/rob/sq=%0d/%0d/%0d/%0d/%0d status active/enq/ready/queued/dispatched/wb/fault/exc/killed/active_sq=%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d",
+                                item.dynamic_epoch, item.rob_key.flag, item.rob_key.value,
+                                item.sq_key.flag, item.sq_key.value,
+                                status.active, status.enq, status.issue_ready,
+                                status.queued_std, status.std_dispatched, status.std_writeback,
+                                status.std_fault, status.exception_pending, status.issue_killed,
+                                status.active_sq_mapped), UVM_LOW)
+        end
+        return eligible;
     endfunction:is_issue_item_state_eligible
 
     function bit item_is_older(input memblock_issue_q_item_t left,

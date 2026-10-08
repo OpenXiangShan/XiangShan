@@ -110,6 +110,18 @@ task memblock_issue_dispatch_base_sequence::drive_dispatch_issue_loop();
                                         status.issue_killed, status.queued_std,
                                         status.std_dispatched), UVM_LOW)
                 end
+                if (!data.issue_queue_contains(MEMBLOCK_ISSUE_TARGET_STD, 31, 0)) begin
+                    status_transaction uid31_status;
+                    uid31_status = data.get_status(31);
+                    `uvm_info("UID31_STD_TRACE",
+                              $sformatf("STD queue missing status dyn/active/enq/ready/queued/dispatched/wb/fault/exc/killed/active_sq=%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d/%0d",
+                                        uid31_status.dynamic_epoch, uid31_status.active,
+                                        uid31_status.enq, uid31_status.issue_ready,
+                                        uid31_status.queued_std, uid31_status.std_dispatched,
+                                        uid31_status.std_writeback, uid31_status.std_fault,
+                                        uid31_status.exception_pending, uid31_status.issue_killed,
+                                        uid31_status.active_sq_mapped), UVM_LOW)
+                end
                 `uvm_error(get_type_name(),
                            $sformatf("issue queue has pending work but no fire for %0d issue-loop iterations: iteration=%0d terminal_done_uid=%0d main_trans_num=%0d load_q=%0d sta_q=%0d std_q=%0d",
                                      idle_count,

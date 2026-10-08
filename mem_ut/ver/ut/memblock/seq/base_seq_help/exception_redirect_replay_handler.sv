@@ -41,6 +41,19 @@ class exception_redirect_replay_handler extends uvm_object;
         return wb_event.has_exception || wb_event.exception_vec != '0;
     endfunction:event_is_fault
 
+    function bit store_redirect_waits_fault_commit(input memblock_wb_event_t wb_event);
+        status_transaction status;
+
+        if (!event_is_redirect(wb_event) ||
+            !data.is_valid_uid(wb_event.uid) ||
+            !data.is_scalar_store_uid(wb_event.uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(wb_event.uid);
+        return status.active && !status.rob_commit && !status.terminal_done &&
+               (status.fault || status.exception_pending);
+    endfunction:store_redirect_waits_fault_commit
+
     function bit event_should_wait_ptw(input memblock_wb_event_t wb_event);
         if (!seq_csr_common::is_initialized() ||
             !seq_csr_common::get_replay_wait_ptw_en()) begin
@@ -264,6 +277,18 @@ class exception_redirect_replay_handler extends uvm_object;
 
         if (select_oldest_redirect(events, redirect_event)) begin
             redirect = redirect_from_event(redirect_event);
+            if (store_redirect_waits_fault_commit(redirect_event)) begin
+                // 中文注释：保留 sideband redirect 在 recovery queue 中，等待 fault
+                // UID 先完成 ROB commit；否则 sideband flush 会绕过 fault token。
+                data.exception_event_q.push_front(redirect_event);
+                foreach (events[idx]) begin
+                    if (events[idx].uid == redirect_event.uid &&
+                        event_is_fault(events[idx])) begin
+                        handle_fault_event(events[idx]);
+                    end
+                end
+                return;
+            end
             if (seq_csr_common::is_initialized() &&
                 !seq_csr_common::get_redirect_seq_en()) begin
                 `uvm_fatal("EXC_REDIRECT",

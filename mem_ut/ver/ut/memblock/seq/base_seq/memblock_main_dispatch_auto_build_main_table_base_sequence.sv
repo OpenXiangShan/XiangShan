@@ -210,6 +210,9 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     // provisional cancel finalize 和第二 redirect 放行只能发生在其后。
     data.service_redirect_deleted_owner_window(
         memblock_sync_pkg::peek_current_dut_global_sample());
+    // 中文注释：STA/STD real-WB 都已由本拍 batch 记录后，才把 pending store fault
+    // 正式提升为 UID 级异常，随后 exception handler 才能看到 fault candidate。
+    data.finalize_pending_store_faults();
     exception_redirect_replay_task();
     // redirect scan 可能在 exception handler 中刚刚 finalize software count；
     // 再 drain 一次可收集处理期间到达的 sideband；同一 service tick 只在此处

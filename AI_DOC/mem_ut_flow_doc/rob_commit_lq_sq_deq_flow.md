@@ -19,6 +19,13 @@
 
 ## 1. Flow 边界与术语
 
+### 1.0 STA/STD 双真实写回与 fault commit 顺序
+
+普通 scalar store 的 fault 先经过 writeback 层 pending 记录，不立即成为 fault candidate。STA、STD
+两个真实 writeback 均完成后，pending fault 才 finalize；commit handler 才能把该 UID 作为 fault head
+提交。fault terminal 完成后，real dispatch topology 才申请 fault redirect。SQ deq 若先于 STD WB，只有
+匹配 pending fault 的唯一 barrier STD 可借 status 保存的历史 SQ key 完成一次发射/WB；普通无 owner STD 仍删除。
+
 ### 1.1 术语与抽象功能说明
 
 | 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
@@ -41,6 +48,7 @@
 | `redirect sample anchor` | redirect输入被DUT采到的sample序号与完整payload | cancel record、`redirect_anchor_history_q` | `R`是anchor拍，`R+1`是下一sample |
 | `overlap` | LOAD MMIO sample等于某个未完成redirect的`R`或`R+1` | `resolve_mmio_uid_by_rob_value()` | 只有唯一旧load owner被覆盖时stale drop |
 | `deferred FIFO` | 已完成semantic转换、等待full-raw LSQ owner成功应用的持久队列 | `memblock_sync_pkg::deferred_raw_ctrl_q` | resync mismatch保留队首到下一service tick |
+| `barrier STD` | pending store fault 已见 STA WB、但 STD WB 未到时唯一允许跨 SQ deq 完成的 STD item | `std_issue_q`、`pending_store_fault_by_uid` | UID31 map 已释放后仍完成 STD WB |
 
 ### 1.2 核心语义
 
@@ -345,6 +353,7 @@ if (has_fault_head) mark_fault_rob_commit_uid(fault_uid);
 ```text
 只有normal batch为空时才检查fault head；
 fault candidate必须active、位于commit cursor、无replay/redirect/flushed/killed，且已有writeback或target fault；
+scalar store 还必须同时满足`sta_writeback && std_writeback`，pending fault 或单 target WB 不能进入 fault commit；
 mark_fault_rob_commit_uid置rob_commit并保存uid、dynamic_epoch和稳定ROB anchor到fault token，同时把本次fault分类提交到
 latched_is_store_exception；如果transaction没有进入该mark阶段，latch不提前变化；
 try_retire_committed_uid只有在LQ/SQ mapping释放后才调用consume_fault_retire，形成success=0的terminal；

@@ -53,6 +53,32 @@ class dispatch_monitor_batch_handler extends uvm_object;
         return wb_event.has_exception || wb_event.exception_vec != '0;
     endfunction:event_has_fault
 
+    function bit store_fault_redirect_must_wait(input memblock_wb_event_t wb_event);
+        status_transaction status;
+
+        // 中文注释：普通 scalar store 的 fault redirect 不能沿用 DUT sideband 的
+        // 同拍到达顺序。fault 必须先完成 STA/STD 双 real-WB、ROB commit 和
+        // terminal，再由 fault token 统一申请 redirect；否则 commit cursor 会被
+        // redirect flush/reissue 反复打回同一 UID。
+        if (!event_is_redirect(wb_event) ||
+            !data.is_valid_uid(wb_event.uid) ||
+            !data.is_scalar_store_uid(wb_event.uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(wb_event.uid);
+        return status.active && !status.rob_commit && !status.terminal_done;
+    endfunction:store_fault_redirect_must_wait
+
+    function bit batch_has_fault_for_uid(input memblock_wb_event_t events[$],
+                                         input memblock_uid_t uid);
+        foreach (events[idx]) begin
+            if (events[idx].uid == uid && event_has_fault(events[idx])) begin
+                return 1'b1;
+            end
+        end
+        return 1'b0;
+    endfunction:batch_has_fault_for_uid
+
     function memblock_redirect_payload_t redirect_from_event(input memblock_wb_event_t wb_event);
         if (!event_is_redirect(wb_event)) begin
             `uvm_fatal("DISP_MON_BATCH", "redirect_from_event requires redirect event")
@@ -209,10 +235,36 @@ class dispatch_monitor_batch_handler extends uvm_object;
         end
 
         if (select_oldest_redirect(normalized_events, selected_redirect_event)) begin
+            bit defer_store_fault_redirect;
+
             selected_redirect = redirect_from_event(selected_redirect_event);
-            data.push_feedback_event(selected_redirect_event);
+            defer_store_fault_redirect =
+                store_fault_redirect_must_wait(selected_redirect_event) ||
+                batch_has_fault_for_uid(normalized_events, selected_redirect_event.uid);
+            if (!defer_store_fault_redirect) begin
+                data.push_feedback_event(selected_redirect_event);
+            end else begin
+                `uvm_info("DISP_MON_BATCH",
+                          $sformatf("defer store fault redirect uid=%0d until fault commit/terminal",
+                                    selected_redirect_event.uid), UVM_LOW)
+                // 中文注释：同 batch fault raw 先落入 pending/fault 状态，再保留
+                // sideband redirect；下一拍 recovery handler 才能看到 fault token。
+                foreach (normalized_events[fault_idx]) begin
+                    if (normalized_events[fault_idx].uid == selected_redirect_event.uid &&
+                        event_has_fault(normalized_events[fault_idx])) begin
+                        void'(process_allowed_non_redirect_event(normalized_events[fault_idx]));
+                    end
+                end
+                data.push_feedback_event(selected_redirect_event);
+            end
             foreach (normalized_events[idx]) begin
                 if (same_redirect_event(normalized_events[idx], selected_redirect_event)) begin
+                    continue;
+                end
+                if (defer_store_fault_redirect &&
+                    normalized_events[idx].uid == selected_redirect_event.uid &&
+                    event_has_fault(normalized_events[idx])) begin
+                    void'(process_allowed_non_redirect_event(normalized_events[idx]));
                     continue;
                 end
                 if (event_covered_by_redirect(normalized_events[idx], selected_redirect)) begin
