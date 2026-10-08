@@ -195,6 +195,8 @@ class MainBtbInternalBank(
 
   snapshot.resp <> snapshotWayArbiter.io.out
 
+  /* *** entry writeBuffer/snapshot -> sram *** */
+  // Entry writes come from the hit path or the retained miss snapshot.
   (entrySrams zip entryWriteBuffer.io.read).zipWithIndex.foreach { case ((way, bufRead), i) =>
     way.io.r.req.valid       := read.req.valid || (pendingValid(i) && snapshotState(i) === SnapshotState.Idle)
     way.io.r.req.bits.setIdx := Mux(read.req.valid, read.req.bits.setIdx, pendingSetIdx(i))
@@ -218,10 +220,7 @@ class MainBtbInternalBank(
   read.resp.entries  := VecInit(entrySrams.map(_.io.r.resp.data.head))
   read.resp.counters := counterSram.io.r.resp.data
 
-  /* *** writeBuffer -> sram *** */
-  // entry
-
-  // counter
+  /* *** counter writeBuffer -> sram *** */
   counterSram.io.r.req.valid            := read.req.valid
   counterSram.io.r.req.bits.setIdx      := read.req.bits.setIdx
   counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid

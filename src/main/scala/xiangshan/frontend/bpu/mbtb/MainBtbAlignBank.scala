@@ -80,7 +80,7 @@ class MainBtbAlignBank(
     val write: Write                 = new Write
     val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
-    // final s3_vbtbtaken, used to touch replacer accurately
+    // Final s3_vbtbTaken, used to touch the replacer accurately.
     val s3_vbtbTaken: Bool = Input(Bool())
 
     // fast path of train pc, used to read replacer in advance for better timing
@@ -293,7 +293,7 @@ class MainBtbAlignBank(
     b.io.writeEntry.req.bits.hit     := t1_hit
   }
 
-  // update an existing vbtb entry
+  // Update an existing VBTB entry when the exact entry was hit.
   private val t1_vbtbEntryNeedUpdate = t1_needWrite && t1_vbtbHit && t1_mispredictInfo.valid && (
     t1_mispredictInfo.bits.attribute.needIttage ||
       !(t1_mispredictInfo.bits.attribute === Mux1H(t1_vbtbHitMask, vbtbEntries.map(_.entry.attribute)))
@@ -354,7 +354,7 @@ class MainBtbAlignBank(
     t1_vbtbNewCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, e.counter.getUpdate(actualTaken))
   }
 
-  // Train the single VBTB with the selected internal-bank prediction metadata.
+  // Update the shared VBTB entry and counters selected by the current training request.
   private val t1_victimNeedTrain = t1_vbtbEntryNeedUpdate || t1_vbtbCounterNeedUpdate
   victimBtb.io.trainEntry.req.valid := t1_fire && t1_victimNeedTrain
   victimBtb.io.trainEntry.req.bits.entryWayMask := Mux(
@@ -370,7 +370,7 @@ class MainBtbAlignBank(
   victimBtb.io.trainEntry.req.bits.entry    := t1_entry
   victimBtb.io.trainEntry.req.bits.counters := t1_vbtbNewCounters
 
-  /* *** victim btb train and snapshot insertion *** */
+  /* *** snapshot insertion *** */
   private val snapshotArbiter = Module(new RRArbiter(new MainBtbSnapshotResp, NumInternalBanks, initLastGrant = true))
   snapshotArbiter.io.in.zip(internalBanks).foreach { case (in, bank) => in <> bank.io.snapshot.resp }
   snapshotArbiter.io.out.ready := true.B

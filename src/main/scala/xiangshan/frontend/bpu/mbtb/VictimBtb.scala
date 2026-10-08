@@ -89,19 +89,19 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule with Helpers {
   private val replacer = Module(new VictimBtbReplacer)
   replacer.io.valids := VecInit(entries.map(_.entry.valid))
 
-  private val readRawHitMask    = getVictimBtbRawHitMask(entries, read.req.startPc)
-  private val readAlignedOffset = getAlignedInstOffset(read.req.startPc)
-  private val s1_hitMask = VecInit((readRawHitMask zip entries).map { case (rawHit, e) =>
-    rawHit && e.entry.position >= readAlignedOffset && !read.req.crossPage
+  private val s1_readRawHitMask    = getVictimBtbRawHitMask(entries, read.req.startPc)
+  private val s1_readAlignedOffset = getAlignedInstOffset(read.req.startPc)
+  private val s1_hitMask = VecInit((s1_readRawHitMask zip entries).map { case (rawHit, e) =>
+    rawHit && e.entry.position >= s1_readAlignedOffset && !read.req.crossPage
   })
 
   // A fully-associative VBTB exposes only the earliest matching entry. The
   // non-strict order makes a lower physical way win when positions are equal.
-  private val readPositionMatrix = CompareMatrix(
+  private val s1_readPositionMatrix = CompareMatrix(
     VecInit(entries.map(_.entry.position)),
     order = (a: UInt, b: UInt) => a <= b
   )
-  private val s1_selectOH    = readPositionMatrix.getLeastElementOH(s1_hitMask).asUInt
+  private val s1_selectOH    = s1_readPositionMatrix.getLeastElementOH(s1_hitMask).asUInt
   private val s1_selectEntry = Mux1H(s1_selectOH, entries)
   private val s1_prediction  = Wire(Valid(new Prediction))
 
