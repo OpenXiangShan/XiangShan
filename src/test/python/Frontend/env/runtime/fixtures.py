@@ -615,9 +615,7 @@ def env(dut, request):
 
             validate_target_probes(runtime_context)
 
-        toffee_sink = ToffeeCoverageSink.from_registry(
-            default_pilot_csv_path(), native_only=True
-        )
+        toffee_sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
         runtime_context.attach_toffee_sink(toffee_sink)
         tb.toffee_functional_coverage = toffee_sink
 

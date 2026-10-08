@@ -38,9 +38,7 @@ def _make_recorder(tmp_path):
         output_dir=tmp_path,
     )
     recorder.attach(env)
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=True
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     recorder.attach_toffee_sink(sink)
     model = MmioV3ToffeeCoverage(recorder, sink=sink)
     return recorder, env, dut, model

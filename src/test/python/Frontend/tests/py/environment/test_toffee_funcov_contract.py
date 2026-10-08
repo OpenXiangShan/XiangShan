@@ -211,8 +211,16 @@ def test_toffee_funcov_continues_sampling_after_point_is_covered() -> None:
     assert bins == {"first": 2, "second": 1}
 
 
-def test_toffee_funcov_registry_model_contains_all_python_recorder_bins() -> None:
+def test_toffee_funcov_registry_model_contains_all_python_recorder_bins(tmp_path) -> None:
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name="registry-native-bins",
+        artifact_tag="registry-native-bins",
+        output_dir=tmp_path,
+    )
+    hub.env = type("Env", (), {"dut": object()})()
     sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    create_toffee_runtime(hub, sink)
     keys = {
         (group["name"], point["name"], item["name"])
         for group in sink.report()
@@ -280,7 +288,7 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "FrontendFuncovSampleHub.from_pilot_csv" in source
     assert "else runtime_context.handle_event" in source
     assert "ToffeeCoverageSink.from_registry" in source
-    assert "native_only=True" in source
+    assert "ToffeeCoverageSink.from_registry(default_pilot_csv_path())" in source
     assert "enable_toffee_direct_domain" not in runtime_source
     assert "toffee_direct_domains" not in recorder_source
     assert "create_toffee_runtime(" in source
@@ -709,9 +717,7 @@ def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) ->
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=True
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
 
     assert sink.cov_groups == []
     assert sink._point_targets == {}
@@ -770,7 +776,9 @@ def test_direct_runtime_defaults_to_no_audit_transfer(tmp_path) -> None:
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     # All direct domains are now native CovGroup models.
     assert runtime.cycle_models
@@ -889,7 +897,9 @@ def test_hitmiss_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     hitmiss = next(
         item
@@ -938,7 +948,9 @@ def test_mainpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     mainpipe = next(
         item
@@ -987,7 +999,9 @@ def test_prefetchpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path)
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     prefetch = next(
         item
@@ -1036,7 +1050,9 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     missunit = next(
         item
@@ -1085,7 +1101,9 @@ def test_waylookup_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     waylookup = next(
         item
@@ -1134,7 +1152,9 @@ def test_two_fetch_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     two_fetch = next(
         item
@@ -1182,7 +1202,9 @@ def test_uncache_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=False
+    )
     runtime = create_toffee_runtime(hub, sink)
     uncache = next(
         item
