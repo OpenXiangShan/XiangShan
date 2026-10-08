@@ -558,57 +558,73 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     )
   }
 
-  // CHI CompData collection (DataID 0/1 may arrive out of order)
+  // CHI CompData collection.
+  //
+  // Each request is answered by exactly one pair of DataID beats, which L2 may
+  // interleave with the beats of other requests and return in either order.
+  // Receive state is therefore kept per outstanding request: a beat is always
+  // consumed (ready is hardwired true) and parked in its own half-beat slot,
+  // never dropped for failing to match an in-flight pair. A shared collector
+  // would wedge here, because a dropped beat can never be resent.
   private val refillCycles = blockBits / l1BusDataWidth
-  private val gotDataId0 = RegInit(false.B)
-  private val gotDataId1 = RegInit(false.B)
-  private val refillTxnId = Reg(UInt(bMemID.W))
+  require(refillCycles == 2, "half-beat buffering assumes a two-beat line")
+  require(l1BusDataWidth == io.cchi.dnDAT.bits.Data.getWidth,
+    s"DnDAT Data width ${io.cchi.dnDAT.bits.Data.getWidth} != l1BusDataWidth $l1BusDataWidth")
+
+  private val gotData  = RegInit(VecInit(Seq.fill(MemReqWidth)(VecInit(Seq.fill(refillCycles)(false.B)))))
+  private val beatHalf = Reg(Vec(MemReqWidth, UInt(l1BusDataWidth.W)))
 
   val compDataValid =
     io.cchi.dnDAT.valid && CCHIOpcode.CompData.is(io.cchi.dnDAT.bits.Opcode, io.cchi.dnDAT.valid)
   val compDataFire = io.cchi.dnDAT.fire && compDataValid
-  val beatMatches =
-    (!gotDataId0 && !gotDataId1) || io.cchi.dnDAT.bits.TxnID === refillTxnId
+  private val txnId  = io.cchi.dnDAT.bits.TxnID(bMemID - 1, 0)
+  private val dataId = io.cchi.dnDAT.bits.DataID(log2Ceil(refillCycles) - 1, 0)
+  // this beat completes the pair: the other half has already arrived
+  val lastFire = compDataFire && gotData(txnId)(dataId ^ 1.U)
 
-  // mem -> data buffer
+  // mem -> data buffer; one merge register, reloaded as each pair completes
   val refill_data = RegInit(VecInit.fill(refillCycles)(0.U(l1BusDataWidth.W)))
 
-  when (compDataFire && beatMatches) {
-    when (!gotDataId0 && !gotDataId1) {
-      refillTxnId := io.cchi.dnDAT.bits.TxnID
-    }
-    when (io.cchi.dnDAT.bits.DataID === 0.U) {
-      gotDataId0 := true.B
-      refill_data(0) := io.cchi.dnDAT.bits.Data
-    }
-    when (io.cchi.dnDAT.bits.DataID === 1.U) {
-      gotDataId1 := true.B
-      refill_data(1) := io.cchi.dnDAT.bits.Data
-    }
+  assert(!compDataFire || io.cchi.dnDAT.bits.TxnID < MemReqWidth.U,
+    "DnDAT CompData TxnID must be a mem request id")
+  assert(!compDataFire || io.cchi.dnDAT.bits.DataID < refillCycles.U,
+    "DnDAT CompData DataID out of range")
+  // a beat for a freed id would land in a recycled entry's state
+  assert(!compDataFire || waiting_resp(txnId),
+    "DnDAT CompData beat with no outstanding mem request")
+  // L2 must never resend a beat: assert the contract instead of masking it
+  assert(!(compDataFire && gotData(txnId)(dataId)),
+    "DnDAT CompData duplicate beat (DataID already received for this TxnID)")
+
+  // a recycled id must start with empty receive state
+  when (mem_arb.io.out.fire) {
+    gotData(mem_arb.io.out.bits.id).foreach(_ := false.B)
   }
 
-  val lastFire = compDataFire && beatMatches && (
-    (io.cchi.dnDAT.bits.DataID === 0.U && gotDataId1) ||
-      (io.cchi.dnDAT.bits.DataID === 1.U && gotDataId0)
-  )
+  when (compDataFire) {
+    gotData(txnId)(dataId) := true.B
+    beatHalf(txnId) := io.cchi.dnDAT.bits.Data
+    when (lastFire) {
+      refill_data(dataId)       := io.cchi.dnDAT.bits.Data
+      refill_data(dataId ^ 1.U) := beatHalf(txnId)
+      gotData(txnId).foreach(_ := false.B)
+    }
+  }
   io.cchi.dnDAT.ready := true.B
 
-  when (lastFire) {
-    gotDataId0 := false.B
-    gotDataId1 := false.B
-  }
-
   val mem_resp_done = lastFire
-  val mem_resp_from_llptw = from_llptw(refillTxnId)
-  val mem_resp_from_ptw = from_ptw(refillTxnId)
-  val mem_resp_from_hptw = from_hptw(refillTxnId)
-  val mem_resp_from_bitmap = from_bitmap(refillTxnId)
-  val mem_resp_from_mptc = from_mptc(refillTxnId)
+  val mem_resp_from_llptw = from_llptw(txnId)
+  val mem_resp_from_ptw = from_ptw(txnId)
+  val mem_resp_from_hptw = from_hptw(txnId)
+  val mem_resp_from_bitmap = from_bitmap(txnId)
+  val mem_resp_from_mptc = from_mptc(txnId)
 
-  // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
+  // Wire fork of refill_data carrying the pair that completes this cycle, so
+  // consumers see the whole line without waiting a cycle for the register.
   val refill_data_tmp = WireInit(refill_data)
-  when (compDataFire && beatMatches) {
-    refill_data_tmp(io.cchi.dnDAT.bits.DataID) := io.cchi.dnDAT.bits.Data
+  when (lastFire) {
+    refill_data_tmp(dataId)       := io.cchi.dnDAT.bits.Data
+    refill_data_tmp(dataId ^ 1.U) := beatHalf(txnId)
   }
 
   // save only one pte for each id
@@ -660,8 +676,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
       // mem -> bitmap
       Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap
-      Bitmap.io.mem.resp.bits.id := DataHoldBypass(refillTxnId, compDataFire && beatMatches)
-      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, compDataFire && beatMatches)
+      Bitmap.io.mem.resp.bits.id := DataHoldBypass(txnId, lastFire)
+      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, lastFire)
     }
 
     // ptwcache -> hptw llptw
@@ -671,7 +687,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // mem -> llptw
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
-  llptw_mem.resp.bits.id := DataHoldBypass(refillTxnId, lastFire)
+  llptw_mem.resp.bits.id := DataHoldBypass(txnId, lastFire)
   llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, lastFire)
   // mem -> ptw
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
@@ -691,15 +707,15 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
   val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) &&
     (if (HasMptCheck) !mem_resp_from_mptc else true.B) &&
-    !flush && !flush_latch(refillTxnId) &&
-    !(from_hptw(refillTxnId) && hptw_bypassed)
+    !flush && !flush_latch(txnId) &&
+    !(from_hptw(txnId) && hptw_bypassed)
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, Mux(refill_from_ptw, ptw.io.refill.req_info, hptw.io.refill.req_info)), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
-  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(refillTxnId)), refill_valid))
+  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(txnId)), refill_valid))
 
   if (env.EnableDifftest) {
     val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
@@ -711,7 +727,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     difftest.coreid := io.hartId
     difftest.index := 2.U
     difftest.valid := cache.io.refill.valid
-    difftest.addr := difftest_ptw_addr(RegEnable(refillTxnId, lastFire))
+    difftest.addr := difftest_ptw_addr(RegEnable(txnId, lastFire))
     difftest.data := refill_data.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }
@@ -904,8 +920,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> control signal
   // waiting_resp and sfence_latch will be reset when mem_resp_done
   when (mem_resp_done) {
-    waiting_resp(refillTxnId) := false.B
-    flush_latch(refillTxnId) := false.B
+    waiting_resp(txnId) := false.B
+    flush_latch(txnId) := false.B
   }
 
   def get_4kppn(ppn: UInt, vpn: UInt, level: UInt, n: Bool): UInt = {
