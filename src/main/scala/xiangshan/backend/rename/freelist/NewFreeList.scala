@@ -64,6 +64,9 @@ class NewFreeList(
 
   val specfreeListReg   = InitFreeList(regType)
   val archfreeListReg   = InitFreeList(regType)
+  val freePhyRegOH = VecInit((0 until commitWidth).map { i =>
+    Mux(io.freeReq(i), UIntToOH(io.freePhyReg(i), numPhyRegs), 0.U(numPhyRegs.W))
+  })
 
   /** NewFreeList owns the free bitmaps; NewFLManager owns preg allocation. */
   val flManager = Module(new NewFLManager(numPhyRegs, RenameWidth, s1QueueSize, commitWidth))
@@ -71,6 +74,7 @@ class NewFreeList(
   flManager.in.allocateReq := io.allocateReq
   flManager.in.freeReq := io.freeReq
   flManager.in.freePhyReg := io.freePhyReg
+  flManager.in.freePhyRegOH := freePhyRegOH
   flManager.in.doAllocate := io.doAllocate && !io.walk
   // RAB/VTypeBuffer enter walk one cycle after redirect; Rob registers their
   // commit bundles once more before Rename sees isWalk. Bridge that gap so s1
@@ -82,29 +86,28 @@ class NewFreeList(
   io.allocatePhyReg := flManager.out.allocatePhyReg
   io.canAllocate := flManager.out.canAllocate
 
-  val freePhyRegOHOR = (0 until commitWidth).map { i =>
-    Mux(
-      io.freeReq(i),
-      UIntToOH(io.freePhyReg(i), numPhyRegs),
-      0.U(numPhyRegs.W)
-    )
-  }.reduce(_ | _)
+  val isWalkAlloc = io.walk && io.doAllocate
+  val isNormalAlloc = !io.walk && io.canAllocate && io.doAllocate
+  val realDoAllocate = !io.redirect && (isWalkAlloc || isNormalAlloc)
+  val lastCycleRedirect = RegNext(redirectReg, false.B)
+  val doRestore = realDoAllocate && lastCycleRedirect
+  val doWalkClear = realDoAllocate && (io.walk || lastCycleRedirect)
+  val freePhyRegOHOR = freePhyRegOH.reduce(_ | _)
   val walkPhyRegOHOR = (0 until commitWidth).map { i =>
     Mux(
-      io.walkReq(i),
+      io.walkReq(i) && doWalkClear,
       UIntToOH(io.walkPhyReg(i), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
   val commitPhyRegOHOR = (0 until commitWidth).map { i =>
     Mux(
-      io.commit.archAlloc(i),
+      io.commit.doCommit && io.commit.archAlloc(i),
       UIntToOH(io.commit.archAllocPhyReg(i), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
 
-  val lastCycleRedirect = RegNext(redirectReg, false.B)
   // Snapshot metadata are only consumed when lastCycleRedirect is true.
   // Its reset value masks both pipeline stages until they contain valid data.
   val lastCycleSnpt     = RegNext(RegNext(io.snpt))
@@ -112,23 +115,16 @@ class NewFreeList(
 
   val redirectedFreeList = Mux(
     lastCycleSnpt.useSnpt,
-    snapshots(lastCycleSnpt.snptSelect) & ~walkPhyRegOHOR,
-    archfreeListReg.asUInt & ~walkPhyRegOHOR
+    snapshots(lastCycleSnpt.snptSelect),
+    archfreeListReg.asUInt
   )
   
-  // As in StdFreeList/MEFreeList, walk must keep rebuilding allocation state
-  // even while normal allocation is paused. It does not consume s1 candidates.
-  val isWalkAlloc = io.walk && io.doAllocate
-  val isNormalAlloc = !io.walk && io.canAllocate && io.doAllocate
-  val isAllocate = isWalkAlloc || isNormalAlloc
-
-  val allocate = Mux(io.walk,walkPhyRegOHOR,flManager.out.allocateBitmap)
-  val freeListRegAllocate = Mux(lastCycleRedirect, redirectedFreeList, specfreeListReg.asUInt & (~allocate))
-  // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
-  val realDoAllocate = !io.redirect && isAllocate
-  specfreeListReg := VecInit((Mux(realDoAllocate, freeListRegAllocate, specfreeListReg.asUInt)|freePhyRegOHOR).asBools)
-  
-  archfreeListReg := VecInit((Mux(io.commit.doCommit,archfreeListReg.asUInt & ~commitPhyRegOHOR,archfreeListReg.asUInt)|freePhyRegOHOR).asBools)
+  // The manager qualifies dequeue with canAllocate, doAllocate and flush.
+  // Reuse that mask for speculative state instead of qualifying it again.
+  val specBase = Mux(doRestore, redirectedFreeList,
+    specfreeListReg.asUInt & ~flManager.out.dequeuedBitmap)
+  specfreeListReg := ((specBase & ~walkPhyRegOHOR) | freePhyRegOHOR).asTypeOf(specfreeListReg)
+  archfreeListReg := ((archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR).asTypeOf(archfreeListReg)
 
   //Debug
   XSPerfAccumulate("utilization", PopCount(io.allocateReq))

@@ -38,9 +38,18 @@ class NewFLManager(
   // keeping this as a plain Reg avoids reset/init logic on the queue payload.
   val s1Queue = Reg(Vec(s1QueueSize, UInt(phyRegIdxWidth.W)))
   val s1HeadPtr = RegInit(0.U(s1PtrWidth.W))
-  val s1HeadPtrOH = RegInit(1.U(s1QueueSize.W))
+  private val headLowWidth = math.min(2, s1PtrWidth)
+  private val headLowSpan = 1 << headLowWidth
+  private val headLowCount = math.min(headLowSpan, s1QueueSize)
+  private val headHighCount = (s1QueueSize + headLowSpan - 1) / headLowSpan
+  val s1HeadLowOH = RegInit(1.U(headLowCount.W))
+  val s1HeadHighOH = RegInit(1.U(headHighCount.W))
+  val s1HeadPtrOH = VecInit((0 until s1QueueSize).map { slot =>
+    s1HeadLowOH(slot % headLowSpan) && s1HeadHighOH(slot / headLowSpan)
+  }).asUInt
   val s1TailPtr = RegInit(0.U(s1PtrWidth.W))
-  val s1ValidCount = RegInit(0.U(s1CountWidth.W))
+  val s1FreeCount = RegInit(s1QueueSize.U(s1CountWidth.W))
+  val s1ValidCount = s1QueueSize.U(s1CountWidth.W) - s1FreeCount
   val s1CanAllocateReg = RegInit(false.B)
 
   private def addS1Ptr(ptr: UInt, increment: UInt): UInt = {
@@ -57,7 +66,6 @@ class NewFLManager(
   // Candidates in s1 remain free in the owner's bitmap until rename really
   // consumes them, so the manager reserves them locally to prevent reselection.
   val reservedBitmap = RegInit(0.U(numPhyRegs.W))
-  val s1FreeCount = s1QueueSize.U(s1CountWidth.W) - s1ValidCount
   val allocateCount = PopCount(in.allocateReq)
   val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
   val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
@@ -72,7 +80,6 @@ class NewFLManager(
   val s0AllocBitmap = in.freeBitmap & ~reservedBitmap
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
-  val s0BankCandidateCount = Wire(Vec(bankCount, UInt(2.W)))
   for (bankIndex <- 0 until bankCount) {
     // Match IntRegFileBank: the low-order preg bits select the bank
     // (preg % bankCount), while the remaining bits select the bank-local row.
@@ -108,14 +115,9 @@ class NewFLManager(
     s0CandidateValid(bankIndex) := !in.flush && bankHasCandidate
     s0CandidateValid(lastCandidateIdx) :=
       !in.flush && bankHasCandidate && bankHasTwoCandidates
-    s0BankCandidateCount(bankIndex) := Mux(
-      !in.flush && bankHasCandidate,
-      Mux(bankHasTwoCandidates, 2.U, 1.U),
-      0.U
-    )
   }
 
-  // Newly released registers are not yet in this cycle's bitmap. Append
+  // Newly released registers are not yet in this cycle's bitmap.
   // Append commit frees after the bitmap candidates. As in StdFreeList, the
   // free interface guarantees distinct, not-currently-free physical regs;
   // keep this validity path independent of the preg values.
@@ -134,7 +136,9 @@ class NewFLManager(
   // The accepted stream is a stable prefix of the valid candidates. Count the
   // raw valids once and clamp to FIFO capacity, instead of PopCount-ing the
   // per-candidate capacity comparisons again on the tail-pointer path.
-  val s0CandidateCount = s0BankCandidateCount.reduce(_ +& _)
+  // Share the qualified-bit reduction with enqueueOffset and the routing
+  // controls instead of maintaining a separate per-bank count network.
+  val s0CandidateCount = PopCount(s0CandidateValid)
   val freeCandidateCount = PopCount(freeCandidateValid)
   val rawCandidateCount = s0CandidateCount +& freeCandidateCount
   val enqueueCount = Mux(
@@ -143,25 +147,29 @@ class NewFLManager(
     rawCandidateCount
   )
   val enqueueBitmap = (0 until enqueueWidth).map { candidateIdx =>
-    Mux(
-      enqueueValid(candidateIdx),
-      UIntToOH(enqueueCandidates(candidateIdx), numPhyRegs),
-      0.U(numPhyRegs.W)
-    )
+    if (candidateIdx < renameWidth) {
+      Mux(enqueueValid(candidateIdx), UIntToOH(s0Candidates(candidateIdx), numPhyRegs), 0.U(numPhyRegs.W))
+    } else {
+      Mux(enqueueOffset(candidateIdx) < s1EnqueueCapacity,
+        in.freePhyRegOH(candidateIdx - renameWidth), 0.U(numPhyRegs.W))
+    }
   }.reduce(_ | _)
 
   // Allocation lanes consume compacted requests from the head of s1.
   // Keep a statically rotated view of the queue, as StdFreeList does, so the
   // output path only selects one already-formed RenameWidth-wide window. The
   // previous dynamic index formed an add/compare/mux chain for every lane.
-  val s1QueueVec = Wire(Vec(s1QueueSize, Vec(renameWidth, UInt(phyRegIdxWidth.W))))
-  for (queueStart <- 0 until s1QueueSize) {
-    for (offset <- 0 until renameWidth) {
-      val queueIndex = (queueStart + offset) % s1QueueSize
-      s1QueueVec(queueStart)(offset) := s1Queue(queueIndex)
-    }
-  }
-  val s1HeadCandidates = Mux1H(s1HeadPtrOH, s1QueueVec)
+  // Factor the head selection into two smaller registered one-hot muxes.
+  val lowRotatedQueue = VecInit((0 until s1QueueSize).map { slot =>
+    Mux1H(s1HeadLowOH, VecInit((0 until headLowCount).map { low =>
+      s1Queue((slot + low) % s1QueueSize)
+    }))
+  })
+  val s1HeadCandidates = VecInit((0 until renameWidth).map { offset =>
+    Mux1H(s1HeadHighOH, VecInit((0 until headHighCount).map { high =>
+      lowRotatedQueue((offset + high * headLowSpan) % s1QueueSize)
+    }))
+  })
   for (laneIdx <- 0 until renameWidth) {
     val candidateOffset = PopCount(in.allocateReq.take(laneIdx))
     out.allocatePhyReg(laneIdx) := s1HeadCandidates(candidateOffset)
@@ -169,23 +177,23 @@ class NewFLManager(
   // Match StdFreeList timing: canAllocate is registered from the number of
   // candidates left after this cycle's dequeue/refill.
   out.canAllocate := s1CanAllocateReg && !in.flush
-  val s1ValidCountNext = s1ValidCount - s1DequeueCount +& enqueueCount
-  val s1CanAllocateNext = s1ValidCountNext >= renameWidth.U
+  val s1WillBeFull = rawCandidateCount >= s1EnqueueCapacity
+  val s1FreeCountNext = Mux(s1WillBeFull, 0.U, s1EnqueueCapacity - rawCandidateCount)
+  val s1CanAllocateNext = (rawCandidateCount +& (s1QueueSize - renameWidth).U) >= s1EnqueueCapacity
   val s1HeadPtrNext = addS1Ptr(s1HeadPtr, s1DequeueCount)
-  val s1HeadPtrOHNext = UIntToOH(s1HeadPtrNext, s1QueueSize)
-  val enqueueWritePtr = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
-    addS1Ptr(s1TailPtr, enqueueOffset(candidateIdx))
-  })
 
-  val selectedBitmap = (0 until renameWidth).map { laneIdx =>
+  // Sparse requests still consume a contiguous prefix of the queue. Decode
+  // that prefix directly instead of decoding the per-lane compaction muxes.
+  val selectedBitmap = (0 until renameWidth).map { offset =>
     Mux(
-      in.allocateReq(laneIdx),
-      UIntToOH(out.allocatePhyReg(laneIdx), numPhyRegs),
+      offset.U < allocateCount,
+      UIntToOH(s1HeadCandidates(offset), numPhyRegs),
       0.U(numPhyRegs.W)
     )
   }.reduce(_ | _)
   out.allocateBitmap := selectedBitmap
   val s1DequeuedBitmap = Mux(s1DoDequeue, selectedBitmap, 0.U(numPhyRegs.W))
+  out.dequeuedBitmap := s1DequeuedBitmap
 
   // s1 holds unallocated prefetch candidates, which remain free across
   // rollback. Keep the head fixed during recovery, but allow commit frees to
@@ -193,19 +201,93 @@ class NewFLManager(
   // can resume immediately when recovery ends.
   when(!in.flush) {
     s1HeadPtr := s1HeadPtrNext
-    s1HeadPtrOH := Mux(s1DoDequeue, s1HeadPtrOHNext, s1HeadPtrOH)
+    when(s1DoDequeue) {
+      s1HeadLowOH := UIntToOH(s1HeadPtrNext(headLowWidth - 1, 0), headLowCount)
+      s1HeadHighOH := UIntToOH(s1HeadPtrNext >> headLowWidth, headHighCount)
+    }
   }
   s1CanAllocateReg := s1CanAllocateNext
-  s1TailPtr := addS1Ptr(s1TailPtr, enqueueCount)
-  s1ValidCount := s1ValidCountNext
-  // Select each physical FIFO slot once instead of lowering every candidate
-  // to a dynamic Vec write address.
+  // A full circular queue has tail == head. Otherwise all raw candidates
+  // fit, so advance tail by the raw count without waiting for capacity clamp.
+  s1TailPtr := Mux(s1WillBeFull, s1HeadPtrNext, addS1Ptr(s1TailPtr, rawCandidateCount))
+  s1FreeCount := s1FreeCountNext
+  // Stable candidate ranks occupy a contiguous cyclic interval. A low-bit
+  // first butterfly therefore routes them without conflicts, using O(Q log Q)
+  // two-input switches instead of an O(Q * enqueueWidth) data crossbar.
+  class EnqueuePacket extends Bundle {
+    val valid = Bool()
+    val preg = UInt(phyRegIdxWidth.W)
+  }
+  val routedCandidates = if (s1QueueSizeIsPow2 && enqueueWidth <= s1QueueSize) {
+    val initial = Wire(Vec(s1QueueSize, new EnqueuePacket))
+    for (idx <- 0 until s1QueueSize) {
+      initial(idx).valid := (if (idx < enqueueWidth) enqueueCandidateValid(idx) else false.B)
+      initial(idx).preg := (if (idx < enqueueWidth) enqueueCandidates(idx) else 0.U)
+    }
+    // A block's compacted candidates occupy a contiguous cyclic interval.
+    // Derive each switch choice directly from that interval, rather than
+    // forwarding valid bits through every preceding routing stage.
+    def firstDestination(start: Int): UInt = {
+      val rank = if (start < enqueueWidth) enqueueOffset(start) else rawCandidateCount
+      if (start == 0) s1TailPtr else addS1Ptr(s1TailPtr, rank)
+    }
+    def candidateCount(start: Int, size: Int): UInt = {
+      PopCount(enqueueCandidateValid.slice(start, math.min(start + size, enqueueWidth)))
+    }
+    var stage = initial.toSeq
+    for (bit <- 0 until s1PtrWidth) {
+      val next = Wire(Vec(s1QueueSize, new EnqueuePacket))
+      val stride = 1 << bit
+      for (base <- 0 until s1QueueSize by 2 * stride) {
+        val first = firstDestination(base)(bit, 0)
+        val leftCount = candidateCount(base, stride)
+        val totalCount = candidateCount(base, 2 * stride)
+        def rankAt(channel: Int): UInt = (channel.U((bit + 1).W) - first)(bit, 0)
+        for (offset <- 0 until stride) {
+          val low = base + offset
+          val high = low + stride
+          val lowRank = rankAt(offset)
+          val highRank = rankAt(offset + stride)
+          next(low).preg := Mux(lowRank < leftCount, stage(low).preg, stage(high).preg)
+          next(high).preg := Mux(highRank < leftCount, stage(low).preg, stage(high).preg)
+          next(low).valid := lowRank < totalCount
+          next(high).valid := highRank < totalCount
+        }
+      }
+      stage = next.toSeq
+    }
+    Some(stage)
+  } else {
+    None
+  }
+
+  // Compare raw count and capacity in parallel to avoid a clamp mux on
+  // the clock-gate enable. Keep capacity out of the packet data path.
+  // Routing all raw valids is safe because the stream has at most Q entries.
   for (queueIdx <- 0 until s1QueueSize) {
-    val writeCandidateOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
-      enqueueValid(candidateIdx) && enqueueWritePtr(candidateIdx) === queueIdx.U
-    })
-    when(writeCandidateOH.asUInt.orR) {
-      s1Queue(queueIdx) := Mux1H(writeCandidateOH, enqueueCandidates)
+    // Compute a slot's rank in the append stream once. This replaces an
+    // address adder per candidate and an address comparison per slot/lane.
+    val slotOffset = if (s1QueueSizeIsPow2) {
+      (queueIdx.U(s1PtrWidth.W) - s1TailPtr)(s1PtrWidth - 1, 0)
+    } else {
+      Mux(queueIdx.U >= s1TailPtr,
+        queueIdx.U - s1TailPtr,
+        (queueIdx + s1QueueSize).U - s1TailPtr)(s1PtrWidth - 1, 0)
+    }
+    val writeData = routedCandidates match {
+      case Some(candidates) =>
+        when(slotOffset < rawCandidateCount && slotOffset < s1EnqueueCapacity) {
+          assert(candidates(queueIdx).valid)
+        }
+        candidates(queueIdx).preg
+      case None =>
+        val writeCandidateOH = VecInit(Seq.tabulate(enqueueWidth) { candidateIdx =>
+          enqueueCandidateValid(candidateIdx) && enqueueOffset(candidateIdx) === slotOffset
+        })
+        Mux1H(writeCandidateOH, enqueueCandidates)
+    }
+    when(slotOffset < rawCandidateCount && slotOffset < s1EnqueueCapacity) {
+      s1Queue(queueIdx) := writeData
     }
   }
 
@@ -243,6 +325,9 @@ object NewFLManager {
     val allocateReq = Vec(renameWidth, Bool())
     val freeReq = Vec(freeReqWidth, Bool())
     val freePhyReg = Vec(freeReqWidth, UInt(log2Up(numPhyRegs).W))
+    // Each one-hot is qualified by freeReq in the owner; share that
+    // decode without adding another freeReq gate at this boundary.
+    val freePhyRegOH = Vec(freeReqWidth, UInt(numPhyRegs.W))
     val doAllocate = Bool()
     // Pause bitmap selection/allocation during recovery; freeReq may fill s1.
     val flush = Bool()
@@ -251,6 +336,7 @@ object NewFLManager {
   class Out(numPhyRegs: Int, renameWidth: Int)(implicit p: Parameters) extends XSBundle {
     val allocatePhyReg = Vec(renameWidth, UInt(log2Up(numPhyRegs).W))
     val allocateBitmap = UInt(numPhyRegs.W)
+    val dequeuedBitmap = UInt(numPhyRegs.W)
     val canAllocate = Bool()
   }
 }
