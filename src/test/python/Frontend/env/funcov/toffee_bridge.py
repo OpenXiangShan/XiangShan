@@ -215,7 +215,7 @@ class ToffeeCoverageSink:
 
     @classmethod
     def from_registry(
-        cls, csv_path: Path, *, native_only: bool = False
+        cls, csv_path: Path, *, native_only: bool = True
     ) -> "ToffeeCoverageSink":
         points: dict[tuple[str, str], list[str]] = {}
         bin_ids: dict[tuple[str, str, str], str] = {}
@@ -268,6 +268,11 @@ class ToffeeCoverageSink:
         target = self._point_targets.get((group_name, point_name))
         group = self._groups.get(group_name)
         if target is None or group is None:
+            if self._native_only:
+                self._record_hit_detail(
+                    (group_name, point_name, bin_name), cycle, evidence
+                )
+                return True
             raise KeyError(
                 f"unknown Toffee coverage point: {group_name}::{point_name}::{bin_name}"
             )
@@ -345,6 +350,10 @@ class ToffeeCoverageSink:
         count = self._flushed_hint_count(key)
         if key in self.pending_hit_keys():
             count += 1
+        if count == 0 and key[0] not in self._groups:
+            detail = self._hit_details.get(key)
+            if detail is not None:
+                count = int(detail["hits"])
         return count
 
     def hit_detail(
@@ -450,5 +459,9 @@ class ToffeeCoverageSink:
         if key in self.pending_hit_keys():
             return True
         self.flush_pending()
-        point = self._groups[group_name].cover_point(point_name)
+        group = self._groups.get(group_name)
+        if group is None:
+            detail = self._hit_details.get(key)
+            return detail is not None and int(detail["hits"]) > 0
+        point = group.cover_point(point_name)
         return int(point["hints"].get(bin_name, 0)) > 0
