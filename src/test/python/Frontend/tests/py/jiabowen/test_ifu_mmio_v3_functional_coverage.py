@@ -1,9 +1,6 @@
 from types import SimpleNamespace
 
-from env.funcov.py.ifu.mmio_v3_funcov import (
-    MMIO_V3_CHECKED_EVENT_TYPE,
-    sample_mmio_v3_coverage,
-)
+from env.funcov.py.ifu.mmio_v3_funcov import MMIO_V3_CHECKED_EVENT_TYPE
 from env.funcov.py.ifu.mmio_v3_toffee import MmioV3ToffeeCoverage
 from env.funcov.runtime_context import FrontendFuncovSampleHub, default_pilot_csv_path
 from env.funcov.toffee_bridge import ToffeeCoverageSink
@@ -41,9 +38,12 @@ def _make_recorder(tmp_path):
         output_dir=tmp_path,
     )
     recorder.attach(env)
-    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    sink = ToffeeCoverageSink.from_registry(
+        default_pilot_csv_path(), native_only=True
+    )
     recorder.attach_toffee_sink(sink)
-    return recorder, env, dut
+    model = MmioV3ToffeeCoverage(recorder, sink=sink)
+    return recorder, env, dut, model
 
 
 def _set_common_signals(dut):
@@ -68,8 +68,13 @@ def _set_common_signals(dut):
     dut.set(_UNCACHE_UNIT + "io_resp_bits_needResend", 0)
 
 
+def _sample(recorder, model, cycle):
+    recorder.begin_cycle_snapshot(cycle)
+    model.sample(cycle)
+
+
 def test_tl_a_stall_requires_full_context_stability(tmp_path):
-    recorder, env, dut = _make_recorder(tmp_path)
+    recorder, env, dut, model = _make_recorder(tmp_path)
     _set_common_signals(dut)
     dut.set("auto_inner_instrUncache_client_out_a_valid", 1)
     dut.set("auto_inner_instrUncache_client_out_a_ready", 0)
@@ -77,41 +82,40 @@ def test_tl_a_stall_requires_full_context_stability(tmp_path):
     dut.set(_IFU + "s2_fetchBlock_0_startVAddr_addr", 0x40000800)
     dut.set(_IFU + "s2_icacheMeta_0_itlbPbmt", 2)
 
-    sample_mmio_v3_coverage(recorder, env, 1)
+    _sample(recorder, model, 1)
     assert not recorder.key_hit("ifu_mmio_tl_a_stall", "stable_until_accept")
 
     dut.set(_IFU + "s2_icacheMeta_0_itlbPbmt", 1)
-    sample_mmio_v3_coverage(recorder, env, 2)
+    _sample(recorder, model, 2)
     assert not recorder.key_hit("ifu_mmio_tl_a_stall", "stable_until_accept")
     assert any(
         item.get("event") == "mmio_tl_a_stall_context_changed"
         for item in recorder.risk_observations
     )
 
-    sample_mmio_v3_coverage(recorder, env, 3)
-    sample_mmio_v3_coverage(recorder, env, 4)
+    _sample(recorder, model, 3)
+    _sample(recorder, model, 4)
     assert recorder.key_hit("ifu_mmio_tl_a_stall", "stable_until_accept")
 
 
 def test_page_tail_rvc_progress_uses_halfword_pc_units(tmp_path):
-    recorder, env, dut = _make_recorder(tmp_path)
+    recorder, env, dut, model = _make_recorder(tmp_path)
     _set_common_signals(dut)
     env.monitor.observations.append(
         SimpleNamespace(pc=0x10001FFE, is_rvc=True, cycle=1)
     )
 
-    sample_mmio_v3_coverage(recorder, env, 1)
+    _sample(recorder, model, 1)
     env.monitor.observations.append(
         SimpleNamespace(pc=0x10002000, is_rvc=True, cycle=2)
     )
-    sample_mmio_v3_coverage(recorder, env, 2)
+    _sample(recorder, model, 2)
 
     assert recorder.key_hit("ifu_mmio_page_tail", "next_pc_plus_2b")
 
 
 def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
-    recorder, _env, _dut = _make_recorder(tmp_path)
-    model = MmioV3ToffeeCoverage(recorder, sink=recorder.toffee_sink)
+    recorder, _env, _dut, model = _make_recorder(tmp_path)
     base_payload = {
         "bin_id": "BIN-1014",
         "condition_met": True,
@@ -140,14 +144,14 @@ def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
 
 
 def test_mmio_result_requires_reserved_ibuffer_slot(tmp_path):
-    recorder, env, dut = _make_recorder(tmp_path)
+    recorder, _env, dut, model = _make_recorder(tmp_path)
     _set_common_signals(dut)
     dut.set(_UNCACHE_UNIT + "io_resp_valid", 1)
     dut.set(_UNCACHE_UNIT + "io_resp_bits_uncacheData", 0x00000013)
     dut.set(_IFU + "io_toIBuffer_valid", 1)
     dut.set(_IFU + "io_toIBuffer_ready", 0)
 
-    sample_mmio_v3_coverage(recorder, env, 1)
+    _sample(recorder, model, 1)
     assert not recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
     assert any(
         item.get("event") == "mmio_result_missing_reserved_ibuffer_slot"
@@ -155,5 +159,5 @@ def test_mmio_result_requires_reserved_ibuffer_slot(tmp_path):
     )
 
     dut.set(_IFU + "io_toIBuffer_ready", 1)
-    sample_mmio_v3_coverage(recorder, env, 2)
+    _sample(recorder, model, 2)
     assert recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
