@@ -590,6 +590,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val lsq     = Module(new LsqWrapper)
   val sbuffer = Module(new Sbuffer)
 
+  // Violation rollback: same-ROB redirects that flush themselves take priority.
+  def isOlder(left: Redirect, right: Redirect): Bool = {
+    // If one instruction generates both a replay and a flush-after rollback,
+    // select the replay so the instruction is fetched again with the right data.
+    left.robIdx.isBeforeSlot(right.robIdx) ||
+      (left.robIdx.isSameSlot(right.robIdx) && left.flushItself() && !right.flushItself())
+  }
+  val allRedirect = newLoadUnits.map(_.io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
+  val selectOldestRedirect = Module(
+    new SelectOldest(new Redirect, allRedirect.length, isOlder)
+      .suggestName("selectOldestRedirect")
+  )
+
   io.mem_to_ooo.stIssuePtr := lsq.io.issuePtrExt
 
   dcache.io.hartId := io.hartId
@@ -1061,10 +1074,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.wakeupToLRQCancel := wakeupToLRQCancel
   lsq.io.brqRedirect    <> redirect
 
-  //  violation rollback
-  val allRedirect = newLoadUnits.map(_.io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
-  val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
-  val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
+  // violation rollback
+  selectOldestRedirect.io.in.zip(allRedirect).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits  := source.bits
+  }
+  val oldestRedirect = WireDefault(selectOldestRedirect.io.out)
   // memory replay would not cause IAF/IPF/IGPF
   oldestRedirect.bits.backendIAF := false.B
   oldestRedirect.bits.backendIPF := false.B
