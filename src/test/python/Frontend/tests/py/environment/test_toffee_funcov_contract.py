@@ -832,6 +832,31 @@ def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> No
     assert sink.key_hit("two_fetch_ifu_source", "two_ftq_sources")
 
 
+def test_recorder_mark_forwards_installed_native_group(tmp_path) -> None:
+    hub = FrontendFuncovSampleHub.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name="runtime-recorder-native-mark",
+        artifact_tag="runtime-recorder-native-mark",
+        output_dir=tmp_path,
+    )
+    hub.env = type("Env", (), {"dut": object()})()
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
+    hub.attach_toffee_sink(sink)
+    create_toffee_runtime(hub, sink)
+    source_group, _source_point, source_bin = sink._key_by_bin_id["BIN-831"]
+
+    hub.mark(
+        source_group,
+        source_bin,
+        cycle=17,
+        evidence={"event": "canonical-source"},
+    )
+
+    assert sink.key_hit(source_group, source_bin)
+    assert sink.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_001")
+    assert sink.hit_count_by_bin_id("BIN-899") == 1
+
+
 def test_native_source_derivation_uses_toffee_hints_not_legacy_hits(tmp_path) -> None:
     context = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),

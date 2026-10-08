@@ -584,16 +584,31 @@ class FrontendFuncovSampleHub:
                 "functional coverage sampler attempted an unmodeled bin: "
                 f"{key[0]}::{key[1]}::{key[2]}"
             )
-        if forward_to_toffee and self.toffee_sink is not None:
-            self.toffee_sink.mark(
-                coverage_group,
-                bin_name,
-                cycle,
-                evidence,
-                coverpoint=coverpoint,
-            )
         definition = self.definition_by_key[key]
-        if derive_owner and self.sampler_domain_enabled("ifu"):
+        native_recorded = False
+        if forward_to_toffee and self.toffee_sink is not None:
+            native_groups = getattr(self.toffee_sink, "_native_group_names", ())
+            if str(coverage_group) in native_groups:
+                self.toffee_sink.mark_native(
+                    coverage_group,
+                    bin_name,
+                    cycle,
+                    evidence,
+                )
+                native_recorded = True
+            else:
+                self.toffee_sink.mark(
+                    coverage_group,
+                    bin_name,
+                    cycle,
+                    evidence,
+                    coverpoint=coverpoint,
+                )
+        if (
+            derive_owner
+            and not native_recorded
+            and self.sampler_domain_enabled("ifu")
+        ):
             if self.toffee_owner_model is not None:
                 self.toffee_owner_model.derive_from_source(
                     definition.bin_id,
