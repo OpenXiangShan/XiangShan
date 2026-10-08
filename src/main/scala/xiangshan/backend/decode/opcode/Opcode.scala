@@ -959,6 +959,8 @@ object Opcode {
   object I2fOpcodes extends Opcodes.FCvtOpcode
 
   trait FDivOpcodes extends Opcodes with DataType {
+    val Fp16Latency = 6
+    val Fp32Latency = 10
     val FixedLatency = 15
 
     private val FDIV  = bb"0"
@@ -982,7 +984,9 @@ object Opcode {
 
     override def getLat(opcode: Opcode): Int = {
       require(all.contains(opcode))
-      FixedLatency
+      if (opcode == fdiv_fp16 || opcode == fsqrt_fp16) Fp16Latency
+      else if (opcode == fdiv_fp32 || opcode == fsqrt_fp32) Fp32Latency
+      else FixedLatency
     }
   }
 

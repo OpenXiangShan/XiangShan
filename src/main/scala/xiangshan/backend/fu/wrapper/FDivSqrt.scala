@@ -104,6 +104,7 @@ class FDivSqrtFlt(cfg: VecFuConfig)(implicit p: Parameters) extends FltNonFixedL
 
   pipe.io.flush := in.flush
   pipe.io.in.valid := dpiDelayedValid
+  pipe.io.fpFormat := dpiDelayedFpFormat
   pipe.io.in.bits := dpiDelayedBits
   pipe.io.in.bits.data.fp.get := resultData
   pipe.io.in.bits.data.fflags.get := dpi.io.fflags

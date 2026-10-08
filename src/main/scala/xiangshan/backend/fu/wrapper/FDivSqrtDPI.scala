@@ -6,6 +6,7 @@ import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.Redirect
 import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes
+import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.vector.fu.{Func, VecFuConfig}
 
 private[wrapper] class FDivSqrtDpiBlackBox extends BlackBox with HasBlackBoxInline {
@@ -117,36 +118,56 @@ private[wrapper] class FDivSqrtDpi(implicit p: Parameters) extends Module {
   io.fflags := dpiOut(68, 64)
 }
 
-private[wrapper] class FDivSqrtFltDpiPipe(cfg: VecFuConfig, latency: Int = FDivOpcodes.FixedLatency - 1)(implicit p: Parameters) extends Module {
-  require(latency >= 4)
+private[wrapper] class FDivSqrtFltDpiPipe(cfg: VecFuConfig)(implicit p: Parameters) extends Module {
+  private val latency = FDivOpcodes.FixedLatency - 1
   implicit val _cfg: VecFuConfig = cfg
   val io = IO(new Bundle {
     val flush = Flipped(ValidIO(new Redirect))
     val in = Flipped(ValidIO(new Func.OutUop))
+    val fpFormat = Input(UInt(2.W))
     val out = ValidIO(new Func.OutUop)
     val wakeUp = ValidIO(UInt(in.bits.ctrl.pdest.getWidth.W))
   })
 
   private val valid = RegInit(VecInit.fill(latency)(false.B))
   private val data = Reg(Vec(latency, new Func.OutUop))
+  private val format = Reg(Vec(latency, UInt(2.W)))
   private val flushed = Wire(Vec(latency, Bool()))
   flushed := VecInit(valid.zip(data).map { case (v, d) => v && d.ctrl.robIdx.needFlush(io.flush) })
 
   for (i <- 0 until latency) {
     val previousValid = if (i == 0) io.in.valid else valid(i - 1)
     val previousData = if (i == 0) io.in.bits else data(i - 1)
+    val previousFormat = if (i == 0) io.fpFormat else format(i - 1)
     val previousFlushed = if (i == 0) io.in.bits.ctrl.robIdx.needFlush(io.flush) else flushed(i - 1)
     valid(i) := previousValid && !previousFlushed
     when(previousValid && !previousFlushed) {
       data(i) := previousData
+      format(i) := previousFormat
     }
   }
 
-  io.out.valid := valid(latency - 1) && !flushed(latency - 1)
-  io.out.bits := data(latency - 1)
+  private val resultTaps = Seq(
+    VSew.e16 -> (FDivOpcodes.Fp16Latency - 2),
+    VSew.e32 -> (FDivOpcodes.Fp32Latency - 2),
+    VSew.e64 -> (FDivOpcodes.FixedLatency - 2),
+  )
+  private val resultValid = resultTaps.map { case (fpFormat, stage) =>
+    valid(stage) && format(stage) === fpFormat && !flushed(stage)
+  }
+  io.out.valid := resultValid.reduce(_ || _)
+  io.out.bits := Mux1H(resultValid.zip(resultTaps.map { case (_, stage) => data(stage) }))
+
   // The issue pipe registers this once; its M2 wakeup is two cycles ahead of the result.
-  io.wakeUp.valid := valid(latency - 4) && !flushed(latency - 4)
-  io.wakeUp.bits := data(latency - 4).ctrl.pdest
+  private val wakeUpTaps = resultTaps.map { case (fpFormat, stage) => fpFormat -> (stage - 3) }
+  private val wakeUpValid = wakeUpTaps.map { case (fpFormat, stage) =>
+    valid(stage) && format(stage) === fpFormat && !flushed(stage)
+  }
+  io.wakeUp.valid := wakeUpValid.reduce(_ || _)
+  io.wakeUp.bits := Mux1H(wakeUpValid.zip(wakeUpTaps.map { case (_, stage) => data(stage).ctrl.pdest }))
+
+  assert(PopCount(VecInit(resultValid)) <= 1.U, "FDivSqrt DPI results collided")
+  assert(PopCount(VecInit(wakeUpValid)) <= 1.U, "FDivSqrt DPI wakeups collided")
 }
 
 private[wrapper] object FDivSqrtDpiFltCtrl {
