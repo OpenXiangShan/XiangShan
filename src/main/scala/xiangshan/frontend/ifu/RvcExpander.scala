@@ -17,7 +17,7 @@ package xiangshan.frontend.ifu
 
 import chisel3._
 import freechips.rocketchip.rocket.ExpandedInstruction
-import freechips.rocketchip.rocket.RVCDecoder
+import xiangshan.frontend.ifu.RVCDecoder.RVCDecoder
 import org.chipsalliance.cde.config.Parameters
 
 class RvcExpander(implicit p: Parameters) extends IfuModule {
