@@ -109,26 +109,6 @@ class RasStack(implicit p: Parameters) extends RasModule
 
   def getCommitTop(currSsp: UInt): RasEntry = commitStack(commitStackIdx(currSsp))
 
-  def getTopNos(currTosr: RasPtr, currTosw: RasPtr, currInSpec: Bool, allowBypass: Boolean): NosEntry = {
-    val ret = Wire(new NosEntry)
-    if (allowBypass) {
-      when(writeBypassValid) {
-        ret := writeBypassNosEntry
-      }.elsewhen(tosrInRange(currTosr, currTosw, currInSpec)) {
-        ret := specNosList(currTosr.value)
-      }.otherwise {
-        ret := 0.U.asTypeOf(new NosEntry)
-      }
-    } else {
-      when(tosrInRange(currTosr, currTosw, currInSpec)) {
-        ret := specNosList(currTosr.value)
-      }.otherwise {
-        ret := 0.U.asTypeOf(new NosEntry)
-      }
-    }
-    ret
-  }
-
   def getNextNos(
       currNos:        RasPtr,
       currTosr:       RasPtr,
@@ -344,19 +324,22 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.meta.nosInSpec  := nosInSpec
   io.meta.ssp        := ssp
 
-  // The stack is empty iff the top is not in the spec queue and the committed stack has been
-  // fully consumed. `ssp - nsp` is the net in-flight effect; with `StackPtrWidth` wide enough
-  // it is reconstructed exactly by a signed subtraction, so no modular-wrap disambiguation is
-  // needed.
+  // RAS is empty iff TOSR is out of range AND currSsp has not advanced commitDepth steps to reach nsp,
+  // where circular pointer wrap is handled by comparing currSsp +& commitDepth against nsp (or 2^w + nsp).
   private def resolvedEmpty(
       currSsp:    UInt,
       currTosr:   RasPtr,
       currTosw:   RasPtr,
       currInSpec: Bool
   ): Bool = {
-    val speculativeDepth = commitDepth.zext.asSInt + (currSsp.asSInt - nsp.asSInt)
-    !tosrInRange(currTosr, currTosw, currInSpec) && speculativeDepth <= 0.S
-  } // ---- 判空逻辑存在问题，待修改
+    val notInCommitStack = WireInit(false.B)
+    when(nsp >= currSsp) {
+      notInCommitStack := (currSsp +& commitDepth) <= nsp
+    }.otherwise {
+      notInCommitStack := (currSsp +& commitDepth) <= Cat(1.U(1.W), nsp)
+    }
+    !tosrInRange(currTosr, currTosw, currInSpec) && notInCommitStack
+  }
 
   // `resolvedEmpty` is exact, but this flag is registered for timing and is only forced non-empty
   // on push / redirect-call. A valid top is therefore never reported empty, while a pop or ret
@@ -404,13 +387,9 @@ class RasStack(implicit p: Parameters) extends RasModule
     commitStack(commitStackIdx(ptrInc(nspUpdate))).retAddr := commitPushAddr
   }
 
-  private val tmpWriteTosr  = RegEnable(io.commit.metaTosw, io.commit.pushValid)
-  private val tmpWriteValid = RegEnable(io.commit.pushValid, false.B, io.commit.pushValid)
   when(io.commit.pushValid) {
-    bos := io.commit.metaTosw
-    when(tmpWriteValid) {
-      specNosList(tmpWriteTosr.value).inSpec := false.B
-    }
+    bos                                          := io.commit.metaTosw
+    specNosList(io.commit.metaTosw.value).inSpec := false.B
   }.elsewhen(io.commit.valid && (distanceBetween(io.commit.metaTosw, bos) > 2.U)) {
     bos := specPtrDec(io.commit.metaTosw)
   }
