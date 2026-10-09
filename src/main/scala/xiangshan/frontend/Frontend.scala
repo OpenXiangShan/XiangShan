@@ -194,7 +194,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))
   itlb.io.hartId := io.hartId
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
-  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.redirect      := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.robPendingPtr := DontCare // only lsu
   itlb.io.base_connect(sfence, tlbCsr)
 
   private val itlbRequestor = VecInit(Seq(icache.io.itlb))

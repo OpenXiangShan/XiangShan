@@ -252,7 +252,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
 
   def may_be_replace(valid: Bool): Bool = {
     // either invalid or has sent out all reqs out
-    !valid || RegNext(PopCount(sent_vec) === BIT_VEC_WITDH.U)
+    !valid || RegNext(valid) && RegNext(PopCount(sent_vec) === BIT_VEC_WITDH.U)
   }
 
   def get_pf_paddr(forward_sent_vec: UInt): UInt = {
@@ -359,6 +359,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     req.bits.hlvx := DontCare
     req.bits.hyperinst := DontCare
     req.bits.pmp_addr := DontCare
+    req.bits.frm_mabuf := DontCare
   }
 
   val l1_replacement = new ValidPseudoLRU(MLP_L1_SIZE)

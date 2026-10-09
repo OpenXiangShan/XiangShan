@@ -240,7 +240,7 @@ class HstatusBundle extends CSRBundle {
   val VTW   = RW(21).withReset(0.U).withDescription("Trap WFI in VS-mode when set.")
   val VTSR  = RW(22).withReset(0.U).withDescription("Trap SRET in VS-mode when set.")
   val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for VS-mode.")
-  val HUPMM = EnvPMM(49, 48, wNoEffect).withReset(EnvPMM.Disable).withDescription("Hypervisor user-mode memory privilege mode from the Ssnpm extension.")
+  val HUPMM = EnvPMM(49, 48, wNoFilter).withReset(EnvPMM.Disable).withDescription("Hypervisor user-mode memory privilege mode from the Ssnpm extension.")
 
 }
 
