@@ -73,6 +73,20 @@ class MissTrackEntry(implicit p: Parameters) extends DCacheBundle {
   val age = UInt(3.W)
 }
 
+// Query snapshots omit replacement/training metadata. The retained result only
+// needs the selected payload and qualification, not the table key.
+class MissTrackLookupResult(implicit p: Parameters) extends DCacheBundle {
+  val valid = Bool()
+  val block_paddr = UInt((PAddrBits - blockOffBits).W)
+  val is_pending = Bool()
+  val mshr_id = UInt(log2Up(cfg.nMissEntries).W)
+}
+
+class MissTrackLookupEntry(implicit p: Parameters) extends MissTrackLookupResult {
+  val idx = UInt(idxBits.W)
+  val src_hash = UInt(cfg.missTrackHashBits.W)
+}
+
 object MissTrack {
   def balancedHashBitPairs(addr: UInt, hi: Int, lo: Int, step: Int = 2): UInt = {
     require(hi >= lo)
@@ -85,6 +99,21 @@ object MissTrack {
       val xor = ParallelXOR(chunks)
       if (remain == 0) xor else Cat(xor(step - 1, remain), xor(remain - 1, 0) ^ addr(hi, hi - remain + 1))
     }
+  }
+
+  /** One-cycle XOR fold with only small local parity reductions before the
+    * register boundary. Bit positions match XORFold, including a short final
+    * chunk. Registers capture unconditionally so late query valid does not
+    * drive their enables. */
+  def registeredXORFold(addr: UInt, width: Int, maxTerms: Int): UInt = {
+    require(width > 0 && width <= addr.getWidth)
+    require(maxTerms > 0)
+    VecInit((0 until width).map { bit =>
+      val terms = (bit until addr.getWidth by width).map(addr(_))
+      val partials = VecInit(terms.grouped(maxTerms).map(ParallelXOR(_)).toSeq)
+      val s1Partials = RegNext(partials)
+      ParallelXOR(s1Partials.toSeq)
+    }).asUInt
   }
 }
 
@@ -119,6 +148,14 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     case 2 => va(untagBits - 1, blockOffBits)
     case _ => throw new IllegalArgumentException(s"Invalid MissTrack index modeId: $modeId")
   }
+  private def registeredIndex(va: UInt): UInt = modeId match {
+    case 1 => Cat(
+      MissTrack.registeredXORFold(va(PAddrBits - 1, pgIdxBits), 2 min (PAddrBits - pgIdxBits), 6),
+      RegNext(va(pgUntagBits - 1, blockOffBits))
+    )(idxBits - 1, 0)
+    case 2 => RegNext(va(untagBits - 1, blockOffBits))
+    case _ => throw new IllegalArgumentException(s"Invalid MissTrack index modeId: $modeId")
+  }
   private def sameLine(a: MissTrackEntry, b: MissTrackEntry): Bool =
     a.idx === b.idx && a.block_paddr === b.block_paddr
   private def ownerMatches(e: MissTrackEntry): Bool = {
@@ -135,8 +172,42 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
   val previousClear = RegNext(io.clear, false.B)
   val previousAllocs = RegNext(io.alloc, 0.U.asTypeOf(io.alloc))
   val events = Wire(Vec(1 + allocPorts + LoadPipelineWidth, Valid(new MissTrackEntry)))
-  val lookupEntries = Wire(Vec(cfg.missTrackEntries, new MissTrackEntry))
   events := 0.U.asTypeOf(events)
+
+  // All lanes sample the same pre-maintenance table. Never use nextEntries or
+  // the live S1 table here: same-edge allocation/retirement must not affect the
+  // S0 observation. This register-to-register snapshot has no query-VA enable.
+  val lookupTable = Wire(Vec(cfg.missTrackEntries, new MissTrackLookupEntry))
+  for (i <- entries.indices) {
+    lookupTable(i).valid := entries(i).valid
+    lookupTable(i).idx := entries(i).idx
+    lookupTable(i).src_hash := entries(i).src_hash
+    lookupTable(i).block_paddr := entries(i).block_paddr
+    lookupTable(i).is_pending := entries(i).is_pending
+    lookupTable(i).mshr_id := entries(i).mshr_id
+  }
+  val lookupSnapshot = RegNext(lookupTable)
+
+  // A matched entry has a second match iff another valid entry has its key.
+  // Share each unordered comparison and capture collisions with the old table,
+  // removing PopCount from the arriving query's path on all lanes.
+  val sameKeys = (for (i <- entries.indices; j <- 0 until i) yield {
+    (i, j) -> (entries(i).idx === entries(j).idx && entries(i).src_hash === entries(j).src_hash)
+  }).toMap
+  val keyCollisions = VecInit(entries.indices.map { i =>
+    ParallelORR(entries.indices.filter(_ != i).map { j =>
+      entries(j).valid && sameKeys((i max j, i min j))
+    })
+  })
+  val collisionSnapshot = RegNext(keyCollisions)
+  val lookupPayloads = lookupSnapshot.map { e =>
+    val payload = Wire(new MissTrackLookupResult)
+    payload.valid := e.valid
+    payload.block_paddr := e.block_paddr
+    payload.is_pending := e.is_pending
+    payload.mshr_id := e.mshr_id
+    payload
+  }
 
   def makeEntry(va: UInt, pa: UInt, way: UInt, pending: Bool, id: UInt): MissTrackEntry = {
     val e = WireDefault(0.U.asTypeOf(new MissTrackEntry))
@@ -178,16 +249,24 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
       !overlaps(truthIdx, truth.way, io.invalidate) &&
       !overlaps(truthIdx, truth.way, previousInvalidate)
 
-    val queryIdx = index(q.s0_vaddr)
-    val queryHash = hash(q.s0_vaddr)
-    val matches = VecInit(lookupEntries.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
-    val matchCount = PopCount(matches)
-    val unique = matchCount === 1.U
-    // The payload is ignored on zero or multiple matches.
-    val candidate = WireDefault(ParallelMux(matches.zip(lookupEntries)))
-    candidate.valid := q.s0_valid && unique && !io.clear
-    val s1 = RegEnable(candidate, q.s0_valid)
-    val s1Multi = RegEnable(matchCount > 1.U, q.s0_valid)
+    val queryIdx = registeredIndex(q.s0_vaddr)
+    val queryHash = MissTrack.registeredXORFold(q.s0_vaddr(VAddrBits - 1, untagBits), cfg.missTrackHashBits, 4)
+    val sampled = RegNext(q.s0_valid, false.B)
+    val matches = VecInit(lookupSnapshot.map(e => e.valid && e.idx === queryIdx && e.src_hash === queryHash))
+    val multi = ParallelORR(matches.zip(collisionSnapshot).map { case (hit, collision) => hit && collision })
+    val unique = ParallelORR(matches) && !multi
+    // Four-entry local muxes preserve masked-OR payloads even on multiple hits.
+    val payloadGroups = matches.zip(lookupPayloads).grouped(4).map(ParallelMux(_)).toSeq
+    val candidate = WireDefault(ParallelOR(payloadGroups))
+    candidate.valid := unique && !previousClear
+
+    // A new query uses the current S1 reconstruction directly, without another
+    // request cycle. Save that result at the next edge solely to preserve the
+    // old RegEnable behavior on bubbles while the shared snapshot keeps moving.
+    val retained = RegEnable(candidate, sampled)
+    val retainedMulti = RegEnable(multi, sampled)
+    val s1 = Mux(sampled, candidate, retained)
+    val s1Multi = Mux(sampled, multi, retainedMulti)
     val s1PaMatch = s1.valid && s1.block_paddr === block(q.s1_paddr)
     io.spec(w).valid := q.s1_valid && !io.clear && !s1Multi
     io.spec(w).resident := s1.valid && !s1.is_pending && s1PaMatch
@@ -267,8 +346,7 @@ class MissTrack(allocPorts: Int)(implicit p: Parameters) extends DCacheModule {
     }
   }
   when (io.clear) { nextEntries.foreach(_.valid := false.B) }
-  // Table maintenance becomes visible to queries after the register boundary.
-  lookupEntries := entries
+  // Table maintenance becomes visible to following S0 queries after this edge.
   entries := nextEntries
 
   // Hash collisions are allowed; duplicate (physical block, cache set) records aren't.
