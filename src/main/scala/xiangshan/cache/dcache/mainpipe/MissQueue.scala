@@ -2029,7 +2029,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val acquireSources = Seq(cmoAcquire) ++ pipeAcquires ++ entryAcquires
       val acquirePayloadGroupSizes =
         Seq(acquireSources.take(5).size) ++ acquireSources.drop(5).grouped(4).map(_.size).toSeq
-      TLArbiter.lowestHierarchical(edge, io.mem_acquire(ch), acquirePayloadGroupSizes,
+      DCacheAcquireArbiter(edge, io.mem_acquire(ch), acquirePayloadGroupSizes,
         acquireSources:_*)
       TLArbiter.lowest(edge, io.mem_finish(ch), finishes:_*)
     }
@@ -2037,7 +2037,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
     val acquirePayloadGroupSizes =
       Seq(acquire_sources.take(5).size) ++ acquire_sources.drop(5).grouped(4).map(_.size).toSeq
-    TLArbiter.lowestHierarchical(edge, io.mem_acquire(0), acquirePayloadGroupSizes,
+    DCacheAcquireArbiter(edge, io.mem_acquire(0), acquirePayloadGroupSizes,
       acquire_sources:_*)
     TLArbiter.lowest(edge, io.mem_finish(0), entries.map(_.io.mem_finish):_*)
   }
