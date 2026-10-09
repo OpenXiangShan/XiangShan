@@ -159,6 +159,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // find the alt, the table with the second longest history among the hit tables
     val hitTableMaskNoProvider = hitTableMask & (~providerTableOH)
     val hasAlt                 = hasProvider && ParallelORR(hitTableMaskNoProvider)
+    val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider.asBools)
     val alt = ParallelPriorityMux(
       hitTableMaskNoProvider.asBools.zip(allTableTagMatchResults).reverse
     )
@@ -178,15 +179,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.toSc.providerTakenCtrVec(i).valid := (hasProvider && branch.valid) && io.enable
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
-    io.meta.entries(i).useProvider       := useProvider
-    io.meta.entries(i).hasProvider       := hasProvider
-    io.meta.entries(i).hasAlt            := hasAlt
-    io.meta.entries(i).providerTableIdx  := providerTableIdx
-    io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
+    io.meta.entries(i).useAltOnNa := useAltOnNa
+    io.meta.entries(i).providerLocation := encodeProviderLocation(
+      hasProvider,
+      providerTableOH.asBools,
+      provider.hitWayMaskOH
+    )
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
-    io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
-    io.meta.entries(i).altConf           := altConf
+    io.meta.entries(i).altLocation       := encodeAltLocation(hasAlt, altTableOH, alt.hitWayMaskOH)
+    io.meta.entries(i).altTakenCtr       := alt.takenCtr
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -223,15 +225,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
-  // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
-  // table entry is needed, or when the prediction was wrong and allocation state is needed.
+  // Meta now stores provider and alt state, so training can skip SRAM re-read unless
+  // there is a mispredict (needed for allocation / full table state).
   private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
-    val mbtbHit      = t0_mbtbHitMask(i)
-    val isCond       = t0_condMask(i)
-    val useProvider  = t0_meta(i).useProvider
-    val hasAlt       = t0_meta(i).hasAlt
-    val mispredicted = branch.bits.mispredict
-    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+    val mbtbHit = t0_mbtbHitMask(i)
+    val isCond  = t0_condMask(i)
+    isCond && branch.bits.mispredict && mbtbHit
   }.reduce(_ || _)
   private val t0_useMeta = !t0_needRead
 
@@ -364,25 +363,27 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altTableOH = Wire(UInt(NumTables.W))
     val alt        = Wire(new TrainTagMatchResult)
 
-    val useProvider   = Wire(Bool())
-    val useAlt        = Wire(Bool())
-    val altOrBasePred = Wire(Bool())
+    val (metaHasProvider, metaProviderTableOH, metaProviderWayOH) = decodeProviderLocation(meta.providerLocation)
+    val (metaHasAlt, metaAltTableOH, metaAltWayOH)                = decodeAltLocation(meta.altLocation)
 
     when(t2_useMeta) {
-      hasProvider     := meta.hasProvider
-      providerTableOH := Mux(meta.hasProvider, UIntToOH(meta.providerTableIdx, NumTables), 0.U)
+      hasProvider     := metaHasProvider
+      providerTableOH := metaProviderTableOH
 
-      provider.hit          := meta.hasProvider
-      provider.hitWayMaskOH := Mux(meta.hasProvider, UIntToOH(meta.providerWayIdx, MaxNumWays), 0.U)
-      provider.tag          := t2_rawTag(meta.providerTableIdx) ^ position
+      provider.hit          := metaHasProvider
+      provider.hitWayMaskOH := metaProviderWayOH
+      provider.tag          := t2_rawTag(OHToUInt(metaProviderTableOH)) ^ position
       provider.takenCtr     := meta.providerTakenCtr
       provider.usefulCtr    := meta.providerUsefulCtr
 
-      hasAlt     := false.B
-      altTableOH := 0.U
-      alt        := 0.U.asTypeOf(new TrainTagMatchResult)
+      hasAlt     := metaHasAlt
+      altTableOH := metaAltTableOH
 
-      altOrBasePred := meta.altOrBasePred
+      alt.hit          := metaHasAlt
+      alt.hitWayMaskOH := metaAltWayOH
+      alt.tag          := t2_rawTag(OHToUInt(metaAltTableOH)) ^ position
+      alt.takenCtr     := meta.altTakenCtr
+      alt.usefulCtr    := UsefulCounter.Zero
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
@@ -392,15 +393,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       hasAlt     := hasProvider && hitTableMaskNoProvider.reduce(_ || _)
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
-
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
     }
 
-    val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
-    val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
-    useProvider := Mux(t2_useMeta, meta.useProvider, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
-    useAlt      := !t2_useMeta && !useProvider && hasAlt
+    val altOrBasePred     = Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
+    val altConf           = Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate)
+    val useAltOnNaIdx     = Cat(OHToUInt(providerTableOH), altConf)
+    val currentUseAltOnNa = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val useAltOnNa        = Mux(t2_useMeta, meta.useAltOnNa, currentUseAltOnNa)
+    val useProvider       = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
+    val useAlt            = !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
     val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
@@ -538,7 +539,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     t3_canAllocateTableMask
   )
   private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
-  private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
+  private val t3_allTableCanAllocateWayMaskPadded = t3_allTableCanAllocateWayMask.map { mask =>
+    val padded = Wire(UInt(MaxNumWays.W))
+    padded := mask
+    padded
+  }
+  private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMaskPadded)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
   dontTouch(t3_allocateTableOH)
   dontTouch(t3_allocateWayOH)
