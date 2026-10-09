@@ -25,6 +25,7 @@ import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.tage.TageMeta
 
 trait Helpers extends HasScParameters with PhrHelper {
   def sign(x: SInt): Bool = x(x.getWidth - 1)
@@ -66,7 +67,8 @@ trait Helpers extends HasScParameters with PhrHelper {
       takenMask:     Vec[Bool],
       wayIdxVec:     Vec[UInt],
       branchIdxVec:  Vec[UInt],
-      metaData:      ScMeta
+      scMeta:        ScMeta,
+      tageMeta:      TageMeta
   ): Vec[ScEntry] = {
     require(
       writeValidVec.length == takenMask.length &&
@@ -80,8 +82,8 @@ trait Helpers extends HasScParameters with PhrHelper {
     val writeDirMask  = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
     writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).zipWithIndex.foreach {
       case ((((valid, taken), writeIdx), oldIdx), i) =>
-        val needUpdate = valid && metaData.tagePredValid(oldIdx) &&
-          (metaData.scPred(oldIdx) =/= taken || !metaData.sumAboveThres(oldIdx))
+        val needUpdate = valid && tageMeta.entries(oldIdx).hasProvider &&
+          (scMeta.scPred(oldIdx) =/= taken || !scMeta.sumAboveThres(oldIdx))
         writeNeedMask(i)(writeIdx) := needUpdate
         writeDirMask(i)(writeIdx)  := taken
     }

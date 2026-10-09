@@ -328,9 +328,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.scBiasLowerBits := RegEnable(s2_biasIdxLowBits, s2_fire)
 
   io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
-  io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
-  io.meta.tageCtr       := RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
-  io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
 
@@ -351,6 +348,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
   private val t0_fire     = io.stageCtrl.t0_fire && io.enable
   private val t0_meta     = io.train.meta.sc
+  private val t0_tageMeta = io.train.meta.tage
   private val t0_commonHR = io.train.meta.commonHR
   private val t0_bankMask = getBankMask(io.train.startPc)
   private val t0_pathIdx = PathTableInfos.zip(pathTable).map { case (info, table) =>
@@ -388,9 +386,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t0_writeValidVec =
     VecInit(t0_branches.zip(t0_branchesScIdxHitVec).zip(t0_branchesScIdxVec).zip(t0_writeTakenVec).map {
       case (((b, hit), predIdx), taken) =>
-        b.valid && b.bits.attribute.isConditional && hit && t0_meta.tagePredValid(predIdx) &&
-        (!(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === taken) || !(t0_meta.useScPred(predIdx) &&
-          t0_meta.tagePredValid(predIdx) && t0_meta.scPred(predIdx) === t0_meta.tagePred(predIdx)))
+        val tagePredValid = t0_tageMeta.entries(predIdx).hasProvider
+        val tagePred      = t0_tageMeta.entries(predIdx).providerPred
+        // Parent-equivalent writeValid (tagePredValid factored out of the second clause):
+        // !(useSc && scPred===taken) || !(useSc && scPred===tagePred)
+        b.valid && b.bits.attribute.isConditional && hit && tagePredValid &&
+        (!(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === taken) ||
+          !(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === tagePred))
     })
   private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
   private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
@@ -427,6 +429,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_fire     = RegNext(t0_fire, false.B)
   private val t1_branches = RegEnable(io.train.branches, t0_fire)
   private val t1_meta     = RegEnable(t0_meta, 0.U.asTypeOf(t0_meta), t0_fire)
+  private val t1_tageMeta = RegEnable(t0_tageMeta, 0.U.asTypeOf(t0_tageMeta), t0_fire)
   private val t1_commonHR = RegEnable(t0_commonHR, t0_fire)
   private val t1_startPc  = RegEnable(io.train.startPc, t0_fire)
 
@@ -493,7 +496,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
     case ((((valid, taken), writeIdx), oldIdx), i) =>
       val scWrong = taken =/= t1_meta.scPred(oldIdx)
-      val needUpdate = valid && t1_meta.tagePredValid(oldIdx) &&
+      val needUpdate = valid && t1_tageMeta.entries(oldIdx).hasProvider &&
         (scWrong || !t1_meta.sumAboveThres(oldIdx))
       thresholdWayMask(i)(writeIdx) := needUpdate
       thresholdDirMask(i)(writeIdx) := scWrong
@@ -526,7 +529,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         t1_writeTakenVec,
         t1_branchesWayIdxVec,
         t1_branchesScIdxVec,
-        t1_meta
+        t1_meta,
+        t1_tageMeta
       )
   }
   dontTouch(t1_writePathEntryVec)
@@ -543,7 +547,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         t1_writeTakenVec,
         t1_branchesWayIdxVec,
         t1_branchesScIdxVec,
-        t1_meta
+        t1_meta,
+        t1_tageMeta
       )
   }
 
@@ -558,7 +563,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         t1_writeTakenVec,
         t1_branchesWayIdxVec,
         t1_branchesScIdxVec,
-        t1_meta
+        t1_meta,
+        t1_tageMeta
       )
   }
 
@@ -568,7 +574,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     t1_writeTakenVec,
     t1_branchesWayIdxVec,
     t1_branchesScIdxVec,
-    t1_meta
+    t1_meta,
+    t1_tageMeta
   )
 
   // calculate bias table new entries and wayMask
@@ -582,7 +589,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
     case ((((valid, taken), writeIdx), oldIdx), i) =>
       val biasWayIdx = Cat(writeIdx, t1_oldBiasLowBits(oldIdx))
-      val needUpdate = valid && t1_meta.tagePredValid(oldIdx) &&
+      val needUpdate = valid && t1_tageMeta.entries(oldIdx).hasProvider &&
         (t1_meta.scPred(oldIdx) =/= taken || !t1_meta.sumAboveThres(oldIdx))
       writeBiasWayMask(i)(biasWayIdx) := needUpdate
       writeBiasDirMask(i)(biasWayIdx) := taken
@@ -715,8 +722,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   for (i <- 0 until ResolveEntryBranchNumber) {
     val branchWayIdx = t1_branchesScIdxVec(i)
     when(t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)) {
-      tageCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.tagePred(branchWayIdx)
-      tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.tagePred(branchWayIdx)
+      tageCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_tageMeta.entries(branchWayIdx).providerPred
+      tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_tageMeta.entries(branchWayIdx).providerPred
       scCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPred(branchWayIdx)
       scWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= t1_meta.scPred(branchWayIdx)
       trainUseScVec(branchWayIdx)  := true.B
@@ -864,9 +871,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     trace.bits.startPc := t1_startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
-    trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
-    trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
-    trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
+    trace.bits.providerValid := t1_tageMeta.entries(predWayIdx).hasProvider
+    trace.bits.providerTaken := t1_tageMeta.entries(predWayIdx).providerPred
+    trace.bits.providerCtr   := t1_tageMeta.entries(predWayIdx).providerTakenCtr.value
 
     trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(predWayIdx).asUInt))
     trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(predWayIdx).asUInt))
