@@ -74,28 +74,22 @@ trait Helpers extends HasScParameters with PhrHelper {
   // Accumulate update information for multiple branches using update methods
   def updateEntry(
       oldEntries:    Vec[ScEntry],
-      writeValidVec: Vec[Bool],
+      needUpdateVec: Vec[Bool],
       takenMask:     Vec[Bool],
-      wayIdxVec:     Vec[UInt],
-      branchIdxVec:  Vec[UInt],
-      scMeta:        ScMeta,
-      tageMeta:      TageMeta
+      wayIdxVec:     Vec[UInt]
   ): Vec[ScEntry] = {
     require(
-      writeValidVec.length == takenMask.length &&
-        writeValidVec.length == wayIdxVec.length &&
-        writeValidVec.length == branchIdxVec.length,
-      "Length of writeValidVec, takenMask, wayIdxVec and branchIdxVec should be the same"
+      needUpdateVec.length == takenMask.length &&
+        needUpdateVec.length == wayIdxVec.length,
+      "Length of needUpdateVec, takenMask and wayIdxVec should be the same"
     )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
     // For each resolved branch, record its update direction, update requirement, and target way.
-    val writeNeedMask = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
-    val writeDirMask  = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
-    writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).zipWithIndex.foreach {
-      case ((((valid, taken), writeIdx), oldIdx), i) =>
-        val needUpdate = valid && tageMeta.entries(oldIdx).hasProvider &&
-          (scMeta.scPred(oldIdx) =/= taken || !scMeta.sumAboveThres(oldIdx))
-        writeNeedMask(i)(writeIdx) := needUpdate
+    val writeNeedMask = VecInit(Seq.fill(needUpdateVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    val writeDirMask  = VecInit(Seq.fill(needUpdateVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    needUpdateVec.zip(takenMask).zip(wayIdxVec).zipWithIndex.foreach {
+      case (((doUpdate, taken), writeIdx), i) =>
+        writeNeedMask(i)(writeIdx) := doUpdate
         writeDirMask(i)(writeIdx)  := taken
     }
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), i) =>
@@ -149,27 +143,17 @@ trait Helpers extends HasScParameters with PhrHelper {
     branchesScIdxVec
   }
 
-  def getWriteValidVec(train: Train, branchesScIdxVec: Vec[Valid[UInt]]): Vec[Bool] = {
+  def getNeedUpdateVec(train: Train, branchesScIdxVec: Vec[Valid[UInt]]): Vec[Bool] = {
     val branches = train.branches
     val scMeta   = train.meta.sc
-    val tageMeta = train.meta.tage.entries
+    val tageMeta = train.meta.tage
 
+    // Same condition as table/threshold/bias updates and TrainingBuffer needRead.
     VecInit(branches.zip(branchesScIdxVec).map { case (branch, idx) =>
-      val hit           = idx.valid
-      val tagePredValid = tageMeta(idx.bits).hasProvider
-      val tagePred      = tageMeta(idx.bits).providerPred
-      val useScPred     = scMeta.useScPred(idx.bits)
-      val scPred        = scMeta.scPred(idx.bits)
-      val isCond        = branch.valid && branch.bits.attribute.isConditional
-      val taken         = branch.bits.taken
-
-      // Equivalent to the pre-TrainingBuffer writeValid condition, with tagePredValid
-      // already required outside the parentheses (parent also AND-ed tagePredValid):
-      //   !(useScPred && scPred === taken) || !(useScPred && scPred === tagePred)
-      // i.e. train when SC is unused, or SC disagrees with taken, or SC disagrees with TAGE.
-      isCond && hit && tagePredValid && (
-        !(useScPred && scPred === taken) || !(useScPred && scPred === tagePred)
-      )
+      val hit    = idx.valid
+      val isCond = branch.valid && branch.bits.attribute.isConditional
+      isCond && hit && tageMeta.entries(idx.bits).hasProvider &&
+        (scMeta.scPred(idx.bits) =/= branch.bits.taken || !scMeta.sumAboveThres(idx.bits))
     })
   }
 

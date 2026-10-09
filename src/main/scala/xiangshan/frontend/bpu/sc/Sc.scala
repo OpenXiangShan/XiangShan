@@ -356,10 +356,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
 
   private val incomingBranchesScIdxVec = getBranchesScIdxVec(io.train.bits)
-  private val incomingWriteValidVec    = getWriteValidVec(io.train.bits, incomingBranchesScIdxVec)
-  private val incomingNeedRead         = incomingWriteValidVec.reduce(_ || _)
-  private val incomingBankIdx          = getBankIndex(io.train.bits.startPc)
-  private val incomingFoldedPathHist   = getFoldedHist(io.trainFoldedPathHist)
+  private val incomingNeedUpdateVec    = getNeedUpdateVec(io.train.bits, incomingBranchesScIdxVec)
+  private val incomingNeedRead         = incomingNeedUpdateVec.reduce(_ || _)
+  private val incomingBankIdx        = getBankIndex(io.train.bits.startPc)
+  private val incomingFoldedPathHist = getFoldedHist(io.trainFoldedPathHist)
 
   private val trainingBuffer = Module(new TrainingBuffer(
     new Bundle {
@@ -403,15 +403,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t0_writeTakenVec =
     VecInit(t0_train.branches.map(b => b.valid && b.bits.taken && b.bits.attribute.isConditional))
   private val t0_branchesScIdxVec = getBranchesScIdxVec(t0_train)
-  private val t0_writeValidVec    = getWriteValidVec(t0_train, t0_branchesScIdxVec)
+  private val t0_needUpdateVec    = getNeedUpdateVec(t0_train, t0_branchesScIdxVec)
   private val t0_needRead         = trainingBuffer.io.deq.bits.needRead
   private val t0_bankConflict     = t0_fire && t0_needRead && s0_fire && t0_bankMask === s0_bankMask
   s0_forceTraining := trainingBuffer.io.forceTraining
-
-  assert(
-    !t0_fire || t0_needRead === t0_writeValidVec.reduce(_ || _),
-    "buffered SC needRead must match the training request"
-  )
 
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needRead && PathEnable.B
@@ -488,9 +483,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_branchesScIdxVec  = RegEnable(t0_branchesScIdxVec, t0_fire)
 
   private val t1_writeTakenVec    = RegEnable(t0_writeTakenVec, t0_fire)
-  private val t1_writeValidVecReg = RegEnable(t0_writeValidVec, t0_fire)
-  private val t1_writeValidVec    = VecInit(t1_writeValidVecReg.map(_ && t1_fire))
-  private val t1_writeValid       = t1_writeValidVec.reduce(_ || _)
+  private val t1_needUpdateVecReg = RegEnable(t0_needUpdateVec, t0_fire)
+  private val t1_needUpdateVec    = VecInit(t1_needUpdateVecReg.map(_ && t1_fire))
+  private val t1_needUpdate       = t1_needUpdateVec.reduce(_ || _)
 
   require(
     t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumWays),
@@ -508,12 +503,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumWays)(false.B))))
   private val thresholdDirMask =
     VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumWays)(false.B))))
-  t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
-    case ((((valid, taken), writeIdx), oldIdx), i) =>
+  t1_needUpdateVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
+    case ((((doUpdate, taken), writeIdx), oldIdx), i) =>
       val scWrong = taken =/= t1_meta.scPred(oldIdx.bits)
-      val needUpdate = valid && t1_tageMeta.entries(oldIdx.bits).hasProvider &&
-        (scWrong || !t1_meta.sumAboveThres(oldIdx.bits))
-      thresholdWayMask(i)(writeIdx) := needUpdate
+      thresholdWayMask(i)(writeIdx) := doUpdate
       thresholdDirMask(i)(writeIdx) := scWrong
   }
   scThreshold.zip(t1_writeThresVec).zipWithIndex.foreach { case ((oldEntry, newEntry), i) =>
@@ -540,12 +533,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
       writeEntries := updateEntry(
         oldEntries,
-        t1_writeValidVec,
+        t1_needUpdateVec,
         t1_writeTakenVec,
-        t1_branchesWayIdxVec,
-        VecInit(t1_branchesScIdxVec.map(_.bits)),
-        t1_meta,
-        t1_tageMeta
+        t1_branchesWayIdxVec
       )
   }
   dontTouch(t1_writePathEntryVec)
@@ -558,12 +548,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
       writeEntries := updateEntry(
         oldEntries,
-        t1_writeValidVec,
+        t1_needUpdateVec,
         t1_writeTakenVec,
-        t1_branchesWayIdxVec,
-        VecInit(t1_branchesScIdxVec.map(_.bits)),
-        t1_meta,
-        t1_tageMeta
+        t1_branchesWayIdxVec
       )
   }
 
@@ -574,23 +561,17 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
       writeEntries := updateEntry(
         oldEntries,
-        t1_writeValidVec,
+        t1_needUpdateVec,
         t1_writeTakenVec,
-        t1_branchesWayIdxVec,
-        VecInit(t1_branchesScIdxVec.map(_.bits)),
-        t1_meta,
-        t1_tageMeta
+        t1_branchesWayIdxVec
       )
   }
 
   private val t1_writeImliEntryVec = updateEntry(
     t1_oldImliEntries,
-    t1_writeValidVec,
+    t1_needUpdateVec,
     t1_writeTakenVec,
-    t1_branchesWayIdxVec,
-    VecInit(t1_branchesScIdxVec.map(_.bits)),
-    t1_meta,
-    t1_tageMeta
+    t1_branchesWayIdxVec
   )
 
   // calculate bias table new entries and wayMask
@@ -598,15 +579,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   // For each reslove branch, record its update direction, whether it has been updated, and which way it has been updated to
   private val writeBiasWayMask =
-    VecInit(Seq.fill(t1_writeValidVec.length)(VecInit(Seq.fill(t1_oldBiasEntries.length)(false.B))))
+    VecInit(Seq.fill(t1_needUpdateVec.length)(VecInit(Seq.fill(t1_oldBiasEntries.length)(false.B))))
   private val writeBiasDirMask =
-    VecInit(Seq.fill(t1_writeValidVec.length)(VecInit(Seq.fill(t1_oldBiasEntries.length)(false.B))))
-  t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
-    case ((((valid, taken), writeIdx), oldIdx), i) =>
+    VecInit(Seq.fill(t1_needUpdateVec.length)(VecInit(Seq.fill(t1_oldBiasEntries.length)(false.B))))
+  t1_needUpdateVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
+    case ((((doUpdate, taken), writeIdx), oldIdx), i) =>
       val biasWayIdx = Cat(writeIdx, t1_oldBiasLowBits(oldIdx.bits))
-      val needUpdate = valid && t1_tageMeta.entries(oldIdx.bits).hasProvider &&
-        (t1_meta.scPred(oldIdx.bits) =/= taken || !t1_meta.sumAboveThres(oldIdx.bits))
-      writeBiasWayMask(i)(biasWayIdx) := needUpdate
+      writeBiasWayMask(i)(biasWayIdx) := doUpdate
       writeBiasDirMask(i)(biasWayIdx) := taken
   }
   t1_oldBiasEntries.zip(t1_writeBiasEntryVec).zipWithIndex.foreach { case ((oldEntry, newEntry), i) =>
@@ -623,14 +602,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(writeBiasDirMask)
   dontTouch(t1_writeBiasEntryVec)
 
-  when(t1_writeValid) {
+  when(t1_needUpdate) {
     scThreshold := t1_writeThresVec
   }
 
   /*
    *  train pipeline stage 2
    */
-  private val t2_writeValid          = RegNext(t1_writeValid, false.B)
+  private val t2_needUpdate          = RegNext(t1_needUpdate, false.B)
   private val t2_bankMask            = RegEnable(t1_bankMask, t1_fire)
   private val t2_pathSetIdx          = RegEnable(t1_pathSetIdx, t1_fire)
   private val t2_globalSetIdx        = RegEnable(t1_globalSetIdx, t1_fire)
@@ -672,7 +651,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   // new entries write back to tables
   pathTable.zip(t2_pathSetIdx).zip(t2_writePathEntryVec).zip(t2_writePathWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t2_writeValid && PathEnable.B
+      table.io.update.valid    := t2_needUpdate && PathEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
@@ -681,7 +660,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   globalTable.zip(t2_globalSetIdx).zip(t2_writeGlobalEntryVec).zip(t2_writeGlobalEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t2_writeValid && t2_commonHR.valid && GlobalEnable.B
+      table.io.update.valid    := t2_needUpdate && t2_commonHR.valid && GlobalEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
@@ -690,20 +669,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   bwTable.zip(t2_bwSetIdx).zip(t2_writeBWEntryVec).zip(t2_writeBWEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t2_writeValid && t2_commonHR.valid && BWEnable.B
+      table.io.update.valid    := t2_needUpdate && t2_commonHR.valid && BWEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
       table.io.update.entryVec := writeEntries
   }
 
-  imliTable.io.update.valid    := t2_writeValid && ImliEnable.B
+  imliTable.io.update.valid    := t2_needUpdate && ImliEnable.B
   imliTable.io.update.setIdx   := t2_imliSetIdx
   imliTable.io.update.bankMask := t2_bankMask
   imliTable.io.update.wayMask  := t2_writeImliWayMask
   imliTable.io.update.entryVec := t2_writeImliEntryVec
 
-  biasTable.io.update.valid    := t2_writeValid && BiasEnable.B
+  biasTable.io.update.valid    := t2_needUpdate && BiasEnable.B
   biasTable.io.update.setIdx   := t2_biasSetIdx
   biasTable.io.update.bankMask := t2_bankMask
   biasTable.io.update.wayMask  := t2_writeBiasWayMask
@@ -736,7 +715,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   // foreach train branches
   for (i <- 0 until ResolveEntryBranchNumber) {
     val branchWayIdx = t1_branchesScIdxVec(i).bits
-    when(t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)) {
+    when(t1_meta.useScPred(branchWayIdx) && t1_needUpdateVec(i)) {
       tageCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_tageMeta.entries(branchWayIdx).providerPred
       tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_tageMeta.entries(branchWayIdx).providerPred
       scCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPred(branchWayIdx)
@@ -761,7 +740,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
       scUsedVec(branchWayIdx) := true.B
     }.otherwise {
-      scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)
+      scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_needUpdateVec(i)
     }
   }
   // foreach write way
@@ -797,15 +776,15 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSPerfAccumulate(s"sc_bias_correct${i}", scBiasCorrectVec(i))
     XSPerfAccumulate(s"sc_bias_wrong${i}", scBiasWrongVec(i))
 
-    XSPerfAccumulate(s"path_table_change${i}", t1_writeValid && pChange)
-    XSPerfAccumulate(s"global_table_change${i}", t1_writeValid && gChange)
-    // XSPerfAccumulate(s"bias_table_change${i}", t1_writeValid && bChange)
-    XSPerfAccumulate(s"sc_train${i}", t1_writeValid && changeVec(i))
+    XSPerfAccumulate(s"path_table_change${i}", t1_needUpdate && pChange)
+    XSPerfAccumulate(s"global_table_change${i}", t1_needUpdate && gChange)
+    // XSPerfAccumulate(s"bias_table_change${i}", t1_needUpdate && bChange)
+    XSPerfAccumulate(s"sc_train${i}", t1_needUpdate && changeVec(i))
   }
 
   XSPerfSeqAccumulate(
     "total",
-    t1_writeValid,
+    t1_needUpdate,
     Seq(
       ("sc_train", changeVec.reduce(_ || _)),
       ("train_use_sc", trainUseScVec.reduce(_ || _)),
@@ -845,8 +824,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate(s"total_sc_bias_correct", scBiasCorrectVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_bias_wrong", scBiasWrongVec.reduce(_ || _))
 
-  XSPerfAccumulate(s"threshold_try_overflow", t1_writeValid && t1_thresholdOverflowVec.reduce(_ || _))
-  XSPerfAccumulate(s"threshold_try_underflow", t1_writeValid && t1_thresholdUnderflowVec.reduce(_ || _))
+  XSPerfAccumulate(s"threshold_try_overflow", t1_needUpdate && t1_thresholdOverflowVec.reduce(_ || _))
+  XSPerfAccumulate(s"threshold_try_underflow", t1_needUpdate && t1_thresholdUnderflowVec.reduce(_ || _))
 
   dontTouch(s2_sumPercsum)
   dontTouch(s2_totalPercsum)
@@ -859,14 +838,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(scCorrectVec)
   dontTouch(scWrongVec)
 
-  private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
+  private val sc_path_predIdx_diff_trainIdx = t1_needUpdate && (t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
     case (predIdx, trainIdx) => predIdx =/= trainIdx
   }.reduce(_ || _))
   private val sc_global_predIdx_diff_trainIdx =
-    t1_writeValid && (t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
+    t1_needUpdate && (t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
       case (predIdx, trainIdx) => predIdx =/= trainIdx
     }.reduce(_ || _))
-  private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
+  private val sc_bias_predIdx_diff_trainIdx = t1_needUpdate && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
 
   dontTouch(sc_path_predIdx_diff_trainIdx)
   dontTouch(sc_global_predIdx_diff_trainIdx)
@@ -883,7 +862,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
     val predWayIdx = t1_branchesScIdxVec(i).bits
-    trace.valid        := t1_writeValidVec(i)
+    trace.valid        := t1_needUpdateVec(i)
     trace.bits.startPc := t1_startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
