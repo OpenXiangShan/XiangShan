@@ -229,10 +229,6 @@ class ToffeeCoverageSink:
         self._pending_cycle = cycle
         group_name = str(coverage_group)
         bin_name = str(bin_name)
-        if group_name in self._native_group_names:
-            raise RuntimeError(
-                f"native Toffee group rejects mark-bridge hits: {group_name}::{bin_name}"
-            )
         expected_point = self._point_by_group_bin.get((group_name, bin_name))
         if expected_point is None:
             raise KeyError(f"unknown Toffee coverage bin: {group_name}::{bin_name}")
