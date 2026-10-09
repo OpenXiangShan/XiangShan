@@ -46,6 +46,10 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+  // Computed before the producer's request register and carried with vaddr.
+  // MissQueue comparisons must not re-hash a registered address on the A path.
+  val vaddrAlias = UInt(math.max(1, blockOffBits + idxBits - pgIdxBits).W)
+  val vaddrSet = UInt((DCacheAboveIndexOffset - DCacheSetOffset).W)
   val pc = UInt(VAddrBits.W)
 
   val lqIdx = new LqPtr
@@ -168,11 +172,18 @@ trait HasMissReqFunction extends HasDCacheParameters
   }
 
   def aliasMatch(req: MissReqWoStoreData, new_req: MissReqWoStoreData): Bool = {
-    is_alias_match(req.vaddr, new_req.vaddr)
+    req.vaddrAlias === new_req.vaddrAlias
   }
 
   def setMatch(req: MissReqWoStoreData, new_req: MissReqWoStoreData): Bool = {
-    addr_to_dcache_set(req.vaddr) === addr_to_dcache_set(new_req.vaddr)
+    req.vaddrSet === new_req.vaddrSet
+  }
+
+  def assertAddressMetadata(req: MissReqWoStoreData, valid: Bool): Unit = {
+    when (valid) {
+      assert(req.vaddrAlias === get_alias(req.vaddr), "MissReq alias must match its vaddr")
+      assert(req.vaddrSet === addr_to_dcache_set(req.vaddr), "MissReq set must match its vaddr")
+    }
   }
 
   // Passing in "req" is to accommodate two different scenarios: MissEntry and MissQueue
@@ -305,7 +316,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     )._2
     acquire := Mux(req.full_overwrite, acquirePerm, acquireBlock)
     // resolve cache alias by L2
-    acquire.user.lift(AliasKey).foreach(_ :=  get_alias(req.vaddr))
+    acquire.user.lift(AliasKey).foreach(_ := req.vaddrAlias)
     // pass vaddr to l2
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // pass pc to l2
@@ -332,11 +343,11 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
   }
 
   def block_and_alias_match(releaseReq: MissQueueBlockReqBundle): Bool = {
-    reg_valid() && get_block(req.addr) === get_block(releaseReq.addr) && is_alias_match(req.vaddr, releaseReq.vaddr)
+    reg_valid() && get_block(req.addr) === get_block(releaseReq.addr) && req.vaddrAlias === get_alias(releaseReq.vaddr)
   }
 
   def evict_set_match(evict_set: UInt): Bool = {
-    reg_valid() && req.isBtoT && addr_to_dcache_set(req.vaddr) === evict_set
+    reg_valid() && req.isBtoT && req.vaddrSet === evict_set
   }
 }
 
@@ -542,7 +553,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_primary_fire = Reg(new MissReqWoStoreData) // for perf use
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
-  val set = addr_to_dcache_set(req.vaddr)
+  val set = req.vaddrSet
+  assertAddressMetadata(req, req_valid)
   val evict_BtoT_way = RegInit(false.B)
   val alloc_is_store = RegInit(false.B)  // The alloc (first) req is a store req
   val hasStore = RegInit(false.B)
@@ -990,7 +1002,7 @@ for(i <- 0 until reqNum) {
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
   // resolve cache alias by L2
-  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := get_alias(req.vaddr))
+  io.mem_acquire.bits.user.lift(AliasKey).foreach(_ := req.vaddrAlias)
   // pass vaddr to l2
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // pass pc to l2
@@ -1049,11 +1061,11 @@ for(i <- 0 until reqNum) {
 
   io.probe.block := req_valid && w_grantlast &&
     get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
-    is_alias_match(req.vaddr, io.probe.req.bits.vaddr)
+    req.vaddrAlias === get_alias(io.probe.req.bits.vaddr)
 
   io.replace.block := req_valid &&
     get_block_addr(req.addr) === get_block_addr(io.replace.req.bits.addr) &&
-    is_alias_match(req.vaddr, io.replace.req.bits.vaddr)
+    req.vaddrAlias === get_alias(io.replace.req.bits.vaddr)
 
   io.req_addr.valid := req_valid
   io.req_addr.bits:= req.addr
@@ -1310,6 +1322,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Analysis result for all queryMQ requests
   val analysis = WireInit(0.U.asTypeOf(new ReqAnalysisResult(reqNum, cfg.nMissEntries)))
   val query_valid = VecInit(io.queryMQ.map(_.req.valid))
+  for (i <- 0 until reqNum) {
+    assertAddressMetadata(io.queryMQ(i).req.bits, query_valid(i))
+    assertAddressMetadata(active_pipe_regs(i).req, active_pipe_regs(i).reg_valid())
+  }
   val spec_candidate_fire = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(false.B)))
   val spec_candidate_id = WireInit(VecInit(Seq.fill(LoadPipelineWidth)(0.U(log2Up(cfg.nMissEntries).W))))
   val spec_grant_register = Module(new SpecMissGrantRegister(LoadPipelineWidth))
@@ -1335,7 +1351,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       query_valid(i) && io.queryMQ(i).req.bits.isSpecMiss && reserve_valid(w) &&
         io.queryMQ(i).req.bits.id === reserve_id(w) &&
         get_block(io.queryMQ(i).req.bits.addr) === get_block(reserve_line(w).paddr) &&
-        is_alias_match(io.queryMQ(i).req.bits.vaddr, reserve_line(w).vaddr) &&
+        io.queryMQ(i).req.bits.vaddrAlias === spec_grant_register.io.alias(w) &&
         VecInit(primary_ready_vec)(reserve_id(w))
     } else {
       false.B
@@ -1416,14 +1432,14 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     for (j <- 0 until reqNum) {
       addr_conflicts(i)(j) := query_valid(j) && query_valid(i) && j.U =/= i.U &&
                               get_block(io.queryMQ(i).req.bits.addr) === get_block(io.queryMQ(j).req.bits.addr) &&
-                              is_alias_match(io.queryMQ(i).req.bits.vaddr, io.queryMQ(j).req.bits.vaddr)
+                              aliasMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits)
     }
 
     // bigger index miss_req will be reject: 
     req_reject_vec(i) :=(0 until reqNum).map{ j => 
       query_valid(j) && query_valid(i) && j.U < i.U &&
         get_block(io.queryMQ(i).req.bits.addr) === get_block(io.queryMQ(j).req.bits.addr) &&
-        !is_alias_match(io.queryMQ(i).req.bits.vaddr, io.queryMQ(j).req.bits.vaddr)  
+        !aliasMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits)
     }.reduce(_ || _)
   }
 
@@ -1629,9 +1645,20 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val i = w + 1
     io.spec_fabric.resolve(w).valid := reserve_valid(w)
     io.spec_fabric.resolve(w).bits.id := reserve_id(w)
-    io.spec_fabric.resolve(w).bits.commit := query_fire(i) && reserved_for_req(i) &&
+    val reference_commit = query_fire(i) && reserved_for_req(i) &&
       (analysis.strategy(i) & 1.U) =/= 0.U && analysis.compress_group(i) === i.U &&
       !io.wfi.wfiReq
+    // A matching reservation already guarantees a valid query and an available
+    // target. Check the remaining acceptance conditions directly, without a
+    // round trip through generic free-rank allocation, strategy, and ready.
+    val existing_block_match = ParallelORR(Cat(block_match_seqs(i) ++ Seq(match_from_pipe(i))))
+    val first_in_conflict_group = !addr_conflicts(i).take(i).reduce(_ || _)
+    val reserved_commit = reserved_for_req(i) && !req_reject_vec(i) &&
+      !existing_block_match && !can_merge_vec(i) && first_in_conflict_group &&
+      !io.wbq_block_miss_req(i) && !io.queryMQ(i).req.bits.cancel && !io.wfi.wfiReq
+    io.spec_fabric.resolve(w).bits.commit := reserved_commit
+    assert(reserved_commit === reference_commit,
+      "SpecMiss reserved commit must equal the generic allocation/ready result")
     when(io.spec_fabric.resolve(w).bits.commit) {
       assert(io.spec_fabric.resolve(w).valid && io.queryMQ(i).req.bits.isSpecMiss &&
         query_fire(i) && reserved_for_req(i) && (analysis.strategy(i) & 1.U) =/= 0.U &&
@@ -1999,13 +2026,19 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       val entryAcquires = demuxedEntryAcquires.map(_(ch))
       val finishes      = demuxedEntryFinishes.map(_(ch))
       val cmoAcquire    = demuxedCmoAcquire(ch)
-      TLArbiter.lowest(edge, io.mem_acquire(ch),
-        (Seq(cmoAcquire) ++ pipeAcquires ++ entryAcquires):_*)
+      val acquireSources = Seq(cmoAcquire) ++ pipeAcquires ++ entryAcquires
+      val acquirePayloadGroupSizes =
+        Seq(acquireSources.take(5).size) ++ acquireSources.drop(5).grouped(4).map(_.size).toSeq
+      TLArbiter.lowestHierarchical(edge, io.mem_acquire(ch), acquirePayloadGroupSizes,
+        acquireSources:_*)
       TLArbiter.lowest(edge, io.mem_finish(ch), finishes:_*)
     }
   } else {
     val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
-    TLArbiter.lowest(edge, io.mem_acquire(0), acquire_sources:_*)
+    val acquirePayloadGroupSizes =
+      Seq(acquire_sources.take(5).size) ++ acquire_sources.drop(5).grouped(4).map(_.size).toSeq
+    TLArbiter.lowestHierarchical(edge, io.mem_acquire(0), acquirePayloadGroupSizes,
+      acquire_sources:_*)
     TLArbiter.lowest(edge, io.mem_finish(0), entries.map(_.io.mem_finish):_*)
   }
 

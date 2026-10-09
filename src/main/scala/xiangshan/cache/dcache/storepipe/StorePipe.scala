@@ -150,6 +150,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   */
   val s2_valid = RegNext(s1_valid) && RegNext(!io.lsu.s1_kill)
   val s2_req = RegEnable(s1_req, s1_valid)
+  val s2_vaddr_alias = RegEnable(get_alias(s1_req.vaddr), s1_valid)
+  val s2_vaddr_set = RegEnable(addr_to_dcache_set(s1_req.vaddr), s1_valid)
 
   val s2_hit = RegEnable(s1_hit, s1_valid)
   val s2_paddr = RegEnable(s1_paddr, s1_valid)
@@ -180,6 +182,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.cmd := MemoryOpConstants.M_PFW
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_req.vaddr
+  io.miss_req.bits.vaddrAlias := s2_vaddr_alias
+  io.miss_req.bits.vaddrSet := s2_vaddr_set
   io.miss_req.bits.req_coh := s2_hit_coh
   // TODO: consider tag error
   io.miss_req.bits.cancel := io.lsu.s2_kill

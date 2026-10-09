@@ -40,6 +40,22 @@ private[cache] object SpecMissReservationLogic {
     val rankWidth = log2Ceil(nEntries + normalValid.length + requests.length + 1)
     val normalBound = PopCount(VecInit(normalValid))
 
+    // Decode and encode every possible suffix rank before the late S1 request
+    // valids arrive. They select already encoded IDs, rather than feeding an
+    // adder, an entry-wide rank comparison, and then an ID encoder in series.
+    val suffixChoices = requests.indices.map { offset =>
+      val rank = Wire(UInt(rankWidth.W))
+      rank := normalBound +& offset.U
+      val choice = initialFree.zip(freeCountBefore).map { case (free, countBefore) =>
+        free && countBefore === rank
+      }
+      val choiceOH = VecInit(choice).asUInt
+      val id = ParallelMux(choice.zipWithIndex.map { case (selected, entry) =>
+        selected -> entry.U(idWidth.W)
+      })
+      (choiceOH.orR, id, choiceOH)
+    }
+
     requests.zipWithIndex.map { case ((requestValid, requestBlock), w) =>
       val occupiedBusy = occupiedBlocks.map { case (valid, block) =>
         valid && block === requestBlock
@@ -53,14 +69,19 @@ private[cache] object SpecMissReservationLogic {
       val earlierRequestCount = if (w == 0) 0.U else PopCount(VecInit(requests.take(w).map(_._1)))
       val rank = Wire(UInt(rankWidth.W))
       rank := normalBound +& earlierRequestCount
-      val choice = initialFree.zip(freeCountBefore).map { case (free, countBefore) =>
-        free && countBefore === rank
+      val suffixSelect = w match {
+        case 0 => Seq(true.B)
+        case 1 => Seq(!requests(0)._1, requests(0)._1)
+        case 2 =>
+          val a = requests(0)._1
+          val b = requests(1)._1
+          Seq(!(a || b), a ^ b, a && b)
+        case _ => (0 to w).map(offset => earlierRequestCount === offset.U)
       }
-      val choiceOH = VecInit(choice).asUInt
-      val choiceValid = choiceOH.orR
-      val id = ParallelMux(choice.zipWithIndex.map { case (selected, entry) =>
-        selected -> entry.U(idWidth.W)
-      })
+      val choices = suffixChoices.take(w + 1)
+      val choiceValid = ParallelMux(suffixSelect.zip(choices.map(_._1)))
+      val id = ParallelMux(suffixSelect.zip(choices.map(_._2)))
+      val choiceOH = ParallelMux(suffixSelect.zip(choices.map(_._3)))
 
       SpecMissReservationChoice(
         valid = requestValid && choiceValid && !addressBusy,
@@ -86,18 +107,25 @@ private[cache] class SpecMissGrantRegister(nPorts: Int)(implicit p: Parameters) 
     val capture = Input(Vec(nPorts, Valid(new SpecMissGrantCapture)))
     val grant = Output(Vec(nPorts, Valid(UInt(log2Up(cfg.nMissEntries).W))))
     val line = Output(Vec(nPorts, new MissTrackLine))
+    val alias = Output(Vec(nPorts, UInt(math.max(1, blockOffBits + idxBits - pgIdxBits).W)))
   })
 
   private val valid = RegInit(VecInit(Seq.fill(nPorts)(false.B)))
   private val id = Reg(Vec(nPorts, UInt(log2Up(cfg.nMissEntries).W)))
   private val line = Reg(Vec(nPorts, new MissTrackLine))
+  private val alias = Reg(chiselTypeOf(io.alias))
 
   for (w <- 0 until nPorts) {
     valid(w) := io.capture(w).valid
     id(w) := io.capture(w).bits.id
     line(w) := io.capture(w).bits.line
+    alias(w) := get_alias(io.capture(w).bits.line.vaddr)
     io.grant(w).valid := valid(w)
     io.grant(w).bits := id(w)
     io.line(w) := line(w)
+    io.alias(w) := alias(w)
+    when (valid(w)) {
+      assert(alias(w) === get_alias(line(w).vaddr), "SpecMiss reservation alias must match its line")
+    }
   }
 }
