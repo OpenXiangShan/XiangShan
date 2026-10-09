@@ -526,6 +526,12 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
     val toMem = Wire(io.toMemExu.get.cloneType)
     io.toMemExu.get <> toMem
+    // A load which writes the FP register file can wake an FMA src2 four
+    // cycles before its normal s3 writeback. Capture the event at the OG1 to
+    // memory-pipeline transfer below, rather than inferring it from the
+    // integer IQ deq interface (which is an earlier OG0/deqDelay stage).
+    val loadM4Candidates: Array[Seq[(Bool, UInt)]] =
+      Array.fill[Seq[(Bool, UInt)]](backendParams.getFpRfWriteSize)(Seq.empty)
     val firstMemExu = bypassNetwork.io.toExus.int.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
     println(s"[Regin_int] firstMemExu = $firstMemExu")
     for (i <- toMem.indices) {
@@ -534,6 +540,13 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         val shouldLdCancel = LoadShouldCancel(toMemExuInput.bits.ctrl.loadDependency, io.ldCancel)
         toMemExuInput.ready := true.B
         val toMemValidAfterCancel = toMemExuInput.valid && !(toMemExuInput.bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel)
+        val exuParams = toMemExuInput.bits.params
+        if (exuParams.hasLoadFu && exuParams.writeFpRf) {
+          val fpPort = exuParams.getFpWBPort.get.port
+          val fpWen = toMemExuInput.bits.ctrl.fpWen.getOrElse(false.B)
+          loadM4Candidates(fpPort) = loadM4Candidates(fpPort) :+
+            ((toMemExuInput.fire && toMemValidAfterCancel && fpWen, toMemExuInput.bits.toRF.pdest))
+        }
         toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         if (toMem(i)(j).bits.params.hasLoadFu){
@@ -560,6 +573,17 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
           thisIQ.io.snResp.get(j).isFmac := false.B
         }
+      }
+    }
+    io.loadFpWbM4Wakeup.get.zip(loadM4Candidates).foreach { case (wakeup, candidates) =>
+      if (candidates.nonEmpty) {
+        wakeup.valid := candidates.map(_._1).foldLeft(false.B)(_ || _)
+        wakeup.bits := Mux1H(candidates.map { case (valid, pdest) => valid -> pdest })
+        assert(PopCount(candidates.map(_._1)) <= 1.U,
+          "multiple load M4 wakeups targeting one FP write port")
+      } else {
+        wakeup.valid := false.B
+        wakeup.bits := 0.U
       }
     }
     io.exuOut.flatten.zip((exuBlock.io.out ++ io.memIntWriteback.get).flatten).map { case (sink, source) =>
@@ -970,6 +994,11 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val cross = new ExuCrossRegion(params)
   val toMemExu = Option.when(params.isIntSchd || params.isVecSchd)(params.genNewExuInputBundle(DecoupledIO(_), _.hasMemFu))
+  // Accepted OG1 load transfers which write an FP physical register. The
+  // vector is indexed by the global FP register-file write port.
+  val loadFpWbM4Wakeup = Option.when(params.isIntSchd)(
+    Output(Vec(backendParams.getFpRfWriteSize, ValidIO(UInt(backendParams.fpPregParams.addrWidth.W))))
+  )
   //to Mem, wake up LoadQueueReplay
   val wakeupToLRQ = Option.when(params.isIntSchd)(intSchdParam.genMemWakeupLRQBundle)
   val wakeupToLRQCancel = Option.when(params.isIntSchd)(intSchdParam.genMemWakeupCancelBundle)

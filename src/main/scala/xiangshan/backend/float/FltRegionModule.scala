@@ -37,7 +37,7 @@ import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue, VecRegionModule}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, Enq, WakeUpBundle}
 import xiangshan.backend.fu.vector.Bundles.Vxrm
-import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
+import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
 import xiangshan.backend.float.FltWbDataPath
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.IntScheduler
@@ -163,6 +163,32 @@ class FltRegionImp(
   val writeFpRfIssueParams = backendParams.allIssueParams.filter(_.writeFpRf)
   assert(writeFpRfIssueParams.size == fpWbM2WakeupOBeforeArbiter.size)
   val fpWbM2WakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams)))
+  // M4 wakeups from the floating-point pipes are indexed by the global FP
+  // register-file write port.  Keep the load-produced path separate until
+  // the final arbitration so the consumer can retain its load provenance.
+  val fpWbM4WakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams)))
+  val fpWbM4FltWakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams)))
+  val fpWbM4LoadWakeUp = Wire(Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams)))
+  for ((wake, port) <- fpWbM4FltWakeUp.zipWithIndex) {
+    val sources = issuePipes.flatten.filter(_.param.getFpWriteCfg.exists(_.port == port)).map(_.out.fpWbM4Wakeup)
+    wake := 0.U.asTypeOf(wake)
+    if (sources.nonEmpty) {
+      wake := Mux1H(sources.map(w => w.wen -> w))
+      assert(PopCount(sources.map(_.wen)) <= 1.U, "Multiple FMA M4 wakeups on one FP write port")
+    }
+  }
+  // The integer Region emits this event at the OG1 -> memory-pipeline
+  // transfer. Keep it separate from ordinary floating-point M4 producers
+  // until the final per-port arbitration so IQ can retain load provenance.
+  for ((wake, source) <- fpWbM4LoadWakeUp.zip(in.fromIntRegion.loadFpWbM4Wakeup)) {
+    wake := 0.U.asTypeOf(wake)
+    wake.wen := source.valid
+    wake.pdest := source.bits
+    wake.isLoad := source.valid
+  }
+  for (((wake, fltWake), loadWake) <- fpWbM4WakeUp.zip(fpWbM4FltWakeUp).zip(fpWbM4LoadWakeUp)) {
+    wake := Mux(fltWake.wen, fltWake, loadWake)
+  }
   val fpWbM2WakeUpIs1Lat = Wire(Vec(backendParams.getFpRfWriteSize, Bool()))
   fpWbM2WakeUpIs1Lat := fpWbM2WakeUpThisRegionIs1Lat ++ Seq.fill(fpWbM2WakeUpIs1Lat.size - fpWbM2WakeUpThisRegionIs1Lat.size)(false.B)
   for (wbPortIdx <- 0 until backendParams.getFpRfWriteSize) {
@@ -191,8 +217,10 @@ class FltRegionImp(
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
       iq.in.resps.ex0 := issuePipes(i).map(_.out.ex0Resp)
+      iq.in.resps.ex1 := issuePipes(i).map(_.out.ex1Resp)
       iq.in.resps.ex0RespFailLat1 := ex0RespFailLat1
       iq.in.wakeup.fpWbM2Vec := fpWbM2WakeUp
+      iq.in.wakeup.fpWbM4Vec := fpWbM4WakeUp
       iq.in.wakeup.fpWbM2D1Vec := fpWbM2D1Vec
       iq.in.ldCancel := ldCancelToIQ
   }
@@ -205,6 +233,7 @@ class FltRegionImp(
       pipe.in.is0WtFail := false.B // Todo
       pipe.in.ldCancel := in.fromMem.ldCancel
       pipe.in.ex0RespFailLat1 := ex0RespFailLat1
+      pipe.in.fpWbM2Vec := fpWbM2WakeUp
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.fpWb0Next := fpWbDataPath.out.wb0Next.map(_.data)
       pipe.in.fpWb0 := fpWbDataPath.out.wb0.map(_.data)
@@ -477,6 +506,7 @@ object FltRegionModule {
       val wakeupFromI2F = new WakeUpBundle(backendParams.fpPregParams)
       val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.fpPregParams)
       val fpWbM3Wakeup = Vec(backendParams.getIntRegionParam.getFpWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
+      val loadFpWbM4Wakeup = Vec(backendParams.getFpRfWriteSize, ValidIO(UInt(backendParams.fpPregParams.addrWidth.W)))
       val busyTableI2F = Input(UInt(3.W))
       val fromIntIQDeqOg1Payload: MixedVec[MixedVec[IssueQueueDeqOg1Payload]] =
         Input(MixedVec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle)))

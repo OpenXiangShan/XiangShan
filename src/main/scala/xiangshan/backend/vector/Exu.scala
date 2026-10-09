@@ -445,6 +445,8 @@ object Exu {
     val vpRen = Vec(param.numRegSrc, Bool())
     val bypassSource = Vec(param.numRegSrc, new BypassSource)
     val bypassDelay  = Vec(param.numRegSrc, BypassDelay())
+    val fmaSrc3Wait = Option.when(param.isFltExeUnit)(UInt(2.W))
+    val fmaSrc3LoadM4 = Option.when(param.isFltExeUnit)(Bool())
 
     def fromIssueDeq(deq: VecIssueQueue.Deq): Unit = {
       this.gpRen := deq.gpRen
@@ -452,6 +454,8 @@ object Exu {
       this.vpRen := deq.vpRen
       this.bypassSource := deq.bypassSource
       this.bypassDelay := deq.bypassDelay
+      this.fmaSrc3Wait.foreach(_ := deq.fmaSrc3Wait.get)
+      this.fmaSrc3LoadM4.foreach(_ := deq.fmaSrc3LoadM4.get)
     }
   }
 

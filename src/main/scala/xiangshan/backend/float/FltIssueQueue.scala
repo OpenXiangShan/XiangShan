@@ -5,7 +5,7 @@ import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility.{PerfCCT, SelectOne}
+import utility.{PerfCCT, SelectOne, XSPerfAccumulate}
 import utils.NamedUInt
 import xiangshan._
 import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
@@ -23,6 +23,7 @@ import xiangshan.backend.vector.ExuParam
 import xiangshan.backend.vector.VecRegionModule
 import xiangshan.backend.vector.VecIssueQueue.{Entry, Enq, Deq, Status, SrcStatus, BypassDelay, RespBundle, WakeUpBundle}
 import xiangshan.mem.SqPtr
+import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
 
 
 class FltIssueQueue(
@@ -116,6 +117,63 @@ class FltIssueQueue(
   private val enqEntrySrcCancel = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Bool())))
   private val fastEntrySrcCancel = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Bool())))
   private val entrySrcCancel = enqEntrySrcCancel ++ fastEntrySrcCancel
+  private val ldWBPort = param.backendParams.getIntRegionParam.issueParams.filter(_.hasLdu).map(_.fpWbPortIds.head)
+  private val ldCancel = in.ldCancel.map(_.ld2Cancel)
+
+  private val entryFmaM4Matches = entries.map { entry =>
+    val src = entry.bits.status.srcStatus(2)
+    in.wakeup.fpWbM4Vec.map(w => w.wen && w.pdest === src.psrc)
+  }
+  private val entryFmaM4LoadMatches = entries.map { entry =>
+    val src = entry.bits.status.srcStatus(2)
+    in.wakeup.fpWbM4Vec.map(w => w.wen && w.isLoad && w.pdest === src.psrc)
+  }
+  private val entryFmaM4Wake = VecInit(entries.zip(entryFmaM4Matches).map { case (entry, matches) =>
+    val src = entry.bits.status.srcStatus(2)
+    entry.valid && !entry.bits.status.robIdx.needFlush(in.flush) &&
+      FuType.isFmul(entry.bits.payload.fuType) && FMacOpcode.isOP3(entry.bits.payload.opcode) &&
+      src.fpRen && !src.srcState && matches.reduce(_ || _)
+  })
+  private val entryFmaM4LoadWake = VecInit(entries.zip(entryFmaM4LoadMatches).map { case (entry, matches) =>
+    val src = entry.bits.status.srcStatus(2)
+    entry.valid && !entry.bits.status.robIdx.needFlush(in.flush) &&
+      FuType.isFmul(entry.bits.payload.fuType) && FMacOpcode.isOP3(entry.bits.payload.opcode) &&
+      src.fpRen && !src.srcState && matches.reduce(_ || _)
+  })
+  private val entryFmaM2Confirm = VecInit(entries.map { entry =>
+    val src = entry.bits.status.srcStatus(2)
+    val wake = in.wakeup.fpWbM2Vec(src.bypassSource.idx(log2Ceil(backendParams.getFpRfWriteSize) - 1, 0))
+    wake.wen && wake.pdest === src.psrc
+  })
+  private val entryFmaM4Cancel = VecInit(entries.zip(entryFmaM2Confirm).map { case (entry, confirmed) =>
+    entry.valid && !entry.bits.status.fmaSrc3LoadM4.get && entry.bits.status.fmaSrc3Wait.get === 1.U && !confirmed
+  })
+  // A load-M4 wakeup is speculative until the normal M2 wakeup arrives.  If
+  // that confirmation is missing in the same window, cancel the source and
+  // the issue state just like a producer-M4 cancellation, but keep this path
+  // separate from the later raw load-cancel protocol.
+  private val entryLoadM4NoM2Cancel = VecInit(entries.zip(entryFmaM2Confirm).map { case (entry, confirmed) =>
+    entry.valid && entry.bits.status.fmaSrc3LoadM4.get && entry.bits.status.fmaSrc3Wait.get === 1.U && !confirmed
+  })
+  // A load may be replay-cancelled after its ordinary M2 wakeup.  This is a
+  // source cancellation for an entry that has not issued yet; issued entries
+  // are stopped in FltIssuePipe using the raw (undelayed) cancel signal.
+  private val entryLoadM4Cancel = VecInit(entries.zipWithIndex.map { case (entry, entryIdx) =>
+    val src = entry.bits.status.srcStatus(2)
+    // The normal load wakeup is speculative until s3.  Keep this marker
+    // through the ordinary M2 confirmation so the delayed IQ-side cancel can
+    // still invalidate an entry that has already become ready or issued.
+    entry.valid && entry.bits.status.fmaSrc3LoadM4.get &&
+      entry.bits.status.fmaSrc3LoadM4CancelWait.get === 4.U && ldWBPort.zip(ldCancel).map { case (wbIdx, cancel) =>
+      src.bypassSource.idx === wbIdx.U && cancel
+    }.foldLeft(false.B)(_ || _)
+  })
+
+  XSPerfAccumulate("fma_src3_m4_wakeup", PopCount(entryFmaM4Wake))
+  XSPerfAccumulate("fma_src3_m4_cancel", PopCount(entryFmaM4Cancel))
+  XSPerfAccumulate("load_fma_src3_m4_no_m2_cancel", PopCount(entryLoadM4NoM2Cancel))
+  XSPerfAccumulate("load_fma_src3_m4_wakeup", PopCount(entryFmaM4LoadWake))
+  XSPerfAccumulate("load_fma_src3_m4_cancel", PopCount(entryLoadM4Cancel))
   private val enqEntryCanIssue = VecInit(enqEntries.zipWithIndex.map {
     case (ety, enqIdx) =>
       entryCanIssueWithWakeUp(
@@ -154,29 +212,31 @@ class FltIssueQueue(
   private val enqEntryCancel = Wire(Vec(param.numEnq, Bool()))
   private val fastEntryCancel = Wire(Vec(param.numFastEntry, Bool()))
   private val entryCancel: Seq[Bool] = enqEntryCancel ++ fastEntryCancel
-  private val ldWBPort = param.backendParams.getIntRegionParam.issueParams.filter(_.hasLdu).map(_.fpWbPortIds.head)
   private val fltExuWBPort = param.backendParams.getFltRegionParam.issueParams.map(_.fpWbPortIds.head)
-  private val ldCancel = in.ldCancel.map(_.ld2Cancel)
   private val entriesKeepNext = enqEntriesKeepNext ++ fastEntriesKeepNext
-  for ((cancel, entry, srcCancel) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel)) {
+  for (((cancel, entry, srcCancel), entryIdx) <- entryCancel.lazyZip(entries).lazyZip(entrySrcCancel).zipWithIndex) {
     cancel := Mux1H(Seq(
       in.resps.is0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
       in.resps.is1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
       in.resps.ex0(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U),
-      ))
+      in.resps.ex1(entry.bits.status.deqPortIdx).fail -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 3.U),
+      )) || entryFmaM4Cancel(entryIdx) || entryLoadM4NoM2Cancel(entryIdx) || entryLoadM4Cancel(entryIdx)
     srcCancel.zipWithIndex.map { case (srccancel, srcidx) =>
       val issuedSrcCancel =
         in.resps.is0(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U ||
         in.resps.is1(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U ||
-        in.resps.ex0(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U
+        in.resps.ex0(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U ||
+        in.resps.ex1(entry.bits.status.deqPortIdx).srcCancel(srcidx) && entry.bits.status.issued && entry.bits.status.issuedTimer === 3.U
       val srcStatus = entry.bits.status.srcStatus(srcidx)
       val notIssuedSrcCancelByLoad = !entry.bits.status.issued && ldWBPort.zip(ldCancel).map{ case (idx, ldcancel) =>
         srcStatus.bypassSource.idx === idx.U && srcStatus.bypassDelay === BypassDelay.delay2 && ldcancel
       }.reduce(_ || _)
+      val loadM4SrcCancel = if (srcidx == 2) entryLoadM4Cancel(entryIdx) else false.B
       val notIssuedSrcCancelByFltExu = !entry.bits.status.issued && fltExuWBPort.zip(in.resps.ex0RespFailLat1).map { case (idx, fltExuCancel) =>
         srcStatus.bypassSource.idx === idx.U && srcStatus.bypassDelay === BypassDelay.delay0 && fltExuCancel
       }.reduce(_ || _)
-      srccancel := issuedSrcCancel || notIssuedSrcCancelByLoad || notIssuedSrcCancelByFltExu
+      srccancel := issuedSrcCancel || notIssuedSrcCancelByLoad || loadM4SrcCancel || notIssuedSrcCancelByFltExu ||
+        (if (srcidx == 2) entryFmaM4Cancel(entryIdx) || entryLoadM4NoM2Cancel(entryIdx) else false.B)
       dontTouch(issuedSrcCancel)
       dontTouch(notIssuedSrcCancelByLoad)
       dontTouch(notIssuedSrcCancelByFltExu)
@@ -192,6 +252,7 @@ class FltIssueQueue(
       in.resps.is0(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 0.U),
       in.resps.is1(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 1.U),
       in.resps.ex0(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 2.U),
+      in.resps.ex1(entry.bits.status.deqPortIdx).success -> (entry.bits.status.issued && entry.bits.status.issuedTimer === 3.U),
     ))
   }
 
@@ -404,7 +465,12 @@ class FltIssueQueue(
   for ((deq: ValidIO[Deq], valid, deqEty) <- out.deq lazyZip deqValidVec lazyZip deqEntries) {
     deq.valid := valid
     deq.bits.fromEntry(deqEty)
+    when(deq.valid && deq.bits.fmaSrc3Wait.get =/= 0.U) {
+      assert(FuType.isFmul(deq.bits.fuType) && FMacOpcode.isOP3(deq.bits.opcode) && deq.bits.fpRen(2))
+    }
   }
+  XSPerfAccumulate("fma_src3_issue_m4", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 2.U)))
+  XSPerfAccumulate("fma_src3_issue_m4_d1", PopCount(out.deq.map(d => d.valid && d.bits.fmaSrc3Wait.get === 1.U)))
 
   private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
   private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
@@ -485,8 +551,9 @@ class FltIssueQueue(
     val scalarD1WakeUp: Bool = fpD1WakeUp
     val delayWakeUp: Bool = scalarD1WakeUp
     val srcCancel: Bool = entrySrcCancel(entryIdx)(srcIdx)
+    val earlyWake = if (srcIdx == 2) entryFmaM4Wake(entryIdx) && !srcCancel else false.B
 
-    statusNext.srcState := Mux(wakeUp || scalarD1WakeUp, true.B, Mux(srcCancel, false.B, status.srcState))
+    statusNext.srcState := Mux(wakeUp || scalarD1WakeUp, true.B, Mux(srcCancel, false.B, status.srcState || earlyWake))
 
     when (!wakeUp && !delayWakeUp) {
       if (isKeep) {
@@ -526,6 +593,16 @@ class FltIssueQueue(
           fpWbM2D1WakeUpVec.zip(in.wakeup.fpWbM2D1Vec.map(_.loadDependency)),
         ).reduce(_ ++ _).map { case (wakeUpMath, loadDependency) => wakeUpMath -> loadDependency }
       )
+    }
+    when(earlyWake && !wakeUp && !delayWakeUp) {
+      // Ordinary bypass/cancel logic must not interpret M4 as an M2 wakeup.
+      statusNext.bypassDelay := BypassDelay.delay3
+      statusNext.bypassSource.idx := Mux(
+        entryFmaM4LoadWake(entryIdx),
+        OHToUInt(VecInit(entryFmaM4LoadMatches(entryIdx))),
+        OHToUInt(VecInit(entryFmaM4Matches(entryIdx))),
+      )
+      statusNext.loadDependency.foreach(_ := 0.U.asTypeOf(statusNext.loadDependency.get))
     }
   }
 
@@ -575,6 +652,43 @@ class FltIssueQueue(
         )
     }
 
+    val src3NormalWake = (fpWbM2WakeUpMatchVec(2) ++ fpWbM2D1WakeUpMatchVec(2)).reduce(_ || _)
+    val src3Wait = statusSource.fmaSrc3Wait.get
+    statusSink.fmaSrc3Wait.get := Mux(src3Wait =/= 0.U, src3Wait - 1.U, 0.U)
+    when(entryFmaM4Wake(entryIdx) && !entrySrcCancel(entryIdx)(2)) {
+      statusSink.fmaSrc3Wait.get := 2.U
+    }
+    when(src3NormalWake || entrySrcCancel(entryIdx)(2)) {
+      statusSink.fmaSrc3Wait.get := 0.U
+    }
+
+    val loadM4Wake = entryFmaM4LoadWake(entryIdx) && !entrySrcCancel(entryIdx)(2)
+    val loadM4Cancel = entryLoadM4Cancel(entryIdx)
+    val loadM4Wait = statusSource.fmaSrc3LoadM4CancelWait.get
+    val src2Cancel: Bool = entrySrcCancel(entryIdx)(2)
+    statusSink.fmaSrc3LoadM4.get := Mux(
+      loadM4Cancel || src2Cancel || src3NormalWake || (statusSource.fmaSrc3LoadM4.get && loadM4Wait === 1.U),
+      false.B,
+      Mux(loadM4Wake, true.B, statusSource.fmaSrc3LoadM4.get),
+    )
+    statusSink.fmaSrc3LoadM4CancelWait.get := Mux(
+      loadM4Cancel || src2Cancel || src3NormalWake || (statusSource.fmaSrc3LoadM4.get && loadM4Wait === 1.U),
+      0.U,
+      Mux(
+        loadM4Wake,
+        FltIssueQueue.LoadM4CancelWindow.U,
+        Mux(loadM4Wait =/= 0.U, loadM4Wait - 1.U, 0.U),
+      ),
+    )
+
+    // The load cancel has priority over an M2 wakeup for this source.  An
+    // issued entry must re-enter the IQ with src2 unavailable and wait for a
+    // replayed load wakeup.
+    when (loadM4Cancel) {
+      statusSink.srcStatus(2).srcState := false.B
+      statusSink.fmaSrc3Wait.get := 0.U
+    }
+
     statusSink.issued := Mux1H(Seq(
       deqSel -> true.B,
       cancel -> false.B,
@@ -603,7 +717,8 @@ class FltIssueQueue(
     val srcReadyOrWake = VecInit(status.srcStatus.zipWithIndex.map {
       case (srcStatus, srcIdx) =>
         val fpWake = fpWbM2WakeUpMatchVec(srcIdx).map(_ && srcStatus.fpRen).foldLeft(false.B)(_ || _)
-        Mux(fpWake, true.B, Mux(entrySrcCancel(entryIdx)(srcIdx), false.B, srcStatus.srcState))
+        val earlyWake = if (srcIdx == 2) entryFmaM4Wake(entryIdx) else false.B
+        Mux(fpWake, true.B, Mux(entrySrcCancel(entryIdx)(srcIdx), false.B, srcStatus.srcState || earlyWake))
     }).asUInt.andR
 
     val srcCanIssue = srcReadyOrWake
@@ -612,6 +727,11 @@ class FltIssueQueue(
 }
 
 object FltIssueQueue {
+  // The raw s3 cancel is followed by a one-cycle-delayed IQ cancel.  A
+  // generous bounded window keeps the load provenance live across both while
+  // allowing it to age out if the load completes normally.
+  val LoadM4CancelWindow = 7
+
   class LazyMod (implicit p: Parameters, val param: IssueParam) extends LazyModule with HasXSParameter {
     override def shouldBeInlined: Boolean = false
 
@@ -761,10 +881,12 @@ object FltIssueQueue {
     val is0 = Vec(param.numDeq, new FltRespBundle)
     val is1 = Vec(param.numDeq, new FltRespBundle)
     val ex0 = Vec(param.numDeq, new FltRespBundle)
+    val ex1 = Vec(param.numDeq, new FltRespBundle)
     val ex0RespFailLat1 = Vec(backendParams.getFltRegionParam.getFpWriteSize, Bool())
   }
 
   class InWakeUp(implicit p: Parameters, param: IssueParam) extends XSBundle {
+    val fpWbM4Vec = Vec(backendParams.getFpRfWriteSize, new FltEarlyWakeUpBundle(backendParams.fpPregParams))
     val fpWbM2Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
     val fpWbM2D1Vec = Vec(backendParams.getFpRfWriteSize, new FltWakeUpBundle(backendParams.fpPregParams))
   }
@@ -903,6 +1025,14 @@ object FltIssueQueue {
       enqPolicy.canEnq := canEnq
       enqPolicy.enqSelOHVec
     }
+  }
+
+  class FltEarlyWakeUpBundle(val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
+    val wen = Bool()
+    val pdest = UInt(pregParams.addrWidth.W)
+    // True only for the load-produced M4 wakeup.  FMA/FMUL producers use
+    // the same bundle but must retain their original cancellation protocol.
+    val isLoad = Bool()
   }
 
   class FltWakeUpBundle(val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
