@@ -107,7 +107,7 @@ trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   )
 
   def getBankIndex(pc: PrunedAddr): UInt =
-    addrFields.extract("bankIdx", pc)
+    pc(8, 7) ^ pc(6, 5) ^ pc(4, 3) ^ pc(2, 1)
 
   def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
     addrFields.extract("setIdx", pc) ^ hist

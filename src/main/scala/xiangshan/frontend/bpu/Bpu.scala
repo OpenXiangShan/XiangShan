@@ -122,6 +122,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_flush = Wire(Bool())
   private val s3_flush = Wire(Bool())
 
+  private val s0_valid = Wire(Bool())
   private val s1_valid = RegInit(false.B)
   private val s2_valid = RegInit(false.B)
   private val s3_valid = RegInit(false.B)
@@ -191,7 +192,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     io.redirect        := redirect.valid
     io.bpuS2Override   := s2_override
     io.bpuS3Override   := s3_override
-    io.newStartPc      := s1_prediction.target
+    io.newStartPc      := Mux(s1_valid, s1_prediction.target, s0_startPcReg.get)
     io.overrideStartPc := Mux(s3_override, s3_prediction.target, s2_prediction.target)
   }
 
@@ -228,12 +229,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
+  tage.io.s0_valid                       := s0_valid
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromMainBtb.baseConf           := VecInit(mbtb.io.meta.entries.flatten.map(_.counter.isSaturate))
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
@@ -257,7 +258,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   when(predictors.map(_.io.sramResetDone).reduce(_ && _)) {
     sramResetDone := true.B
   }
-  s0_fire := s1_ready && sramResetDone
+  s0_valid := s1_ready && sramResetDone
+
+  s0_fire := s0_valid && !tage.io.holdPredict
   s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
   s2_fire := s2_valid && s3_ready
   s3_fire := s3_valid

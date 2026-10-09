@@ -41,6 +41,7 @@ case class TageParameters(
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 5,
+    TrainingBufferSize:    Int = 2,
     EnableTageTrace:       Boolean = false
 ) {
   require(TableInfos.nonEmpty, "TageParameters: TableInfos cannot be empty")
@@ -72,6 +73,10 @@ trait HasTageParameters extends HasBpuParameters {
 
   def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays).max(1)
+
+  def NumTableReadPorts: Int = 2 // for prediction and training
+
+  def TrainingBufferSize: Int = tageParameters.TrainingBufferSize
 
   // Encode table and way as a flat location. The value after the last location means that no entry exists.
   def TableWayOffsets:       Seq[Int] = TableInfos.scanLeft(0)((offset, info) => offset + info.NumWays).dropRight(1)
