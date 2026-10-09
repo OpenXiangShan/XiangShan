@@ -233,7 +233,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.streamFdbkDegree := io.l2_fdbk_pf_ctrl.streamDegree
     pf.strideFdbkDegree := io.l2_fdbk_pf_ctrl.strideDegree
 
-    // stride will train on miss or prefetch hit
+    // Stream and stride train only on misses or their own prefetch hits.
     for(i <- 0 until LD_TRAIN_WIDTH){
       // for stride
       val source = io.trainSource.s3_load(i)
@@ -247,7 +247,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         s3_loadPcVec(i)
       )
       // for stream
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
+        source.bits.miss || isFromStream(source.bits.metaSource)
+      ) && !source.bits.isHwPrefetch
       // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
