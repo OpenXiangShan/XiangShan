@@ -211,23 +211,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     NumBanks,
     TrainingBufferSize
   ))
-  private val incomingIsCondMask = io.train.branches.map(b => b.valid && b.bits.attribute.isConditional)
+  private val incomingIsCondMask = io.train.bits.branches.map(b => b.valid && b.bits.attribute.isConditional)
   private val incomingHasCond    = incomingIsCondMask.reduce(_ || _)
   // Re-read SRAM when has mispredict
-  private val incomingNeedRead = io.train.branches.zip(incomingIsCondMask).map { case (branch, isCond) =>
-    val mbtbMeta = io.train.meta.mbtb.entries.flatten
+  private val incomingNeedRead = io.train.bits.branches.zip(incomingIsCondMask).map { case (branch, isCond) =>
+    val mbtbMeta = io.train.bits.meta.mbtb.entries.flatten
     val mbtbHit  = mbtbMeta.map(_.hit(branch.bits)).reduce(_ || _)
     isCond && branch.bits.mispredict && mbtbHit
   }.reduce(_ || _)
 
-  // trainReady is always true; Ftq/Bpu still use Decoupled fire as the enqueue pulse.
-  private val incomingTrainFire = io.stageCtrl.t0_fire
-  trainingBuffer.io.enq.valid                := io.enable && incomingTrainFire && incomingHasCond
-  trainingBuffer.io.enq.bits.data.train      := io.train
+  trainingBuffer.io.enq.valid                := io.enable && io.train.valid && incomingHasCond
+  trainingBuffer.io.enq.bits.data.train      := io.train.bits
   trainingBuffer.io.enq.bits.data.foldedHist := incomingFoldedHist
-  trainingBuffer.io.enq.bits.bankIdx         := tables.head.getBankIndex(io.train.startPc)
+  trainingBuffer.io.enq.bits.bankIdx         := tables.head.getBankIndex(io.train.bits.startPc)
   trainingBuffer.io.enq.bits.needRead        := incomingNeedRead
-  io.trainReady                              := true.B
   trainingBuffer.io.predictReadValid         := io.enable && io.s0_valid
   trainingBuffer.io.predictReadBankIdx       := s0_bankIdx
 
@@ -719,7 +716,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       Mux(s2_fire, PopCount(mismatchMask), 0.U)
     }
   )
-  XSPerfAccumulate("total_train", incomingTrainFire)
+  XSPerfAccumulate("total_train", io.train.valid)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
@@ -754,7 +751,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   )
   XSPerfAccumulate(
     "total_all_br_mispredicted",
-    io.train.branches.map(b => incomingTrainFire && b.valid && b.bits.mispredict).reduce(_ || _)
+    io.train.bits.branches.map(b => io.train.valid && b.valid && b.bits.mispredict).reduce(_ || _)
   )
   XSPerfAccumulate(
     "mispredict_branch_has_provider",

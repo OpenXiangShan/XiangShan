@@ -355,11 +355,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  train pipeline stage 0
    */
 
-  private val incomingTrainFire        = io.stageCtrl.t0_fire
-  private val incomingBranchesScIdxVec = getBranchesScIdxVec(io.train)
-  private val incomingWriteValidVec    = getWriteValidVec(io.train, incomingBranchesScIdxVec)
+  private val incomingBranchesScIdxVec = getBranchesScIdxVec(io.train.bits)
+  private val incomingWriteValidVec    = getWriteValidVec(io.train.bits, incomingBranchesScIdxVec)
   private val incomingNeedRead         = incomingWriteValidVec.reduce(_ || _)
-  private val incomingBankIdx          = getBankIndex(io.train.startPc)
+  private val incomingBankIdx          = getBankIndex(io.train.bits.startPc)
   private val incomingFoldedPathHist   = getFoldedHist(io.trainFoldedPathHist)
 
   private val trainingBuffer = Module(new TrainingBuffer(
@@ -371,12 +370,11 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     TrainingBufferSize
   ))
 
-  trainingBuffer.io.enq.valid                    := io.enable && incomingTrainFire
-  trainingBuffer.io.enq.bits.data.train          := io.train
+  trainingBuffer.io.enq.valid                    := io.enable && io.train.valid
+  trainingBuffer.io.enq.bits.data.train          := io.train.bits
   trainingBuffer.io.enq.bits.data.foldedPathHist := incomingFoldedPathHist
   trainingBuffer.io.enq.bits.bankIdx             := incomingBankIdx
   trainingBuffer.io.enq.bits.needRead            := incomingNeedRead
-  io.trainReady                                  := true.B
   trainingBuffer.io.predictReadValid             := s0_fire
   trainingBuffer.io.predictReadBankIdx           := s0_bankIdx
 
