@@ -768,40 +768,19 @@ def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
     assert set(keys) == set(sink.hit_counts())
 
 
-def test_direct_runtime_defaults_to_no_audit_transfer(tmp_path) -> None:
+def test_direct_runtime_installs_native_groups(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(
         default_pilot_csv_path(),
-        testcase_name="runtime-no-audit",
-        artifact_tag="runtime-no-audit",
+        testcase_name="runtime-native-groups",
+        artifact_tag="runtime-native-groups",
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     # All direct domains are now native CovGroup models.
     assert runtime.cycle_models
     assert set(sink._native_group_names)
-    # Shared sink mark-bridge is reserved for non-native groups only; with full
-    # native install it should reject every active domain group.
-    sample_group = sorted(sink._native_group_names)[0]
-    sample_point = next(
-        point["name"]
-        for group in sink.report()
-        if group["name"] == sample_group
-        for point in group["points"]
-    )
-    sample_bin = next(
-        item["name"]
-        for group in sink.report()
-        if group["name"] == sample_group
-        for point in group["points"]
-        if point["name"] == sample_point
-        for item in point["bins"]
-    )
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1, coverpoint=sample_point)
 
 
 def test_native_evaluator_dispatches_checked_hits_to_owner_model(tmp_path) -> None:
@@ -896,9 +875,7 @@ def test_hitmiss_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     hitmiss = next(
         item
@@ -918,8 +895,6 @@ def test_hitmiss_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         (group, ICACHE_HITMISS_COVERPOINTS[group], bin_name)
         for group, bin_name in ICACHE_HITMISS_SAMPLER_BIN_KEYS
     }
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark("icache_hit_path", "continuous_same_line_sram_hit", cycle=1)
     # Native model samples its own groups; shared flush must not touch them.
     before = hitmiss.hit_counts()[
         "icache_hit_path",
@@ -947,9 +922,7 @@ def test_mainpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     mainpipe = next(
         item
@@ -970,8 +943,6 @@ def test_mainpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         for group, bin_name in ICACHE_MAINPIPE_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = mainpipe.hit_counts()[
         sample_group,
         ICACHE_MAINPIPE_COVERPOINTS[sample_group],
@@ -998,9 +969,7 @@ def test_prefetchpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path)
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     prefetch = next(
         item
@@ -1021,8 +990,6 @@ def test_prefetchpipe_native_groups_are_installed_and_not_mark_bridged(tmp_path)
         for group, bin_name in ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = prefetch.hit_counts()[
         sample_group,
         ICACHE_PREFETCHPIPE_COVERPOINTS[sample_group],
@@ -1049,9 +1016,7 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     missunit = next(
         item
@@ -1072,8 +1037,6 @@ def test_missunit_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> 
         for group, bin_name in ICACHE_MISSUNIT_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = missunit.hit_counts()[
         sample_group,
         ICACHE_MISSUNIT_COVERPOINTS[sample_group],
@@ -1100,9 +1063,7 @@ def test_waylookup_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     waylookup = next(
         item
@@ -1123,8 +1084,6 @@ def test_waylookup_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         for group, bin_name in ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = waylookup.hit_counts()[
         sample_group,
         ICACHE_WAYLOOKUP_COVERPOINTS[sample_group],
@@ -1151,9 +1110,7 @@ def test_two_fetch_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     two_fetch = next(
         item
@@ -1174,8 +1131,6 @@ def test_two_fetch_native_groups_are_installed_and_not_mark_bridged(tmp_path) ->
         for group, bin_name in TWO_FETCH_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(TWO_FETCH_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = two_fetch.hit_counts()[
         sample_group,
         TWO_FETCH_COVERPOINTS[sample_group],
@@ -1201,9 +1156,7 @@ def test_uncache_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         output_dir=tmp_path,
     )
     hub.env = type("Env", (), {"dut": object()})()
-    sink = ToffeeCoverageSink.from_registry(
-        default_pilot_csv_path(), native_only=False
-    )
+    sink = ToffeeCoverageSink.from_registry(default_pilot_csv_path())
     runtime = create_toffee_runtime(hub, sink)
     uncache = next(
         item
@@ -1224,8 +1177,6 @@ def test_uncache_native_groups_are_installed_and_not_mark_bridged(tmp_path) -> N
         for group, bin_name in UNCACHE_EVENT_SAMPLER_BIN_KEYS
     }
     sample_group, sample_bin = next(iter(UNCACHE_EVENT_SAMPLER_BIN_KEYS))
-    with pytest.raises(RuntimeError, match="native Toffee group rejects mark-bridge"):
-        sink.mark(sample_group, sample_bin, cycle=1)
     before = uncache.hit_counts()[
         sample_group,
         UNCACHE_EVENT_COVERPOINTS[sample_group],
