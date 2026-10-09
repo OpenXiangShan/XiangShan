@@ -30,64 +30,69 @@ import chisel3.util._
   */
 object RviInst {
   // ------------------------------------------------------------------------ opcode (bits 6:0)
-  val OP_LOAD     : UInt = 0x03.U(7.W)
-  val OP_LOAD_FP  : UInt = 0x07.U(7.W)
-  val OP_IMM      : UInt = 0x13.U(7.W)
-  val OP_IMM_32   : UInt = 0x1b.U(7.W)
-  val OP_STORE    : UInt = 0x23.U(7.W)
-  val OP_STORE_FP : UInt = 0x27.U(7.W)
-  val OP          : UInt = 0x33.U(7.W)
-  val OP_LUI      : UInt = 0x37.U(7.W)
-  val OP_32       : UInt = 0x3b.U(7.W)
-  val OP_BRANCH   : UInt = 0x63.U(7.W)
-  val OP_JALR     : UInt = 0x67.U(7.W)
-  val OP_JAL      : UInt = 0x6f.U(7.W)
-  val OP_SYSTEM   : UInt = 0x73.U(7.W)
+  val OP_LOAD:     UInt = 0x03.U(7.W)
+  val OP_LOAD_FP:  UInt = 0x07.U(7.W)
+  val OP_IMM:      UInt = 0x13.U(7.W)
+  val OP_IMM_32:   UInt = 0x1b.U(7.W)
+  val OP_STORE:    UInt = 0x23.U(7.W)
+  val OP_STORE_FP: UInt = 0x27.U(7.W)
+  val OP:          UInt = 0x33.U(7.W)
+  val OP_LUI:      UInt = 0x37.U(7.W)
+  val OP_32:       UInt = 0x3b.U(7.W)
+  val OP_BRANCH:   UInt = 0x63.U(7.W)
+  val OP_JALR:     UInt = 0x67.U(7.W)
+  val OP_JAL:      UInt = 0x6f.U(7.W)
+  val OP_SYSTEM:   UInt = 0x73.U(7.W)
 
   /** reserved opcodes used as sentinels for the RVC code points that expand to nothing valid */
   val OP_RESERVED_1F: UInt = 0x1f.U(7.W)
   val OP_RESERVED_3F: UInt = 0x3f.U(7.W)
 
   // ------------------------------------------------------------------------ funct3
-  val F3_ADD : UInt = 0x0.U(3.W)
-  val F3_SLL : UInt = 0x1.U(3.W)
-  val F3_XOR : UInt = 0x4.U(3.W)
-  val F3_SR  : UInt = 0x5.U(3.W)
-  val F3_OR  : UInt = 0x6.U(3.W)
-  val F3_AND : UInt = 0x7.U(3.W)
+  val F3_ADD: UInt = 0x0.U(3.W)
+  val F3_SLL: UInt = 0x1.U(3.W)
+  val F3_XOR: UInt = 0x4.U(3.W)
+  val F3_SR:  UInt = 0x5.U(3.W)
+  val F3_OR:  UInt = 0x6.U(3.W)
+  val F3_AND: UInt = 0x7.U(3.W)
 
-  val F3_LB  : UInt = 0x0.U(3.W)
-  val F3_LH  : UInt = 0x1.U(3.W)
-  val F3_LW  : UInt = 0x2.U(3.W)
-  val F3_LD  : UInt = 0x3.U(3.W)
-  val F3_LBU : UInt = 0x4.U(3.W)
-  val F3_LHU : UInt = 0x5.U(3.W)
+  val F3_LB:  UInt = 0x0.U(3.W)
+  val F3_LH:  UInt = 0x1.U(3.W)
+  val F3_LW:  UInt = 0x2.U(3.W)
+  val F3_LD:  UInt = 0x3.U(3.W)
+  val F3_LBU: UInt = 0x4.U(3.W)
+  val F3_LHU: UInt = 0x5.U(3.W)
 
-  val F3_SB : UInt = 0x0.U(3.W)
-  val F3_SH : UInt = 0x1.U(3.W)
-  val F3_SW : UInt = 0x2.U(3.W)
-  val F3_SD : UInt = 0x3.U(3.W)
+  val F3_SB: UInt = 0x0.U(3.W)
+  val F3_SH: UInt = 0x1.U(3.W)
+  val F3_SW: UInt = 0x2.U(3.W)
+  val F3_SD: UInt = 0x3.U(3.W)
 
-  val F3_BEQ : UInt = 0x0.U(3.W)
-  val F3_BNE : UInt = 0x1.U(3.W)
+  val F3_BEQ: UInt = 0x0.U(3.W)
+  val F3_BNE: UInt = 0x1.U(3.W)
 
   // ------------------------------------------------------------------------ funct7
-  val F7_ADD    : UInt = 0x00.U(7.W)
-  val F7_SUB    : UInt = 0x20.U(7.W)
-  val F7_MUL    : UInt = 0x01.U(7.W)
+  val F7_ADD: UInt = 0x00.U(7.W)
+  val F7_SUB: UInt = 0x20.U(7.W)
+  val F7_MUL: UInt = 0x01.U(7.W)
+
   /** add.uw (RV64), and zext.h / pack when rs2 = x0 */
-  val F7_ADD_UW : UInt = 0x04.U(7.W)
+  val F7_ADD_UW: UInt = 0x04.U(7.W)
 
   // ------------------------------------------------------------------------ immediates
   /** srai sets imm[10] (the funct6 010000 field of the shift immediate). */
-  val IMM_SRAI  : UInt = 0x400.U(12.W)
+  val IMM_SRAI: UInt = 0x400.U(12.W)
+
   /** andi 0xff  == c.zext.b */
   val IMM_ZEXT_B: UInt = 0x0ff.U(12.W)
+
   /** xori -1    == c.not */
-  val IMM_NOT   : UInt = 0xfff.U(12.W)
+  val IMM_NOT: UInt = 0xfff.U(12.W)
+
   /** sext.b / sext.h */
   val IMM_SEXT_B: UInt = 0x604.U(12.W)
   val IMM_SEXT_H: UInt = 0x605.U(12.W)
+
   /** ebreak immediate */
   val IMM_EBREAK: UInt = 1.U(12.W)
 
@@ -127,19 +132,20 @@ object RviInst {
   }
 
   // ======================================================================== convenience builders
-  def load(funct3: UInt, rd: UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_LOAD)
-  def loadFp(funct3: UInt, rd: UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_LOAD_FP)
-  def store(funct3: UInt, rs2: UInt, rs1: UInt, imm: UInt): UInt = sType(imm, rs2, rs1, funct3, OP_STORE)
+  def load(funct3:    UInt, rd:  UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_LOAD)
+  def loadFp(funct3:  UInt, rd:  UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_LOAD_FP)
+  def store(funct3:   UInt, rs2: UInt, rs1: UInt, imm: UInt): UInt = sType(imm, rs2, rs1, funct3, OP_STORE)
   def storeFp(funct3: UInt, rs2: UInt, rs1: UInt, imm: UInt): UInt = sType(imm, rs2, rs1, funct3, OP_STORE_FP)
-  def opImm(funct3: UInt, rd: UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_IMM)
-  def opImm32(funct3: UInt, rd: UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_IMM_32)
+  def opImm(funct3:   UInt, rd:  UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_IMM)
+  def opImm32(funct3: UInt, rd:  UInt, rs1: UInt, imm: UInt): UInt = iType(imm, rs1, funct3, rd, OP_IMM_32)
   def op(funct7: UInt, rs2: UInt, rs1: UInt, funct3: UInt, rd: UInt): UInt = rType(funct7, rs2, rs1, funct3, rd, OP)
-  def op32(funct7: UInt, rs2: UInt, rs1: UInt, funct3: UInt, rd: UInt): UInt = rType(funct7, rs2, rs1, funct3, rd, OP_32)
-  def branch(funct3: UInt, rs2: UInt, rs1: UInt, imm: UInt): UInt = bType(imm, rs2, rs1, funct3, OP_BRANCH)
-  def jal(imm: UInt, rd: UInt): UInt = jType(imm, rd, OP_JAL)
-  def jalr(imm: UInt, rs1: UInt, rd: UInt): UInt = iType(imm, rs1, F3_ADD, rd, OP_JALR)
-  def lui(imm20: UInt, rd: UInt): UInt = uType(imm20, rd, OP_LUI)
-  def system(imm: UInt, rs1: UInt, funct3: UInt, rd: UInt): UInt = iType(imm, rs1, funct3, rd, OP_SYSTEM)
+  def op32(funct7: UInt, rs2: UInt, rs1: UInt, funct3: UInt, rd: UInt): UInt =
+    rType(funct7, rs2, rs1, funct3, rd, OP_32)
+  def branch(funct3: UInt, rs2: UInt, rs1:    UInt, imm: UInt): UInt = bType(imm, rs2, rs1, funct3, OP_BRANCH)
+  def jal(imm:       UInt, rd:  UInt): UInt = jType(imm, rd, OP_JAL)
+  def jalr(imm:      UInt, rs1: UInt, rd:     UInt): UInt = iType(imm, rs1, F3_ADD, rd, OP_JALR)
+  def lui(imm20:     UInt, rd:  UInt): UInt = uType(imm20, rd, OP_LUI)
+  def system(imm:    UInt, rs1: UInt, funct3: UInt, rd:  UInt): UInt = iType(imm, rs1, funct3, rd, OP_SYSTEM)
 
   /** nop = addi x0, x0, 0 */
   def nop: UInt = opImm(F3_ADD, 0.U(5.W), 0.U(5.W), 0.U(12.W))
