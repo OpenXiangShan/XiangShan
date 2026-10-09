@@ -42,8 +42,8 @@ class NewFLManager(
   private val headLowSpan = 1 << headLowWidth
   private val headLowCount = math.min(headLowSpan, s1QueueSize)
   private val headHighCount = (s1QueueSize + headLowSpan - 1) / headLowSpan
-  val s1HeadLowOH = RegInit(1.U(headLowCount.W))
-  val s1HeadHighOH = RegInit(1.U(headHighCount.W))
+  val s1HeadLowOH = UIntToOH(s1HeadPtr(headLowWidth - 1, 0), headLowCount)
+  val s1HeadHighOH = UIntToOH(s1HeadPtr >> headLowWidth, headHighCount)
   val s1HeadPtrOH = VecInit((0 until s1QueueSize).map { slot =>
     s1HeadLowOH(slot % headLowSpan) && s1HeadHighOH(slot / headLowSpan)
   }).asUInt
@@ -86,7 +86,7 @@ class NewFLManager(
     // Build each bank bitmap from interleaved physical-register indices rather
     // than slicing four contiguous ranges.
     val bankPRegs = (bankIndex until numPhyRegs by bankCount).toSeq
-    val bankBitmap = VecInit(bankPRegs.map(s0AllocBitmap(_))).asUInt
+    val bankBitmap = VecInit(bankPRegs.map(s0AllocBitmap(_))).asUInt.pad(1 << log2Ceil(bankPRegs.size))
     // With low-bit interleaving, preg = row << bankIndexWidth | bankIndex.
     // Form the physical index arithmetically instead of dynamically indexing
     // a 32/40-entry constant vector after priority encoding.
@@ -159,20 +159,20 @@ class NewFLManager(
   // Keep a statically rotated view of the queue, as StdFreeList does, so the
   // output path only selects one already-formed RenameWidth-wide window. The
   // previous dynamic index formed an add/compare/mux chain for every lane.
-  // Factor the head selection into two smaller registered one-hot muxes.
+  // Split the binary head index into two shared four-way selection stages.
   val lowRotatedQueue = VecInit((0 until s1QueueSize).map { slot =>
-    Mux1H(s1HeadLowOH, VecInit((0 until headLowCount).map { low =>
+    VecInit((0 until headLowCount).map { low =>
       s1Queue((slot + low) % s1QueueSize)
-    }))
+    })(s1HeadPtr(headLowWidth - 1, 0))
   })
   val s1HeadCandidates = VecInit((0 until renameWidth).map { offset =>
-    Mux1H(s1HeadHighOH, VecInit((0 until headHighCount).map { high =>
+    VecInit((0 until headHighCount).map { high =>
       lowRotatedQueue((offset + high * headLowSpan) % s1QueueSize)
-    }))
+    })(s1HeadPtr >> headLowWidth)
   })
   for (laneIdx <- 0 until renameWidth) {
     val candidateOffset = PopCount(in.allocateReq.take(laneIdx))
-    out.allocatePhyReg(laneIdx) := s1HeadCandidates(candidateOffset)
+    out.allocatePhyReg(laneIdx) := Mux1H((0 until renameWidth).map(i => candidateOffset === i.U), s1HeadCandidates.toSeq)
   }
   // Match StdFreeList timing: canAllocate is registered from the number of
   // candidates left after this cycle's dequeue/refill.
@@ -192,7 +192,10 @@ class NewFLManager(
     )
   }.reduce(_ | _)
   out.allocateBitmap := selectedBitmap
-  val s1DequeuedBitmap = Mux(s1DoDequeue, selectedBitmap, 0.U(numPhyRegs.W))
+  val s1DequeuedBitmap = (0 until renameWidth).map { offset =>
+    Mux(s1DoDequeue && offset.U < allocateCount,
+      UIntToOH(s1HeadCandidates(offset), numPhyRegs), 0.U(numPhyRegs.W))
+  }.reduce(_ | _)
   out.dequeuedBitmap := s1DequeuedBitmap
 
   // s1 holds unallocated prefetch candidates, which remain free across
@@ -201,10 +204,6 @@ class NewFLManager(
   // can resume immediately when recovery ends.
   when(!in.flush) {
     s1HeadPtr := s1HeadPtrNext
-    when(s1DoDequeue) {
-      s1HeadLowOH := UIntToOH(s1HeadPtrNext(headLowWidth - 1, 0), headLowCount)
-      s1HeadHighOH := UIntToOH(s1HeadPtrNext >> headLowWidth, headHighCount)
-    }
   }
   s1CanAllocateReg := s1CanAllocateNext
   // A full circular queue has tail == head. Otherwise all raw candidates
