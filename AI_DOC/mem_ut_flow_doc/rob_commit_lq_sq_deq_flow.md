@@ -23,8 +23,8 @@
 
 普通 scalar store 的 fault 先经过 writeback 层 pending 记录，不立即成为 fault candidate。STA、STD
 两个真实 writeback 均完成后，pending fault 才 finalize；commit handler 才能把该 UID 作为 fault head
-提交。fault terminal 完成后，real dispatch topology 才申请 fault redirect。SQ deq 若先于 STD WB，只有
-匹配 pending fault 的唯一 barrier STD 可借 status 保存的历史 SQ key 完成一次发射/WB；普通无 owner STD 仍删除。
+提交。fault terminal 完成后，real dispatch topology 才申请 fault redirect。SQ deq 删除尚未 fire 的 STD，
+不再为 pending fault 保留 barrier STD，也不得用历史 SQ key 补发。
 
 ### 1.1 术语与抽象功能说明
 
@@ -48,7 +48,7 @@
 | `redirect sample anchor` | redirect输入被DUT采到的sample序号与完整payload | cancel record、`redirect_anchor_history_q` | `R`是anchor拍，`R+1`是下一sample |
 | `overlap` | LOAD MMIO sample等于某个未完成redirect的`R`或`R+1` | `resolve_mmio_uid_by_rob_value()` | 只有唯一旧load owner被覆盖时stale drop |
 | `deferred FIFO` | 已完成semantic转换、等待full-raw LSQ owner成功应用的持久队列 | `memblock_sync_pkg::deferred_raw_ctrl_q` | resync mismatch保留队首到下一service tick |
-| `barrier STD` | pending store fault 已见 STA WB、但 STD WB 未到时唯一允许跨 SQ deq 完成的 STD item | `std_issue_q`、`pending_store_fault_by_uid` | UID31 map 已释放后仍完成 STD WB |
+| `pending fault draft` | 双 real-WB 前的 store 异常证据；SQ deq 不再为它保留 STD | `pending_store_fault_by_uid` | 更老 redirect 的普通 reissue 会删除该草稿 |
 
 ### 1.2 核心语义
 

@@ -1,5 +1,10 @@
 # UID31 双写回屏障卡住根因与解决方案
 
+> 注记：本文记录 2026-09-23 的旧根因分析，其中 barrier STD 保留路径已经删除。当前行为以
+> `AI_DOC/plan/test_framework/plan/do/memblock_redirect_pending_store_fault_draft_clear_plan_20261008.md`
+> 和最新 `fault_exception_flow.md` 为准。
+
+
 ## 1. 分析范围与术语
 
 ### 1.1 术语与抽象功能说明

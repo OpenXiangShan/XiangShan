@@ -30,10 +30,10 @@ writeback handler 先把 target writeback 和异常证据保存到 pending recor
 real dispatch 中，DUT fault sideband redirect 仍由既有 recovery queue 单飞仲裁；它不能绕过 fault token，
 但不是 STA/STD 双写回屏障的状态真源。
 
-SQ deq 释放 store owner 时，普通未 fire STD 仍删除且不得在无 `active_sq_mapped` 时重新路由。唯一例外是
-当前动态实例已有 pending store fault、STA 已 real-WB、STD 尚未 real-WB 的 barrier STD：map 删除后保留已有
-queue item 和历史 SQ key，scheduler/adapter 以 ROB、issue epoch、flush epoch 和该 key 完成一次 STD 发射/WB。
-STD WB 到达后，该例外立即失效，fault 才能 finalize。
+SQ deq 释放 store owner 时删除尚未 fire 的 STD，并清除 `queued_std`。没有 `active_sq_mapped` 时不允许重新 route 或发射。
+pending store fault 在双 real-WB 前只存在于 `pending_store_fault_by_uid`，不再保留 barrier STD。
+
+更老 redirect 覆盖尚未 `rob_commit` 的 UID 时，双 real-WB 前走普通 reissue。`clear_uid_dispatch_result()` 删除该 UID 的 pending 草稿；普通路径仅在实际删除后、`dynamic_epoch` 增加前打印 `PENDING_FAULT_DRAFT`。正式 fault 位已置位时走方案 A：active 分支只释放活映射，随后无论 active 与否都调用 `remove_uid_from_issue_queues()`，再由 `reset_uid_after_older_redirect()` 重置。finalize 已经删过 LOAD 和 STA，STD 也已在 real-WB 前出队，因此到达方案 A 时三个队列通常为空。已 `rob_commit` 的 fault head 仍由 `preserve_fault_uid_during_redirect()` 保留。
 
 ## 术语与抽象功能说明
 
@@ -46,7 +46,7 @@ STD WB 到达后，该例外立即失效，fault 才能 finalize。
 | `terminal skip` | redirect 扫描遇到已 terminal 的 fault 时不重新建立动态实例的既有规则。 | `apply_redirect_flush_range()`。 | UID5 被扫描跳过。 |
 | `re-admission` | younger 旧动态实例被 cancel 后，既有 admission 路径重新构造同一 UID。 | `prepare_uid_for_redirect_reissue()`。 | UID6 是第一个重新 admission UID。 |
 | `active redirect` | 已取得 cancel record、正在 drive/anchor/apply 的唯一 recovery owner。 | `data.active_redirect`。 | fault token 不能与其并发申请新 record。 |
-| `barrier STD` | pending store fault 已建立后、SQ deq 先于 STD WB 时必须继续完成的一项 STD。 | `std_issue_q`、保存的 SQ key。 | UID31 的 STD 在 map 删除后仍须 WB。 |
+| `pending fault draft` | 双 real-WB 前按 UID 暂存的 store 异常证据；旧实例被 redirect 作废时由普通 reissue 删除。 | `pending_store_fault_by_uid`。 | STA fault 已见、STD real-WB 未到。 |
 
 抽象功能描述：fault 状态、RM compare 和 fault terminal 仍由原有路径负责；本 flow 仅在 real dispatch topology 中把已 terminal 的 fault head 转为一次 `level=1` redirect。既有 redirect owner 负责 driver、monitor anchor、LSQ cancel 和 younger UID re-admission，fault UID 只作为 terminal skip，不会再次发射。
 
@@ -74,7 +74,7 @@ flowchart TD
     P --> Q
     P --> R{scalar store dual real-WB complete?}
     R -->|yes| S[finalize_pending_store_fault]
-    R -->|no| T[keep pending fault and barrier STD]
+    R -->|no| T[keep pending fault draft only]
     S --> U[status.fault/exception_pending set]
     U --> V[push_feedback_event]
     V --> W[normalize_feedback_event again]
@@ -124,7 +124,7 @@ Fault / Exception 主流程：
    handle_real_writeback_event 判断 event_has_fault；
    scalar store 的 mark_target_fault 先设置 target writeback 并保存 pending fault，不能立即设置 UID fault；
    同一动态实例的 STA/STD real WB 都完成后，finalize_pending_store_faults 设置 status.fault/exception_pending；
-   pending 期间若 SQ deq 已到，唯一 barrier STD 保留并继续发射，后续 recovery handler 不重复写 fault。
+   pending 期间不保留 barrier STD；SQ deq 删除尚未 fire 的 STD。后续 recovery handler 不重复写 fault。
 
 4. recovery queue 消费：
    fault event 在目标证据记录后调用 push_feedback_event；
@@ -491,7 +491,7 @@ real topology 中，has_pending_monitor_redirect 扫描 recovery queue 中尚未
 申请成功后 finish_fault_head_terminal 把 cursor 置为 fault_uid+1 并清 token；global flush 阻止 admission/issue，直到 monitor anchor 后的 apply_redirect_flush 完成。
 ```
 
-`apply_redirect_flush_range()` 首先跳过 `terminal_done` 的 UID5，所以 `flush_itself=1` 不会重新发射 fault；对仍 active 的 UID6 及更年轻实例调用 `prepare_uid_for_redirect_reissue()`，由既有 admission 恢复。
+`apply_redirect_flush_range()` 首先跳过 `terminal_done` 的 UID5，所以 `flush_itself=1` 不会重新发射 fault；对仍 active 的 UID6 及更年轻实例调用 `prepare_uid_for_redirect_reissue()`，由既有 admission 恢复。尚未正式 fault 的 pending 草稿在这条普通 reissue 中删除。已经正式 fault 且尚未 `rob_commit` 的实例进入方案 A，重置前删除该 UID 的旧发射项。
 
 ## 7. `push_feedback_event()` 后 fault 入队
 

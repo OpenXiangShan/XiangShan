@@ -369,6 +369,7 @@ apply_redirect_flush最后清PTW wait replay、drive queue和global freeze状态
 
 抽象功能描述：`note_lsq_cancel_for_uid()`必须在mapping释放前保存该动态实例的cancel事实；
 `prepare_uid_for_redirect_reissue()`随后清旧map、issue项和执行状态，为同uid新动态实例重新admission做准备。
+双 real-WB 前的 pending 草稿由普通 reissue 删除；正式 fault 且尚未 `rob_commit` 时走方案 A，重置前统一删除发射项。
 
 真实逻辑摘要：
 

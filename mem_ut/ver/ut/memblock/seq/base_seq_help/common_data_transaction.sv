@@ -1995,10 +1995,12 @@ class common_data_transaction extends uvm_object;
                pending_store_fault_by_uid[uid].dynamic_epoch == status.dynamic_epoch;
     endfunction:pending_store_fault_matches
 
-    function void clear_pending_store_fault(input memblock_uid_t uid);
+    function bit clear_pending_store_fault(input memblock_uid_t uid);
         if (pending_store_fault_by_uid.exists(uid)) begin
             pending_store_fault_by_uid.delete(uid);
+            return 1'b1;
         end
+        return 1'b0;
     endfunction:clear_pending_store_fault
 
     function bit capture_pending_store_fault(input memblock_uid_t uid,
@@ -2076,7 +2078,7 @@ class common_data_transaction extends uvm_object;
         quiesce_fault_uid_pending_work(uid, 1'b0);
         release_ptw_wait_replay(uid);
         status.clear_sta_late_fault_tombstones();
-        clear_pending_store_fault(uid);
+        void'(clear_pending_store_fault(uid));
         status.last_event_cycle = pending.cycle;
         `uvm_info("STORE_FAULT_BARRIER",
                   $sformatf("finalize store fault uid=%0d sta_wb=%0d std_wb=%0d sta_fault=%0d std_fault=%0d",
@@ -2095,7 +2097,7 @@ class common_data_transaction extends uvm_object;
         foreach (pending_uids[idx]) begin
             uid = pending_uids[idx];
             if (!pending_store_fault_matches(uid)) begin
-                clear_pending_store_fault(uid);
+                void'(clear_pending_store_fault(uid));
                 continue;
             end
             void'(finalize_pending_store_fault(uid));
@@ -2676,10 +2678,14 @@ class common_data_transaction extends uvm_object;
                status.lsq_reservation_sample_valid;
     endfunction:uid_lsq_reservation_visible
 
-    function void clear_uid_dispatch_result(input memblock_uid_t uid);
+    function bit clear_uid_dispatch_result(input memblock_uid_t uid);
         status_transaction status;
+        bit                dropped_pending_draft;
 
         status = get_status(uid);
+        // 草稿删除只服务旧动态实例作废。finalize 直接调用
+        // clear_pending_store_fault()，不经过这里，因此不会打出 reissue 日志。
+        dropped_pending_draft = clear_pending_store_fault(uid);
         clear_uid_mmio_tag(uid);
         status.enq             = 1'b0;
         status.issue_ready     = 1'b0;
@@ -2723,6 +2729,7 @@ class common_data_transaction extends uvm_object;
         status.active_instance_flush_epoch = 0;
         status.clear_target_instance_flush_epochs();
         status.clear_lsq_reservation_visibility();
+        return dropped_pending_draft;
     endfunction:clear_uid_dispatch_result
 
     function void reset_uid_after_older_redirect(input memblock_uid_t uid);
@@ -2737,7 +2744,7 @@ class common_data_transaction extends uvm_object;
         if (pending_store_fault_by_uid.exists(uid)) begin
             pending_store_fault_by_uid.delete(uid);
         end
-        clear_uid_dispatch_result(uid);
+        void'(clear_uid_dispatch_result(uid));
         status.fault           = 1'b0;
         status.exception_pending = 1'b0;
         status.sta_fault       = 1'b0;
@@ -3722,15 +3729,13 @@ class common_data_transaction extends uvm_object;
         if ((status.fault || status.exception_pending || status.sta_fault || status.std_fault) &&
             !status.rob_commit) begin
             if (status.active) begin
-                // apply_redirect_flush_range() 已经冻结旧 owner 并登记 cancel；这里
-                // 只释放 live map，避免对同一 generation 重复 capture owner。
+                // owner 已在本函数入口冻结，这里只释放活映射。
                 release_uid_lq_mapping(uid);
                 release_uid_sq_mapping(uid);
                 uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
                 status.active = 1'b0;
-            end else begin
-                remove_uid_from_issue_queues(uid);
             end
+            remove_uid_from_issue_queues(uid);
             reset_uid_after_older_redirect(uid);
             return;
         end
@@ -3739,7 +3744,19 @@ class common_data_transaction extends uvm_object;
         end else begin
             remove_uid_from_issue_queues(uid);
         end
-        clear_uid_dispatch_result(uid);
+        begin
+            bit dropped_pending_draft;
+            int unsigned cleared_epoch;
+
+            cleared_epoch = status.dynamic_epoch;
+            dropped_pending_draft = clear_uid_dispatch_result(uid);
+            if (dropped_pending_draft) begin
+                `uvm_info("PENDING_FAULT_DRAFT",
+                          $sformatf("drop pending store fault draft on redirect reissue uid=%0d dynamic_epoch=%0d",
+                                    uid, cleared_epoch),
+                          UVM_LOW)
+            end
+        end
         status.redirect_pending = 1'b1;
         status.flushed          = 1'b1;
         status.dynamic_epoch++;

@@ -1801,19 +1801,16 @@ redirect_phase 回到 IDLE。
 
 ```text
 检查 redirect valid，禁止 flush 已 terminal_done uid；
-记录当前 uid 是否有 LQ/SQ active mapping；
-对真正被redirect覆盖的uid，先调用close_issue_generation_token(REDIRECT)：
-  关闭LOAD/STA open token并写最近SQ/ROB tombstone；
-  必须在retire_active_uid删除active key map前完成；
-如果 status.active：
-  调用 retire_active_uid：从 active ROB/LQ/SQ map 删除 uid，并清掉该 uid 的 issue queue 项；
-否则：
-  调用 remove_uid_from_issue_queues：清残留 issue queue，避免已非 active 的旧发射项继续发射；
-如果原来有 LQ/SQ mapping：
-  增加 pending_lq_cancel_count / pending_sq_cancel_count；
-调用 clear_uid_dispatch_result：清 enq/queued/dispatched/writeback/pass/fault/replay 等状态，为 redirect 后重新 admission 做准备；
-设置 redirect_pending=1、flushed=1、dynamic_epoch++、active=0、success=0；
-记录 last_event_cycle。
+先冻结 redirect owner 并登记 LSQ cancel；
+如果正式 fault 位已置位且尚未 rob_commit：
+  active 时只释放 LQ、SQ、ROB 活映射；
+  无论是否 active，都调用 remove_uid_from_issue_queues；
+  调用 reset_uid_after_older_redirect：先删 pending 草稿，再清 dispatch 结果并递增 dynamic_epoch；
+  不打印 PENDING_FAULT_DRAFT；
+否则走普通 reissue：
+  active 时调用 retire_active_uid，否则只删除残留 issue item；
+  clear_uid_dispatch_result 删除 pending 草稿；实际删除时在 dynamic_epoch 增加前打印 PENDING_FAULT_DRAFT；
+  设置 redirect_pending=1、flushed=1，然后 dynamic_epoch++。
 ```
 
 ## 29.1 issue-generation token 生命周期对 writeback flow 的约束
