@@ -52,18 +52,22 @@ class NewFreeList(
 )(implicit p: Parameters)
     extends XSModule with HasXSParameter with HasPerfEvents{
   val io                = IO(FreeListBundle(numPhyRegs, RenameWidth, commitWidth))
-  //Init
+  // Encode free bits relative to the architectural reset bitmap.
+  // Storage resets to zero; XOR restores exactly the original visible bits.
   def InitFreeList(reg_t: RegType) = {
-    reg_t match {
-      case Reg_I => RegInit(VecInit(Seq.tabulate(numPhyRegs)( i => if(i==0)false.B else true.B)))
-      case Reg_F => RegInit(VecInit(Seq.tabulate(numPhyRegs)( i => if(i%(numPhyRegs/numLogicRegs)==0)false.B else true.B)))
-      case Reg_V => RegInit(VecInit(Seq.tabulate(numPhyRegs)( i => if(i%(numPhyRegs/numLogicRegs)==0)false.B else true.B)))
-      case _ => RegInit(VecInit(Seq.tabulate(numPhyRegs)( i => if(i<numLogicRegs)false.B else true.B)))
+    val initialFree = reg_t match {
+      case Reg_I => Seq.tabulate(numPhyRegs)(i => i != 0)
+      case Reg_F => Seq.tabulate(numPhyRegs)(i => i % (numPhyRegs / numLogicRegs) != 0)
+      case Reg_V => Seq.tabulate(numPhyRegs)(i => i % (numPhyRegs / numLogicRegs) != 0)
+      case _ => Seq.tabulate(numPhyRegs)(i => i >= numLogicRegs)
     }
+    val resetMask = VecInit(initialFree.map(_.B)).asUInt
+    val storage = RegInit(0.U(numPhyRegs.W))
+    val logical = (storage ^ resetMask).asTypeOf(Vec(numPhyRegs, Bool()))
+    (storage, logical, resetMask)
   }
-
-  val specfreeListReg   = InitFreeList(regType)
-  val archfreeListReg   = InitFreeList(regType)
+  val (specStorage, specfreeListReg, specResetMask) = InitFreeList(regType)
+  val (archStorage, archfreeListReg, archResetMask) = InitFreeList(regType)
   val freePhyRegOH = VecInit((0 until commitWidth).map { i =>
     Mux(io.freeReq(i), UIntToOH(io.freePhyReg(i), numPhyRegs), 0.U(numPhyRegs.W))
   })
@@ -111,11 +115,19 @@ class NewFreeList(
   // Snapshot metadata are only consumed when lastCycleRedirect is true.
   // Its reset value masks both pipeline stages until they contain valid data.
   val lastCycleSnpt     = RegNext(RegNext(io.snpt))
-  val snapshots = FreeListSnapshotGenerator(specfreeListReg.asUInt|freePhyRegOHOR, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec, freePhyRegOHOR,numPhyRegs)
+  val snapshotStore = Module(new NewFreeListSnapshotStore(numPhyRegs))
+  snapshotStore.io.enqData := specfreeListReg.asUInt
+  snapshotStore.io.enq := io.snpt.snptEnq
+  snapshotStore.io.deq := io.snpt.snptDeq
+  snapshotStore.io.redirect := io.redirect
+  snapshotStore.io.flushVec := io.snpt.flushVec
+  snapshotStore.io.freePhyRegOH := freePhyRegOHOR
+  snapshotStore.io.hasFree := io.freeReq.asUInt.orR
+  snapshotStore.io.select := lastCycleSnpt.snptSelect
 
   val redirectedFreeList = Mux(
     lastCycleSnpt.useSnpt,
-    snapshots(lastCycleSnpt.snptSelect),
+    snapshotStore.io.selected,
     archfreeListReg.asUInt
   )
   
@@ -123,8 +135,8 @@ class NewFreeList(
   // Reuse that mask for speculative state instead of qualifying it again.
   val specBase = Mux(doRestore, redirectedFreeList,
     specfreeListReg.asUInt & ~flManager.out.dequeuedBitmap)
-  specfreeListReg := ((specBase & ~walkPhyRegOHOR) | freePhyRegOHOR).asTypeOf(specfreeListReg)
-  archfreeListReg := ((archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR).asTypeOf(archfreeListReg)
+  specStorage := ((specBase & ~walkPhyRegOHOR) | freePhyRegOHOR) ^ specResetMask
+  archStorage := ((archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR) ^ archResetMask
 
   //Debug
   XSPerfAccumulate("utilization", PopCount(io.allocateReq))
@@ -154,3 +166,52 @@ class NewFreeListCommitBundle(commitWidth: Int,numPhyRegs: Int) extends Bundle {
   val archAlloc = Vec(commitWidth, Bool())
   val archAllocPhyReg = Vec(commitWidth, UInt(log2Up(numPhyRegs).W))
 }
+
+// On capture/free events, swap each pair of physical rows and update phase.
+// Logical checkpoint numbers stay fixed. The shared event enables whole rows,
+// avoiding a separate hold/clock-gate condition for every physical-register bit.
+class NewFreeListSnapshotStore(numPhyRegs: Int)(implicit p: Parameters)
+  extends XSModule with HasCircularQueuePtrHelper {
+  private val count = RenameSnapshotNum
+  val io = IO(new Bundle {
+    val enq = Input(Bool())
+    val deq = Input(Bool())
+    val redirect = Input(Bool())
+    val flushVec = Input(Vec(count, Bool()))
+    val enqData = Input(UInt(numPhyRegs.W))
+    val freePhyRegOH = Input(UInt(numPhyRegs.W))
+    val hasFree = Input(Bool())
+    val select = Input(UInt(log2Ceil(count).W))
+    val selected = Output(UInt(numPhyRegs.W))
+  })
+  // Reuse the original pointer/valid/flush implementation with no payload.
+  val metadata = Module(new NewFreeListSnapshotMetadata)
+  metadata.io.enq := io.enq
+  metadata.io.deq := io.deq
+  metadata.io.redirect := io.redirect
+  metadata.io.flushVec := io.flushVec
+  metadata.io.enqData := 0.U
+
+  // Store busy bits so every release clears the same bit in every checkpoint.
+  val rows = Reg(Vec(count, UInt(numPhyRegs.W)))
+  val phase = RegInit(false.B)
+  val nextPhase = !phase
+  def physicalRow(index: UInt, flip: Bool): UInt = {
+    val canSwap = if (count % 2 == 0) true.B else index =/= (count - 1).U
+    Mux(flip && canSwap, index ^ 1.U, index)
+  }
+  val capture = io.enq && !io.redirect && !isFull(metadata.io.enqPtr, metadata.io.deqPtr)
+  val captureRow = physicalRow(metadata.io.enqPtr.value, nextPhase)
+  when(capture || io.hasFree) {
+    for (row <- 0 until count) {
+      val partner = if ((row ^ 1) < count) row ^ 1 else row
+      rows(row) := Mux(capture && captureRow === row.U, ~io.enqData, rows(partner)) & ~io.freePhyRegOH
+    }
+    phase := nextPhase
+  }
+  io.selected := ~Mux1H(UIntToOH(physicalRow(io.select, phase), count), rows)
+}
+
+// Keep the original enqueue/dequeue/flush rules and only replace payload storage.
+class NewFreeListSnapshotMetadata(implicit p: Parameters)
+  extends xiangshan.backend.rename.SnapshotGenerator[UInt](0.U(1.W))
