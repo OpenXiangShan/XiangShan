@@ -117,7 +117,6 @@ class VectorDecodeChannel(
     IsVecMemContinousField,
     ImmIsSign5b,
     ImmIsUnsign5b,
-    ExceptionIIField,
     IsVecIntInstField,
     IsVecFPField,
     IsVtypeIgnoreField,
@@ -290,7 +289,7 @@ class VectorDecodeChannel(
 
     out.uop(i).bits.exceptionII := Mux(
       instBundle(IsVecIntInstField),
-      instBundle(ExceptionIIField),
+      false.B,
       vecException,
     )
   }
