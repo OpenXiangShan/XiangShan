@@ -26,14 +26,13 @@ def evaluate_uncache_event_coverage(runtime, env, cycle: int):
 class UncacheEventToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for uncache path and ordering events."""
 
-    def __init__(self, runtime, *, sink=None, audit_recorder=None) -> None:
+    def __init__(self, runtime, *, sink=None) -> None:
         super().__init__(
             runtime,
             keys=UNCACHE_EVENT_SAMPLER_BIN_KEYS,
             coverpoints=UNCACHE_EVENT_COVERPOINTS,
             evaluate=evaluate_uncache_event_coverage,
             sink=sink,
-            audit_recorder=audit_recorder,
         )
 
 __all__ = [

@@ -296,7 +296,7 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))" in source
     assert 'request.config.getoption("--toffee-report")' in source
     assert "set_func_coverage(request, toffee_sink.cov_groups)" in source
-    assert "audit_recorder=None" in source
+    assert "audit_recorder" not in source
     assert 'collector.write(path or (_funcov_dir() / "toffee.funcov.json"))' in source
     assert "FunctionalCoverageRecorder" not in source
     assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
@@ -782,7 +782,6 @@ def test_direct_runtime_defaults_to_no_audit_transfer(tmp_path) -> None:
     runtime = create_toffee_runtime(hub, sink)
     # All direct domains are now native CovGroup models.
     assert runtime.cycle_models
-    assert all(getattr(model, "_audit_recorder", None) is None for model in runtime.cycle_models)
     assert set(sink._native_group_names)
     # Shared sink mark-bridge is reserved for non-native groups only; with full
     # native install it should reject every active domain group.

@@ -24,9 +24,9 @@ class ToffeeRuntime:
     uncache_model: object
 
 
-def create_toffee_runtime(recorder, sink, *, audit_recorder=None) -> ToffeeRuntime:
+def create_toffee_runtime(recorder, sink) -> ToffeeRuntime:
     def create(model_type):
-        return model_type(recorder, sink=sink, audit_recorder=audit_recorder)
+        return model_type(recorder, sink=sink)
 
     hitmiss = create(ICacheHitMissToffeeCoverage)
     mainpipe = create(ICacheMainpipeToffeeCoverage)

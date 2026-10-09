@@ -12,7 +12,7 @@ from ...native_toffee import NativeDomainToffeeCoverage
 class TwoFetchToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for the FTQ two-fetch domain."""
 
-    def __init__(self, runtime, *, sink=None, audit_recorder=None) -> None:
+    def __init__(self, runtime, *, sink=None) -> None:
         super().__init__(
             runtime,
             keys=TWO_FETCH_SAMPLER_BIN_KEYS,
@@ -20,7 +20,6 @@ class TwoFetchToffeeCoverage(NativeDomainToffeeCoverage):
             evaluate=evaluate_two_fetch_coverage,
             reset=reset_ftq_coverage_state,
             sink=sink,
-            audit_recorder=audit_recorder,
         )
 
 

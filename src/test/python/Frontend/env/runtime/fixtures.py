@@ -622,7 +622,6 @@ def env(dut, request):
         runtime = create_toffee_runtime(
             runtime_context,
             toffee_sink,
-            audit_recorder=None,
         )
         toffee_direct_models.extend(runtime.cycle_models)
         for model in runtime.event_models:

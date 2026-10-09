@@ -193,24 +193,6 @@ class ToffeeCoverageSink:
         self.record_native_hits(
             {key: True}, {key: point_name}, cycle, evidence
         )
-
-        audit_recorder = getattr(model, "_audit_recorder", None)
-        if audit_recorder is not None:
-            kwargs = {
-                "coverpoint": point_name,
-                "forward_to_toffee": False,
-            }
-            try:
-                audit_recorder.mark(
-                    group_name,
-                    bin_name,
-                    cycle,
-                    evidence,
-                    derive_owner=False,
-                    **kwargs,
-                )
-            except TypeError:
-                audit_recorder.mark(group_name, bin_name, cycle, evidence, **kwargs)
         return True
 
     @classmethod

@@ -13,7 +13,7 @@ from ...native_toffee import NativeDomainToffeeCoverage
 class MmioV3ToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for IFU MMIO V3."""
 
-    def __init__(self, runtime, *, sink=None, audit_recorder=None) -> None:
+    def __init__(self, runtime, *, sink=None) -> None:
         super().__init__(
             runtime,
             keys=MMIO_V3_SAMPLER_BIN_KEYS,
@@ -21,7 +21,6 @@ class MmioV3ToffeeCoverage(NativeDomainToffeeCoverage):
             evaluate=evaluate_mmio_v3_coverage,
             reset=initialize_mmio_v3_coverage_state,
             sink=sink,
-            audit_recorder=audit_recorder,
         )
 
     def handle_event(self, event) -> bool:

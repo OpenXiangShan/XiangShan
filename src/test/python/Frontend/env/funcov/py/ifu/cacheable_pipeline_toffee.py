@@ -12,7 +12,7 @@ from ...native_toffee import NativeDomainToffeeCoverage
 class IfuCacheablePipelineToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for IFU cacheable pipeline."""
 
-    def __init__(self, runtime, *, sink=None, audit_recorder=None) -> None:
+    def __init__(self, runtime, *, sink=None) -> None:
         super().__init__(
             runtime,
             keys=IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
@@ -20,7 +20,6 @@ class IfuCacheablePipelineToffeeCoverage(NativeDomainToffeeCoverage):
             evaluate=evaluate_ifu_cacheable_pipeline_coverage,
             reset=reset_ifu_cacheable_pipeline_state,
             sink=sink,
-            audit_recorder=audit_recorder,
         )
 
 

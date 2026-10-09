@@ -96,12 +96,10 @@ class NativeDomainToffeeCoverage:
         evaluate: Callable[..., tuple[dict[tuple[str, str], bool], dict[str, Any]]] | None = None,
         reset=None,
         sink=None,
-        audit_recorder=None,
         clear_flags_after_cycle: bool = True,
     ) -> None:
         self._runtime = runtime
         self._sink = sink
-        self._audit_recorder = audit_recorder
         self.env = runtime.env
         self._keys = frozenset((str(g), str(b)) for g, b in keys)
         self._coverpoints = {str(k): str(v) for k, v in coverpoints.items()}
@@ -195,27 +193,6 @@ class NativeDomainToffeeCoverage:
                     self._sink.record_native_hits(
                         {key: True}, self._coverpoints_by_key, cycle, bin_evidence
                     )
-        if self._audit_recorder is not None:
-            for group_name, bin_name in self._keys:
-                if not self._view.flags.get((group_name, bin_name), False):
-                    continue
-                bin_evidence = (
-                    evidence.by_bin.get((group_name, bin_name), evidence)
-                    if isinstance(evidence, BinEvidence)
-                    else evidence
-                )
-                self._audit_recorder.mark(
-                    group_name,
-                    bin_name,
-                    cycle,
-                    bin_evidence,
-                    coverpoint=(
-                        self._sink.point_name(group_name, bin_name)
-                        if self._sink is not None
-                        else self._coverpoints[group_name]
-                    ),
-                    forward_to_toffee=False,
-                )
         if self._clear_flags_after_cycle:
             self._view.flags = self._empty_flags()
 
@@ -235,32 +212,6 @@ class NativeDomainToffeeCoverage:
             self._sink.record_native_hits(
                 {key: True}, self._coverpoints_by_key, cycle, evidence
             )
-        if self._audit_recorder is not None:
-            audit_kwargs = {
-                "coverpoint": (
-                    self._sink.point_name(coverage_group, bin_name)
-                    if self._sink is not None
-                    else self._coverpoints[str(coverage_group)]
-                ),
-                "forward_to_toffee": False,
-            }
-            try:
-                self._audit_recorder.mark(
-                    coverage_group,
-                    bin_name,
-                    cycle,
-                    evidence,
-                    derive_owner=False,
-                    **audit_kwargs,
-                )
-            except TypeError:
-                self._audit_recorder.mark(
-                    coverage_group,
-                    bin_name,
-                    cycle,
-                    evidence,
-                    **audit_kwargs,
-                )
         return True
 
     def report(self):
@@ -287,12 +238,10 @@ class NativeCycleToffeeCoverage:
         evaluate: Callable[..., tuple[Mapping[Any, bool], dict[str, Any]]],
         reset=None,
         sink=None,
-        audit_recorder=None,
         flag_key: Callable[[tuple[str, str]], Any] | None = None,
     ) -> None:
         self._runtime = runtime
         self._sink = sink
-        self._audit_recorder = audit_recorder
         self.env = runtime.env
         self._keys = tuple(
             sorted((str(group), str(bin_name)) for group, bin_name in keys)
@@ -390,24 +339,6 @@ class NativeCycleToffeeCoverage:
                     self._sink.record_native_hits(
                         {key: True}, self._coverpoints_by_key, cycle, bin_evidence
                     )
-        if self._audit_recorder is not None:
-            for group_name, bin_name in self._keys:
-                if not hit_flags[(group_name, bin_name)]:
-                    continue
-                key = (group_name, bin_name)
-                bin_evidence = (
-                    evidence.by_bin.get(key, evidence)
-                    if isinstance(evidence, BinEvidence)
-                    else evidence
-                )
-                self._audit_recorder.mark(
-                    group_name,
-                    bin_name,
-                    cycle,
-                    bin_evidence,
-                    coverpoint=self._coverpoints_by_key[key],
-                    forward_to_toffee=False,
-                )
         self._view.flags = self._empty_flags()
 
     def report(self):

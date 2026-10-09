@@ -49,7 +49,7 @@ CFVEC_COVERPOINTS = {
 class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
     """Native Toffee CovGroup sampling for IFU cfVec/compact."""
 
-    def __init__(self, runtime, *, sink=None, audit_recorder=None) -> None:
+    def __init__(self, runtime, *, sink=None) -> None:
         super().__init__(
             runtime,
             keys=CFVEC_SAMPLER_BIN_KEYS,
@@ -57,7 +57,6 @@ class IfuCfvecToffeeCoverage(NativeDomainToffeeCoverage):
             evaluate=evaluate_cfvec_coverage,
             reset=reset_ifu_coverage_state,
             sink=sink,
-            audit_recorder=audit_recorder,
         )
 
 

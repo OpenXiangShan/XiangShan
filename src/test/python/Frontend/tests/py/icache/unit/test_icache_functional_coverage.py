@@ -887,11 +887,10 @@ def test_icache_hitmiss_toffee_model_collects_stateful_sampler_hits() -> None:
     ] == 1
 
 
-def test_icache_hitmiss_toffee_model_can_audit_without_forwarding_legacy_marks() -> None:
+def test_icache_hitmiss_native_sample_is_not_repeated_by_flush() -> None:
     runtime = _Recorder()
     sink = ToffeeCoverageSink(_point_definitions_for_hitmiss())
-    audit = _Recorder()
-    direct = ICacheHitMissToffeeCoverage(runtime, sink=sink, audit_recorder=audit)
+    direct = ICacheHitMissToffeeCoverage(runtime, sink=sink)
     _set_single_hit(runtime)
     runtime.set_hitmiss_key("req0_start", 0x1000)
     direct.sample(40)
@@ -904,7 +903,6 @@ def test_icache_hitmiss_toffee_model_can_audit_without_forwarding_legacy_marks()
     direct.sample(42)
 
     assert runtime.hits == set()
-    assert audit.hits
     assert "icache_hit_path" in sink._native_group_names
     assert sink.hit_counts()[
         "icache_hit_path",
