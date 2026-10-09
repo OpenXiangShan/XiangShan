@@ -17,6 +17,7 @@
 package xiangshan.cache
 
 import chisel3._
+import freechips.rocketchip.tilelink.ClientMetadata
 import chisel3.util._
 import freechips.rocketchip.tilelink.TLPermissions
 import org.chipsalliance.cde.config.Parameters
@@ -310,7 +311,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // get s1_will_send_miss_req in lpad_s1
   val (s1_has_permission, s1_shrink_perm, s1_new_hit_coh) = s1_hit_coh.onAccess(s1_req.cmd)
-  io.spec_query.req.bits.grow := s1_shrink_perm
+  // SpecMiss can commit only after S2 confirms that no tag matched. Its
+  // permissions therefore start at Nothing, independently of the late SRAM
+  // response. Keep the command decode: a write prefetch needs NtoT, not NtoB.
+  io.spec_query.req.bits.grow := ClientMetadata.onReset.onAccess(s1_req.cmd)._2
   val s1_hit = s1_tag_match_dup_dc && s1_has_permission && s1_hit_coh === s1_new_hit_coh
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
 
@@ -339,6 +343,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
+  val s2_vaddr_alias = RegEnable(get_alias(s1_vaddr), s1_fire)
+  val s2_vaddr_set = RegEnable(addr_to_dcache_set(s1_vaddr), s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
   val s2_wpu_pred_fail = RegEnable(s1_wpu_pred_fail, s1_fire)
@@ -349,6 +355,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_spec_candidate = RegNext(s1_spec_candidate, false.B)
   val s2_spec_reserved = io.spec_query.grant.valid
   val s2_spec_id = io.spec_query.grant.bits
+  val s2_spec_grow = RegEnable(io.spec_query.req.bits.grow, s1_fire)
 
   // occupy set check, it will fail if the number of BtoT at same set great equal nWays - 1
   io.occupy_set := addr_to_dcache_set(s2_vaddr)
@@ -398,6 +405,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
   val s2_specmiss_confirm = s2_valid && s2_spec_reserved && !s2_tag_match &&
     !s2_tl_error.asUInt.orR && !s2_tag_error && !s2_btot_occupy_fail && !io.lsu.s2_kill
+  when (s2_specmiss_confirm) {
+    assert(s2_spec_grow === s2_hit_coh.onAccess(s2_req.cmd)._2,
+      "SpecMiss permissions must match the accurately confirmed miss")
+  }
   val s2_request_cancel = io.lsu.s2_kill || s2_tag_error || s2_btot_occupy_fail
   val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
   val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
@@ -452,6 +463,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
+  io.miss_req.bits.vaddrAlias := s2_vaddr_alias
+  io.miss_req.bits.vaddrSet := s2_vaddr_set
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.cancel := s2_request_cancel
   io.miss_req.bits.isSpecMiss := s2_specmiss_confirm
