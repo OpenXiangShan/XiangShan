@@ -30,6 +30,12 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
+  def NormalUopNumWidth(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
+
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
+    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -114,9 +120,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
-    val vtype            = new VType()
-    val specvtype        = new VType()
     val instr = UInt(32.W)
     val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
@@ -147,7 +150,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
     val instr = UInt(32.W)
     // commitType will be used in rob to calculate lsq commit count
@@ -236,22 +238,18 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val RVC = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val hasLastInFtqEntry = UInt(2.W)
-    val compressType = CompressType()
-    val complexHasDest = UInt(1.W)
-    val hasStore = Bool()
-    val noCompressSource = UInt(2.W)
-    val needFlush = UInt(2.W)
-    val interrupt_safe = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
+    val entryPairType = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -286,8 +284,8 @@ object Bundles {
     val numWB = NumWB() // rob need this
     val latency = Latency()
     val numUops = UInt(log2Up(MaxUopSize).W) // rob need this
-    val formerNumWB = UInt(log2Up(MaxUopSize + 1).W) // rob need this
-    val latterNumWB = UInt(log2Up(MaxUopSize + 1).W) // rob need this
+    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
@@ -302,6 +300,7 @@ object Bundles {
     val dirtyFs = Bool()
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    val formerTraceIretire = UInt(IretireWidthEncoded.W)
     // Take snapshot at this CFI inst
     val snapshot = Bool()
     val storeSetHit = Bool() // inst has been allocated an store set
@@ -317,11 +316,8 @@ object Bundles {
     val lsqIdxStart = new LSIdx
     val lsqIdxEnd = new LSIdx
     val hasException = Bool()
-    val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
-    val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
-    val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
     def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
@@ -390,7 +386,7 @@ object Bundles {
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
-    val RVC = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
@@ -623,13 +619,12 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
-    val RVC             = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC           = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
-    val ftqLastOffset   = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before channge in rename
     val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
@@ -646,16 +641,12 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
-    val hasLastInFtqEntry = UInt(2.W)
-    val compressType    = CompressType()
-    val complexHasDest = UInt(1.W)
-    val hasStore = Bool()
-    val noCompressSource = UInt(2.W)
-    val needFlush = UInt(2.W)
-    val interrupt_safe = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
+    val entryPairType    = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
     val fusionNum       = UInt(log2Ceil(RenameWidth + 1).W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
@@ -1760,7 +1751,7 @@ object Bundles {
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
     // Identifies the faulting slot when two instructions share one ROB entry.
-    val isFormer = Bool()
+    val slotIsFormer = Bool()
   }
 
   object UopIdx extends NamedUInt(3)
