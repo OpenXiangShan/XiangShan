@@ -53,9 +53,13 @@ class MainBtbInternalBank(
 
     class WriteCounter extends Bundle {
       class Req extends Bundle {
-        val setIdx:   UInt                 = UInt(SetIdxLen.W)
-        val wayMask:  UInt                 = UInt(NumWay.W)
-        val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val alloc:     Bool                 = Bool()
+        val tag:       UInt                 = UInt(TagWidth.W)
+        val position:  UInt                 = UInt(CfiPositionWidth.W)
+        val setIdx:    UInt                 = UInt(SetIdxLen.W)
+        val wayMask:   UInt                 = UInt(NumWay.W)
+        val allocMask: UInt                 = UInt(NumWay.W)
+        val counters:  Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -125,12 +129,7 @@ class MainBtbInternalBank(
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
 
-  private val counterWriteBuffer = Module(new Queue(
-    new MainBtbCounterSramWriteReq,
-    WriteBufferSize,
-    pipe = true,
-    flow = true
-  ))
+  private val counterWriteBuffer = Module(new MainBtbCounterBuffer)
 
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
 
@@ -153,11 +152,11 @@ class MainBtbInternalBank(
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
   // counter
-  counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
-  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
-  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
-  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
-  counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
+  counterSram.io.w.req.valid            := counterWriteBuffer.io.writeSram.valid && !counterSram.io.r.req.valid
+  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.writeSram.bits.counters
+  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.writeSram.bits.setIdx
+  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.writeSram.bits.wayMask
+  counterWriteBuffer.io.writeSram.ready := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
 
   /* *** io -> writeBuffer *** */
   // entry
@@ -188,11 +187,16 @@ class MainBtbInternalBank(
       valid
     )
   }
+
   // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid
-  counterWriteBuffer.io.enq.bits.setIdx   := writeCounter.req.bits.setIdx
-  counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
-  counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters
+  counterWriteBuffer.io.writeReq.valid          := writeCounter.req.valid
+  counterWriteBuffer.io.writeReq.bits.setIdx    := writeCounter.req.bits.setIdx
+  counterWriteBuffer.io.writeReq.bits.wayMask   := writeCounter.req.bits.wayMask
+  counterWriteBuffer.io.writeReq.bits.counters  := writeCounter.req.bits.counters
+  counterWriteBuffer.io.writeReq.bits.alloc     := writeCounter.req.bits.alloc
+  counterWriteBuffer.io.writeReq.bits.tag       := writeCounter.req.bits.tag
+  counterWriteBuffer.io.writeReq.bits.position  := writeCounter.req.bits.position
+  counterWriteBuffer.io.writeReq.bits.allocMask := writeCounter.req.bits.allocMask
 
   private val perfEntryOverwrite = entryWriteBuffer.io.overwrite.reduce(_ || _)
 
@@ -202,10 +206,6 @@ class MainBtbInternalBank(
       (writeEntry.req.bits.wayMask & flush.req.bits.wayMask).orR
   )
 
-  XSPerfAccumulate(
-    "counter_writebuffer_drop_write",
-    !counterWriteBuffer.io.enq.ready && counterWriteBuffer.io.enq.valid
-  )
   XSPerfAccumulate(
     "entry_writebuffer_overwrite",
     perfEntryOverwrite

@@ -257,7 +257,7 @@ class MainBtbAlignBank(
 
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
-      branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
+      branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition && meta.rawHit
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
@@ -284,10 +284,14 @@ class MainBtbAlignBank(
   private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.writeCounter.req.valid         := t1_fire && t1_counterNeedWrite && t1_internalBankMask(i)
-    b.io.writeCounter.req.bits.setIdx   := t1_setIdx
-    b.io.writeCounter.req.bits.wayMask  := t1_counterWayMask.asUInt
-    b.io.writeCounter.req.bits.counters := t1_newCounters
+    b.io.writeCounter.req.valid          := t1_fire && t1_counterNeedWrite && t1_internalBankMask(i)
+    b.io.writeCounter.req.bits.setIdx    := t1_setIdx
+    b.io.writeCounter.req.bits.wayMask   := t1_counterWayMask.asUInt
+    b.io.writeCounter.req.bits.counters  := t1_newCounters
+    b.io.writeCounter.req.bits.alloc     := t1_entryNeedWrite
+    b.io.writeCounter.req.bits.tag       := getTag(t1_startPc)
+    b.io.writeCounter.req.bits.position  := t1_mispredictInfo.bits.cfiPosition
+    b.io.writeCounter.req.bits.allocMask := t1_entryWayMask
   }
 
   /* *** multi-hit detection & flush *** */
