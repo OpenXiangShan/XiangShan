@@ -316,7 +316,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           # if is custom and checkpoint_path is empty, then the benchmark is a workload list, which does not have a score, so we don't show the key indicators
-          if [[ ${{ inputs.benchmark_type }} != 'custom' || ${{ inputs.checkpoint_path }} != '' ]]; then
+          if [[ "${{ inputs.benchmark_type }}" != "custom" || -n "${{ inputs.checkpoint_path }}" ]]; then
             echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
             echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
             TOTAL_SCORE=$(grep "SPEC\(rate\)\?[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
