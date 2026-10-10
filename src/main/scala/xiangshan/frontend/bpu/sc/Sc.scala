@@ -370,7 +370,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     TrainingBufferSize
   ))
 
-  trainingBuffer.io.enq.valid                    := io.enable && io.train.valid
+  // No-op training must not bypass queued updates and prevent them from draining.
+  trainingBuffer.io.enq.valid                    := io.enable && io.train.valid && incomingNeedRead
   trainingBuffer.io.enq.bits.data.train          := io.train.bits
   trainingBuffer.io.enq.bits.data.foldedPathHist := incomingFoldedPathHist
   trainingBuffer.io.enq.bits.bankIdx             := incomingBankIdx
