@@ -618,12 +618,12 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = Wire(Valid(new Redirect))
   lastLastCycleRedirect.valid := RegNext(lastCycleRedirect.valid)
   lastLastCycleRedirect.bits := RegEnable(lastCycleRedirect.bits, lastCycleRedirect.valid)
-  val oldestRedirectNotFlushed = oldestRedirect.valid &&
-    !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
-    !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
-    !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect)
-  io.rollback.valid := GatedValidRegNext(oldestRedirectNotFlushed)
+  io.rollback.valid := GatedValidRegNext(oldestRedirect.valid &&
+                      !oldestRedirect.bits.robIdx.needFlush(io.redirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastCycleRedirect) &&
+                      !oldestRedirect.bits.robIdx.needFlush(lastLastCycleRedirect))
   io.rollback.bits := RegEnable(oldestRedirect.bits, oldestRedirect.valid)
+
 
   /******************************************************************
    * Perf Counter

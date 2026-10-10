@@ -553,6 +553,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
+  csrio.diffCommitForTrap.zip(ctrlBlock.io.robio.diffCommitForTrap).foreach { case (sink, source) => sink := source }
+  ctrlBlock.io.robio.diffArchEvent.zip(csrio.diffArchEvent).foreach { case (sink, source) => sink := source }
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr

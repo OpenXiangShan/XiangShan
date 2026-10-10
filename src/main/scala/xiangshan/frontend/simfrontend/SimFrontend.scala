@@ -250,7 +250,8 @@ class SimFrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBa
     cfVec.bits.ftqPtr.value := fetchOut.preDecode(12, 7)
     cfVec.bits.ftqPtr.flag  := fetchOut.preDecode(13)
 
-    cfVec.bits.ftqOffset := fetchOut.preDecode(18, 15)
+    cfVec.bits.isLastInFtqEntry := fetchOut.preDecode(14)
+    cfVec.bits.ftqOffset        := fetchOut.preDecode(18, 15)
 
     cfVec.bits.debug_seqNum := 0.U.asTypeOf(new InstSeqNum)
     cfVec.bits.debug_seqNum.seqNum := PerfCCT.createInstMetaAtFetch(
