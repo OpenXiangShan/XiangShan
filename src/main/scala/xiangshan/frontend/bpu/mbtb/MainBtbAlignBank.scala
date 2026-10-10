@@ -227,7 +227,7 @@ class MainBtbAlignBank(
     !t1_hit ||
       // 2. hit, do write only if:
       //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
-      t1_mispredictInfo.bits.attribute.needIttage ||
+      t1_mispredictInfo.bits.attribute.needIttage || t1_mispredictInfo.bits.attribute.hasPop ||
       //   b. attribute changed, probably indicating a software self-modification.
       t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
   )
