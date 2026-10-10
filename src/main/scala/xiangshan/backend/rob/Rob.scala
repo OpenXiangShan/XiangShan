@@ -2323,7 +2323,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val exuOut = dt_exuDebug(ptr)(j)
       val basicDebug = dt_basicDebug(ptr)(j)
       val ordinaryValid = io.commits.isCommit && commitSlotValid(index)
-      val eventHere = (i == 0).B && event.valid && (event.bits === (j == 1).B)
       val slotInstrCount = if (j == 0) {
         Mux(CompressType.isNORMAL(io.commits.info(i).entryPairType), instrSizeCommit(i), formerInstrCntCommit(i))
       } else {
@@ -2335,20 +2334,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val difftest = DifftestModule(new DiffInstrCommit(diffMaxPhyRegs), delay = 3, dontCare = true)
       difftest.coreid := io.hartId
       difftest.index := index.U
-      difftest.valid := ordinaryValid || eventHere
-      difftest.setSpecial(isLatterArchEvent = eventHere)
+      difftest.valid := ordinaryValid
       difftest.skip := ordinaryValid && skip
       difftest.isRVC := ordinaryValid && uop.isRVC
       difftest.rfwen := ordinaryValid && uop.rfWen && basicDebug.ldest =/= 0.U
       difftest.fpwen := ordinaryValid && basicDebug.fpWen
       difftest.vecwen := ordinaryValid && basicDebug.vecWen
       difftest.v0wen := ordinaryValid && (basicDebug.v0Wen || isVLoad && basicDebug.vd === 0.U)
-      difftest.wpdest := Mux(eventHere, 0.U, basicDebug.pdest)
-      difftest.wdest := Mux(eventHere, 0.U, Mux(isVLoad, basicDebug.vd, basicDebug.ldest))
+      difftest.wpdest := basicDebug.pdest
+      difftest.wdest := Mux(isVLoad, basicDebug.vd, basicDebug.ldest)
       difftest.nFused := Mux(ordinaryValid, slotInstrCount - 1.U, 0.U)
       when(ordinaryValid) {
         assert(slotInstrCount >= 1.U)
-        assert(!eventHere, "An architectural event must have its own commit slot")
       }
       if (fullBasicDiff) {
         // Vector instructions are never compressed; retain mainline vector mapping.
@@ -2356,14 +2353,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           val vecDest = if (idx == 0) Mux(difftest.v0wen, pdest, pdest + V0PhyRegs.U)
             else pdest + V0PhyRegs.U
           val splitDest = (vecDest << 1).asUInt
-          Seq(splitDest, splitDest + 1.U).map(dest => Mux(eventHere, 0.U, dest))
+          Seq(splitDest, splitDest + 1.U)
         }
         val pcTransType = dt_pcTransType.get(ptr)(j)
-        difftest.pc := Mux(eventHere, 0.U, pcTransType.extend(uopDebug.pc, XLEN))
-        difftest.instr := Mux(eventHere, 0.U, uopDebug.instr)
-        difftest.robIdx := Mux(eventHere, 0.U, ZeroExt(ptr, 10))
-        difftest.lqIdx := Mux(eventHere, 0.U, ZeroExt(debug_lqIdx(ptr)(j).value, 7))
-        difftest.sqIdx := Mux(eventHere, 0.U, ZeroExt(debug_sqIdx(ptr)(j).value, 7))
+        difftest.pc := pcTransType.extend(uopDebug.pc, XLEN)
+        difftest.instr := uopDebug.instr
+        difftest.robIdx := ZeroExt(ptr, 10)
+        difftest.lqIdx := ZeroExt(debug_lqIdx(ptr)(j).value, 7)
+        difftest.sqIdx := ZeroExt(debug_sqIdx(ptr)(j).value, 7)
         difftest.isLoad := ordinaryValid && uop.commitType === CommitType.LOAD
         difftest.isStore := ordinaryValid && uop.commitType === CommitType.STORE
       }
