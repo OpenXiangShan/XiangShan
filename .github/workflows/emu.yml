@@ -18,7 +18,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@v7
     - uses: dorny/paths-filter@v4
       id: filter
       with:
@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 900
     name: Generate Verilog
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -120,7 +120,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Basics
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -217,7 +217,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - CHI
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -256,7 +256,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Build docker image
         run: make image
@@ -272,7 +272,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - Performance
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -385,7 +385,7 @@ jobs:
     timeout-minutes: 900
     name: EMU - MC
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -438,7 +438,7 @@ jobs:
     timeout-minutes: 900
     name: SIMV - Basics
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: set env
@@ -495,7 +495,7 @@ jobs:
     timeout-minutes: 60
     name: Upload Artifacts
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: set env
         run: echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
       - name: psutil
@@ -591,7 +591,7 @@ jobs:
     timeout-minutes: 5
     name: Check Submodules
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: 'true'
           fetch-depth: '0'
@@ -624,10 +624,10 @@ jobs:
     timeout-minutes: 900
     name: Check Format
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: 'recursive'
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '11'
