@@ -1159,6 +1159,14 @@ for(i <- 0 until reqNum) {
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 400, 1000, 50, true, true)
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 1000, 5000, 200, true, false)
 
+  // Sum/count for the existing load-miss-to-refill histogram. The sample
+  // boundary is intentionally identical to load_miss_penalty_to_use above.
+  XSPerfAccumulate(
+    "load_miss_penalty_to_use_sum",
+    Mux(load_miss_penalty_sample, load_miss_penalty, 0.U)
+  )
+  XSPerfAccumulate("load_miss_penalty_to_use_cnt", load_miss_penalty_sample)
+
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, GatedValidRegNext(io.mem_grant.fire && refill_done))
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, true)

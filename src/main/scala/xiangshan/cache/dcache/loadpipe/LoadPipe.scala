@@ -662,6 +662,48 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match_dup_dc && !io.disable_ld_fast_wakeup)
   XSPerfAccumulate("ideal_ld_fast_wakeup", io.banked_data_read.fire && s1_tag_match_dup_dc)
 
+  // Carry the request timestamp through the fixed pipeline so back-to-back
+  // requests are measured independently. A shared active bit would be reset
+  // by every new request and would sample the wrong request under throughput.
+  val demand_processing_start = s0_fire && s0_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U
+  val demand_processing_start_s1 = RegEnable(demand_processing_start, s0_fire)
+  val demand_processing_cycle_s1 = RegEnable(GTimer(), s0_fire)
+  val demand_processing_start_s2 = RegEnable(demand_processing_start_s1, s1_fire)
+  val demand_processing_cycle_s2 = RegEnable(demand_processing_cycle_s1, s1_fire)
+  val demand_processing_sample = io.lsu.resp.fire && demand_processing_start_s2
+  val demand_processing_latency = GTimer() - demand_processing_cycle_s2
+  val demand_hit_processing_sample = demand_processing_sample && !real_miss
+
+  XSPerfAccumulate(
+    "l1_demand_hit_processing_time_sum",
+    Mux(demand_hit_processing_sample, demand_processing_latency, 0.U)
+  )
+  XSPerfAccumulate("l1_demand_hit_processing_time_cnt", demand_hit_processing_sample)
+  XSPerfHistogram(
+    "l1_demand_hit_processing_time",
+    demand_processing_latency,
+    demand_hit_processing_sample,
+    0, 20, 1, true, true
+  )
+  XSPerfHistogram(
+    "l1_demand_hit_processing_time",
+    demand_processing_latency,
+    demand_hit_processing_sample,
+    20, 100, 10, true, true
+  )
+  XSPerfHistogram(
+    "l1_demand_hit_processing_time",
+    demand_processing_latency,
+    demand_hit_processing_sample,
+    100, 1000, 50, true, true
+  )
+  XSPerfHistogram(
+    "l1_demand_hit_processing_time",
+    demand_processing_latency,
+    demand_hit_processing_sample,
+    1000, 5000, 200, true, false
+  )
+
   val perfEvents = Seq(
     ("load_req                 ", io.lsu.req.fire                                               ),
     ("load_replay              ", io.lsu.resp.fire && resp.bits.replay                          ),
