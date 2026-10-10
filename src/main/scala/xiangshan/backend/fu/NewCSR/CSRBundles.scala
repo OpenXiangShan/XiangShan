@@ -183,7 +183,7 @@ object CSRBundles {
   class RobCommitCSR(implicit p: Parameters) extends Bundle {
     // need contain 8x8
     val instNum = ValidIO(UInt(7.W))
-    val fflags  = ValidIO(Fflags())
+    val fflags  = Vec(5, Valid(Bool()))
     val fsDirty = Bool()
     val vxsat   = ValidIO(Vxsat())
     val vsDirty = Bool()
@@ -213,5 +213,9 @@ object CSRBundles {
     val hd_misalign_ld_enable = Output(Bool())
     val power_down_enable = Output(Bool())
     val flush_l2_enable = Output(Bool())
+    // Rename
+    val fusion_enable = Output(Bool())
+    val high_density_rob_compression_enable = Output(Bool())
+    val wfi_enable = Output(Bool())
   }
 }

@@ -213,6 +213,21 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     XSError(commitCount > i.U && !allocated((deqPtr+i.U).value), s"why commit invalid entry $i?\n")
   })
 
+  // vector commit or replay
+  val vecLdCommittmp = Wire(Vec(VirtualLoadQueueSize, Vec(VecLoadPipelineWidth, Bool())))
+  val vecLdCommit = Wire(Vec(VirtualLoadQueueSize, Bool()))
+  for (i <- 0 until VirtualLoadQueueSize) {
+    val cmt = io.vecCommit
+    for (j <- 0 until VecLoadPipelineWidth) {
+      vecLdCommittmp(i)(j) := allocated(i) && cmt(j).valid && robIdx(i).isSameSlot(cmt(j).bits.robidx) && uopIdx(i) === cmt(j).bits.uopidx
+    }
+    vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
+
+    when (vecLdCommit(i) && isvec(i)) {
+      committed(i) := true.B
+    }
+  }
+
   // misprediction recovery / exception redirect
   // invalidate lq term using robIdx
   for (i <- 0 until VirtualLoadQueueSize) {
@@ -247,7 +262,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
         debug_paddr(loadWbIndex) := io.ldin(i).bits.paddr
       }
     }
-    XSError((io.ldin(i).bits.uop.robIdx =/= robIdx(loadWbIndex)) && io.ldin(i).valid, s"writeback load robIdx missMatch! at pipeline ${i}\n")
+    XSError(!io.ldin(i).bits.uop.robIdx.isSameSlot(robIdx(loadWbIndex)) && io.ldin(i).valid, s"writeback load robIdx missMatch! at pipeline ${i}\n")
     XSError((!allocated(loadWbIndex) || committed(loadWbIndex)) && io.ldin(i).valid, s"writeback load invalid! at pipeline ${i}\n")
     XSInfo(io.ldin(i).valid && !need_rep && need_valid,
       "load hit write to lq idx %d pc 0x%x vaddr %x paddr %x mask %x mmio %x isvec %x\n",

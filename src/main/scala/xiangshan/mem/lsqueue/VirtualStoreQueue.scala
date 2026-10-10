@@ -188,12 +188,52 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
       snapshotQueue(i / SnapshotInterval).entryEndSqIdx := enqBits.reqEndPtr.sqIdx
     }
 
+    // TODO: vecMbCommit will be remove in the future.
+    val fbk = io.fromVMergeBuffer
+    for (j <- 0 until VecStorePipelineWidth) {
+      vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
+        dataEntries(i).robIdx.isSameSlot(fbk(j).bits.robidx) && dataEntries(i).uopIdx === fbk(j).bits.uopidx
+    }
+    // vector feedback may occur with deqCancel/needCancel at the same time
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
+
+    when (vecCommit(i)) {
+      ctrlEntries(i).vecMbCommit := true.B
+    }.elsewhen(deqCancel || needCancel(i)) {
+      ctrlEntries(i).vecMbCommit := false.B
+    }
+
     // debug info
     if(debugEn){
       when(enqSet) {
         dataEntries(i).debugUop.get := enqBits.debugUop.get
       }
     }
+  }
+
+  // query whether mdp hit when load query forward.
+  //TODO: maybe we need the distance-base mdp.
+  for(i <- 0 until LoadPipelineWidth) {
+    // forward stage 0
+    val s0Req = io.mdpQuery(i)
+    val s0MdpHitVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
+      s0Req.bits.loadWaitBit && dataEntries(j).robIdx.isSameSlot(s0Req.bits.waitForRobIdx) && ctrlEntries(j).allocated)))
+
+    // forward stage 1
+    val s1ReqValid  = RegNext(s0Req.valid && s0Req.bits.loadWaitBit)
+    val s1MdpHitVec = RegEnable(s0MdpHitVec, s0Req.valid)
+    //TODO: vector store maybe hit multiple entry, but we only care the first one, need to verify it in the future.
+    val s1MdpHitIdx = ParallelPriorityEncoder(s1MdpHitVec.asUInt)
+
+    val s1VirtualQueueHit = s1MdpHitVec.reduce(_ || _) && s1ReqValid
+
+    val s2HitEntryPtr = RegEnable(makeEntryPtrFromValue(s1MdpHitIdx), s1ReqValid)
+
+    val s2VirtualQueueSqIdx = WireDefault(0.U.asTypeOf(PhysicalQueuePtr.cloneType))
+    s2VirtualQueueSqIdx := getEntryStartSqIdx(s2HitEntryPtr)
+
+    io.toPhysicalQueue.mdpHitPtr(i).valid := RegNext(s1VirtualQueueHit)
+    io.toPhysicalQueue.mdpHitPtr(i).bits  := s2VirtualQueueSqIdx
   }
 
   /**
@@ -233,7 +273,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   enqPtrVec := enqPtrVecNext
 
-  val headIsRetired = isBefore(dataEntries(deqPtrHead.value).robIdx, robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
+  val headIsRetired = dataEntries(deqPtrHead.value).robIdx.isBeforeSlot(robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
   //redirect logic
   switch(state) {
     is(WalkState.idle) {
@@ -255,7 +295,9 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val retireRobIdxVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).robIdx))
   val retireAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
-  val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(retireRobIdxVec(i), robHeadPtr) && retireAllocatedVec(i)))
+  val retireBaseVec = VecInit((0 until CommitWidth).map(i => deqRobIdxVec(i).isBeforeSlot(robHeadPtr) && deqAllocatedVec(i)))
+  val deqMbCommitVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).vecMbCommit))
+  val mbCommitVec = VecInit((0 until CommitWidth).map(i => deqRobIdxVec(i).isSameSlot(robHeadPtr) && deqMbCommitVec(i) && deqAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
   val deqPtrVecNext = deqPtrVec.map(_ + retireCount)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
@@ -281,7 +323,8 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // precommit store, it will be write to sbuffer before rob retire.
   val preCommitEntry = ctrlEntries(preCommitPtr.value)
-  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr && preCommitEntry.allocated
+  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx.isSameSlot(robHeadPtr) &&
+    preCommitEntry.allocated && (!preCommitEntry.isVec || preCommitEntry.vecMbCommit)
 
   val preCommitPtrNext = WireInit(preCommitPtr)
   when(redirectReg.valid) { // redirect next cycle update preCommitPtr
