@@ -101,7 +101,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       }
       if (iq.param.numIntSrc == 0) wakeUp.bits.rfWen := false.B
       if (iq.param.numFpSrc == 0) wakeUp.bits.fpWen := false.B
-      if (iq.param.numVfSrc == 0) wakeUp.bits.vecWen := false.B
+      if (iq.param.numVfSrc == 0 && !iq.param.needOldVdLazyRead) wakeUp.bits.vecWen := false.B
       if (iq.param.numV0Src == 0) wakeUp.bits.v0Wen := false.B
       if (iq.param.numVlSrc == 0) wakeUp.bits.vlWen := false.B
     }
@@ -111,7 +111,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       connectSamePort(wakeUp.bits, wakeUpIn.bits)
       if (iq.param.numIntSrc == 0) wakeUp.bits.rfWen := false.B
       if (iq.param.numFpSrc == 0) wakeUp.bits.fpWen := false.B
-      if (iq.param.numVfSrc == 0) wakeUp.bits.vecWen := false.B
+      if (iq.param.numVfSrc == 0 && !iq.param.needOldVdLazyRead) wakeUp.bits.vecWen := false.B
       if (iq.param.numV0Src == 0) wakeUp.bits.v0Wen := false.B
       if (iq.param.numVlSrc == 0) wakeUp.bits.vlWen := false.B
     }
@@ -218,12 +218,26 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     println(s"[Region] vec write int port = ${idxes}")
     val wakeupFromWB = MixedVecInit(idxes.map(x => io.fromIntWb(x)))
     val wakeupFromWBDelayed = RegNext(wakeupFromWB)
+    val wakeupFromVfWBDelayed = RegNext(io.fromVfWb)
+    val wakeupFromVlWBDelayed = RegNext(io.fromVlWb)
     issueQueues.map { case iq =>
       val vecExuIndices = params.backendParam.allExuParams.filter(x => x.isVfExeUnit || x.isMemExeUnit && x.needVecWen).map(_.exuIdx)
       println(s"[Region_int] vecExuIndices = ${vecExuIndices}")
-      val vecWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(x => x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty).map(_._2)
-      println(s"[Region_int] vecWBIndices = ${vecWBIndices}")
-      vecWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
+      val vecExuIntWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter { x =>
+        x._1.bits.dataConfig.isInstanceOf[IntData] && x._1.bits.exuIndices.intersect(vecExuIndices).nonEmpty
+      }.map(_._2)
+      println(s"[Region_int] vecExuIntWBIndices = ${vecExuIntWBIndices}")
+      vecExuIntWBIndices.zip(wakeupFromWB).zip(wakeupFromWBDelayed).map { case ((i, source1), source2) =>
+        connectWakeupWB(iq.io.wakeupFromWB(i), source1)
+        connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
+      }
+      val vfWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(_._1.bits.dataConfig.isInstanceOf[VecData]).map(_._2)
+      vfWBIndices.zip(io.fromVfWb).zip(wakeupFromVfWBDelayed).map { case ((i, source1), source2) =>
+        connectWakeupWB(iq.io.wakeupFromWB(i), source1)
+        connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
+      }
+      val vlWBIndices = iq.io.wakeupFromWB.zipWithIndex.filter(_._1.bits.dataConfig.isInstanceOf[VlData]).map(_._2)
+      vlWBIndices.zip(io.fromVlWb).zip(wakeupFromVlWBDelayed).map { case ((i, source1), source2) =>
         connectWakeupWB(iq.io.wakeupFromWB(i), source1)
         connectWakeupWB(iq.io.wakeupFromWBDelayed(i), source2)
       }

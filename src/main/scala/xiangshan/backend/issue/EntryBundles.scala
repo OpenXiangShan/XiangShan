@@ -7,7 +7,7 @@ import utils.MathUtils
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles._
-import xiangshan.backend.datapath.DataConfig.{V0Data, VlData}
+import xiangshan.backend.datapath.DataConfig.{V0Data, VecData, VlData}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{NumLsElem, VType}
@@ -24,6 +24,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcStatus             = Vec(params.numRegSrc, new SrcStatus)
     val srcStatusV0           = Option.when(params.readV0Rf)(new V0SrcStatus)
     val srcStatusVl           = Option.when(params.readVlRf)(new VlSrcStatus)
+    val srcStatusOldVd           = Option.when(params.needOldVdLazyRead)(new OldVdSrcStatus)
     //issue status
     val blocked               = Bool()
     val issued                = Bool()
@@ -34,7 +35,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR &&
         srcStatusVl.map(_.srcState).map(SrcState.isReady).getOrElse(true.B) &&
-        srcStatusV0.map(_.srcState).map(SrcState.isReady).getOrElse(true.B)
+        srcStatusV0.map(_.srcState).map(SrcState.isReady).getOrElse(true.B) &&
+        srcStatusOldVd.map(_.srcState).map(SrcState.isReady).getOrElse(true.B)
     }
 
     def canIssue: Bool        = {
@@ -70,6 +72,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val psrc = UInt(backendParams.getPregParams(V0Data()).addrWidth.W)
     val srcState = SrcState()
     val dataSource = DataSource()
+  }
+
+  class OldVdSrcStatus(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+    val psrc = UInt(VfPhyRegIdxWidth.W)
+    val srcState = SrcState()
   }
 
   class StatusVecMemPart(implicit p:Parameters, params: IssueBlockParams) extends Bundle {
@@ -200,6 +207,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcV0WakeupByWB       = Bool()
     val vlWakeupByIntWb       = Bool()
     val vlWakeupByVfWb        = Bool()
+    val oldVdWakeupByWB       = Bool()
     val srcCancelVec          = Vec(params.numRegSrc, Bool())
     val srcLoadCancelVec      = Vec(params.numRegSrc, Bool())
     val srcLoadTransCancelVec = Vec(params.numRegSrc, Bool())
@@ -233,6 +241,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     common.srcLoadDependencyNext.zip(status.srcStatus.map(_.srcLoadDependency)).foreach { case (ldsNext, lds) =>
       ldsNext.zip(lds).foreach{ case (ldNext, ld) => ldNext := ld << 1 }
     }
+
+    common.oldVdWakeupByWB := status.srcStatusOldVd.map { srcStatusOldVd =>
+      commonIn.wakeUpFromWB
+        .filter(_.bits.dataConfig.isInstanceOf[VecData])
+        .map(bundle => bundle.bits.wakeUp(Seq((srcStatusOldVd.psrc, SrcType.vp)), bundle.valid).head)
+        .fold(false.B)(_ || _)
+    }.getOrElse(false.B)
     if(isEnq) {
       common.validRegNext     := Mux(commonIn.enq.valid && common.enqReady, true.B, Mux(common.clear, false.B, validReg))
     } else {
@@ -240,12 +255,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
 
     if (params.readVlRf) {
-      val wakeUpFromVl = VecInit(commonIn.wakeUpFromWB.filter(_.bits.dataConfig.isInstanceOf[VlData]).map{ bundle =>
+      val wakeUpFromVl = commonIn.wakeUpFromWB.filter(_.bits.dataConfig.isInstanceOf[VlData]).map{ bundle =>
         bundle.bits.wakeUpVl((status.srcStatusVl.get.psrc, SrcType.vp), bundle.valid)
-      })
-      val intSchdVlWbPort = p(XSCoreParamsKey).intSchdVlWbPort
-      // int wb is first bit of vlwb, which is after vfwb and v0wb
-      common.vlWakeupByIntWb  := wakeUpFromVl(intSchdVlWbPort)
+      }
+      common.vlWakeupByIntWb  := wakeUpFromVl.fold(false.B)(_ || _)
       // vf wb is second bit of wb
       common.vlWakeupByVfWb   := false.B
     } else {
@@ -307,10 +320,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     hasIQWakeupGet.srcWakeupByIQButCancel           := wakeupVec.map(x => VecInit(x.zip(cancelSel).map { case (wakeup, cancel) => wakeup && cancel }))
     hasIQWakeupGet.srcWakeupByIQWithoutCancel       := wakeupVec.map(x => VecInit(x))
     hasIQWakeupGet.wakeupLoadDependencyByIQVec      := commonIn.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
+    val regSrcReadyBypass = VecInit(status.srcStatus.map(_.srcState).zip(hasIQWakeupGet.srcWakeupByIQWithoutCancel).map {
+      case (state, wakeupVec) => wakeupVec.asUInt.orR || SrcState.isReady(state)
+    }).asUInt.andR
+    val vlReadyBypass = status.srcStatusVl.map(src => SrcState.isReady(src.srcState)).getOrElse(true.B)
+    val oldVdReady = status.srcStatusOldVd.map(src => SrcState.isReady(src.srcState)).getOrElse(true.B)
     hasIQWakeupGet.canIssueBypass                   := validReg && !status.issued && !status.blocked &&
-      VecInit(status.srcStatus.map(_.srcState).zip(hasIQWakeupGet.srcWakeupByIQWithoutCancel).zipWithIndex.map { case ((state, wakeupVec), srcIdx) =>
-        wakeupVec.asUInt.orR | state
-      }).asUInt.andR
+      regSrcReadyBypass && vlReadyBypass && oldVdReady
   }
 
 
@@ -446,6 +462,11 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           Seq(
           ),
         )
+    }
+    entryUpdate.status.srcStatusOldVd.zip(status.srcStatusOldVd).foreach {
+      case (srcStatusOldVdNext, srcStatusOldVd) =>
+        srcStatusOldVdNext.psrc := srcStatusOldVd.psrc
+        srcStatusOldVdNext.srcState := srcStatusOldVd.srcState | common.oldVdWakeupByWB
     }
 
     entryUpdate.status.blocked                        := false.B
@@ -600,6 +621,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcWakeUpByWB: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcVlWakeUpByWB: Option[UInt]                       = Option.when(params.readVlRf)(SrcState())
     val srcV0WakeUpByWB: Option[UInt]                       = Option.when(params.readV0Rf)(SrcState())
+    val oldVdWakeUpByWB: Option[UInt]                       = Option.when(params.needOldVdLazyRead)(SrcState())
     val srcWakeUpByIQ: Vec[UInt]                            = Vec(params.numRegSrc, SrcState())
     val srcWakeUpByIQVec: Vec[Vec[Bool]]                    = Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))
     val srcCancelByLoad: Vec[Bool]                          = Vec(params.numRegSrc, Bool())
@@ -627,6 +649,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
           wakeup.bits.wakeUpV0((status.srcStatusV0.map(_.psrc).getOrElse(0.U), SrcType.v0), wakeup.valid)
       }.fold(false.B)(_ || _)
     )
+    enqDelayOut.oldVdWakeUpByWB.foreach { wakeup =>
+      wakeup := enqDelayIn.wakeUpFromWB
+        .filter(_.bits.dataConfig.isInstanceOf[VecData])
+        .map(bundle => bundle.bits.wakeUp(Seq((status.srcStatusOldVd.get.psrc, SrcType.vp)), bundle.valid).head)
+        .fold(false.B)(_ || _)
+    }
 
     if (params.hasIQWakeUp) {
       val wakeupVec: IndexedSeq[IndexedSeq[Bool]] = enqDelayIn.wakeUpFromIQ.map{ x =>
