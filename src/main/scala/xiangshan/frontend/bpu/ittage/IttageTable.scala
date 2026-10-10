@@ -179,11 +179,12 @@ class IttageTable(
   private val sramReadData =
     Mux1H(s1_bankMask, tables.map(_.io.r.resp.data.head))
   private val s1_sramReadHit = sramReadData.valid && (if (tagLen != 0) sramReadData.tag === s1_tag else true.B)
-  private val bufferReadData =
-    Mux1H(s1_bankMask, readBypassPorts.map(_.resp.head.bits.entry))
-  private val s1_bufferReadHit = bufferReadData.valid && (if (tagLen != 0) bufferReadData.tag === s1_tag else true.B)
+  private val bufferReadResp = Mux1H(s1_bankMask, readBypassPorts.map(_.resp.head))
+  private val bufferReadData = bufferReadResp.bits.entry
+  private val s1_bufferReadHit =
+    bufferReadResp.valid && bufferReadData.valid && (if (tagLen != 0) bufferReadData.tag === s1_tag else true.B)
   private val s1_reqReadHit    = s1_sramReadHit || s1_bufferReadHit
-  private val tableReadData    = Mux(s1_reqReadHit, sramReadData, bufferReadData)
+  private val tableReadData    = Mux(s1_bufferReadHit, bufferReadData, sramReadData)
 
   io.resp.valid             := s1_reqReadHit && s1_valid // && s1_mask(b)
   io.resp.bits.cnt          := tableReadData.confidenceCnt
