@@ -351,10 +351,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     }
     histQueue(newS0Ptr.value) := initCommonHR
 
-    enqPtr := nextEnqPtr
-    // Keep predPtr on the corresponding queue entry. The S0 block launched by
-    // an S2 override reuses the flushed S1 block's history below, and the
-    // following cycle must consume the S3 update before predPtr advances.
+    enqPtr     := nextEnqPtr
+    predPtr    := Mux(s3_fire, writePtr, Mux(writePtr === predPtr, predPtr, writePtr - 1.U))
     writePtr   := nextWritePtr
     recoverPtr := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
   }.otherwise {
@@ -380,10 +378,15 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   // Use distance-based checks for circular pointers to avoid wrap-around ordering ambiguity.
   private val writeToPredDist   = distanceBetween(writePtr, predPtr)
+  private val enqToPredDist     = distanceBetween(enqPtr, predPtr)
   private val predToRecoverDist = distanceBetween(predPtr, recoverPtr)
   XSError(
     enqEnable && (writeToPredDist > 3.U || predToRecoverDist > 2.U),
     "The predPtr exceeds the correct range"
+  )
+  XSError(
+    enqToPredDist > 3.U,
+    "The enqPtr exceeds the predPtr range"
   )
   XSError(
     writeEnable && s3_update.startPc =/= histQueue(writePtr.value).predStartPc.get,
