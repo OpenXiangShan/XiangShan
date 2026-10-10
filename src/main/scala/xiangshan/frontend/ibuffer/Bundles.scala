@@ -53,7 +53,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt   = UInt(MemPredPCWidth.W)
   val isRvc:            Bool   = Bool()
   val predTaken:        Bool   = Bool()
-  val fixedTaken:     Bool   = Bool()
   val ftqPtr:           FtqPtr = new FtqPtr
   val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
   val triggered:        UInt   = TriggerAction()
@@ -129,6 +128,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val isBackendException: Bool          = Bool()
   val hasSatpFlush:       Bool          = Bool()
   val triggered:          UInt          = TriggerAction()
+  val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()

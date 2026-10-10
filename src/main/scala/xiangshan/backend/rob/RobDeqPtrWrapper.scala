@@ -70,7 +70,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends
   // we don't need to consider whether the first instruction has exceptions since it wil trigger exceptions.
   val realCommitLast = deqPtrVec(0).lineHeadPtr.addEntries(Fill(bankAddrWidth, 1.U))
   val realCommitLastSlot = WireInit(realCommitLast)
-  realCommitLastSlot.slotIsFormer := false.B
+  realCommitLastSlot.isFormer := false.B
   val commit_exception = io.exception_state.valid && !io.exception_state.bits.robIdx.isAfterSlot(realCommitLastSlot)
   val canCommit = VecInit((0 until CommitWidth).map(i => io.deq_v(i) && io.deq_w(i) || io.hasCommitted(i)))
   val normalCommitCnt = PriorityEncoder(canCommit.map(c => !c) :+ true.B) - PopCount(io.hasCommitted)

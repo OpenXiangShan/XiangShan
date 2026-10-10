@@ -568,6 +568,10 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_icacheExceptionMask = UIntToOH(s2_icacheExceptionIdx, IBufferEnqueueWidth)
 
+  io.toIBuffer.bits.isLastInFtqEntry := (0 until IBufferEnqueueWidth).map { i =>
+    if (i == IBufferEnqueueWidth - 1) enq(i)
+    else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
+  }
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
     a.predTaken := s2_expandedInstrVec(i).isPredTaken && !s2_useUncacheFetch
     a.offset    := s2_endOffsetVec(i)

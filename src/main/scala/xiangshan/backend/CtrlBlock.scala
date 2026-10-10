@@ -695,7 +695,6 @@ class CtrlBlockImp(
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
-    decode.io.debugOutValid.foreach{ validVec => validVec(i) := decodePipeRename(i).valid}
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -877,6 +876,8 @@ class CtrlBlockImp(
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
+  io.robio.diffCommitForTrap.zip(rob.io.diffCommitForTrap).foreach { case (sink, source) => sink := source }
+  rob.io.diffArchEvent.zip(io.robio.diffArchEvent).foreach { case (sink, source) => sink := source }
   io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
@@ -1017,6 +1018,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
+    val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Bool()))
+    val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Valid(Bool())))
     val lsq = new RobLsqIO
     val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
     val debug_ls = Input(new DebugLSIO())

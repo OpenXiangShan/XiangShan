@@ -317,7 +317,8 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val exceptionCrossPage: Bool          = Bool()
   val exceptionMask:      UInt          = UInt(IBufferEnqueueWidth.W)
 
-  val triggered: Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
+  val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
+  val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
   val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr

@@ -51,8 +51,20 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val eliminatedMove = Bool()
     val isXSTrap = Bool()
   }
-  def NormalUopNumWidth(implicit p: Parameters): Int = log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
-  def CompressedSlotUopNumWidth(implicit p: Parameters): Int = log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
+  def connectBasicDebug(debug: BasicDebugInfo, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
+    debug.ldest := robEnq.ldest
+    debug.pdest := robEnq.pdest
+    debug.vd := robEnq.debug.map(_.instr.asTypeOf(new XSInstBitFields).VD).getOrElse(0.U)
+    debug.fpWen := robEnq.fpWen
+    debug.vecWen := robEnq.vecWen
+    debug.v0Wen := robEnq.v0Wen
+    debug.eliminatedMove := robEnq.isMove
+    debug.isXSTrap := robEnq.isXSTrap
+  }
+  def isVectorMemory(uop: EnqRobUop): Bool =
+    FuType.isLoadStore(uop.fuType) && LSUOpType.isVecMemOp(uop.fuOpType)
+
   def PackedUopStateWidth(implicit p: Parameters): Int = {
     math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
   }
@@ -132,7 +144,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
     val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
-    val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
+    val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
     val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
     val perfDebugInfo    = OptionWrapper(backendParams.debugEn, new PerfDebugInfo)
     val debug_lqIdx      = OptionWrapper(backendParams.debugEn, new LqPtr)
@@ -190,7 +202,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
-    val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
+    val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
     // debug_end
 
   }
@@ -208,16 +220,15 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.ftqOffset := robEnq.ftqOffset
     robEntry.slotHeadRvcMask := robEnq.slotHeadRvcMask
     robEntry.predTaken := robEnq.predTaken
-    robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
-    robEntry.vls := robEnq.vlsInstr
+    robEntry.needVTB := robEnq.isVset
+    robEntry.vls := isVectorMemory(robEnq)
     robEntry.rfWen := robEnq.rfWen
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.formerTraceBlockInPipe := robEnq.traceBlockInPipe
-    robEntry.debug_ldest.foreach(_ := robEnq.ldest)
-    robEntry.debug_pdest.foreach(_ := robEnq.pdest)
+    robEntry.basicDebug.foreach(connectBasicDebug(_, robEnq))
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
     robEntry.debug_fuOpType.foreach(_ := robEnq.fuOpType)
     robEntry.debug_rfWen.foreach(_ := robEnq.rfWen)
@@ -284,25 +295,25 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
   entries
 ) with HasCircularQueuePtrHelper {
 
-  val slotIsFormer = Bool()
+  val isFormer = Bool()
 
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).RobSize)
 
   def isSameEntry(that: RobPtr): Bool = this.flag === that.flag && this.value === that.value
-  def isSameSlot(that: RobPtr): Bool = isSameEntry(that) && this.slotIsFormer === that.slotIsFormer
+  def isSameSlot(that: RobPtr): Bool = isSameEntry(that) && this.isFormer === that.isFormer
 
   def isAfterSlot(that: RobPtr): Bool = {
     val differentFlag = this.flag ^ that.flag
     val compare = this.value > that.value
     val sameEntry = this.flag === that.flag && this.value === that.value
-    (differentFlag ^ compare) || (sameEntry && !this.slotIsFormer && that.slotIsFormer)
+    (differentFlag ^ compare) || (sameEntry && !this.isFormer && that.isFormer)
   }
 
   def isBeforeSlot(that: RobPtr): Bool = {
     val differentFlag = this.flag ^ that.flag
     val compare = this.value < that.value
     val sameEntry = this.flag === that.flag && this.value === that.value
-    (differentFlag ^ compare) || (sameEntry && this.slotIsFormer && !that.slotIsFormer)
+    (differentFlag ^ compare) || (sameEntry && this.isFormer && !that.isFormer)
   }
 
   def isNotAfterSlot(that: RobPtr): Bool = isBeforeSlot(that) || isSameSlot(that)
@@ -321,7 +332,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
       newPtr.flag := Mux(reverseFlag, !this.flag, this.flag)
       newPtr.value := Mux(reverseFlag, diff.asUInt, newValue)
     }
-    newPtr.slotIsFormer := this.slotIsFormer
+    newPtr.isFormer := this.isFormer
     newPtr
   }
 
@@ -330,14 +341,14 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     val newPtr = Wire(new RobPtr(entries))
     newPtr.flag := !flippedPtr.flag
     newPtr.value := flippedPtr.value
-    newPtr.slotIsFormer := this.slotIsFormer
+    newPtr.isFormer := this.isFormer
     newPtr
   }
 
   def asFormer: RobPtr = {
     val ptr = Wire(new RobPtr(entries))
     ptr := this
-    ptr.slotIsFormer := true.B
+    ptr.isFormer := true.B
     ptr
   }
 
@@ -353,7 +364,7 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     val out = Wire(new RobPtr)
     out.flag := this.flag
     out.value := Cat(this.value(this.PTR_WIDTH-1, log2Up(CommitWidth)), 0.U(log2Up(CommitWidth).W))
-    out.slotIsFormer := true.B
+    out.isFormer := true.B
     out
   }
 
@@ -368,7 +379,7 @@ object RobPtr {
     val ptr = Wire(new RobPtr)
     ptr.flag := f
     ptr.value := v
-    ptr.slotIsFormer := true.B
+    ptr.isFormer := true.B
     ptr
   }
 }

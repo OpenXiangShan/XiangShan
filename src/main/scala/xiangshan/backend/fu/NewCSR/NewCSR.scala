@@ -155,7 +155,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
+      val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Bool())
     })
+    val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
 
     val fromRename = Input(new Bundle {
       val diffVl = Option.when(backendParams.basicDebugEn)(Vl())
@@ -1625,6 +1627,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
   // Rename
   io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
+  io.toDecode.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
   io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
   io.toDecode.singlestep := io.status.singleStepFlag
 
@@ -1651,16 +1654,22 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {
-    // Delay trap passed to difftest until VecExcpMod is not busy
+    // Hardware trap handling above is unchanged. Only the observation waits
+    // for an older surviving former slot, or for vector exception recovery.
     val pendingTrap = RegInit(false.B)
+    val pendingLatter = RegEnable(!trapIsFormer, hasTrap)
+    val trapValid = pendingTrap && !io.fromVecExcpMod.busy &&
+      (!pendingLatter || io.fromRob.diffCommitForTrap.get)
     when (hasTrap) {
+      assert(!pendingTrap || trapValid, "An architectural event observation is already pending")
       pendingTrap := true.B
-    }.elsewhen (!io.fromVecExcpMod.busy) {
+    }.elsewhen (trapValid) {
       pendingTrap := false.B
     }
+    io.diffArchEvent.get.valid := trapValid
+    io.diffArchEvent.get.bits := pendingLatter
 
     val hartId = io.fromTop.hartId
-    val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
     val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
     val hasNMI = nmi && hasTrap
@@ -1689,9 +1698,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
     diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
-    diffArchEvent.isFormer := RegEnable(trapIsFormer, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
-    diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && interrupt)
+    diffArchEvent.virtualInterruptIsHvictlInject := RegEnable(virtualInterruptIsHvictlInject && interrupt, hasTrap)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
     diffArchEvent.irToVS := RegEnable(irToVS, hasTrap)
     if (env.EnableDifftest || env.FullBasicDiff) {
