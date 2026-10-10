@@ -231,6 +231,10 @@ class MainBtbAlignBank(
       //   b. attribute changed, probably indicating a software self-modification.
       t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
   )
+  private val t1_counterNeedAlloc = t1_needWrite && t1_mispredictInfo.valid && (
+    !t1_hit ||
+      t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
+  )
   // Use hit wayMask if hit, else use replacer's victim way
   private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, t1_victimMask)
 
@@ -261,9 +265,8 @@ class MainBtbAlignBank(
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
-    val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
-
-    t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
+    val entryOverridden = t1_counterNeedAlloc && t1_entryWayMask(i)
+    t1_counterWayMask(i) := entryOverridden || (hitMask.reduce(_ || _) && !meta.counter.shouldHold(actualTaken))
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
   private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
