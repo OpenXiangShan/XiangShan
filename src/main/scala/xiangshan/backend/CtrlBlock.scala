@@ -1033,6 +1033,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
       val robidx = Input(new RobPtr)
       val pc     = Output(UInt(VAddrBits.W))
+      val storeOffset = Option.when(env.EnableDifftest)(Output(UInt(log2Ceil(RenameWidth + 1).W)))
+      val preCommit = Option.when(env.EnableDifftest)(Output(Bool()))
     })
     val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
   }

@@ -208,6 +208,8 @@ class Sbuffer(implicit p: Parameters)
     val memSetPattenDetected = Input(Bool())
     val force_write = Input(Bool())
     val diffStore = Input(new DiffStoreIO)
+    val diffStoreOffset = Option.when(env.EnableDifftest)(Input(Vec(EnsbufferWidth, UInt(log2Ceil(RenameWidth + 1).W))))
+    val diffStorePreCommit = Option.when(env.EnableDifftest)(Input(Vec(EnsbufferWidth, Bool())))
   })
 
   val dataModule = Module(new SbufferData)
@@ -951,6 +953,8 @@ class Sbuffer(implicit p: Parameters)
 
       difftestCommon.pc           := io.diffStore.diffInfo(i).uop.pc
       difftestCommon.robidx       := io.diffStore.diffInfo(i).uop.robIdx.value
+      difftestCommon.storeOffset  := io.diffStoreOffset.get(i)
+      difftestCommon.preCommit    := io.diffStorePreCommit.get(i)
 
       difftestCommon.addr     := rawAddr
       difftestCommon.data     := rawData(63, 0)
@@ -977,6 +981,8 @@ class Sbuffer(implicit p: Parameters)
     ncmmStoreEvent.offset := 0.U
     ncmmStoreEvent.pc := io.diffStore.diffInfo(0).uop.pc
     ncmmStoreEvent.robidx := io.diffStore.diffInfo(0).uop.robIdx.value
+    ncmmStoreEvent.storeOffset := io.diffStoreOffset.get(0)
+    ncmmStoreEvent.preCommit := io.diffStorePreCommit.get(0)
   }
 
 
