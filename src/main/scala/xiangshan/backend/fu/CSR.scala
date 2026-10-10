@@ -39,7 +39,7 @@ import system.HasSoCParameter
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
 class FpuCsrIO extends Bundle {
-  val fflags = Output(Valid(UInt(5.W)))
+  val fflags = Output(Vec(5, Valid(Bool())))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -571,9 +571,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   println("  Enable unaligned store: " + EnableHardwareStoreMisalign)
   println("  Enable unaligned load: " + EnableHardwareLoadMisalign)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h7".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h17".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.wfi_enable := srnctl(2)
+  csrio.customCtrl.high_density_rob_compression_enable := srnctl(4)
 
   // Hypervisor CSRs
   val hstatusWMask = "h7003c0".U(XLEN.W)
