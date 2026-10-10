@@ -147,6 +147,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
       val robidx = Input(new RobPtr)
       val pc     = Output(UInt(VAddrBits.W))
+      val storeOffset = Option.when(env.EnableDifftest)(Output(UInt(log2Ceil(RenameWidth + 1).W)))
+      val preCommit = Option.when(env.EnableDifftest)(Output(Bool()))
     })
   })
 
@@ -2405,6 +2407,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   if (env.EnableDifftest || env.FullBasicDiff) {
     io.storeDebugInfo.map{port =>
       port.pc := debugMeta(debug_microOp(port.robidx.value)(slotIndex(port.robidx))).pc
+      port.storeOffset.foreach(_ := decodeTraceInstrCount(robEntries(port.robidx.value).traceBlockInPipe.iretire) - 1.U)
+      // Conservatively include stores from the current head entry, even when it retires this cycle.
+      port.preCommit.foreach(_ := port.robidx.isSameEntry(deqPtr))
     }
   }
 

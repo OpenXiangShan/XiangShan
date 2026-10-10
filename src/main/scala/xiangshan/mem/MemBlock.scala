@@ -238,6 +238,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
     val robidx = Output(new RobPtr)
     val pc     = Input(UInt(VAddrBits.W))
+    val storeOffset = Option.when(env.EnableDifftest)(Input(UInt(log2Ceil(RenameWidth + 1).W)))
+    val preCommit = Option.when(env.EnableDifftest)(Input(Bool()))
   })
 
   val intWriteback: MixedVec[MixedVec[MemWriteBack]] = intSchdParams.genMemWriteBackBundle
@@ -1162,6 +1164,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sbuffer.io.diffStore.ncStore := lsq.io.diffStore.get.ncStore
       io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
       sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
+      sbuffer.io.diffStoreOffset.get(i) := io.mem_to_ooo.storeDebugInfo(i).storeOffset.get
+      sbuffer.io.diffStorePreCommit.get(i) := io.mem_to_ooo.storeDebugInfo(i).preCommit.get
     }
   }
 
