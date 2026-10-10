@@ -86,6 +86,12 @@ ifneq ($(FIRTOOL),)
 MFC_ARGS += --firtool-binary-path $(abspath $(FIRTOOL))
 endif
 
+# firtool --preserve-aggregate level (none/1d-vec/vec/all). Empty keeps the
+# firtool default (none); the stage-07 aggregate flow passes PRESERVE_AGGREGATE=all.
+ifneq ($(PRESERVE_AGGREGATE),)
+MFC_ARGS += --firtool-opt "--preserve-aggregate=$(PRESERVE_AGGREGATE)"
+endif
+
 # prefix of XSTop or XSNoCTop
 ifneq ($(XSTOP_PREFIX),)
 COMMON_EXTRA_ARGS += --xstop-prefix $(XSTOP_PREFIX)
