@@ -1062,7 +1062,13 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.brqRedirect    <> redirect
 
   //  violation rollback
-  val allRedirect = newLoadUnits.map(_.io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
+  /*
+   * NOTES: The nack_rollback && nuke_rollback always flush itself,
+   *            loadUnits_rollback sometimes flush the instructions at the back (RAR violation don't need to flush itself),
+   *            when both (nack_rollback/nuke_rollback) and loadUnits_rollback exist during Load,
+   *            we need to prioritize making sure we can re-fetch load first.
+   */
+  val allRedirect = lsq.io.nack_rollback ++ lsq.io.nuke_rollback ++ newLoadUnits.map(_.io.rollback)
   val oldestOneHot = Redirect.selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
   // memory replay would not cause IAF/IPF/IGPF
