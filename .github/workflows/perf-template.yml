@@ -278,19 +278,17 @@ jobs:
           if [[ -n "${{ inputs.max_cycles }}" ]]; then
             EXTRA_OPTS+=(--max-cycles "${{ inputs.max_cycles }}")
           fi
-          DUMP_DB_OPT=${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }}
-          GCPT_OPT=()
-          if [[ -n "$CKPT_HOME" ]]; then
-            GCPT_OPT+=(--gcpt-path "$CKPT_HOME")
-          fi
-          python3 main.py "${GCPT_OPT[@]}" --json-path "$CKPT_JSON_PATH" \
-            --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" --result-path $SPEC_DIR \
-            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+          python3 main.py \
+            --gcpt-path "$CKPT_HOME" \
+            --json-path "$CKPT_JSON_PATH" \
+            --result-path "$SPEC_DIR" \
             --benchmarks "${{ inputs.benchmarks }}" \
+            --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" \
+            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            $DUMP_DB_OPT \
+            ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
             --run \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
@@ -299,9 +297,9 @@ jobs:
         run: |
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py \
-            --gcpt-path $CKPT_HOME \
-            --json-path $CKPT_JSON_PATH \
-            --result-path $SPEC_DIR \
+            --gcpt-path "$CKPT_HOME" \
+            --json-path "$CKPT_JSON_PATH" \
+            --result-path "$SPEC_DIR" \
             --benchmarks "${{ inputs.benchmarks }}" \
             --report \
             > "$SCORE_FILE"
