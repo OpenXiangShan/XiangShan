@@ -38,8 +38,7 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict request
   val startPc: GuardedPc = Input(GuardedPc())
   // resolve train
-  val trainReady: Bool  = Output(Bool())
-  val train:      Train = Input(new Train)
+  val train: ValidIO[Train] = Flipped(Valid(new Train))
   // fast train for s1 predictors
   val fastTrain: Option[Valid[FastTrain]] = None
 
