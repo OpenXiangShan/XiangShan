@@ -118,6 +118,8 @@ object Extensions {
 
   case object Zicond extends UnprivExt(Seq(ZICONDType), tableZicond)
 
+  case object Zimop extends UnprivExt(Seq(ZIMOPType), tableZimop)
+
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
 
   case object Zifencei extends UnprivExt(Seq(ZIFENCEIType), tableZifencei)

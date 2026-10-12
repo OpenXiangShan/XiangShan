@@ -92,7 +92,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   val cboOpcode = resultInstCboI2f(CboOpcodeField)
 
-  val isMop  = result(IsMopField)
+  val isMop  = result(IsMopField) // TODO: modify here if MOP needs implementation
   val selImm = result(SelImmField)
 
   val isJs          = isJFields.map(field => result(field))
@@ -150,7 +150,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := instFields.RS1
+    out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1) // TODO: modify here if MOP needs implementation
     out.uop(i).bits.lsrc2 := instFields.RS2
     out.uop(i).bits.lsrc3 := instFields.FS3
     out.uop(i).bits.frmRen := frmRen
@@ -159,7 +159,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.frm := instFields.RM
     out.uop(i).bits.frmIll := instFields.RM === 5.U || instFields.RM === 6.U
     out.uop(i).bits.selImm := selImm
-    out.uop(i).bits.imm := imm
+    out.uop(i).bits.imm := Mux(isMop, 0.U, imm)
     out.uop(i).bits.commitType := commitType
     out.uop(i).bits.canRobCompress := canRobCompress
     out.uop(i).bits.numWb := numWb
@@ -168,7 +168,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.isLastUop := i.U === numUop
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
-    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
+    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U // TODO: modify here if MOP needs implementation
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII || reserveExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }

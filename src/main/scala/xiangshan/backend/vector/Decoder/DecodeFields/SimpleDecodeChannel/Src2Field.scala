@@ -17,7 +17,7 @@ object Src2Field extends DecodeField[InstPattern, SrcRenType] {
     val srcType: UInt = op match {
       case int: IntInstPattern => int match {
         case _: IntRTypePattern => GP
-        case _: IntITypePattern => null
+        case _: IntITypePattern => null // TODO: modify here if MOP needs implementation
         case _: IntSTypePattern => GP
         case IntBTypePattern() => GP
         case IntUTypePattern() => null

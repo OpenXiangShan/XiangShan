@@ -40,13 +40,14 @@ object Types {
 
   object DecodeSelImm extends NamedUInt(5) {
     type Type = UInt
-    def NO = ub"00000"
-    def S  = ub"00001"
-    def SB = ub"00010"
-    def U  = ub"00011"
-    def UJ = ub"00100"
-    def I  = ub"00101"
-    def Z  = ub"00110"
+    def NO  = ub"00000"
+    def S   = ub"00001"
+    def SB  = ub"00010"
+    def U   = ub"00011"
+    def UJ  = ub"00100"
+    def I   = ub"00101"
+    def Z   = ub"00110"
+    def MOP = ub"00111"
     def OPIVIS    = ub"01000"
     def OPIVIU    = ub"01001"
     def VSETVLI   = ub"01010"

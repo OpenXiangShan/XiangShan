@@ -105,6 +105,10 @@ case class IntJTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
 
 case class IntImmInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
+case class MopRPattern()(implicit rawInst: BitPat) extends IntITypePattern
+
+case class MopRRPattern()(implicit rawInst: BitPat) extends IntITypePattern
+
 case class IntLoadInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class JalrPattern()(implicit rawInst: BitPat) extends IntITypePattern
@@ -465,9 +469,11 @@ object InstPattern {
               case _ => PrivInstPattern()
             }
           case "100" =>
-            func7(0).rawString match {
-              case "0" => HyperLoadInstPattern()
-              case "1" => HyperStoreInstPattern()
+            func7.rawString match {
+              case s if rawStringMatches(s, "0?????0") => HyperLoadInstPattern()
+              case s if rawStringMatches(s, "0?????1") => HyperStoreInstPattern()
+              case s if rawStringMatches(s, "1?00??1") => MopRPattern()
+              case s if rawStringMatches(s, "1?00??1") => MopRRPattern()
             }
           // Todo: Check it
           case _ => CSRInstPattern()

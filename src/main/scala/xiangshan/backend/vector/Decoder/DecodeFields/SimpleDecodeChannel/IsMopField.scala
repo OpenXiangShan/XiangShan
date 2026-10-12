@@ -13,7 +13,7 @@ object IsMopField extends BoolDecodeField[InstPattern] {
   override def genTable(op: InstPattern): BitPat = {
     op match {
       case inst if insts.contains(inst.name) => y
-      case _                                                => n
+      case _                                 => n
     }
   }
 

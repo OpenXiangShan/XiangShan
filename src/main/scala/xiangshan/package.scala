@@ -576,12 +576,13 @@ package object xiangshan {
   }
 
   object SelImm {
-    def IMM_S  = "b0001".U
-    def IMM_SB = "b0010".U
-    def IMM_U  = "b0011".U
-    def IMM_UJ = "b0100".U
-    def IMM_I  = "b0101".U
-    def IMM_Z  = "b0110".U
+    def IMM_S   = "b0001".U
+    def IMM_SB  = "b0010".U
+    def IMM_U   = "b0011".U
+    def IMM_UJ  = "b0100".U
+    def IMM_I   = "b0101".U
+    def IMM_Z   = "b0110".U
+    def IMM_MOP = "b0111".U
 
     def IMM_OPIVIS    = "b1000".U
     def IMM_OPIVIU    = "b1001".U
@@ -603,6 +604,7 @@ package object xiangshan {
         IMM_UJ.litValue        -> "UJ",
         IMM_I.litValue         -> "I",
         IMM_Z.litValue         -> "Z",
+        IMM_MOP.litValue       -> "MOP",
         IMM_OPIVIS.litValue    -> "VIS",
         IMM_OPIVIU.litValue    -> "VIU",
         IMM_VSETVLI.litValue   -> "VSETVLI",
@@ -622,6 +624,7 @@ package object xiangshan {
         IMM_UJ.litValue        -> ImmUnion.J,
         IMM_I.litValue         -> ImmUnion.I,
         IMM_Z.litValue         -> ImmUnion.Z,
+        IMM_MOP.litValue       -> ImmUnion.MOP,
         IMM_OPIVIS.litValue    -> ImmUnion.OPIVIS,
         IMM_OPIVIU.litValue    -> ImmUnion.OPIVIU,
         IMM_VSETVLI.litValue   -> ImmUnion.VSETVLI,

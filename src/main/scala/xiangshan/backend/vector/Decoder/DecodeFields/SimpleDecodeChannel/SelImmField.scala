@@ -31,6 +31,8 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
             case _ => null
           }
           case HyperLoadInstPattern() => null
+          case MopRPattern() => DecodeSelImm.MOP // reserved for May be OPeration to use
+          case MopRRPattern() => DecodeSelImm.MOP // reserved for May be OPeration to use
           case CSRInstPattern() => DecodeSelImm.Z
           case AmoLrInstPattern() => null
           case _: CboInstPattern => DecodeSelImm.S

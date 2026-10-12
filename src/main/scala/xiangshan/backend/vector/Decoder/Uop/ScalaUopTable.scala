@@ -605,7 +605,13 @@ object ScalaUopTable {
     )
   }
 
-  def tableZimop = ???
+  def tableZimop = {
+    import xiangshan.backend.decode.isa.Instructions.ZIMOPType
+    ZIMOPType.mapUopcode(
+      _.MOP_R_N   -> add.S2xRemove, // TODO: modify here if MOP needs implementation
+      _.MOP_RR_N  -> add.S2xRemove, // TODO: modify here if MOP needs implementation
+    )
+  }
 
   val tableZknd = {
     import xiangshan.backend.decode.isa.Instructions.ZKND64Type
