@@ -119,8 +119,10 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
     shouldReset = false,
     holdRead = false,
     singlePort = true,
+    withClockGate = true,
     hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl
+    hasSramCtl = hasSramCtl,
+    suffix = Some("dcsh_dat")
   ))
 
   data_sram.io.w.req.valid := io.w.en
@@ -274,6 +276,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val rr_bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
+    val readline_way_en_htag = Input(UInt(DCacheWays.W))
+    val s2_tag_match_way = Input(Vec(LoadPipelineWidth, UInt(DCacheWays.W)))
   })
 
   // Half of the data banks use the duplicate address path to reduce fanout.
