@@ -74,9 +74,16 @@ class bitmapEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 class bitmapIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
+    // Only the selected 64-bit bitmap word needs to survive between beats.
+    val word = Flipped(Valid(new Bundle {
+      val id = UInt(bMemID.W)
+      val value = UInt(XLEN.W)
+    }))
+    val word_data = Output(UInt(XLEN.W))
+    val flush_latch = Input(Vec(l2tlbParams.llptwsize+2, Bool()))
     val resp = Flipped(DecoupledIO(new Bundle {
       val id = Output(UInt(bMemID.W))
-      val value = Output(UInt(blockBits.W))
+      val value = Output(UInt(XLEN.W))
     }))
     val req_mask = Input(Vec(l2tlbParams.llptwsize+2, Bool()))
   }
@@ -144,8 +151,15 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem_ptr = ParallelPriorityEncoder(is_having)
   val mem_arb = Module(new RRArbiterInit(new bitmapEntry(), l2tlbParams.llptwsize+2))
 
-  val bitmapdata = Wire(Vec(blockBits / XLEN, UInt(XLEN.W)))
-  bitmapdata := io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, UInt(XLEN.W)))
+  val bitmapdata = io.mem.resp.bits.value
+  val word_entry = io.mem.word.bits.id - (l2tlbParams.llptwsize + 2).U
+  io.mem.word_data := entries(word_entry).data
+  // Keep receive state alive across flush, but never write old data into a
+  // recycled logical entry. req_mask prevents reuse of the memory ID itself.
+  when (io.mem.word.valid && !flush && !io.mem.flush_latch(word_entry) &&
+    state(word_entry) === state_mem_waiting && entries(word_entry).wait_id === word_entry) {
+    entries(word_entry).data := io.mem.word.bits.value
+  }
 
   for (i <- 0 until l2tlbParams.llptwsize+2) {
     mem_arb.io.in(i).bits := entries(i)
@@ -166,7 +180,9 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   )
   val dup_req_fire = mem_arb.io.out.fire && dupBitmapPPN(req_real_ppn, mem_arb.io.out.bits.ppn)
   val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w}
-  val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
+  val mem_resp_valid = io.mem.resp.fire && !flush &&
+    !io.mem.flush_latch(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
+  val dup_wait_resp = mem_resp_valid && VecInit(dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
 
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
@@ -198,10 +214,9 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
       entries(enq_ptr).cfs(i) := false.B
     }
     when (to_mem_out) {
-      val index = getBitmapAddr(req_real_ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-      entries(enq_ptr).cf := bitmapdata(index)(req_real_ppn(log2Up(XLEN)-1, 0))
+      entries(enq_ptr).cf := bitmapdata(req_real_ppn(log2Up(XLEN)-1, 0))
       val ppnPart = req_real_ppn(log2Up(XLEN)-1, log2Up(8))
-      val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
+      val selectedBits = bitmapdata.asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
       for (j <- 0 until tlbcontiguous) {
         entries(enq_ptr).cfs(j) := selectedBits(j)
       }
@@ -251,7 +266,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
       )
       val cm_dup_req_fire = mem_arb.io.out.fire && dupBitmapPPN(entries(i).ppn, mem_arb.io.out.bits.ppn)
       val cm_dup_vec_wait = cm_dup_vec.zip(is_waiting).map{case (d, w) => d && w}
-      val cm_dup_wait_resp = io.mem.resp.fire && VecInit(cm_dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
+      val cm_dup_wait_resp = mem_resp_valid && VecInit(cm_dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
       val cm_wait_id = Mux(cm_dup_req_fire, mem_arb.io.chosen, ParallelMux(cm_dup_vec_wait zip entries.map(_.wait_id)))
       val cm_to_wait = Cat(cm_dup_vec_wait).orR || cm_dup_req_fire
       val cm_to_mem_out = cm_dup_wait_resp
@@ -271,10 +286,9 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
             entries(i).wait_id := Mux(cm_to_wait, cm_wait_id, entries(i).wait_id)
             entries(i).hit := cm_to_wait || cm_to_mem_out
             when (cm_to_mem_out) {
-              val index = getBitmapAddr(entries(i).ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-              entries(i).cf := bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1,0))
+              entries(i).cf := bitmapdata(entries(i).ppn(log2Up(XLEN)-1,0))
               val ppnPart = entries(i).ppn(log2Up(XLEN)-1, log2Up(8))
-              val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
+              val selectedBits = bitmapdata.asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
               for (j <- 0 until tlbcontiguous) {
                 entries(i).cfs(j) := selectedBits(j)
               }
@@ -293,15 +307,14 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
     }
   }
 
-  when (io.mem.resp.fire) {
+  when (mem_resp_valid) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id + (l2tlbParams.llptwsize + 2).U) {
         state(i) := state_mem_out
-        val index = getBitmapAddr(entries(i).ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
-        entries(i).data := bitmapdata(index)
-        entries(i).cf := bitmapdata(index)(entries(i).ppn(log2Up(XLEN)-1, 0))
+        entries(i).data := bitmapdata
+        entries(i).cf := bitmapdata(entries(i).ppn(log2Up(XLEN)-1, 0))
         val ppnPart = entries(i).ppn(log2Up(XLEN)-1, log2Up(8))
-        val selectedBits = bitmapdata(index).asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
+        val selectedBits = bitmapdata.asTypeOf(Vec(XLEN/8, UInt(8.W)))(ppnPart)
         for (j <- 0 until tlbcontiguous) {
           entries(i).cfs(j) := selectedBits(j)
         }

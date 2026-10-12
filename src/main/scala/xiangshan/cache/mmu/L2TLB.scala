@@ -460,9 +460,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   def blockBytes_align(addr: UInt) = {
     Cat(addr(PAddrBits - 1, log2Up(l2tlbParams.blockBytes)), 0.U(log2Up(l2tlbParams.blockBytes).W))
   }
-  def addr_low_from_vpn(vpn: UInt) = {
-    vpn(log2Ceil(l2tlbParams.blockBytes)-log2Ceil(XLEN/8)-1, 0)
-  }
   def addr_low_from_paddr(paddr: UInt) = {
     paddr(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
   }
@@ -502,6 +499,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   hptw.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize + 1)
   if (HasBitmapCheck) {
     bitmap.get.io.mem.req_mask := waiting_resp.slice(MemReqWidth - (l2tlbParams.llptwsize + 2), MemReqWidth)
+    bitmap.get.io.mem.flush_latch := flush_latch.slice(MemReqWidth - (l2tlbParams.llptwsize + 2), MemReqWidth)
   }
 
   if (HasMptCheck) { mptc.get.io.mem.mask := waiting_resp.apply(l2tlbParams.llptwsize + 2) }
@@ -535,10 +533,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val req_addr_low = Reg(Vec(MemReqWidth, UInt((log2Up(l2tlbParams.blockBytes)-log2Up(XLEN/8)).W)))
 
-  when (llptw.io.in.fire) {
-    // when enq miss queue, set the req_addr_low to receive the mem resp data part
-    req_addr_low(llptw_mem.enq_ptr) := addr_low_from_vpn(llptw.io.in.bits.req_info.vpn)
-  }
   when (mem_arb.io.out.fire) {
     req_addr_low(mem_arb.io.out.bits.id) := addr_low_from_paddr(mem_arb.io.out.bits.addr)
     waiting_resp(mem_arb.io.out.bits.id) := true.B
@@ -562,17 +556,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   //
   // Each request is answered by exactly one pair of DataID beats, which L2 may
   // interleave with the beats of other requests and return in either order.
-  // Receive state is therefore kept per outstanding request: a beat is always
-  // consumed (ready is hardwired true) and parked in its own half-beat slot,
-  // never dropped for failing to match an in-flight pair. A shared collector
-  // would wedge here, because a dropped beat can never be resent.
+  // Receive control remains per transaction, including across flush. LLPTW
+  // stores the first beat in its issuing entry's ptes; Bitmap keeps only the
+  // selected word in its issuing entry's data. PTW/HPTW (and optional MPT)
+  // retain dedicated half-beat slots. Stale beats still drain, but never write
+  // recycled logical entries. No limit is added to request concurrency.
   private val refillCycles = blockBits / l1BusDataWidth
   require(refillCycles == 2, "half-beat buffering assumes a two-beat line")
   require(l1BusDataWidth == io.cchi.dnDAT.bits.Data.getWidth,
     s"DnDAT Data width ${io.cchi.dnDAT.bits.Data.getWidth} != l1BusDataWidth $l1BusDataWidth")
 
   private val gotData  = RegInit(VecInit(Seq.fill(MemReqWidth)(VecInit(Seq.fill(refillCycles)(false.B)))))
-  private val beatHalf = Reg(Vec(MemReqWidth, UInt(l1BusDataWidth.W)))
+  private val beatHalf = Reg(Vec(if (HasMptCheck) 3 else 2, UInt(l1BusDataWidth.W)))
 
   val compDataValid =
     io.cchi.dnDAT.valid && CCHIOpcode.CompData.is(io.cchi.dnDAT.bits.Opcode, io.cchi.dnDAT.valid)
@@ -581,6 +576,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   private val dataId = io.cchi.dnDAT.bits.DataID(log2Ceil(refillCycles) - 1, 0)
   // this beat completes the pair: the other half has already arrived
   val lastFire = compDataFire && gotData(txnId)(dataId ^ 1.U)
+  val liveTxn = !flush && !flush_latch(txnId)
+  val fsmTxn = from_ptw(txnId) || from_hptw(txnId) ||
+    (if (HasMptCheck) from_mptc(txnId) else false.B)
+  val fsmId = txnId - l2tlbParams.llptwsize.U
+
+  llptw_mem.beat.valid := compDataFire && !lastFire && from_llptw(txnId) && liveTxn
+  llptw_mem.beat.bits.id := txnId
+  llptw_mem.beat.bits.dataId := dataId
+  llptw_mem.beat.bits.value := io.cchi.dnDAT.bits.Data
+  val previousHalf = Mux(from_llptw(txnId), llptw_mem.half, beatHalf(fsmId))
 
   // mem -> data buffer; one merge register, reloaded as each pair completes
   val refill_data = RegInit(VecInit.fill(refillCycles)(0.U(l1BusDataWidth.W)))
@@ -603,10 +608,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   when (compDataFire) {
     gotData(txnId)(dataId) := true.B
-    beatHalf(txnId) := io.cchi.dnDAT.bits.Data
+    when (fsmTxn) {
+      beatHalf(fsmId) := io.cchi.dnDAT.bits.Data
+    }
     when (lastFire) {
-      refill_data(dataId)       := io.cchi.dnDAT.bits.Data
-      refill_data(dataId ^ 1.U) := beatHalf(txnId)
+      when (!(if (HasBitmapCheck) from_bitmap(txnId) else false.B)) {
+        refill_data(dataId)       := io.cchi.dnDAT.bits.Data
+        refill_data(dataId ^ 1.U) := previousHalf
+      }
       gotData(txnId).foreach(_ := false.B)
     }
   }
@@ -622,29 +631,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // Wire fork of refill_data carrying the pair that completes this cycle, so
   // consumers see the whole line without waiting a cycle for the register.
   val refill_data_tmp = WireInit(refill_data)
-  when (lastFire) {
+  when (lastFire && !(if (HasBitmapCheck) from_bitmap(txnId) else false.B)) {
     refill_data_tmp(dataId)       := io.cchi.dnDAT.bits.Data
-    refill_data_tmp(dataId ^ 1.U) := beatHalf(txnId)
+    refill_data_tmp(dataId ^ 1.U) := previousHalf
   }
 
-  // save only one pte for each id
-  // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
-  val resp_pte = VecInit((0 until (if (HasBitmapCheck) MemReqWidth / 2 else MemReqWidth)).map(i =>
-    if (i == l2tlbParams.llptwsize + 2) { RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_mptc) } // HasMptCheck
-    else if (i == l2tlbParams.llptwsize + 1) { RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_hptw) }
-    else if (i == l2tlbParams.llptwsize) { RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_ptw) }
-    else { Mux(llptw_mem.buffer_it(i), get_part(refill_data, req_addr_low(i)), RegEnable(get_part(refill_data, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data, req_addr_low(i))), llptw_mem.buffer_it(i))) }
-    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
-  ))
-
-  // save eight ptes for each id when sector tlb
-  // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
-  val resp_pte_sector = VecInit((0 until (if (HasBitmapCheck) MemReqWidth / 2 else if (HasMptCheck) MemReqWidth - 1 else MemReqWidth)).map(i =>
-    if (i == l2tlbParams.llptwsize + 1) {RegEnable(refill_data_tmp, 0.U.asTypeOf(refill_data_tmp), mem_resp_done && mem_resp_from_hptw) }
-    else if (i == l2tlbParams.llptwsize) {RegEnable(refill_data_tmp, 0.U.asTypeOf(refill_data_tmp), mem_resp_done && mem_resp_from_ptw) }
-    else { Mux(llptw_mem.buffer_it(i), refill_data, RegEnable(refill_data, 0.U.asTypeOf(refill_data), llptw_mem.buffer_it(i))) }
-    // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
-  ))
+  // LLPTW retains its complete PTE line internally. Only scalar walkers need
+  // a separate selected-PTE holding register after memory completion.
+  val resp_pte = VecInit((0 until (if (HasMptCheck) 3 else 2)).map(i => {
+    val id = l2tlbParams.llptwsize + i
+    val pte = get_part(refill_data_tmp, req_addr_low(id))
+    RegEnable(pte, 0.U.asTypeOf(pte), mem_resp_done && txnId === id.U)
+  }))
 
   if (HasBitmapCheck) {
     // add bitmap arb
@@ -675,9 +673,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       llptw.io.bitmap.get.resp.bits := Bitmap.io.resp.bits
 
       // mem -> bitmap
-      Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap
+      val bitmapWordIndex = req_addr_low(txnId)
+      val targetBeat = dataId === bitmapWordIndex(log2Ceil(blockBits / XLEN) - 1)
+      val beatWords = io.cchi.dnDAT.bits.Data.asTypeOf(Vec(l1BusDataWidth / XLEN, UInt(XLEN.W)))
+      val selectedWord = beatWords(bitmapWordIndex(log2Ceil(l1BusDataWidth / XLEN) - 1, 0))
+      Bitmap.io.mem.word.valid := compDataFire && mem_resp_from_bitmap && targetBeat && liveTxn
+      Bitmap.io.mem.word.bits.id := txnId
+      Bitmap.io.mem.word.bits.value := selectedWord
+      Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap && liveTxn
       Bitmap.io.mem.resp.bits.id := DataHoldBypass(txnId, lastFire)
-      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, lastFire)
+      // The target word may arrive on the completing beat: bypass that beat
+      // instead of reading the old issuing-entry register value.
+      Bitmap.io.mem.resp.bits.value := Mux(targetBeat, selectedWord, Bitmap.io.mem.word_data)
     }
 
     // ptwcache -> hptw llptw
@@ -686,19 +693,19 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   // mem -> llptw
-  llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
+  llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw && liveTxn
   llptw_mem.resp.bits.id := DataHoldBypass(txnId, lastFire)
   llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, lastFire)
   // mem -> ptw
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
-  ptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize)
+  ptw.io.mem.resp.bits := resp_pte(0)
   // mem -> hptw
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
-  hptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 1)
+  hptw.io.mem.resp.bits := resp_pte(1)
 
   if (HasMptCheck) {
     mptc.get.io.mem.resp.valid := RegNext(mem_resp_done && mem_resp_from_mptc) // fix later extra delay reg which is unnecessary
-    mptc.get.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 2)
+    mptc.get.io.mem.resp.bits := resp_pte(2)
   }
   // mem -> cache
   val refill_from_llptw = mem_resp_from_llptw
@@ -845,7 +852,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       // When G-stage triggers gpf | gaf, `first_s2xlate_fault` will be true
       // So Here only including pf | af in Stage1, or Stage1Gpf (gpf = llptw_out.bits.h_resp.gpf)
       contiguous_pte_to_merge_ptwResp(
-        if (HasBitmapCheck) Mux(llptw_out.bits.bitmapCheck.get.jmp_bitmap_check, llptw_out.bits.bitmapCheck.get.ptes.asUInt, resp_pte_sector(llptw_out.bits.id).asUInt) else resp_pte_sector(llptw_out.bits.id).asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af,
+        llptw_out.bits.ptes.asUInt, llptw_out.bits.req_info.vpn, llptw_out.bits.af,
         true, s2xlate = llptw_out.bits.req_info.s2xlate, mPBMTE = mPBMTE, hPBMTE = hPBMTE, gpf = llptw_out.bits.h_resp.gpf,
         cfs = cfsValue.getOrElse(VecInit(Seq.fill(tlbcontiguous)(false.B)))
       )

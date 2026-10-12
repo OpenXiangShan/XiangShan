@@ -730,6 +730,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val out = DecoupledIO(new Bundle {
     val req_info = Output(new L2TlbInnerBundle())
     val id = Output(UInt(bMemID.W))
+    val ptes = Output(Vec(tlbcontiguous, UInt(XLEN.W)))
     val h_resp = Output(new HptwResp)
     val first_s2xlate_fault = Output(Bool()) // Whether the first stage 2 translation occurs pf/af
     val af = Output(Bool())
@@ -741,12 +742,18 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
+    // The issuing entry holds the first beat until the full response arrives.
+    val beat = Flipped(Valid(new Bundle {
+      val id = UInt(log2Up(l2tlbParams.llptwsize).W)
+      val dataId = UInt(1.W)
+      val value = UInt(l1BusDataWidth.W)
+    }))
+    val half = Output(UInt(l1BusDataWidth.W))
     val resp = Flipped(Valid(new Bundle {
       val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
       val value = Output(UInt(blockBits.W))
     }))
     val enq_ptr = Output(UInt(log2Ceil(l2tlbParams.llptwsize).W))
-    val buffer_it = Output(Vec(l2tlbParams.llptwsize, Bool()))
     val refill = Output(new L2TlbInnerBundle())
     val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
     val flush_latch = Input(Vec(l2tlbParams.llptwsize, Bool()))
@@ -815,6 +822,21 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
+
+  require(tlbcontiguous * XLEN == blockBits && blockBits == 2 * l1BusDataWidth)
+  val beat_entry = io.mem.beat.bits.id
+  val beat_ptes = entries(beat_entry).ptes.asUInt.asTypeOf(Vec(2, UInt(l1BusDataWidth.W)))
+  io.mem.half := beat_ptes(io.mem.beat.bits.dataId ^ 1.U)
+  // Flush frees logical entries before old memory responses have drained.
+  // Never let an old beat overwrite a new cache-hit task in a recycled entry.
+  when (io.mem.beat.valid && !flush && !io.mem.flush_latch(beat_entry) &&
+    state(beat_entry) === state_mem_waiting && entries(beat_entry).wait_id === beat_entry) {
+    for (i <- 0 until tlbcontiguous) {
+      when (io.mem.beat.bits.dataId === (i / (l1BusDataWidth / XLEN)).U) {
+        entries(beat_entry).ptes(i) := io.mem.beat.bits.value.asTypeOf(Vec(l1BusDataWidth / XLEN, UInt(XLEN.W)))(i % (l1BusDataWidth / XLEN))
+      }
+    }
+  }
   val is_cache = state.map(_ === state_cache)
   val is_hptw_req = state.map(_ === state_hptw_req)
   val is_last_hptw_req = state.map(_ === state_last_hptw_req)
@@ -976,6 +998,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       entries(enq_ptr).wait_id := Mux(to_mpt_mem_req , wait_mpt_mem_id,Mux(to_mpt,wait_mpt_id, Mux(to_wait, wait_id, enq_ptr)))
     }
     entries(enq_ptr).af := false.B
+    // A duplicate arriving on the completing beat must retain the whole line,
+    // just like the entries that were already waiting for this transaction.
+    entries(enq_ptr).ptes := Mux(dup_wait_resp, io.mem.resp.bits.value,
+      0.U(blockBits.W)).asTypeOf(entries(enq_ptr).ptes)
     if (HasMptCheck) {
       when(dup_mpt_resp) {
         entries(enq_ptr).af := accessFaultMpt
@@ -986,9 +1012,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       entries(enq_ptr).from_l0 := false.B
       entries(enq_ptr).way_info := 0.U
       entries(enq_ptr).jmp_bitmap_check := false.B
-      for (i <- 0 until tlbcontiguous) {
-        entries(enq_ptr).ptes(i) := 0.U
-      }
       entries(enq_ptr).cfs := io.in.bits.bitmapCheck.get.cfs
       entries(enq_ptr).n := last_hptw_req_pte.n
     }
@@ -1099,7 +1122,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
   }
 
-  when (io.mem.resp.fire) {
+  when (io.mem.resp.fire && !flush && !io.mem.flush_latch(io.mem.resp.bits.id)) {
     state.indices.map{i =>
       when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
         val req_paddr = MakeAddr(entries(i).ppn, getVpnn(entries(i).req_info.vpn, 0))
@@ -1114,6 +1137,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
                         state_last_hptw_req,
                         Mux(bitmap_enable && !(vsStagePf || (entries(i).req_info.s2xlate === allStage && gStagePf)), state_bitmap_check, state_mem_out))
         mem_resp_hit(i) := true.B
+        entries(i).ptes := io.mem.resp.bits.value.asTypeOf(entries(i).ptes)
         entries(i).ppn := Mux(ptes(index).n === 0.U, ptes(index).getPPN(), Cat(ptes(index).getPPN()(ptePPNLen - 1, pteNapotBits), entries(i).req_info.vpn(pteNapotBits - 1, 0))) // for last stage 2 translation
         // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
         entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, gStagePf, false.B)
@@ -1226,6 +1250,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.valid := ParallelOR(is_having).asBool && (if (HasMptCheck) mem_state else true.B)
   io.out.bits.req_info := entries(mem_ptr).req_info
   io.out.bits.id := mem_ptr
+  io.out.bits.ptes := entries(mem_ptr).ptes
   if (HasBitmapCheck) {
     io.out.bits.af := Mux(bitmap_enable, entries(mem_ptr).af || entries(mem_ptr).cf, entries(mem_ptr).af)
     io.out.bits.bitmapCheck.get.jmp_bitmap_check := entries(mem_ptr).jmp_bitmap_check
@@ -1271,7 +1296,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
   io.mem.refill.s2xlate := entries(mem_refill_id).req_info.s2xlate
-  io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
 
