@@ -543,7 +543,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   new WithPDBDepth(PDBDepthParameters(enabled = true, usedMoveEnabled = true, unusedMoveEnabled = true))
     ++ new WithPDB(64, "lru")
     ++ OpenLLCConfig("32MB", ways = 16, banks = 4)
-    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false, cdp = false)
+    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
 )
