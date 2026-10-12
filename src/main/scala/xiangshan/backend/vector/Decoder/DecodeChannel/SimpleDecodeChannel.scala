@@ -150,8 +150,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := instFields.RS1
-    out.uop(i).bits.lsrc2 := instFields.RS2
+    out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
+    out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
     out.uop(i).bits.lsrc3 := instFields.FS3
     out.uop(i).bits.frmRen := frmRen
     out.uop(i).bits.fflagsWen := fflagsWen
