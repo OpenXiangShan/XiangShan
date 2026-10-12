@@ -5,7 +5,6 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
-import xiangshan.backend.rename.FreeListSnapshotGenerator
 import xiangshan.backend.rename.RegType
 import xiangshan.backend.rename.Reg_I
 import xiangshan.backend.rename.Reg_F
@@ -62,12 +61,16 @@ class NewFreeList(
       case _ => Seq.tabulate(numPhyRegs)(i => i >= numLogicRegs)
     }
     val resetMask = VecInit(initialFree.map(_.B)).asUInt
-    val storage = RegInit(0.U(numPhyRegs.W))
-    val logical = (storage ^ resetMask).asTypeOf(Vec(numPhyRegs, Bool()))
-    (storage, logical, resetMask)
+    // Keep the flops behind one word enable instead of a hold condition per bit.
+    val state = Module(new NewFreeListBitmapRegister(numPhyRegs))
+    val storage = Wire(UInt(numPhyRegs.W))
+    state.io.data := storage
+    state.io.enable := true.B
+    val logical = (state.io.value ^ resetMask).asTypeOf(Vec(numPhyRegs, Bool()))
+    (storage, logical, resetMask, state)
   }
-  val (specStorage, specfreeListReg, specResetMask) = InitFreeList(regType)
-  val (archStorage, archfreeListReg, archResetMask) = InitFreeList(regType)
+  val (specStorage, specfreeListReg, specResetMask, specState) = InitFreeList(regType)
+  val (archStorage, archfreeListReg, archResetMask, archState) = InitFreeList(regType)
   val freePhyRegOH = VecInit((0 until commitWidth).map { i =>
     Mux(io.freeReq(i), UIntToOH(io.freePhyReg(i), numPhyRegs), 0.U(numPhyRegs.W))
   })
@@ -137,6 +140,11 @@ class NewFreeList(
     specfreeListReg.asUInt & ~flManager.out.dequeuedBitmap)
   specStorage := ((specBase & ~walkPhyRegOHOR) | freePhyRegOHOR) ^ specResetMask
   archStorage := ((archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR) ^ archResetMask
+
+  // Without any of these events, both logical bitmaps keep their values.
+  val bitmapUpdate = doRestore || doWalkClear || isNormalAlloc || io.freeReq.asUInt.orR || io.commit.doCommit
+  specState.io.enable := bitmapUpdate
+  archState.io.enable := bitmapUpdate
 
   //Debug
   XSPerfAccumulate("utilization", PopCount(io.allocateReq))
@@ -215,3 +223,14 @@ class NewFreeListSnapshotStore(numPhyRegs: Int)(implicit p: Parameters)
 // Keep the original enqueue/dequeue/flush rules and only replace payload storage.
 class NewFreeListSnapshotMetadata(implicit p: Parameters)
   extends xiangshan.backend.rename.SnapshotGenerator[UInt](0.U(1.W))
+
+class NewFreeListBitmapRegister(width: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val data = Input(UInt(width.W))
+    val enable = Input(Bool())
+    val value = Output(UInt(width.W))
+  })
+  val bits = RegInit(0.U(width.W))
+  when(io.enable) { bits := io.data }
+  io.value := bits
+}
