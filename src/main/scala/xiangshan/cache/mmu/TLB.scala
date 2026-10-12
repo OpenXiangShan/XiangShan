@@ -279,7 +279,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     val noTranslateReg = RegNext(req(i).bits.no_translate)
     val addr = Mux(noTranslateReg, req(i).bits.pmp_addr, pmp_addr(i))
-    pmp_check(addr, req_out(i).size, req_out(i).cmd, noTranslateReg, i)
+    val pmpCmd = Mux(req_out(i).hlvx, TlbCmd.read_exec, req_out(i).cmd)
+    pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
       val mptTemp = Option.when(HasMptCheck) (mptPerm.get(i)(d))
@@ -666,7 +667,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         perm_check(mptResp.getOrElse(0.U.asTypeOf(new MptPermBundle(isTlbPort = true))), mptEn.getOrElse(false.B),
           stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
-      pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, req_out(idx).cmd, false.B, idx)
+      val pmpCmd = Mux(req_out(idx).hlvx, TlbCmd.read_exec, req_out(idx).cmd)
+      pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, pmpCmd, false.B, idx)
 
       // NOTE: the unfiltered req would be handled by Repeater
     }
