@@ -89,6 +89,11 @@ class AXI4IntrGenerator
       randCounter := 0.U
     }
 
-    in.r.bits.data := Cat(intrReg(1), intrReg(0))
+    val rdataWidth = in.r.bits.data.getWidth
+    if (rdataWidth == 32) {
+      in.r.bits.data := Mux(raddr(2), intrReg(1), intrReg(0))
+    } else {
+      in.r.bits.data := Cat(intrReg(1), intrReg(0))
+    }
   }
 }
