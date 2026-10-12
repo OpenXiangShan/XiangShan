@@ -221,7 +221,8 @@ object SimpleDecodeChannelMain extends App {
   })
 
   val coreParams = defaultConfig(XSCoreParamsKey)
-  val simpleExts: Seq[ExtBase] = extensions(defaultConfig)
+  val simpleExts: Seq[ExtBase] = extensions(defaultConfig).diff(
+    ScalarMultiUopDecodeChannel.channelExtensions(extensions(defaultConfig), coreParams.HasShadowStack))
   val insts: Seq[InstPattern] = InstPattern.extensionInsts(simpleExts: _*).collect { case x if !x.isInstanceOf[VecInstPattern] => x }
 
   println(s"number of insts: ${insts.size}")
