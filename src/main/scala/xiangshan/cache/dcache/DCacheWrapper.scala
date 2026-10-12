@@ -1553,9 +1553,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
   missQueue.io.forward_stData := io.lsu.forward_mshrStData
 
-  // refill to load queue
- // io.lsu.lsq <> missQueue.io.refill_to_ldq
-
   // Compact CHI: per-channel MQ / WBQ / Probe
   val wbTxnIdBase = releaseIdBase.U(8.W)
   val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
