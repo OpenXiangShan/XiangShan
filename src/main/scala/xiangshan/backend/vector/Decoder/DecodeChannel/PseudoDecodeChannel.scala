@@ -26,16 +26,15 @@ import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
-import xiangshan.backend.vector.HasVectorSettings
 import xiangshan.backend.decode.ImmUnion
-
+import xiangshan.HasXSParameter
 import scala.collection.SeqMap
 import scala.language.implicitConversions
 
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
-)(implicit val p: Parameters) extends Module with HasVectorSettings {
+)(implicit val p: Parameters) extends Module with HasXSParameter {
   import PseudoDecodeChannel._
 
   @public
@@ -68,12 +67,19 @@ class PseudoDecodeChannel(
   )
 
   val table = new DecodeTable(patterns, fields)
-  val zicfissMopTable = new DecodeTable(zicfissMopPatterns, Seq(legalField))
-  val ssrdpTable = new DecodeTable(Seq(SSRDP_PATTERN), Seq(legalField))
 
   val bundle = table.decode(in.rawInst)
-  val isAllocatedZicfissMop = zicfissMopTable.decode(in.rawInst)(legalField) ||
-    (ssrdpTable.decode(in.rawInst)(legalField) && instBitFields.RD =/= 0.U)
+
+  // Scala selection omits the SS-specific decode logic when the hardware is disabled.
+  val suppressMopFallback = if (HasShadowStack) {
+    val zicfissMopTable = new DecodeTable(zicfissMopPatterns, Seq(legalField))
+    val ssrdpTable = new DecodeTable(Seq(SSRDP_PATTERN), Seq(legalField))
+    val isAllocatedZicfissMop = zicfissMopTable.decode(in.rawInst)(legalField) ||
+      (ssrdpTable.decode(in.rawInst)(legalField) && instBitFields.RD =/= 0.U)
+    isAllocatedZicfissMop && in.fromCSR.enableZicfiss.getOrElse(false.B)
+  } else {
+    false.B
+  }
 
   val selImm = Wire(ValidIO(DecodeSelImm()))
   val imm = Wire(UInt(32.W))
@@ -90,8 +96,8 @@ class PseudoDecodeChannel(
     )
   )
 
-  val shadowStackEnabled = in.fromCSR.enableZicfiss.getOrElse(false.B)
-  out.valid := bundle(legalField) && !(isAllocatedZicfissMop && shadowStackEnabled)
+  // Pseudo has priority; only yield allocated SS encodings when SSE is enabled.
+  out.valid := bundle(legalField) && !suppressMopFallback
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
   out.bits.src1RenType := bundle(src1Field)
