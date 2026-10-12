@@ -25,7 +25,6 @@ import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
-import xiangshan.frontend.bpu.WriteReqBundle
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 object TakenCounter extends SaturateCounterFactory {
@@ -88,16 +87,23 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
 
-class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
-  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
-  val entry:        TageEntry               = new TageEntry
-  override def tag: Option[UInt]            = Some(entry.tag)
-  override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
+class TageSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:        UInt            = UInt(SetIdxWidth.W)
+  val entry:         TageEntry       = new TageEntry
+  val usefulCtr:     SaturateCounter = UsefulCounter()
+  val usefulValid:   Bool            = Bool()
+  val writeEntryEn:  Bool            = Bool()
+  val writeUsefulEn: Bool            = Bool()
+  val allocate:      Bool            = Bool()
+  val actualTaken:   Bool            = Bool()
 }
 
-class UsefulCtrSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val setIdx:    UInt            = UInt(SetIdxWidth.W)
-  val usefulCtr: SaturateCounter = UsefulCounter()
+class TageWriteBufferEntry(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:      UInt            = UInt(SetIdxWidth.W)
+  val entry:       TageEntry       = new TageEntry
+  val entryValid:  Bool            = Bool()
+  val usefulCtr:   SaturateCounter = UsefulCounter()
+  val usefulValid: Bool            = Bool()
 }
 
 class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
@@ -106,6 +112,8 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val wayMask:         UInt                 = UInt(NumWays.W)
   val writeEntryEn:    Vec[Bool]            = Vec(NumWays, Bool())
   val writeUsefulEn:   Vec[Bool]            = Vec(NumWays, Bool())
+  val usefulValid:     Vec[Bool]            = Vec(NumWays, Bool())
+  val allocate:        Vec[Bool]            = Vec(NumWays, Bool())
   val actualTakenMask: Vec[Bool]            = Vec(NumWays, Bool())
   val entries:         Vec[TageEntry]       = Vec(NumWays, new TageEntry)
   val usefulCtrs:      Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())

@@ -353,7 +353,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       provider.hitWayMaskOH := metaProviderWayOH
       provider.tag          := t2_rawTag(OHToUInt(metaProviderTableOH)) ^ position
       provider.takenCtr     := meta.providerTakenCtr
-      provider.usefulCtr    := meta.providerUsefulCtr
+      provider.usefulCtr    := Mux(usefulResetInFlight, UsefulCounter.Zero, meta.providerUsefulCtr)
 
       hasAlt     := metaHasAlt
       altTableOH := metaAltTableOH
@@ -548,12 +548,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
-    val writeWayMask    = Wire(Vec(NumWays, Bool()))
-    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
-    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
-    val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
-    val actualTakenMask = Wire(Vec(NumWays, Bool()))
+    val writeWayMask     = Wire(Vec(NumWays, Bool()))
+    val writeEntryEn     = Wire(Vec(NumWays, Bool()))
+    val writeUsefulEn    = Wire(Vec(NumWays, Bool()))
+    val writeEntries     = Wire(Vec(NumWays, new TageEntry))
+    val writeUsefulCtrs  = Wire(Vec(NumWays, UsefulCounter()))
+    val actualTakenMask  = Wire(Vec(NumWays, Bool()))
+    val writeUsefulValid = Wire(Vec(NumWays, Bool()))
+    val writeAllocate    = Wire(Vec(NumWays, Bool()))
 
     (0 until NumWays).foreach { wayIdx =>
       val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t3_trainInfoVec.map { info =>
@@ -587,12 +589,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
       val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
 
-      writeWayMask(wayIdx)    := updateEn || allocateEn
-      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
-      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
-      writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
-      actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      writeWayMask(wayIdx)     := updateEn || allocateEn
+      writeEntryEn(wayIdx)     := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
+      writeUsefulEn(wayIdx)    := providerWriteUseful.reduce(_ || _) || allocateEn
+      writeEntries(wayIdx)     := Mux(allocateEn, t3_allocateEntry, updateEntry)
+      writeUsefulCtrs(wayIdx)  := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
+      actualTakenMask(wayIdx)  := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      writeUsefulValid(wayIdx) := allocateEn || hitProvider || !t3_useMeta
+      writeAllocate(wayIdx)    := allocateEn
     }
 
     table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
@@ -604,6 +608,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.entries         := writeEntries
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
+    table.io.writeReq.bits.usefulValid     := writeUsefulValid
+    table.io.writeReq.bits.allocate        := writeAllocate
 
     table.io.usefulResetStart := t3_usefulResetStart
   }
