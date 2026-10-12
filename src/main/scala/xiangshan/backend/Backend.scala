@@ -397,6 +397,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.wen := intRegion.io.cross.I2FWakeupOut.get.valid && intRegion.io.cross.I2FWakeupOut.get.bits.fpWen
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.pdest := intRegion.io.cross.I2FWakeupOut.get.bits.pdest
   fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency := 0.U.asTypeOf(fpRegion.in.fromIntRegion.fpWbM3Wakeup.head.loadDependency)
+  fpRegion.in.fromIntRegion.loadFpWbM4Wakeup.zip(intRegion.io.loadFpWbM4Wakeup.get).foreach {
+    case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits
+  }
   fpRegion.fromIntIQ <> intRegion.io.intIQOut.get
   fpRegion.in.fromIntRegion.fromIntIQDeqOg1Payload <> intRegion.io.intIQDeqOg1PayloadOut.get
   fpRegion.in.fromVecRegion := vecRegion.out.toFltRegion
@@ -548,6 +553,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
   csrio.vpu.dirty_vs := ctrlBlock.io.robio.csr.dirty_vs
   csrio.exception := ctrlBlock.io.robio.exception
+  csrio.diffCommitForTrap.zip(ctrlBlock.io.robio.diffCommitForTrap).foreach { case (sink, source) => sink := source }
+  ctrlBlock.io.robio.diffArchEvent.zip(csrio.diffArchEvent).foreach { case (sink, source) => sink := source }
   csrio.robDeqPtr := ctrlBlock.io.robio.robDeqPtr
   csrio.memExceptionVAddr := io.mem.exceptionAddr.vaddr
   csrio.memExceptionGPAddr := io.mem.exceptionAddr.gpaddr
@@ -593,7 +600,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
   io.mem.sfence := fenceio.sfence
-  io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+  io.mem.isStoreException := ctrlBlock.io.robio.exception.bits.isStore
   io.mem.isVlsException := ctrlBlock.io.robio.exception.bits.vls
 
   val issueSta = io.mem.intIssue.flatten.filter(_.bits.params.hasStoreAddrFu)
@@ -806,6 +813,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
     val robidx = Input(new RobPtr)
     val pc     = Output(UInt(VAddrBits.W))
+    val storeOffset = Option.when(env.EnableDifftest)(Output(UInt(log2Ceil(RenameWidth + 1).W)))
+    val preCommit = Option.when(env.EnableDifftest)(Output(Bool()))
   })
 }
 

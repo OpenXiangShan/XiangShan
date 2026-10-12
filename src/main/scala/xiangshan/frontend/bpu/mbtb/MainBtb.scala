@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -101,6 +102,14 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
+  /* *** s3 ***
+   * touch replacer using final takenMask (mbtb + tage + sc)
+   */
+  // io.result is flattened, so use each align bank's last result as its VBTB taken feedback.
+  alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.s3_vbtbTaken := io.s3_takenMask(i * (NumWay + 1) + NumWay)
+  }
+
   /* *** t0 ***
    * receive training data
    * send startPc to alignBank for replacer state reading
@@ -108,9 +117,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t0_fire  = io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
 
-  private val t0_startPc    = t0_train.startPc
-  private val t0_rotator    = VecRotate(getAlignBankIndex(t0_startPc))
-  private val t0_startPcVec = t0_rotator.rotate(t0_train.startPcVec.get)
+  private val t0_startPc          = t0_train.startPc
+  private val t0_rotator          = VecRotate(getAlignBankIndex(t0_startPc))
+  private val t0_startPcVec       = t0_rotator.rotate(t0_train.startPcVec.get)
+  private val t0_posBitsHigherVec = t0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.t0_startPc := t0_startPcVec(i)
@@ -122,8 +132,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_fire  = RegNext(t0_fire, init = false.B)
   private val t1_train = RegEnable(t0_train, t0_fire)
 
-  private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
-  private val t1_startPcVec = RegEnable(t0_startPcVec, t0_fire)
+  private val t1_rotator          = RegEnable(t0_rotator, t0_fire)
+  private val t1_startPcVec       = RegEnable(t0_startPcVec, t0_fire)
+  private val t1_posBitsHigherVec = RegEnable(t0_posBitsHigherVec, t0_fire)
 
   private val t1_meta           = t1_train.meta.mbtb
   private val t1_mispredictInfo = t1_train.mispredictBranch
@@ -132,11 +143,12 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_writeAlignBankMask = t1_rotator.rotate(VecInit(UIntToOH(t1_writeAlignBankIdx).asBools))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.write.req.valid          := t1_fire
-    b.io.write.req.bits.needWrite := t1_writeAlignBankMask(i)
-    b.io.write.req.bits.startPc   := t1_startPcVec(i)
-    b.io.write.req.bits.branches  := t1_train.branches
-    b.io.write.req.bits.meta      := t1_meta.entries(i)
+    b.io.write.req.valid              := t1_fire
+    b.io.write.req.bits.needWrite     := t1_writeAlignBankMask(i)
+    b.io.write.req.bits.startPc       := t1_startPcVec(i)
+    b.io.write.req.bits.branches      := t1_train.branches
+    b.io.write.req.bits.meta          := VecInit(t1_meta.entries(i).take(NumWay))
+    b.io.write.req.bits.posHigherBits := t1_posBitsHigherVec(i)
     // see comments in MainBtbAlignBank.scala
     b.io.write.req.bits.mispredictInfo := t1_mispredictInfo
   }
@@ -168,11 +180,15 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s2_fire                    = io.stageCtrl.s2_fire && io.enable
   private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
+  private val pref_pred_miss             = s2_fire && perf_s2HitMask.reduce(!_ && !_)
 
   XSPerfAccumulate("total_train", t1_fire)
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
-  XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
+  XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumBtbResultEntries + 1)
   XSPerfAccumulate("train_has_mispredict", t1_fire && t1_mispredictInfo.valid)
   XSPerfAccumulate("train_hit_mispredict", t1_fire && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
-  XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
+  XSPerfAccumulate("pred_miss", pref_pred_miss)
+
+  XSPerfRolling("rolling_mbtb_pred_miss", pref_pred_miss, 10000, clock, reset)
+
 }

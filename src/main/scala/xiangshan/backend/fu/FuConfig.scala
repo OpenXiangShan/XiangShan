@@ -309,23 +309,6 @@ object FuConfig {
     immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
   )
 
-  val F2vCfg: FuConfig = FuConfig (
-    name = "f2v",
-    FuType.f2v,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("f2v")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeFpRf = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
-    destDataBits = 128,
-    srcDataBits = Some(64),
-  )
-
   val CsrCfg: FuConfig = FuConfig (
     name = "csr",
     fuType = FuType.csr,
@@ -856,7 +839,7 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
+    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
     FaluCfg, FmulCfg, FcvtCfg, FdivCfg,
     VialuCfg, VimacCfg, VidivCfg, VmoveCfg,
