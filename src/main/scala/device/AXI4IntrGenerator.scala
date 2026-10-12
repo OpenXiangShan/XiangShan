@@ -89,6 +89,6 @@ class AXI4IntrGenerator
       randCounter := 0.U
     }
 
-    in.r.bits.data := intrReg(raddr)
+    in.r.bits.data := Cat(intrReg(1), intrReg(0))
   }
 }
