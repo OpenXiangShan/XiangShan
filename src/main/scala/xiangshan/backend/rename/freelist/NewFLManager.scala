@@ -80,7 +80,9 @@ class NewFLManager(
 
   // Candidates in s1 remain free in the owner's bitmap until rename really
   // consumes them, so the manager reserves them locally to prevent reselection.
-  val reservedBitmap = RegInit(0.U(numPhyRegs.W))
+  // Use one word enable for the reservation bitmap.
+  val reservedState = Module(new NewFLManagerReservedRegister(numPhyRegs))
+  val reservedBitmap = reservedState.io.value
   val allocationPrefix = prefixCounts(in.allocateReq.toSeq)
   // Keep the balanced total-count path independent of the offset network.
   val allocateCount = PopCount(in.allocateReq)
@@ -190,7 +192,10 @@ class NewFLManager(
   })
   for (laneIdx <- 0 until renameWidth) {
     val candidateOffset = allocationPrefix(laneIdx)
-    out.allocatePhyReg(laneIdx) := Mux1H((0 until renameWidth).map(i => candidateOffset === i.U), s1HeadCandidates.toSeq)
+    out.allocatePhyReg(laneIdx) := Mux1H(
+      (0 to laneIdx).map(i => candidateOffset === i.U),
+      s1HeadCandidates.take(laneIdx + 1)
+    )
   }
   // Match StdFreeList timing: canAllocate is registered from the number of
   // candidates left after this cycle's dequeue/refill.
@@ -210,10 +215,8 @@ class NewFLManager(
     )
   }.reduce(_ | _)
   out.allocateBitmap := selectedBitmap
-  val s1DequeuedBitmap = (0 until renameWidth).map { offset =>
-    Mux(s1DoDequeue && offset.U < allocateCount,
-      UIntToOH(s1HeadCandidates(offset), numPhyRegs), 0.U(numPhyRegs.W))
-  }.reduce(_ | _)
+  // Qualify the shared prefix decode once for the actual dequeue.
+  val s1DequeuedBitmap = Mux(s1DoDequeue, selectedBitmap, 0.U(numPhyRegs.W))
   out.dequeuedBitmap := s1DequeuedBitmap
 
   // s1 holds unallocated prefetch candidates, which remain free across
@@ -308,7 +311,8 @@ class NewFLManager(
     }
   }
 
-  reservedBitmap := (reservedBitmap | enqueueBitmap) & ~s1DequeuedBitmap
+  reservedState.io.data := (reservedBitmap | enqueueBitmap) & ~s1DequeuedBitmap
+  reservedState.io.enable := enqueueCount.orR || s1DequeueCount.orR
 
   when(!in.flush) {
     assert((reservedBitmap & ~in.freeBitmap) === 0.U,
@@ -332,6 +336,17 @@ class NewFLManager(
       }
     }
   }
+}
+
+class NewFLManagerReservedRegister(width: Int)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val data = Input(UInt(width.W))
+    val enable = Input(Bool())
+    val value = Output(UInt(width.W))
+  })
+  val bits = RegInit(0.U(width.W))
+  when(io.enable) { bits := io.data }
+  io.value := bits
 }
 
 object NewFLManager {

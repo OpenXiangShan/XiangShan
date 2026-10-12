@@ -49,8 +49,10 @@ class NewFreeList(
   numLogicRegs: Int = 32,
   s1QueueSize: Int = NewFreeList.DefaultS1QueueSize
 )(implicit p: Parameters)
-    extends XSModule with HasXSParameter with HasPerfEvents{
+    extends XSModule with HasXSParameter with HasPerfEvents {
   val io                = IO(FreeListBundle(numPhyRegs, RenameWidth, commitWidth))
+  // Performance events are intentionally disabled for this implementation.
+  val perfEvents: Seq[(String, UInt)] = Seq.empty
   // Encode free bits relative to the architectural reset bitmap.
   // Storage resets to zero; XOR restores exactly the original visible bits.
   def InitFreeList(reg_t: RegType) = {
@@ -146,27 +148,9 @@ class NewFreeList(
   specState.io.enable := bitmapUpdate
   archState.io.enable := bitmapUpdate
 
-  //Debug
-  XSPerfAccumulate("utilization", PopCount(io.allocateReq))
-  XSPerfAccumulate("allocation_blocked_cycle", !io.canAllocate)
-  
-  val freeListSize = numPhyRegs - numLogicRegs
-  val freeRegCnt = Option.when(!env.FPGAPlatform || backendParams.debugEn)(PopCount(specfreeListReg.asUInt))
-  io.debug_UnusedRegCount.foreach(_ := freeRegCnt.get)
-  val perfEvents = if (!env.FPGAPlatform) {
-    val freeRegCntReg = RegNext(freeRegCnt.get)
-    QueuePerf(size = freeListSize, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)
-    Seq(
-      ("std_freelist_1_4_valid", freeRegCntReg <  (freeListSize / 4).U                                            ),
-      ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U    ),
-      ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U),
-      ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U                                        )
-    )
-  } else {
-    Seq.empty
-  }
-
-  generatePerfEvent()
+  // Keep the optional debug port deterministic without synthesizing
+  // the free-list PopCount or performance-monitoring network.
+  io.debug_UnusedRegCount.foreach(_ := 0.U)
 }
 
 class NewFreeListCommitBundle(commitWidth: Int,numPhyRegs: Int) extends Bundle {
@@ -175,11 +159,11 @@ class NewFreeListCommitBundle(commitWidth: Int,numPhyRegs: Int) extends Bundle {
   val archAllocPhyReg = Vec(commitWidth, UInt(log2Up(numPhyRegs).W))
 }
 
-// On capture/free events, swap each pair of physical rows and update phase.
-// Logical checkpoint numbers stay fixed. The shared event enables whole rows,
-// avoiding a separate hold/clock-gate condition for every physical-register bit.
+// Capture and releases update fixed busy-bitmap checkpoint rows.
+// Inline the store to share its update logic with the owner's bitmap paths.
 class NewFreeListSnapshotStore(numPhyRegs: Int)(implicit p: Parameters)
   extends XSModule with HasCircularQueuePtrHelper {
+  chisel3.experimental.annotate(this)(Seq(firrtl.passes.InlineAnnotation(toNamed)))
   private val count = RenameSnapshotNum
   val io = IO(new Bundle {
     val enq = Input(Bool())
@@ -200,24 +184,15 @@ class NewFreeListSnapshotStore(numPhyRegs: Int)(implicit p: Parameters)
   metadata.io.flushVec := io.flushVec
   metadata.io.enqData := 0.U
 
-  // Store busy bits so every release clears the same bit in every checkpoint.
+  // Capture overwrites one checkpoint and releases clear busy bits in all rows.
   val rows = Reg(Vec(count, UInt(numPhyRegs.W)))
-  val phase = RegInit(false.B)
-  val nextPhase = !phase
-  def physicalRow(index: UInt, flip: Bool): UInt = {
-    val canSwap = if (count % 2 == 0) true.B else index =/= (count - 1).U
-    Mux(flip && canSwap, index ^ 1.U, index)
-  }
   val capture = io.enq && !io.redirect && !isFull(metadata.io.enqPtr, metadata.io.deqPtr)
-  val captureRow = physicalRow(metadata.io.enqPtr.value, nextPhase)
   when(capture || io.hasFree) {
     for (row <- 0 until count) {
-      val partner = if ((row ^ 1) < count) row ^ 1 else row
-      rows(row) := Mux(capture && captureRow === row.U, ~io.enqData, rows(partner)) & ~io.freePhyRegOH
+      rows(row) := Mux(capture && metadata.io.enqPtr.value === row.U, ~io.enqData, rows(row)) & ~io.freePhyRegOH
     }
-    phase := nextPhase
   }
-  io.selected := ~Mux1H(UIntToOH(physicalRow(io.select, phase), count), rows)
+  io.selected := ~Mux1H(UIntToOH(io.select, count), rows)
 }
 
 // Keep the original enqueue/dequeue/flush rules and only replace payload storage.
