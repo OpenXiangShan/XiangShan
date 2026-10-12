@@ -31,7 +31,7 @@ import xiangshan.cache._
 import xiangshan.backend.Bundles.{ExceptionInfo, TrapInstInfo}
 import xiangshan.backend.fu.NewCSR.CSREvents.TargetPCBundle
 import xiangshan.backend.fu.NewCSR.CSRNamedConstant.ContextStatus
-import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob._
 import utils.MathUtils.{BigIntGenMask, BigIntNot}
 import xiangshan.backend.trace._
 import freechips.rocketchip.rocket.CSRs
@@ -101,6 +101,7 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val isXRet = Output(Bool())
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
+  val interruptEvaluation = Output(new IntrEvaluation)
   val wfi_event = Output(Bool())
   //trace
   val traceCSR = Output(new TraceCSR)

@@ -185,12 +185,28 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // special cases
   val hasBlockBackward = RegInit(false.B)
   val hasWaitForward = RegInit(false.B)
+  val intrEvaluationPending = RegInit(false.B)
+  val boundaryInterruptPending = RegInit(false.B)
+  when (io.csr.intrEvaluation.start) {
+    assert(!intrEvaluationPending && !boundaryInterruptPending,
+      "Only one CSR/xRET interrupt evaluation may be outstanding")
+    intrEvaluationPending := true.B
+  }
+  when (io.csr.intrEvaluation.done) {
+    assert(intrEvaluationPending,
+      "CSR/xRET interrupt evaluation completed without a pending request")
+    intrEvaluationPending := false.B
+    when (io.csr.intrEvaluation.hasInterrupt) {
+      boundaryInterruptPending := true.B
+    }
+  }
   val enqPtr = enqPtrVec(0)
   val deqPtr = deqPtrVec(0)
   val walkPtr = walkPtrVec(0)
   val allocatePtrVec = VecInit((0 until RenameWidth).map(i => enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.firstUop)))))
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
+  io.enq.boundaryInterruptPending := boundaryInterruptPending
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
@@ -392,7 +408,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // When blockBackward instruction leaves Rob (commit or walk), hasBlockBackward should be set to false.B
   // To reduce registers usage, for hasBlockBackward cases, we allow enqueue after ROB is empty.
-  when(isEmpty) {
+  when(isEmpty && (!intrEvaluationPending || io.csr.intrEvaluation.done)) {
     hasBlockBackward := false.B
   }
   // When any instruction commits, hasNoSpecExec should be set to false.B
@@ -572,7 +588,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtrEntryValid = deqPtrEntry.commit_v
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
+  val normalIntrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe
+  val boundaryIntrEnable = boundaryInterruptPending && deqPtrEntry.interrupt_safe
+  val intrEnable = (normalIntrEnable || boundaryIntrEnable) && !deqHasFlushed
   val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
@@ -649,6 +667,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
   val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
+  when (exceptionHappen && boundaryIntrEnable) {
+    boundaryInterruptPending := false.B
+  }
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(debug_deqUop.pc, exceptionHappen)
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
@@ -669,6 +690,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.singleStep := RegEnable(exceptionDataRead.bits.singleStep, exceptionHappen)
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
+  io.exception.bits.boundaryInterrupt := RegEnable(boundaryIntrEnable, exceptionHappen)
   io.exception.bits.isHls := RegEnable(deqPtrEntry.isHls, exceptionHappen)
   io.exception.bits.vls := RegEnable(deqPtrEntry.vls, exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
@@ -789,7 +811,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commit_wDeqGroup = VecInit(robDeqGroup.map(_.commit_w))
   val realCommitLast = deqPtrVec(0).lineHeadPtr + Fill(bankAddrWidth, 1.U)
   val commit_block = VecInit((0 until CommitWidth).map(i => !commit_wDeqGroup(i) && !hasCommitted(i)))
-  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg
+  val allowOnlyOneCommit = VecInit(robDeqGroup.map(x => x.commit_v && x.needFlush)).asUInt.orR || intrBitSetReg || boundaryInterruptPending
   // for instructions that may block others, we don't allow them to commit
   io.commits.commitValid := PriorityMux(commitValidThisLine, (0 until CommitWidth).map(i => (commitValidThisLine.asUInt >> i).asUInt.asTypeOf(io.commits.commitValid)))
 
@@ -878,8 +900,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrGenModule.io.deq_v := commit_vDeqGroup
   deqPtrGenModule.io.deq_w := commit_wDeqGroup
   deqPtrGenModule.io.exception_state := exceptionDataRead
-  deqPtrGenModule.io.intrBitSetReg := intrBitSetReg
-  deqPtrGenModule.io.hasNoSpecExec := hasWaitForward
+  deqPtrGenModule.io.intrBitSetReg := intrBitSetReg || boundaryInterruptPending
+  deqPtrGenModule.io.hasNoSpecExec := hasWaitForward && !boundaryInterruptPending
   deqPtrGenModule.io.allowOnlyOneCommit := allowOnlyOneCommit
   deqPtrGenModule.io.interrupt_safe := robDeqGroup(deqPtr.value(bankAddrWidth-1,0)).interrupt_safe
   deqPtrGenModule.io.blockCommit := blockCommit
@@ -1164,7 +1186,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
                              !FuType.isCsr(io.enq.req(i).bits.fuType) &&
                              !io.enq.req(i).bits.isVset &&
                              !FuType.isAMO(io.enq.req(i).bits.fuType)
-      robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
+      robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts || boundaryInterruptPending
     }
   }
 
@@ -1636,7 +1658,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitStoreVec = VecInit(io.commits.commitValid.zip(commitIsStore).map { case (v, t) => v && t })
   val perfEvents = Seq(
     ("rob_interrupt_num      ", io.flushOut.valid && intrEnable),
-    ("rob_exception_num      ", io.flushOut.valid && deqHasException),
+    ("rob_exception_num      ", io.flushOut.valid && deqHasException && !intrEnable),
     ("rob_flush_pipe_num     ", io.flushOut.valid && isFlushPipe),
     ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst),
     ("rob_commitUop          ", ifCommit(commitCnt)),
