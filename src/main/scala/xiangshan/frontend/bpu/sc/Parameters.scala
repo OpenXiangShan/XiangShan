@@ -46,6 +46,7 @@ case class ScParameters(
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
+    TrainingBufferSize:  Int = 8,
     EnableScTrace:       Boolean = false
 ) {}
 
@@ -96,6 +97,8 @@ trait HasScParameters extends HasBpuParameters {
 
   def ShiftBits:       Int = FetchBlockAlignWidth - BankWidth - instOffsetBits
   def WriteBufferSize: Int = scParameters.WriteBufferSize
+
+  def TrainingBufferSize: Int = scParameters.TrainingBufferSize
 
   def EnableScTrace: Boolean = scParameters.EnableScTrace
 }

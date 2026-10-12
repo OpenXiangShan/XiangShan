@@ -44,7 +44,6 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val overridePathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: MicroTageIO = IO(new MicroTageIO)
-  io.trainReady := true.B
 
   // Ahead pipeline implementation. Advantage: get data one cycle earlier.
   // Disadvantage: multi-position competition for the same entry.

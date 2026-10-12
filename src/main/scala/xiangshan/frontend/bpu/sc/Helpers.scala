@@ -24,9 +24,18 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.ScTableInfo
+import xiangshan.frontend.bpu.Train
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.tage.TageMeta
 
 trait Helpers extends HasScParameters with PhrHelper {
+  def getFoldedHist(allFoldedPathHist: PhrAllFoldedHistories): PhrAllFoldedHistories = {
+    val pathFoldedHistoryInfos = PathTableInfos.flatMap(_.getFoldedHistoryInfoSet()).toSet
+    val foldedHist             = Wire(new PhrAllFoldedHistories(pathFoldedHistoryInfos))
+    foldedHist.autoConnectFrom(allFoldedPathHist)
+    foldedHist
+  }
+
   def sign(x: SInt): Bool = x(x.getWidth - 1)
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
@@ -43,8 +52,11 @@ trait Helpers extends HasScParameters with PhrHelper {
   lazy val addrFields = generateAddrField()
 
   // sc should start using startPc as setIdx from the highest bit of CfiPosition
+  def getBankIndex(pc: PrunedAddr): UInt =
+    addrFields.extract("bankIdx", pc)
+
   def getBankMask(pc: PrunedAddr): UInt =
-    UIntToOH(addrFields.extract("bankIdx", pc))
+    UIntToOH(getBankIndex(pc), NumBanks)
 
   def getWayIdx(cfiPosition: UInt): UInt = {
     val nChunks = (cfiPosition.getWidth + log2Ceil(NumWays) - 1) / log2Ceil(NumWays)
@@ -62,27 +74,22 @@ trait Helpers extends HasScParameters with PhrHelper {
   // Accumulate update information for multiple branches using update methods
   def updateEntry(
       oldEntries:    Vec[ScEntry],
-      writeValidVec: Vec[Bool],
+      needUpdateVec: Vec[Bool],
       takenMask:     Vec[Bool],
-      wayIdxVec:     Vec[UInt],
-      branchIdxVec:  Vec[UInt],
-      metaData:      ScMeta
+      wayIdxVec:     Vec[UInt]
   ): Vec[ScEntry] = {
     require(
-      writeValidVec.length == takenMask.length &&
-        writeValidVec.length == wayIdxVec.length &&
-        writeValidVec.length == branchIdxVec.length,
-      "Length of writeValidVec, takenMask, wayIdxVec and branchIdxVec should be the same"
+      needUpdateVec.length == takenMask.length &&
+        needUpdateVec.length == wayIdxVec.length,
+      "Length of needUpdateVec, takenMask and wayIdxVec should be the same"
     )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
     // For each resolved branch, record its update direction, update requirement, and target way.
-    val writeNeedMask = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
-    val writeDirMask  = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
-    writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).zipWithIndex.foreach {
-      case ((((valid, taken), writeIdx), oldIdx), i) =>
-        val needUpdate = valid && metaData.tagePredValid(oldIdx) &&
-          (metaData.scPred(oldIdx) =/= taken || !metaData.sumAboveThres(oldIdx))
-        writeNeedMask(i)(writeIdx) := needUpdate
+    val writeNeedMask = VecInit(Seq.fill(needUpdateVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    val writeDirMask  = VecInit(Seq.fill(needUpdateVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    needUpdateVec.zip(takenMask).zip(wayIdxVec).zipWithIndex.foreach {
+      case (((doUpdate, taken), writeIdx), i) =>
+        writeNeedMask(i)(writeIdx) := doUpdate
         writeDirMask(i)(writeIdx)  := taken
     }
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), i) =>
@@ -112,6 +119,44 @@ trait Helpers extends HasScParameters with PhrHelper {
     }
     updateWayMask
   }
+
+  def getBranchesScIdxVec(train: Train): Vec[Valid[UInt]] = {
+    val branches    = train.branches
+    val mbtbEntries = train.meta.mbtb.entries.flatten
+
+    // if the branch cfi not in mbtbResult, do not train
+    // During training, find the predicted scPred and lowBits values in the order of the predicted mbtbResult
+    // MBTB may invalidate entry with larger idx during multihit, and the order needs to be reversed
+    val branchesScIdxVec = WireInit(VecInit.fill(ResolveEntryBranchNumber)(
+      0.U.asTypeOf(Valid(UInt(log2Ceil(NumWays).W)))
+    ))
+
+    branches.zipWithIndex.foreach { case (branch, branchIdx) =>
+      for (i <- (0 until NumWays).reverse) {
+        when(branch.valid && mbtbEntries(i).hit(branch.bits)) {
+          branchesScIdxVec(branchIdx).valid := true.B
+          branchesScIdxVec(branchIdx).bits  := i.U
+        }
+      }
+    }
+
+    branchesScIdxVec
+  }
+
+  def getNeedUpdateVec(train: Train, branchesScIdxVec: Vec[Valid[UInt]]): Vec[Bool] = {
+    val branches = train.branches
+    val scMeta   = train.meta.sc
+    val tageMeta = train.meta.tage
+
+    // Same condition as table/threshold/bias updates and TrainingBuffer needRead.
+    VecInit(branches.zip(branchesScIdxVec).map { case (branch, idx) =>
+      val hit    = idx.valid
+      val isCond = branch.valid && branch.bits.attribute.isConditional
+      isCond && hit && tageMeta.entries(idx.bits).hasProvider &&
+        (scMeta.scPred(idx.bits) =/= branch.bits.taken || !scMeta.sumAboveThres(idx.bits))
+    })
+  }
+
 }
 
 trait AbstractTableHelper extends Helpers {

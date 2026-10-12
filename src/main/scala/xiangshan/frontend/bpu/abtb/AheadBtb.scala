@@ -53,8 +53,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
 
-  io.trainReady := true.B
-
   private val takenCounter = RegInit(
     VecInit.fill(NumBanks)(
       VecInit.fill(NumSets)(
