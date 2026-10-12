@@ -168,7 +168,10 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   // L1 DCache controller
   def cacheCtrlParamsOpt  = OptionWrapper(
                               p(SoCParamsKey).EnableDCacheCtrl,
-                              L1CacheCtrlParams(p(SoCParamsKey).DCacheCtrlRange)
+                              L1CacheCtrlParams(
+                                address = p(SoCParamsKey).DCacheCtrlRange,
+                                nBanks = DCacheBanks
+                              )
                             )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
@@ -1084,6 +1087,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val ctrlUnit = outer.cacheCtrlOpt.head.module
     ldu.map(mod => mod.io.pseudo_error <> ctrlUnit.io_pseudoError(0))
     mainPipe.io.pseudo_error <> ctrlUnit.io_pseudoError(0)
+    // Connect address range and match signals
+    mainPipe.io.error_inj_addr_range <> ctrlUnit.io_addrRange
+    ldu.map(_.io.error_inj_addr_range <> ctrlUnit.io_addrRange)
+    // Combine addrMatch from mainPipe and ldu using OR
+    val tagAddrMatch = mainPipe.io.addrMatch || ldu.map(_.io.addrMatch).reduce(_ || _)
+    ctrlUnit.io_addrMatch(0) := tagAddrMatch
     ctrlUnit.io_pseudoError(0).ready := mainPipe.io.pseudo_tag_error_inj_done ||
                                         ldu.map(_.io.pseudo_tag_error_inj_done).reduce(_|_)
   }
@@ -1092,6 +1101,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   if (outer.cacheCtrlOpt.nonEmpty && EnableDataEcc) {
     val ctrlUnit = outer.cacheCtrlOpt.head.module
     bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)
+    // Connect address range for error injection
+    bankedDataArray.io.error_inj_addr_range <> ctrlUnit.io_addrRange
+    // Connect address match signal: BankedDataArray tells CtrlUnit if current addr is in range
+    ctrlUnit.io_addrMatch(1) := bankedDataArray.io.addrMatch
     ctrlUnit.io_pseudoError(1).ready := bankedDataArray.io.pseudo_error.ready &&
                                         (mainPipe.io.pseudo_data_error_inj_done ||
                                          ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
