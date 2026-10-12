@@ -194,7 +194,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val isSh2add  = ALUOpType.isSh2add(func)
   val isSh3add  = ALUOpType.isSh3add(func)
   val isSh4add  = ALUOpType.isSh4add(func)
-  val isSspDec  = ALUOpType.isSspDec(func)
+  val isSspDec  = if(HasShadowStack) ALUOpType.isSspDec(func) else false.B
 
   val adduwSrc     = ZeroExt(src1(31, 0), XLEN)
   val oddaddSrc    = ZeroExt(src1(0), XLEN)
