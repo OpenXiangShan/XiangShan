@@ -32,6 +32,21 @@ class NewFLManager(
   private val s1CountWidth = log2Ceil(s1QueueSize + 1)
   private val s1QueueSizeIsPow2 = (s1QueueSize & (s1QueueSize - 1)) == 0
 
+  // Entry i counts bits before i. Reuse each half's total across the
+  // right-half prefixes instead of building a PopCount for every offset.
+  private def prefixCounts(bits: Seq[Bool]): Seq[UInt] = {
+    if (bits.size == 1) Seq(0.U(1.W), bits.head.asUInt)
+    else {
+      val split = bits.size / 2
+      val left = prefixCounts(bits.take(split))
+      val right = prefixCounts(bits.drop(split))
+      left ++ right.tail.zipWithIndex.map { case (value, idx) =>
+        val width = math.max(1, log2Ceil(split + idx + 2))
+        (left.last +& value)(width - 1, 0)
+      }
+    }
+  }
+
   /** Stage 1: a configurable circular queue of physical-register candidates. */
   // Queue data are invalid while s1ValidCount is zero and are overwritten
   // before they can be consumed.  They therefore do not need a reset value;
@@ -66,6 +81,8 @@ class NewFLManager(
   // Candidates in s1 remain free in the owner's bitmap until rename really
   // consumes them, so the manager reserves them locally to prevent reselection.
   val reservedBitmap = RegInit(0.U(numPhyRegs.W))
+  val allocationPrefix = prefixCounts(in.allocateReq.toSeq)
+  // Keep the balanced total-count path independent of the offset network.
   val allocateCount = PopCount(in.allocateReq)
   val s1DoDequeue = s1CanAllocateReg && in.doAllocate && !in.flush
   val s1DequeueCount = Mux(s1DoDequeue, allocateCount, 0.U)
@@ -126,10 +143,11 @@ class NewFLManager(
   val enqueueWidth = renameWidth + freeWidth
   val enqueueCandidates = VecInit(s0Candidates ++ in.freePhyReg)
   val enqueueCandidateValid = VecInit(s0CandidateValid ++ freeCandidateValid)
+  val enqueuePrefix = prefixCounts(enqueueCandidateValid.toSeq)
   val enqueueOffset = Wire(Vec(enqueueWidth, UInt(log2Ceil(enqueueWidth + 1).W)))
   val enqueueValid = Wire(Vec(enqueueWidth, Bool()))
   for (candidateIdx <- 0 until enqueueWidth) {
-    enqueueOffset(candidateIdx) := PopCount(enqueueCandidateValid.take(candidateIdx))
+    enqueueOffset(candidateIdx) := enqueuePrefix(candidateIdx)
     enqueueValid(candidateIdx) := enqueueCandidateValid(candidateIdx) &&
       enqueueOffset(candidateIdx) < s1EnqueueCapacity
   }
@@ -171,7 +189,7 @@ class NewFLManager(
     })(s1HeadPtr >> headLowWidth)
   })
   for (laneIdx <- 0 until renameWidth) {
-    val candidateOffset = PopCount(in.allocateReq.take(laneIdx))
+    val candidateOffset = allocationPrefix(laneIdx)
     out.allocatePhyReg(laneIdx) := Mux1H((0 until renameWidth).map(i => candidateOffset === i.U), s1HeadCandidates.toSeq)
   }
   // Match StdFreeList timing: canAllocate is registered from the number of
