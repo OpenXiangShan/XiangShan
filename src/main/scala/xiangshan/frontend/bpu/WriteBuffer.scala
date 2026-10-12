@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
+import utility.RRArbiterInit
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
@@ -101,6 +102,7 @@ class WriteBuffer[T <: WriteReqBundle](
   private val replacerWay  = Wire(Vec(numPorts, UInt(log2Ceil(numEntries).W)))
   private val readValidVec = WireInit(VecInit.fill(numPorts)(VecInit.fill(numEntries)(false.B)))
   private val readReadyVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
+  private val readIdxVec   = Wire(Vec(numPorts, UInt(log2Ceil(numEntries).W)))
   private val emptyVec     = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val fullVec      = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   // Replace is to prioritize replacing the entry of the same port as setIdx
@@ -112,7 +114,18 @@ class WriteBuffer[T <: WriteReqBundle](
   // Apply drain first. Write requests below override it when they update the same slot,
   // and flush overrides both at the end of the next-state calculation.
   for (rowIdx <- 0 until numPorts) {
-    val drainIdx = PriorityEncoder(dirty(rowIdx))
+    val drainIdx = if (numEntries > 1) {
+      val arb = Module(new RRArbiterInit(Bool(), numEntries))
+      for (i <- 0 until numEntries) {
+        arb.io.in(i).valid := dirty(rowIdx)(i)
+        arb.io.in(i).bits  := false.B
+      }
+      arb.io.out.ready := io.read(rowIdx).ready
+      arb.io.chosen
+    } else {
+      PriorityEncoder(dirty(rowIdx))
+    }
+    readIdxVec(rowIdx) := drainIdx
     when(io.read(rowIdx).fire) {
       nextDirty(rowIdx)(drainIdx) := false.B
     }
@@ -251,15 +264,13 @@ class WriteBuffer[T <: WriteReqBundle](
   //  read buffer entry
   for (nRows <- 0 until numPorts) {
     val replacer = ReplacementPolicy.fromString("plru", numEntries)
-    readReadyVec(nRows) := io.read(nRows).ready
-    readValidVec(nRows) := dirty(nRows)
-    emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
-    fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
-    io.full(nRows)      := fullVec(nRows)
-    val readIdx = PriorityEncoder(readValidVec(nRows))
-
+    readReadyVec(nRows)  := io.read(nRows).ready
+    readValidVec(nRows)  := dirty(nRows)
+    emptyVec(nRows)      := !readValidVec(nRows).reduce(_ || _)
+    fullVec(nRows)       := readValidVec(nRows).reduce(_ && _)
+    io.full(nRows)       := fullVec(nRows)
     io.read(nRows).valid := !emptyVec(nRows)
-    io.read(nRows).bits  := entries(nRows)(readIdx)
+    io.read(nRows).bits  := entries(nRows)(readIdxVec(nRows))
 
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
