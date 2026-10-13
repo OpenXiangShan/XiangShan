@@ -225,7 +225,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   trainingBuffer.io.enq.bits.data.foldedHist := incomingFoldedHist
   trainingBuffer.io.enq.bits.bankIdx         := tables.head.getBankIndex(io.train.bits.startPc)
   trainingBuffer.io.enq.bits.needRead        := incomingNeedRead
-  trainingBuffer.io.predictReadValid         := io.enable && io.s0_valid
+  trainingBuffer.io.predictReadValid         := s0_fire
   trainingBuffer.io.predictReadBankIdx       := s0_bankIdx
 
   private val t0_fire     = trainingBuffer.io.deq.valid
@@ -261,9 +261,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.readReq(1).bits.bankMask := t0_bankMask
   }
 
-  // hold prediction when the training buffer is full and
-  // the incoming training request has bank conflict with the prediction request
-  io.holdPredict := trainingBuffer.io.forceTraining
+  // Decide whether to hold prediction from the buffer state, before read arbitration.
+  io.holdPredict := trainingBuffer.io.full
+  XSPerfAccumulate("tage_force_train", io.s0_valid && io.holdPredict)
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1

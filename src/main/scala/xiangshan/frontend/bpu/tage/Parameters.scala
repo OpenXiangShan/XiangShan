@@ -41,7 +41,7 @@ case class TageParameters(
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 5,
-    TrainingBufferSize:    Int = 2,
+    TrainingBufferSize:    Int = 4,
     EnableTageTrace:       Boolean = false
 ) {
   require(TableInfos.nonEmpty, "TageParameters: TableInfos cannot be empty")

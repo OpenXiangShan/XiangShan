@@ -35,7 +35,7 @@ class TrainingBuffer[T <: Data](gen: T, numBanks: Int, numEntries: Int)(implicit
     val enq = Flipped(Valid(new TrainingBufferEntry(gen, numBanks)))
     val deq = Valid(new TrainingBufferEntry(gen, numBanks))
 
-    val forceTraining: Bool = Output(Bool())
+    val full: Bool = Output(Bool())
   })
 
   require(numEntries > 0)
@@ -43,6 +43,7 @@ class TrainingBuffer[T <: Data](gen: T, numBanks: Int, numEntries: Int)(implicit
   private val entries = Reg(Vec(numEntries, new TrainingBufferEntry(gen, numBanks)))
   private val valid   = RegInit(VecInit.fill(numEntries)(false.B))
   private val full    = valid.asUInt.andR
+  io.full := full
 
   // Fixed slots avoid moving payloads on dequeue. No arrival order is guaranteed.
   private val candidates = VecInit(entries.zipWithIndex.map { case (entry, i) =>
@@ -54,13 +55,11 @@ class TrainingBuffer[T <: Data](gen: T, numBanks: Int, numEntries: Int)(implicit
   private val incomingConflict = io.enq.valid && io.enq.bits.needRead &&
     io.predictReadValid && io.enq.bits.bankIdx === io.predictReadBankIdx
 
-  // When no slot can be freed, suppress the prediction and issue the incoming request without buffering it.
-  private val forceTraining = full && incomingConflict && !canDeq
-  io.forceTraining := forceTraining
-
-  private val bypass = io.enq.valid && (!incomingConflict || forceTraining)
+  // The caller suppresses prediction reads when full. Only conflicting incoming
+  // requests are buffered; non-conflicting requests retain bypass priority.
+  private val bypass = io.enq.valid && !incomingConflict
   private val deq    = !bypass && canDeq
-  private val enq    = incomingConflict && !forceTraining
+  private val enq    = incomingConflict
   // A full buffer can reuse the slot being dequeued on this cycle.
   private val enqIdx = Mux(full, deqIdx, PriorityEncoder(~valid.asUInt))
 
@@ -87,7 +86,7 @@ class TrainingBuffer[T <: Data](gen: T, numBanks: Int, numEntries: Int)(implicit
   }
   assert(!(bypass && deq), "only one training request may issue per cycle")
   assert(
-    !(io.deq.valid && io.deq.bits.needRead && io.predictReadValid && !forceTraining &&
+    !(io.deq.valid && io.deq.bits.needRead && io.predictReadValid &&
       io.deq.bits.bankIdx === io.predictReadBankIdx),
     "prediction and training reads must not use the same bank"
   )
@@ -95,5 +94,4 @@ class TrainingBuffer[T <: Data](gen: T, numBanks: Int, numEntries: Int)(implicit
   XSPerfAccumulate("full", full)
   XSPerfAccumulate("enq", enq)
   XSPerfAccumulate("deq", deq)
-  XSPerfAccumulate("forceTraining", forceTraining)
 }

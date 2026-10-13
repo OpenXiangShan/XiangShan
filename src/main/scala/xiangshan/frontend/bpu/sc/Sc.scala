@@ -146,33 +146,33 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for debug
 
   // cancel prediction when force training
-  private val s0_forceTraining = WireDefault(false.B)
-  private val s1_forceTraining = RegEnable(s0_forceTraining, s0_fire)
-  private val s2_forceTraining = RegEnable(s1_forceTraining, s1_fire)
+  private val s0_forceTrain = WireDefault(false.B)
+  private val s1_forceTrain = RegEnable(s0_forceTrain, s0_fire)
+  private val s2_forceTrain = RegEnable(s1_forceTrain, s1_fire)
 
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && PathEnable.B && !s0_forceTraining
+    table.io.predictReadReq.valid         := s0_fire && PathEnable.B && !s0_forceTrain
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid := s0_fire && s0_commonHR.valid && GlobalEnable.B && !s0_forceTraining // if ghr invalid not request global table
+    table.io.predictReadReq.valid := s0_fire && s0_commonHR.valid && GlobalEnable.B && !s0_forceTrain // if ghr invalid not request global table
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   bwTable.zip(s0_bwIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && s0_commonHR.valid && BWEnable.B && !s0_forceTraining
+    table.io.predictReadReq.valid         := s0_fire && s0_commonHR.valid && BWEnable.B && !s0_forceTrain
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
-  imliTable.io.predictReadReq.valid         := s0_fire && ImliEnable.B && !s0_forceTraining
+  imliTable.io.predictReadReq.valid         := s0_fire && ImliEnable.B && !s0_forceTrain
   imliTable.io.predictReadReq.bits.setIdx   := s0_imliIdx
   imliTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
-  biasTable.io.predictReadReq.valid         := s0_fire && BiasEnable.B && !s0_forceTraining
+  biasTable.io.predictReadReq.valid         := s0_fire && BiasEnable.B && !s0_forceTrain
   biasTable.io.predictReadReq.bits.setIdx   := s0_biasIdx
   biasTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
@@ -318,7 +318,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         (predValid && tageConfLow)  -> s2_sumAboveThresholdShift3(i)
       )
     )
-    s2_useScPred(i)     := conf && io.enable && !s2_forceTraining
+    s2_useScPred(i)     := conf && io.enable && !s2_forceTrain
     s2_sumAboveThres(i) := Mux(predValid, conf, true.B)
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)
@@ -358,8 +358,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val incomingBranchesScIdxVec = getBranchesScIdxVec(io.train.bits)
   private val incomingNeedUpdateVec    = getNeedUpdateVec(io.train.bits, incomingBranchesScIdxVec)
   private val incomingNeedRead         = incomingNeedUpdateVec.reduce(_ || _)
-  private val incomingBankIdx        = getBankIndex(io.train.bits.startPc)
-  private val incomingFoldedPathHist = getFoldedHist(io.trainFoldedPathHist)
+  private val incomingBankIdx          = getBankIndex(io.train.bits.startPc)
+  private val incomingFoldedPathHist   = getFoldedHist(io.trainFoldedPathHist)
 
   private val trainingBuffer = Module(new TrainingBuffer(
     new Bundle {
@@ -376,8 +376,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   trainingBuffer.io.enq.bits.data.foldedPathHist := incomingFoldedPathHist
   trainingBuffer.io.enq.bits.bankIdx             := incomingBankIdx
   trainingBuffer.io.enq.bits.needRead            := incomingNeedRead
-  trainingBuffer.io.predictReadValid             := s0_fire
-  trainingBuffer.io.predictReadBankIdx           := s0_bankIdx
+  // Release the prediction bank when a full buffer cancels the SC prediction read.
+  trainingBuffer.io.predictReadValid   := s0_fire && !s0_forceTrain
+  trainingBuffer.io.predictReadBankIdx := s0_bankIdx
 
   private val t0_fire           = trainingBuffer.io.deq.valid
   private val t0_train          = trainingBuffer.io.deq.bits.data.train
@@ -407,7 +408,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t0_needUpdateVec    = getNeedUpdateVec(t0_train, t0_branchesScIdxVec)
   private val t0_needRead         = trainingBuffer.io.deq.bits.needRead
   private val t0_bankConflict     = t0_fire && t0_needRead && s0_fire && t0_bankMask === s0_bankMask
-  s0_forceTraining := trainingBuffer.io.forceTraining
+  s0_forceTrain := trainingBuffer.io.full
 
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needRead && PathEnable.B
@@ -857,7 +858,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate("sc_path_predIdx_diff_trainIdx", sc_path_predIdx_diff_trainIdx)
   XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", sc_global_predIdx_diff_trainIdx)
   XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
-  XSPerfAccumulate("sc_force_training", s0_fire && s0_forceTraining)
+  XSPerfAccumulate("sc_force_train", s0_fire && s0_forceTrain)
 
   /* *** Sc Trace *** */
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
