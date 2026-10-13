@@ -53,6 +53,19 @@ object ScalaUopTable {
     commitType: Option[UInt] = None,
   ) extends OpcodeTrait
 
+  def split(
+    op: Opcode,
+    src1: LogicalRegSel = LogicalRegSel.Rs1,
+    src2: LogicalRegSel = LogicalRegSel.Rs2(),
+    src3: LogicalRegSel = LogicalRegSel.Rs3,
+    dest: LogicalRegSel = LogicalRegSel.Rd,
+    imm: Option[UopImmSpec] = None,
+    commitType: Option[UInt] = None,
+  ): Opcode = {
+    val copied = op.copy()
+    copied.setTraits((op.getTraits + UopMetadata(src1, src2, src3, dest, imm, commitType)).toSeq: _*)
+    copied
+  }
   // Decode fields read this metadata after the instruction table has been built.
   def metadata(op: Opcode): UopMetadata = {
     val entries = op.getTraits.collect { case m: UopMetadata => m }
@@ -602,8 +615,6 @@ object ScalaUopTable {
     )
   }
 
-  def tableZicfi = ???
-
   val tableZicbo = {
     import xiangshan.backend.decode.isa.Instructions.ZICBOType
     ZICBOType.mapUopcode(
@@ -724,19 +735,6 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.ZICFISSType
     import LogicalRegSel._
         /** Describe one split uop; omitted operands use the instruction's rs1/rs2/rs3/rd fields. */
-    def split(
-      op: Opcode,
-      src1: LogicalRegSel = LogicalRegSel.Rs1,
-      src2: LogicalRegSel = LogicalRegSel.Rs2(),
-      src3: LogicalRegSel = LogicalRegSel.Rs3,
-      dest: LogicalRegSel = LogicalRegSel.Rd,
-      imm: Option[UopImmSpec] = None,
-      commitType: Option[UInt] = None,
-    ): Opcode = {
-      val copied = op.copy()
-      copied.setTraits((op.getTraits + UopMetadata(src1, src2, src3, dest, imm, commitType)).toSeq: _*)
-      copied
-    }
 
     val sspTmp = Const(32)
     val sspOrder = Const(33)
