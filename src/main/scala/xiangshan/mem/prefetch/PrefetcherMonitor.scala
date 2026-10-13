@@ -192,7 +192,10 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val low_conf_cnt = RegInit(0.U((log2Up(param.LOW_CONF_INTERVAL) + 1).W))
 
   val timely_reset = (total_prefetch_cnt === param.TIMELY_CHECK_INTERVAL.U) || (pf_late_in_cache_cnt >= param.TIMELY_CHECK_INTERVAL.U)
-  val validity_reset = (hit_pf_in_cache_cnt + pf_useless_cnt) === param.VALIDITY_CHECK_INTERVAL.U
+  // hit_pf_in_cache can add up to LoadPipelineWidth per cycle (the main-pipe leg is not driven) and
+  // pf_useless one more, so the sum may step over the interval; an exact compare would then miss the
+  // window end and let pf_useless_cnt keep growing.
+  val validity_reset = (hit_pf_in_cache_cnt +& pf_useless_cnt) >= param.VALIDITY_CHECK_INTERVAL.U
   val back_off_reset = back_off_cnt === param.BACK_OFF_INTERVAL.U
   val conf_reset = low_conf_cnt === param.LOW_CONF_INTERVAL.U
 
