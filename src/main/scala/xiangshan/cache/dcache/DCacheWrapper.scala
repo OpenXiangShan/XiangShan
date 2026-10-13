@@ -71,7 +71,7 @@ case class DCacheParameters
   channelSelByAddr: Boolean = true,
 
   // ========== MissTrack / SpecMiss ==========
-  enMissTrack: Boolean = false,
+  enMissTrack: Boolean = true,
   missTrackEntries: Int = 16,
   missTrackHashBits: Int = 5
 ) extends L1CacheParameters {

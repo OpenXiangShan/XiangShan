@@ -581,40 +581,16 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  (OpenLLCConfig("32MB", ways = 16, banks = 4)
+  OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
-    ++ new BaseConfig(n)).alter((site, here, up) => {
-      case XSTileKey => up(XSTileKey).map { p =>
-        p.copy(
-          dcacheParametersOpt = p.dcacheParametersOpt.map(_.copy(
-            enMissTrack = true
-          ))
-        )
-      }
-    })
+    ++ new BaseConfig(n)
 )
 
 class NoRobCompressionConfig(n: Int = 1) extends Config(
   new DefaultConfig(n).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))
-  })
-)
-
-// Compatibility alias. DefaultConfig now enables the functional SpecMiss path.
-class SpecMissConfig(n: Int = 1) extends DefaultConfig(n)
-
-// Same cache/fabric configuration as DefaultConfig, with SpecMiss disabled for A/B comparison.
-class FabricOnlyConfig(n: Int = 1) extends Config(
-  (new DefaultConfig(n)).alter((site, here, up) => {
-    case XSTileKey => up(XSTileKey).map { p =>
-      p.copy(
-        dcacheParametersOpt = p.dcacheParametersOpt.map(_.copy(
-          enMissTrack = false
-        ))
-      )
-    }
   })
 )
 
