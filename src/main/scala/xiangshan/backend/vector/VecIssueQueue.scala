@@ -921,6 +921,7 @@ object VecIssueQueue {
 
     // from rename
     val robIdx    = new RobPtr
+    val chanelIdx = UInt(log2Up(RenameWidth).W)
     val psrc      = Vec(numRegSrc, UInt(PhyRegIdxWidth.W))
     val psrcV0    = UInt(V0PhyRegIdxWidth.W)
     val psrcVl    = UInt(VlPhyRegIdxWidth.W)
@@ -966,6 +967,7 @@ object VecIssueQueue {
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
+      this.chanelIdx := source.chanelIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0
       this.psrcVl := source.psrcVl
@@ -1012,6 +1014,7 @@ object VecIssueQueue {
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
+      this.chanelIdx := source.chanelIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0.getOrElse(0.U)
       this.psrcVl := source.psrcVl.getOrElse(0.U)
@@ -1036,6 +1039,7 @@ object VecIssueQueue {
     val opcode       = Opcode()
 
     val robIdx       = new RobPtr
+    val chanelIdx    = UInt(log2Up(RenameWidth).W)
     val uopIdx       = UopIdx()
 
     val gpRen        = Vec(exuParam.numRegSrc, Bool())
@@ -1050,6 +1054,10 @@ object VecIssueQueue {
 
     val bypassDelay  = Vec(exuParam.numRegSrc, BypassDelay())
     val bypassSource = Vec(exuParam.numRegSrc, new BypassSource)
+
+    // 2: issued with M4, 1: issued one cycle after M4, 0: ordinary issue.
+    val fmaSrc3Wait = Option.when(exuParam.isFltExeUnit)(UInt(2.W))
+    val fmaSrc3LoadM4 = Option.when(exuParam.isFltExeUnit)(Bool())
 
     val gpWen        = Bool()
     val fpWen        = Bool()
@@ -1084,6 +1092,7 @@ object VecIssueQueue {
       this.vm.foreach(_ := entry.payload.vm.get)
       this.src12Rev := entry.payload.src12Rev
       this.robIdx := entry.status.robIdx
+      this.chanelIdx := entry.status.chanelIdx
       this.uopIdx := entry.status.uopIdx
 
       this.gpRen := entry.status.srcStatus.map(_.gpRen)
@@ -1099,6 +1108,8 @@ object VecIssueQueue {
 
       this.bypassDelay := entry.status.srcStatus.map(_.bypassDelay)
       this.bypassSource := entry.status.srcStatus.map(_.bypassSource)
+      this.fmaSrc3Wait.foreach(_ := entry.status.fmaSrc3Wait.get)
+      this.fmaSrc3LoadM4.foreach(_ := entry.status.fmaSrc3LoadM4.get)
 
       this.gpWen := entry.payload.gpWen.getOrElse(false.B)
       this.fpWen := entry.payload.fpWen.getOrElse(false.B)
@@ -1152,6 +1163,7 @@ object VecIssueQueue {
 
   class Status(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val robIdx      = new RobPtr
+    val chanelIdx   = UInt(log2Up(RenameWidth).W)
     val uopIdx      = UopIdx()
     val fuType      = FuType()
     val srcStatus   = Vec(param.numRegSrc, new SrcStatus())
@@ -1165,6 +1177,17 @@ object VecIssueQueue {
     val issuedTimer = IssuedTimer()
     val deqPortIdx  = UInt(1.W)
 
+    // M4 installs 2; the following cycle decrements to 1. At 1, M2 is due.
+    // Keep this in the entry so enqueue-to-fast-entry transfers preserve it.
+    val fmaSrc3Wait = Option.when(param.inFltRegion)(UInt(2.W))
+    // Provenance for the load early-wakeup path. Keep it separate from the
+    // ordinary FMA M4 timing state and its M2 confirmation logic.
+    val fmaSrc3LoadM4 = Option.when(param.inFltRegion)(Bool())
+    // Independent countdown for the load's post-M2 s3 cancellation window.
+    // This is intentionally separate from fmaSrc3Wait, which controls the
+    // FMUL1 data-bypass timing carried by a dequeued uop.
+    val fmaSrc3LoadM4CancelWait = Option.when(param.inFltRegion)(UInt(3.W))
+
     def srcReady: Bool = VecInit(srcStatus.map(_.srcState)).asUInt.andR &&
       srcStatusV0.map(_.srcState).getOrElse(true.B) &&
       srcStatusVl.map(_.srcState).getOrElse(true.B)
@@ -1173,6 +1196,7 @@ object VecIssueQueue {
 
     def fromEnq(enq: Enq): Unit = {
       this.robIdx := enq.robIdx
+      this.chanelIdx := enq.chanelIdx
       this.uopIdx := enq.uopIdx
       this.fuType := enq.fuType
       for ((s, srcIdx) <- this.srcStatus.zipWithIndex) {
@@ -1218,6 +1242,9 @@ object VecIssueQueue {
       this.firstIssue := true.B
       this.issuedTimer := IssuedTimer.init
       this.deqPortIdx := 0.U // Todo
+      this.fmaSrc3Wait.foreach(_ := 0.U)
+      this.fmaSrc3LoadM4.foreach(_ := false.B)
+      this.fmaSrc3LoadM4CancelWait.foreach(_ := 0.U)
     }
   }
 

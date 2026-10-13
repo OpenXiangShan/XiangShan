@@ -276,7 +276,6 @@ object VecFuConfig {
   val BrhCfg = VecFuConfig.fromFuConfig(FuConfig.BrhCfg)
   val I2fCfg = VecFuConfig.fromFuConfig(FuConfig.I2fCfg)
   val I2vCfg = VecFuConfig.fromFuConfig(FuConfig.I2vCfg)
-  val F2vCfg = VecFuConfig.fromFuConfig(FuConfig.F2vCfg)
   val CsrCfg = VecFuConfig.fromFuConfig(FuConfig.CsrCfg)
   val AluCfg = VecFuConfig.fromFuConfig(FuConfig.AluCfg)
   val MulCfg = VecFuConfig.fromFuConfig(FuConfig.MulCfg)
@@ -318,7 +317,6 @@ object VecFuConfig {
     I2fCfg,
     FcmpCfg,
     I2vCfg,
-    F2vCfg,
     CsrCfg,
     AluCfg,
     MulCfg,

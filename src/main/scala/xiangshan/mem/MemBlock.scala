@@ -183,8 +183,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val lcommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
+    val scommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)
     val pendingPtrNext = Input(new RobPtr)
@@ -238,6 +238,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
     val robidx = Output(new RobPtr)
     val pc     = Input(UInt(VAddrBits.W))
+    val storeOffset = Option.when(env.EnableDifftest)(Input(UInt(log2Ceil(RenameWidth + 1).W)))
+    val preCommit = Option.when(env.EnableDifftest)(Input(Bool()))
   })
 
   val intWriteback: MixedVec[MixedVec[MemWriteBack]] = intSchdParams.genMemWriteBackBundle
@@ -603,7 +605,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(io.ooo_to_mem.tlbCsr)
   private val ptw = outer.ptw.module
-  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
   private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
@@ -1164,6 +1166,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       sbuffer.io.diffStore.ncStore := lsq.io.diffStore.get.ncStore
       io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
       sbuffer.io.diffStore.diffInfo(i).uop.pc := io.mem_to_ooo.storeDebugInfo(i).pc
+      sbuffer.io.diffStoreOffset.get(i) := io.mem_to_ooo.storeDebugInfo(i).storeOffset.get
+      sbuffer.io.diffStorePreCommit.get(i) := io.mem_to_ooo.storeDebugInfo(i).preCommit.get
     }
   }
 
@@ -1302,8 +1306,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   if (p(DebugOptionsKey).ResetGen) {
     val leftResetTree = ResetGenNode(
       Seq(
-        ModuleNode(ptw),
-        ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(ptw)
+      )
+      ++ (if (!coreParams.softPTW) Seq(ModuleNode(ptw_to_l2_buffer)) else Seq())
+      ++ Seq(
         ModuleNode(lsq),
         ModuleNode(dtlb_st_tlb_st),
         ModuleNode(dtlb_prefetch_tlb_prefetch),

@@ -18,7 +18,6 @@ object FuType extends ChiselOHEnum {
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
-  val f2v = addType(name = "f2v")
   val csr = addType(name = "csr")
   val alu = addType(name = "alu")
   val mul = addType(name = "mul")
@@ -107,7 +106,7 @@ object FuType extends ChiselOHEnum {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
+  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vialu, vimac, vidiv)
   val vecOPF = Seq(vfmac, vfdiv, vfcvt)
@@ -184,7 +183,6 @@ object FuType extends ChiselOHEnum {
     brh -> "brh",
     i2f -> "int_to_float",
     i2v -> "int_to_vector",
-    f2v -> "float_to_vector",
     csr -> "csr",
     alu -> "alu",
     mul -> "mul",
@@ -205,4 +203,3 @@ object FuType extends ChiselOHEnum {
     vfcvt -> "vfcvt"
   )
 }
-
