@@ -922,7 +922,9 @@ class PrefetchFilterEntry()(implicit p: Parameters) extends XSBundle with HasSMS
   val alias_bits = UInt(2.W)
   val paddr_valid = Bool()
   val decr_mode = Bool()
-  val debug_source_type = UInt(log2Up(nSourceType).W)
+  // A region may merge AGT, stride and PHT predictions. Preserve provenance
+  // per block so one producer cannot relabel another producer's pending lines.
+  val source_types = Vec(REGION_BLKS, UInt(log2Up(nSourceType).W))
 }
 
 class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper {
@@ -932,7 +934,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     val pmp_resp = Flipped(new PMPRespBundle())
     val l2_pf_addr = DecoupledIO(UInt(PAddrBits.W))
     val pf_alias_bits = Output(UInt(2.W))
-    val debug_source_type = Output(UInt(log2Up(nSourceType).W))
+    val source_type = Output(UInt(log2Up(nSourceType).W))
   })
   val entries = Seq.fill(smsParams.pf_filter_size){ Reg(new PrefetchFilterEntry()) }
   val valids = Seq.fill(smsParams.pf_filter_size){ RegInit(false.B) }
@@ -943,13 +945,14 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   val tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, smsParams.pf_filter_size))
   val pf_req_arb = Module(new TwoLevelRRArbiter(UInt(PAddrBits.W), smsParams.pf_filter_size))
+  val pf_req_sources = Wire(Vec(smsParams.pf_filter_size, UInt(log2Up(nSourceType).W)))
 
   io.l2_pf_addr <> pf_req_arb.io.out
   io.pf_alias_bits := Mux1H(entries.zipWithIndex.map({
     case (entry, i) => (i.U === pf_req_arb.io.chosen) -> entry.alias_bits
   }))
 
-  io.debug_source_type := VecInit(entries.map(_.debug_source_type))(pf_req_arb.io.chosen)
+  io.source_type := pf_req_sources(pf_req_arb.io.chosen)
 
   val s1_valid = Wire(Bool())
   val s1_hit = Wire(Bool())
@@ -998,9 +1001,11 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
       pending_req_vec.asBools.reverse,
       (0 until smsParams.pf_filter_size).reverse.map(_.U(REGION_OFFSET.W))
     )
+    val pf_offset = Mux(ent.decr_mode, last_one_offset, first_one_offset)
+    pf_req_sources(i) := ent.source_types(pf_offset)
     val pf_addr = Cat(
       ent.region_addr,
-      Mux(ent.decr_mode, last_one_offset, first_one_offset),
+      pf_offset,
       0.U(log2Up(dcacheParameters.blockBytes).W)
     )
     pf_req_arb.io.in(i).valid := v && Cat(pending_req_vec).orR && ent.paddr_valid && !is_evicted
@@ -1039,7 +1044,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.decr_mode := s1_gen_req.decr_mode
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
-  s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+  s1_alloc_entry.source_types.foreach(_ := s1_gen_req.debug_source_type)
   io.tlb_req.req.valid := s1_tlb_req_valid && !((s1_tlb_fire_vec & s1_replace_vec).orR && s1_valid && !s1_hit)
   io.tlb_req.req.bits := s1_tlb_req_bits
   io.tlb_req.resp.ready := true.B
@@ -1084,6 +1089,11 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     }
     when(update){
       ent.region_bits := ent.region_bits | s1_gen_req.region_bits
+      for (block <- 0 until REGION_BLKS) {
+        when(s1_gen_req.region_bits(block) && !ent.region_bits(block)) {
+          ent.source_types(block) := s1_gen_req.debug_source_type
+        }
+      }
     }
     when(pf_fired){
       val curr_bit = UIntToOH(block_addr(pf_req_arb.io.in(i).bits)(REGION_OFFSET - 1, 0))
@@ -1234,7 +1244,13 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   io.l2_req.valid := pf_filter.io.l2_pf_addr.valid && io.enable
   io.l2_req.bits.addr := pf_filter.io.l2_pf_addr.bits
-  io.l2_req.bits.source := MemReqSource.Prefetch2L2SMS.id.U
+  // Preserve the generating engine after filtering. GEM5's SPht maps to SMS,
+  // while AGT maps to SStream and must not enter the stride/PHT offload policy.
+  // The filter retains this field with the selected address, including stalls.
+  io.l2_req.bits.source := MuxLookup(pf_filter.io.source_type, MemReqSource.Prefetch2L2SMS.id.U)(Seq(
+    HW_PREFETCH_AGT.U -> MemReqSource.Prefetch2L2Stream.id.U,
+    HW_PREFETCH_STRIDE.U -> MemReqSource.Prefetch2L2Stride.id.U
+  ))
   pf_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   // for now, sms will not send l1 prefetch requests
@@ -1253,7 +1269,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   trace.vaddr := 0.U
   trace.pc := 0.U
   trace.paddr := io.l2_req.bits.addr
-  trace.source := pf_filter.io.debug_source_type
+  trace.source := pf_filter.io.source_type
   val table = ChiselDB.createTable("L1SMSMissTrace_hart"+ p(XSCoreParamsKey).HartId.toString, new L1MissTrace)
   table.log(trace, io.l2_req.fire, "SMSPrefetcher", clock, reset)
 

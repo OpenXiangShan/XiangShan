@@ -327,7 +327,8 @@ case class L2CacheConfig
   nl: Boolean = false,
   cdp: Boolean = true,
   enablePC: Boolean = false, // Enable PC field for L1Param
-  enableFlush: Boolean = false
+  enableFlush: Boolean = false,
+  hintOffload: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -364,6 +365,7 @@ case class L2CacheConfig
           (if (nl) Seq(NLParameters()) else Nil) ++
           (if (cdp) Seq(CDPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        enableL2HintOffload = hintOffload && cdp,
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
@@ -583,7 +585,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
-    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
+    ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false, hintOffload = true)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
 )

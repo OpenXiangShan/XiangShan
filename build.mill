@@ -102,6 +102,15 @@ object XSCache extends ChiselModule {
       PathRef(millSourcePath / "src" / "test" / "scala" / "ZhuJiangBridge.scala")
     )
   }
+
+  object offloadTest extends ChiselModule {
+    def moduleDeps = Seq(XSCache)
+    override def sources: T[Seq[PathRef]] = Task.Sources {
+      Seq("L2HintOffloadTest.scala", "TestTopL2.scala").map { name =>
+        PathRef(pwd / "XSCache" / "src" / "test" / "scala" / name)
+      }
+    }
+  }
 }
 
 object openNCB extends ChiselModule {
@@ -147,6 +156,13 @@ object macros extends ScalaModule {
 
 object xiangshan extends ChiselModule {
   def millSourcePath = pwd
+
+  object offloadTest extends ChiselModule {
+    def moduleDeps = Seq(xiangshan)
+    override def sources: T[Seq[PathRef]] = Task.Sources {
+      Seq(PathRef(pwd / "src" / "test" / "scala" / "cache" / "SMSOffloadSourceTest.scala"))
+    }
+  }
 
   def moduleDeps = Seq(
     `rocket-chip`,
