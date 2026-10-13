@@ -1532,7 +1532,10 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.bits.robIdx := uop.robIdx
   ldout.toRob.bits.exceptionVec extendFrom exceptionVec
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
-  ldout.toRob.bits.trigger.get := uop.trigger
+  // The exception of a split load may be its head's (s4Head, see exceptionVec): report the head's trigger action with
+  // it. With the tail's (usually None) the ROB took a head load breakpoint for a pc breakpoint (mtval = pc), and a
+  // head trigger that enters Debug Mode was lost.
+  ldout.toRob.bits.trigger.get := Mux(s4HeadValid && s4HeadHasException, s4Head.uop.trigger, uop.trigger)
   ldout.toRob.bits.isRVC.get := uop.isRVC
   ldout.toRob.bits.debugInfo.isMMIO.foreach(_ := in.isMMIOReplay())
   ldout.toRob.bits.debugInfo.isNCIO.foreach(_ := in.isNCReplay() && in.pmp.get.mmio)
