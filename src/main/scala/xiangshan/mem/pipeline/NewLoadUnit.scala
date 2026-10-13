@@ -951,6 +951,17 @@ class LoadUnitS2(param: ExeUnitParams)(
   exceptionVec(loadAddrMisaligned) := am
   exceptionVec(loadAccessFault) := af
   exceptionVec(hardwareError) := hwe
+  // Zicbop: if access to the cache block is not permitted, a software prefetch (prefetch.r/w) raises no exception and
+  // shall not access any caches or memory; it retires as a no-op. (S1 already keeps TLB-faulting requests out of the
+  // DCache; swPrefetchUnpermitted also kills PMP-denied ones below.) Breakpoints are masked by loadTrigger.isPrf.
+  val swPrefetchUnpermitted = isSwPrefetch && (af || am || hwe || tlbUnaccessable)
+  when (isSwPrefetch) {
+    exceptionVec(loadAddrMisaligned) := false.B
+    exceptionVec(loadAccessFault) := false.B
+    exceptionVec(hardwareError) := false.B
+    exceptionVec(loadPageFault) := false.B
+    exceptionVec(loadGuestPageFault) := false.B
+  }
 
   /**
     * Data forward response
@@ -1211,7 +1222,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   io.unalignTailValid := pipeIn.valid && isUnalignTail
 
-  io.dcacheKill := kill || exception || isUncache || isUncacheReplay ||
+  io.dcacheKill := kill || exception || swPrefetchUnpermitted || isUncache || isUncacheReplay ||
     specialRequest
   io.dcacheResp.ready := true.B
 
@@ -1222,7 +1233,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   // TODO: Currently, we don't train prefetcher on vector request, because vector instruction PC is incorrect.
   // TODO: `isFirstIssue` is Fake First Issue according to prefetcher !!!
-  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay &&
+  io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !swPrefetchUnpermitted && !isUncache && !isUncacheReplay &&
     in.isFirstIssue() && !isVector
   io.prefetchTrain.bits.robIdx := uop.robIdx
   io.prefetchTrain.bits.pc := uop.pc
