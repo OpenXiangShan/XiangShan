@@ -471,7 +471,7 @@ case class XSCoreParameters
         ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX3", Seq(FaluCfg, FmulCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
+        ExeUnitParams("FEX3", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
       ), numEntries = 20, numEnq = 2, numComp = 18),
     ),
       numPregs = fpPreg.numEntries,
