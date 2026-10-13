@@ -500,7 +500,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_resolveMeta.utage := s3_utageMeta
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
-  s3_commitMeta.ras := ras.io.commitMeta
+  s3_commitMeta.ras       := ras.io.commitMeta
+  s3_commitMeta.attribute := s3_prediction.attribute
 
   println(s"bpu redirect meta width: ${s3_redirectMeta.getWidth}")
   println(s"bpu resolve meta width: ${s3_resolveMeta.getWidth}")
