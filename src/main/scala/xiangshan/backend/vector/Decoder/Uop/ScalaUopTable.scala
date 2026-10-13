@@ -53,35 +53,7 @@ object ScalaUopTable {
     commitType: Option[UInt] = None,
   ) extends OpcodeTrait
 
-  private def withMetadata(op: Opcode, metadata: UopMetadata): Opcode = {
-    val copied = op.copy()
-    copied.setTraits((op.getTraits + metadata).toSeq: _*)
-    copied
-  }
-
-  /** Describe one split uop; omitted operands use the instruction's rs1/rs2/rs3/rd fields. */
-  def split(
-    op: Opcode,
-    src1: LogicalRegSel = LogicalRegSel.Rs1,
-    src2: LogicalRegSel = LogicalRegSel.Rs2(),
-    src3: LogicalRegSel = LogicalRegSel.Rs3,
-    dest: LogicalRegSel = LogicalRegSel.Rd,
-    imm: Option[UopImmSpec] = None,
-    commitType: Option[UInt] = None,
-  ): Opcode = withMetadata(op, UopMetadata(src1, src2, src3, dest, imm, commitType))
-
-  private def copyWithout(op: Opcode, traits: OpcodeTrait*): Opcode = {
-    val copied = op.copy()
-    copied.setTraits((op.getTraits -- traits).toSeq: _*)
-    copied
-  }
-
-  private def copyWith(op: Opcode, traits: OpcodeTrait*): Opcode = {
-    val copied = op.copy()
-    copied.setTraits((op.getTraits ++ traits).toSeq: _*)
-    copied
-  }
-
+  // Decode fields read this metadata after the instruction table has been built.
   def metadata(op: Opcode): UopMetadata = {
     val entries = op.getTraits.collect { case m: UopMetadata => m }
     require(entries.size <= 1, s"Multiple operand definitions for ${op.name}")
@@ -670,16 +642,6 @@ object ScalaUopTable {
     )
   }
 
-  val tableZimop = {
-    import xiangshan.backend.decode.isa.Instructions.ZIMOPType
-
-    // Decode as add rd, x0, x0; SimpleDecodeChannel forces both sources to x0.
-    ZIMOPType.mapUopcode(
-      _.MOP_R_N  -> add,
-      _.MOP_RR_N -> add,
-    )
-  }
-
   val tableZknd = {
     import xiangshan.backend.decode.isa.Instructions.ZKND64Type
     ZKND64Type.mapUopcode(
@@ -761,6 +723,20 @@ object ScalaUopTable {
   val tableZicfiss = {
     import xiangshan.backend.decode.isa.Instructions.ZICFISSType
     import LogicalRegSel._
+        /** Describe one split uop; omitted operands use the instruction's rs1/rs2/rs3/rd fields. */
+    def split(
+      op: Opcode,
+      src1: LogicalRegSel = LogicalRegSel.Rs1,
+      src2: LogicalRegSel = LogicalRegSel.Rs2(),
+      src3: LogicalRegSel = LogicalRegSel.Rs3,
+      dest: LogicalRegSel = LogicalRegSel.Rd,
+      imm: Option[UopImmSpec] = None,
+      commitType: Option[UInt] = None,
+    ): Opcode = {
+      val copied = op.copy()
+      copied.setTraits((op.getTraits + UopMetadata(src1, src2, src3, dest, imm, commitType)).toSeq: _*)
+      copied
+    }
 
     val sspTmp = Const(32)
     val sspOrder = Const(33)
@@ -770,10 +746,22 @@ object ScalaUopTable {
     val zeroImm = UopImmSpec(DecodeSelImm.I, _ => BigInt(0))
     val noImm = UopImmSpec(DecodeSelImm.NO, _ => BigInt(0))
 
-    val readSsp = copyWith(copyWithout(set, BlockBack), GpWen)
-    val writeSsp = split(copyWithout(wrt, NoSpec, GpWen),
+    val readSsp = set.copy()
+    readSsp.setTraits((set.getTraits -- Seq(BlockBack) + GpWen).toSeq: _*)
+
+    val writeSspOp = wrt.copy()
+    writeSspOp.setTraits((wrt.getTraits -- Seq(NoSpec, GpWen)).toSeq: _*)
+    val writeSsp = split(writeSspOp,
       src1 = sspTmp, src2 = Zero, src3 = Zero, dest = Zero,
       imm = Some(writeImm), commitType = Some(CommitType.NORMAL))
+
+    val sspDecOp = sspdec.copy()
+    sspDecOp.setTraits((sspdec.getTraits + GpWen).toSeq: _*)
+    val sspopchkOp = sspopchk.copy()
+    sspopchkOp.setTraits((sspopchk.getTraits + GpWen).toSeq: _*)
+    val setGpWen = set.copy()
+    setGpWen.setTraits((set.getTraits + GpWen).toSeq: _*)
+
     val push = Seq(
       split(readSsp, src1 = Zero, src2 = Zero, src3 = Zero, dest = sspTmp,
         imm = Some(readImm), commitType = Some(CommitType.STORE)),
@@ -781,14 +769,14 @@ object ScalaUopTable {
         imm = Some(stepImm.copy(sel = DecodeSelImm.S)), commitType = Some(CommitType.STORE)),
       split(ld, src1 = sspTmp, src2 = Zero, src3 = Zero, dest = sspOrder,
         imm = Some(stepImm), commitType = Some(CommitType.LOAD)),
-      split(copyWith(sspdec, GpWen), src1 = sspTmp, src2 = sspOrder, src3 = Zero, dest = sspTmp,
+      split(sspDecOp, src1 = sspTmp, src2 = sspOrder, src3 = Zero, dest = sspTmp,
         imm = Some(noImm), commitType = Some(CommitType.NORMAL)),
       writeSsp,
     )
     val pop = Seq(
       split(readSsp, src1 = Zero, src2 = Zero, src3 = Zero, dest = sspTmp,
         imm = Some(readImm), commitType = Some(CommitType.LOAD)),
-      split(copyWith(sspopchk, GpWen), src1 = sspTmp, src2 = Rs1, src3 = Zero, dest = sspTmp,
+      split(sspopchkOp, src1 = sspTmp, src2 = Rs1, src3 = Zero, dest = sspTmp,
         imm = Some(zeroImm), commitType = Some(CommitType.LOAD)),
       writeSsp,
     )
@@ -797,7 +785,7 @@ object ScalaUopTable {
       _.SSPUSH_X5 -> push,
       _.SSPOPCHK_X1 -> pop,
       _.SSPOPCHK_X5 -> pop,
-      _.SSRDP -> Seq(split(copyWith(set, GpWen), src1 = Zero, src2 = Zero, src3 = Zero,
+      _.SSRDP -> Seq(split(setGpWen, src1 = Zero, src2 = Zero, src3 = Zero,
         dest = Rd, imm = Some(readImm), commitType = Some(CommitType.NORMAL))),
       _.SSAMOSWAP_W -> Seq(ssamoswap_w),
       _.SSAMOSWAP_D -> Seq(ssamoswap_d),
