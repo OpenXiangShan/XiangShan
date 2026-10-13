@@ -38,9 +38,8 @@ class ScalarMultiUopDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[Ext
   (implicit val p: Parameters) extends Module with HasXSParameter {
   import ScalarMultiUopDecodeChannel._
 
-  require(instSeq.nonEmpty && instSeq.forall(!_.isInstanceOf[VecInstPattern]))
   private val maxSplit = splitCounts(instSeq, extensions).max
-  require(maxSplit > 0 && maxSplit <= 8)
+  require(instSeq.nonEmpty && maxSplit > 0 && maxSplit <= 8)
 
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(new ScalarMultiUopDecodeChannelOutput(maxSplit)))
