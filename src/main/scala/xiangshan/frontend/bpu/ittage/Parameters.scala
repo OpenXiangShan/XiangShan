@@ -25,7 +25,7 @@ case class IttageParameters(
       new IttageTableInfo(256, 8),
       new IttageTableInfo(512, 16),
       new IttageTableInfo(512, 32),
-      new IttageTableInfo(512, 64)
+      new IttageTableInfo(512, 48)
     ),
     NumBanks:           Int = 2,
     TagWidth:           Int = 9,
