@@ -397,8 +397,10 @@ class RasStack(implicit p: Parameters) extends RasModule
   when(io.redirect.valid) {
     tosr       := io.redirect.meta.tosr
     tosw       := io.redirect.meta.tosw
+    nos        := io.redirect.meta.nos
     ssp        := io.redirect.meta.ssp
     tosrInSpec := io.redirect.meta.tosrInSpec
+    nosInSpec  := io.redirect.meta.nosInSpec
 
     when(io.redirect.isCall) {
       specPush(io.redirect.meta.ssp, io.redirect.meta.tosr, io.redirect.meta.tosrInSpec, io.redirect.meta.tosw)
