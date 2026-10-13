@@ -39,6 +39,7 @@ from ..funcov.runtime_context import (
 from ..runtime.artifact_provenance import file_sha256
 from ..core.frontend_env import FrontendEnv
 from ..support.logging_utils import configure_env_logging
+from .frontend_init import FrontendInitConfig, initialize_frontend
 
 
 logger = getLogger("env.fixtures")
@@ -224,7 +225,9 @@ def _funcov_run_metadata(request, env) -> dict:
     execution = {
         "testcase_nodeid": str(getattr(node, "nodeid", "") or "").strip(),
         "testcase_path": None if testcase_path is None else str(testcase_path),
-        "testcase_sha256": "unavailable" if testcase_path is None else file_sha256(testcase_path),
+        "testcase_sha256": (
+            "unavailable" if testcase_path is None else file_sha256(testcase_path)
+        ),
         "run_command": os.getenv("TB_RUN_COMMAND", "").strip(),
         "artifact_root": str(artifact_root),
         "case_log_path": str(Path(case_log).resolve()) if case_log else None,
@@ -236,6 +239,9 @@ def _funcov_run_metadata(request, env) -> dict:
             "ptw": int(config.ptw.seed),
         },
         "random_scenarios": list(getattr(env, "random_scenario_records", [])),
+        "initialization": [
+            item.metadata() for item in vars(env).get("init_history", [])
+        ],
     }
     for env_name, field in (("TB_ASM_PATH", "asm"), ("TB_BIN_PATH", "bin"), ("TB_TRACE_PATH", "trace")):
         path, digest = _input_path_metadata(env_name)
@@ -562,7 +568,22 @@ def dut(request):
 
 
 @pytest.fixture(scope="function")
-def env(dut, request):
+def frontend_init_config(request):
+    """Per-test startup plan; accepts indirect pytest parameters or a factory."""
+    config = getattr(request, "param", None)
+    if config is None:
+        config = FrontendInitConfig()
+    elif callable(config):
+        config = config()
+    if not isinstance(config, FrontendInitConfig):
+        raise TypeError(
+            "frontend_init_config must be FrontendInitConfig or a factory returning it"
+        )
+    return config
+
+
+@pytest.fixture(scope="function")
+def env(dut, request, frontend_init_config):
     configure_env_logging()
     random.seed(_test_seed())
     data_dir = _data_dir()
@@ -597,7 +618,7 @@ def env(dut, request):
             if runtime_context is None
             else runtime_context.handle_event
         ),
-        config=DEFAULT_ENV_CONFIG,
+        config=frontend_init_config.env_config,
     )
     if not vars(dut).get("_frontend_clock_initialized", False):
         dut.InitClock("clock")
@@ -638,11 +659,11 @@ def env(dut, request):
             toffee_sink.flush_cycle(cycle)
 
         dut.StepRis(sample_functional_coverage)
-    tb.initialize(
-        reset_vector=_read_int_env("TB_RESET_VECTOR", "0x80000000"),
-        bare_mode=True,
-        reset_cycles=20,
-    )
+    if not frontend_init_config.defer:
+        initialize_frontend(tb, frontend_init_config)
+    else:
+        # A deferred plan must keep the DUT quiescent until its explicit boot.
+        tb._write(tb.clock_reset.reset, 1)
     yield tb
     if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
         from toffee_test.reporter import set_line_coverage

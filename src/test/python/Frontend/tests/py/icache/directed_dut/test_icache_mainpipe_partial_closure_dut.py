@@ -6,6 +6,13 @@ tests without modifying that source file.
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    FrontendInitConfig,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
 import os
 from collections.abc import Callable
 
@@ -60,6 +67,9 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
 
 
 @pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+@pytest.mark.parametrize(
     "fault,refill_bin",
     [
         ({"corrupt": 1, "denied": 0, "beat": 0}, "error_first_beat_no_sram_write"),
@@ -82,12 +92,31 @@ def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-626")
 def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     samples = _register_mainpipe_observer(env)
     _load_two_fetch_loop(env, _DUAL_BASE)
-    env.icache_agent.configure(hit_latency=8, miss_latency=8, miss_rate=1.0, seed=0x2524)
-    env.initialize(reset_vector=_DUAL_BASE, bare_mode=True, reset_cycles=20)
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 8, "miss_latency": 8, "miss_rate": 1.0, "seed": 0x2524},
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=_DUAL_BASE,
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(_DUAL_BASE)
 
@@ -114,6 +143,9 @@ def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-623")
 def test_tc_icache_mainpipe_nonmatching_refill_dut(env) -> None:
     _run_sector_lane_refill(env)
@@ -127,6 +159,9 @@ def test_tc_icache_mainpipe_nonmatching_refill_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-634")
 def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
     _run_pmp_execute_denied(env)
@@ -134,6 +169,9 @@ def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-635")
 def test_tc_icache_mainpipe_pma_mmio_suppress_dut(env) -> None:
     _run_cross_page_pma_path(env)
@@ -142,6 +180,9 @@ def test_tc_icache_mainpipe_pma_mmio_suppress_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-638")
 def test_tc_icache_mainpipe_uncache_suppress_dut(env) -> None:
     _run_pbmt_nc_redirect(env)

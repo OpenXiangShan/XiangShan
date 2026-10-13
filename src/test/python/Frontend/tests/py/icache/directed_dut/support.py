@@ -6,6 +6,11 @@ test module. These helpers only centralize operations with identical behavior.
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    run_initialization_steps,
+)
+
 from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from tests.py.support.dut_support import (
@@ -194,11 +199,19 @@ def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
 
     _load_two_fetch_loop(env)
     _warm_two_fetch_execution(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=0.0,
-        seed=int(seed),
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 0.0,
+                    "seed": int(seed),
+                },
+            ),
+        ),
     )
     set_predictors(env, True)
 

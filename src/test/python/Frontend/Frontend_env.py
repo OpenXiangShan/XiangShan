@@ -23,8 +23,8 @@ for _path in (_PYLIB_PATH,):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from env.runtime.fixtures import env, full_env
+from env.runtime.fixtures import env, frontend_init_config, full_env
 from env.core.frontend_env import FrontendEnv
 
 
-__all__ = ["FrontendEnv", "env", "full_env"]
+__all__ = ["FrontendEnv", "env", "frontend_init_config", "full_env"]

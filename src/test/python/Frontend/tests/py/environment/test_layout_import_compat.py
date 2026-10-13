@@ -60,8 +60,14 @@ def test_frontend_api_re_exports_env_api_and_fixtures():
 def test_frontend_env_re_exports_env_objects():
     assert Frontend_env.FrontendEnv is FrontendEnv
     assert Frontend_env.env is fixtures.env
+    assert Frontend_env.frontend_init_config is fixtures.frontend_init_config
     assert Frontend_env.full_env is fixtures.full_env
-    assert sorted(Frontend_env.__all__) == ["FrontendEnv", "env", "full_env"]
+    assert sorted(Frontend_env.__all__) == [
+        "FrontendEnv",
+        "env",
+        "frontend_init_config",
+        "full_env",
+    ]
 
 
 def test_env_root_re_exports_frontend_monitor():

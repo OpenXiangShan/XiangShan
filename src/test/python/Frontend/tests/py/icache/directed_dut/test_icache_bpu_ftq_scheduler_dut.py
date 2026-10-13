@@ -1,5 +1,14 @@
 """Public scheduler integration and exact MainPipe BPU-flush reachability tests."""
 
+from env.runtime.frontend_init import (
+    FrontendInitConfig,
+    LoadProgram,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
+
 import os
 
 import pytest
@@ -15,14 +24,31 @@ from tests.py.icache.directed_dut.support import (
 pytestmark = pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires compiled DUT")
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 def test_bpu_scheduler_drives_live_identity_resolve(env):
     base = 0x80000000
     # Use decoded control-flow instructions so the captured identity is a
     # legal source for directed resolve injection.  JAL x0,+4 keeps execution
     # inside the loaded image while providing an exact decoded target.
     jal_x0_plus_4 = 0x0040006F
-    env.load_program(jal_x0_plus_4.to_bytes(4, "little") * 16, base)
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=jal_x0_plus_4.to_bytes(4, "little") * 16, base_addr=base
+                )
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     identity = env.bpu_ftq_scheduler.wait_live_identity(

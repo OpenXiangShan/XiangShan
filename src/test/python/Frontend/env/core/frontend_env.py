@@ -30,7 +30,7 @@ from ..bundles import (
 )
 from toffee.bundle import DummySignal
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
-from ..support.env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
+from ..support.env_config import DEFAULT_ENV_CONFIG, EnvConfig
 from ..support.logging_utils import configure_env_logging, parse_log_level
 from ..support.pmp_pma import (
     PmpPmaConfig,
@@ -687,35 +687,30 @@ class FrontendEnv:
         reset_vector: int = 0x80000000,
         bare_mode: Optional[bool] = None,
         reset_cycles: int = 20,
+        *,
+        before_release: Optional[Callable[[], None]] = None,
     ) -> None:
-        selected_mode = self.config.ptw.mode if bare_mode is None else ("bare" if bool(bare_mode) else "sv39")
-        if selected_mode not in {"bare", "sv39"}:
-            raise ValueError(f"unsupported frontend init mode: {selected_mode}")
-        ptw_config = self.config.ptw if self.config.ptw.mode == selected_mode else (
-            BAREMODE_ENV_CONFIG.ptw if selected_mode == "bare" else SV39_ENV_CONFIG.ptw
+        """Compatibility entry; all startup execution lives in frontend_init."""
+        from ..runtime.frontend_init import (
+            FrontendInitConfig,
+            InitCallback,
+            initialize_frontend,
         )
-        self.logger.info(
-            "initialize env: reset_vector=0x%x bare_mode=%s mode=%s reset_cycles=%d",
-            int(reset_vector),
-            None if bare_mode is None else bool(bare_mode),
-            selected_mode,
-            int(reset_cycles),
+
+        initialize_frontend(
+            self,
+            FrontendInitConfig(
+                env_config=self.config,
+                reset_vector=reset_vector,
+                bare_mode=bare_mode,
+                reset_cycles=reset_cycles,
+                before_release=(
+                    ()
+                    if before_release is None
+                    else (InitCallback(lambda _env: before_release()),)
+                ),
+            ),
         )
-        self._write(self.clock_reset.io_reset_vector_addr, int(reset_vector) >> 1)
-        self.page_table.set_mode(selected_mode)
-        self._write(self.csr_ctrl_if.io_tlbCsr_priv_virt, int(ptw_config.priv_virt))
-        self._write(self.csr_ctrl_if.io_tlbCsr_priv_imode, int(ptw_config.priv_imode))
-        self._write(self.csr_ctrl_if.io_tlbCsr_satp_mode, int(ptw_config.satp_mode))
-        self._write(self.csr_ctrl_if.io_tlbCsr_satp_asid, int(ptw_config.satp_asid))
-        self._write(self.csr_ctrl_if.io_tlbCsr_satp_ppn, int(ptw_config.satp_ppn))
-        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, int(ptw_config.vsatp_mode))
-        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_asid, int(ptw_config.vsatp_asid))
-        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_ppn, int(ptw_config.vsatp_ppn))
-        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, int(ptw_config.hgatp_mode))
-        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_vmid, int(ptw_config.hgatp_vmid))
-        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_ppn, int(ptw_config.hgatp_ppn))
-        self.reset(reset_cycles)
-        self.monitor.set_expected_pc(int(reset_vector))
 
     def load_program(self, data: bytes, base_addr: int) -> None:
         self.memory.load_bin(data, int(base_addr))

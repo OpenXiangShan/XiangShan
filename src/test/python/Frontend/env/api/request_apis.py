@@ -109,19 +109,34 @@ def reset_frontend(env, reset_cycles=1, step_cycles=0):
 
 
 def load_program(env, image: ProgramImage, step_cycles=0) -> int:
-    return LoadProgramSequence(image, step_cycles=int(step_cycles)).run(env)
+    from ..runtime.frontend_init import run_initialization_steps
+
+    return run_initialization_steps(
+        env, (LoadProgramSequence(image, step_cycles=int(step_cycles)),)
+    )[0].value
 
 
 def load_program_file(env, path, base_addr, step_cycles=0) -> int:
-    return LoadProgramFileSequence(
-        path=str(path),
-        base_addr=int(base_addr),
-        step_cycles=int(step_cycles),
-    ).run(env)
+    from ..runtime.frontend_init import run_initialization_steps
+
+    return run_initialization_steps(
+        env,
+        (
+            LoadProgramFileSequence(
+                path=str(path),
+                base_addr=int(base_addr),
+                step_cycles=int(step_cycles),
+            ),
+        ),
+    )[0].value
 
 
 def load_golden_trace(env, source: GoldenTraceSource, step_cycles=0) -> int:
-    return LoadGoldenTraceSequence(source=source, step_cycles=int(step_cycles)).run(env)
+    from ..runtime.frontend_init import run_initialization_steps
+
+    return run_initialization_steps(
+        env, (LoadGoldenTraceSequence(source=source, step_cycles=int(step_cycles)),)
+    )[0].value
 
 
 def run_until_commit(env, target: CommitTarget) -> int:

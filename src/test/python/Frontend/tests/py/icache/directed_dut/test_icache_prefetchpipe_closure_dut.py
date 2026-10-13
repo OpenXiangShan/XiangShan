@@ -7,13 +7,27 @@ sampled only to align public stimulus with the transaction stage under test.
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    FrontendInitConfig,
+    LoadProgram,
+    PrepareTranslationScenario,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
+
 import os
 from collections.abc import Iterable
 
 import pytest
 
 from env.funcov.py.icache.icache_prefetchpipe_funcov import _read_prefetch
-from env.sequences import TranslationScenario, TranslationScenarioBuilder, TranslationPmpPmaEntry
+from env.sequences import (
+    TranslationScenario,
+    TranslationPmpPmaEntry,
+)
 from env.support import PmpPmaConfig
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss as _run_trained_refill,
@@ -130,7 +144,17 @@ def _wait_refill_waymask(env, address: int, *, max_cycles: int = 4096) -> int:
 
 
 def _load_nops(env, base: int, *, words: int = 8192) -> None:
-    env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=(_NOP.to_bytes(4, "little")) * int(words),
+                    base_addr=int(base),
+                )
+            ),
+        ),
+    )
 
 
 def _load_overlap2_loop(env, base: int) -> int:
@@ -141,7 +165,9 @@ def _load_overlap2_loop(env, base: int) -> int:
     payload = bytearray((0x0001).to_bytes(2, "little") * 128)
     payload[0x50:0x52] = _c_j(0x10).to_bytes(2, "little")
     payload[0x70:0x72] = _c_j(-0x40).to_bytes(2, "little")
-    env.load_program(bytes(payload), int(base))
+    run_initialization_steps(
+        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
+    )
     return noncross_entry
 
 
@@ -154,13 +180,29 @@ def _prepare_nops(
     words: int = 8192,
 ) -> None:
     _load_nops(env, base, words=words)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=int(latency),
-        miss_rate=1.0,
-        seed=int(seed),
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": int(latency),
+                    "miss_rate": 1.0,
+                    "seed": int(seed),
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=int(base), bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=int(base),
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(int(base))
 
@@ -208,6 +250,9 @@ def prefetchpipe_env(env):
         _restore_predictors(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-656", "BIN-657", "BIN-663", "BIN-677")
 def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -248,11 +293,19 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
 def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=96,
-        miss_rate=1.0,
-        seed=0x6654,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 96,
+                    "miss_rate": 1.0,
+                    "seed": 0x6654,
+                },
+            ),
+        ),
     )
     for _ in range(64):
         if _s0_sampling_window(env):
@@ -285,11 +338,19 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _initialize_bpu_s3_stream(env)
     _load_nops(env, _SOFT_BASE)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=64,
-        miss_rate=1.0,
-        seed=0x6653,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 64,
+                    "miss_rate": 1.0,
+                    "seed": 0x6653,
+                },
+            ),
+        ),
     )
 
     for attempt in range(128):
@@ -355,6 +416,9 @@ def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-664")
 def test_tc_icache_prefetchpipe_disabled(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -390,7 +454,15 @@ def _translation_state(
         # Start with a virtual reset PC; a bare-mode PA boot followed by an
         # unbound redirect can retain an unrelated FTQ context at recovery.
         assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
-        env.initialize(reset_vector=int(va), bare_mode=False, reset_cycles=20)
+        initialize_frontend(
+            env,
+            FrontendInitConfig(
+                env_config=env.config,
+                reset_vector=int(va),
+                bare_mode=False,
+                reset_cycles=20,
+            ),
+        )
     scenario = TranslationScenario(
         scenario_id=scenario_id,
         va=int(va),
@@ -413,9 +485,14 @@ def _translation_state(
             int(pa) & ~0x3FFF, size=0x4000,
         ),) if reset_entry else (),
     )
-    return TranslationScenarioBuilder(env).build(scenario)
+    return run_initialization_steps(
+        env, (PrepareTranslationScenario(scenario, arm=False),)
+    )[0].value
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-658", "BIN-678", "BIN-738", "BIN-740")
 def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -467,6 +544,9 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-679")
 def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> None:
     """Hold MetaArray behind fence.i while a translated retry completes."""
@@ -531,6 +611,9 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-661", "BIN-666", "BIN-700")
 def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -544,6 +627,9 @@ def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-683")
 def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) -> None:
     """A clean response for an existing MSHR cancels an unissued s2 miss."""
@@ -581,6 +667,9 @@ def test_tc_icache_prefetch_clean_mshr_before_first_miss_fire(prefetchpipe_env) 
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-659")
 def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> None:
     """Keep an exact prefetch probe live across its clean refill window."""
@@ -640,6 +729,9 @@ def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> N
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-660")
 def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -698,6 +790,9 @@ def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-667")
 def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -743,6 +838,9 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-779")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
@@ -756,13 +854,29 @@ def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     base = _SOFT_BASE + 0x1_0000
     noncross_entry = _load_overlap2_loop(env, base)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=16,
-        miss_rate=1.0,
-        seed=0x6779,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 16,
+                    "miss_rate": 1.0,
+                    "seed": 0x6779,
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=noncross_entry, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=noncross_entry,
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(noncross_entry)
     for _ in range(1200):
@@ -800,6 +914,9 @@ def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-681")
 def test_tc_icache_prefetchpipe_s2_pressure(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -812,6 +929,9 @@ def test_tc_icache_prefetchpipe_s2_pressure(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins(
     "BIN-682", "BIN-672", "BIN-702", "BIN-703", "BIN-704", "BIN-747"
 )
@@ -838,6 +958,9 @@ def test_tc_icache_prefetchpipe_flush_boundaries(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-668")
 def test_tc_icache_prefetchpipe_protection(prefetchpipe_env) -> None:
     env = prefetchpipe_env

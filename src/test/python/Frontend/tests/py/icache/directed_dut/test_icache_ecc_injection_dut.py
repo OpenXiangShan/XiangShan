@@ -1,5 +1,13 @@
 """Corrupt real SRAM parity; refetch through FTQ and require actual ECC coverage."""
 
+from env.runtime.frontend_init import (
+    FrontendInitConfig,
+    LoadProgram,
+    ProgramImage,
+    run_initialization_steps,
+)
+
+
 import os
 
 import pytest
@@ -18,16 +26,46 @@ pytestmark = pytest.mark.skipif(
     reason="requires compiled DUT",
 )
 
-@pytest.mark.parametrize("kind,bin_name", [
-    pytest.param("meta", "meta_code_mismatch_single_way", marks=pytest.mark.funcov_bins("BIN-641")),
-    pytest.param("data", "data_ecc_selected_valid_sram_bank", marks=pytest.mark.funcov_bins("BIN-642")),
-    pytest.param("multiway", "meta_multiway_hit", marks=pytest.mark.funcov_bins("BIN-770")),
-    pytest.param("unselected", "data_ecc_unselected_bank_ignored", marks=pytest.mark.funcov_bins("BIN-773")),
-])
+
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+@pytest.mark.parametrize(
+    "kind,bin_name",
+    [
+        pytest.param(
+            "meta",
+            "meta_code_mismatch_single_way",
+            marks=pytest.mark.funcov_bins("BIN-641"),
+        ),
+        pytest.param(
+            "data",
+            "data_ecc_selected_valid_sram_bank",
+            marks=pytest.mark.funcov_bins("BIN-642"),
+        ),
+        pytest.param(
+            "multiway", "meta_multiway_hit", marks=pytest.mark.funcov_bins("BIN-770")
+        ),
+        pytest.param(
+            "unselected",
+            "data_ecc_unselected_bank_ignored",
+            marks=pytest.mark.funcov_bins("BIN-773"),
+        ),
+    ],
+)
 def test_icache_sram_ecc_refetch(env, kind, bin_name):
     base = target = 0x80040000
     _initialize_cacheable_stream(env, base, latency=8)
-    env.load_program((0x13).to_bytes(4, "little") * 1024, target)
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=(0x13).to_bytes(4, "little") * 1024, base_addr=target
+                )
+            ),
+        ),
+    )
     env.backend_model.set_can_accept(0)
     agent = env.icache_ecc_agent
     beu_samples = []
@@ -52,7 +90,16 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         env.step(16)
         if kind == "multiway":
             second = target + 0x4000
-            env.load_program((0x13).to_bytes(4, "little") * 16, second)
+            run_initialization_steps(
+                env,
+                (
+                    LoadProgram(
+                        ProgramImage(
+                            payload=(0x13).to_bytes(4, "little") * 16, base_addr=second
+                        )
+                    ),
+                ),
+            )
             _drive_soft_prefetch(env, [second])
             dest_way = agent.wait_resident(second)
             env.step(8)
@@ -82,7 +129,9 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
                 break
             env.step(1)
         else:
-            raise AssertionError({"missing_new_ecc_hit": bin_name, "hits_before": hits_before})
+            raise AssertionError(
+                {"missing_new_ecc_hit": bin_name, "hits_before": hits_before}
+            )
         detail = env.functional_coverage.hit_detail_by_bin_id(bin_id)
         assert detail is not None and detail["evidence"], {"missing_ecc_evidence": bin_id}
         s2_evidence = detail["evidence"][-1]
@@ -98,11 +147,13 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
                 break
             env.step(1)
         else:
-            raise AssertionError({
-                "reason": "ECC error did not propagate from MainPipe to BEU",
-                "beu_errors": beu_samples[-8:],
-                "coverage": detail,
-            })
+            raise AssertionError(
+                {
+                    "reason": "ECC error did not propagate from MainPipe to BEU",
+                    "beu_errors": beu_samples[-8:],
+                    "coverage": detail,
+                }
+            )
         assert not env.monitor.get_errors()
     finally:
         agent.restore_all()

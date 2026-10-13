@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    FrontendInitConfig,
+)
+
 import os
 
 import pytest
@@ -165,6 +169,9 @@ def _wait_hit(env, bin_name: str, *, max_cycles: int) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-605")
 def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
     samples: list[dict] = []

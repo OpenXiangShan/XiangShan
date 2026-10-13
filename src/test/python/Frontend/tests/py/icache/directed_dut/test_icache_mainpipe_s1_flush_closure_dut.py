@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    FrontendInitConfig,
+)
+
 import os
 from collections.abc import Callable
 
@@ -398,6 +402,9 @@ def _drive_bpu_s3_until_s2_hit(
     }
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
 def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
     samples = _register_s1_observer(env)
@@ -440,6 +447,9 @@ def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
                 raise
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-769")
 def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
     samples = _register_s1_observer(env)
@@ -486,6 +496,9 @@ def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-620")
 def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
     _initialize_cacheable_stream(env, _BASE, latency=64)
@@ -525,6 +538,9 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-621", "BIN-706")
 def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
     samples = _register_s1_observer(env)
@@ -567,6 +583,9 @@ def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-675")
 def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
     samples = _register_s1_observer(env)
@@ -600,6 +619,9 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
     _wait_hit(env, "flush_cancels_registered_refill", max_cycles=1)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-645")
 def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
     samples = _register_s1_observer(env)

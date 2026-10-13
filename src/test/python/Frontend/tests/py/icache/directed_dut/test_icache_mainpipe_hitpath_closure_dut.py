@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    FrontendInitConfig,
+    LoadProgram,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
+
 import os
 import random
 from collections.abc import Callable, Sequence
@@ -202,20 +212,38 @@ def _load_fetch_loop(env, base: int, *, target_offset: int) -> int:
         payload[offset : offset + 4] = _NOP.to_bytes(4, "little")
     tail = int(target_offset) + 7 * 4
     payload[tail : tail + 4] = _jal(0, -7 * 4).to_bytes(4, "little")
-    env.load_program(bytes(payload), int(base))
+    run_initialization_steps(
+        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
+    )
     return target
 
 
 def _initialize_loop(env, base: int, *, target_offset: int, latency: int) -> list[dict[str, int]]:
     target = _load_fetch_loop(env, int(base), target_offset=int(target_offset))
-    env.icache_agent.configure(
-        hit_latency=int(latency),
-        miss_latency=int(latency),
-        miss_rate=1.0,
-        seed=0x6608 + int(target_offset),
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": int(latency),
+                    "miss_latency": int(latency),
+                    "miss_rate": 1.0,
+                    "seed": 0x6608 + int(target_offset),
+                },
+            ),
+        ),
     )
     samples = _register_observer(env)
-    env.initialize(reset_vector=int(base), bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=int(base),
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(int(base))
     _run_until(
@@ -227,6 +255,9 @@ def _initialize_loop(env, base: int, *, target_offset: int, latency: int) -> lis
     return samples
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-608")
 def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
     samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)
@@ -246,6 +277,9 @@ def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-609", "BIN-1133")
 def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
     samples = _initialize_loop(env, _CROSS_BASE, target_offset=0x34, latency=8)
@@ -362,11 +396,14 @@ def test_tc_icache_mainpipe_four_line_fixed_priority(env) -> None:
     finally:
         random.setstate(random_state)
 
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=96,
-        miss_rate=1.0,
-        seed=0x628,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 96, "miss_rate": 1.0, "seed": 0x628},
+            ),
+        ),
     )
     fencei = getattr(env.clock_reset, "io_fencei", None)
     assert fencei is not None, {"missing_signal": "io_fencei"}
@@ -399,11 +436,14 @@ def test_tc_icache_mainpipe_four_line_fixed_priority(env) -> None:
 @pytest.mark.funcov_bins("BIN-1138")
 def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     """Train varied dual requests, then replay them through MainPipe refills."""
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=2,
-        miss_rate=1.0,
-        seed=0x7138,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 2, "miss_rate": 1.0, "seed": 0x7138},
+            ),
+        ),
     )
     random_state = random.getstate()
     random.seed(1)
@@ -444,6 +484,9 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-613")
 def test_tc_icache_mainpipe_hit_response_stall(env) -> None:
     samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)

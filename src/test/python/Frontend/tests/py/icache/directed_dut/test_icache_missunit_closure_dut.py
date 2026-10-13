@@ -7,6 +7,16 @@ signals are sampled for transaction evidence; they are never driven or forced.
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    FrontendInitConfig,
+    LoadProgram,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
+
 import os
 from collections.abc import Callable
 
@@ -116,7 +126,17 @@ def _snapshot(env) -> dict[str, int | None]:
 
 
 def _load_nops(env, base: int, *, words: int = 4096) -> None:
-    env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=(_NOP.to_bytes(4, "little")) * int(words),
+                    base_addr=int(base),
+                )
+            ),
+        ),
+    )
 
 
 def _set_soft_prefetch(env, addresses: list[int]) -> None:
@@ -435,11 +455,19 @@ def _prepare(
 ) -> list[dict[str, int | None]]:
     samples: list[dict[str, int | None]] = []
     _load_nops(env, _BASE, words=words)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=int(latency),
-        miss_rate=1.0,
-        seed=0x686,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": int(latency),
+                    "miss_rate": 1.0,
+                    "seed": 0x686,
+                },
+            ),
+        ),
     )
     env.register_cycle_observer(
         lambda _cycle, active_env: samples.append(_snapshot(active_env))
@@ -447,7 +475,12 @@ def _prepare(
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = (
         1 if prefetch_enabled else 0
     )
-    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=_BASE, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.backend_model.set_can_accept(1 if backend_can_accept else 0)
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
@@ -495,6 +528,9 @@ def missunit_cleanup(env):
         _cleanup_missunit(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-690")
 def test_icache_missunit_request_and_concurrent_dut(env) -> None:
     samples = _prepare(
@@ -528,6 +564,9 @@ def test_icache_missunit_request_and_concurrent_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-691")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
@@ -577,6 +616,9 @@ def test_icache_missunit_distinct_parallel_allocate_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-688")
 def test_icache_missunit_fetch_capacity_dut(env) -> None:
     """Fill all demand MSHRs and hold one distinct request under backpressure."""
@@ -588,11 +630,19 @@ def test_icache_missunit_fetch_capacity_dut(env) -> None:
         backend_can_accept=False,
     )
     _wait_initial_refill(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=4096,
-        miss_rate=1.0,
-        seed=0x688,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 4096,
+                    "miss_rate": 1.0,
+                    "seed": 0x688,
+                },
+            ),
+        ),
     )
 
     redirect_index = 0
@@ -617,6 +667,9 @@ def test_icache_missunit_fetch_capacity_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-689")
 def test_icache_missunit_prefetch_capacity_dut(env) -> None:
     samples = _prepare(env, latency=16384)
@@ -639,6 +692,9 @@ def test_icache_missunit_prefetch_capacity_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-625", "BIN-693", "BIN-694", "BIN-698")
 def test_icache_missunit_acquire_priority_dut(env) -> None:
     _prepare(
@@ -682,6 +738,9 @@ def test_icache_missunit_acquire_priority_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-699", "BIN-700")
 @pytest.mark.xfail(
     strict=True,
@@ -812,6 +871,9 @@ def test_icache_missunit_dedup_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-702", "BIN-703", "BIN-705")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
@@ -893,6 +955,9 @@ def test_icache_missunit_redirect_unissued_prefetch_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-704", "BIN-1005", "BIN-706")
 @pytest.mark.xfail(
     strict=True,
@@ -969,6 +1034,9 @@ def test_icache_missunit_redirect_flush_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-686")
 def test_icache_missunit_fetch_allocate_dut(env) -> None:
     """Observe an uncontended demand allocation with prefetch disabled."""
@@ -982,6 +1050,9 @@ def test_icache_missunit_fetch_allocate_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-709", "BIN-710", "BIN-1005")
 def test_icache_missunit_fencei_dut(env) -> None:
     samples = _prepare(env, latency=128)
@@ -1006,6 +1077,9 @@ def test_icache_missunit_fencei_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-629", "BIN-707", "BIN-708", "BIN-711")
 def test_icache_missunit_fencei_unissued_dut(env) -> None:
     samples = _prepare(
@@ -1063,6 +1137,9 @@ def test_icache_missunit_fencei_unissued_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-712", "BIN-1007")
 def test_icache_missunit_fencei_redirect_unissued_dut(env) -> None:
     samples = _prepare(
@@ -1100,6 +1177,9 @@ def test_icache_missunit_fencei_redirect_unissued_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-1006", "BIN-1008")
 def test_icache_missunit_fencei_redirect_issued_dut(env) -> None:
     samples = _prepare(

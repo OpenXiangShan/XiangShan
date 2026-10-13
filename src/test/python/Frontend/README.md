@@ -49,6 +49,7 @@
 
 - 根目录负责稳定导入入口，不重复实现 `env/` 内逻辑。
 - `env/runtime/fixtures.py` 是 DUT fixture 与环境装配的真实实现位置。
+- `env/runtime/frontend_init.py` 是所有 Frontend 用例初始化操作的公共执行位置。
 - `env/api/__init__.py` 是公共 `api_Frontend_*` helper 的真实实现位置。
 - `env/api/request_apis.py` 是 API 下层请求式 helper 的真实实现位置。
 - `env/core/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
@@ -59,6 +60,97 @@
 - `env/monitors/` 承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
+
+## 公共初始化
+
+所有使用 `env` / `full_env` fixture 的用例，统一经
+`env/runtime/frontend_init.py` 中的 `initialize_frontend()` 初始化。
+`FrontendInitConfig` 描述每个用例需要的入口地址、复位周期、环境配置和准备操作。
+共享的是初始化代码；每个用例仍单独创建环境、内存、Agent 和检查器状态。
+
+fixture 先装配环境、时钟回调、检查器和覆盖率，再执行初始化计划。默认计划保持
+Bare 模式、`0x80000000` 入口和 20 个复位周期。入口和复位周期的优先级为：
+计划显式参数 > `TB_RESET_VECTOR` / `TB_RESET_CYCLES` > `EnvConfig.sequence`。
+地址须为非负、半字对齐，复位周期须为非负。
+
+初始化操作分为三个有明确时序的阶段：
+
+1. `before_reset`：在执行复位前准备程序、Agent 参数和内存属性。
+2. `before_release`：复位周期结束后、释放复位之前配置页表、CSR、权限或启用检查器。
+3. `after_reset`：释放复位并推进一个周期后执行后续准备。
+
+有首个活动时钟边沿要求的配置应放在 `before_release` 或更早阶段。
+PMP/PMA 的分布式 CSR 写入需要 DUT 时钟，若需跨复位后保留权限配置，应放在
+`before_release` 或 `after_reset`，按对应场景的原有时序选择。
+
+用例通过 pytest 的间接参数指定计划，例如：
+
+```python
+import pytest
+
+from env.core.transactions import ProgramImage
+from env.runtime.frontend_init import (
+    ConfigureAgent, FrontendInitConfig, LoadProgram, MapPage,
+)
+from env.support.env_config import SV39_ENV_CONFIG
+
+
+def fetch_init_config():
+    return FrontendInitConfig(
+        env_config=SV39_ENV_CONFIG,
+        reset_vector=0x40000000,
+        before_release=(
+            MapPage(0x40000, 0x80001, {"r": 1, "x": 1}),
+            LoadProgram(ProgramImage(b"\x13\x00\x00\x00" * 256, 0x80001000)),
+            ConfigureAgent("icache", {"miss_latency": 8}),
+        ),
+    )
+
+
+@pytest.mark.parametrize("frontend_init_config", [fetch_init_config], indirect=True)
+def test_fetch(env):
+    env.step(1000)
+    assert env.monitor.observations
+    assert not env.get_errors()
+```
+
+`frontend_init_config` 同时接受 `FrontendInitConfig` 实例和无参数工厂。
+`LoadProgramFile`、`LoadGoldenTrace`、`ClearPageTable`、`SetMemoryRegion`、
+`WritePmp`、`WritePma`、`WriteCsr`、`SetBackendPolicy`、`ConfigureTrigger` 和
+`PrepareTranslationScenario` 提供其他场景需要的准备操作。共享计划加载 golden trace
+时使用 `LoadGoldenTrace(path=...)` 或 `factory=...`，每次初始化获取独立 trace cursor。
+`AttachGoldenTrace` 用于保留用例本地 trace 对象身份。
+
+对于随机程序或多子场景，用例可选择 `FrontendInitConfig(defer=True)`，让 fixture
+完成环境装配并保持复位、不推进时钟，再在数据生成后调用同一个公共入口：
+
+```python
+from env.runtime.frontend_init import initialize_frontend
+
+
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True,
+)
+def test_generated_stream(env):
+    payload = b"\x13\x00\x00\x00" * 256  # 可以替换为用例生成的程序
+    initialize_frontend(env, FrontendInitConfig(
+        env_config=env.config,
+        before_reset=(LoadProgram(ProgramImage(payload, 0x80000000)),),
+    ))
+    env.step(1000)
+    assert env.monitor.observations
+    assert not env.get_errors()
+```
+
+已启动环境的热身或动态重配置使用同一文件中的
+`run_initialization_steps(env, steps)`，不会隐式再次复位。`env.initialize()` 和原有
+程序/trace 加载 API 保留兼容，并转发到公共模块。`env.reset()` 仍可作为测试运行期的
+复位刺激使用。
+
+`env.init_result` 保存最近一次启动结果，`env.init_history` 保存各次启动的阶段、周期
+和完成状态，并写入运行元数据；动态准备记录保存在 `env.init_preparation_history`。
+初始化失败会保留部分执行记录并抛出原异常。再次初始化不重复装配时钟回调，也不
+隐式清空已有错误或累计覆盖率。
 
 ## 阅读建议
 

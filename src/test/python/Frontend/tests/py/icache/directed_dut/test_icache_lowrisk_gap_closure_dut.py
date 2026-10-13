@@ -6,6 +6,17 @@ It does not force internal MSHR, queue, ready, or coverage-model state.
 
 from __future__ import annotations
 
+from env.runtime.frontend_init import (
+    ConfigureAgent,
+    FrontendInitConfig,
+    LoadProgram,
+    PrepareTranslationScenario,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
+
+
 import os
 
 import pytest
@@ -13,7 +24,6 @@ import pytest
 from env.sequences import (
     WayLookupCapacitySequence,
     TranslationScenario,
-    TranslationScenarioBuilder,
 )
 from env.sequences import TranslationPmpPmaEntry
 from env.funcov.py.icache.icache_waylookup_funcov import (
@@ -226,12 +236,33 @@ _IFU_CACHEABLE_REQ_VALID = (
 
 
 def _load_nops(env, base: int, *, words: int = 512) -> None:
-    env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=(_NOP.to_bytes(4, "little")) * int(words),
+                    base_addr=int(base),
+                )
+            ),
+        ),
+    )
 
 
 def _load_idle_loop(env, base: int) -> None:
     """Keep the reset-vector stream in one line while the directed probe runs."""
-    env.load_program(_jal(0, 0).to_bytes(4, "little") + _NOP.to_bytes(4, "little") * 255, int(base))
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=_jal(0, 0).to_bytes(4, "little")
+                    + _NOP.to_bytes(4, "little") * 255,
+                    base_addr=int(base),
+                )
+            ),
+        ),
+    )
 
 
 def _jal(rd: int, offset: int) -> int:
@@ -265,7 +296,9 @@ def _load_same_set_jump_loop(
         branch = target + int(segment_lines) * 64 - 4
         offset = branch - int(base)
         payload[offset : offset + 4] = _jal(0, next_target - branch).to_bytes(4, "little")
-    env.load_program(bytes(payload), int(base))
+    run_initialization_steps(
+        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
+    )
     return targets
 
 
@@ -580,6 +613,9 @@ def lowrisk_cleanup(env):
     _set_predictors(env, True)
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-685")
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000
@@ -609,21 +645,44 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins(
-    "BIN-655", "BIN-656", "BIN-657", "BIN-663", "BIN-677",
-    "BIN-661", "BIN-778", "BIN-779", "BIN-780"
+    "BIN-655",
+    "BIN-656",
+    "BIN-657",
+    "BIN-663",
+    "BIN-677",
+    "BIN-661",
+    "BIN-778",
+    "BIN-779",
+    "BIN-780",
 )
 def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
     _load_nops(env, base, words=512)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6255,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6255,
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
 
@@ -645,6 +704,9 @@ def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-674", "BIN-602")
 def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
@@ -711,19 +773,35 @@ def test_icache_mainpipe_s0_entry_data_backpressure_dut(lowrisk_cleanup) -> None
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-610")
 def test_icache_mainpipe_single_bank_range_dut(env) -> None:
     base = 0x8008_0000
     target = base + 0x08
 
     _load_nops(env, base, words=512)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=16,
-        miss_rate=1.0,
-        seed=0x6610,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 16,
+                    "miss_rate": 1.0,
+                    "seed": 0x6610,
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=target, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=target, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(target)
 
@@ -733,11 +811,19 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
         max_cycles=1024,
         label="initial target line refill",
     )
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=16,
-        miss_rate=0.0,
-        seed=0x6611,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 16,
+                    "miss_rate": 0.0,
+                    "seed": 0x6611,
+                },
+            ),
+        ),
     )
     env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
     _run_until(
@@ -752,9 +838,26 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins(
-    "BIN-686", "BIN-690", "BIN-691", "BIN-692", "BIN-699", "BIN-705", "BIN-1005",
-    "BIN-707", "BIN-708", "BIN-709", "BIN-710", "BIN-711", "BIN-712", "BIN-1006", "BIN-1007", "BIN-1008",
+    "BIN-686",
+    "BIN-690",
+    "BIN-691",
+    "BIN-692",
+    "BIN-699",
+    "BIN-705",
+    "BIN-1005",
+    "BIN-707",
+    "BIN-708",
+    "BIN-709",
+    "BIN-710",
+    "BIN-711",
+    "BIN-712",
+    "BIN-1006",
+    "BIN-1007",
+    "BIN-1008",
 )
 def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     return _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup)
@@ -783,18 +886,29 @@ def _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-746")
 def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8006_0000
     _load_nops(env, base, words=8192)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=1.0,
-        seed=0x746,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 24, "miss_rate": 1.0, "seed": 0x746},
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     env.step(32)
@@ -809,8 +923,16 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins(
-    "BIN-720", "BIN-726", "BIN-727", "BIN-728", "BIN-735", "BIN-777",
+    "BIN-720",
+    "BIN-726",
+    "BIN-727",
+    "BIN-728",
+    "BIN-735",
+    "BIN-777",
 )
 def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     """Build normal WayLookup entries, then exercise read-side backpressure."""
@@ -836,11 +958,14 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     # which is the RTL's intended single-service fallback condition.
     _pulse_fencei(env)
     _set_predictors(env, False)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=1.0,
-        seed=0x727,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 24, "miss_rate": 1.0, "seed": 0x727},
+            ),
+        ),
     )
     _wait_funcov_hit(
         env,
@@ -866,6 +991,9 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-733")
 def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
@@ -879,6 +1007,9 @@ def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-731")
 def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
     """Keep the old tag queued while a same-set replacement refill returns."""
@@ -891,13 +1022,21 @@ def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
         stride=same_set_stride,
         line_count=4,
     )
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=48,
-        miss_rate=1.0,
-        seed=0x731,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 48, "miss_rate": 1.0, "seed": 0x731},
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     _set_predictors(env, True)
     env.backend_model.set_can_accept(1)
 
@@ -945,11 +1084,19 @@ def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
     # response.  Soft prefetch does not add another WayLookup entry.
     replacement = base + 4 * same_set_stride
     request_phase = int(env.current_cycle)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=512,
-        miss_rate=1.0,
-        seed=0x731,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 512,
+                    "miss_rate": 1.0,
+                    "seed": 0x731,
+                },
+            ),
+        ),
     )
     for _ in range(64):
         _drive_soft_prefetch(env, [replacement])
@@ -1017,19 +1164,30 @@ def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-734")
 def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> None:
     """Update wins over a pending write, which resumes after the update."""
     env = lowrisk_cleanup
     base = 0x8070_0000
     _load_nops(env, base, words=32768)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x734,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 32, "miss_rate": 1.0, "seed": 0x734},
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     _wait_funcov_hit(
@@ -1042,19 +1200,30 @@ def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> Non
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-744")
 def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
     """Flush immediately after an accepted write and discard the old entry."""
     env = lowrisk_cleanup
     base = 0x8080_0000
     _load_nops(env, base, words=32768)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=1.0,
-        seed=0x744,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 24, "miss_rate": 1.0, "seed": 0x744},
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     _run_until(
@@ -1082,8 +1251,17 @@ def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins(
-    "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741", "BIN-762",
+    "BIN-737",
+    "BIN-738",
+    "BIN-739",
+    "BIN-1010",
+    "BIN-740",
+    "BIN-741",
+    "BIN-762",
 )
 def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     """Drive a cacheable instruction page fault through the existing PTW model."""
@@ -1109,7 +1287,9 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="cacheline refill before ITLB exception",
     )
-    state = TranslationScenarioBuilder(env).build(scenario)
+    state = run_initialization_steps(
+        env, (PrepareTranslationScenario(scenario, arm=False),)
+    )[0].value
 
     env.monitor.clear()
     env.monitor.set_expected_pc(va)
@@ -1188,6 +1368,9 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-763")
 def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     """Present a cacheable line with execute permission denied by the PMP model."""
@@ -1240,7 +1423,9 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="cacheline refill before PMP exception",
     )
-    state = TranslationScenarioBuilder(env).build(scenario)
+    state = run_initialization_steps(
+        env, (PrepareTranslationScenario(scenario, arm=False),)
+    )[0].value
 
     env.monitor.clear()
     env.monitor.set_expected_pc(va)
@@ -1265,9 +1450,10 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins(
-    "BIN-753", "BIN-757", "BIN-758", "BIN-1011"
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
 )
+@pytest.mark.funcov_bins("BIN-753", "BIN-757", "BIN-758", "BIN-1011")
 @pytest.mark.funcov_closure_pending
 @pytest.mark.xfail(
     strict=True,
@@ -1284,13 +1470,21 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     # PrefetchPipe excludes them from WayLookup writes.
     base = 0x8000_0000
     _load_nops(env, base, words=4096)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x680,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {"hit_latency": 1, "miss_latency": 32, "miss_rate": 1.0, "seed": 0x680},
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
@@ -1329,19 +1523,42 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-759", "BIN-760")
 def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
     """Fill adjacent lines, then let the normal sequential stream exercise clean hits."""
     env = lowrisk_cleanup
     base = 0x800A_0000
-    env.load_program(_trained_short_block_loop(), base)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=1.0,
-        seed=0x6275,
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(payload=_trained_short_block_loop(), base_addr=base)
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 24,
+                    "miss_rate": 1.0,
+                    "seed": 0x6275,
+                },
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     _run_until(
@@ -1350,11 +1567,19 @@ def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="two cacheline refills for hit-path sequence",
     )
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=0.0,
-        seed=0x6275,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 24,
+                    "miss_rate": 0.0,
+                    "seed": 0x6275,
+                },
+            ),
+        ),
     )
     _wait_funcov_hits(
         env,
@@ -1368,27 +1593,58 @@ def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-761")
 def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
     """Train the existing two-fetch loop with both requested lines resident."""
     env = lowrisk_cleanup
     base = 0x8000_0000
-    env.load_program(_trained_short_block_loop(), base)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=1.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(payload=_trained_short_block_loop(), base_addr=base)
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 24,
+                    "miss_rate": 1.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     _warm_two_fetch_execution(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=24,
-        miss_rate=0.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 24,
+                    "miss_rate": 0.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
     )
     _wait_funcov_hit(
         env,
@@ -1400,19 +1656,35 @@ def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-765", "BIN-767", "BIN-768")
 def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
     _load_nops(env, base, words=32768)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
     )
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     # Keep the first FTQ context live throughout the directed redirects.  This
     # prevents the synthetic redirect from selecting a committed FTQ context
     # while the ICache is deliberately stalled on refills.
@@ -1430,11 +1702,19 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env.monitor.set_expected_pc(target)
     # The first refill is intentionally forced to miss.  Subsequent soft
     # prefetches must see the refilled line as an SRAM hit.
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=0.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 0.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
     )
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
     for _ in range(32):
@@ -1453,11 +1733,19 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     # the demand redirect path: a one-cycle soft-prefetch pulse can be consumed
     # by a stale post-fence lookup without ever reaching MissUnit.  The fifth
     # demand tag is then the replacement candidate.
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
     )
     same_set_stride = 0x4000
     for index in range(1, 5):
@@ -1506,7 +1794,14 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     # sequence for the same line.
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
     loop_base = base + 0x1_8000
-    env.load_program(_trained_short_block_loop(), loop_base)
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(payload=_trained_short_block_loop(), base_addr=loop_base)
+            ),
+        ),
+    )
     env.backend_model.set_can_accept(1)
     env.monitor.clear()
     env.monitor.set_expected_pc(loop_base)
@@ -1520,11 +1815,19 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="stable trained short-block loop",
     )
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6276,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6276,
+                },
+            ),
+        ),
     )
     _pulse_fencei(env)
     _wait_funcov_hit(
@@ -1538,6 +1841,9 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-1139")
 @pytest.mark.xfail(
     strict=True,
@@ -1563,14 +1869,32 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
     # A 32-bit NOP beginning at byte 62 forces the fetch block at +0x20 to
     # consume bytes from both cachelines.
     payload[62:66] = _NOP.to_bytes(4, "little")
-    env.load_program(bytes(payload), target)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=48,
-        miss_rate=1.0,
-        seed=0x1139,
+    run_initialization_steps(
+        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=target)),)
     )
-    env.initialize(reset_vector=idle_base, bare_mode=True, reset_cycles=20)
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 48,
+                    "miss_rate": 1.0,
+                    "seed": 0x1139,
+                },
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=idle_base,
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(idle_base)
     _set_predictors(env, False)
@@ -1621,11 +1945,19 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
         "resident_way": int(resident_way),
     }
 
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=96,
-        miss_rate=1.0,
-        seed=0x1139,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 96,
+                    "miss_rate": 1.0,
+                    "seed": 0x1139,
+                },
+            ),
+        ),
     )
     fetch_pc = target + 0x20
     env.monitor.clear()
@@ -1654,6 +1986,9 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-759")
 @pytest.mark.xfail(
     strict=True,
@@ -1667,13 +2002,26 @@ def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
     _load_nops(env, base, words=256)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6277,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6277,
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
     initial_resp_line_count = int(env.icache_agent.get_stats()["resp_line_count"])
@@ -1685,11 +2033,19 @@ def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
         max_cycles=2048,
         label="initial cache line refill",
     )
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=0.0,
-        seed=0x6278,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 0.0,
+                    "seed": 0x6278,
+                },
+            ),
+        ),
     )
     env.backend_model.inject_redirect(base, "ctrl_redirect", delay_cycles=0)
     _wait_funcov_hit(
@@ -1702,6 +2058,9 @@ def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
 @pytest.mark.funcov_bins("BIN-812", "BIN-816")
 @pytest.mark.xfail(
     strict=True,
@@ -1715,13 +2074,26 @@ def test_ifu_cacheable_backend_redirect_blocks_pending_response(lowrisk_cleanup)
     env = lowrisk_cleanup
     base = 0x8004_0000
     _load_nops(env, base, words=512)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=32,
-        miss_rate=1.0,
-        seed=0x6278,
+    run_initialization_steps(
+        env,
+        (
+            ConfigureAgent(
+                "icache",
+                {
+                    "hit_latency": 1,
+                    "miss_latency": 32,
+                    "miss_rate": 1.0,
+                    "seed": 0x6278,
+                },
+            ),
+        ),
     )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        ),
+    )
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
 

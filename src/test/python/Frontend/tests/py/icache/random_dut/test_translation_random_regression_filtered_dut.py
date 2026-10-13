@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from env.runtime.frontend_init import FrontendInitConfig
+
 import os
 
 import pytest
@@ -45,7 +47,12 @@ def _has_expected_fault(scenario) -> bool:
     return False
 
 
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+@pytest.mark.skipif(
+    not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+)
 def test_translation_constrained_random_filtered_stream_dut(env) -> None:
     seed = _read_int("TB_TRANSLATION_RANDOM_SEED", "0x5a390001")
     count = _read_int("TB_TRANSLATION_RANDOM_COUNT", "6")
