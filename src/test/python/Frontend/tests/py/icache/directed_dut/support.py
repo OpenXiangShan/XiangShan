@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from env.runtime.frontend_init import (
     ConfigureAgent,
+    FrontendInitConfig,
+    LoadProgram,
+    ProgramImage,
+    initialize_frontend,
     run_initialization_steps,
 )
 
@@ -32,6 +36,24 @@ _BPU_S0_WINDOW_SIGNALS = {
     "s1_ready": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_ready",
         "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s1_ready",
+    ),
+}
+
+
+_BPU_TRAINING_BASE = 0x80000000
+_BPU_TRAINING_BLOCK_BYTES = 64
+_BPU_TRAINING_BLOCK_COUNT = 8
+_BPU_TRAINING_CNOP = 0x0001
+_BPU_TRAINING_SIGNALS = {
+    "ftq_valid": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_valid",
+    ),
+    "ftq_ready": (
+        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_ready",
+    ),
+    "ftq_req1_valid": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
     ),
 }
 
@@ -190,15 +212,119 @@ def drive_soft_prefetch(env, addresses: Iterable[int]) -> None:
     clear_soft_prefetch(env)
 
 
-def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
-    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
-    from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
-        _load_and_reset as _load_two_fetch_loop,
-        _warm_frontend_execution as _warm_two_fetch_execution,
+def _encode_c_j(offset: int) -> int:
+    """Encode the RISC-V compressed jump used by the training stream."""
+    assert int(offset) % 2 == 0
+    assert -(1 << 11) <= int(offset) < (1 << 11)
+    imm = int(offset) & 0xFFF
+    return (
+        (0b101 << 13)
+        | (((imm >> 11) & 0x1) << 12)
+        | (((imm >> 4) & 0x1) << 11)
+        | (((imm >> 8) & 0x3) << 9)
+        | (((imm >> 10) & 0x1) << 8)
+        | (((imm >> 6) & 0x1) << 7)
+        | (((imm >> 7) & 0x1) << 6)
+        | (((imm >> 1) & 0x7) << 3)
+        | (((imm >> 5) & 0x1) << 2)
+        | 0b01
     )
 
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
+
+def _build_bpu_training_program() -> bytes:
+    """Build eight 64-byte blocks with a taken C.J at byte offset 30.
+
+    Each jump skips the remaining 32 bytes; the final jump returns to the
+    first block. Repetition trains predictions without register execution.
+    """
+    halfwords: list[int] = []
+    for block in range(_BPU_TRAINING_BLOCK_COUNT):
+        halfwords.extend([_BPU_TRAINING_CNOP] * 15)
+        branch_pc = block * _BPU_TRAINING_BLOCK_BYTES + 30
+        target = (
+            (block + 1) * _BPU_TRAINING_BLOCK_BYTES
+            if block + 1 < _BPU_TRAINING_BLOCK_COUNT
+            else 0
+        )
+        halfwords.append(_encode_c_j(target - branch_pc))
+        halfwords.extend([_BPU_TRAINING_CNOP] * 16)
+    assert len(halfwords) * 2 == _BPU_TRAINING_BLOCK_BYTES * _BPU_TRAINING_BLOCK_COUNT
+    return b"".join(int(halfword).to_bytes(2, "little") for halfword in halfwords)
+
+
+def _read_bpu_training_signal(recorder, key: str) -> int:
+    names = _BPU_TRAINING_SIGNALS[key]
+    value = recorder._read_first_dut_signal(recorder.env.dut, names)
+    assert value is not None, {
+        "reason": "required directed-flow observation is unavailable",
+        "label": str(key),
+        "candidates": list(names),
+    }
+    return int(value)
+
+
+def _warm_bpu_training_stream(env, *, max_cycles: int | None = None) -> dict:
+    recorder = getattr(env, "functional_coverage", None)
+    assert recorder is not None, "directed flow tests require the canonical funcov recorder"
+    assert getattr(recorder, "env", None) is env
+    if max_cycles is None:
+        max_cycles = cycle_limit("TB_TWO_FETCH_TRAIN_MAX_CYCLES", 4000)
+    for _ in range(max(0, int(max_cycles))):
+        env.step(1)
+        dual_request_fire = (
+            _read_bpu_training_signal(recorder, "ftq_valid") == 1
+            and _read_bpu_training_signal(recorder, "ftq_ready") == 1
+            and _read_bpu_training_signal(recorder, "ftq_req1_valid") == 1
+        )
+        if (
+            int(env.backend_model.get_stats().get("commit_count", 0)) >= 1
+            and int(env.icache_agent.get_stats().get("req_count", 0)) >= 4
+            and recorder.key_hit("ifu_cfi_decode_type", "jal")
+            and recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
+            and recorder.key_hit("two_fetch_delivery", "dual_fire")
+            and dual_request_fire
+        ):
+            return {
+                "cycle": int(env.current_cycle),
+                "icache": env.icache_agent.get_stats(),
+                "backend": env.backend_model.get_stats(),
+            }
+    raise AssertionError(
+        {
+            "reason": "short-block loop did not reach dual-eligible frontend execution",
+            "max_cycles": int(max_cycles),
+            "icache": env.icache_agent.get_stats(),
+            "backend": env.backend_model.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        }
+    )
+
+
+def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
+    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    payload=_build_bpu_training_program(), base_addr=_BPU_TRAINING_BASE
+                )
+            ),
+        ),
+    )
+    initialize_frontend(
+        env,
+        FrontendInitConfig(
+            env_config=env.config,
+            reset_vector=_BPU_TRAINING_BASE,
+            bare_mode=True,
+            reset_cycles=20,
+        ),
+    )
+    env.monitor.clear()
+    env.monitor.set_expected_pc(_BPU_TRAINING_BASE)
+
+    _warm_bpu_training_stream(env)
     run_initialization_steps(
         env,
         (

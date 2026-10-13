@@ -18,6 +18,13 @@ waits, soft-prefetch operations, predictor controls, and ICache-specific DUT
 adapters. Test modules keep scenario signal maps, sampling windows, stimulus
 timing, timeout evidence, and assertions.
 
+The shared BPU s3 stream is owned by this directory's `support.py`, including
+its instruction generator, FTQ observation aliases, and bounded training
+wait. It loads through `run_initialization_steps` and starts through
+`initialize_frontend`, without importing helpers from another test module.
+Keep the load/reset/warmup/agent-configuration order and training predicates
+when changing this stream.
+
 Keep the dependency direction as `test scenario -> ICache support -> generic
 DUT support`. Do not make the generic layer import an ICache module. A test
 module may retain a small compatibility wrapper when its public helper name is
