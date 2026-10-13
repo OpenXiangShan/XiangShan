@@ -13,6 +13,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa.Extensions.{ExtBase, Zicfiss}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import xiangshan.backend.vector.Decoder.DecodeFields.ScalarMultiUopDecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
 import xiangshan.backend.vector.Decoder.InstPattern._
@@ -61,7 +62,7 @@ class ScalarMultiUopDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[Ext
   private val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++
     lsrc1Fields ++ lsrc2Fields ++ lsrc3Fields ++ ldestFields ++
     immFields ++ commitFields ++ Seq(
-      numUopField, NumWbField, CanRobCompressField,
+      numUopField, ScalarNumWbField, ScalarCanRobCompressField, IsSsamoswapField,
       PrivExceptionCauseField, FrmRenField, FFlagsWenField, NeedFsField,
     )
 
@@ -86,7 +87,13 @@ class ScalarMultiUopDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[Ext
   }
 
   private val (privExceptionII, privExceptionVI) =
-    privExceptions(result(PrivExceptionCauseField), in.fromCSR, HasCMO, HasShadowStack)
+    privExceptions(result(PrivExceptionCauseField), in.fromCSR, HasCMO)
+  private val ssamoswapExceptionII = if (HasShadowStack) {
+    result(IsSsamoswapField) && in.fromCSR.illegalInst.ssamoswap.getOrElse(false.B)
+  } else false.B
+  private val ssamoswapExceptionVI = if (HasShadowStack) {
+    result(IsSsamoswapField) && in.fromCSR.virtualInst.ssamoswap.getOrElse(false.B)
+  } else false.B
   // The top-level selection only consumes this count when the first uop is valid.
   out.uopNum := result(numUopField) +& 1.U
 
@@ -109,8 +116,8 @@ class ScalarMultiUopDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[Ext
     out.uop(i).bits.selImm := immInfos(i).selImm
     out.uop(i).bits.imm := imms(i)
     out.uop(i).bits.commitType := commitTypes(i)
-    out.uop(i).bits.canRobCompress := result(CanRobCompressField)
-    out.uop(i).bits.numWb := result(NumWbField)
+    out.uop(i).bits.canRobCompress := result(ScalarCanRobCompressField)
+    out.uop(i).bits.numWb := result(ScalarNumWbField)
     out.uop(i).bits.uopIdx := i.U
     out.uop(i).bits.isFirstUop := (i == 0).B
     out.uop(i).bits.isLastUop := i.U === result(numUopField)
@@ -120,9 +127,9 @@ class ScalarMultiUopDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[Ext
     out.uop(i).bits.frmIll := instFields.RM === 5.U || instFields.RM === 6.U
     val frmExceptionII = out.uop(i).bits.frmRen &&
       (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
-    out.uop(i).bits.exceptionII := privExceptionII || frmExceptionII ||
+    out.uop(i).bits.exceptionII := privExceptionII || ssamoswapExceptionII || frmExceptionII ||
       (result(NeedFsField) && in.fromCSR.illegalInst.fsIsOff)
-    out.uop(i).bits.exceptionVI := privExceptionVI
+    out.uop(i).bits.exceptionVI := privExceptionVI || ssamoswapExceptionVI
   }
 }
 
@@ -137,7 +144,7 @@ object ScalarMultiUopDecodeChannel {
     insts.map(UopInfoFieldSimple.genUopSeq(_, extensions).length).distinct.sorted
 
   private def privExceptions(cause: PrivExceptionCause.Type, fromCSR: CSRToDecode,
-    hasCMO: Boolean, hasShadowStack: Boolean): (Bool, Bool) = {
+    hasCMO: Boolean): (Bool, Bool) = {
     val sources = Seq(
       (PrivExceptionCause.sfenceVMA,  fromCSR.illegalInst.sfenceVMA,              fromCSR.virtualInst.sfenceVMA),
       (PrivExceptionCause.sfencePart, fromCSR.illegalInst.sfencePart,             fromCSR.virtualInst.sfencePart),
@@ -152,10 +159,7 @@ object ScalarMultiUopDecodeChannel {
       (PrivExceptionCause.cboI,       !hasCMO.B || fromCSR.illegalInst.cboI,      fromCSR.virtualInst.cboI),
       (PrivExceptionCause.aes64ks1i,  true.B,                                     false.B),
       (PrivExceptionCause.amocasQ,    true.B,                                     false.B),
-    ) ++ (if (hasShadowStack) Seq(
-      (PrivExceptionCause.ssamoswap, fromCSR.illegalInst.ssamoswap.getOrElse(false.B),
-        fromCSR.virtualInst.ssamoswap.getOrElse(false.B)),
-    ) else Seq.empty)
+    )
     val illegal = Mux1H(sources.map { case (c, ii, _) => (cause === c) -> ii })
     val virtual = Mux1H(sources.map { case (c, _, vi) => (cause === c) -> vi })
     (illegal, virtual)
