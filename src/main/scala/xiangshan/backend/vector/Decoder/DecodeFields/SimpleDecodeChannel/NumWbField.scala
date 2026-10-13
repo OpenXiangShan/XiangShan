@@ -19,8 +19,6 @@ object NumWbField extends DecodeField[InstPattern, UInt] {
 
   override def genTable(instP: InstPattern): BitPat = {
     val numWb = instP match {
-      case _: SspushInstPattern => 6 // STA and STD write back separately
-      case _: SspopchkInstPattern => 3
       case int: IntInstPattern =>
         int match {
           case s: IntSTypePattern => s match {

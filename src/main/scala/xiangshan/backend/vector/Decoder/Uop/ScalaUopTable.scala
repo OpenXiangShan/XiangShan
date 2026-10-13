@@ -494,22 +494,11 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
 
     val tableZacas64 = ZACAS64Type.mapUopcodes(
-      _.AMOCAS_Q -> Seq(
-        withMetadata(amocas_q_0, UopMetadata(src1 = LogicalRegSel.Zero)),
-        withMetadata(amocas_q_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
-        withMetadata(amocas_q_2, UopMetadata(src1 = LogicalRegSel.Zero, src2 = LogicalRegSel.Rs2(1))),
-        withMetadata(amocas_q_3, UopMetadata(src1 = LogicalRegSel.Zero, src2 = LogicalRegSel.RdOffset(1), dest = LogicalRegSel.RdOffset(1))),
-      ),
+      _.AMOCAS_Q -> Seq(amocas_q_0, amocas_q_1, amocas_q_2, amocas_q_3),
     )
     val tableZacas = ZACASType.mapUopcodes(
-      _.AMOCAS_D -> Seq(
-        withMetadata(amocas_d_0, UopMetadata(src1 = LogicalRegSel.Zero)),
-        withMetadata(amocas_d_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
-      ),
-      _.AMOCAS_W -> Seq(
-        withMetadata(amocas_w_0, UopMetadata(src1 = LogicalRegSel.Zero)),
-        withMetadata(amocas_w_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
-      ),
+      _.AMOCAS_D -> Seq(amocas_d_0, amocas_d_1),
+      _.AMOCAS_W -> Seq(amocas_w_0, amocas_w_1),
     )
 
     tableZacas ++ tableZacas64
@@ -519,14 +508,8 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.ZABHA_ZACASType
 
     ZABHA_ZACASType.mapUopcodes(
-      _.AMOCAS_B -> Seq(
-        withMetadata(amocas_b_0, UopMetadata(src1 = LogicalRegSel.Zero)),
-        withMetadata(amocas_b_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
-      ),
-      _.AMOCAS_H -> Seq(
-        withMetadata(amocas_h_0, UopMetadata(src1 = LogicalRegSel.Zero)),
-        withMetadata(amocas_h_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
-      ),
+      _.AMOCAS_B -> Seq(amocas_b_0, amocas_b_1),
+      _.AMOCAS_H -> Seq(amocas_h_0, amocas_h_1),
     )
   }
 

@@ -582,7 +582,6 @@ object Opcode {
 
     val difftestLduOpMap: Seq[(BitPat, UInt)] = Seq(
       LduOp.ls    -> LduDifftestOpcode.ls   ,
-      (SCALAR1 ## nonH ## nonX ## sign) -> LduDifftestOpcode.ls,
       LduOp.lu    -> LduDifftestOpcode.lu   ,
       LduOp.hlvs  -> LduDifftestOpcode.hlvs ,
       LduOp.hlvu  -> LduDifftestOpcode.hlvu ,
