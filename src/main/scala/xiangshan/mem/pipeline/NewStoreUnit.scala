@@ -288,6 +288,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
     // unalign head sent tlb info to unalign tail
     val unalignHeadTlbHit = Input(Bool())
+    val unalignHeadTlbExcp = Input(Bool())
 
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
@@ -403,12 +404,19 @@ class StoreUnitS1(param: ExeUnitParams)(
     * the second physical address. A younger unalign head is killed like illegalIssue and reports a miss.
     *
     * A illegalIssue means the request is out of range and must be replayed by RS.
+    *
+    * If the head hit in the TLB with an exception, the store traps with the head's exception (S3
+    * prefers it), so a TLB miss of the tail must not replay the store. Replaying livelocks when both
+    * parts need a guest-page-fault GPA: the TLB keeps the GPA of a single VPN (need_gpa_vpn), and the
+    * head and the tail take it from each other on every replay, so they never hit in the same pass.
+    * The tail has no paddr then, so it is still reported to the StoreQueue as a TLB miss.
     */
   val forceReplay = isScalar && (illegalIssue || youngCrossHead)
   val canFeedBack = isScalar && !isUnalignHead
   val feedBackValid = fire && canFeedBack || forceReplay
   val unalignBothTlbHit = tlbHit && io.unalignHeadTlbHit
-  val unalignTailHit = unalignBothTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
+  val unalignTailSkipTlb = isUnalignTail && io.unalignHeadTlbExcp && !tlbHit
+  val unalignTailHit = unalignBothTlbHit && (!cross4KPage || io.toUnalignQueue.ready) || unalignTailSkipTlb
   val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit) && !forceReplay
   val needRSReplay = feedBackValid && !feedBackHit
   val toUnalignQueueValid = fire && isUnalignTail && cross4KPage && unalignBothTlbHit
@@ -434,7 +442,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   }
   toSqAddr.paddr := Mux(isCbo, alignVWordAddr(paddr), paddr)
   toSqAddr.vaddr := Mux(isCbo, alignVWordAddr(vaddr), vaddr)
-  toSqAddr.tlbMiss := !feedBackHit
+  toSqAddr.tlbMiss := !feedBackHit || unalignTailSkipTlb
   toSqAddr.mask := mask
   toSqAddr.size := Mux(isCbo, MemorySize.QB.U, size)
   toSqAddr.wlineflag := isCbo
@@ -566,6 +574,7 @@ class StoreUnitS2(param: ExeUnitParams)(
 
     // unalign head sent tlb info to unalign tail
     val unalignHeadTlbHit = Output(Bool())
+    val unalignHeadTlbExcp = Output(Bool())
 
     // Prefetch Train
     val prefetchTrainHint = Output(Bool())
@@ -701,6 +710,8 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
 
   io.unalignHeadTlbHit := fire && isUnalignHead && tlbHit
+  // S1 exception of the head (TLB pf/af/gpf or trigger), registered from S1: no PMP path into S1
+  io.unalignHeadTlbExcp := fire && isUnalignHead && tlbHit && in.hasException.get
 
   // Perf counters
   XSPerfAccumulate("s2_valid", pipeIn.valid)
@@ -906,6 +917,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s4 <> s3
   s0.io.unalignTail <> s1.io.unalignTail
   s1.io.unalignHeadTlbHit := s2.io.unalignHeadTlbHit
+  s1.io.unalignHeadTlbExcp := s2.io.unalignHeadTlbExcp
   s3.io.unalignConcat <> s4.io.unalignConcat
 
   // IO wiring
