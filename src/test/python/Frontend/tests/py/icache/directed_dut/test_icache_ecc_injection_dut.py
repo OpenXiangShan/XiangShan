@@ -16,8 +16,8 @@ from tests.py.icache.directed_dut.support import (
     drive_soft_prefetch as _drive_soft_prefetch,
     read_dut_signal,
 )
-from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
-    _initialize_cacheable_stream,
+from tests.py.icache.directed_dut.mainpipe_support import (
+    initialize_cacheable_stream as _initialize_cacheable_stream,
 )
 
 

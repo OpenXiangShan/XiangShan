@@ -1,7 +1,7 @@
 """Directed DUT closure for ICache MainPipe partial functional coverage.
 
-This file intentionally reuses helper code from the existing jiabowen DUT
-tests without modifying that source file.
+Scenario preparation and transaction observations are owned by local support
+modules and use the shared Frontend environment interfaces.
 """
 
 from __future__ import annotations
@@ -19,23 +19,19 @@ from collections.abc import Callable
 import pytest
 from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, wait_until
 
-from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
-    _BASE,
-    _DUAL_BASE,
-    _completed_dual_transactions,
-    _initialize_cacheable_stream,
-    _load_two_fetch_loop,
-    _register_mainpipe_observer,
+from tests.py.icache.directed_dut.mainpipe_support import (
+    CACHEABLE_BASE as _BASE,
+    DUAL_FETCH_BASE as _DUAL_BASE,
+    completed_dual_transactions as _completed_dual_transactions,
+    initialize_cacheable_stream as _initialize_cacheable_stream,
+    load_two_fetch_loop as _load_two_fetch_loop,
+    register_mainpipe_observer as _register_mainpipe_observer,
 )
-from tests.py.zhaoxinran.uncache.test_instr_uncache_port_boundaries import (
-    _run_uncache_sv39_cross_page_rvi_uses_second_page_pma_path
-    as _run_cross_page_pma_path,
-    _run_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault
-    as _run_pmp_execute_denied,
-    _run_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page
-    as _run_sector_lane_refill,
-    _run_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests
-    as _run_pbmt_nc_redirect,
+from tests.py.icache.directed_dut.protection_scenarios import (
+    run_cross_page_pma_path as _run_cross_page_pma_path,
+    run_pmp_execute_denied as _run_pmp_execute_denied,
+    run_sector_lane_refill as _run_sector_lane_refill,
+    run_cacheable_pending_redirect_to_pbmt_nc as _run_pbmt_nc_redirect,
 )
 pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1",

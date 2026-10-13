@@ -39,14 +39,18 @@ from tests.py.icache.directed_dut.support import (
     wait_coverage_hits,
     wait_until,
 )
-from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
-    _initialize_cacheable_stream,
-    test_icache_trained_two_fetch_asymmetric_line_refill as _run_asymmetric_refill,
+from tests.py.icache.directed_dut.mainpipe_support import (
+    initialize_cacheable_stream as _initialize_cacheable_stream,
 )
-from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
-    _load_and_reset as _load_two_fetch_loop,
-    _trained_short_block_loop,
-    _warm_frontend_execution as _warm_two_fetch_execution,
+from tests.py.icache.directed_dut.refill_scenarios import (
+    run_asymmetric_dual_refill as _run_asymmetric_refill,
+)
+from tests.py.icache.directed_dut.support import (
+    load_and_reset_bpu_training_stream as _load_two_fetch_loop,
+    warm_bpu_training_stream as _warm_two_fetch_execution,
+)
+from tests.py.icache.directed_dut.programs import (
+    build_bpu_training_program as _trained_short_block_loop,
 )
 
 

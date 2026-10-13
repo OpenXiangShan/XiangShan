@@ -16,8 +16,8 @@ from env.funcov.py.icache.flush_from_bpu import (
     ftq_ptr_matches_or_before,
     ftq_ptr_is_strictly_after_current,
 )
-from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
-    _initialize_cacheable_stream,
+from tests.py.icache.directed_dut.mainpipe_support import (
+    initialize_cacheable_stream as _initialize_cacheable_stream,
 )
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,

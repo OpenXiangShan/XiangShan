@@ -18,12 +18,12 @@ from collections.abc import Callable, Sequence
 
 import pytest
 
-from tests.py.jiabowen.test_functional_coverage_baremode import (
-    _load_nop_program,
-    _warmup_commits,
+from tests.py.icache.directed_dut.mainpipe_support import (
+    load_nop_program as _load_nop_program,
+    warmup_commits as _warmup_commits,
 )
-from tests.py.zhaoxinran.test_multi_branch import (
-    test_multi_branch_random_positions as _run_multi_branch_positions,
+from tests.py.icache.directed_dut.branch_scenarios import (
+    run_multi_branch_random_positions as _run_multi_branch_positions,
 )
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,

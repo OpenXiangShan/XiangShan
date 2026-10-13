@@ -24,6 +24,12 @@ from tests.py.support.dut_support import (
 )
 
 
+from .programs import (
+    BPU_TRAINING_BASE as _BPU_TRAINING_BASE,
+    build_bpu_training_program as _build_bpu_training_program,
+)
+
+
 _BPU_S0_WINDOW_SIGNALS = {
     "from_valid": (
         "Frontend_top.Frontend.inner_icache.mainPipe.io_fromWayLookup_valid",
@@ -40,10 +46,6 @@ _BPU_S0_WINDOW_SIGNALS = {
 }
 
 
-_BPU_TRAINING_BASE = 0x80000000
-_BPU_TRAINING_BLOCK_BYTES = 64
-_BPU_TRAINING_BLOCK_COUNT = 8
-_BPU_TRAINING_CNOP = 0x0001
 _BPU_TRAINING_SIGNALS = {
     "ftq_valid": (
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_valid",
@@ -84,10 +86,12 @@ def read_dut_signal(
             if value is not None:
                 return int(value)
             if required:
-                raise AssertionError({
-                    "reason": "required DUT signal is unavailable",
-                    "candidates": aliases,
-                })
+                raise AssertionError(
+                    {
+                        "reason": "required DUT signal is unavailable",
+                        "candidates": aliases,
+                    }
+                )
             return default
 
     return _read_generic_dut_signal(
@@ -148,6 +152,7 @@ def wait_coverage_hits(
         if len(expected) == 1
         else "functional coverage targets"
     )
+
     def timeout_diagnostics() -> dict[str, object]:
         # Rebuild from the targets still outstanding after the last checked
         # cycle. A hit produced by that final step is not visible to the
@@ -176,9 +181,7 @@ def wait_coverage_hits(
             return
         detail = error.args[0] if error.args else None
         if isinstance(detail, dict):
-            detail["missing"] = sorted(
-                f"{group}.{name}" for group, name in remaining
-            )
+            detail["missing"] = sorted(f"{group}.{name}" for group, name in remaining)
         raise
 
 
@@ -212,46 +215,6 @@ def drive_soft_prefetch(env, addresses: Iterable[int]) -> None:
     clear_soft_prefetch(env)
 
 
-def _encode_c_j(offset: int) -> int:
-    """Encode the RISC-V compressed jump used by the training stream."""
-    assert int(offset) % 2 == 0
-    assert -(1 << 11) <= int(offset) < (1 << 11)
-    imm = int(offset) & 0xFFF
-    return (
-        (0b101 << 13)
-        | (((imm >> 11) & 0x1) << 12)
-        | (((imm >> 4) & 0x1) << 11)
-        | (((imm >> 8) & 0x3) << 9)
-        | (((imm >> 10) & 0x1) << 8)
-        | (((imm >> 6) & 0x1) << 7)
-        | (((imm >> 7) & 0x1) << 6)
-        | (((imm >> 1) & 0x7) << 3)
-        | (((imm >> 5) & 0x1) << 2)
-        | 0b01
-    )
-
-
-def _build_bpu_training_program() -> bytes:
-    """Build eight 64-byte blocks with a taken C.J at byte offset 30.
-
-    Each jump skips the remaining 32 bytes; the final jump returns to the
-    first block. Repetition trains predictions without register execution.
-    """
-    halfwords: list[int] = []
-    for block in range(_BPU_TRAINING_BLOCK_COUNT):
-        halfwords.extend([_BPU_TRAINING_CNOP] * 15)
-        branch_pc = block * _BPU_TRAINING_BLOCK_BYTES + 30
-        target = (
-            (block + 1) * _BPU_TRAINING_BLOCK_BYTES
-            if block + 1 < _BPU_TRAINING_BLOCK_COUNT
-            else 0
-        )
-        halfwords.append(_encode_c_j(target - branch_pc))
-        halfwords.extend([_BPU_TRAINING_CNOP] * 16)
-    assert len(halfwords) * 2 == _BPU_TRAINING_BLOCK_BYTES * _BPU_TRAINING_BLOCK_COUNT
-    return b"".join(int(halfword).to_bytes(2, "little") for halfword in halfwords)
-
-
 def _read_bpu_training_signal(recorder, key: str) -> int:
     names = _BPU_TRAINING_SIGNALS[key]
     value = recorder._read_first_dut_signal(recorder.env.dut, names)
@@ -263,9 +226,11 @@ def _read_bpu_training_signal(recorder, key: str) -> int:
     return int(value)
 
 
-def _warm_bpu_training_stream(env, *, max_cycles: int | None = None) -> dict:
+def warm_bpu_training_stream(env, *, max_cycles: int | None = None) -> dict:
     recorder = getattr(env, "functional_coverage", None)
-    assert recorder is not None, "directed flow tests require the canonical funcov recorder"
+    assert (
+        recorder is not None
+    ), "directed flow tests require the canonical funcov recorder"
     assert getattr(recorder, "env", None) is env
     if max_cycles is None:
         max_cycles = cycle_limit("TB_TWO_FETCH_TRAIN_MAX_CYCLES", 4000)
@@ -300,8 +265,11 @@ def _warm_bpu_training_stream(env, *, max_cycles: int | None = None) -> dict:
     )
 
 
-def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
-    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
+_warm_bpu_training_stream = warm_bpu_training_stream
+
+
+def load_and_reset_bpu_training_stream(env) -> None:
+    """Load the BPU training program and reset, without warming or configuring agents."""
     run_initialization_steps(
         env,
         (
@@ -324,7 +292,11 @@ def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(_BPU_TRAINING_BASE)
 
-    _warm_bpu_training_stream(env)
+
+def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
+    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
+    load_and_reset_bpu_training_stream(env)
+    warm_bpu_training_stream(env)
     run_initialization_steps(
         env,
         (

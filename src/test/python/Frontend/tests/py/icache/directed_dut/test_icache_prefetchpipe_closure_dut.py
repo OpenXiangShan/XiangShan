@@ -29,12 +29,14 @@ from env.sequences import (
     TranslationPmpPmaEntry,
 )
 from env.support import PmpPmaConfig
-from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
-    test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss as _run_trained_refill,
+from tests.py.icache.directed_dut.refill_scenarios import (
+    run_trained_dual_refill as _run_trained_refill,
 )
-from tests.py.jiabowen.test_two_fetch_directed_flow_dut import _c_j
-from tests.py.zhaoxinran.test_multi_branch import (
-    test_large_loop_multi_segment as _run_large_loop,
+from tests.py.icache.directed_dut.programs import (
+    encode_c_j as _c_j,
+)
+from tests.py.icache.directed_dut.branch_scenarios import (
+    run_large_loop_multi_segment as _run_large_loop,
 )
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
