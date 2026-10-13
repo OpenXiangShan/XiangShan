@@ -1199,7 +1199,9 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   dmxbar2to1LM.suggestName("dmxbar2to1")
   val dmxbar2to1 = dmxbar2to1LM.node
   // Cbus.cpum,dm_fcrs_mNode --> dmxbar2to1 --->(sefid==reqid) & dm_sNode =>debugModule
-  dmxbar2to1 := Cbus.cpum // dm_self_mNode
+  val cbus2dm_buf = LazyModule(new AXI4Buffer())
+  cbus2dm_buf.suggestName("cbus2dm_buf")
+  dmxbar2to1 := cbus2dm_buf.node := Cbus.cpum // dm_self_mNode
   dmxbar2to1 := AXI4Buffer() := u_dm_DataBridge.axi_xbar_o
   // define slaveNode, addr space is for debug
   val dm_sNode =
