@@ -21,8 +21,8 @@ import xiangshan.frontend.bpu.IttageTableInfo
 
 case class IttageParameters(
     TableInfos: Seq[IttageTableInfo] = Seq(
-      new IttageTableInfo(256, 4),
-      new IttageTableInfo(256, 8),
+      new IttageTableInfo(256, 6),
+      new IttageTableInfo(256, 10),
       new IttageTableInfo(512, 16),
       new IttageTableInfo(512, 32),
       new IttageTableInfo(512, 48)
