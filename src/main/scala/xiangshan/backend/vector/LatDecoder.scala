@@ -31,8 +31,23 @@ class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
 }
 
 object LatDecoder {
+  // One group per opcode space; keep in sync with the vector exe units in `vecSchdParams`.
+  // Groups sharing a fuType would be OR-ed together by the Mux1H below.
+  val opcodes = Seq(
+    FAluOpcodes,
+    FMiscOpcodes,
+    FCvtOpcodes,
+    FMacOpcodes,
+    VIAluOpcodes,
+    VIMacOpcodes,
+    VMoveOpcodes,
+    VFCvtOpcodes,
+    VFMacOpcodes,
+    StuOpcodes,
+  )
+
   def apply(fuType: UInt, opcode: UInt): UInt = {
-    val mod = Module(new LatDecoder(Seq(VIAluOpcodes)))
+    val mod = Module(new LatDecoder(opcodes))
     mod.in.fuType := fuType
     mod.in.opcode := opcode
     mod.out.lat
@@ -40,12 +55,31 @@ object LatDecoder {
 
   def main(args: Array[String]): Unit = {
     Verilog.emitVerilog(
-      new LatDecoder(Seq(VIAluOpcodes)),
+      new LatDecoder(opcodes),
       Array(
         "--full-stacktrace",
         "--target-dir", "build/LatDecoder",
       )
     )
+    println(
+      s"[LatDecoder] fuType=${new In().fuType.getWidth}b opcode=${new In().opcode.getWidth}b " +
+        s"latency=${new Out().lat.getWidth}b"
+    )
+    dumpLatencies()
+  }
+
+  /** One line per opcode pattern with the latency its table row gets, i.e. `<group>.getLat(opcode)`. */
+  private def dumpLatencies(): Unit = {
+    opcodes.foreach { g =>
+      val name = g.getClass.getSimpleName.stripSuffix("$")
+      val fu = FuTypeField.genFuType(g)
+      println(s"=== $name fuType=${fu.getName} (${g.all.size} patterns) ===")
+      g.all.sortBy(_.encode.value).foreach { op =>
+        val lat = op.getLat
+        val note = if (lat == Latency.uncertainLitVal()) "  (uncertain)" else ""
+        println(f"  ${op.getName()}%-38s ${op.encode.rawString}  lat = $lat%2d$note")
+      }
+    }
   }
 
   class In extends Bundle {
@@ -68,10 +102,18 @@ object LatDecoder {
   class LatField(opcodes: Opcodes) extends DecodeField[OpcodePattern, UInt] {
     override def name: String = "lat"
 
-    override def chiselType: UInt = UInt(opcodes.maxLat.W)
+    override def chiselType: UInt = Latency()
 
     override def genTable(op: OpcodePattern): BitPat = {
-      BitPat(op.opcode.getLat.U).pad0To(opcodes.maxLat)
+      val lat = op.opcode.getLat
+      if (lat != Latency.uncertainLitVal()) {
+        BitPat(lat.U).pad0To(this.width)
+      } else {
+        opcodes match {
+          case _: StuOpcodes => BitPat(0.U)
+          case _ => BitPat(op.opcode.getLat.U).pad0To(this.width)
+        }
+      }
     }
   }
 }

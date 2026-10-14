@@ -93,6 +93,8 @@ object IntRTypePattern {
   def apply()(implicit rawInst: BitPat): IntRTypePattern = new IntRTypePattern
 }
 
+case class MopInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
+
 sealed class IntITypePattern(implicit rawInst: BitPat) extends IntInstPattern
 
 sealed class IntSTypePattern(implicit rawInst: BitPat) extends IntInstPattern
@@ -103,13 +105,7 @@ case class IntUTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
 
 case class IntJTypePattern()(implicit rawInst: BitPat) extends IntInstPattern
 
-sealed class IntImmInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
-
-object IntImmInstPattern {
-  def apply()(implicit rawInst: BitPat): IntImmInstPattern = new IntImmInstPattern
-}
-
-case class Aes64ks1iIllInstPattern()(implicit rawInst: BitPat) extends IntImmInstPattern
+case class IntImmInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class IntLoadInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
@@ -130,6 +126,8 @@ case class SfenceOtherInstPattern()(implicit rawInst: BitPat) extends SystemInst
 case class HfenceGVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
 case class HfenceVVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+
+case class MfenceInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
 case class WaitForInterruptInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
@@ -159,13 +157,7 @@ case class FenceiInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class AmoInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
 
-sealed class AmocasInstPattern()(implicit rawInst: BitPat) extends ScaMultUopInstPattern
-
-object AmocasInstPattern {
-  def apply()(implicit rawInst: BitPat): AmocasInstPattern = new AmocasInstPattern
-}
-
-case class AmocasQIllInstPattern()(implicit rawInst: BitPat) extends AmocasInstPattern
+case class AmocasInstPattern()(implicit rawInst: BitPat) extends ScaMultUopInstPattern
 
 case class IntStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePattern
 
@@ -394,19 +386,7 @@ object InstPattern {
           }
           case _ => null
         }
-      case OP_IMM =>
-        func7.rawString match {
-          case "0011000" =>
-            rs2(4).rawString match {
-              case "1" =>
-                rs2(3, 0).rawString match {
-                  case "1011" | "1100" | "1101" | "1110" | "1111" => Aes64ks1iIllInstPattern()
-                  case _ => IntImmInstPattern()
-                }
-              case _ => IntImmInstPattern()
-            }
-          case _ => IntImmInstPattern()
-        }
+      case OP_IMM => IntImmInstPattern()
       case AUIPC => IntUTypePattern()
       case OP_IMM_32 => IntImmInstPattern()
       case INST48b_0 => null
@@ -423,15 +403,7 @@ object InstPattern {
       case AMO =>
         funct5.rawString match {
           case "00010" => AmoLrInstPattern()
-          case "00101" =>
-            func3.rawString match {
-              case "100" =>
-                (rs2(0).rawString, rd(0).rawString) match {
-                  case ("1", _) | (_, "1") => AmocasQIllInstPattern()
-                  case _ => AmocasInstPattern()
-                }
-              case _ => AmocasInstPattern()
-            }
+          case "00101" => AmocasInstPattern()
           case _ => AmoInstPattern()
         }
       case OP => IntRTypePattern()
@@ -491,10 +463,14 @@ object InstPattern {
               case s if rawStringMatches(s, "0001001?????") || rawStringMatches(s, "0001011?????") => SfenceVMAInstPattern()
               case s if rawStringMatches(s, "0110001?????") || rawStringMatches(s, "0110011?????") => HfenceGVMAInstPattern()
               case s if rawStringMatches(s, "0010001?????") || rawStringMatches(s, "0010011?????") => HfenceVVMAInstPattern()
+              case s if rawStringMatches(s, "1011111?????") => MfenceInstPattern()
               case _ => PrivInstPattern()
             }
           case "100" =>
             func7(0).rawString match {
+              case _ if rawInst.rawString == Instructions.MOP_R_N.rawString ||
+                        rawInst.rawString == Instructions.MOP_RR_N.rawString =>
+                MopInstPattern()
               case "0" => HyperLoadInstPattern()
               case "1" => HyperStoreInstPattern()
             }

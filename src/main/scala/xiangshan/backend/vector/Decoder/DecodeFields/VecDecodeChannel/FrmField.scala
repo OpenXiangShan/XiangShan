@@ -14,7 +14,7 @@ object Frm extends NamedUInt(3) {
   val RDN = 2.U(width.W)
   val RUP = 3.U(width.W)
   val RMM = 4.U(width.W)
-  val ROD = 5.U(width.W)
+  val ROD = 6.U(width.W)
   val DYN = 7.U(width.W)
 }
 

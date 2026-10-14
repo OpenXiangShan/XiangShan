@@ -87,6 +87,7 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
+        self.llc = args.llc
         self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else 0
         self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
@@ -158,6 +159,7 @@ class XSArgs(object):
             (self.pgo_emu_args,  "PGO_EMU_ARGS"),
             (self.llvm_profdata, "LLVM_PROFDATA"),
             (self.issue,         "ISSUE"),
+            (self.llc,           "LLC"),
             (self.simfrontend,   "ENABLE_SIMFRONTEND"),
             (self.emu_trace_all, "EMU_TRACE_ALL"),
         ]
@@ -845,6 +847,7 @@ if __name__ == "__main__":
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
     parser.add_argument('--xprop', action='store_true', help='enable xprop for vcs')
     parser.add_argument('--issue', nargs='?', type=str, help='CHI issue')
+    parser.add_argument('--llc', nargs='?', type=str, help='LLC backend (OpenLLC or ZhuJiang)')
     parser.add_argument('--simfrontend', action='store_true', help='enable the simfrontend')
     # emu arguments
     parser.add_argument('--numa', action='store_true', help='use numactl')

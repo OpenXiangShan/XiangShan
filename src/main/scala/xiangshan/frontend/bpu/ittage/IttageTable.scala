@@ -176,9 +176,11 @@ class IttageTable(
 
   private val updateAllBitmask = VecInit.fill(ittageEntrySz)(1.U).asUInt // update all entry
   private val updateNoBitmask  = VecInit.fill(ittageEntrySz)(0.U).asUInt // update no
-  private val updateNoUsBitmask =
-    VecInit.tabulate(ittageEntrySz)(_.U >= UsefulCntWidth.U).asUInt // update others besides useful bit
-  private val updateUsBitmask = VecInit.tabulate(ittageEntrySz)(_.U < UsefulCntWidth.U).asUInt // update useful bit
+  // Build the mask through the entry field itself so it follows the Bundle's actual layout.
+  private val usefulMaskEntry = WireInit(0.U.asTypeOf(new IttageEntry(tagLen)))
+  usefulMaskEntry.usefulCnt := UsefulCounter.SaturatePositive
+  private val updateUsefulBitmask       = usefulMaskEntry.asUInt
+  private val updateExceptUsefulBitmask = ~updateUsefulBitmask
 
   private val needReset      = RegInit(false.B)
   private val usefulCanReset = !(io.req.fire || io.update.valid) && needReset
@@ -192,7 +194,7 @@ class IttageTable(
   private val updateBitmask = Mux(
     io.update.usefulCntValid && io.update.valid,
     updateAllBitmask,
-    Mux(io.update.valid, updateNoUsBitmask, Mux(usefulCanReset, updateUsBitmask, updateNoBitmask))
+    Mux(io.update.valid, updateExceptUsefulBitmask, Mux(usefulCanReset, updateUsefulBitmask, updateNoBitmask))
   )
 
   /**

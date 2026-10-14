@@ -53,11 +53,12 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       val retTarget: GuardedPc = GuardedPc() // Predicted return address
       val isCanUse:  Bool      = Bool()      // Whether the prediction is valid
     }
-    val specIn:      MicroRasSpecIn  = Input(new MicroRasSpecIn)
-    val specOut:     MicroRasSpecOut = Output(new MicroRasSpecOut)
-    val hasRedirect: Bool            = Input(Bool()) // Global redirect signal (e.g., misprediction)
-    val overrideData: Valid[MicroRasSpecIn] = Input(Valid(new MicroRasSpecIn)) // S3-level override (flushes S1–S2)
-    val fullRetAddr:  GuardedPc             = Input(GuardedPc())               // Current top of the main RAS
+    val specIn:         MicroRasSpecIn        = Input(new MicroRasSpecIn)
+    val specOut:        MicroRasSpecOut       = Output(new MicroRasSpecOut)
+    val hasRedirect:    Bool                  = Input(Bool())      // Global redirect signal (e.g., misprediction)
+    val s2OverrideData: Valid[MicroRasSpecIn] = Input(Valid(new MicroRasSpecIn))
+    val s3OverrideData: Valid[MicroRasSpecIn] = Input(Valid(new MicroRasSpecIn))
+    val fullRetAddr:    GuardedPc             = Input(GuardedPc()) // Current top of the main RAS
   }
   val io = IO(new MicroRasIO)
   io.sramResetDone := true.B
@@ -85,18 +86,28 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
 
   // One-cycle delayed version of redirect; used to detect RAS recovery state
   private val redirectDelay1 = RegNext(io.hasRedirect, init = false.B)
-  private val hasOverride    = io.overrideData.valid
-  private val s3_realPush    = io.overrideData.bits.attribute.isCall
-  private val s3_realPop     = io.overrideData.bits.attribute.isReturn
+
+  private val s2_override = io.s2OverrideData.valid
+  private val s2_realPush = io.s2OverrideData.bits.attribute.isCall
+  private val s2_realPop  = io.s2OverrideData.bits.attribute.isReturn
+  private val s2_realPushAddr =
+    getCfiPcFromPosition(io.s2OverrideData.bits.startPc, io.s2OverrideData.bits.cfiPosition) + 2.U
+
+  private val s3_override = io.s3OverrideData.valid
+  private val s3_realPush = io.s3OverrideData.bits.attribute.isCall
+  private val s3_realPop  = io.s3OverrideData.bits.attribute.isReturn
   private val s3_realPushAddr =
-    getCfiPcFromPosition(io.overrideData.bits.startPc, io.overrideData.bits.cfiPosition) + 2.U
+    getCfiPcFromPosition(io.s3OverrideData.bits.startPc, io.s3OverrideData.bits.cfiPosition) + 2.U
 
   // -------------------------------
   // Pipeline control for S2 stage
   // -------------------------------
-  when(hasOverride || io.hasRedirect) {
+  when(s3_override || io.hasRedirect) {
     s2_hasPush := false.B
     s2_hasPop  := false.B
+  }.elsewhen(s2_override) {
+    s2_hasPush := Mux(io.stageCtrl.s2_fire, false.B, s2_realPush)
+    s2_hasPop  := Mux(io.stageCtrl.s2_fire, false.B, s2_realPop)
   }.elsewhen(io.stageCtrl.s1_fire) {
     s2_hasPush := specPush
     s2_hasPop  := specPop
@@ -108,14 +119,14 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   // -------------------------------
   // Pipeline control for S3 stage
   // -------------------------------
-  when(hasOverride || io.hasRedirect) {
+  when(s3_override || io.hasRedirect) {
     // Redirect flushes entire pipeline, including S3
     s3_hasPush := false.B
     s3_hasPop  := false.B
   }.elsewhen(io.stageCtrl.s2_fire) {
     // Move S2 ops into S3
-    s3_hasPush := s2_hasPush
-    s3_hasPop  := s2_hasPop
+    s3_hasPush := Mux(s2_override, s2_realPush, s2_hasPush)
+    s3_hasPop  := Mux(s2_override, s2_realPop, s2_hasPop)
   }.elsewhen(io.stageCtrl.s3_fire) {
     // Clear S3 after it completes
     s3_hasPush := false.B
@@ -123,13 +134,16 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   }
 
   // Capture return address for speculative CALL in S1 → store in S2
-  when(io.stageCtrl.s1_fire && specPush) {
+  when(io.stageCtrl.s1_fire && !s2_override && specPush) {
     s2_retAddr := specPushAddr
   }
 
   // Pass return address from S2 to S3
   when(io.stageCtrl.s2_fire) {
-    s3_retAddr := s2_retAddr
+    s3_retAddr := Mux(s2_override, s2_realPushAddr, s2_retAddr)
+  }
+  when(s2_override && !io.stageCtrl.s2_fire && s2_realPush) {
+    s2_retAddr := s2_realPushAddr
   }
 
   // ------------------------------------------------------------
@@ -140,7 +154,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     // On redirect, the main RAS state is being restored,
     // and the S1–S3 pipeline is flushed → no valid prediction.
     isCanUse := false.B
-  }.elsewhen(hasOverride) {
+  }.elsewhen(s3_override) {
     // On S3 override (e.g., late redirect), S1–S2 are flushed.
     // Only S3’s operation affects the RAS state seen by the next S1:
     // - If S3 pops, the main RAS top changes → prediction invalid.
@@ -153,11 +167,29 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
         0.U.asTypeOf(GuardedPc()),
         Mux(s3_realPush, s3_realPushAddr, io.fullRetAddr)
       )
-  }.elsewhen(io.stageCtrl.s1_fire && specPush) {
+  }.elsewhen(s2_override) {
+    // The corrected S2 operation is now the youngest speculative operation.
+    // Older S3 operations still precede it in stack order.
+    when(s2_realPush) {
+      isCanUse   := true.B
+      topRetAddr := s2_realPushAddr
+    }.elsewhen(s2_realPop) {
+      isCanUse   := s3_hasPush
+      topRetAddr := Mux(s3_hasPush, io.fullRetAddr, 0.U.asTypeOf(GuardedPc()))
+    }.elsewhen(s3_hasPush) {
+      isCanUse   := true.B
+      topRetAddr := s3_retAddr
+    }.elsewhen(s3_hasPop) {
+      isCanUse := false.B
+    }.otherwise {
+      isCanUse   := Mux(redirectDelay1, false.B, true.B)
+      topRetAddr := Mux(redirectDelay1, 0.U.asTypeOf(GuardedPc()), io.fullRetAddr)
+    }
+  }.elsewhen(io.stageCtrl.s1_fire && !s2_override && specPush) {
     // S1 sees a CALL → next cycle’s RAS top will be the return address of this CALL.
     isCanUse   := true.B
     topRetAddr := specPushAddr
-  }.elsewhen(io.stageCtrl.s1_fire && specPop) {
+  }.elsewhen(io.stageCtrl.s1_fire && !s2_override && specPop) {
     // S1 sees a RET → we must predict what the RAS top will be after resolving
     // in-flight pushes/pops in S2 and S3.
     when(s2_hasPush) {
@@ -184,7 +216,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
       // No pairing possible; main RAS will be popped → unknown new top.
       isCanUse := false.B
     }
-  }.elsewhen(io.stageCtrl.s1_fire) {
+  }.elsewhen(io.stageCtrl.s1_fire && !s2_override) {
     // S1 processes a non-CFI (or non-call/ret) instruction.
     // We still need to predict the RAS top for potential future RETs.
     when(s2_hasPush) {
@@ -213,7 +245,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   io.specOut.isCanUse  := isCanUse
   io.specOut.retTarget := topRetAddr
 
-  private val s3_overrideHasRasAction     = hasOverride && (s3_realPush || s3_realPop)
+  private val s3_overrideHasRasAction     = s3_override && (s3_realPush || s3_realPop)
   private val s3_overrideHasRasActionNext = RegNext(s3_overrideHasRasAction, false.B)
   XSPerfAccumulate("s3_override_has_rasAction", s3_overrideHasRasAction)
   XSPerfAccumulate(

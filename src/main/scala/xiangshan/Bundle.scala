@@ -19,8 +19,6 @@ package xiangshan
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.experimental.decode.EspressoMinimizer
 import utility._
 import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
@@ -36,7 +34,6 @@ import xiangshan.frontend.FrontendRedirect
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
-import xiangshan.backend.decode.XDecode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
@@ -97,11 +94,10 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
-  val fixedTaken = Bool()
   val predTaken  = Bool()
   val crossPageIPFFix = Bool()
   val storeSetHit = Bool() // inst has been allocated an store set
-  val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+  val waitSqIdx = new SqPtr // store set predicted previous store sqIdx
   // Load wait is needed
   // load inst will not be executed until former store (predicted by mdp) addr calcuated
   val loadWaitBit = Bool()
@@ -112,8 +108,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
-  val vtype            = VType()
-  val specvtype        = VType()
+  val vtype = VType()
+  val specvtype = VType()
   val debug_seqNum = InstSeqNum()
 }
 
@@ -152,21 +148,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
   val canRobCompress = Bool()
-
-  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
-
-  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
-    allSignals zip decoder foreach { case (s, d) => s := d }
-    commitType := DontCare
-    this
-  }
-
-  def decode(bit: List[BitPat]): CtrlSignals = {
-    allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
-    this
-  }
 
   def isWFI: Bool = fuType === FuType.csr.U && fuOpType === CSROpType.wfi
   def isSoftPrefetch: Bool = {
@@ -221,6 +202,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val robIdx = new RobPtr
   val interrupt: Bool = Bool()
   val isMisPred: Bool = Bool()
+  val isFromLoad: Bool = Bool()
 
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
@@ -265,7 +247,7 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
 object Redirect extends HasCircularQueuePtrHelper {
 
   def selectOldestRedirect(xs: Seq[Valid[Redirect]]): Vec[Bool] = {
-    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => isAfter(xs(j).bits.robIdx, xs(i).bits.robIdx)))
+    val compareVec = (0 until xs.length).map(i => (0 until i).map(j => xs(j).bits.robIdx.isAfterSlot(xs(i).bits.robIdx)))
     val resultOnehot = VecInit((0 until xs.length).map(i => Cat((0 until xs.length).map(j =>
       (if (j < i) !xs(j).valid || compareVec(i)(j)
       else if (j == i) xs(i).valid
@@ -281,7 +263,7 @@ object Redirect extends HasCircularQueuePtrHelper {
     }.elsewhen(!in1.valid && in2.valid) {
       out := in2
     }.elsewhen(in1.valid && in2.valid) {
-      out := Mux(in1.bits.robIdx.isAfter(in1.bits.robIdx, in2.bits.robIdx), in2, in1)
+      out := Mux(in1.bits.robIdx.isAfterSlot(in2.bits.robIdx), in2, in1)
     }.otherwise(
       out := in1
     )
@@ -666,6 +648,10 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val hd_misalign_ld_enable = Output(Bool())
   val power_down_enable = Output(Bool())
   val flush_l2_enable = Output(Bool())
+  // Rename
+  val fusion_enable = Output(Bool())
+  val high_density_rob_compression_enable = Output(Bool())
+  val wfi_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
@@ -717,6 +703,8 @@ class AddrTransType(implicit p: Parameters) extends XSBundle {
 
   def shouldBeSext: Bool = sv39 || sv48
   def shouldBeZext: Bool = bare || sv39x4 || sv48x4
+
+  def extend(pc: UInt, len: Int): UInt = Mux(shouldBeSext, SignExt(pc, len), ZeroExt(pc, len))
 }
 
 object AddrTransType {

@@ -8,6 +8,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -58,9 +59,25 @@ class DecodeStageImp(
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
   /** whether instruction decoded are illegal */
-  val isIllegalInstVec = VecInit(out.uop.map(x => x.fire && (x.bits.exceptionVec(illegalInstr) || x.bits.exceptionVec(virtualInstr))))
+  // Register uop fire/exception/uopBits to cut timing path before trapInstInfo output
+  val uopFire_reg   = RegNext(VecInit(out.uop.map(_.fire)))
+  val uopExcII_reg  = RegNext(VecInit(out.uop.map(_.bits.exceptionVec(illegalInstr))))
+  val uopExcVI_reg  = RegNext(VecInit(out.uop.map(_.bits.exceptionVec(virtualInstr))))
+  val uopBits_reg   = RegNext(VecInit(out.uop.map(_.bits)))
+
+  val isIllegalInstVec = VecInit(uopFire_reg.zip(uopExcII_reg).zip(uopExcVI_reg).map {
+    case ((fire, excII), excVI) => fire && (excII || excVI)
+  })
   val hasIllegalInst = isIllegalInstVec.reduce(_ || _)
-  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(out.uop.map(_.bits)), 0.U.asTypeOf(new DecodeOutUop))
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(uopBits_reg), 0.U.asTypeOf(new DecodeOutUop))
+
+  val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
+  illegalTrapInstInfo := DontCare
+  illegalTrapInstInfo.fromDecodedInst(illegalInst)
+
+  val redirect_reg = RegNext(in.redirect.valid)
+  out.toCSR.trapInstInfo.valid := !redirect_reg && hasIllegalInst
+  out.toCSR.trapInstInfo.bits  := illegalTrapInstInfo
 
 
   for (i <- decodeChannels.in.mops.indices) {
@@ -84,7 +101,6 @@ class DecodeStageImp(
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := inMopBits.trigger
         ctrl.isRVC            := inMopBits.isRVC
-        ctrl.fixedTaken       := inMopBits.fixedTaken
         ctrl.predTaken        := inMopBits.predTaken
         ctrl.crossPageIPFFix  := inMopBits.crossPageIPFFix
         ctrl.ftqPtr           := inMopBits.ftqPtr
@@ -119,7 +135,6 @@ class DecodeStageImp(
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger
         bits.isRVC := mopInfo.isRVC
-        bits.fixedTaken := mopInfo.fixedTaken
         bits.predTaken := mopInfo.predTaken
         bits.crossPageIPFFix := mopInfo.crossPageIPFFix
         bits.ftqPtr := mopInfo.ftqPtr
@@ -146,50 +161,32 @@ class DecodeStageImp(
         bits.blockBackward := uopInfo.blockBack
         bits.flushPipe := uopInfo.flushPipe
         bits.canRobCompress := uopInfo.canRobCompress
+        // Simple instructions may share a high-density CROB segment. Complex
+        // scalar instructions retain their own segment and observation slot.
+        bits.simple := uopInfo.canRobCompress && in.fromCSR.custom.high_density_rob_compression_enable &&
+          !FuType.isLoadStore(uopInfo.fuType) && !FuType.isBJU(uopInfo.fuType) &&
+          !FuType.isAMO(uopInfo.fuType) && !FuType.isFence(uopInfo.fuType) &&
+          !FuType.isCsr(uopInfo.fuType) && !FuType.isVset(uopInfo.fuType) &&
+          !uopInfo.vpWen && !uopInfo.dirtyVs
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
-        bits.vpu.vill     := mopInfo.vtype.illegal     // Todo: remove it
-        bits.vpu.vma      := mopInfo.vtype.vma         // Todo: remove it
-        bits.vpu.vta      := mopInfo.vtype.vta         // Todo: remove it
-        bits.vpu.vsew     := mopInfo.vtype.vsew        // Todo: remove it
-        bits.vpu.vlmul    := mopInfo.vtype.vlmul       // Todo: remove it
-        bits.vpu.vm := uopInfo.vm
-        bits.vpu.vstart := 0.U // Todo: remove it
-        bits.vpu.frm := 0.U // Todo: remove it
-        bits.vpu.fpu := 0.U.asTypeOf(bits.vpu.fpu) // Todo: remove it
-        bits.vpu.vxrm := 0.U // Todo: remove it
-        bits.vpu.vuopIdx := 0.U // Todo: remove it
-        bits.vpu.lastUop := false.B // Todo: remove it
-        bits.vpu.vmask := 0.U // Todo: remove it
-        bits.vpu.vl := 0.U // Todo: remove it
-        bits.vpu.nf := 0.U // Todo: remove it
-        bits.vpu.veew := 0.U // Todo: remove it
-        bits.vpu.isReverse := 0.U // Todo: remove it
-        bits.vpu.isExt := 0.U // Todo: remove it
-        bits.vpu.isNarrow := 0.U // Todo: remove it
-        bits.vpu.isDstMask := 0.U // Todo: remove it
-        bits.vpu.isOpMask := 0.U // Todo: remove it
-        bits.vpu.isMove := 0.U // Todo: remove it
-        bits.vpu.isDependOldVd := 0.U // Todo: remove it
-        bits.vpu.isWritePartVd := 0.U // Todo: remove it
-        bits.vpu.isVleff := false.B // Todo: remove it
-        bits.vpu.maskVecGen := 0.U // Todo: remove it
-        bits.vpu.sew8 := false.B // Todo: remove it
-        bits.vpu.sew16 := false.B // Todo: remove it
-        bits.vpu.sew32 := false.B // Todo: remove it
-        bits.vpu.sew64 := false.B // Todo: remove it
+        bits.src12Rev := uopInfo.src12Rev
         bits.frm := uopInfo.frm
         bits.vm := uopInfo.vm
         bits.vtype := mopInfo.vtype
         bits.oldVType := mopInfo.oldVType
         bits.vlsInstr := false.B // Todo: remove
         bits.fflagsWen := uopInfo.fflagsWen
+        bits.vxsatWen := uopInfo.vxsatWen
+        bits.dirtyVs := uopInfo.dirtyVs
         bits.isMove := uopInfo.isMove
         bits.uopIdx := uopInfo.uopIdx
         bits.uopSplitType := 0.U // Todo: remove
         bits.isVset := uopInfo.isVset
         bits.firstUop := uopInfo.isFirstUop
         bits.lastUop := uopInfo.isLastUop
+        bits.isJ := uopInfo.isJ
+        bits.isJr := uopInfo.isJr
         bits.numWB := uopInfo.numWb +& 1.U
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>
@@ -220,13 +217,6 @@ class DecodeStageImp(
   }
 
   out.toFrontend.canAccept := !in.redirect.valid && out.uop.head.ready
-
-  val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
-  illegalTrapInstInfo := DontCare
-  illegalTrapInstInfo.fromDecodedInst(illegalInst)
-
-  out.toCSR.trapInstInfo.valid := RegNext(!in.redirect.valid && hasIllegalInst)
-  out.toCSR.trapInstInfo.bits  := RegNext(illegalTrapInstInfo)
 
   stallReason.out.reason := stallReason.in.reason
 

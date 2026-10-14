@@ -36,6 +36,8 @@ case class SchdBlockParams(
 
   def JmpCnt: Int = issueBlockParams.map(_.JmpCnt).sum
 
+  def LinkCnt: Int = issueBlockParams.map(_.LinkCnt).sum
+
   def BrhCnt: Int = issueBlockParams.map(_.BrhCnt).sum
 
   def I2fCnt: Int = issueBlockParams.map(_.I2fCnt).sum
@@ -54,8 +56,6 @@ case class SchdBlockParams(
 
   def VsetCnt: Int = issueBlockParams.map(_.VsetCnt).sum
 
-  def FmacCnt: Int = issueBlockParams.map(_.FmacCnt).sum
-
   def FDivSqrtCnt: Int = issueBlockParams.map(_.fDivSqrtCnt).sum
 
   def LduCnt: Int = issueBlockParams.map(_.LduCnt).sum
@@ -69,12 +69,6 @@ case class SchdBlockParams(
   def HyuCnt: Int = issueBlockParams.map(_.HyuCnt).sum
 
   def LdExuCnt: Int = issueBlockParams.map(_.LdExuCnt).sum
-
-  def VipuCnt: Int = issueBlockParams.map(_.VipuCnt).sum
-
-  def VlduCnt: Int = issueBlockParams.map(_.VlduCnt).sum
-
-  def VstuCnt: Int = issueBlockParams.map(_.VstuCnt).sum
 
   def numExu: Int = issueBlockParams.map(_.exuBlockParams.count(!_.fakeUnit)).sum
 

@@ -46,8 +46,8 @@ class IttageEntry(tagLen: Int)(implicit p: Parameters) extends IttageBundle {
   val tag:           UInt            = UInt(tagLen.W)
   val confidenceCnt: SaturateCounter = ConfidenceCounter()
   val targetOffset:  IttageOffset    = new IttageOffset()
-  val usefulCnt:  SaturateCounter = UsefulCounter() // Due to the bitMask the useful bit needs to be at the lowest bit
-  val paddingBit: UInt            = UInt(1.W)
+  val usefulCnt:     SaturateCounter = UsefulCounter()
+  val paddingBit:    UInt            = UInt(1.W)
 }
 
 class IttageOffset(implicit p: Parameters) extends IttageBundle {

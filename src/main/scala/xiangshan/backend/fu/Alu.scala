@@ -172,14 +172,13 @@ class ConditionalZeroModule(implicit p: Parameters) extends XSModule {
   io.condRes := Mux(use_zero, 0.U, io.value)
 }
 
-class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) extends XSModule {
+class AluDataModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
-    val pc = Input(UInt(XLEN.W))
     val src = Vec(2, Input(UInt(XLEN.W)))
     val func = Input(FuOpType())
     val result = Output(UInt(XLEN.W))
   })
-  val (src1, src2, func, pc) = (io.src(0), io.src(1), io.func, io.pc)
+  val (src1, src2, func) = (io.src(0), io.src(1), io.func)
 
   val isAddw       = ALUOpType.isAddw(func)
   val isOddaddw    = ALUOpType.isOddaddw(func)
@@ -381,11 +380,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   condModule.io.isNez     := func(1)
   val condRes = condModule.io.condRes
 
-  val jmpModule = Module(new AddModule)
-  jmpModule.io.src(0) := pc
-  jmpModule.io.src(1) := src2
-  val jmpRes = jmpModule.io.add
-
   val isAdd     = ALUOpType.isAdd(func)
   val isSradd   = ALUOpType.isSradd(func)
   val isShadd   = ALUOpType.isShadd(func)
@@ -412,7 +406,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
   val isRolw = ALUOpType.isRolw(func)
   val isRorw = ALUOpType.isRorw(func)
   val isZicond = ALUOpType.isZicond(func)
-  val isJmp = if (aluNeedPc) ALUOpType.isJmp(func) else false.B
 
   val aluRes = Mux1H(Seq(
     isAdd     -> add,
@@ -441,7 +434,6 @@ class AluDataModule(val aluNeedPc: Boolean = false)(implicit p: Parameters) exte
     isRolw    -> SignExt(rolw, XLEN),
     isRorw    -> SignExt(rorw, XLEN),
     isZicond  -> condRes,
-    isJmp     -> jmpRes,
   ))
 
   io.result := aluRes

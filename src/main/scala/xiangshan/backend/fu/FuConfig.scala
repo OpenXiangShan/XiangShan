@@ -3,15 +3,14 @@ package xiangshan.backend.fu
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, NewExuInput}
+import xiangshan.backend.Bundles.NewExuInput
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode._
 import xiangshan.backend.fu.FuConfig.VectorV2Config
 import xiangshan.backend.fu.fpu.IntFPToVec
 import xiangshan.backend.fu.wrapper._
-import xiangshan.backend.fu.vector.{DummyVecPipedFuncUnit, DummyVecNonPipedFuncUnit}
 import xiangshan.backend.vector.Exu
-import xiangshan.mem.{Std, VStd}
+import xiangshan.mem.Std
 
 /**
   *
@@ -159,16 +158,24 @@ case class FuConfig (
   // predict info
   def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
+  def needPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
-  var aluNeedPc: Boolean = false
+  def aluBjuNeedPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh).contains(fuType)
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
+    Seq(
+      vialu,
+      vimac,
+      vidiv,
+      vfmac,
+      vmove,
+      vfdiv,
+      vfcvt,
+      vsha256ms,
+      vsha256c
+    ).contains(fuType)
   }
-
-  def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
 
   def needUncertainWakeup: Boolean = {
     FuConfig.needUncertainWakeupFuConfigs.contains(this)
@@ -187,18 +194,24 @@ case class FuConfig (
 
   def isJmp: Boolean = fuType == FuType.jmp
 
+  def isLink: Boolean = fuType == FuType.link
+
   def isFence: Boolean = fuType == FuType.fence
 
-  def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
-                            fuType == FuType.vppu || fuType == FuType.vipu ||
-                            fuType == FuType.vfalu || fuType == FuType.vfma ||
-                            fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
-                            fuType == FuType.vidiv || fuType == FuType.vmove ||
-                            fuType == FuType.vsha256ms || fuType == FuType.vsha256c
+  def isVecArith: Boolean = FuType.FuTypeOrR(
+    fuType,
+    FuType.vialu,
+    FuType.vimac,
+    FuType.vfmac,
+    FuType.vfdiv,
+    FuType.vfcvt,
+    FuType.vidiv,
+    FuType.vmove,
+    FuType.vsha256ms,
+    FuType.vsha256c,
+  )
 
-  def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
-                          fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
-                          name == "vstd"
+  def isVecMem: Boolean = name == "vstd"
 
   def needOg2: Boolean = isVecArith || isVecMem
 
@@ -219,15 +232,25 @@ case class FuConfig (
 }
 
 object FuConfig {
-  val JmpCfg: FuConfig = FuConfig (
-    name = "jmp",
+  val NJmpCfg: FuConfig = FuConfig (
+    name = "njmp",
     fuType = FuType.jmp,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new JumpUnit(cfg)(p)).suggestName("jmp"),
     srcData = Seq(
-      Seq(IntData()), // jal
+      Seq(IntData()), // jal -> Seq(ja, link)
     ),
     piped = true,
-    immType = Set(Imm_I(), Imm_J(), Imm_U()),
+    immType = Set(Imm_I(), Imm_J()),
+  )
+
+  val LinkCfg: FuConfig = FuConfig (
+    name = "link",
+    fuType = FuType.link,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new LinkUnit(cfg)(p)).suggestName("link"),
+    srcData = Seq(Seq(NoData())), // pc + 4 / pc + imm
+    piped = true,
+    writeIntRf = true,
+    immType = Set(Imm_U()),
   )
 
   val BrhCfg: FuConfig = FuConfig (
@@ -266,7 +289,7 @@ object FuConfig {
     piped = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(3),
   )
 
   val I2vCfg: FuConfig = FuConfig (
@@ -284,23 +307,6 @@ object FuConfig {
     destDataBits = 128,
     srcDataBits = Some(64),
     immType = Set(Imm_OPIVIU(), Imm_OPIVIS(), Imm_VRORVI()),
-  )
-
-  val F2vCfg: FuConfig = FuConfig (
-    name = "f2v",
-    FuType.f2v,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new IntFPToVec(cfg)(p).suggestName("f2v")),
-    srcData = Seq(
-      Seq(FpData(), FpData()),
-      Seq(FpData()),
-    ),
-    piped = true,
-    writeFpRf = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
-    destDataBits = 128,
-    srcDataBits = Some(64),
   )
 
   val CsrCfg: FuConfig = FuConfig (
@@ -561,8 +567,8 @@ object FuConfig {
   )
 
   val VialuCfg = FuConfig (
-    name = "vialuFix",
-    fuType = FuType.vialuF,
+    name = "vialu",
+    fuType = FuType.vialu,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
@@ -627,49 +633,6 @@ object FuConfig {
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
-  val VppuCfg = FuConfig (
-    name = "vppu",
-    fuType = FuType.vppu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VPPU(cfg)(p).suggestName("Vppu")),
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
-    ),
-    piped = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = CertainLatency(2),
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    exceptionOut = Seq(illegalInstr),
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
-  )
-
-  val VipuCfg: FuConfig = FuConfig (
-    name = "vipu",
-    fuType = FuType.vipu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
-    ),
-    piped = true,
-    writeIntRf = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = CertainLatency(2),
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    exceptionOut = Seq(illegalInstr),
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-    immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
-  )
-
   val VmoveCfg = FuConfig (
     name = "vmove",
     fuType = FuType.vmove,
@@ -691,35 +654,13 @@ object FuConfig {
     readVType = true,
   )
 
-  val VfaluCfg = FuConfig (
-    name = "vfalu",
-    fuType = FuType.vfalu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFAlu(cfg)(p).suggestName("Vfalu")),
+  val VfmacCfg = FuConfig (
+    name = "vfmac",
+    fuType = FuType.vfmac,
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
-    ),
-    piped = true,
-    writeVecRf = true,
-    writeV0Rf = true,
-    writeFpRf = true,
-    writeFflags = true,
-    latency = CertainLatency(1),
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    exceptionOut = Seq(illegalInstr),
-    needSrcFrm = true,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VfmaCfg = FuConfig (
-    name = "vfma",
-    fuType = FuType.vfma,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
@@ -825,7 +766,7 @@ object FuConfig {
   val FaluCfg = FuConfig(
     name = "falu",
     fuType = FuType.falu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FAlu(cfg)(p).suggestName("Falu")),
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData()),
     ),
@@ -837,17 +778,17 @@ object FuConfig {
     needSrcFrm = true,
   )
 
-  val FmacCfg = FuConfig(
-    name = "fmac",
-    fuType = FuType.fmac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new FMA(cfg)(p).suggestName("Fmac")),
+  val FmulCfg = FuConfig(
+    name = "fmul",
+    fuType = FuType.fmul,
+    fuGen = null,
     srcData = Seq(
       Seq(FpData(), FpData(), FpData()),
     ),
     piped = true,
     writeFpRf = true,
     writeFflags = true,
-    latency = CertainLatency(3),
+    latency = CertainLatency(value = 2),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -878,7 +819,9 @@ object FuConfig {
     writeFpRf = true,
     writeIntRf = true,
     writeFflags = true,
-    latency = CertainLatency(2, extraValue = 1),
+    // TODO, f2f 2cycle, f2i 3cycle
+    // latency = CertainLatency(2, extraValue = 1),
+    latency = CertainLatency(3),
     destDataBits = 64,
     needSrcFrm = true,
   )
@@ -895,107 +838,13 @@ object FuConfig {
     destDataBits = 128,
   )
 
-  val VlduCfg: FuConfig = FuConfig (
-    name = "vldu",
-    fuType = FuType.vldu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()),  //vs1, vs2, vd_old
-    ),
-    piped = false, // Todo: check it
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, loadGuestPageFault, breakPoint, hardwareError),
-    flushPipe = false,
-    replayInst = false,
-    trigger = true,
-    hasLoadError = true,
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VstuCfg: FuConfig = FuConfig (
-    name = "vstu",
-    fuType = FuType.vstu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()),  //vs1, vs2, vd_old
-    ),
-    piped = false,
-    latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, storeGuestPageFault, breakPoint, hardwareError),
-    flushPipe = false,
-    replayInst = false,
-    trigger = true,
-    hasLoadError = true,
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VseglduCfg: FuConfig = FuConfig (
-    name = "vsegldu",
-    fuType = FuType.vsegldu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()), //vs1, vs2, vd_old
-    ),
-    piped = false, // Todo: check it
-    writeVecRf = true,
-    writeV0Rf = true,
-    latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault, breakPoint, hardwareError),
-    flushPipe = false,
-    replayInst = false,
-    trigger = true,
-    hasLoadError = true,
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
-  val VsegstuCfg: FuConfig = FuConfig(
-    name = "vsegstu",
-    fuType = FuType.vsegstu,
-    fuGen = null,
-    srcData = Seq(
-      Seq(VecData(), VecData(), VecData()), //vs1, vs2, vd_old
-    ),
-    piped = false,
-    latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault, breakPoint, hardwareError),
-    flushPipe = false,
-    replayInst = false,
-    trigger = true,
-    hasLoadError = true,
-    vlWakeUp = true,
-    maskWakeUp = true,
-    destDataBits = 128,
-    readV0 = true,
-    readVl = true,
-    readVType = true,
-  )
-
   def allConfigs = Seq(
-    JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
-    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, /*VialuCfg,*/ /*VipuCfg,*/ VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg,
-    FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ HyldaCfg, HystaCfg
-  )
-
-  def VecArithFuConfigs = Seq(
-    /*VialuCfg,*/ /*VimacCfg,*/ VppuCfg, /*VipuCfg,*/ VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ VfdivCfg
+    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
+    FaluCfg, FmulCfg, FcvtCfg, FdivCfg,
+    VialuCfg, VimacCfg, VidivCfg, VmoveCfg,
+    VfmacCfg, VfdivCfg, VfcvtCfg,
+    HyldaCfg, HystaCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(

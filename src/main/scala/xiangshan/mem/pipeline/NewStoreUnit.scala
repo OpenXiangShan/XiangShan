@@ -27,6 +27,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.NewCSR._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.ExceptionNO._
@@ -54,6 +55,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     // DCache request
     val dcacheReq = DecoupledIO(new DcacheStoreRequestIO)
 
+    val sqDeqPtr = Input(new SqPtr)
     val sqAddrReadyPtr = Input(new SqPtr)
   })
 
@@ -101,6 +103,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.isFirstIssue := stin.isFirstIssue
   scalarIssue.bits.ssid.get := stinUop.ssid
   scalarIssue.bits.storeSetHit.get := stinUop.storeSetHit
+  scalarIssue.bits.illegalIssue := DontCare
   scalarIssue.bits.DontCareUnalign()
 
   // 2. hardware prefetch requests
@@ -117,6 +120,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   prefetchReq.bits.size := MemorySize.QB.U
   prefetchReq.bits.mask := Fill(VLEN/8, 1.U(1.W))
   prefetchReq.bits.isFirstIssue := true.B
+  prefetchReq.bits.illegalIssue := DontCare
 
   // sources arbitration
   arbiter(sources, sink, Some("RequestSources"))
@@ -132,6 +136,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
+  sink.bits.illegalIssue := !sink.bits.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
 
   /**
     * Pipeline connect
@@ -222,7 +227,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.debug.pc := uop.pc
   io.tlbReq.bits.debug.robIdx := uop.robIdx
   io.tlbReq.bits.debug.isFirstIssue := sink.bits.isFirstIssue
-  io.tlbReqKill := false.B
+  io.tlbReqKill := false.B // will be assigned in S1
 
   io.dcacheReq.valid := pipeIn.fire
   io.dcacheReq.bits.cmd := MemoryOpConstants.M_PFW
@@ -255,6 +260,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
     // Tlb response
     val tlbResp = Flipped(DecoupledIO(new TlbResp))
+    val tlbReqKill = Output(Bool())
 
     // DCache request: paddr and s1 kill signal
     val dcachePAddr = Output(UInt(PAddrBits.W))
@@ -283,9 +289,6 @@ class StoreUnitS1(param: ExeUnitParams)(
 
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
-
-    // physical storeQueue deqPtr
-    val sqDeqPtr = Input(new SqPtr)
 
     val debugInfo = Output(new DebugLsInfoBundle)
   })
@@ -316,7 +319,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val cross4KPage = in.cross4KPage.get
   val cross16Byte = isUnalignTail || isUnalignHead
-  val illegalIssue = pipeIn.valid && !in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
+  val illegalIssue = pipeIn.valid && in.illegalIssue
   // Younger cross-page unalign head need to be killed
   val youngCrossHead = pipeIn.valid && isScalar && isUnalignHead && cross4KPage && !in.isAddrReadyHead.get
 
@@ -381,6 +384,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch
   val nukeQueryReq = Wire(new StoreNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
+  nukeQueryReq.sqIdx := uop.sqIdx
   nukeQueryReq.paddr := paddr
   nukeQueryReq.mask := mask
   nukeQueryReq.matchType := Mux(isCbo, StLdNukeMatchType.CacheLine, StLdNukeMatchType.Normal)
@@ -489,11 +493,12 @@ class StoreUnitS1(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
   io.tlbResp.ready := true.B
+  io.tlbReqKill := kill
   io.dcachePAddr := paddr
   io.dcacheKill := killDCache
 
   io.updateLFST.valid := updateLFSTValid
-  io.updateLFST.bits.robIdx := robIdx
+  io.updateLFST.bits.sqIdx := uop.sqIdx
   io.updateLFST.bits.ssid := ssid
   io.updateLFST.bits.storeSetHit := storeSetHit
 
@@ -755,7 +760,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, in.uop.exceptionVec)
   wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
   wbData.tlbException.get := Mux(headHasException, head.tlbException.get, in.tlbException.get)
-  wbData.uop.vpu.vstart := Mux(headHasException, head.uop.vpu.vstart, in.uop.vpu.vstart)
+  // Todo[Vector]: support vector exception
   wbData.isForVSnonLeafPTE.get := Mux(
     headHasException,
     head.isForVSnonLeafPTE.get,
@@ -873,6 +878,8 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   // Writeback
   val stout = new MemWriteBack(param)
   val exceptionInfo = ValidIO(new MemExceptionInfo)
+  val perfRobHeadPtr = Input(new RobPtr)
+  val writebackAtRobHead = Output(Bool())
 
   val debugInfo = Output(new DebugLsInfoBundle)
 }
@@ -900,15 +907,15 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s0.io.redirect := io.redirect
   s0.io.stin <> io.stin
   s0.io.prefetchReq <> io.prefetchReq
+  s0.io.sqDeqPtr := io.sqDeqPtr
   s0.io.sqAddrReadyPtr := io.sqAddrReadyPtr
   io.tlb.req <> s0.io.tlbReq
-  io.tlb.req_kill := s0.io.tlbReqKill
   io.dcache.req <> s0.io.dcacheReq
   // s1
+  io.tlb.req_kill := s1.io.tlbReqKill
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger
   s1.io.tlbResp <> io.tlb.resp
-  s1.io.sqDeqPtr := io.sqDeqPtr
   io.dcache.s1_paddr := s1.io.dcachePAddr
   io.dcache.s1_kill := s1.io.dcacheKill
   io.updateLFST := s1.io.updateLFST
@@ -932,6 +939,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // s3
   s3.io.redirect := io.redirect
   io.stout := s3.io.stout
+  io.writebackAtRobHead := io.stout.toRob.valid && io.stout.toRob.bits.robIdx === io.perfRobHeadPtr
   io.exceptionInfo := s3.io.exceptionInfo
 }
 

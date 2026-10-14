@@ -32,7 +32,7 @@ import freechips.rocketchip.devices.debug.DebugModuleKey
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
-import xscache.chi.{CHIAsyncBridgeSink, PortIO}
+import xscache.chi.{CHIAsyncBridgeSink, CHIDataCheckKey, CHIPoisonKey, PortIO}
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource}
 import chisel3.experimental.annotate
@@ -196,6 +196,8 @@ trait HasXSTile { this: BaseXSSoc =>
   val core_with_l2 = LazyModule(new XSTileWrap()(XSCachedParametersOptional(p(CachedParameterKey), p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
+    case CHIDataCheckKey if isZhuJiang => "none"
+    case CHIPoisonKey if isZhuJiang => false
   }))))
   // interrupts
   val clintIntNode = Option.when(!UsePrivateClint)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
@@ -263,19 +265,20 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
 trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
   this: BaseXSSocImp with HasAsyncClockImp =>
 
+  require(socParams.isOpenLLC, "XSNoCTop currently supports only LLC=OpenLLC")
+
   val io_chi = IO(new PortIO)
 
-  require(socParams.enableCHI)
 
   socParams.EnableCHIAsyncBridge match {
     case Some(param) =>
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
         val time_sink = Module(new CHIAsyncBridgeSink(param))
-        time_sink.io.async <> core_with_l2.module.io.chi
+        time_sink.io.async <> core_with_l2.module.io.chi.get
         io_chi <> time_sink.io.deq
       }
     case None =>
-      io_chi <> core_with_l2.module.io.chi
+      io_chi <> core_with_l2.module.io.chi.get
   }
 }
 

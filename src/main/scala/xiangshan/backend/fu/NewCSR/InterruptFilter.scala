@@ -292,7 +292,7 @@ class InterruptFilter extends Module {
   val Candidate123 = Candidate1 || Candidate2 || Candidate3
   val Candidate45 = Candidate4 || Candidate5
 
-  // Candidate2,Candidate5 不可能同时成立
+  // Candidate2,Candidate5 cannot both be true.
   val onlyC1Enable = Candidate1 & !Candidate45
   val onlyC2Enable = Candidate2 & !Candidate45
   val onlyC3Enable = Candidate3 & !Candidate45

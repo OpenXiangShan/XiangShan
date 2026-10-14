@@ -33,7 +33,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val setVstart = csrIn.vpu.set_vstart
   val setVtype = csrIn.vpu.set_vtype
   val setVxsat = csrIn.vpu.set_vxsat
-  val vlFromPreg = csrIn.vpu.vl
 
   val flushPipe = Wire(Bool())
   val satpFlush = Wire(Bool())
@@ -143,14 +142,19 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
   csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
+  csrMod.io.fromRob.trap.bits.isFormer := csrIn.exception.bits.isFormer
+  csrMod.io.fromRob.diffCommitForTrap.zip(csrIn.diffCommitForTrap).foreach { case (sink, source) =>
+    sink := source
+  }
+  csrIn.diffArchEvent.zip(csrMod.io.diffArchEvent).foreach { case (sink, source) =>
+    sink := source
+  }
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
-  csrMod.io.fromRob.commit.vxsat.valid := setVxsat.valid
-  csrMod.io.fromRob.commit.vxsat.bits := setVxsat.bits
+  csrMod.io.fromRob.commit.vxsat := setVxsat
   csrMod.io.fromRob.commit.vsDirty := setVsDirty
   csrMod.io.fromRob.commit.vstart := setVstart
-  csrMod.io.fromRob.commit.vl := vlFromPreg
   // Todo: correct vtype
   csrMod.io.fromRob.commit.vtype.valid := setVtype.valid
   csrMod.io.fromRob.commit.vtype.bits.VILL := setVtype.bits(XLEN - 1)
@@ -163,6 +167,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.commit.instNum.bits  := csrIn.perf.retiredInstr
 
   csrMod.io.fromRob.robDeqPtr := csrIn.robDeqPtr
+
+  csrMod.io.fromRename.diffVl.zip(csrIn.vpu.diffVl).foreach { case (sink, source) =>
+    sink := source
+  }
 
   csrMod.io.fromVecExcpMod.busy := io.csrin.get.fromVecExcpMod.busy
 
@@ -402,6 +410,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
+      // Rename
+      custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
+      custom.high_density_rob_compression_enable := csrMod.io.status.custom.high_density_rob_compression_enable
+      custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory
       custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
@@ -592,6 +604,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val custom = new Bundle {
     // Rename
     val fusion_enable = Bool()
+    val high_density_rob_compression_enable = Bool()
     val wfi_enable = Bool()
   }
 

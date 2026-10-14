@@ -226,19 +226,6 @@ object Bundles {
     def width(implicit p: Parameters) = log2Up(p(XSCoreParamsKey).maxElemPerVreg) + 1
   }
 
-  class Fpu extends Bundle{
-    val isFpToVecInst = Bool()
-    val isFP32Instr   = Bool()
-    val isFP64Instr   = Bool()
-    val isReduction   = Bool()
-    val isFoldTo1_2   = Bool()
-    val isFoldTo1_4   = Bool()
-    val isFoldTo1_8   = Bool()
-  }
-  object Fpu {
-    def apply() = new Fpu
-  }
-
   object Vlmax extends NamedUInt(3) {
     def apply(vsew: UInt, vlmul: UInt, elen: Int): ValidIO[UInt] = {
       val vsewMinusVlmul = (vsew -& vlmul).asSInt

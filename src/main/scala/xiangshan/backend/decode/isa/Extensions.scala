@@ -1,10 +1,12 @@
 package xiangshan.backend.decode.isa
 
 import chisel3.util.BitPat
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.isa.CustomInstructions.XSTrapType
 import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable._
+import xiangshan.XSCoreParamsKey
 
 object Extensions {
   sealed trait ExtBase {
@@ -69,6 +71,8 @@ object Extensions {
 
   case object Zcmop extends UnprivExt(Seq(ZCMOPType))
 
+  case object Zimop extends UnprivExt(Seq(ZIMOPType), tableZimop)
+
   case object Zfa extends UnprivExt
 
   case object Zfh extends UnprivExt(Seq(ZFHType, ZFH64Type), tableZfh)
@@ -130,6 +134,8 @@ object Extensions {
 
   case object Zksh extends UnprivExt(Seq(ZKSHType), tableZksh)
 
+  case object Smmtt extends PrivExt(Seq(SMMTTType), tableSmmtt)
+
   case object Sdtrig extends PrivExt
 //  case object Sha extends PrivExt
   case object Shcounterenw extends PrivExt
@@ -149,7 +155,7 @@ object Extensions {
 
   case object XSTrap extends UnprivExt(Seq(XSTrapType), tableXSTrap)
 
-  def extensions: Seq[ExtBase] = Seq(
+  def extensions(implicit p: Parameters): Seq[ExtBase] = Seq(
     I, M, A, F, D, Zicsr,
     System, S, Svinval,
     Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
@@ -160,10 +166,10 @@ object Extensions {
     XSTrap,
     Zicbo,
     Zicond,
-    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
+    Zifencei, Zimop, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
-  )
+  ) ++ Option.when(p(XSCoreParamsKey).HasMptCheck && !p(XSCoreParamsKey).HasBitmapCheck)(Smmtt).toSeq
 
   trait HasInst { self: ExtBase =>
     val types: Seq[InstType]

@@ -80,7 +80,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.ref == 'refs/heads/master' }}
+          push: ${{ github.ref == 'refs/heads/kunminghu-v3' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
 

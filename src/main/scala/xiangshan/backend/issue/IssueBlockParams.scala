@@ -49,9 +49,9 @@ case class IssueBlockParams(
 
   def inVfSchd: Boolean = schdType == VecScheduler()
 
-  def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
+  def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || HyuCnt > 0
 
-  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0 || VStdCnt > 0
+  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || HyuCnt > 0 || VStdCnt > 0
 
   def isLdAddrIQ: Boolean = LduCnt > 0
 
@@ -63,19 +63,11 @@ case class IssueBlockParams(
 
   def isHyAddrIQ: Boolean = HyuCnt > 0
 
-  def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0
-
-  def isVecStuIQ: Boolean = (VstuCnt + VsegstuCnt) > 0
-
   def isVecStdIQ: Boolean = VStdCnt > 0
 
-  def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
+  def needLqIdx: Boolean = isLdAddrIQ
 
-  def needLqIdx: Boolean = isLdAddrIQ || isVecMemIQ
-
-  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ || isVecStdIQ
-
-  def needFeedBackSqIdx: Boolean = isVecStuIQ
+  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isLdAddrIQ || isVecStdIQ
 
   // There is no snresp for load, so there is no need to provide feedback on lqidx
   def needFeedBackLqIdx: Boolean = isLdAddrIQ
@@ -138,6 +130,8 @@ case class IssueBlockParams(
 
   def needPc: Boolean = exuBlockParams.map(_.needPc).reduce(_ || _)
 
+  def needPcRdPortNum: Int = exuBlockParams.map(_.needPc).count(_ == true)
+
   def needRasAction: Boolean = exuBlockParams.map(_.hasRasAction).reduce(_ || _)
 
   def needIsRVC: Boolean = exuBlockParams.map(_.needIsRVC).reduce(_ || _)
@@ -180,6 +174,8 @@ case class IssueBlockParams(
 
   def JmpCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.jmp)).sum
 
+  def LinkCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.link)).sum
+
   def BrhCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.brh)).sum
 
   def I2fCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.i2f)).sum
@@ -198,8 +194,6 @@ case class IssueBlockParams(
 
   def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vset)).sum
 
-  def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
-
   def fDivSqrtCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
   def LduCnt: Int = exuBlockParams.count(x => x.hasLoadFu && !x.hasStoreAddrFu)
@@ -215,16 +209,6 @@ case class IssueBlockParams(
   def HyuCnt: Int = exuBlockParams.count(_.hasHyldaFu) // only count hylda, since it equals to hysta
 
   def LdExuCnt = LduCnt + HyuCnt
-
-  def VipuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vipu)).sum
-
-  def VlduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vldu)).sum
-
-  def VstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vstu)).sum
-
-  def VseglduCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegldu)).sum
-
-  def VsegstuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vsegstu)).sum
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
@@ -248,9 +232,11 @@ case class IssueBlockParams(
 
   def needVlWen: Boolean = exuBlockParams.map(_.needVlWen).reduce(_ || _)
 
+  def writeVxsat: Boolean = exuBlockParams.map(_.writeVxsat).reduce(_ || _)
+
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
-  def needS0Resp = this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ
+  def needS0Resp = this.isStAddrIQ || this.isStdIQ
 
   def needFakeS1Resp = this.isStAddrIQ
 
@@ -258,7 +244,7 @@ case class IssueBlockParams(
 
   def needS2Resp = this.isStAddrIQ
 
-  def needSnResp = this.isVecStuIQ || this.isLdAddrIQ
+  def needSnResp = this.isLdAddrIQ
 
   // TODO needOg0Resp needOg1Resp
   def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, (needFakeS1Resp || needS1Resp), needS2Resp, needSnResp).count(_ == true)
@@ -360,8 +346,6 @@ case class IssueBlockParams(
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   def deqFuCfgs: Seq[Seq[FuConfig]] = exuBlockParams.map(_.fuConfigs)
-
-  def aluDeqNeedPickJump = (deqFuCfgs.size == 2) && deqFuCfgs.flatten.contains(AluCfg) && deqFuCfgs.flatten.contains(JmpCfg)
 
   def deqFuInterSect: Seq[FuConfig] = if (numDeq == 2) deqFuCfgs(0).intersect(deqFuCfgs(1)) else Seq()
 

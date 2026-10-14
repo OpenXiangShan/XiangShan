@@ -39,7 +39,7 @@ import system.HasSoCParameter
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
 class FpuCsrIO extends Bundle {
-  val fflags = Output(Valid(UInt(5.W)))
+  val fflags = Output(Vec(5, Bool()))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -49,11 +49,11 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val vstart = Input(Vstart())
   val vxrm = Input(UInt(2.W))
 
-  val vl = Output(Vl())
+  val diffVl = Option.when(backendParams.basicDebugEn)(Output(Vl()))
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
-  val set_vxsat = Output(Valid(UInt(1.W)))
+  val set_vxsat = Output(Bool())
 
   val dirty_vs = Output(Bool())
 }
@@ -91,6 +91,9 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // from rob
   val exception = Flipped(ValidIO(new ExceptionInfo))
   val robDeqPtr = Input(new RobPtr)
+  // Observation-only handshake: publish a latter trap after the former retires.
+  val diffCommitForTrap = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Input(Bool()))
+  val diffArchEvent = Option.when(env.EnableDifftest || env.AlwaysBasicDiff)(Output(Valid(Bool())))
   // to ROB
   val trapTarget = Output(new TargetPCBundle)
   val interrupt = Output(Bool())
@@ -454,7 +457,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val sieMask = "h222".U & mideleg
   val sipMask = "h222".U & mideleg
   val sipWMask = "h2".U(XLEN.W) // ssip is writeable in smode
-  val satp = if(EnbaleTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
+  val satp = if(EnableTlbDebug) RegInit(UInt(XLEN.W), "h8000000000087fbe".U) else RegInit(0.U(XLEN.W))
   // val satp = RegInit(UInt(XLEN.W), "h8000000000087fbe".U) // only use for tlb naive debug
   // val satpMask = "h80000fffffffffff".U(XLEN.W) // disable asid, mode can only be 8 / 0
   // TODO: use config to control the length of asid
@@ -571,9 +574,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   println("  Enable unaligned store: " + EnableHardwareStoreMisalign)
   println("  Enable unaligned load: " + EnableHardwareLoadMisalign)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h7".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h17".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.wfi_enable := srnctl(2)
+  csrio.customCtrl.high_density_rob_compression_enable := srnctl(4)
 
   // Hypervisor CSRs
   val hstatusWMask = "h7003c0".U(XLEN.W)
@@ -1019,11 +1023,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.distribute_csr.w.bits.data := wdata
   csrio.customCtrl.distribute_csr.w.bits.addr := addr
 
-  when (RegNext(csrio.fpu.fflags.valid)) {
-    fcsr := fflags_wfn(update = true)(RegEnable(csrio.fpu.fflags.bits, csrio.fpu.fflags.valid))
+  val robFflags = RegNext(csrio.fpu.fflags.asUInt, 0.U)
+  when (robFflags.orR) {
+    fcsr := fflags_wfn(update = true)(robFflags)
   }
-  when(RegNext(csrio.vpu.set_vxsat.valid)) {
-    vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vxsat.valid))
+  val robVxsat = RegNext(csrio.vpu.set_vxsat, false.B)
+  when(robVxsat) {
+    vcsr := vxsat_wfn(update = true)(robVxsat)
   }
 
   // set fs and sd in mstatus

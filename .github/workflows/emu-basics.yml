@@ -55,7 +55,7 @@ jobs:
         run: |
           # TODO: Use verilator for wave dump, switch to GSIM when ready
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator verilator --threads 8 \
+            --emulator verilator --threads 8 --llc OpenLLC \
             --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
             --trace-fst
       - name: Save artifact

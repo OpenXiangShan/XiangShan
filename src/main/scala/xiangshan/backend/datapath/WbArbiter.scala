@@ -124,23 +124,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   // split
   val fromExuPre = collection.mutable.Seq() ++ (io.fromIntExu ++ io.fromFpExu ++ io.fromVfExu).flatten
   val wbReplaceVld = fromExuPre
-  if (schdParams.isVecSchd) {
-    val fromExuVld: Seq[DecoupledIO[NewExuOutput]] = fromExuPre.filter(_.bits.params.hasVLoadFu).toSeq
-    val vldMgu: Seq[VldMergeUnit] = fromExuVld.map(x => Module(new VldMergeUnit(x.bits.params)))
-    vldMgu.zip(fromExuVld).foreach { case (mgu, exu) =>
-      mgu.io.flush := io.flush
-      mgu.io.writeback <> exu
-      // Since xs will flush pipe, when vstart is not 0 and execute vector mem inst, the value of vstart in CSR is the
-      // first element of this vector instruction. When exception occurs, the vstart in writeback bundle is the new one,
-      // So this vstart should never be used as the beginning of vector mem operation.
-      mgu.io.writeback.bits.toRob.bits.vls.get.vpu.vstart := io.fromCSR.vstart
-    }
-    val vldIdx: Seq[Int] = vldMgu.map(x => fromExuPre.indexWhere(_.bits.params == x.params))
-    println("vldIdx: " + vldIdx)
-    vldIdx.zip(vldMgu).foreach { case (id, wb) =>
-      wbReplaceVld.update(id, wb.io.writebackAfterMerge)
-    }
-  }
+
   val fromExu = Wire(chiselTypeOf(MixedVecInit(wbReplaceVld.toSeq)))
 
   // io.fromExuPre ------------------------------------------------------------> fromExu
@@ -247,9 +231,9 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
         when (intWrite) {
           assert(intArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write int regfile\n")
         }
-        when(fpWrite) {
-          assert(fpArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write fp regfile\n")
-        }
+//        when(fpWrite) {
+//          assert(fpArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write fp regfile\n")
+//        }
         when (vfWrite) {
           assert(vfArbiterInput.ready, s"exu ${exuOut.bits.params.exuIdx} failed to write vf regfile\n")
         }
@@ -314,7 +298,7 @@ class WbDataPath(params: BackendParams, schdParams: SchdBlockParams)(implicit p:
   intWbArbiter.io.flush <> io.flush
   require(intWbArbiter.io.in.size == intArbiterInputsWireY.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all int wb size: ${intArbiterInputsWireY.size}")
   intWbArbiter.io.in.zip(intArbiterInputsWireY).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid && in.bits.toIntRf.map(_.valid).getOrElse(false.B)
+    arbiterIn.valid := in.bits.toIntRf.map(_.valid).getOrElse(false.B)
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits, "int")
   }

@@ -52,7 +52,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
     dontTouch(outSew1H)
   }
 
-  val outIsMvInst = FCvtOpcode.getCvtSign(fuOpType).andR
+  val isMvInst = FCvtOpcode.getCvtSign(fuOpType).andR
   val isFli = FCvtOpcode.isFli(fuOpType)
 
   val fliHTable = Module(new FliHTable)
@@ -80,6 +80,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   val outIsFli = RegEnable(RegEnable(isFli, fire), fireReg)
   val outFliData = RegEnable(RegEnable(fliData, fire), fireReg)
+  val outIsMvInst = RegEnable(RegEnable(isMvInst, fire), fireReg)
 
   io.out.bits.res.fflags.get := Mux(outIsFli || outIsMvInst, 0.U, fcvt.io.fflags)
 
@@ -87,7 +88,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
     outIsFli,
     outFliData,
     Mux(
-      RegEnable(RegEnable(outIsMvInst, fire), fireReg),
+      outIsMvInst,
       RegEnable(RegEnable(src1, fire), fireReg),
       fcvt.io.result
     )

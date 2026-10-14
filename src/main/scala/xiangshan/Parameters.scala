@@ -72,7 +72,7 @@ case class XSCoreParameters
   AsidLength: Int = 16,
   SdidLength: Int = 6,
   VmidLength: Int = 14,
-  EnbaleTlbDebug: Boolean = false,
+  EnableTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableSv48: Boolean = true,
@@ -84,6 +84,7 @@ case class XSCoreParameters
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
+  EnableRobCompression: Boolean = true,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
@@ -111,7 +112,7 @@ case class XSCoreParameters
   StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 352,
+  RobSize: Int = 144,
   RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
@@ -303,15 +304,15 @@ case class XSCoreParameters
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
     // single letter extensions, in canonical order
-    "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
+    "i", "m", "a", "f", "d", "c", "b", "v", "h",
     // multi-letter extensions, sorted alphanumerically
-    "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
+    "sdext", "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
     "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
     "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zawrs", "zba",
+    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zama16b", "zawrs", "zba",
     "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
-    "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
+    "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccamoc", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
     "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
     "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
   )
@@ -342,12 +343,12 @@ case class XSCoreParameters
     implicit val schdType: SchedulerType = IntScheduler()
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
+        ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
+        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(3, 1)), Seq(IntRD(9, 2))))
+        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(3, 1)), Seq(IntRD(9, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -358,7 +359,7 @@ case class XSCoreParameters
           true,
           2,
         ),
-        ExeUnitParams("BJU2", Seq(BrhCfg, JmpCfg), Seq(), Seq(Seq(IntRD(5, 1)), Seq(IntRD(11, 2))))
+        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(5, 1)), Seq(IntRD(11, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -458,20 +459,20 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "FEX0",
-          Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg),
+          Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg),
           Seq(FpWB(port = 0, 0), IntWB(port = 3, 1)),
           Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0))),
         ),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX3", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
-      ), numEntries = 20, numEnq = 2, numComp = 16),
+        ExeUnitParams("FEX3", Seq(FaluCfg, FmulCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
+      ), numEntries = 20, numEnq = 2, numComp = 18),
     ),
       numPregs = fpPreg.numEntries,
       numDeqOutside = 0,
@@ -486,9 +487,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VmoveCfg),
+          Seq(VialuCfg, VimacCfg, VmoveCfg, VfcvtCfg, VfmacCfg),
           Seq(VfWB(port = 3, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
-          Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0))),
+          Seq(Seq(VfRD(0, 0), FpRD(12, 1)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0))),
           vlRD = VlRD(0, 0),
           v0WB = V0WB(0, 0),
           v0RD = V0RD(0, 0),
@@ -497,9 +498,9 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
-          Seq(VialuCfg),
+          Seq(VialuCfg, VidivCfg, VfmacCfg, VfdivCfg),
           Seq(VfWB(port = 4, 0)),
-          Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0))),
+          Seq(Seq(VfRD(3, 0), FpRD(13, 1)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0))),
           vlRD = VlRD(1, 0),
           v0WB = V0WB(1, 0),
           v0RD = V0RD(1, 0),
@@ -720,7 +721,7 @@ trait HasXSParameter {
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
-  def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
+  def EnableTlbDebug = coreParams.EnableTlbDebug
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
 
@@ -735,6 +736,7 @@ trait HasXSParameter {
   def RobCommitWidth = coreParams.RobCommitWidth
   def RabCommitWidth = coreParams.RabCommitWidth
   def MaxUopSize = coreParams.MaxUopSize
+  def EnableRobCompression = coreParams.EnableRobCompression
   def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   def RenameSnapshotNum = coreParams.RenameSnapshotNum
   def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp

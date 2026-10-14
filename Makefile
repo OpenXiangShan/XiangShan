@@ -50,10 +50,20 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
+LLC ?= OpenLLC
 
 SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
 $(error "Unsupported CHI issue: $(ISSUE)")
+endif
+SUPPORT_LLC = OpenLLC ZhuJiang
+ifeq ($(findstring $(LLC), $(SUPPORT_LLC)),)
+$(error "Unknown LLC: $(LLC)")
+endif
+ifeq ($(LLC),ZhuJiang)
+ifneq ($(ISSUE),E.b)
+$(error "LLC=ZhuJiang only supports ISSUE=E.b or newer")
+endif
 endif
 
 ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
@@ -66,10 +76,16 @@ else
 GOALS = $(MAKECMDGOALS)
 endif
 
+IOMMU_ENABLED := $(WITH_IOMMU)
+
 # GSIM reads CHIRRTL directly, so Verilog is not needed for these goals.
 # An explicit CHISEL_TARGET on the command line still takes precedence.
 ifneq ($(filter sim-chirrtl gsim,$(GOALS)),)
 CHISEL_TARGET ?= chirrtl
+ifeq ($(WITH_IOMMU),1)
+$(info WITH_IOMMU=1 is ignored for GSIM/CHIRRTL)
+endif
+IOMMU_ENABLED := 0
 endif
 CHISEL_TARGET ?= systemverilog
 
@@ -142,6 +158,9 @@ ifneq ($(CHI_ADDR_WIDTH),)
 COMMON_EXTRA_ARGS += --chi-addr-width $(CHI_ADDR_WIDTH)
 endif
 
+# LLC backend selection
+COMMON_EXTRA_ARGS += --llc $(LLC)
+
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
 COMMON_EXTRA_ARGS += --l2-cache-size $(L2_CACHE_SIZE)
@@ -181,6 +200,16 @@ ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# OpenIOMMU is enabled only for the configuration that provides the BOSC
+# lightweight integration. GSIM forces the effective option off above.
+ifeq ($(IOMMU_ENABLED),1)
+ifeq ($(CONFIG),DefaultConfig)
+override SIM_ARGS += --with-iommu
+else
+$(error WITH_IOMMU=1 requires CONFIG=DefaultConfig)
+endif
 endif
 
 # SimAXIMem size in GB (for sim-verilog only)
@@ -339,7 +368,7 @@ GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
 init:
 	git submodule update --init $(GIT_FORCE_FLAG)
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
-	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB
+	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB ZhuJiang
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.

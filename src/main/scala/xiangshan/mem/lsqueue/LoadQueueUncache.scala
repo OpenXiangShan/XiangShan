@@ -122,7 +122,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val pendingPtr = GatedRegNext(io.rob.pendingPtr)
   val canSendReq = req_valid && !needFlush && Mux(
     req.nc, true.B,
-    req.uop.robIdx === pendingPtr
+    req.uop.robIdx.isNotAfterSlot(pendingPtr)
   )
   switch (uncacheState) {
     is (s_idle) {
@@ -204,7 +204,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.ncOut.bits := DontCare
 
   when(req.nc){
-    io.ncOut.valid := (uncacheState === s_wait) && !needFlush
+    io.ncOut.valid := (uncacheState === s_wait) // we will be flush in loadUnit s1, don't need to flush in s0.
     io.ncOut.bits := DontCare
     io.ncOut.bits.uop := req.uop
     io.ncOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -213,7 +213,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.ncOut.bits.data := uncacheData
     io.ncOut.bits.paddr := req.paddr
   }.otherwise{
-    io.mmioOut.valid := (uncacheState === s_wait) && !needFlush
+    io.mmioOut.valid := (uncacheState === s_wait) // we will be flush in loadUnit s1, don't need to flush in s0.
     io.mmioOut.bits := DontCare
     io.mmioOut.bits.uop := req.uop
     io.mmioOut.bits.uop.lqIdx := req.uop.lqIdx
@@ -228,15 +228,15 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
     io.mmioRawData.uop := req.uop
     io.mmioRawData.addrOffset := req.paddr
   }
-  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlush && !needFlushReg
+  io.ncWakeup.valid := uncacheState === s_wakeup && req.nc && !needFlushReg
   io.ncWakeup.bits := req.uop.lqIdx
-  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlush && !needFlushReg
+  io.mmioWakeup.valid := uncacheState === s_wakeup && req.mmio && !needFlushReg
   io.mmioWakeup.bits := req.uop.lqIdx
 
-  io.exception.valid := writeback
-  io.exception.bits := req
-  io.exception.bits.uop.exceptionVec(loadAccessFault) := nderr
-  io.exception.bits.uop.exceptionVec(hardwareError) := derr
+  io.exception.valid := RegNext(writeback)
+  io.exception.bits := RegEnable(req, writeback)
+  io.exception.bits.uop.exceptionVec(loadAccessFault) := RegEnable(nderr, writeback)
+  io.exception.bits.uop.exceptionVec(hardwareError) := RegEnable(derr, writeback)
 
   /* debug log */
   XSDebug(io.uncache.req.fire,
@@ -332,7 +332,9 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
    *    ready: freelist can allocate
    ******************************************************************/
 
-  val s1_sortedVec = HwSort(VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
+  val s1_sortedVec = HwSort(
+    VecInit(io.req.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) })
+  )((a, b) => a.isBeforeSlot(b))
   val s1_req = VecInit(s1_sortedVec.map(_.bits))
   val s1_valid = VecInit(s1_sortedVec.map(_.valid))
   val s2_enqueue = Wire(Vec(LoadPipelineWidth, Bool()))

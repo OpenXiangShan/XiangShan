@@ -315,14 +315,15 @@ trait MachineLevel { self: NewCSR =>
     regOut.SGEIP := Cat(hgeip.asUInt & hgeie.asUInt).orR
 
     // bit 13 LCOFIP
-    when (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid || wen) {
+    val lcofiReqHold = lcofiReq || RegNext(lcofiReq, false.B)
+    when(lcofiReqHold) {
+      reg.LCOFIP := lcofiReqHold
+    }.elsewhen (fromSip.LCOFIP.valid || fromVSip.LCOFIP.valid || wen) {
       reg.LCOFIP := Mux1H(Seq(
         fromSip.LCOFIP.valid  -> fromSip.LCOFIP.bits,
         fromVSip.LCOFIP.valid -> fromVSip.LCOFIP.bits,
         wen -> wdata.LCOFIP,
       ))
-    }.elsewhen(lcofiReq) {
-      reg.LCOFIP := lcofiReq
     }.otherwise {
       reg.LCOFIP := reg.LCOFIP
     }

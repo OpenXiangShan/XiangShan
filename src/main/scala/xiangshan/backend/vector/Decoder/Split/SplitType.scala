@@ -34,6 +34,7 @@ object SplitType extends ChiselEnum {
 
   val VLSNONIDX            = Value(b"11000")
   val VLSNONIDXFF          = Value(b"11001")
+  val VFNCVT               = Value(b"11010")
 
   lazy val maxValue = this.all.map(_.litValue.toInt).max
 
@@ -70,4 +71,3 @@ object SplitTypeOH extends OHEnumeration {
   lazy val all: Seq[Type] = SplitType.all.map(x => this.apply(x))
   lazy val allBitPat: Seq[BitPat] = all.map(x => BitPat("b" + BitPat(x).rawString.replace('0', '?')))
 }
-

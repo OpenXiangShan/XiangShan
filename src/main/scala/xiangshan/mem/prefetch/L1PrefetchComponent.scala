@@ -133,10 +133,14 @@ class TrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasStoreT
   val deqPtr = WireInit(deqPtrExt.value)
 
   val ldReorderOpt = io.ldTrainOpt.map { ldTrain =>
-    HwSort(VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
+    HwSort(
+      VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) })
+    )((a, b) => a.isBeforeSlot(b))
   }
   val stReorderOpt = io.stTrainOpt.map { stTrain =>
-    HwSort(VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
+    HwSort(
+      VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) })
+    )((a, b) => a.isBeforeSlot(b))
   }
   val ldReorderBufferedOpt = ldReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))
   val stReorderBufferedOpt = stReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))
@@ -364,9 +368,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val l1_replacement = new ValidPseudoLRU(MLP_L1_SIZE)
   val l2_replacement = new ValidPseudoLRU(MLP_L2_SIZE)
   val l3_replacement = new ValidPseudoLRU(MLP_L3_SIZE)
-  val l1_tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_L1_SIZE))
-  val l2_tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_L2_SIZE))
-  val l3_tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_L3_SIZE))
+  val l1_tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, MLP_L1_SIZE))
+  val l2_tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, MLP_L2_SIZE))
+  val l3_tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, MLP_L3_SIZE))
   val l1_pf_req_arb = Module(new TwoLevelRRArbiter(new Bundle {
     val req = new L1PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
@@ -375,7 +379,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val req = new L2PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
   }, MLP_L2_SIZE))
-  val l3_pf_req_arb = Module(new RRArbiterInit(new L3PrefetchReq, MLP_L3_SIZE))
+  val l3_pf_req_arb = Module(new TwoLevelRRArbiter(new L3PrefetchReq, MLP_L3_SIZE))
 
   val l1_opt_replace_vec = VecInit(l1_array.zip(l1_valids).map{case (e, v) => e.may_be_replace(v)})
   val l2_opt_replace_vec = VecInit(l2_array.zip(l2_valids).map{case (e, v) => e.may_be_replace(v)})

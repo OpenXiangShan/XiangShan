@@ -209,6 +209,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
+    val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val lqEmpty = Output(Bool())
@@ -222,6 +223,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val replayAllocate = Output(Bool())
+    val specialMode = Output(Bool())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -288,6 +290,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueReplay
    */
   loadQueueReplay.io.redirect         <> io.redirect
+  loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtrNext
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup
@@ -303,11 +306,16 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
+  loadQueueReplay.io.fast_tlb_hint    <> io.fast_tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   loadQueueReplay.io.storeAddrWakeup.zip(io.wakeupToLRQ.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeAddrWakeupCancel.zip(io.wakeupToLRQCancel.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeupCancel.zip(io.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeDataWrite.zip(io.std.storeDataIn).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits.sqIdx
+  }
   loadQueueReplay.io.physicalUpperSqIdx <> io.sq.physicalUpperSqIdx
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
@@ -315,6 +323,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
   loadQueueReplay.io.replayAllocate <> io.replayAllocate
+  io.specialMode := loadQueueReplay.io.specialMode
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
