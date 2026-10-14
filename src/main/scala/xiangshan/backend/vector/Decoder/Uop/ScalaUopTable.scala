@@ -653,16 +653,6 @@ object ScalaUopTable {
     )
   }
 
-  val tableZimop = {
-    import xiangshan.backend.decode.isa.Instructions.ZIMOPType
-
-    // Decode as add rd, x0, x0; SimpleDecodeChannel forces both sources to x0.
-    ZIMOPType.mapUopcode(
-      _.MOP_R_N  -> add,
-      _.MOP_RR_N -> add,
-    )
-  }
-
   val tableZknd = {
     import xiangshan.backend.decode.isa.Instructions.ZKND64Type
     ZKND64Type.mapUopcode(

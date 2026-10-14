@@ -56,8 +56,7 @@ class DecodeChannels(
   val scalarMultiUopInsts = InstPattern.extensionInsts(scalarMultiUopExts: _*)
   val scalarSplitCounts = ScalarMultiUopDecodeChannel.splitCounts(scalarMultiUopInsts, scalarMultiUopExts)
     .filterNot(Seq(0, 1, 2, 4, 8).contains)
-  // MOPs stay in Pseudo so Simple cannot overlap active Zicfiss decoding.
-  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha, Zimop) ++ scalarMultiUopExts)
+  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha) ++ scalarMultiUopExts)
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
 
   // Get vector instruction bits pattern by extensions
