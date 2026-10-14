@@ -245,11 +245,38 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   io.specOut.isCanUse  := isCanUse
   io.specOut.retTarget := topRetAddr
 
-  private val s3_overrideHasRasAction     = s3_override && (s3_realPush || s3_realPop)
-  private val s3_overrideHasRasActionNext = RegNext(s3_overrideHasRasAction, false.B)
-  XSPerfAccumulate("s3_override_has_rasAction", s3_overrideHasRasAction)
+  private val s2_canUseRas   = RegEnable(isCanUse, io.stageCtrl.s1_fire)
+  private val s3_canUseRas   = RegEnable(s2_canUseRas, io.stageCtrl.s2_fire)
+  private val s2_predictAddr = RegEnable(topRetAddr, io.stageCtrl.s1_fire)
+  private val s3_predictAddr = RegEnable(s2_predictAddr, io.stageCtrl.s2_fire)
+  private val targetDiff     = s3_predictAddr =/= io.fullRetAddr
+
   XSPerfAccumulate(
-    "s1_has_return_after_override_has_action",
-    s3_overrideHasRasActionNext && io.stageCtrl.s1_fire && specPop
+    "microRas_mispredict",
+    s3_canUseRas && s3_override && s3_realPop && io.stageCtrl.s3_fire && targetDiff
+  )
+  XSPerfAccumulate(
+    "microRas_mispredict_not_excepted",
+    s3_canUseRas && s3_override && s3_realPop && io.stageCtrl.s3_fire
+  )
+  XSPerfAccumulate(
+    "microRas_predict",
+    s3_canUseRas && s3_realPop && io.stageCtrl.s3_fire
+  )
+  XSPerfAccumulate(
+    "microRas_need_predict",
+    s3_hasPop && s3_realPop && io.stageCtrl.s3_fire
+  )
+  XSPerfAccumulate(
+    "microRas_need_predict_and_mispredict",
+    s3_hasPop && s3_realPop && s3_override && io.stageCtrl.s3_fire && targetDiff
+  )
+  XSPerfAccumulate(
+    "microRas_need_predict_and_mispredict_not_excepted",
+    s3_hasPop && s3_realPop && s3_override && io.stageCtrl.s3_fire
+  )
+  XSPerfAccumulate(
+    "mainRas_actual_ret",
+    s3_realPop && io.stageCtrl.s3_fire
   )
 }

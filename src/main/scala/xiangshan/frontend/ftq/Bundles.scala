@@ -20,14 +20,17 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utils.EnumUInt
+import xiangshan.Redirect
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
@@ -97,6 +100,16 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   val startPc: GuardedPc = Output(GuardedPc())
 }
 
+class NonCfiInfo(implicit p: Parameters) extends FtqBundle with HalfAlignHelper {
+  val hasRedirect: Bool = Bool()
+  val cfiPosition: UInt = UInt(CfiPositionWidth.W)
+
+  def fromRedirect(redirect: Redirect): Unit = {
+    this.hasRedirect := redirect.attribute.isNone
+    this.cfiPosition := getAlignedPosition(PcInit(redirect.pc), redirect.ftqOffset)._1
+  }
+}
+
 class PerfMeta(implicit p: Parameters) extends FtqBundle {
   val bpuPerf: BpuPerfMeta = new BpuPerfMeta
 
@@ -108,6 +121,7 @@ class PerfMeta(implicit p: Parameters) extends FtqBundle {
   // no matter how many mispredictions happened before, count correct-path only
   val mispredict:           Bool       = Bool()
   val mispredictBranchInfo: BranchInfo = new BranchInfo()
+  val nonCfiInfo:           NonCfiInfo = new NonCfiInfo()
 }
 
 class FtqToPrefetchBundle(implicit p: Parameters) extends FtqBundle {
