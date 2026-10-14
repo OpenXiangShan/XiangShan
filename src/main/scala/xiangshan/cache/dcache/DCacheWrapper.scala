@@ -68,8 +68,15 @@ case class DCacheParameters
   // Channel selection strategy
   // true = select by address set低位
   // false = select by MSHR ID
-  channelSelByAddr: Boolean = true
+  channelSelByAddr: Boolean = true,
+
+  // ========== MissTrack / SpecMiss ==========
+  enMissTrack: Boolean = true,
+  missTrackEntries: Int = 16,
+  missTrackHashBits: Int = 5
 ) extends L1CacheParameters {
+  require(missTrackEntries >= 2, "MissTrack needs at least two entries")
+  require(missTrackHashBits > 0, "MissTrack hash must be nonempty")
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
   // we need to avoid this by recoding additional bits in L2 cache
@@ -935,6 +942,34 @@ class DCacheMQQueryIOBundle(implicit p: Parameters) extends DCacheBundle
   val ready  = Input(Bool())
 }
 
+class DCacheSpecMissQueryIOBundle(implicit p: Parameters) extends DCacheBundle {
+  val req = ValidIO(new DCacheSpecMissReq)
+  val grant = Flipped(ValidIO(UInt(log2Up(cfg.nMissEntries).W)))
+}
+
+class DCacheSpecMissReq(implicit p: Parameters) extends MissTrackLine {
+  val pc = UInt(VAddrBits.W)
+  val grow = UInt(TLPermissions.aWidth.W)
+}
+
+class SpecMissFabricRequest(implicit p: Parameters) extends DCacheSpecMissReq {
+  val id = UInt(log2Up(cfg.nMissEntries).W)
+  val alias = UInt(VAddrBits.W)
+  val prefetch = Bool()
+  val channel = UInt(2.W)
+}
+
+class SpecMissFabricResolve(implicit p: Parameters) extends DCacheBundle {
+  val id = UInt(log2Up(cfg.nMissEntries).W)
+  val commit = Bool()
+}
+
+class SpecMissFabricIO(implicit p: Parameters) extends DCacheBundle {
+  val candidate = Vec(LoadPipelineWidth, DecoupledIO(new SpecMissFabricRequest))
+  val resolve = Vec(LoadPipelineWidth, ValidIO(new SpecMissFabricResolve))
+  val committed = Input(Vec(LoadPipelineWidth, Bool()))
+}
+
 class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val in = Vec(n, Flipped(DecoupledIO(new MissReq)))
@@ -958,6 +993,10 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
+
+  val specFabricSource = Option.when(cfg.enMissTrack)(
+    BundleBridgeSource(() => new SpecMissFabricIO)
+  )
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
@@ -1429,6 +1468,48 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     }
   }
 
+  /** MissTrack observes all load ports and qualifies SpecMiss requests. */
+  if (cfg.enMissTrack) {
+    val misstrack = Module(new MissTrack(MissReqPortCount))
+    // Keep ECC/readline control off the same-cycle MissTrack age cone. The
+    // table is advisory, so observing install/error events one cycle later is
+    // safe; the functional load/miss pipeline is unchanged.
+    val delayedInstall = RegNext(
+      mainPipe.io.misstrack_install,
+      0.U.asTypeOf(Valid(new MissTrackResident))
+    )
+    val delayedClear = RegNext(
+      mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _),
+      false.B
+    )
+    for (w <- 0 until LoadPipelineWidth) {
+      misstrack.io.loads(w) := ldu(w).io.mtrack
+      ldu(w).io.specmiss := misstrack.io.spec(w)
+      ldu(w).io.mshr_full := missQueue.io.full
+    }
+    misstrack.io.alloc := missQueue.io.misstrack_alloc
+    misstrack.io.owners := missQueue.io.misstrack_owners
+    misstrack.io.install := delayedInstall
+    val tagWrite = mainPipe.io.tag_write
+    val metaWrite = mainPipe.io.meta_write
+    // Both ports belong to the same MainPipe s3 transaction. Tag writes remove
+    // the old occupant; installation of the new line is handled independently.
+    misstrack.io.invalidate.valid := tagWrite.fire ||
+      (metaWrite.fire && !metaWrite.bits.meta.coh.isValid())
+    // Both payloads are the same s3_idx/s3_way_en even when a port is not valid.
+    // Avoid putting the late write handshake on the invalidate payload mux.
+    misstrack.io.invalidate.bits.idx := metaWrite.bits.idx
+    misstrack.io.invalidate.bits.way := metaWrite.bits.way_en
+    // Error reports can arrive after the s2 training observation. Conservatively
+    // clear the small history table; normal cache error handling remains intact.
+    misstrack.io.clear := delayedClear
+  } else {
+    for (w <- 0 until LoadPipelineWidth) {
+      ldu(w).io.specmiss := 0.U.asTypeOf(new MissTrackSpec)
+      ldu(w).io.mshr_full := missQueue.io.full
+    }
+  }
+
   //----------------------------------------
   // load pipe
   // the s1 kill signal
@@ -1572,6 +1653,25 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.wbq_block_miss_req := wb.io.block_miss_req
 
   missReadyGen.io.queryMQ <> missQueue.io.queryMQ
+  for (w <- 0 until LoadPipelineWidth) {
+    ldu(w).io.spec_query <> missQueue.io.spec_query(w)
+  }
+  outer.specFabricSource match {
+    case Some(source) =>
+      val fabric = source.bundle
+      for (w <- 0 until LoadPipelineWidth) {
+        fabric.candidate(w).valid := missQueue.io.spec_fabric.candidate(w).valid
+        fabric.candidate(w).bits := missQueue.io.spec_fabric.candidate(w).bits
+        missQueue.io.spec_fabric.candidate(w).ready := fabric.candidate(w).ready
+        fabric.resolve(w) := missQueue.io.spec_fabric.resolve(w)
+        missQueue.io.spec_fabric.committed(w) := fabric.committed(w)
+      }
+    case None =>
+      for (w <- 0 until LoadPipelineWidth) {
+        missQueue.io.spec_fabric.candidate(w).ready := false.B
+        missQueue.io.spec_fabric.committed(w) := false.B
+      }
+  }
   io.cmoOpReq <> missQueue.io.cmo_req
   io.cmoOpResp <> missQueue.io.cmo_resp
 

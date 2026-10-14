@@ -197,6 +197,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
+    val misstrack_install = ValidIO(new MissTrackResident)
     val tag_write_ready_dup = Vec(nDupTagWriteReady, Input(Bool()))
     val tag_write_intend = Output(new Bool())
 
@@ -470,6 +471,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_vaddr_alias = RegEnable(get_alias(s1_req.vaddr), s1_fire)
+  val s2_vaddr_set = RegEnable(addr_to_dcache_set(s1_req.vaddr), s1_fire)
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
   val s2_has_real_tag_eq_way = RegEnable(s1_has_real_tag_eq_way, s1_fire)
@@ -911,6 +914,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
+  miss_req.vaddrAlias := s2_vaddr_alias
+  miss_req.vaddrSet := s2_vaddr_set
   miss_req.store_data := s2_req.store_data
   miss_req.store_mask := s2_req.store_mask
   miss_req.word_idx := s2_req.word_idx
@@ -920,6 +925,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.req_coh := s2_hit_coh
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
+  miss_req.isSpecMiss := false.B
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
@@ -1047,6 +1053,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_write.bits.tag := get_tag(s3_req.addr)
   io.tag_write.bits.ecc := DontCare // generate ecc code in tagArray
   io.tag_write.bits.vaddr := s3_req.vaddr
+
+  // Only a committed, readable installation supplies a RESIDENT record.
+  io.misstrack_install.valid := io.tag_write.fire && io.meta_write.fire &&
+    new_coh.isValid() && !s3_l2_error_wb.asUInt.orR && !s3_error_wb
+  io.misstrack_install.bits.vaddr := s3_req.vaddr
+  io.misstrack_install.bits.paddr := s3_req.addr
+  io.misstrack_install.bits.way := s3_way_en
 
   io.tag_write_intend := s3_req.miss && s3_valid
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
