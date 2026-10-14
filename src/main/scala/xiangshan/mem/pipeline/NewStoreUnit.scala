@@ -532,8 +532,11 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.prefetchTrainHint := fire && isFirstIssue
 
   io.debugInfo := DontCare
-  io.debugInfo.s1_robIdx := robIdx.value
+  io.debugInfo.s1_robIdx := robIdx
   io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHwPrefetch && isFirstIssue
+  // TEA ST_TLB: any-issue TLB miss (exclude hw prefetch).
+  io.debugInfo.s1_isTlbMiss := pipeIn.valid && !kill && tlbMiss && !isHwPrefetch
+  io.debugInfo.s2_isDcacheMiss := false.B
 
   // Perf counters
   XSPerfAccumulate("s1_valid", pipeIn.valid)

@@ -245,10 +245,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val hartId = p(XSCoreParamsKey).HartId
   val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
   val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 1)
-  val teaPsvSetSources = scala.collection.mutable.ArrayBuffer[(Bool, UInt, UInt)]()
-  def teaPc(entry: RobEntryBundle): UInt = if (backendParams.debugEn) entry.debug_pc.get else 0.U(VAddrBits.W)
-  def mergedTeaSetMask(target: UInt): UInt = teaPsvSetSources.foldLeft(TeaPsvOps.empty) {
-    case (acc, (valid, robIdx, mask)) => acc | Mux(valid && robIdx === target, mask, TeaPsvOps.empty)
+  private case class TeaPsvSetSource(valid: Bool, robIdx: RobPtr, mask: UInt)
+  private val teaPsvSetSources = scala.collection.mutable.ArrayBuffer[TeaPsvSetSource]()
+  def teaPc(ptr: RobPtr): UInt = if (backendParams.debugEn) {
+    debugMeta(debug_microOp(ptr.value)((!ptr.isFormer).asUInt)).pc
+  } else {
+    0.U(VAddrBits.W)
+  }
+  def teaPsv(ptr: RobPtr): UInt = robEntries(ptr.value).teaPsv((!ptr.isFormer).asUInt)
+  def mergedTeaSetMask(target: RobPtr): UInt = teaPsvSetSources.foldLeft(TeaPsvOps.empty) {
+    case (acc, source) =>
+      val sameSlot = source.robIdx.value === target.value && source.robIdx.isFormer === target.isFormer
+      acc | Mux(source.valid && sameSlot, source.mask, TeaPsvOps.empty)
   }
   // robEntries enqueue
   for (i <- 0 until RobSize) {
@@ -261,7 +269,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // TODO: enq
       val entryHeadUop = Mux1H(enqOH, io.enq.req.map(_.bits))
       connectEnq(robEntries(i), entryHeadUop)
-      robEntries(i).teaPsv := Mux(enableTea.asBool, entryHeadUop.teaPsv, TeaPsvOps.empty)
+      val slotPsv = collectTeaPsvBySlot(
+        entryEnqValid,
+        io.enq.req.map(_.bits.robIdx.isFormer),
+        io.enq.req.map(_.bits.teaPsv)
+      )
+      for (slot <- 0 until 2) {
+        robEntries(i).teaPsv(slot) := Mux(enableTea.asBool, slotPsv(slot), TeaPsvOps.empty)
+      }
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
@@ -992,31 +1007,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       p"excp $deqHasException flushPipe $isFlushPipe " +
       p"Trap_target 0x${Hexadecimal(io.csr.trapTarget.pc)} exceptionVec ${Binary(exceptionDataRead.bits.exceptionVec.asUInt)}\n")
 
-  val teaRedirectIdx = io.redirect.bits.robIdx.value
-  val teaFlushIdx = deqPtr.value
+  val teaRedirectPtr = io.redirect.bits.robIdx
+  val teaFlushPtr = deqExceptionRobIdx
   val teaRedirectCtrlMispred = enableTea.asBool && io.redirect.valid &&
     io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred
   val teaRedirectMemVio = enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsMemVio
   val teaExceptionFlush = enableTea.asBool && io.flushOut.valid && deqHasException
-  teaPsvSetSources += ((teaRedirectCtrlMispred, teaRedirectIdx, TeaEvent.bit(TeaEvent.FL_MB)))
-  teaPsvSetSources += ((teaRedirectMemVio, teaRedirectIdx, TeaEvent.bit(TeaEvent.FL_MO)))
-  teaPsvSetSources += ((teaExceptionFlush, teaFlushIdx, TeaEvent.bit(TeaEvent.FL_EX)))
+  teaPsvSetSources += TeaPsvSetSource(teaRedirectCtrlMispred, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MB))
+  teaPsvSetSources += TeaPsvSetSource(teaRedirectMemVio, teaRedirectPtr, TeaEvent.bit(TeaEvent.FL_MO))
+  teaPsvSetSources += TeaPsvSetSource(teaExceptionFlush, teaFlushPtr, TeaEvent.bit(TeaEvent.FL_EX))
 
   when (enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred) {
-    val idx = teaRedirectIdx
     teaFlushCause.valid := true.B
-    teaFlushCause.pc := teaPc(robEntries(idx))
-    teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_MB)
+    teaFlushCause.pc := teaPc(teaRedirectPtr)
   }.elsewhen(enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsMemVio) {
-    val idx = teaRedirectIdx
     teaFlushCause.valid := true.B
-    teaFlushCause.pc := teaPc(robEntries(idx))
-    teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_MO)
+    teaFlushCause.pc := teaPc(teaRedirectPtr)
   }.elsewhen(enableTea.asBool && io.flushOut.valid && deqHasException) {
-    val idx = teaFlushIdx
     teaFlushCause.valid := true.B
-    teaFlushCause.pc := teaPc(robEntries(idx))
-    teaFlushCause.psv := robEntries(idx).teaPsv | TeaEvent.bit(TeaEvent.FL_EX)
+    teaFlushCause.pc := teaPc(teaFlushPtr)
   }.elsewhen(enableTea.asBool && io.redirect.valid) {
     teaFlushCause.valid := false.B
   }
@@ -1465,13 +1474,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // debug_inst update
   for (i <- 0 until (LduCnt + StaCnt)) {
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx.value).s1SignalEnable(io.debug_ls.debugLsInfo(i))
+    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx.value).s2SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(io.debug_ls.debugLsInfo(i))
     val s1Idx = io.debug_ls.debugLsInfo(i).s1_robIdx
     val s2Idx = io.debug_ls.debugLsInfo(i).s2_robIdx
-    teaPsvSetSources += ((enableTea.asBool && io.debug_ls.debugLsInfo(i).s1_isTlbFirstMiss, s1Idx, TeaEvent.bit(TeaEvent.ST_TLB)))
-    teaPsvSetSources += ((enableTea.asBool && io.debug_ls.debugLsInfo(i).s2_isDcacheFirstMiss, s2Idx, TeaEvent.bit(TeaEvent.ST_L1)))
+    teaPsvSetSources += TeaPsvSetSource(
+      enableTea.asBool && io.debug_ls.debugLsInfo(i).s1_isTlbMiss,
+      s1Idx,
+      TeaEvent.bit(TeaEvent.ST_TLB)
+    )
+    teaPsvSetSources += TeaPsvSetSource(
+      enableTea.asBool && io.debug_ls.debugLsInfo(i).s2_isDcacheMiss,
+      s2Idx,
+      TeaEvent.bit(TeaEvent.ST_L1)
+    )
   }
   for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
@@ -2169,34 +2186,35 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
   val l2Miss = io.debugTopDown.fromCore.l2MissMatch
   val l3Miss = io.debugTopDown.fromCore.l3MissMatch
-  val headLlcMiss = enableTea.asBool && robEntries(deqPtr.value).valid &&
-    robEntries(deqPtr.value).commitType === CommitType.LOAD &&
-    io.debugTopDown.toCore.robHeadPaddr.valid && l3Miss
-  teaPsvSetSources += ((headLlcMiss, deqPtr.value, TeaEvent.bit(TeaEvent.ST_LLC)))
-
   for (i <- 0 until RobSize) {
-    val mergedSetMask = mergedTeaSetMask(i.U)
-    when (enableTea.asBool && robEntries(i).valid && mergedSetMask.orR) {
-      robEntries(i).teaPsv := robEntries(i).teaPsv | mergedSetMask
+    for (slot <- 0 until 2) {
+      val target = Wire(new RobPtr)
+      target := deqPtr
+      target.value := i.U
+      target.isFormer := (slot == 0).B
+      val mergedSetMask = mergedTeaSetMask(target)
+      when (enableTea.asBool && robEntries(i).valid && !enqOHByEntry(i).asUInt.orR && mergedSetMask.orR) {
+        robEntries(i).teaPsv(slot) := robEntries(i).teaPsv(slot) | mergedSetMask
+      }
     }
   }
   when (enableTea.asBool && io.redirect.valid && (io.redirect.bits.debugIsCtrl || io.redirect.bits.debugIsMemVio)) {
-    val idx = io.redirect.bits.robIdx.value
-    teaFlushCause.psv := robEntries(idx).teaPsv | mergedTeaSetMask(idx)
+    val ptr = io.redirect.bits.robIdx
+    teaFlushCause.psv := teaPsv(ptr) | mergedTeaSetMask(ptr)
   }.elsewhen (enableTea.asBool && io.flushOut.valid && deqHasException) {
-    teaFlushCause.psv := robEntries(deqPtr.value).teaPsv | mergedTeaSetMask(deqPtr.value)
+    teaFlushCause.psv := teaPsv(teaFlushPtr) | mergedTeaSetMask(teaFlushPtr)
   }
   val teaVisibleCause = WireInit(teaFlushCause)
   when (enableTea.asBool && io.redirect.valid &&
     (io.redirect.bits.debugIsCtrl && io.redirect.bits.isMisPred || io.redirect.bits.debugIsMemVio)) {
-    val idx = io.redirect.bits.robIdx.value
+    val ptr = io.redirect.bits.robIdx
     teaVisibleCause.valid := true.B
-    teaVisibleCause.pc := teaPc(robEntries(idx))
-    teaVisibleCause.psv := robEntries(idx).teaPsv | mergedTeaSetMask(idx)
+    teaVisibleCause.pc := teaPc(ptr)
+    teaVisibleCause.psv := teaPsv(ptr) | mergedTeaSetMask(ptr)
   }.elsewhen (enableTea.asBool && io.flushOut.valid && deqHasException) {
     teaVisibleCause.valid := true.B
-    teaVisibleCause.pc := teaPc(robEntries(deqPtr.value))
-    teaVisibleCause.psv := robEntries(deqPtr.value).teaPsv | mergedTeaSetMask(deqPtr.value)
+    teaVisibleCause.pc := teaPc(teaFlushPtr)
+    teaVisibleCause.psv := teaPsv(teaFlushPtr) | mergedTeaSetMask(teaFlushPtr)
   }.elsewhen (enableTea.asBool && io.redirect.valid) {
     teaVisibleCause.valid := false.B
   }
@@ -2208,18 +2226,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     hasTeaCommit,
     teaVisibleCause.valid
   )
-  val commitPcVec = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
-  val commitPsvVec = Wire(Vec(CommitWidth, UInt(TeaEvent.width.W)))
-  for (i <- 0 until CommitWidth) {
-    commitPcVec(i) := teaPc(robEntries(io.commits.robIdx(i).value))
-    commitPsvVec(i) := robEntries(io.commits.robIdx(i).value).teaPsv
+  val teaCommitWidth = 2 * CommitWidth
+  val teaCommitMask = VecInit(commitSlotValid.map(io.commits.isCommit && _)).asUInt
+  val commitPcVec = Wire(Vec(teaCommitWidth, UInt(VAddrBits.W)))
+  val commitPsvVec = Wire(Vec(teaCommitWidth, UInt(TeaEvent.width.W)))
+  for (slot <- 0 until teaCommitWidth) {
+    val entry = io.commits.robIdx(slot / 2).value
+    commitPcVec(slot) := debugMeta(commitDebugUop(slot)).pc
+    commitPsvVec(slot) := robEntries(entry).teaPsv(slot % 2)
   }
 
   teaSelector.io.enable := enableTea.asBool
   teaSelector.io.samplePeriod := teaSamplePeriod
   teaSelector.io.state := teaState
   teaSelector.io.hasCommit := hasTeaCommit
-  teaSelector.io.commitMask := Mux(io.commits.isCommit, io.commits.commitValid.asUInt, 0.U)
+  teaSelector.io.commitMask := teaCommitMask
   teaSelector.io.commitPc := commitPcVec
   teaSelector.io.commitPsv := commitPsvVec
   teaSelector.io.flushCause := teaVisibleCause
