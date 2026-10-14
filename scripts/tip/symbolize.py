@@ -32,10 +32,10 @@ def _unknown_symbol(pc: str) -> Dict[str, object]:
 TEXT_SYMBOL_TYPES = {"T", "t", "W", "w"}
 
 
-def _collect_symbols(elf: Path) -> List[tuple[int, str]]:
+def _collect_symbols(elf: Path) -> List[tuple[int, int, str]]:
     try:
         result = subprocess.run(
-            ["nm", "-n", "--defined-only", "--", str(elf)],
+            ["nm", "-n", "-S", "--defined-only", "--", str(elf)],
             check=True,
             text=True,
             capture_output=True,
@@ -43,15 +43,18 @@ def _collect_symbols(elf: Path) -> List[tuple[int, str]]:
         )
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return []
-    symbols: List[tuple[int, str]] = []
+    symbols: List[tuple[int, int, str]] = []
     for line in result.stdout.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 3 and parts[1] in TEXT_SYMBOL_TYPES:
+        parts = line.strip().split(maxsplit=3)
+        if len(parts) == 3:
+            parts.insert(1, "0")  # nm omits the size for size-less symbols.
+        if len(parts) == 4 and parts[2] in TEXT_SYMBOL_TYPES:
             try:
                 addr = int(parts[0], 16)
+                size = int(parts[1], 16)
             except ValueError:
                 continue
-            symbols.append((addr, parts[2]))
+            symbols.append((addr, size, parts[3]))
     return symbols
 
 
@@ -112,7 +115,7 @@ class ElfResolver:
         self.elf = Path(elf).resolve()
         self.cache_path = Path(cache_path) if cache_path else None
         self._elf_identity = self._identity()
-        self._cache_file: Dict[str, object] = {"version": 1, "elfs": {}}
+        self._cache_file: Dict[str, object] = {"version": 2, "elfs": {}}
         self._cache: Dict[str, dict[str, object]] = self._load_cache()
 
     def _identity(self) -> str:
@@ -127,7 +130,7 @@ class ElfResolver:
             return {}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.get("version") == 1 and isinstance(data.get("elfs"), dict):
+            if isinstance(data, dict) and data.get("version") == 2 and isinstance(data.get("elfs"), dict):
                 self._cache_file = data
                 entries = data["elfs"].get(self._elf_identity, {})
                 if isinstance(entries, dict):
@@ -172,10 +175,11 @@ class ElfResolver:
             except ValueError:
                 pc_val = 0
             symbol_entry = None
-            for addr, name in sorted_symbols:
+            for addr, size, name in sorted_symbols:
                 if addr > pc_val:
                     break
-                symbol_entry = (addr, name)
+                if pc_val == addr or pc_val < addr + size:
+                    symbol_entry = (addr, name)
             entry = locations.get(pc, _unknown_symbol(pc))
             function = entry.get("function", "<unknown>")
             symbol_offset = "0x0"

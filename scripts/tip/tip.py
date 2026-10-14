@@ -12,9 +12,6 @@ else:
     from . import queries, symbolize
 
 
-_PLOT_MODULE = None
-
-
 def default_out_dir() -> Path:
     root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
     return root / "xiangshan" / "tip"
@@ -26,13 +23,9 @@ def default_sym_cache() -> Path:
 
 
 def _plot_module():
-    global _PLOT_MODULE
-    if _PLOT_MODULE is None:
-        if __package__ in (None, ""):
-            _PLOT_MODULE = importlib.import_module("plot")
-        else:
-            _PLOT_MODULE = importlib.import_module(".plot", package=__package__)
-    return _PLOT_MODULE
+    if __package__ in (None, ""):
+        return importlib.import_module("plot")
+    return importlib.import_module(".plot", package=__package__)
 
 
 def print_rows(title: str, rows: list[dict]) -> None:
@@ -96,9 +89,9 @@ def export_summary(conn, hart: int, out_dir: Path) -> dict:
 
 def export_hotspots(conn, hart: int, out_dir: Path, top: int) -> dict:
     pc_rows = queries.fetch_pc_hotspots(conn, hart, top=top)
-    pc_commit_rows = queries.fetch_pc_commit_type_hotspots(conn, hart, top=top)
+    pc_commit_rows = queries.fetch_commit_event_rows(conn, hart, top=top)
     redirect_rows = queries.fetch_redirect_targets(conn, hart, top=top)
-    replay_rows = queries.fetch_replay_hotspots(conn, hart, top=top)
+    replay_rows = queries.fetch_replay_event_rows(conn, hart, top=top)
     queries.write_csv(out_dir / "pc_hotspots.csv", pc_rows)
     queries.write_csv(out_dir / "pc_commit_type_hotspots.csv", pc_commit_rows)
     queries.write_csv(out_dir / "redirect_targets.csv", redirect_rows)
@@ -134,7 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to ELF binary for symbolizing addresses (required for 'symbols'; optional for 'all')",
     )
     common.add_argument("--sym-cache", default=default_sym_cache(), help="JSON cache for symbol resolutions")
-    parser = argparse.ArgumentParser(description="TIP analysis for XiangShan ChiselDB output", parents=[common])
+    parser = argparse.ArgumentParser(description="TIP analysis for XiangShan ChiselDB output")
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
     subparsers.add_parser("summary", help="print summary and write summary CSVs", parents=[common])
     subparsers.add_parser("hotspots", help="print hotspots and write hotspot CSVs", parents=[common])
@@ -153,8 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.top <= 0:
         parser.error("--top must be positive")
-    requires_elf = args.subcommand == "symbols"
-    if requires_elf and not args.elf:
+    if args.subcommand == "symbols" and not args.elf:
         parser.error("--elf is required for 'symbols'")
 
     include_symbolized = args.subcommand == "symbols" or (args.subcommand == "all" and args.elf)
@@ -162,33 +154,20 @@ def main(argv: list[str] | None = None) -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     conn = queries.open_db(db_path)
-    queries.ensure_tip_table(conn, args.hart)
-
-    summary_data = None
-    hotspot_data = None
-    symbolized_rows = None
-    elf_path = Path(args.elf) if args.elf else None
-    sym_cache_path = Path(args.sym_cache)
     if args.subcommand in ("summary", "all", "plot"):
         summary_data = export_summary(conn, args.hart, out_dir)
     if args.subcommand in ("hotspots", "all", "plot"):
         hotspot_data = export_hotspots(conn, args.hart, out_dir, args.top)
     if include_symbolized:
-        if elf_path is None:
-            parser.error("--elf is required for symbolized reports")
-        symbolized_rows = export_symbolized_commits(
+        export_symbolized_commits(
             conn,
             args.hart,
             out_dir,
-            elf_path,
-            sym_cache_path,
+            Path(args.elf),
+            Path(args.sym_cache),
             args.top,
         )
     if args.subcommand in ("plot", "all"):
-        if summary_data is None:
-            summary_data = export_summary(conn, args.hart, out_dir)
-        if hotspot_data is None:
-            hotspot_data = export_hotspots(conn, args.hart, out_dir, args.top)
         export_plots(summary_data, hotspot_data, out_dir)
 
     conn.close()

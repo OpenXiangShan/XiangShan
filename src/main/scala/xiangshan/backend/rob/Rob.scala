@@ -443,6 +443,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val tip_data = Wire(new TipEntry())
   tip_data.state := tip_state
   tip_data.commits := io.commits
+  // Walk reads can replace commit metadata; replay data still describes the dequeue head.
+  tip_data.commits.info(0).debug_pc.foreach(_ := debugMeta(debug_microOp(deqPtr.value).head).pc)
+  tip_data.commits.info(0).commit_v := robEntries(deqPtr.value).valid
   tip_data.redirect := io.redirect
   tip_data.redirect_pc := debugMeta(debug_microOp(io.redirect.bits.robIdx.value)(slotIndex(io.redirect.bits.robIdx))).pc
   tip_data.debugLsInfo := debug_lsInfo(io.commits.robIdx(0).value)

@@ -124,7 +124,7 @@ def fetch_commit_type_summary(conn: sqlite3.Connection, hart: int) -> list[dict]
         """
     )
     for row in result:
-        row["commit_type_name"] = COMMIT_TYPE_NAMES.get(row["commit_type"], "FUSED_OR_OTHER")
+        row["commit_type_name"] = COMMIT_TYPE_NAMES[row["commit_type"]]
     return result
 
 
@@ -154,7 +154,7 @@ def fetch_commit_event_rows(conn: sqlite3.Connection, hart: int, top: int | None
         params,
     )
     for row in rows:
-        row["commit_type_name"] = COMMIT_TYPE_NAMES.get(row["commit_type"], "FUSED_OR_OTHER")
+        row["commit_type_name"] = COMMIT_TYPE_NAMES[row["commit_type"]]
     return rows
 
 
@@ -174,10 +174,6 @@ def fetch_pc_hotspots(conn: sqlite3.Connection, hart: int, top: int = 20) -> lis
         for pc_raw, count in sorted_items[:top]
     ]
     return result
-
-
-def fetch_pc_commit_type_hotspots(conn: sqlite3.Connection, hart: int, top: int = 20) -> list[dict]:
-    return fetch_commit_event_rows(conn, hart, top=top)
 
 
 def fetch_redirect_summary(conn: sqlite3.Connection, hart: int) -> list[dict]:
@@ -222,14 +218,14 @@ def fetch_redirect_event_rows(conn: sqlite3.Connection, hart: int, top: int | No
         f"""
         select REDIRECT_PC as source_pc_raw,
                printf('0x%x', REDIRECT_PC) as source_pc,
-               REDIRECT_BITS_CFIUPDATE_TARGET as target_pc_raw,
-               printf('0x%x', REDIRECT_BITS_CFIUPDATE_TARGET) as target_pc,
+               REDIRECT_BITS_TARGET as target_pc_raw,
+               printf('0x%x', REDIRECT_BITS_TARGET) as target_pc,
                coalesce(sum(REDIRECT_BITS_DEBUGISCTRL), 0) as ctrl_redirects,
                coalesce(sum(REDIRECT_BITS_DEBUGISMEMVIO), 0) as memvio_redirects,
                count(*) as count
         from {table}
         where REDIRECT_VALID=1
-        group by REDIRECT_PC, REDIRECT_BITS_CFIUPDATE_TARGET
+        group by REDIRECT_PC, REDIRECT_BITS_TARGET
         order by count desc, source_pc_raw asc, target_pc_raw asc
         {limit_clause}
         """,
@@ -258,6 +254,7 @@ def _replay_entries_cte(table: str) -> str:
                  lag(DEBUGLSINFO_REPLAYCNT) over (order by {order}) as prev_replay_cnt,
                  lag(COMMITS_ISCOMMIT and COMMITS_COMMITVALID_0) over (order by {order}) as prev_committed
           from {table}
+          where STATE != 3 and COMMITS_INFO_0_COMMIT_V=1
         ), boundaries as (
           select *,
                  case when prev_stamp is null
@@ -337,10 +334,6 @@ def fetch_replay_event_rows(conn: sqlite3.Connection, hart: int, top: int | None
         """,
         params,
     )
-
-
-def fetch_replay_hotspots(conn: sqlite3.Connection, hart: int, top: int = 20) -> list[dict]:
-    return fetch_replay_event_rows(conn, hart, top=top)
 
 
 def write_csv(path: Path | str, rows: list[dict]) -> None:
