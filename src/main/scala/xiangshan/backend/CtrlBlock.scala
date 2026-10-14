@@ -469,6 +469,7 @@ class CtrlBlockImp(
   decode.in.fromCSR := io.fromCSR.toDecode
   decode.in.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.in.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
+  decode.in.isResumeVType := rob.out.toDecode.isResumeVType
 
   io.frontend.toIBuf.resumingVType := rob.out.toDecode.isResumeVType
   io.frontend.toIBuf.walkToArchVType := rob.out.toDecode.walkToArchVType
@@ -494,6 +495,9 @@ class CtrlBlockImp(
 
   /** Valid receiving signals of instructions to be decoded, Registers in vector of DecodeWidth */
   val decodeBufValid = RegInit(VecInit(Seq.fill(DecodeWidth)(false.B)))
+
+  /** Reasons for the empty slots following the instructions held in the decode buffer. */
+  val decodeBufReason = Reg(chiselTypeOf(io.frontend.stallReason.reason))
 
   /** Insts input from frontend, in vector of DecodeWidth */
   val decodeFromFrontend = io.frontend.cfVec
@@ -553,6 +557,21 @@ class CtrlBlockImp(
       decodeBufBits(i).connectCtrlFlow(decodeFromFrontend(i.U + decodeFromFrontendAcceptNum).bits)
     }
   }
+  for (i <- 0 until DecodeWidth) {
+    when(decodeBufValid(0) && decodeBufNotAccept.asUInt.orR) {
+      decodeBufReason(i) := Mux(
+        decodeBufAcceptNum + i.U < DecodeWidth.U,
+        decodeBufReason(decodeBufAcceptNum + i.U),
+        BackendOtherCoreStall.id.U
+      )
+    }.elsewhen(!decodeBufValid(0) && decodeFromFrontendNotAccept.asUInt.orR) {
+      decodeBufReason(i) := Mux(
+        decodeFromFrontendAcceptNum + i.U < DecodeWidth.U,
+        io.frontend.stallReason.reason(decodeFromFrontendAcceptNum + i.U),
+        BackendOtherCoreStall.id.U
+      )
+    }
+  }
   /** Insts input from frontend, in vector of DecodeWidth */
   val decodeConnectFromFrontend = Wire(Vec(DecodeWidth, new DecodeInUop))
   decodeConnectFromFrontend.zip(decodeFromFrontend).map(x => x._1.connectCtrlFlow(x._2.bits))
@@ -606,7 +625,7 @@ class CtrlBlockImp(
   }
 
   decode.in.fusion := 0.U.asTypeOf(decode.in.fusion) // Todo
-  decode.stallReason.in <> io.frontend.stallReason
+  decode.stallReason.in.reason := Mux(decodeBufValid(0), decodeBufReason, io.frontend.stallReason.reason)
 
   // snapshot check
   class CFIRobIdx extends Bundle {
@@ -670,6 +689,7 @@ class CtrlBlockImp(
   }
 
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodeOutUop)))
+  decode.in.toRenameValid := decodePipeRename.map(_.valid)
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.out.uop(i), decodePipeRename(i), rename.io.in(i).ready,
       s1_s3_redirect.valid || s2_s4_pendingRedirectValid, moduleName = Some("decodePipeRenameModule"))
