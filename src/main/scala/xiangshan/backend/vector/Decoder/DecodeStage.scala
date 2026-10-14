@@ -6,7 +6,9 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
+import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.{PipelineStallReason, StoreBubbleReason}
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
@@ -37,8 +39,10 @@ class DecodeStageImp(
 
   val stallReason = IO(new Bundle {
     val in = Flipped(new StallReasonIO(DecodeWidth))
-    val out = new StallReasonIO(DecodeWidth)
+    val out = new StallReasonIO(RenameWidth)
   })
+
+  require(DecodeWidth == RenameWidth)
 
   // io alias
   private val outReadys = out.uop.map(_.ready)
@@ -218,7 +222,57 @@ class DecodeStageImp(
 
   out.toFrontend.canAccept := !in.redirect.valid && out.uop.head.ready
 
-  stallReason.out.reason := stallReason.in.reason
+  val inValidVec = in.mop.map(_.valid)
+  val inReadyVec = in.mop.map(_.ready)
+  val outFireVec = out.uop.map(_.ready).zip(in.toRenameValid).map { case (ready, valid) => ready && valid }
+  val outAllFire = outFireVec.zip(in.toRenameValid).map { case (fire, valid) => !valid || fire }.reduce(_ && _)
+  val outHasValidAllFire = in.toRenameValid.reduce(_ || _) && outAllFire
+
+  val frontendStall = !inValidVec.reduce(_ || _)
+  val frontendBubble = !inValidVec.reduce(_ && _) && !frontendStall
+  val decodeStall = !inReadyVec.reduce(_ || _)
+
+  val debugRedirect = RegEnable(in.redirect.bits, in.redirect.valid)
+  val decodeStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+    (in.isResumeVType && debugRedirect.debugIsCtrl) -> ControlRecoveryStall.id.U,
+    (in.isResumeVType && debugRedirect.debugIsMemVio) -> MemVioRecoveryStall.id.U,
+    in.isResumeVType -> OtherRecoveryStall.id.U,
+  ))
+  val redirectReason = MuxCase(OtherRedirectStall.id.U, Seq(
+    in.redirect.bits.debugIsCtrl -> ControlRedirectStall.id.U,
+    in.redirect.bits.debugIsMemVio -> MemVioRedirectStall.id.U,
+  ))
+
+  for (i <- 0 until RenameWidth) {
+    val frontendReason = Mux(
+      stallReason.in.reason(i) === NoStall.id.U,
+      FrontendOtherCoreStall.id.U,
+      stallReason.in.reason(i)
+    )
+    val bubbleStore = Module(new StoreBubbleReason(log2Ceil(NumStallReasons.id)))
+    // A buffered UOP tail can leave output slots empty even when all MOP inputs are empty.
+    val bufferedUopTail = frontendStall && outValid && !out.uop(i).valid
+    bubbleStore.io.bubbleValid := !inValidVec(i) && (frontendBubble || bufferedUopTail)
+    bubbleStore.io.bubbleReason := frontendReason
+    bubbleStore.io.redirect := in.redirect.valid
+    bubbleStore.io.reasonFire := outHasValidAllFire && !decodeStall
+
+    val reasonPipe = Module(new PipelineStallReason(log2Ceil(NumStallReasons.id)))
+    reasonPipe.io.rightFire := outFireVec(i)
+    reasonPipe.io.rightHasFire := outHasValidAllFire
+    reasonPipe.io.prePipeStall := frontendStall && !in.isResumeVType
+    reasonPipe.io.prePipeStallReason := frontendReason
+    reasonPipe.io.prePipeBubble := bubbleStore.io.outReasonValid
+    reasonPipe.io.prePipeBubbleReason := bubbleStore.io.outReason
+    reasonPipe.io.redirect := in.redirect.valid
+    reasonPipe.io.redirectReason := redirectReason
+    reasonPipe.io.currentPipeStall := decodeStall || in.isResumeVType
+    reasonPipe.io.currentPipeStallReason := decodeStallReason
+    reasonPipe.io.currentPipeBubble := false.B
+    reasonPipe.io.currentPipeBubbleReason := NoStall.id.U
+
+    stallReason.out.reason(i) := reasonPipe.io.outReason
+  }
 
   val perfEvents = Seq()
   generatePerfEvent()
@@ -227,6 +281,8 @@ class DecodeStageImp(
 object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
     val redirect = Input(ValidIO(new Redirect))
+    val isResumeVType = Input(Bool())
+    val toRenameValid = Input(Vec(RenameWidth, Bool()))
 
     // The ready of mop means this mop is accepted by DecodeStage
     // Ready signal depends on valid
