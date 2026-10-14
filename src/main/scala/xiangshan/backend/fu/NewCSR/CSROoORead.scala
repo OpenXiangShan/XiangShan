@@ -4,8 +4,8 @@ import xiangshan.backend.decode.isa.CSRs
 
 object CSROoORead {
   /**
-   * "Read only" CSRs that can be fully pipelined when read in CSRR instruction.
-   * Only read by csr instructions.
+   * Deny-lists: csrr of a CSR on a list keeps waitForward / blockBackward, every other CSR is read out of order.
+   * List any CSR that a non-CSR instruction or hardware can change (e.g. ssp, open PR #6716) or whose read has side effects.
    */
   val waitForwardInOrderCsrReadList = List(
     CSRs.fflags,
@@ -35,7 +35,17 @@ object CSROoORead {
     CSRs.hip,
     CSRs.hvip,
     CSRs.mvip,
-  )
+    // Set by hardware, and synchronised to the difftest reference when they change
+    CSRs.hgeip,
+    CSRs.scountovf,
+    CSRs.sireg2, // mhpmevent through Smcdeleg
+    0xBC1, // mflushpwr (custom): L2_FLUSH_DONE
+    // No effect: csrrs rd, vl, x0 is pseudo-decoded to readvl (never serialised); other read forms see the unit's vl, always 0
+    CSRs.vl,
+  ) ++ (CSRs.mhpmevent3 to CSRs.mhpmevent31) ++ // OF is set by hardware
+    // Counters change on their own: read in order, they count every older instruction and never go backwards
+    (CSRs.mcycle to CSRs.mhpmcounter31) ++
+    (CSRs.cycle to CSRs.hpmcounter31)
   val blockBackwardInOrderCsrReadList = List(
     CSRs.mireg,
     CSRs.sireg,
@@ -52,5 +62,6 @@ object CSROoORead {
     CSRs.hip,
     CSRs.hvip,
     CSRs.mvip,
+    CSRs.hgeip,
   )
 }

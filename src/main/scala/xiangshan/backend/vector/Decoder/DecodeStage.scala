@@ -8,7 +8,9 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
+import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.NewCSR.CSROoORead
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -123,6 +125,17 @@ class DecodeStageImp(
     val mopInfo = coUop.bits.ctrl
     val uopInfo = coUop.bits.info
 
+    // CSR instructions that write no CSR (csrrs/csrrc with rs1 = x0, csrrsi/csrrci with uimm = 0) only read.
+    // Most CSRs can then be read without waiting for older instructions, and no read needs to block
+    // younger ones; CSRs that older instructions or the hardware can change stay in order (CSROoORead).
+    val inst = mopInfo.rawInst.asTypeOf(new XSInstBitFields)
+    val isCsr = inst.OPCODE5Bit === OPCODE5Bit.SYSTEM && inst.FUNCT3(1, 0) =/= 0.U
+    val isCsrr = isCsr && inst.FUNCT3 === BitPat("b?1?") && inst.RS1 === 0.U
+    val csrrWaitForward = LookupTreeDefault(inst.CSRIDX, false.B,
+      CSROoORead.waitForwardInOrderCsrReadList.map(_.U -> true.B))
+    val csrrBlockBackward = LookupTreeDefault(inst.CSRIDX, false.B,
+      CSROoORead.blockBackwardInOrderCsrReadList.map(_.U -> true.B))
+
     uop.valid := coUop.valid
     uop.bits match {
       case bits =>
@@ -157,8 +170,8 @@ class DecodeStageImp(
         bits.v0Wen := uopInfo.vpWen && uopInfo.ldest === 0.U
         bits.vlWen := uopInfo.vlWen
         bits.vlRen := uopInfo.vlRen
-        bits.waitForward := uopInfo.noSpec
-        bits.blockBackward := uopInfo.blockBack
+        bits.waitForward := uopInfo.noSpec && !(isCsrr && !csrrWaitForward)
+        bits.blockBackward := uopInfo.blockBack && !(isCsrr && !csrrBlockBackward)
         bits.flushPipe := uopInfo.flushPipe
         bits.canRobCompress := uopInfo.canRobCompress
         // Simple instructions may share a high-density CROB segment. Complex
