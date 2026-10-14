@@ -554,8 +554,9 @@ class LoadUnitS1(param: ExeUnitParams)(
     // Debug info
     val debugInfo = Output(new Bundle() {
       val isTlbFirstMiss = Bool()
+      val isTlbMiss = Bool()
       val isLoadToLoadForward = Bool()
-      val robIdx = UInt(log2Ceil(RobSize).W)
+      val robIdx = new RobPtr
       val hasROBEntry = Bool()
       val vaddr = ValidIO(UInt(VAddrBits.W))
       val pc = Output(UInt(VAddrBits.W))
@@ -774,8 +775,10 @@ class LoadUnitS1(param: ExeUnitParams)(
   io.swInstrPrefetch.bits.vaddr := vaddr
 
   io.debugInfo.isTlbFirstMiss := pipeIn.valid && !kill && tlbMiss && in.isFirstIssue()
+  // TEA ST_TLB: any-issue TLB miss (ROB OR-accumulates; no first-issue filter).
+  io.debugInfo.isTlbMiss := pipeIn.valid && !kill && in.hasROBEntry && tlbMiss
   io.debugInfo.isLoadToLoadForward := false.B
-  io.debugInfo.robIdx := robIdx.value
+  io.debugInfo.robIdx := robIdx
   io.debugInfo.hasROBEntry := in.hasROBEntry
   io.debugInfo.vaddr.valid := pipeIn.valid && !kill
   io.debugInfo.vaddr.bits := vaddr
@@ -867,7 +870,7 @@ class LoadUnitS2(param: ExeUnitParams)(
       val isDCacheRealMiss = Bool() // ?
       val isForwardFail = Bool()
       val isTlbNotMiss = Bool()
-      val robIdx = UInt(log2Ceil(RobSize).W)
+      val robIdx = new RobPtr
       val hasROBEntry = Bool()
       val paddr = ValidIO(UInt(PAddrBits.W))
       val pc = Output(UInt(VAddrBits.W))
@@ -1240,7 +1243,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.debugInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.real_miss
   io.debugInfo.isForwardFail := pipeIn.valid && !kill && cause(C_FF)
   io.debugInfo.isTlbNotMiss := pipeIn.valid && !kill && tlbNotMiss
-  io.debugInfo.robIdx := robIdx.value
+  io.debugInfo.robIdx := robIdx
   io.debugInfo.hasROBEntry := in.hasROBEntry
   io.debugInfo.paddr.valid := pipeIn.valid && !kill
   io.debugInfo.paddr.bits := paddr
@@ -2216,9 +2219,11 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // Debug info
   io.debugInfo.s1_isTlbFirstMiss := s1.io.debugInfo.isTlbFirstMiss
+  io.debugInfo.s1_isTlbMiss := s1.io.debugInfo.isTlbMiss
   io.debugInfo.s1_isLoadToLoadForward := s1.io.debugInfo.isLoadToLoadForward
   io.debugInfo.s2_isBankConflict := s2.io.debugInfo.isBankConflict
   io.debugInfo.s2_isDcacheFirstMiss := s2.io.debugInfo.isDCacheFirstMiss
+  io.debugInfo.s2_isDcacheMiss := s2.io.debugInfo.isDCacheMiss
   io.debugInfo.s2_isForwardFail := s2.io.debugInfo.isForwardFail
   io.debugInfo.s3_isReplayFast := s3.io.debugInfo.isReplayFast
   io.debugInfo.s3_isReplaySlow := s3.io.debugInfo.isReplaySlow
@@ -2230,10 +2235,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.debugInfo.s2_robIdx := s2.io.debugInfo.robIdx
   io.debugInfo.s3_robIdx := s3.io.debugInfo.robIdx
 
-  io.topDownInfo.s1.robIdx := s1.io.debugInfo.robIdx
+  io.topDownInfo.s1.robIdx := s1.io.debugInfo.robIdx.value
   io.topDownInfo.s1.vaddr_valid := s1.io.debugInfo.hasROBEntry && s1.io.debugInfo.vaddr.valid
   io.topDownInfo.s1.vaddr_bits := s1.io.debugInfo.vaddr.bits
-  io.topDownInfo.s2.robIdx := s2.io.debugInfo.robIdx
+  io.topDownInfo.s2.robIdx := s2.io.debugInfo.robIdx.value
   io.topDownInfo.s2.paddr_valid := s2.io.debugInfo.hasROBEntry && s2.io.debugInfo.paddr.valid &&
     s2.io.debugInfo.isTlbNotMiss
   io.topDownInfo.s2.paddr_bits := s2.io.debugInfo.paddr.bits

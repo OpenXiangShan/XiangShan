@@ -152,7 +152,13 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   }.elsewhen(s1_waitItlb && !fromItlb.bits.miss) {
     s1_waitItlb := false.B
   }
-  private val s1_needItlb   = (RegNext(s0_fire) || s1_waitItlb) && fromItlb.bits.miss
+  private val s1_needItlb    = (RegNext(s0_fire) || s1_waitItlb) && fromItlb.bits.miss
+  private val s1_teaItlbMiss = RegInit(false.B)
+  when(s1_flush || s0_fire) {
+    s1_teaItlbMiss := false.B
+  }.elsewhen(s1_valid && s1_needItlb) {
+    s1_teaItlbMiss := true.B
+  }
   private val tlbValidPulse = (RegNext(s0_fire) || s1_waitItlb) && !fromItlb.bits.miss
   private val tlbValidLatch = ValidHoldBypass(tlbValidPulse, s1_fire, flush = s1_flush)
   private val tlbFinish     = tlbValidLatch
@@ -318,6 +324,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     port.bits.entry.metaCodes   := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
     port.bits.entry.isMmio      := s1_isMmio
     port.bits.entry.itlbPbmt    := s1_itlbPbmt
+    // The two prefetch blocks share one translation; only the first carries its event.
+    port.bits.entry.teaItlbMiss := (i == 0).B && s1_teaItlbMiss
 
     port.bits.exceptionEntry.itlbException     := s1_itlbException
     port.bits.exceptionEntry.gpAddr            := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
