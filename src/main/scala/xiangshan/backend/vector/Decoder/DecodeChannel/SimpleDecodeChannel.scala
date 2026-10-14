@@ -65,7 +65,6 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val isJrFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJrField(i))
 
   val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ isJFields ++ isJrFields ++ Seq(
-    IsMopField,
     FrmRenField,
     FFlagsWenField,
     SelImmField,
@@ -92,7 +91,6 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   val cboOpcode = resultInstCboI2f(CboOpcodeField)
 
-  val isMop  = result(IsMopField)
   val selImm = result(SelImmField)
 
   val isJs          = isJFields.map(field => result(field))
@@ -150,8 +148,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
-    out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
+    out.uop(i).bits.lsrc1 := instFields.RS1
+    out.uop(i).bits.lsrc2 := instFields.RS2
     out.uop(i).bits.lsrc3 := instFields.FS3
     out.uop(i).bits.frmRen := frmRen
     out.uop(i).bits.fflagsWen := fflagsWen
@@ -168,7 +166,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.isLastUop := i.U === numUop
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
-    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
+    out.uop(i).bits.isMove := (rawInst === isMove) && instFields.RD =/= 0.U
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII || reserveExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
