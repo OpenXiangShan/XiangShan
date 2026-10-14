@@ -17,6 +17,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.vector.Decoder.DecodeChannel.VectorDecodeChannel.VecDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel.SimpleDecodeChannel.SimpleDecodeChannelOutputUop
+import xiangshan.backend.vector.Decoder.DecodeChannel.ScalarMultiUopDecodeChannel.ScalarMultiUopDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
 import xiangshan.backend.vector.Decoder.InstPattern._
@@ -51,7 +52,12 @@ class DecodeChannels(
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
   require(extensions.distinct.size == extensions.size, "Duplicate extensions are not allowed")
-  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha))
+  val scalarMultiUopExts = ScalarMultiUopDecodeChannel.channelExtensions(extensions, p(XSCoreParamsKey).HasShadowStack)
+  val scalarMultiUopInsts = InstPattern.extensionInsts(scalarMultiUopExts: _*)
+  val scalarSplitCounts = ScalarMultiUopDecodeChannel.splitCounts(scalarMultiUopInsts, scalarMultiUopExts)
+    .filterNot(Seq(0, 1, 2, 4, 8).contains)
+  // MOPs stay in Pseudo so Simple cannot overlap active Zicfiss decoding.
+  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha, Zimop) ++ scalarMultiUopExts)
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
 
   // Get vector instruction bits pattern by extensions
@@ -93,6 +99,8 @@ class DecodeChannels(
 
   val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, simpleExts))
   val pseudoDecodeChannel: Definition[PseudoDecodeChannel] = Definition(new PseudoDecodeChannel())
+  val scalarMultiUopDecodeChannel = Option.when(scalarMultiUopInsts.nonEmpty)(
+    Definition(new ScalarMultiUopDecodeChannel(scalarMultiUopInsts, scalarMultiUopExts)))
 
 //  out.bits.imm := Mux1HLookUp(
 //    out.bits.selImm.bits,
@@ -115,6 +123,7 @@ class DecodeChannels(
   val vsetDecodeChannels = Seq.fill(mopWidth)(Instance(vsetDecodeChannel))
   val simpleDecodeChannels = Seq.fill(mopWidth)(Instance(simpleDecodeChannelM2))
   val pseudoDecodeChannels = Seq.fill(mopWidth)(Instance(pseudoDecodeChannel))
+  val scalarMultiUopDecodeChannels = Seq.fill(mopWidth)(scalarMultiUopDecodeChannel.map(d => Instance(d)))
 
   val uopBufferUpdateVec = Wire(Vec(uopBufferLength, Bool()))
   val uopBufferUpdate = Cat(uopBufferUpdateVec).orR
@@ -133,6 +142,16 @@ class DecodeChannels(
     vsetUopOuts.map(x => makeValid(x.valid, DecodeChannelOutput.fromVSetChannelUop(x.bits)))
   val simChannelOut: Seq[Seq[ValidIO[DecodeChannelOutput]]] =
     simUopOuts.map(_.map(x => makeValid(x.valid, DecodeChannelOutput.fromSimpleChannelUop(x.bits))))
+  // Pad absent scalar ports with invalid uops; Simple remains two-wide in every configuration.
+  val scalarMultiUopChannelOut: Seq[Seq[ValidIO[DecodeChannelOutput]]] = scalarMultiUopDecodeChannels.map { channel =>
+    Seq.tabulate(maxSplitUopNum) { j =>
+      channel.filter(_.out.uop.isDefinedAt(j)).map { ch =>
+        val uop = ch.out.uop(j)
+        makeValid(uop.valid, DecodeChannelOutput.fromScalarMultiUopChannelUop(uop.bits))
+      }.getOrElse(makeValid(false.B, 0.U.asTypeOf(new DecodeChannelOutput)))
+    }
+  }
+  val scalarMultiUopNums = scalarMultiUopDecodeChannels.map(_.map(_.out.uopNum).getOrElse(NumUopOH.N0))
   val psdChannelOut: Seq[ValidIO[DecodeChannelOutput]] =
     psdUopOuts.map(x => makeValid(x.valid, DecodeChannelOutput.fromPseudoChannelUop(x.bits, VLEN)))
 
@@ -140,6 +159,7 @@ class DecodeChannels(
     val hasDecodedUop = vecChannelOut(i).head.valid ||
                         vsetChannelOut(i).valid ||
                         simChannelOut(i).head.valid ||
+                        scalarMultiUopChannelOut(i).head.valid ||
                         psdChannelOut(i).valid
     makeValid(instValids(i) && !hasDecodedUop, DecodeChannelOutput.illegalUop())
   }
@@ -163,6 +183,7 @@ class DecodeChannels(
     uopWidth = uopWidth,
     uopBufferLength = uopBufferSize,
     numM2M4M8Channel = numM2M4M8Channel,
+    scalarSplitCounts = scalarSplitCounts,
   ))
 
   val uopSelectMod = Module(new UopSelectModule(
@@ -209,6 +230,10 @@ class DecodeChannels(
     modIn.vstart  := in.mops(i).bits.info.vstart
   }
 
+  scalarMultiUopDecodeChannels.zipWithIndex.foreach { case (channel, i) =>
+    channel.foreach(_.in := in.mops(i).bits.info)
+  }
+
   val psdDecodeChannelsIn: Seq[PseudoDecodeChannel.In] = pseudoDecodeChannels.map(_.in)
   psdDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
@@ -235,6 +260,7 @@ class DecodeChannels(
               vecChannelOut(i).head.valid -> vecUopNumOHs(i),
               vsetChannelOut(i).valid -> NumUopOH.N1,
               simChannelOut(i).head.valid -> simpleUopNumOHs(i),
+              scalarMultiUopChannelOut(i).head.valid -> scalarMultiUopNums(i),
             )),
           ),
         ),
@@ -263,17 +289,16 @@ class DecodeChannels(
             vecChannelOut(i)(0).valid -> vecChannelOut(i)(0).bits,
             vsetChannelOut(i).valid -> vsetChannelOut(i).bits,
             simChannelOut(i)(0).valid -> simChannelOut(i)(0).bits,
+            scalarMultiUopChannelOut(i)(0).valid -> scalarMultiUopChannelOut(i)(0).bits,
           ))
         )
       )
-    for (j <- 1 until maxSimpleSplitUopNum) {
+    for (j <- 1 until maxSplitUopNum) {
+      val simplePort = simChannelOut(i).lift(j).map(x => x.valid -> x.bits).toSeq
       uopSelectMod.in.uopFromChannel(i)(j) := Mux1H(Seq(
         vecChannelOut(i)(j).valid -> vecChannelOut(i)(j).bits,
-        simChannelOut(i)(j).valid -> simChannelOut(i)(j).bits,
-      ))
-    }
-    for (j <- maxSimpleSplitUopNum until maxSplitUopNum) {
-      uopSelectMod.in.uopFromChannel(i)(j) := vecChannelOut(i)(j).bits
+        scalarMultiUopChannelOut(i)(j).valid -> scalarMultiUopChannelOut(i)(j).bits,
+      ) ++ simplePort)
     }
   }
   uopSelectMod.in.uopFromBuffer := uopBuffer
@@ -329,9 +354,9 @@ class DecodeChannelOutput extends Bundle {
   val src2Type = DecodeSrcType()
   val src3Ren = Bool()
   val src3Type = DecodeSrcType()
-  val lsrc1 = UInt(5.W)
-  val lsrc2 = UInt(5.W)
-  val lsrc3 = UInt(5.W)
+  val lsrc1 = UInt(6.W)
+  val lsrc2 = UInt(6.W)
+  val lsrc3 = UInt(6.W)
   val vlRen = Bool()
   val v0Ren = Bool()
   val frmRen = Bool()
@@ -341,7 +366,7 @@ class DecodeChannelOutput extends Bundle {
   val gpWen = Bool()
   val fpWen = Bool()
   val vpWen = Bool()
-  val ldest = UInt(5.W)
+  val ldest = UInt(6.W)
 
   val vlWen = Bool()
   val vxsatWen = Bool()
@@ -585,6 +610,70 @@ object DecodeChannelOutput {
     uop
   }
 
+  def fromScalarMultiUopChannelUop(suop: ScalarMultiUopDecodeChannelOutputUop): DecodeChannelOutput = {
+    val uop = Wire(new DecodeChannelOutput)
+    uop.fuType := suop.fuType
+    uop.opcode := suop.opcode
+    uop.isVset := false.B
+
+    uop.src1Ren := suop.renameInfo.src1Ren
+    uop.src1Type := suop.renameInfo.src1Type
+    uop.src2Ren := suop.renameInfo.src2Ren
+    uop.src2Type := suop.renameInfo.src2Type
+    uop.src3Ren := suop.renameInfo.src3Ren
+    uop.src3Type := suop.renameInfo.src3Type
+    uop.lsrc1 := suop.lsrc1
+    uop.lsrc2 := suop.lsrc2
+    uop.lsrc3 := suop.lsrc3
+    uop.vlRen := false.B
+    uop.v0Ren := false.B
+    uop.frmRen := suop.frmRen
+    uop.maskType := 0.U.asTypeOf(uop.maskType)
+    uop.intRmRen := false.B
+    uop.gpWen := suop.renameInfo.gpWen
+    uop.fpWen := suop.renameInfo.fpWen
+    uop.vpWen := false.B
+
+    uop.vlWen := false.B
+    uop.vxsatWen := false.B
+    uop.fflagsWen := suop.fflagsWen
+    uop.dirtyVs := false.B
+
+    uop.ldest := suop.ldest
+
+    uop.frm := suop.frm
+    uop.frmIll := suop.frmIll
+
+    uop.vm := false.B
+
+    uop.noSpec := suop.renameInfo.noSpec
+    uop.blockBack := suop.renameInfo.blockBack
+    uop.flushPipe := suop.renameInfo.flushPipe
+    uop.selImm := suop.selImm
+    uop.imm := suop.imm
+    uop.commitType := suop.commitType
+    uop.vdDepElim := VdDepElim.Always // never used
+    uop.isWritePartVd := false.B
+
+    uop.canRobCompress := suop.canRobCompress
+
+    uop.numWb := suop.numWb
+    uop.uopIdx := suop.uopIdx
+    uop.isFirstUop := suop.isFirstUop
+    uop.isLastUop := suop.isLastUop
+    uop.src12Rev := false.B
+
+    uop.isMove := suop.isMove
+
+    uop.isJ := suop.isJ
+    uop.isJr := suop.isJr
+
+    uop.exceptionII := suop.exceptionII
+    uop.exceptionVI := suop.exceptionVI
+
+    uop
+  }
+
   def fromPseudoChannelUop(puop: PseudoDecodeChannel.Out, VLEN: Int): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
 
@@ -638,7 +727,7 @@ object DecodeChannelOutput {
     uop.isLastUop := true.B
     uop.src12Rev := false.B
 
-    uop.isMove := false.B
+    uop.isMove := puop.isMove
 
     uop.isJ := puop.isJ
     uop.isJr := puop.isJr
