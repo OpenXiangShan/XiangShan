@@ -27,9 +27,9 @@ on:
         required: false
         type: string
       cst_file:
-          description: Constantin file path (empty for default init setting, or file path for specific file)
-          required: false
-          type: string
+        description: Constantin file path (empty for default init setting, or file path for specific file)
+        required: false
+        type: string
       enable_db:
         description: Enable ChiselDB dump
         required: false
@@ -40,10 +40,11 @@ on:
         required: false
         type: boolean
         default: false
-      servers:
-        description: Servers to run emulation on, leave empty to let the script select
+      cluster:
+        description: Cluster to run emulation on, can be default, node, open or all
         required: false
         type: string
+        default: default
       checkpoint_path:
         description: "Custom checkpoint directory. Empty: json_path is a workload list"
         required: false
@@ -126,15 +127,22 @@ jobs:
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
 
-          if [[ -z "${{ inputs.servers }}" ]]; then
-            if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
-              echo "SERVER_LIST=node" >> $GITHUB_ENV
-            else
-              echo "SERVER_LIST=open" >> $GITHUB_ENV
-            fi
-          else
-            echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
-          fi
+          case "${{ inputs.cluster }}" in
+            default)
+              if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
+                echo "SERVER_LIST=node" >> $GITHUB_ENV
+              else
+                echo "SERVER_LIST=open" >> $GITHUB_ENV
+              fi
+              ;;
+            node|open|all)
+              echo "SERVER_LIST=${{ inputs.cluster }}" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "Error: Invalid server group: ${{ inputs.cluster }}"
+              exit 1
+              ;;
+          esac
 
           SPEC_TAG="-${{ inputs.xs_config }}"
           # Set CST_COMPILE_OPT and CST_RUN_OPT based on cst_file

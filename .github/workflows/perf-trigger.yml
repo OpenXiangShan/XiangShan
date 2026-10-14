@@ -67,10 +67,16 @@ on:
         required: false
         type: boolean
         default: false
-      servers:
-        description: Servers to run emulation on, leave empty to let the script select
+      cluster:
+        description: Cluster to run emulation on, default gsim on node, verilator on open
         required: false
-        type: string
+        type: choice
+        options:
+          - default
+          - node
+          - open
+          - all
+        default: default
       checkpoint_path:
         description: "Custom checkpoint directory. Empty: json_path is a workload list"
         required: false
@@ -104,7 +110,7 @@ jobs:
         cst_file: ${{ github.event.inputs.cst_file }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
-        servers: ${{ github.event.inputs.servers }}
+        cluster: ${{ github.event.inputs.cluster }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}
         warmup: ${{ github.event.inputs.warmup }}
