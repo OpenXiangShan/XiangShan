@@ -28,9 +28,6 @@ import utility.XORFold
 import utility.XSPerfAccumulate
 import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
-import xiangshan.TeaEvent
-import xiangshan.TeaPsvOps
-import xiangshan.TopDownCounters
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.ExceptionType
@@ -415,19 +412,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
   private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
   private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
-  private val packetTeaPsv = Mux(
-    perfAnalyzer.io.topdownOut.topdown.reasons(TopDownCounters.ICacheMissBubble.id),
-    TeaEvent.bit(TeaEvent.DR_L1),
-    TeaPsvOps.empty
-  )
-  private val s2_teaPsv = RegEnable(
-    Mux(
-      perfAnalyzer.io.topdownOut.topdown.reasons(TopDownCounters.ITLBMissBubble.id),
-      TeaPsvOps.setBit(packetTeaPsv, TeaEvent.DR_TLB),
-      packetTeaPsv
-    ),
-    s1_fire
-  )
+  private val s1_teaPsv               = RegEnable(io.fromICache.req.bits.teaPsv, s0_fire)
+  private val s2_teaPsv               = RegEnable(s1_teaPsv, s1_fire)
 
   private val s2_icacheExceptionIdx = RegEnable(s1_icacheExceptionIdx, s1_fire)
 

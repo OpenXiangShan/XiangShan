@@ -26,6 +26,8 @@ import utility.ValidHold
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
+import xiangshan.TeaEvent
+import xiangshan.TeaPsvOps
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
@@ -426,12 +428,24 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall", toMiss.valid && !toMiss.ready)
 
   private val s1_fetchFinish = !s1_shouldFetch.reduce(_ || _)
+  private val s1_missSeen    = RegInit(false.B)
+  when(s1_flush || s1_fire) {
+    s1_missSeen := false.B
+  }.elsewhen(s1_valid && !s1_fetchFinish) {
+    s1_missSeen := true.B
+  }
+  private val s1_teaItlbMiss = s1_req.zip(s1_wayLookupEntry).map {
+    case (req, entry) => req.valid && entry.teaItlbMiss
+  }.reduce(_ || _)
 
   // merge all exceptions, itlb/pmp has the highest priority, then from bus
   // parity check is deferred to s2 stage and sent to ifu via a separate port, not included here
   private val s1_exceptionOut = VecInit((s1_exception zip s1_tlException).map { case (e, tl) => e || tl })
 
   io.toIfu.req.valid := s1_valid && s1_fetchFinish && !s1_flush
+  io.toIfu.req.bits.teaPsv :=
+    Mux(s1_missSeen, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty) |
+      Mux(s1_teaItlbMiss, TeaEvent.bit(TeaEvent.DR_TLB), TeaPsvOps.empty)
   io.toIfu.req.bits.maybeRvcMap :=
     s1_alignedMaybeRvcMapVec.flatten.zip(s1_alignedMaybeRvcMaskVec.flatten).map { case (a, b) => a & b }.reduce(_ | _)
   io.toIfu.req.bits.firstRange := s1_firstBlockRange
