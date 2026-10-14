@@ -1499,6 +1499,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val fromStaS1      = Vec(StorePipelineWidth, Flipped(DecoupledIO(new UnalignQueueIO)))
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
+        val deqPtr       = Input(new SqPtr)
       }
       val toDeqModule = DecoupledIO(new Bundle {
         val paddr        = UInt(PAddrBits.W)
@@ -1545,6 +1546,20 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       }
     }
 
+    // The DeqModule takes the entry when the store enters EnterSbufferQueue, but the second page is not in the
+    // sbuffer yet, and the StoreQueue CAM only covers the first page. Until the store leaves the StoreQueue (deqPtr
+    // passes it, the same timing as its StoreQueue dequeue credit) the entry stays visible to load forwarding, so a
+    // younger load to the second page still replays instead of reading stale memory. A held slot is not reused.
+    private val fwdHold = RegInit(VecInit(Seq.fill(queueSize)(false.B)))
+    (0 until queueSize).map{i =>
+      val deqCancel = i.U === deqPtr.value && io.toDeqModule.fire
+      when(deqCancel) {
+        fwdHold(i) := true.B
+      }.elsewhen(entries(i).sqIdx.isBefore(io.fromSQ.deqPtr)) {
+        fwdHold(i) := false.B
+      }
+    }
+
     // update pointer
     needCancel.zipWithIndex.map{case (sink, i) =>
       sink := entries(i).sqIdx.needFlush(io.redirect) && allocated(i)
@@ -1573,10 +1588,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       sink.paddr := source.paddr
       sink.sqIdx := source.sqIdx
     }
-    io.forwardValid := allocated
+    io.forwardValid := VecInit(allocated.zip(fwdHold).map { case (a, h) => a || h })
 
     io.fromStaS1.map{case sink =>
-      sink.ready := !full && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
+      sink.ready := !full && !fwdHold(enqPtr.value) && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
+    }
+
+    if (debugEn) {
+      dontTouch(fwdHold)
     }
 
   }
@@ -1688,6 +1707,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   // unalignQueue connection
   unalignQueue.io.redirect            := io.fromVirtualStoreQueue.redirectPtr
   unalignQueue.io.fromSQ.addrReadyPtr := addrReadyPtr
+  unalignQueue.io.fromSQ.deqPtr       := deqPtrExt.head
   unalignQueue.io.fromStaS1.zip(io.fromStoreUnit.unalignQueueReq).map{case (sink, source) =>
     sink <> source
   }
