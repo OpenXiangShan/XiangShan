@@ -19,6 +19,7 @@ jobs:
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
       benchmark_type: spec06-rva23-novec-gcc16-1.0c
+      high_priority: true
 
   run-xscc:
     name: Run SPEC06 XSCC Performance Test

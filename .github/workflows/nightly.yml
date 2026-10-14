@@ -16,6 +16,7 @@ jobs:
     with:
       test_branch: kunminghu-v3
       benchmark_type: spec06-rva23-novec-gcc16-0.3c
+      high_priority: true
 
   select:
     name: Select random checkpoints
@@ -59,6 +60,7 @@ jobs:
       benchmark_type: custom
       json_path: ${{ needs.select.outputs.RESULT_PATH }}
       artifact_name: fuzz-report
+      high_priority: true
 
   report:
     name: Generate Report
