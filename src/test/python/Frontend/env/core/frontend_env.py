@@ -659,6 +659,16 @@ class FrontendEnv:
             self.monitor.on_clock_edge(cycle)
             self.translation_oracle.on_clock_edge(cycle)
             self._drive_backend_cycle(cycle)
+        # Cycle observers run after the environment has driven backend and
+        # agent state.  Native Toffee direct models use a read-once snapshot;
+        # start it at this same post-drive boundary so observers and the
+        # later StepRis coverage callback read the identical DUT values.
+        coverage = getattr(self, "functional_coverage", None)
+        begin_snapshot = getattr(coverage, "begin_cycle_snapshot", None)
+        if callable(begin_snapshot) and getattr(
+            coverage, "native_toffee_runtime_enabled", False
+        ):
+            begin_snapshot(int(cycle))
         for observer in list(self._cycle_observers):
             observer(int(cycle), self)
         self._emit_event("clock.tick", {"cycle": int(cycle)}, level="DEBUG")
