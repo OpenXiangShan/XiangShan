@@ -972,8 +972,16 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val l1x2ToL1x1Buf = connectThroughTimingCut(l1xbar1to2(1), l1xbar1to2(2), "imsic_l1x2_to_l1x1_buf")
   val l1x1ToL1x0Buf = connectThroughTimingCut(l1xbar1to2(0), l1xbar1to2(1), "imsic_l1x1_to_l1x0_buf")
   // icx4 <- icxl1_0, icx6 <- icxl1_1, icx8 <- icxl1_2, icx10 <- icxl1_3
+  val l1x3ToXbar2SourceTimingCut = newTimingCutBuffer("imsic_l1x3_to_xbar2_source_timing_cut")
+  val l1x3ToXbar2SinkTimingCut = newTimingCutBuffer("imsic_l1x3_to_xbar2_sink_timing_cut")
   for (i <- 0 until NumCX_l1) {
-    xbar1to2(8 - i * 2) := l1xbar1to2(i)
+    if (i == 3) {
+      xbar1to2(2) := l1x3ToXbar2SinkTimingCut.node
+      l1x3ToXbar2SinkTimingCut.node := l1x3ToXbar2SourceTimingCut.node
+      l1x3ToXbar2SourceTimingCut.node := l1xbar1to2(3)
+    } else {
+      xbar1to2(8 - i * 2) := l1xbar1to2(i)
+    }
   }
   val l1x0ToXbar10Buf = connectThroughTimingCut(xbar1to2(10), l1xbar1to2(0), "imsic_l1x0_to_xbar10_buf")
   // icx xbar 1to2 design
@@ -1054,6 +1062,8 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     val xbar6RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(6).module, l1x1RouteReset)
     val xbar4RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(4).module, l1x2RouteReset)
     val xbar2RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(2).module, l1x3RouteReset)
+    l1x3ToXbar2SourceTimingCut.module.reset := l1xbar1to2LMs(3).module.reset
+    l1x3ToXbar2SinkTimingCut.module.reset := xbar1to2LMs(2).module.reset
 
     val xbar10ToXbar9RouteReset = xbar10ToXbar9Buf.sourceSinkReset(l1x0RouteReset)
     xbar10ToXbar9Buf.setTimingCutReset(xbar10ToXbar9RouteReset)
