@@ -75,6 +75,11 @@ on:
         required: false
         type: string
         default: score
+      high_priority:
+        description: This is a high priority test (bypass parallelism limit etc.)
+        required: false
+        type: boolean
+        default: false
     outputs:
       SHORT_SHA:
         description: Short git commit sha used in this run
@@ -298,6 +303,7 @@ jobs:
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
             ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
             --run \
+            ${{ inputs.high_priority && '--parallel 9999' || '' }} \
             "${EXTRA_OPTS[@]}" \
             $CST_RUN_OPT
 
