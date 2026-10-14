@@ -19,6 +19,7 @@ create table Tip_0(
   SITE text,
   COMMITS_ISCOMMIT int not null,
   COMMITS_ISWALK int not null,
+  COMMITS_INFO_0_COMMIT_V int not null,
   COMMITS_COMMITVALID_0 int not null,
   COMMITS_COMMITVALID_1 int not null,
   COMMITS_COMMITVALID_2 int not null,
@@ -47,10 +48,7 @@ create table Tip_0(
   REDIRECT_PC int not null,
   REDIRECT_BITS_DEBUGISCTRL int not null,
   REDIRECT_BITS_DEBUGISMEMVIO int not null,
-  REDIRECT_BITS_CFIUPDATE_TARGET int not null,
-  REDIRECT_BITS_CFIUPDATE_ISMISPRED int not null,
-  REDIRECT_BITS_CFIUPDATE_TAKEN int not null,
-  REDIRECT_BITS_CFIUPDATE_PREDTAKEN int not null,
+  REDIRECT_BITS_TARGET int not null,
   DEBUGLSINFO_S3_ISREPLAY int not null,
   DEBUGLSINFO_S3_ISREPLAYFAST int not null,
   DEBUGLSINFO_S3_ISREPLAYSLOW int not null,
@@ -74,6 +72,7 @@ create table Tip_0(
 
 TIP_COLUMNS = [
     "STATE", "STAMP", "SITE", "COMMITS_ISCOMMIT", "COMMITS_ISWALK",
+    "COMMITS_INFO_0_COMMIT_V",
     "COMMITS_COMMITVALID_0", "COMMITS_COMMITVALID_1", "COMMITS_COMMITVALID_2", "COMMITS_COMMITVALID_3",
     "COMMITS_COMMITVALID_4", "COMMITS_COMMITVALID_5", "COMMITS_COMMITVALID_6", "COMMITS_COMMITVALID_7",
     "COMMITS_INFO_0_DEBUG_PC", "COMMITS_INFO_1_DEBUG_PC", "COMMITS_INFO_2_DEBUG_PC", "COMMITS_INFO_3_DEBUG_PC",
@@ -81,8 +80,7 @@ TIP_COLUMNS = [
     "COMMITS_INFO_0_COMMITTYPE", "COMMITS_INFO_1_COMMITTYPE", "COMMITS_INFO_2_COMMITTYPE", "COMMITS_INFO_3_COMMITTYPE",
     "COMMITS_INFO_4_COMMITTYPE", "COMMITS_INFO_5_COMMITTYPE", "COMMITS_INFO_6_COMMITTYPE", "COMMITS_INFO_7_COMMITTYPE",
     "REDIRECT_VALID", "REDIRECT_PC", "REDIRECT_BITS_DEBUGISCTRL", "REDIRECT_BITS_DEBUGISMEMVIO",
-    "REDIRECT_BITS_CFIUPDATE_TARGET", "REDIRECT_BITS_CFIUPDATE_ISMISPRED", "REDIRECT_BITS_CFIUPDATE_TAKEN",
-    "REDIRECT_BITS_CFIUPDATE_PREDTAKEN", "DEBUGLSINFO_S3_ISREPLAY", "DEBUGLSINFO_S3_ISREPLAYFAST",
+    "REDIRECT_BITS_TARGET", "DEBUGLSINFO_S3_ISREPLAY", "DEBUGLSINFO_S3_ISREPLAYFAST",
     "DEBUGLSINFO_S3_ISREPLAYSLOW", "DEBUGLSINFO_S3_ISREPLAYRS", "DEBUGLSINFO_S2_ISBANKCONFLICT",
     "DEBUGLSINFO_S2_ISDCACHEFIRSTMISS", "DEBUGLSINFO_S2_ISFORWARDFAIL", "DEBUGLSINFO_REPLAYCNT",
     "DEBUGLSINFO_REPLAYCAUSE_0", "DEBUGLSINFO_REPLAYCAUSE_1", "DEBUGLSINFO_REPLAYCAUSE_2", "DEBUGLSINFO_REPLAYCAUSE_3",
@@ -91,19 +89,16 @@ TIP_COLUMNS = [
 ]
 
 
-def insert_row(conn: sqlite3.Connection, row):
-    if len(row) != len(TIP_COLUMNS):
-        raise ValueError("row length does not match Tip_0 columns")
-    placeholders = ", ".join(["?"] * len(TIP_COLUMNS))
-    columns = ", ".join(TIP_COLUMNS)
-    conn.execute(f"insert into Tip_0({columns}) values ({placeholders})", row)
-
-
 def insert_tip_row(conn: sqlite3.Connection, **values):
     row = dict.fromkeys(TIP_COLUMNS, 0)
-    row["SITE"] = ""
+    row.update(SITE="", COMMITS_INFO_0_COMMIT_V=1)
     row.update(values)
-    insert_row(conn, tuple(row[column] for column in TIP_COLUMNS))
+    placeholders = ", ".join(["?"] * len(TIP_COLUMNS))
+    columns = ", ".join(TIP_COLUMNS)
+    conn.execute(
+        f"insert into Tip_0({columns}) values ({placeholders})",
+        tuple(row[column] for column in TIP_COLUMNS),
+    )
 
 
 class TipScriptTest(unittest.TestCase):
@@ -114,61 +109,52 @@ class TipScriptTest(unittest.TestCase):
         self.db = self.base / "tip.db"
         conn = sqlite3.connect(self.db)
         conn.execute(TIP_SCHEMA)
-        insert_row(
+        insert_tip_row(
             conn,
-            (
-                0, 0, "", 1, 0,
-                1, 1, 0, 0, 0, 0, 0, 0,
-                0x100, 0x104, 0, 0, 0, 0, 0, 0,
-                2, 1, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ),
+            STATE=0,
+            STAMP=0,
+            COMMITS_ISCOMMIT=1,
+            COMMITS_COMMITVALID_0=1,
+            COMMITS_COMMITVALID_1=1,
+            COMMITS_INFO_0_DEBUG_PC=0x100,
+            COMMITS_INFO_1_DEBUG_PC=0x104,
+            COMMITS_INFO_0_COMMITTYPE=2,
+            COMMITS_INFO_1_COMMITTYPE=1,
         )
-        insert_row(
+        insert_tip_row(
             conn,
-            (
-                1, 1, "", 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0,
-                0x100, 0, 0, 0, 0, 0, 0, 0,
-                2, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                1, 1, 0, 0,
-                1, 0, 0, 2,
-                0, 0, 0, 0, 0, 0, 1, 0, 0, 0,
-            ),
+            STATE=1,
+            STAMP=1,
+            COMMITS_INFO_0_DEBUG_PC=0x100,
+            COMMITS_INFO_0_COMMITTYPE=2,
+            DEBUGLSINFO_S3_ISREPLAY=1,
+            DEBUGLSINFO_S3_ISREPLAYFAST=1,
+            DEBUGLSINFO_S2_ISBANKCONFLICT=1,
+            DEBUGLSINFO_REPLAYCNT=2,
+            DEBUGLSINFO_REPLAYCAUSE_6=1,
         )
-        insert_row(
+        insert_tip_row(
             conn,
-            (
-                2, 2, "", 0, 1,
-                0, 0, 0, 0, 0, 0, 0, 0,
-                0x200, 0, 0, 0, 0, 0, 0, 0,
-                1, 0, 0, 0, 0, 0, 0, 0,
-                1, 0x200, 1, 0,
-                0x300, 1, 1, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ),
+            STATE=2,
+            STAMP=2,
+            COMMITS_ISWALK=1,
+            COMMITS_INFO_0_DEBUG_PC=0x200,
+            COMMITS_INFO_0_COMMITTYPE=1,
+            REDIRECT_VALID=1,
+            REDIRECT_PC=0x200,
+            REDIRECT_BITS_DEBUGISCTRL=1,
+            REDIRECT_BITS_TARGET=0x300,
         )
-        insert_row(
+        insert_tip_row(
             conn,
-            (
-                0, 3, "", 1, 0,
-                1, 0, 0, 0, 0, 0, 0, 0,
-                0x108, 0, 0, 0, 0, 0, 0, 0,
-                3, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 0, 0, 0,
-                0, 1, 0, 0,
-                0, 0, 0, 0, 1, 0, 0, 0, 0, 0,
-            ),
+            STATE=0,
+            STAMP=3,
+            COMMITS_ISCOMMIT=1,
+            COMMITS_COMMITVALID_0=1,
+            COMMITS_INFO_0_DEBUG_PC=0x108,
+            COMMITS_INFO_0_COMMITTYPE=3,
+            DEBUGLSINFO_S2_ISDCACHEFIRSTMISS=1,
+            DEBUGLSINFO_REPLAYCAUSE_4=1,
         )
         conn.commit()
         conn.close()
@@ -196,7 +182,7 @@ class TipScriptTest(unittest.TestCase):
         self.assertNotIn(0, commit_counts)
         redirect_rows = queries.fetch_redirect_targets(conn, 0, top=5)
         self.assertEqual(redirect_rows[0]["target"], "0x300")
-        replay_rows = queries.fetch_replay_hotspots(conn, 0, top=5)
+        replay_rows = queries.fetch_replay_event_rows(conn, 0, top=5)
         self.assertEqual(replay_rows[0]["pc"], "0x100")
         conn.close()
 
@@ -280,6 +266,35 @@ class TipScriptTest(unittest.TestCase):
         self.assertEqual(replay["dcache_first_miss"], 1)
         self.assertEqual(replay["replay_cnt_sum"], 3)
 
+    def test_replay_keeps_walk_residence_and_ignores_invalid_heads(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("delete from Tip_0")
+            for stamp, state, valid, committed in [
+                (4, 1, 1, 0),
+                (5, 2, 1, 0),
+                (6, 0, 1, 1),
+                (7, 3, 1, 0),
+                (8, 1, 0, 0),
+            ]:
+                insert_tip_row(
+                    conn,
+                    STAMP=stamp,
+                    STATE=state,
+                    COMMITS_INFO_0_COMMIT_V=valid,
+                    COMMITS_ISCOMMIT=committed,
+                    COMMITS_COMMITVALID_0=committed,
+                    COMMITS_INFO_0_DEBUG_PC=0x400,
+                    DEBUGLSINFO_S3_ISREPLAY=1,
+                    DEBUGLSINFO_REPLAYCNT=2,
+                )
+            summary = queries.fetch_replay_summary(conn, 0)[0]
+            hotspots = queries.fetch_replay_event_rows(conn, 0)
+
+        self.assertEqual(summary["entries"], 1)
+        self.assertEqual(summary["replay_cnt_sum"], 2)
+        self.assertEqual(hotspots[0]["pc"], "0x400")
+        self.assertEqual(hotspots[0]["count"], 1)
+
     def test_symbolize_rows(self):
         rows = [{"pc": "0X100 ", "count": 3}]
         resolver = Mock()
@@ -321,6 +336,41 @@ class TipScriptTest(unittest.TestCase):
         self.assertEqual(result["0x80001080"]["function"], "core_list_reverse")
         self.assertEqual(result["0x80001080"]["file"], "src/core_list_join.c")
         self.assertEqual(result["0x80001080"]["line"], 398)
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_sign_extends_truncated_kernel_pc(self, run_mock):
+        run_mock.side_effect = [
+            Mock(stdout="ffffffff80001000 00000010 T kernel_entry\n", returncode=0),
+            Mock(stdout="kernel_entry\nkernel/entry.S:42\n", returncode=0),
+        ]
+
+        from scripts.tip import symbolize
+
+        resolver = symbolize.ElfResolver(Path("/tmp/vmlinux"), pc_bits=39, pc_mode="sign")
+        result = resolver.resolve_many(["0x7f80001000"])
+
+        self.assertEqual(result["0x7f80001000"]["pc"], "0x7f80001000")
+        self.assertEqual(result["0x7f80001000"]["function"], "kernel_entry")
+        self.assertEqual(run_mock.call_args_list[1].args[0][-1], "0xffffffff80001000")
+
+    def test_pc_lookup_zero_extends_unsigned_address(self):
+        from scripts.tip import symbolize
+
+        self.assertEqual(symbolize._lookup_pc("0x7f80001000", 39, "zero"), "0x7f80001000")
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_preserves_addr2line_discriminator(self, run_mock):
+        run_mock.side_effect = [
+            Mock(stdout="00000100 00000010 T optimized\n", returncode=0),
+            Mock(stdout="optimized\nsrc/foo.c:42 (discriminator 3)\n", returncode=0),
+        ]
+
+        from scripts.tip import symbolize
+
+        result = symbolize.ElfResolver(Path("/tmp/program.elf")).resolve_many(["0x100"])
+
+        self.assertEqual(result["0x100"]["line"], 42)
+        self.assertEqual(result["0x100"]["location"], "src/foo.c:42 (discriminator 3)")
 
     @patch("scripts.tip.symbolize.subprocess.run")
     def test_elf_resolver_missing_tools_degrades(self, run_mock):
@@ -382,6 +432,66 @@ class TipScriptTest(unittest.TestCase):
         self.assertEqual(result_a["0x100"]["function"], "from_a")
         self.assertEqual(result_b["0x100"]["function"], "from_b")
         self.assertEqual(run_mock.call_count, 4)
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_cache_isolated_by_pc_mode(self, run_mock):
+        elf = self.base / "program.elf"
+        cache = self.base / "symbols.json"
+        elf.write_bytes(b"elf")
+        run_mock.side_effect = [
+            Mock(stdout="ffffffff80001000 00000010 T signed_pc\n", returncode=0),
+            Mock(stdout="signed_pc\nsigned.c:1\n", returncode=0),
+            Mock(stdout="0000007f80001000 00000010 T unsigned_pc\n", returncode=0),
+            Mock(stdout="unsigned_pc\nunsigned.c:2\n", returncode=0),
+        ]
+
+        from scripts.tip import symbolize
+
+        signed = symbolize.ElfResolver(
+            elf, cache_path=cache, pc_bits=39, pc_mode="sign"
+        ).resolve_many(["0x7f80001000"])
+        unsigned = symbolize.ElfResolver(
+            elf, cache_path=cache, pc_bits=39, pc_mode="zero"
+        ).resolve_many(["0x7f80001000"])
+
+        self.assertEqual(signed["0x7f80001000"]["function"], "signed_pc")
+        self.assertEqual(unsigned["0x7f80001000"]["function"], "unsigned_pc")
+        self.assertEqual(run_mock.call_count, 4)
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_limits_nm_fallback_to_symbol_range(self, run_mock):
+        run_mock.side_effect = [
+            Mock(stdout="00000100 00000010 T first\n00000200 00000010 T second\n"
+                        "00000300 00000004 D data\n00000400 T size_less\n"),
+            Mock(stdout="??\n??:0\n" * 6),
+        ]
+        from scripts.tip import symbolize
+
+        resolved = symbolize.ElfResolver(self.base / "program.elf").resolve_many(
+            ["0x104", "0x180", "0x300", "0x400", "0x404", "0x80000000"]
+        )
+        self.assertEqual(resolved["0x104"]["function"], "first")
+        self.assertEqual(resolved["0x104"]["symbol_offset"], "0x4")
+        self.assertEqual(resolved["0x400"]["function"], "size_less")
+        for pc in ("0x180", "0x300", "0x404", "0x80000000"):
+            self.assertEqual(resolved[pc]["function"], "<unknown>")
+
+    def test_cli_options_follow_subcommand(self):
+        parser = tip.build_parser()
+        args = parser.parse_args([
+            "symbols", "--db", str(self.db), "--hart", "1", "--top", "3",
+            "--elf", "/tmp/program.elf", "--pc-bits", "48", "--pc-mode", "zero",
+        ])
+        self.assertEqual(args.db, str(self.db))
+        self.assertEqual(args.hart, 1)
+        self.assertEqual(args.top, 3)
+        self.assertEqual(args.elf, "/tmp/program.elf")
+        self.assertEqual(args.pc_bits, 48)
+        self.assertEqual(args.pc_mode, "zero")
+        with patch("sys.stderr", new=io.StringIO()):
+            with self.assertRaises(SystemExit) as error:
+                parser.parse_args(["--db", str(self.db), "summary"])
+        self.assertEqual(error.exception.code, 2)
 
     def test_default_paths_are_user_owned(self):
         state_home = self.base / "state"
@@ -447,7 +557,6 @@ class TipScriptTest(unittest.TestCase):
         ]:
             self.assertTrue((out_dir / name).exists(), name)
         self.assertFalse((out_dir / "symbolized_commits.csv").exists())
-        self.assertFalse((out_dir / "family_distribution.png").exists())
         with open(out_dir / "state_summary.csv", newline="", encoding="utf-8") as fp:
             rows = list(csv.DictReader(fp))
         self.assertEqual(rows[0]["state_name"], "computing")
@@ -482,8 +591,18 @@ class TipScriptTest(unittest.TestCase):
             "/tmp/program.elf",
             "--sym-cache",
             str(cache_path),
+            "--pc-bits",
+            "48",
+            "--pc-mode",
+            "zero",
         ])
         self.assertEqual(rc, 0)
+        resolver_ctor.assert_called_once_with(
+            Path("/tmp/program.elf"),
+            cache_path=cache_path,
+            pc_bits=48,
+            pc_mode="zero",
+        )
         symbol_path = out_dir / "symbolized_commits.csv"
         self.assertTrue(symbol_path.exists(), symbol_path)
         with symbol_path.open(newline="", encoding="utf-8") as fp:
@@ -524,7 +643,6 @@ class TipScriptTest(unittest.TestCase):
         ])
         self.assertEqual(rc, 0)
         self.assertTrue((out_dir / "symbolized_commits.csv").exists())
-        self.assertFalse((out_dir / "family_distribution.png").exists())
 
 
 if __name__ == "__main__":

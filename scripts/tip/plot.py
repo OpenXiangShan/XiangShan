@@ -47,9 +47,9 @@ def plot_pc_hotspots(rows: list[dict], out_path: Path | str) -> None:
     _bar_plot(
         [row["pc"] for row in rows],
         [row["count"] for row in rows],
-        "Top PC Hotspots",
+        "Committed ROB Entry PC Hotspots",
         "PC",
-        "Count",
+        "Committed ROB Entries",
         out_path,
     )
 

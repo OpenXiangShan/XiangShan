@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
 
 TIMEOUT_SECONDS = 10
+XLEN = 64
+DEFAULT_PC_BITS = 39
+DEFAULT_PC_MODE = "sign"
+PC_MODES = ("sign", "zero")
 
 
 def _normalize_pc(pc: str) -> str:
@@ -16,6 +20,19 @@ def _normalize_pc(pc: str) -> str:
         return f"0x{int(text):x}"
     except ValueError:
         return text
+
+
+def _lookup_pc(pc: str, pc_bits: int, pc_mode: str) -> str:
+    normalized = _normalize_pc(pc)
+    try:
+        value = int(normalized, 16)
+    except ValueError:
+        return normalized
+    mask = (1 << pc_bits) - 1
+    value &= mask
+    if pc_mode == "sign" and value & (1 << (pc_bits - 1)):
+        value |= ((1 << XLEN) - 1) ^ mask
+    return f"0x{value:x}"
 
 
 def _unknown_symbol(pc: str) -> Dict[str, object]:
@@ -91,7 +108,7 @@ def _resolve_locations(elf: Path, pcs: Iterable[str]) -> Dict[str, dict[str, obj
                 file_candidate = "<unknown>"
             file = file_candidate
             try:
-                line_num = int(line_part)
+                line_num = int(line_part.split(maxsplit=1)[0])
             except ValueError:
                 line_num = 0
         if file == "??":
@@ -99,23 +116,37 @@ def _resolve_locations(elf: Path, pcs: Iterable[str]) -> Dict[str, dict[str, obj
         if not location or location.startswith("??"):
             file = "<unknown>"
             line_num = 0
+            location = "<unknown>:0"
         resolved[pc] = {
             "pc": pc,
             "function": func if func != "??" else "<unknown>",
             "file": file,
             "line": line_num,
-            "location": f"{file}:{line_num}",
+            "location": location,
             "symbol_offset": "0x0",
         }
     return resolved
 
 
 class ElfResolver:
-    def __init__(self, elf: Path, cache_path: Optional[Path] = None):
+    def __init__(
+        self,
+        elf: Path,
+        cache_path: Optional[Path] = None,
+        pc_bits: int = DEFAULT_PC_BITS,
+        pc_mode: str = DEFAULT_PC_MODE,
+    ):
+        if not 1 <= pc_bits <= XLEN:
+            raise ValueError(f"pc_bits must be between 1 and {XLEN}")
+        if pc_mode not in PC_MODES:
+            raise ValueError(f"pc_mode must be one of: {', '.join(PC_MODES)}")
         self.elf = Path(elf).resolve()
         self.cache_path = Path(cache_path) if cache_path else None
+        self.pc_bits = pc_bits
+        self.pc_mode = pc_mode
         self._elf_identity = self._identity()
-        self._cache_file: Dict[str, object] = {"version": 2, "elfs": {}}
+        self._cache_identity = f"{self._elf_identity}|pc_bits={pc_bits}|pc_mode={pc_mode}"
+        self._cache_file: Dict[str, object] = {"version": 3, "elfs": {}}
         self._cache: Dict[str, dict[str, object]] = self._load_cache()
 
     def _identity(self) -> str:
@@ -130,9 +161,9 @@ class ElfResolver:
             return {}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.get("version") == 2 and isinstance(data.get("elfs"), dict):
+            if isinstance(data, dict) and data.get("version") == 3 and isinstance(data.get("elfs"), dict):
                 self._cache_file = data
-                entries = data["elfs"].get(self._elf_identity, {})
+                entries = data["elfs"].get(self._cache_identity, {})
                 if isinstance(entries, dict):
                     return {str(k): dict(v) for k, v in entries.items()}
         except (json.JSONDecodeError, OSError):
@@ -143,7 +174,7 @@ class ElfResolver:
         if not self.cache_path:
             return
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache_file["elfs"][self._elf_identity] = self._cache
+        self._cache_file["elfs"][self._cache_identity] = self._cache
         try:
             self.cache_path.write_text(json.dumps(self._cache_file, indent=2), encoding="utf-8")
         except OSError:
@@ -166,12 +197,13 @@ class ElfResolver:
 
     def _resolve_missing(self, pcs: List[str]) -> Dict[str, dict[str, object]]:
         symbols = _collect_symbols(self.elf)
-        locations = _resolve_locations(self.elf, pcs)
+        lookup_pcs = [_lookup_pc(pc, self.pc_bits, self.pc_mode) for pc in pcs]
+        locations = _resolve_locations(self.elf, lookup_pcs)
         resolved: Dict[str, dict[str, object]] = {}
         sorted_symbols = sorted(symbols)
-        for pc in pcs:
+        for pc, lookup_pc in zip(pcs, lookup_pcs):
             try:
-                pc_val = int(pc, 16) if pc.lower().startswith("0x") else int(pc)
+                pc_val = int(lookup_pc, 16)
             except ValueError:
                 pc_val = 0
             symbol_entry = None
@@ -180,7 +212,7 @@ class ElfResolver:
                     break
                 if pc_val == addr or pc_val < addr + size:
                     symbol_entry = (addr, name)
-            entry = locations.get(pc, _unknown_symbol(pc))
+            entry = locations.get(lookup_pc, _unknown_symbol(pc))
             function = entry.get("function", "<unknown>")
             symbol_offset = "0x0"
             if symbol_entry:

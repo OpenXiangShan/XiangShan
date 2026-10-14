@@ -53,9 +53,16 @@ def export_symbolized_commits(
     elf_path: Path,
     sym_cache: Path,
     top: int,
+    pc_bits: int,
+    pc_mode: str,
 ) -> list[dict]:
     rows = queries.fetch_commit_event_rows(conn, hart, top=top)
-    resolver = symbolize.ElfResolver(elf_path, cache_path=sym_cache)
+    resolver = symbolize.ElfResolver(
+        elf_path,
+        cache_path=sym_cache,
+        pc_bits=pc_bits,
+        pc_mode=pc_mode,
+    )
     symbolized = symbolize.symbolize_rows(rows, resolver, pc_field="pc")
     queries.write_csv(out_dir / "symbolized_commits.csv", symbolized)
     print_rows("Symbolized Commits", symbolized)
@@ -96,10 +103,10 @@ def export_hotspots(conn, hart: int, out_dir: Path, top: int) -> dict:
     queries.write_csv(out_dir / "pc_commit_type_hotspots.csv", pc_commit_rows)
     queries.write_csv(out_dir / "redirect_targets.csv", redirect_rows)
     queries.write_csv(out_dir / "replay_hotspots.csv", replay_rows)
-    print_rows("PC Hotspots", pc_rows)
-    print_rows("PC CommitType Hotspots", pc_commit_rows)
+    print_rows("Committed ROB Entry PC Hotspots", pc_rows)
+    print_rows("Committed ROB Entry PC/Type Hotspots", pc_commit_rows)
     print_rows("Redirect Targets", redirect_rows)
-    print_rows("Replay Hotspots", replay_rows)
+    print_rows("Observed Head Replay Hotspots", replay_rows)
     return {
         "pc": pc_rows,
         "pc_commit": pc_commit_rows,
@@ -127,6 +134,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to ELF binary for symbolizing addresses (required for 'symbols'; optional for 'all')",
     )
     common.add_argument("--sym-cache", default=default_sym_cache(), help="JSON cache for symbol resolutions")
+    common.add_argument(
+        "--pc-bits",
+        type=int,
+        default=symbolize.DEFAULT_PC_BITS,
+        help="architectural PC width used for ELF lookup, default 39",
+    )
+    common.add_argument(
+        "--pc-mode",
+        choices=symbolize.PC_MODES,
+        default=symbolize.DEFAULT_PC_MODE,
+        help="extend truncated PCs with sign or zero bits, default sign",
+    )
     parser = argparse.ArgumentParser(description="TIP analysis for XiangShan ChiselDB output")
     subparsers = parser.add_subparsers(dest="subcommand", required=True)
     subparsers.add_parser("summary", help="print summary and write summary CSVs", parents=[common])
@@ -146,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.top <= 0:
         parser.error("--top must be positive")
+    if not 1 <= args.pc_bits <= symbolize.XLEN:
+        parser.error(f"--pc-bits must be between 1 and {symbolize.XLEN}")
     if args.subcommand == "symbols" and not args.elf:
         parser.error("--elf is required for 'symbols'")
 
@@ -166,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.elf),
             Path(args.sym_cache),
             args.top,
+            args.pc_bits,
+            args.pc_mode,
         )
     if args.subcommand in ("plot", "all"):
         export_plots(summary_data, hotspot_data, out_dir)
