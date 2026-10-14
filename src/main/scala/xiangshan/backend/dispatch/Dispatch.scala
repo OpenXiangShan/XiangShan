@@ -701,13 +701,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val fuType = uop.map(_.fuType)
 
   private val numLsElem = VecInit(uop.map(_.numLsElem))
-  val sqHasRoomLane0 = fromRename(0).bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
-  val drSqBlock = io.enqRob.isEmpty && fromRename(0).valid &&
-    FuType.isStore(fromRename(0).bits.fuType) && !sqHasRoomLane0
+  // Partial dispatch leaves the oldest remaining instruction in its original lane.
+  val drSqHeadIdx = PriorityEncoder(VecInit(fromRename.map(_.valid)))
+  val drSqHead = fromRename(drSqHeadIdx)
+  val sqHasRoom = drSqHead.bits.lsqIdxEnd.sqIdx > io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
+  val drSqBlock = io.enqRob.isEmpty && drSqHead.valid &&
+    FuType.isStore(drSqHead.bits.fuType) && !sqHasRoom
   val drSqPending = RegInit(false.B)
   when (io.redirect.valid) {
     drSqPending := false.B
-  }.elsewhen (drSqPending && fromRename(0).fire) {
+  }.elsewhen (drSqPending && drSqHead.fire) {
     drSqPending := false.B
   }.elsewhen (drSqBlock) {
     drSqPending := true.B
@@ -799,10 +802,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
     updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
-    if (i == 0) {
-      when (drSqPending && fromRename(0).valid && FuType.isStore(fromRename(0).bits.fuType)) {
-        updatedUop(0).teaPsv := TeaPsvOps.setBit(fromRename(0).bits.teaPsv, TeaEvent.DR_SQ)
-      }
+    when (drSqPending && drSqHeadIdx === i.U && isStore(i)) {
+      updatedUop(i).teaPsv := TeaPsvOps.setBit(fromRename(i).bits.teaPsv, TeaEvent.DR_SQ)
     }
     XSDebug(
       fromRename(i).fire &&
