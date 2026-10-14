@@ -6,6 +6,8 @@ from dataclasses import replace
 from itertools import islice
 from typing import Callable, Deque, Dict, Optional
 
+from toffee.bundle import DummySignal
+
 from ..agents.backend_agent import BackendAgent
 from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
 from ..support.pc_utils import pc_from_ftq_start, require_matching_foldpc
@@ -71,6 +73,7 @@ class BackendModel:
         self.dut = None
         self.drive_if = None
         self.observe_if = None
+        self._cfvec_is_last_observable = True
         self.from_ftq_if = None
         self.env = None
         self.monitor = None
@@ -2871,6 +2874,10 @@ class BackendModel:
         self.drive_if = drive_if
         self.observe_if = observe_if
         self.from_ftq_if = from_ftq_if
+        is_last_signals = getattr(observe_if, "cfvec_is_last_in_ftq_entry", ())
+        self._cfvec_is_last_observable = bool(is_last_signals) and any(
+            not isinstance(signal, DummySignal) for signal in is_last_signals
+        )
 
     def attach_env(self, env) -> None:
         self.env = env
@@ -3873,7 +3880,10 @@ class BackendModel:
                     # Redirect/truncation can cut an FTQ entry short before DUT raises
                     # isLastInFtqEntry for the surviving prefix. Close the prefix so
                     # later resolve/commit bookkeeping does not silently lose it.
-                    if not self._ftq_transition_without_last_is_expected():
+                    if (
+                        self._cfvec_is_last_observable
+                        and not self._ftq_transition_without_last_is_expected()
+                    ):
                         self.logger.warning(
                             "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
                             self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,

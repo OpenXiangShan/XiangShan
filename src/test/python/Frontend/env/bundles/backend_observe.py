@@ -4,6 +4,14 @@ from toffee import Bundle, Signal, SignalList
 
 
 class BackendObserveBundle(Bundle):
+    # The standalone FrontendTop test DUT wraps the backend with an empty
+    # blackbox.  FIRRTL prunes cfVec.isLastInFtqEntry because that blackbox
+    # does not consume it, while an integrated core exports the field.  Keep
+    # this one field optional so the environment can run against both ABIs;
+    # BackendModel closes an FTQ span when the observed pointer changes and
+    # never treats the missing pin as a coverage hit.
+    OPTIONAL_ATTRS = ("cfvec_is_last_in_ftq_entry",)
+
     SIGNAL_BINDINGS = {
         "redirect_valid": "io_backend_toFtq_redirect_valid",
         "redirect_bits_pc": "io_backend_toFtq_redirect_bits_pc",
