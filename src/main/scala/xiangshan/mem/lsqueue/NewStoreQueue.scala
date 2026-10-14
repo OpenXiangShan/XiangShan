@@ -1319,7 +1319,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       port.bits.addr     := writeSbufferPaddr(i)
       port.bits.vaddr    := writeSbufferVaddr(i)
 
-      port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
+      // Only port 0 can carry a cbo.zero line write (port 1 never takes a CBO on its own: cboStall). For a cross-16B
+      // store at the head, port 1 carries the high half through the bypass, and slot rdataPtr+1 is the NEXT store or
+      // a stale slot whose last occupant was a cbo.zero: its isCbo/cboType would turn the half into a full-line write.
+      port.bits.wline    := (if (i == 0) ctrlEntry.isCbo && isCboZero(dataEntry.cboType) else false.B)
       port.bits.prefetch := dataEntry.prefetch
       port.bits.vecValid := true.B
       if (i == 0) {
