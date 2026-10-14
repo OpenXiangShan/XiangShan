@@ -326,7 +326,17 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
   io.outValidAhead3Cycle.get := csrModOutValid
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
-  io.out.valid := Mux(isXRetReg, csrModOutValid, DelayN(csrModOutValid, 3))
+  // CSR reads that are not serialised (CSROoORead) execute speculatively. The CtrlBlock only drops a write-back
+  // flushed by a redirect in the same or the previous cycle, so drop a uop flushed while it is in the delay stages.
+  private val outDelayValid = Wire(Vec(4, Bool()))
+  private val outDelayRobIdx = Wire(Vec(4, new RobPtr))
+  outDelayValid(0) := csrModOutValid && !isXRetReg
+  outDelayRobIdx(0) := robIdxReg
+  for (i <- 1 to 3) {
+    outDelayValid(i) := RegNext(outDelayValid(i - 1) && !outDelayRobIdx(i - 1).needFlush(io.flush), false.B)
+    outDelayRobIdx(i) := RegEnable(outDelayRobIdx(i - 1), outDelayValid(i - 1))
+  }
+  io.out.valid := Mux(isXRetReg, csrModOutValid, outDelayValid(3))
   io.out.bits.ctrl.exceptionVec := ExceptSparseVec.mux2(
     isXRetReg,
     exceptionVec,
@@ -373,7 +383,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   generateCriticalErrors()
 
   // Todo: summerize all difftest skip condition
-  csrOut.isPerfCnt  := io.out.valid && csrMod.io.out.bits.isPerfCnt && RegEnable(func =/= CSROpType.jmp, false.B, io.in.fire)
+  // Delayed with the result: a younger CSR read can fire before the result of an older one is written back
+  private val perfCntRead = csrMod.io.out.bits.isPerfCnt && RegEnable(func =/= CSROpType.jmp, false.B, io.in.fire)
+  csrOut.isPerfCnt  := io.out.valid && !isXRetReg && DelayNWithValid(perfCntRead, csrModOutValid, 3)._2
   csrOut.fpu.frm    := csrMod.io.status.fpState.frm.asUInt
   csrOut.vpu.vstart := csrMod.io.status.vecState.vstart.asUInt
   csrOut.vpu.vxrm   := csrMod.io.status.vecState.vxrm.asUInt

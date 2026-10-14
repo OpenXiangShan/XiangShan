@@ -1506,22 +1506,25 @@ class NewCSR(implicit val p: Parameters) extends Module
   assert(PopCount(io.status.instrAddrTransType.asUInt) === 1.U, "Exactly one inst trans type should be asserted")
 
   private val csrAccess = wenLegalReg || RegNext(ren)
+  // The IMSIC is accessed in the cycle after the CSR instruction fires. Use that instruction's address: a CSR read
+  // that is not serialised (CSROoORead) can be followed on the input by an unrelated uop in that cycle.
+  private val accessAddr = RegNext(addr)
 
   private val imsicAddrValid =
-    csrAccess &&  addr === CSRs.mireg.U &&  miselect.inIMSICRange ||
-    csrAccess &&  addr === CSRs.sireg.U && !isModeVS && siselect.inIMSICRange ||
-    csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U) && vsiselect.inIMSICRange
+    csrAccess &&  accessAddr === CSRs.mireg.U &&  miselect.inIMSICRange ||
+    csrAccess &&  accessAddr === CSRs.sireg.U && !isModeVS && siselect.inIMSICRange ||
+    csrAccess && (accessAddr === CSRs.sireg.U &&  isModeVS || accessAddr === CSRs.vsireg.U) && vsiselect.inIMSICRange
 
   private val imsicAddr = Mux1H(Seq(
-    (csrAccess &&  addr === CSRs.mireg.U) -> miselect.rdata,
-    (csrAccess &&  addr === CSRs.sireg.U && !isModeVS) -> siselect.rdata,
-    (csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U)) -> vsiselect.rdata,
+    (csrAccess &&  accessAddr === CSRs.mireg.U) -> miselect.rdata,
+    (csrAccess &&  accessAddr === CSRs.sireg.U && !isModeVS) -> siselect.rdata,
+    (csrAccess && (accessAddr === CSRs.sireg.U &&  isModeVS || accessAddr === CSRs.vsireg.U)) -> vsiselect.rdata,
   ))
 
   private val imsicAddrPrivState = Mux1H(Seq(
-    (csrAccess &&  addr === CSRs.mireg.U) -> PrivState.ModeM,
-    (csrAccess &&  addr === CSRs.sireg.U && !isModeVS) -> PrivState.ModeHS,
-    (csrAccess && (addr === CSRs.sireg.U &&  isModeVS || addr === CSRs.vsireg.U)) -> PrivState.ModeVS,
+    (csrAccess &&  accessAddr === CSRs.mireg.U) -> PrivState.ModeM,
+    (csrAccess &&  accessAddr === CSRs.sireg.U && !isModeVS) -> PrivState.ModeHS,
+    (csrAccess && (accessAddr === CSRs.sireg.U &&  isModeVS || accessAddr === CSRs.vsireg.U)) -> PrivState.ModeVS,
   ))
 
   private val imsicWdataValid =
