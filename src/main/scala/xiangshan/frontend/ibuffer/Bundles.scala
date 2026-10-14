@@ -68,7 +68,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     foldpc           := fetch.foldpc(i)
     isRvc            := fetch.isRvc(i)
     predTaken        := fetch.instrEndOffset(i).predTaken
-    teaPsv           := fetch.teaPsv
     ftqPtr           := fetch.ftqPtr(i)
     instrEndOffset   := fetch.instrEndOffset(i).offset
     triggered        := fetch.triggered(i)
