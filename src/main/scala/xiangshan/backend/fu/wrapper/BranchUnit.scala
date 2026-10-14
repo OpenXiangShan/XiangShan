@@ -64,7 +64,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.isMisPred := isMisPred
       redirect.bits.taken := dataModule.io.taken
       redirect.bits.target := addModule.io.target
-      redirect.bits.pc := io.in.bits.data.pc.get
+      redirect.bits.pc := pcExtend(VAddrBits, 0)
       redirect.bits.backendIAF := false.B
       redirect.bits.backendIPF := false.B
       redirect.bits.backendIGPF := false.B

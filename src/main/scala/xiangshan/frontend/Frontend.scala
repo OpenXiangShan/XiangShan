@@ -51,7 +51,7 @@ import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
 import xiangshan.L1BusErrorUnitInfo
 import xiangshan.SfenceBundle
-import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.SoftIPrefetchBundle
 import xiangshan.TlbCsrBundle
 import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.fu.PMP
@@ -76,8 +76,8 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val fencei:       Bool             = Input(Bool())
   val ptw:          TlbPtwIO         = new TlbPtwIO
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
-  val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
-    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
+  val softPrefetch: Vec[Valid[SoftIPrefetchBundle]] =
+    Vec(backendParams.LduCnt, Flipped(Valid(new SoftIPrefetchBundle)))
   val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
 
   // ctrl
@@ -99,6 +99,8 @@ class Frontend()(implicit p: Parameters) extends LazyModule with HasFrontendPara
 
   val inner:       FrontendInlined = LazyModule(new FrontendInlined)
   lazy val module: FrontendImp     = new FrontendImp(this)
+
+  require(VAddrBits >= PAddrBits, s"VAddrBits ($VAddrBits) must be greater than or equal to PAddrBits ($PAddrBits)")
 }
 
 class FrontendImp(wrapper: Frontend)(implicit p: Parameters) extends LazyModuleImp(wrapper) {
@@ -144,18 +146,18 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val sfence  = DelayN(io.sfence, SfencePortDelay)
 
   // trigger
-  ifu.io.frontendTrigger := csrCtrl.frontend_trigger
+  ifu.io.frontendTrigger := csrCtrl.frontendTrigger
 
   // RVCDecoder fsIsOff
   ifu.io.csrFsIsOff := csrCtrl.fsIsOff
 
   // bpu ctrl
-  bpu.io.ctrl        := csrCtrl.bp_ctrl
+  bpu.io.ctrl        := csrCtrl.bpCtrl
   bpu.io.resetVector := io.reset_vector
 
   // pmp
   private val pmp = Module(new PMP)
-  pmp.io.distribute_csr := csrCtrl.distribute_csr
+  pmp.io.distributeCsr := csrCtrl.distributeCsr
 
   private val pmpChecker = VecInit(Seq.fill(coreParams.ipmpPortNum)(Module(new PMPChecker(sameCycle = true)).io))
 
@@ -191,10 +193,11 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   }
 
   // icache use a non-block tlb port
-  private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, Seq(false), itlbParams))
+  private val itlb = Module(new TLB(coreParams.itlbPortNum, nRespDups = 1, itlbParams))
   itlb.io.hartId := io.hartId
   itlb.io.flushPipe.foreach(_ := icache.io.itlbFlushPipe)
-  itlb.io.redirect := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.redirect      := DontCare // itlb has flushpipe, don't need redirect signal
+  itlb.io.robPendingPtr := DontCare // only lsu
   itlb.io.base_connect(sfence, tlbCsr)
 
   private val itlbRequestor = VecInit(Seq(icache.io.itlb))
@@ -211,8 +214,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   private val itlbRepeater2 =
     PTWRepeaterNB(passReady = false, itlbParams.fenceDelay, itlbRepeater1.io.ptw, io.ptw, sfence, tlbCsr)
 
-  // ICache-Memblock
-  icache.io.softPrefetchReq <> io.softPrefetch
+  // Ftq-Memblock
+  ftq.io.softPrefetch <> io.softPrefetch
 
   // wfi (backend-icache, backend-instrUncache)
   private val wfiReq = DelayN(io.backend.wfi.wfiReq, WfiReqPortDelay)
@@ -237,7 +240,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.fromICache <> icache.io.toIfu
 
   // ICache-Backend
-  icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
+  icache.io.csrPfEnable := RegNext(csrCtrl.pfCtrl.l1I_pf_enable)
   icache.io.fencei      := RegNext(io.fencei)
 
   // IFU-Ibuffer
@@ -275,7 +278,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // PFEvent
   private val pfevent = Module(new PFEvent)
-  pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
+  pfevent.io.distributeCsr := io.csrCtrl.distributeCsr
   private val csrevents = pfevent.io.hpmevent.take(8)
 
   private val perfFromUnits = Seq(ifu, ibuffer, icache, ftq).flatMap(_.getPerfEvents)

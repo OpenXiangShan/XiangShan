@@ -21,19 +21,14 @@ import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
-import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FetchRequestBundle
-import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
-import xiangshan.frontend.PcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ifu.IfuBundle
 
 /* ***
  * Naming:
@@ -288,25 +283,41 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 }
 
 /* ***** PrefetchPipe ***** */
-class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:       GuardedPc     = GuardedPc()
-  val nextLineVAddr:    GuardedPc     = GuardedPc()
-  val vSetIdx:          Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
-  val isCrossLine:      Bool          = Bool()
-  val ftqIdx:           FtqPtr        = new FtqPtr
-  val backendException: ExceptionType = new ExceptionType
-  val isSoftPrefetch:   Bool          = Bool()
+class PrefetchSource extends Bundle {
+  val value: UInt = PrefetchSource.Value()
 
-  def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    startVAddr       := PcInit(req.vaddr).signGuard
-    nextLineVAddr    := DontCare
-    vSetIdx          := VecInit(get_idx(startVAddr), 0.U(idxBits.W))
-    isCrossLine      := false.B
-    ftqIdx           := DontCare
-    backendException := ExceptionType.None
-    isSoftPrefetch   := true.B
-    this
+  def isFdip: Bool = value === PrefetchSource.Value.Fdip
+  def isSw:   Bool = value === PrefetchSource.Value.Sw
+
+  def inStream: Bool = isFdip // in instruction stream, i.e. should be sent to mainPipe\ifu\backend
+
+  def getValidSeq: Seq[(String, Bool)] = PrefetchSource.Value.getValidSeq(value)
+}
+
+object PrefetchSource {
+  object Value extends EnumUInt(2) {
+    def Fdip: UInt = 0.U(width.W) // Fetch-directed instruction prefetch
+    def Sw:   UInt = 1.U(width.W) // Zicbop prefetch.i
   }
+
+  def apply(that: UInt): PrefetchSource = {
+    val source = Wire(new PrefetchSource)
+    source.value := that
+    source
+  }
+
+  def Fdip: PrefetchSource = apply(Value.Fdip)
+  def Sw:   PrefetchSource = apply(Value.Sw)
+}
+
+class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
+  val startVAddr:       GuardedPc      = GuardedPc()
+  val nextLineVAddr:    GuardedPc      = GuardedPc()
+  val vSetIdx:          Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val isCrossLine:      Bool           = Bool()
+  val ftqIdx:           FtqPtr         = new FtqPtr
+  val backendException: ExceptionType  = new ExceptionType
+  val source:           PrefetchSource = new PrefetchSource
 }
 
 /* ***** ICacheWayLookup ***** */

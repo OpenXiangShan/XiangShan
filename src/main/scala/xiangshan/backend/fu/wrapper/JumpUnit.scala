@@ -41,12 +41,13 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.fullTarget := jumpTarget
   redirect.taken := true.B
   redirect.target := jumpTarget
-  redirect.pc := io.in.bits.data.pc.get
+  redirect.pc := pc(VAddrBits, 0)
   redirect.isMisPred := needRedirect
   redirect.backendIAF := io.instrAddrTransType.get.checkAccessFault(jumpTarget)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpTarget)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpTarget)
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
+  redirect.isRVC := io.in.bits.ctrl.isRVC.get
   //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
 
   io.in.ready := io.out.ready

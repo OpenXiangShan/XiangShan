@@ -1,0 +1,138 @@
+name: Performance Regression Build
+
+on:
+  workflow_call:
+    inputs:
+      test_branch:
+        description: Branch or commit to build
+        required: true
+        type: string
+      emulator:
+        description: Emulator to build
+        required: false
+        type: string
+        default: gsim
+      xs_config:
+        description: Config for XiangShan core
+        required: false
+        type: string
+        default: DefaultConfig
+      cst_file:
+        description: Constantin file path (empty for default init setting)
+        required: false
+        type: string
+      disable_diff:
+        description: Mark no-diff runs separately in the report directory
+        required: false
+        type: boolean
+        default: false
+      enable_db:
+        description: Enable ChiselDB dump
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump, which implies enable_db
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      COMMIT_SHA:
+        description: Full git commit SHA used for the build
+        value: ${{ jobs.build.outputs.COMMIT_SHA }}
+      SHORT_SHA:
+        description: Short git commit SHA used for the build
+        value: ${{ jobs.build.outputs.SHORT_SHA }}
+      DATE:
+        description: Commit date in yymmdd format
+        value: ${{ jobs.build.outputs.DATE }}
+      SPEC_DIR:
+        description: Shared directory containing the emulator and reports
+        value: ${{ jobs.build.outputs.SPEC_DIR }}
+      CST_FILE:
+        description: Shared Constantin file path, if supplied
+        value: ${{ jobs.build.outputs.CST_FILE }}
+
+jobs:
+  build:
+    runs-on: perf
+    timeout-minutes: 7200
+    name: Build EMU for Performance Regression
+    outputs:
+      COMMIT_SHA: ${{ steps.set_env.outputs.COMMIT_SHA }}
+      SHORT_SHA: ${{ steps.set_env.outputs.SHORT_SHA }}
+      DATE: ${{ steps.set_env.outputs.DATE }}
+      SPEC_DIR: ${{ steps.set_env.outputs.SPEC_DIR }}
+      CST_FILE: ${{ steps.build.outputs.CST_FILE }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.test_branch }}
+          fetch-depth: 0
+          submodules: true
+
+      - name: Set env
+        id: set_env
+        run: |
+          COMMIT_SHA=$(git rev-parse HEAD)
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
+          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          echo "COMMIT_SHA=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "DATE=${DATE}" >> "$GITHUB_OUTPUT"
+
+          SPEC_TAG="-${{ inputs.xs_config }}"
+          if [[ -n "${{ inputs.cst_file }}" ]]; then
+            if [[ ! -f "${{ inputs.cst_file }}" ]]; then
+              echo "Error: cst_file does not exist: ${{ inputs.cst_file }}"
+              exit 1
+            fi
+            CONST_BASENAME=$(basename "${{ inputs.cst_file }}")
+            CONST_TAG=${CONST_BASENAME%.*}
+            SPEC_TAG="${SPEC_TAG}-${CONST_TAG}"
+            echo "CST_COMPILE_OPT=--with-constantin" >> "$GITHUB_ENV"
+          else
+            echo "CST_COMPILE_OPT=" >> "$GITHUB_ENV"
+          fi
+          if [[ "${{ inputs.disable_diff }}" == "true" ]]; then
+            SPEC_TAG="${SPEC_TAG}-nodiff"
+          fi
+          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
+          echo "SPEC_DIR=${SPEC_DIR}" >> "$GITHUB_ENV"
+          echo "SPEC_DIR=${SPEC_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Initialize submodules
+        run: make init-force
+
+      - name: Clean Up
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+
+      - name: Build EMU & stage files
+        id: build
+        run: |
+          if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
+            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+              --config "${{ inputs.xs_config }}" \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
+              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
+              --llvm-profdata llvm-profdata --trace-fst \
+              --emulator ${{ inputs.emulator }} \
+              ${{ inputs.enable_db && '--enable-db' || '' }} \
+              ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
+              $CST_COMPILE_OPT
+            mkdir -p $SPEC_DIR
+            cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
+          fi
+
+          if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
+            cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
+          fi
+
+          if [[ -n "${{ inputs.cst_file }}" ]]; then
+            CST_FILE="$SPEC_DIR/constantin-$(basename "${{ inputs.cst_file }}")"
+            cp -- "${{ inputs.cst_file }}" "$CST_FILE"
+            echo "CST_FILE=$CST_FILE" >> "$GITHUB_OUTPUT"
+          fi

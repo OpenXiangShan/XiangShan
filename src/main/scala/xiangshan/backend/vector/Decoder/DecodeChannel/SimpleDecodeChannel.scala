@@ -43,7 +43,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val patterns = instSeq
 
 
-  val patternsCboI2f: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
+  val patternsCbo: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
     instP <- instSeq.filter(x => ZICBOType.all.contains(x.bitPat));
     bool <- BoolPattern.all
   ) yield {
@@ -53,7 +53,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   println("[tmp-SimpleDecodeChannel]")
   instSeq.foreach(println)
   println("[tmp-SimpleDecodeChannel]")
-  patternsCboI2f.foreach(println)
+  patternsCbo.foreach(println)
 
   val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i, extensions))
   val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i, extensions))
@@ -65,7 +65,6 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val isJrFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJrField(i))
 
   val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ isJFields ++ isJrFields ++ Seq(
-    IsMopField,
     FrmRenField,
     FFlagsWenField,
     SelImmField,
@@ -80,19 +79,20 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
   val table = new DecodeTable(patterns, fields)
-  val instCboI2fTable = new DecodeTable(patternsCboI2f, Seq(CboOpcodeField))
+  // Decode all CBO opcodes, including inval-to-flush conversion requested by CBIE.
+  val instCboTable = new DecodeTable(patternsCbo, Seq(CboOpcodeField))
 
   // Get the decode result by generating a decode table by programming logic array (pla)
   val result = table.decode(in.rawInst)
-  val resultInstCboI2f = instCboI2fTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
+  val resultInstCbo = instCboTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
 
   val uopInfos = uopInfoFields.map(field => result(field))
   val opcodes = opcodeFields.map(field => result(field))
   val fuTypes = fuTypeFields.map(field => result(field))
 
-  val cboOpcode = resultInstCboI2f(CboOpcodeField)
+  val cboOpcode = resultInstCbo(CboOpcodeField)
+  val isCbo = ZICBOType.all.map(rawInst === _).reduce(_ || _)
 
-  val isMop  = result(IsMopField)
   val selImm = result(SelImmField)
 
   val isJs          = isJFields.map(field => result(field))
@@ -125,7 +125,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     (PrivExceptionCause.mfence,     in.fromCSR.illegalInst.mfence.getOrElse(false.B), false.B),
     (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
     (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
-    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrs_nto,                in.fromCSR.virtualInst.wrs_nto),
+    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrsNto,                in.fromCSR.virtualInst.wrsNto),
     (PrivExceptionCause.cboZ,       !HasCMO.B || in.fromCSR.illegalInst.cboZ,      in.fromCSR.virtualInst.cboZ),
     (PrivExceptionCause.cboCF,      !HasCMO.B || in.fromCSR.illegalInst.cboCF,     in.fromCSR.virtualInst.cboCF),
     (PrivExceptionCause.cboI,       !HasCMO.B || in.fromCSR.illegalInst.cboI,      in.fromCSR.virtualInst.cboI),
@@ -149,9 +149,10 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
-    out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
-    out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
+    // TODO: Consider integrating CBO opcode decoding into the main table to avoid this final opcode override.
+    out.uop(i).bits.opcode := Mux(isCbo, cboOpcode, opcodes(i))
+    out.uop(i).bits.lsrc1 := instFields.RS1
+    out.uop(i).bits.lsrc2 := instFields.RS2
     out.uop(i).bits.lsrc3 := instFields.FS3
     out.uop(i).bits.frmRen := frmRen
     out.uop(i).bits.fflagsWen := fflagsWen
@@ -168,7 +169,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.isLastUop := i.U === numUop
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
-    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
+    out.uop(i).bits.isMove := (rawInst === isMove) && instFields.RD =/= 0.U
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII || reserveExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }

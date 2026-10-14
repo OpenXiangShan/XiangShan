@@ -147,7 +147,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     b.io.write.req.bits.needWrite     := t1_writeAlignBankMask(i)
     b.io.write.req.bits.startPc       := t1_startPcVec(i)
     b.io.write.req.bits.branches      := t1_train.branches
-    b.io.write.req.bits.meta          := VecInit(t1_meta.entries(i).take(NumWay))
+    b.io.write.req.bits.meta          := t1_meta.entries(i)
     b.io.write.req.bits.posHigherBits := t1_posBitsHigherVec(i)
     // see comments in MainBtbAlignBank.scala
     b.io.write.req.bits.mispredictInfo := t1_mispredictInfo

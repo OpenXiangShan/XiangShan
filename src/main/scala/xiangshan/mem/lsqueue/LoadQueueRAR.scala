@@ -133,7 +133,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val release1Cycle = io.release
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
-  val release2Cycle = RegEnable(io.release, io.release.valid)
+  val release2Cycle = Wire(io.release.cloneType)
+  release2Cycle.bits := RegEnable(io.release.bits, io.release.valid)
   release2Cycle.valid := RegNext(io.release.valid)
   //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
 
@@ -255,7 +256,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
                          robIdxMask(i) &&
                          released(i))
       }
-    val matchMask = GatedValidRegNext(matchMaskReg)
+    val matchMask = RegEnable(matchMaskReg, query.req.valid)
     //  Load-to-Load violation check result
     val ldLdViolationMask = matchMask
     ldLdViolationMask.suggestName("ldLdViolationMask_" + w)

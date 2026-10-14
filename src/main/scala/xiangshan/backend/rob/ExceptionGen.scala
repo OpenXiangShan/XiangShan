@@ -30,23 +30,13 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
+import xiangshan.backend.rob.ExceptionGen._
 
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val allExceptions = ExceptionNO.exceptionGenSet(params)
 
-  val io = IO(new Bundle {
-    val redirect = Input(Valid(new Redirect))
-    val flush = Input(Bool())
-    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
-    // csr + load + store + varith + vload + vstore
-    val wb = MixedVec(
-      params.getWrite2RobParams().filter(_.needExceptionGen).map { x =>
-        Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut)))
-      }
-    )
-    val out = ValidIO(new RobExceptionInfo(allExceptions))
-    val state = ValidIO(new RobExceptionInfo(allExceptions))
-  })
+  val in = IO(new In(params))
+  val out = IO(new Out(params))
 
   val wbExuParams = params.getWrite2RobParams().filter(_.needExceptionGen)
 
@@ -83,18 +73,18 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val enqAllExcept = Wire(Vec(RenameWidth, Valid(new RobExceptionInfo(allExceptions))))
   val wbAllExcept = Wire(Vec(params.numException, Valid(new RobExceptionInfo(allExceptions))))
 
-  enqAllExcept.zip(io.enq) foreach { case (sink, source) =>
+  enqAllExcept.zip(in.enq) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
     sink.bits.exceptionVec extendFrom source.bits.exceptionVec
     sink.bits.flushPipe := source.bits.flushPipe && !source.bits.hasException
   }
-  wbAllExcept.zip(io.wb) foreach { case (sink, source) =>
+  wbAllExcept.zip(in.wb) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
     sink.bits.exceptionVec extendFrom source.bits.exceptionVec
   }
 
   // orR the exceptionVec
-  val lastCycleFlush = RegNext(io.flush)
+  val lastCycleFlush = RegNext(in.flush)
   val enq_s0_valid = VecInit(enqAllExcept.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
   val enq_s0_bits = WireInit(VecInit(enqAllExcept.map(_.bits)))
 
@@ -107,7 +97,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb).filter(_.nonEmpty)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
   val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
-    valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }.reduce(_ || _)
+    valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(in.redirect) || in.flush) }.reduce(_ || _)
   }
   val wb_bits = in_wb_valids.zip(writebacks).map { case (valid, wb) => getOldest(valid, wb.map(_.bits))}
 
@@ -115,20 +105,20 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val s0_out_bits = wb_bits.zip(wb_valid).map{ case(b, v) => RegEnable(b, v)}
 
   // s1: compare last six and current flush
-  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) })
+  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, bits) => v && !(bits.robIdx.needFlush(in.redirect) || in.flush) })
   val s1_out_bits = RegEnable(getOldest(s0_out_valid, s0_out_bits), s1_valid.asUInt.orR)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
-  val enq_s1_valid = RegNext(enq_s0_valid.asUInt.orR && !io.redirect.valid && !io.flush)
-  val enq_s1_bits: RobExceptionInfo = RegEnable(ParallelPriorityMux(enq_s0_valid, enq_s0_bits), enq_s0_valid.asUInt.orR && !io.redirect.valid && !io.flush)
+  val enq_s1_valid = RegNext(enq_s0_valid.asUInt.orR && !in.redirect.valid && !in.flush)
+  val enq_s1_bits: RobExceptionInfo = RegEnable(ParallelPriorityMux(enq_s0_valid, enq_s0_bits), enq_s0_valid.asUInt.orR && !in.redirect.valid && !in.flush)
 
   // s2: compare the input exception with the current one
   // priorities:
   // (1) system reset
   // (2) current is valid: flush, remain, merge, update
   // (3) current is not valid: s1 or enq
-  val current_flush = current.robIdx.needFlush(io.redirect) || io.flush
-  val s1_flush = s1_out_bits.robIdx.needFlush(io.redirect) || io.flush
+  val current_flush = current.robIdx.needFlush(in.redirect) || in.flush
+  val s1_flush = s1_out_bits.robIdx.needFlush(in.redirect) || in.flush
 
   val isVecUpdate = s1_out_bits.vstart < current.vstart || !current.vstartEn
   when (currentValid) {
@@ -167,15 +157,43 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     currentValid := true.B
     current := s1_out_bits
     current.isEnqExcp := false.B
-  }.elsewhen (enq_s1_valid && !(io.redirect.valid || io.flush)) {
+  }.elsewhen (enq_s1_valid && !(in.redirect.valid || in.flush)) {
     currentValid := true.B
     current := enq_s1_bits
     current.isEnqExcp := true.B
   }
 
-  io.out.valid   := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback
-  io.out.bits    := Mux(s1_out_valid, s1_out_bits, enq_s1_bits)
-  io.state.valid := currentValid
-  io.state.bits  := current
+  out.exception.valid   := s1_out_valid || enq_s1_valid && enq_s1_bits.can_writeback
+  out.exception.bits    := Mux(s1_out_valid, s1_out_bits, enq_s1_bits)
+  out.state.valid := currentValid
+  out.state.bits  := current
 
+}
+
+object ExceptionGen {
+  class In(params: BackendParams)(implicit p: Parameters) extends XSBundle {
+    // Redirect.
+    val redirect = Input(Valid(new Redirect))
+
+    // Exception flush.
+    val flush = Input(Bool())
+
+    // Rename stage exceptions.
+    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
+
+    // Execution stage exceptions.
+    val wb = MixedVec(
+      params.getWrite2RobParams().filter(_.needExceptionGen).map { x =>
+        Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut)))
+      }
+    )
+  }
+
+  class Out(params: BackendParams)(implicit p: Parameters) extends XSBundle {
+    // Exception updates.
+    val exception = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
+
+    // Oldest retained exception.
+    val state = ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params)))
+  }
 }

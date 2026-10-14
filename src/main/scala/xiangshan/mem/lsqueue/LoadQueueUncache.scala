@@ -23,7 +23,8 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.rob.{RobPtr, RobLsqIO}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobLsqIO
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.{DynInst, MemExuOutput}
 import xiangshan.backend.fu.FuConfig.LduCfg
@@ -72,6 +73,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   val uncacheData = Reg(io.uncache.resp.bits.data.cloneType)
   val nderr = RegInit(false.B)
   val derr = RegInit(false.B)
+  val respAccept = RegInit(false.B)
 
   val writeback = Mux(req.nc, io.ncOut.fire, io.mmioOut.fire)
   val slaveAck = req_valid && io.uncache.idResp.valid && io.uncache.idResp.bits.mid === entryIndex.U
@@ -190,10 +192,16 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
   io.uncache.resp.ready := true.B
 
   /* uncache resp */
-  when (io.uncache.resp.fire) {
+  when (io.uncache.resp.fire && !respAccept) {
     uncacheData := io.uncache.resp.bits.data
     nderr := io.uncache.resp.bits.nderr
     derr := io.uncache.resp.bits.error
+  }
+
+  when(needFlush || writeback) {
+    respAccept := false.B
+  }.elsewhen(io.uncache.resp.fire && !needFlushReg && !needFlush) {
+    respAccept := true.B
   }
 
   /* uncache writeback */
@@ -606,7 +614,6 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush
-    redirect.bits.target      := reqSelUops(i).pc // TODO: check if need pc
     redirect.bits.debug_runahead_checkpoint_id := reqSelUops(i).perfDebugInfo.runahead_checkpoint_id
     redirect
   })

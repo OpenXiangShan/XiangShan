@@ -91,13 +91,13 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val hPBMTE = csr_dup(0).hPBMTE
   val mmpt = csr_dup(0).mmpt
 
-  val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed || priv.virt_changed || (if (HasMptCheck) (csr_dup(0).mmpt.changed) else false.B)
+  val flush  = sfence_dup(0).valid || satp.changed || vsatp.changed || hgatp.changed || priv.virtChanged || (if (HasMptCheck) (csr_dup(0).mmpt.changed) else false.B)
 
   val mptEn = Option.when(HasMptCheck) (mmpt.mode =/= 0.U)
 
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck || HasMptCheck) 5 else 4) (Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
-  pmp.io.distribute_csr := io.csr.distribute_csr
+  pmp.io.distributeCsr := io.csr.distributeCsr
   def pmpCheckMode(index: Int): UInt = if (HasMptCheck && index == 4) ModeM else ModeS
   if (HasBitmapCheck) {
     if (KeyIDBits > 0) {
@@ -1190,7 +1190,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.csr.tlb.satp.changed ||
     io.csr.tlb.vsatp.changed ||
     io.csr.tlb.hgatp.changed ||
-    io.csr.tlb.priv.virt_changed
+    io.csr.tlb.priv.virtChanged
   flush(0) := DelayN(flushCond, itlbParams.fenceDelay)
   flush(1) := DelayN(flushCond, ldtlbParams.fenceDelay)
 

@@ -93,8 +93,6 @@ object IntRTypePattern {
   def apply()(implicit rawInst: BitPat): IntRTypePattern = new IntRTypePattern
 }
 
-case class MopInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
-
 sealed class IntITypePattern(implicit rawInst: BitPat) extends IntInstPattern
 
 sealed class IntSTypePattern(implicit rawInst: BitPat) extends IntInstPattern
@@ -477,9 +475,6 @@ object InstPattern {
           case "100" if rawInst == Instructions.SSRDP => SsrdpInstPattern()
           case "100" =>
             func7(0).rawString match {
-              case _ if rawInst.rawString == Instructions.MOP_R_N.rawString ||
-                        rawInst.rawString == Instructions.MOP_RR_N.rawString =>
-                MopInstPattern()
               case "0" => HyperLoadInstPattern()
               case "1" => HyperStoreInstPattern()
             }

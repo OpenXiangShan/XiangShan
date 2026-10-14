@@ -344,12 +344,12 @@ trait PMPMethod extends PMPConst {
 
 class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with PMPMethod with PMAMethod with HasCSRConst {
   val io = IO(new Bundle {
-    val distribute_csr = Flipped(new DistributedCSRIO())
+    val distributeCsr = Flipped(new DistributedCSRIO())
     val pmp = Output(Vec(NumPMPReal, new PMPEntry()))
     val pma = Output(Vec(NumPMAReal, new PMPEntry()))
   })
 
-  val w = io.distribute_csr.w
+  val w = io.distributeCsr.w
 
   val pmp = Wire(Vec(NumPMPReal, new PMPEntry()))
   val pma = Wire(Vec(NumPMAReal, new PMPEntry()))
@@ -403,9 +403,9 @@ class PMPRespBundle(implicit p: Parameters) extends PMPBundle {
 trait PMPCheckMethod extends PMPConst {
   def pmp_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
+    resp.ld := (TlbCmd.isRead(cmd) || TlbCmd.isReadExec(cmd)) && !TlbCmd.isAmo(cmd) && !cfg.r
     resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
-    resp.instr := TlbCmd.isExec(cmd) && !cfg.x
+    resp.instr := (TlbCmd.isExec(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.x
     resp.mmio := false.B
     resp.atomic := false.B
     resp

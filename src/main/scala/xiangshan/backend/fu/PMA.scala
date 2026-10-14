@@ -40,7 +40,7 @@ case class MemoryRange(lower: BigInt, upper: BigInt) {
 }
 
 case class PMAConfigEntry(
-  base_addr: BigInt,
+  baseAddr: BigInt,
   range: BigInt = 0L, // only use for napot mode
   l: Boolean = false,
   c: Boolean = false,
@@ -162,8 +162,8 @@ trait PMAMethod extends PMAConst {
     val mask_list = ListBuffer[UInt]()
 
     def addPMA(conf: PMAConfigEntry) = {
-      val addr = if (conf.a < 2) { shift_addr(conf.base_addr) }
-        else { get_napot(conf.base_addr, conf.range) }
+      val addr = if (conf.a < 2) { shift_addr(conf.baseAddr) }
+        else { get_napot(conf.baseAddr, conf.range) }
       cfg_list.append(PMPConfigUInt(conf.l, conf.c, conf.atomic, conf.a, conf.x, conf.w, conf.r))
       addr_list.append(genAddr(addr))
       mask_list.append(genMask(addr, conf.a))
@@ -211,9 +211,9 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := TlbCmd.isRead(cmd) && !cfg.r
+    resp.ld := (TlbCmd.isRead(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.r || cmd === TlbCmd.atom_read && !cfg.atomic
     resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
-    resp.instr := TlbCmd.isExec(cmd) && !cfg.x
+    resp.instr := (TlbCmd.isExec(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.x
     resp.mmio := !cfg.c
     resp.atomic := cfg.atomic
     resp

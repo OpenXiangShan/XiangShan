@@ -113,7 +113,7 @@ case class XSCoreParameters
   StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 144,
+  RobSize: Int = 160,
   RabSize: Int = 352,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
@@ -229,45 +229,30 @@ case class XSCoreParameters
     name = "ldtlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
-    outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
-    outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   hytlbParameters: TLBParameters = TLBParameters(
     name = "hytlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
-    outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
-    outsideRecvFlush = true,
-    saveLevel = false,
     lgMaxSize = 4
   ),
   l2ToL1tlbParameters: TLBParameters = TLBParameters(
     name = "l2tlb",
     NWays = 48,
     outReplace = false,
-    partialStaticPMP = true,
-    outsideRecvFlush = true,
-    saveLevel = false
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
@@ -301,6 +286,8 @@ case class XSCoreParameters
   softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
+  hartIDDmodeWidth: Int = -1, // only for Customization
+  enableResetMtvec: Boolean = false, // only for Customization
 ){
   // Zicfiss split uops use one hidden logical register for SSP and one for
   // the same-address ordering load dependency.
@@ -673,6 +660,8 @@ trait HasXSParameter {
   val minFLen = 32
   val fLen = 64
   def hartIdLen = p(MaxHartIdBits)
+  def hartIDDmodeWidth = coreParams.hartIDDmodeWidth
+  def enableResetMtvec = coreParams.enableResetMtvec
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasShadowStack = coreParams.HasShadowStack

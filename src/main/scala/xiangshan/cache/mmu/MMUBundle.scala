@@ -25,10 +25,9 @@ import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
-import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import freechips.rocketchip.diplomacy.LazyModuleImp
 import freechips.rocketchip.tilelink._
-import xiangshan.backend.fu.{PMPReqBundle, PMPConfig}
-import xiangshan.backend.fu.PMPBundle
+import xiangshan.backend.fu.PMPReqBundle
 
 
 abstract class TlbBundle(implicit p: Parameters) extends XSBundle with HasTlbConst
@@ -50,26 +49,12 @@ class PtePermBundle(implicit p: Parameters) extends TlbBundle {
   }
 }
 
-class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
-  val r = Bool()
-  val w = Bool()
-  val x = Bool()
-  val c = Bool()
-  val atomic = Bool()
-
-  def assign_ap(pm: PMPConfig) = {
-    r := pm.r
-    w := pm.w
-    x := pm.x
-    c := pm.c
-    atomic := pm.atomic
-  }
-}
-
-class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
+class TlbPermBundle(hasV: Boolean = true)(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
   val af = Bool() // NOTE: if this is true, just raise af
-  val v = Bool() // if stage1 pte is fake_pte, v is false
+  // S/VS-stage permissions use v to identify fake PTEs (v = false)
+  // G-stage permissions do not need v, so hasV is false
+  val v = Option.when(hasV)(Bool())
   // pagetable perm (software defined)
   val d = Bool()
   val a = Bool()
@@ -83,7 +68,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.pf
     this.af := item.af
-    this.v := item.v
+    this.v.foreach(_ := item.entry.v)
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -99,7 +84,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
     val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
     this.pf := item.gpf
     this.af := item.gaf
-    this.v := false.B
     this.d := ptePerm.d
     this.a := ptePerm.a
     this.g := ptePerm.g
@@ -114,7 +98,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
     this.pf := pf
     this.af := af
-    this.v := entryValid
+    this.v.foreach(_ := entryValid)
     this.d := pte.perm.d
     this.a := pte.perm.a
     this.g := pte.perm.g
@@ -128,83 +112,6 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
-  }
-}
-
-class TlbSectorPermBundle(implicit p: Parameters) extends TlbBundle {
-  val pf = Bool() // NOTE: if this is true, just raise pf
-  val af = Bool() // NOTE: if this is true, just raise af
-  val v = Bool() // if stage1 pte is fake_pte, v is false
-  // pagetable perm (software defined)
-  val d = Bool()
-  val a = Bool()
-  val g = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
-
-  def apply(item: PtwSectorResp) = {
-    val ptePerm = item.entry.perm.get.asTypeOf(new PtePermBundle().cloneType)
-    this.pf := item.pf
-    this.af := item.af
-    this.v := item.v
-    this.d := ptePerm.d
-    this.a := ptePerm.a
-    this.g := ptePerm.g
-    this.u := ptePerm.u
-    this.x := ptePerm.x
-    this.w := ptePerm.w
-    this.r := ptePerm.r
-
-    this
-  }
-  def apply(pte: PteBundle, pf: Bool, af: Bool, entryValid: Bool) = {
-    this.pf := pf
-    this.af := af
-    this.v := entryValid
-    this.d := pte.perm.d
-    this.a := pte.perm.a
-    this.g := pte.perm.g
-    this.u := pte.perm.u
-    this.x := pte.perm.x
-    this.w := pte.perm.w
-    this.r := pte.perm.r
-
-    this
-  }
-
-  override def toPrintable: Printable = {
-    p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} "
-  }
-}
-
-// multi-read && single-write
-// input is data, output is hot-code(not one-hot)
-class CAMTemplate[T <: Data](val gen: T, val set: Int, val readWidth: Int)(implicit p: Parameters) extends TlbModule {
-  val io = IO(new Bundle {
-    val r = new Bundle {
-      val req = Input(Vec(readWidth, gen))
-      val resp = Output(Vec(readWidth, Vec(set, Bool())))
-    }
-    val w = Input(new Bundle {
-      val valid = Bool()
-      val bits = new Bundle {
-        val index = UInt(log2Up(set).W)
-        val data = gen
-      }
-    })
-  })
-
-  val wordType = UInt(gen.getWidth.W)
-  val array = Reg(Vec(set, wordType))
-
-  io.r.resp.zipWithIndex.map{ case (a,i) =>
-    a := array.map(io.r.req(i).asUInt === _)
-  }
-
-  when (io.w.valid) {
-    array(io.w.bits.index) := io.w.bits.data.asUInt
   }
 }
 
@@ -224,13 +131,13 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val n = UInt(pteNLen.W)
   val pbmt = UInt(ptePbmtLen.W)
   val g_pbmt = UInt(ptePbmtLen.W)
-  val perm = new TlbSectorPermBundle
+  val perm = new TlbPermBundle()
   val valididx = Vec(tlbcontiguous, Bool())
   val pteidx = Vec(tlbcontiguous, Bool())
   val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
   val mptperm = Option.when(HasMptCheck) (new MptPermBundle(isTlbPort = false))
-  val g_perm = new TlbPermBundle
+  val g_perm = new TlbPermBundle(hasV = false)
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
 
@@ -430,13 +337,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.s2xlate := item.s2xlate
     this
   }
-  // 4KB is normal entry, 2MB/1GB is considered as super entry
-  def is_normalentry(): Bool = {
-    if (!pageSuper) { true.B }
-    else if (!pageNormal) { false.B }
-    else { level.get === 0.U }
-  }
-
 
   def genPPN(saveLevel: Boolean = false, valid: Bool = false.B)(vpn: UInt) : UInt = {
     val inner_level = level.getOrElse(0.U)
@@ -471,11 +371,13 @@ object TlbCmd {
 
   def atom_read  = "b100".U // lr
   def atom_write = "b101".U // sc / amo
+  def read_exec  = "b111".U // HLVX final physical permission check
 
   def apply() = UInt(3.W)
   def isRead(a: UInt) = a(1,0)===read
   def isWrite(a: UInt) = a(1,0)===write
   def isExec(a: UInt) = a(1,0)===exec
+  def isReadExec(a: UInt) = a===read_exec
 
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
@@ -495,39 +397,34 @@ object Pbmt {
   def isIO(a: UInt) = a===io
 }
 
+class TlbQuery(implicit p: Parameters) extends TlbBundle {
+  val vpn = UInt(vpnLen.W)
+  val s2xlate = UInt(2.W)
+}
+
+class TlbStorageResult(nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val ppn = Vec(nDups, UInt(ppnLen.W))
+  val pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val g_pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val perm = Vec(nDups, new TlbPermBundle())
+  val g_perm = Vec(nDups, new TlbPermBundle(hasV = false))
+  val s2xlate = Vec(nDups, UInt(2.W))
+  val mptperm = Option.when(HasMptCheck)(Vec(nDups, new MptPermBundle(isTlbPort = true)))
+}
+
+class TlbStorageReadIO(ports: Int, nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val req = Vec(ports, Flipped(DecoupledIO(new TlbQuery)))
+  val resp = Vec(ports, ValidIO(new TlbStorageResult(nDups)))
+}
+
 class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val r = new Bundle {
-    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
-      val vpn = Output(UInt(vpnLen.W))
-      val s2xlate = Output(UInt(2.W))
-    })))
-    val resp = Vec(ports, ValidIO(new Bundle{
-      val hit = Output(Bool())
-      val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
-      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle()))
-      val s2xlate = Vec(nDups, Output(UInt(2.W)))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true)))) // add mptperm
-    }))
-  }
+  val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwRespS2)
   }))
   val access = Vec(ports, new ReplaceAccessBundle(nSets, nWays))
-
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate:UInt): Unit = {
-    this.r.req(i).valid := valid
-    this.r.req(i).bits.vpn := vpn
-    this.r.req(i).bits.s2xlate := s2xlate
-
-  }
-
-  def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
-  }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
     this.w.valid := valid
@@ -553,38 +450,11 @@ class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends 
   }
 }
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
-  val r = new Bundle {
-    val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
-      val vpn = Output(UInt(vpnLen.W))
-      val s2xlate = Output(UInt(2.W))
-    })))
-    val resp = Vec(ports, ValidIO(new Bundle{
-      val hit = Output(Bool())
-      val ppn = Vec(nDups, Output(UInt(ppnLen.W)))
-      val pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
-      val perm = Vec(nDups, Output(new TlbPermBundle()))
-      val g_perm = Vec(nDups, Output(new TlbPermBundle()))
-      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true))))
-      // HasMptCheck,add mptperm
-      val s2xlate = Vec(nDups, Output(UInt(2.W)))
-    }))
-  }
+  val r = new TlbStorageReadIO(ports, nDups)
   val w = Flipped(ValidIO(new Bundle {
     val data = Output(new PtwRespS2)
   }))
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(ports, q)) else null
-
-  def r_req_apply(valid: Bool, vpn: UInt, i: Int, s2xlate: UInt): Unit = {
-    this.r.req(i).valid := valid
-    this.r.req(i).bits.vpn := vpn
-    this.r.req(i).bits.s2xlate := s2xlate
-  }
-
-  def r_resp_apply(i: Int) = { // HasMptCheck,add mptperm
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, 
-      this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt,this.r.resp(i).bits.mptperm)
-  }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
     this.w.valid := valid
@@ -641,20 +511,20 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
   val hyperinst = Output(Bool())
   val hlvx = Output(Bool())
   val size = Output(UInt(log2Ceil(log2Ceil(VLEN/8)+1).W))
-  val kill = Output(Bool()) // Use for blocked tlb that need sync with other module like icache
+  val kill = Output(Bool()) // Kill the response for this request
   val memidx = Output(new MemBlockidxBundle)
   val isPrefetch = Output(Bool())
   val shadowStackUser = Option.when(HasShadowStack)(Output(Bool()))
   // do not translate, but still do pmp/pma check
   val no_translate = Output(Bool())
   val pmp_addr = Output(UInt(PAddrBits.W)) // load s1 send prefetch paddr
+  val frm_mabuf = Output(Bool())
   val debug = new Bundle {
     val pc = Output(UInt(XLEN.W))
     val robIdx = Output(new RobPtr)
     val isFirstIssue = Output(Bool())
   }
 
-  // Maybe Block req needs a kill: for itlb, itlb and icache may not sync, itlb should wait icache to go ahead
   override def toPrintable: Printable = {
     p"vaddr:0x${Hexadecimal(vaddr)} cmd:${cmd} kill:${kill} pc:0x${Hexadecimal(debug.pc)} robIdx:${debug.robIdx}"
   }
@@ -672,6 +542,81 @@ class TlbRespExcp(implicit p: Parameters) extends TlbBundle {
   val gpf = new TlbExceptionBundle
   val pf = new TlbExceptionBundle
   val af = new TlbExceptionBundle
+}
+
+class TlbPreFault(implicit p: Parameters) extends TlbBundle {
+  val pf = Bool()
+  val gpf = Bool()
+  val af = Bool()
+}
+
+class TlbPreCheckResp(implicit p: Parameters) extends TlbBundle {
+  val effectiveVa = UInt(XLEN.W)
+  val query = new TlbQuery
+  val preFault = new TlbPreFault
+}
+
+// Access information for permission and PBMT checks
+class TlbAccessCheckInfo(implicit p: Parameters) extends TlbBundle {
+  val isShadowStack = Option.when(HasShadowStack)(Bool())
+  val sse = Option.when(HasShadowStack)(Bool())
+  val cmd = TlbCmd()
+  val hlvx = Bool()
+  val mode = UInt(2.W)
+  val sum = Bool()
+  // S/VS-stage MXR uses mstatus.MXR || vsstatus.MXR for virtual accesses,
+  // and mstatus.MXR otherwise. When set, PTE.X can satisfy read permission
+  val s1Mxr = Bool()
+  // G-stage uses only mstatus.MXR; when set, PTE.X can satisfy read permission
+  val s2Mxr = Bool()
+  val ifetch = Bool()
+  val translateEnable = Bool()
+  val s2xlate = UInt(2.W)
+  val isHyper = Bool()
+  val mptCheckOnly = Option.when(HasMptCheck)(Bool())
+}
+
+class TlbAccessRequest(implicit p: Parameters) extends TlbBundle {
+  val info = new TlbAccessCheckInfo
+  val mptPerm = Option.when(HasMptCheck)(new MptPermBundle(isTlbPort = true))
+  val perm = new TlbPermBundle()
+  val gPerm = new TlbPermBundle(hasV = false)
+  val pbmt = UInt(ptePbmtLen.W)
+  val gPbmt = UInt(ptePbmtLen.W)
+}
+
+class TlbAccessResult(implicit p: Parameters) extends TlbBundle {
+  val excp = new TlbRespExcp
+  val isForVSnonLeafPTE = Bool()
+  val pbmt = UInt(ptePbmtLen.W)
+}
+
+class TlbPtwBypassResult(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val hitFast = Bool()
+  val ppn = UInt(ppnLen.W)
+  val pbmt = UInt(ptePbmtLen.W)
+  val perm = new TlbPermBundle()
+  val gvpn = UInt(ptePPNLen.W)
+  val gPbmt = UInt(ptePbmtLen.W)
+  val gPerm = new TlbPermBundle(hasV = false)
+  val s2xlate = UInt(2.W)
+  val s1Level = UInt(log2Up(Level + 1).W)
+  val s1IsLeaf = Bool()
+  val s1IsFakePte = Bool()
+  val mptPerm = Option.when(HasMptCheck)(new MptPermBundle(isTlbPort = true))
+}
+
+class TlbReadResult(nDups: Int)(implicit p: Parameters) extends TlbBundle {
+  val hit = Bool()
+  val miss = Bool()
+  val paddr = Vec(nDups, UInt(PAddrBits.W))
+  val gpaddr = Vec(nDups, UInt(XLEN.W))
+  val perm = Vec(nDups, new TlbPermBundle())
+  val gPerm = Vec(nDups, new TlbPermBundle(hasV = false))
+  val pbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val gPbmt = Vec(nDups, UInt(ptePbmtLen.W))
+  val mptPerm = Option.when(HasMptCheck)(Vec(nDups, new MptPermBundle(isTlbPort = true)))
 }
 
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
@@ -775,7 +720,9 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val refill_to_mem = Output(new TlbRefilltoMemIO())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle(q.lgMaxSize)))
+  val pmpMode = Vec(Width, Output(UInt(2.W)))
   val tlbreplay = Vec(Width, Output(Bool()))
+  val robPendingPtr = Input(new RobPtr)
 }
 
 class VectorTlbPtwIO(Width: Int)(implicit p: Parameters) extends TlbBundle {
@@ -1118,10 +1065,14 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      val denyNapotInSector = if (hasPerm && level == 0) pte.isNapot(levelUInt) else false.B
+      val isRefillEntry = pte.canRefill(levelUInt, s2xlate, pbmte, mode) &&
+        (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      val onlyPf = (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.getPPN()
-      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
-      ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
+      ps.vs(i)   := (isRefillEntry || onlyPf) && !denyNapotInSector
+      ps.onlypf(i) := onlyPf && !denyNapotInSector
       ps.perms.map(_(i) := pte.getPerm())
       when (s2xlate === onlyStage2) {
         // g bit in G-stage PTEs should be ignored by hardware
@@ -1547,7 +1498,7 @@ class L2TLBIO(implicit p: Parameters) extends PtwBundle {
   val wfi = Flipped(new WfiReqBundle)
   val csr = new Bundle {
     val tlb = Input(new TlbCsrBundle)
-    val distribute_csr = Flipped(new DistributedCSRIO)
+    val distributeCsr = Flipped(new DistributedCSRIO)
   }
 }
 

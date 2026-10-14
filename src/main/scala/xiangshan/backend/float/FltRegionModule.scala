@@ -20,25 +20,21 @@ import chisel3.util._
 import difftest.{DiffPhyFpRegState, DifftestModule}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import difftest.plugin.topdown.TopdownIQInfoCollect
 import xiangshan._
-import xiangshan.backend.Bundles.{IssueQueueDeqOg1Payload, Og0InUop}
+import xiangshan.backend.Bundles.{IssueQueueDeqOg1Payload, TopdownIQExtendedInfo, connectSamePort}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{FpRFReadArbiter, RFRdArbParams}
-import xiangshan.backend.datapath.RdConfig.RdConfig
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.regfile.FpRegFile
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.float.FltRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
-import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
-import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, IssuePipe, RegionParam, VecIssueQueue, VecRegionModule}
+import xiangshan.backend.vector.{Exu, ExuParam, IssueParam, RegionParam, VecRegionModule}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, Enq, WakeUpBundle}
-import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.float.FltIssueQueue.{FltEarlyWakeUpBundle, FltWakeUpBundle}
-import xiangshan.backend.float.FltWbDataPath
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.issue.IntScheduler
 
@@ -66,7 +62,6 @@ class FltRegionImp(
   implicit
   p: Parameters, param: RegionParam
 ) extends LazyModuleImp(wrapper) with HasXSParameter {
-  val debugEn = backendParams.debugEn
   val basicDebugEn = backendParams.basicDebugEn
 
   val numFp = backendParams.fpPregParams.numEntries
@@ -101,21 +96,12 @@ class FltRegionImp(
   // configuration, not a per-region subset.
   private val intRegfileWbPortIds = backendParams.getWbPortIndices(IntData())
   private val fpRegfileWbPortIds = backendParams.getWbPortIndices(FpData())
-  private val vpRegfileWbPortIds = backendParams.getWbPortIndices(VecData())
-  private val v0RegfileWbPortIds = backendParams.getWbPortIndices(V0Data())
-  private val vlRegfileWbPortIds = backendParams.getWbPortIndices(VlData())
 
   private val intWbPortIdxMap = intRegfileWbPortIds.zipWithIndex.toMap
   private val fpWbPortIdxMap = fpRegfileWbPortIds.zipWithIndex.toMap
-  private val vpWbPortIdxMap = vpRegfileWbPortIds.zipWithIndex.toMap
-  private val v0WbPortIdxMap = v0RegfileWbPortIds.zipWithIndex.toMap
-  private val vlWbPortIdxMap = vlRegfileWbPortIds.zipWithIndex.toMap
 
   private val intNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getGpWriteCfg.map(_.port), _.writeIntRf)
   private val fpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getFpWriteCfg.map(_.port), _.writeFpRf)
-  private val vpNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVpWriteCfg.map(_.port), _.writeVecRf)
-  private val v0NonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getV0WriteCfg.map(_.port), _.writeV0Rf)
-  private val vlNonFixedLatFuWbSources = nonFixedLatFuWbSources(_.getVlWriteCfg.map(_.port), _.writeVlRf)
 
   private val intWbFuBusyTable = buildWbFuBusyTable(
     intRegfileWbPortIds,
@@ -225,19 +211,17 @@ class FltRegionImp(
       iq.in.ldCancel := ldCancelToIQ
   }
 
-  (issueQueues lazyZip issuePipes).zipWithIndex.foreach { case ((iq, pipes), iqIdx) =>
+  (issueQueues lazyZip issuePipes).foreach { case (iq, pipes) =>
     pipes.zipWithIndex.foreach { case (pipe, pipeIdx) =>
       pipe.in.flush := in.flush
       pipe.in.is0Next := iq.out.deq(pipeIdx)
       pipe.in.is0RdFail := false.B // Todo
-      pipe.in.is0WtFail := false.B // Todo
       pipe.in.ldCancel := in.fromMem.ldCancel
       pipe.in.ex0RespFailLat1 := ex0RespFailLat1
       pipe.in.fpWbM2Vec := fpWbM2WakeUp
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.fpWb0Next := fpWbDataPath.out.wb0Next.map(_.data)
       pipe.in.fpWb0 := fpWbDataPath.out.wb0.map(_.data)
-      pipe.in.fpWb1 := fpWbDataPath.out.wb1.map(_.data)
       // for div
       pipe.in.busyTableEmpty.foreach(_ := !iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead.get.head(4))
       pipe.in.busyTableI2F.foreach(_ := in.fromIntRegion.busyTableI2F)
@@ -336,13 +320,12 @@ class FltRegionImp(
 
   out.toDispatch.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum)
   out.toDispatch.debug.foreach(_.IQValidNumVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.validNum))
-  out.toDispatch.debug.foreach(_.IQEnqHasIssuedVec.foreach(_ := 0.U))
+  out.toDispatch.debug.foreach(_.IQEnqHasIssuedVec := issueQueues.filterNot(_.param.hasVStd).map(_.out.debugEnqHasIssued.get))
   for ((iq, i) <- issueQueues.filterNot(_.param.hasVStd).zipWithIndex) {
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
-  // TODO
-  out.toDispatch.debugIQValidNumVec.foreach(_ := 0.U.asTypeOf(out.toDispatch.debugIQValidNumVec.get))
-  out.toDispatch.debugIQEnqHasIssuedVec.foreach(_ := 0.U.asTypeOf(out.toDispatch.debugIQEnqHasIssuedVec.get))
+  out.toDispatch.debugIQValidNumVec.foreach(_ := issueQueues.map(_.out.validNum))
+  out.toDispatch.debugIQEnqHasIssuedVec.foreach(_ := issueQueues.map(_.out.debugEnqHasIssued.get))
   out.toDispatch.wakeUpFp := fpWbM2WakeupToDispatch
   out.toDispatch.wakeUpFpIs1Lat := fpWbM2WakeUpIs1Lat
   val wakeupF2I = Wire(new FltWakeUpBundle(backendParams.intPregParams))
@@ -381,7 +364,7 @@ class FltRegionImp(
   }
   out.toVecRegion.is2RdDataNext.lazyZip(in.fromVecRegion.is1RdAddrNext).lazyZip(vecFpRdGrant).foreach { case (iqRdata, iqAddr, iqGrant) =>
     iqRdata.lazyZip(iqAddr).lazyZip(iqGrant).foreach { case (pipeRdata, pipeAddr, pipeGrant) =>
-      pipeRdata.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (rdata, raddr, grant) =>
+      pipeRdata.lazyZip(pipeAddr).lazyZip(pipeGrant).foreach { case (rdata, _, _) =>
         rdata.data := fpRdata(rdata.rdConfig.port)
       }
     }
@@ -401,7 +384,58 @@ class FltRegionImp(
   }
   out.toVecRegion.wb0 := fpWbDataPath.out.wb0.map(_.data)
   out.toRob.debugIQDeqRobIdxVec.foreach(_ := 0.U.asTypeOf(out.toRob.debugIQDeqRobIdxVec.get))
-  out.toTopDownMod := 0.U.asTypeOf(out.toTopDownMod)
+  val issuedLastCycle = issueQueues.flatMap(_.out.deq).map(deq => RegNext(deq.valid, false.B))
+  out.toTopDownMod.uopTopDown.uopsIssued := issuedLastCycle.reduce(_ || _)
+  out.toTopDownMod.uopTopDown.uopsIssuedCnt := PopCount(issuedLastCycle)
+  out.toTopDownMod.uopTopDown.noStoreIssued := true.B
+
+  if (backendParams.debugEn) {
+    val topdownIQInfoVec = issueQueues.flatMap(_.out.topdownIQInfoVec.get)
+    val configuredEntryNum = param.issueParams.map(_.numEntries).sum
+    val physicalEntryNum = param.issueParams.map(_.numEntry).sum
+    require(param.issueParams.forall(iq => iq.numEntries >= iq.numEntry))
+    require(topdownIQInfoVec.size == physicalEntryNum)
+    require(out.topdownIQInfoVec.get.size == configuredEntryNum)
+
+    // The new FP IQ has no slow-entry storage; keep its configured ROB slots invalid.
+    val topdownIQInfoCollect = Module(new TopdownIQInfoCollect(physicalEntryNum))
+    val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+    val allFuConfigs = allIssueParams.flatMap(_.exuBlockParams.flatMap(_.fuConfigs)).distinct.sortBy(_.fuType.id)
+    val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.flatMap(_.fuConfigs).toSet)
+    val fuMapPipelineNum = allFuConfigs.map { fu =>
+      val iqCount = fuConfigsInIssueParams.count(_.contains(fu))
+      (if (fu.fuType == FuType.stu) iqCount * 2 else iqCount).asUInt
+    }
+    topdownIQInfoCollect.io.in.zip(topdownIQInfoVec).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.robIdx := source.bits.robIdx.value
+      sink.robFlag := source.bits.robIdx.flag
+      sink.srcReady := source.bits.srcReady
+      sink.pipeNum := Mux1H(allFuConfigs.zip(fuMapPipelineNum).map { case (fu, count) =>
+        source.bits.fuType(fu.fuType.id) -> count
+      })
+      sink.cancelSource := source.bits.cancelSource
+      sink.futype := OHToUInt(source.bits.fuType)
+      sink.issued := source.bits.issued
+    }
+    val extendedInfo = out.topdownIQInfoVec.get
+    var configuredOffset = 0
+    var physicalOffset = 0
+    for (iq <- issueQueues) {
+      for (entryIdx <- 0 until iq.param.numEntry) {
+        val sink = extendedInfo(configuredOffset + entryIdx)
+        val source = iq.out.topdownIQInfoVec.get(entryIdx)
+        sink.valid := source.valid
+        connectSamePort(sink.bits, source.bits)
+        sink.bits.idealIssueTime := topdownIQInfoCollect.io.out(physicalOffset + entryIdx).idealIssueTime
+      }
+      for (entryIdx <- iq.param.numEntry until iq.param.numEntries) {
+        extendedInfo(configuredOffset + entryIdx) := 0.U.asTypeOf(ValidIO(new TopdownIQExtendedInfo))
+      }
+      configuredOffset += iq.param.numEntries
+      physicalOffset += iq.param.numEntry
+    }
+  }
   out.fpWb := fpWbDataPath.out.wb0
 
   require(
@@ -490,10 +524,7 @@ class FltRegionImp(
 object FltRegionModule {
   class In(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val intRegion = backendParams.getIntRegionParam
-    val fltRegion = backendParams.getFltRegionParam
     val vecRegion = backendParams.getVecRegionParam
-
-    val fpSchdParam = backendParams.fpSchdParams.get
 
     val fromTop = new Bundle {
       val hartId = UInt(8.W)
@@ -523,15 +554,13 @@ object FltRegionModule {
     }
   }
 
-  class FromMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
+  class FromMem(implicit p: Parameters) extends XSBundle {
     val ldCancel = Vec(backendParams.LdExuCnt, Input(new LoadCancelIO))
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
-    private val intRegion = backendParams.getIntRegionParam
     private val vecRegion = backendParams.getVecRegionParam
 
-    val numDeq: Int = param.issueParams.map(_.numDeq).sum
     val numEntry: Int = param.issueParams.map(_.numEntry).max
     val numIQ: Int = param.issueParams.count(x => !x.hasVStd)
 
@@ -576,6 +605,7 @@ object FltRegionModule {
     val toTopDownMod = new Bundle {
       val uopTopDown = new UopTopDown
     }
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Vec(param.issueParams.map(_.numEntries).sum, ValidIO(new TopdownIQExtendedInfo)))
     val gpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.intPregParams)
     val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
 
@@ -587,27 +617,5 @@ object FltRegionModule {
       backendParams.getRfWriteSize(backendParams.fpPregParams.dataCfg),
       new RfWriteBundle(backendParams.fpPregParams)
     )
-  }
-
-  class RfArbiterBundle(val rdConfig: RdConfig)(implicit p: Parameters) extends XSBundle {
-    val ren = Bool()
-    val addr = UInt(PhyRegIdxWidth.W)
-    val robIdx = new RobPtr()
-  }
-
-  object RfArbiterBundle {
-    def apply(rdConfig: RdConfig)(ren: Bool, addr: UInt, robIdx: RobPtr)(implicit p: Parameters): RfArbiterBundle = {
-      val rfArbiterBundle = Wire(new RfArbiterBundle(rdConfig))
-      rfArbiterBundle.ren := ren
-      rfArbiterBundle.addr := addr
-      rfArbiterBundle.robIdx := robIdx
-      rfArbiterBundle
-    }
-  }
-
-  class DebugBundle(implicit p: Parameters) extends XSBundle {
-    val debug          = new xiangshan.DebugBundle
-    val perfDebugInfo  = new PerfDebugInfo()
-    val seqNum         = InstSeqNum()
   }
 }

@@ -290,7 +290,7 @@ class Sbuffer(implicit p: Parameters)
   // insert and merge: cohCount=0
   // every cycle cohCount+=1
   // if cohCount(EvictCountBits-1)==1, evict
-  val cohTimeOutMask_wire = VecInit(widthMap(i => cohCount(i) >= io.csrCtrl.sbuffer_timeout && stateVec(i).isActive()))
+  val cohTimeOutMask_wire = VecInit(widthMap(i => cohCount(i) >= io.csrCtrl.sbufferTimeout && stateVec(i).isActive()))
   val cohTimeOutMask = RegInit(VecInit(Seq.fill(StoreBufferSize)(false.B)))
   cohTimeOutMask := cohTimeOutMask_wire
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
@@ -818,8 +818,8 @@ class Sbuffer(implicit p: Parameters)
     val inflight_tag_matches = widthMap(w => tag_matches(w) && inflightMask(w))
     val line_offset_mask = UIntToOH(getVWordOffset(s1Paddr))
 
-    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, s1ReqValid))
-    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, s1ReqValid))
+    val valid_tag_match_reg = valid_tag_matches.map(RegEnable(_, false.B, s1ReqValid))
+    val inflight_tag_match_reg = inflight_tag_matches.map(RegEnable(_, false.B, s1ReqValid))
     val forward_mask_candidate_reg = RegEnable(
       VecInit(mask.map(entry => entry(getVWordOffset(s1Paddr)))),
       s1ReqValid

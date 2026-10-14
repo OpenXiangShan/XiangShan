@@ -170,13 +170,12 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateResetUsefulCnt  = WireInit(false.B)
   private val updateCorrect         = Wire(Vec(NumTables, Bool()))
-  private val updateAlloc           = Wire(Vec(NumTables, Bool()))
+  private val updateAlloc           = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateOldCnt          = Wire(Vec(NumTables, ConfidenceCounter()))
   private val updateUsefulCnt       = Wire(Vec(NumTables, UsefulCounter()))
   private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
   private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
   updateCorrect         := DontCare
-  updateAlloc           := DontCare
   updateOldCnt          := DontCare
   updateUsefulCnt       := DontCare
   updateTargetOffset    := DontCare

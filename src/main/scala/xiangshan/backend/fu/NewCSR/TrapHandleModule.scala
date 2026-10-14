@@ -15,6 +15,7 @@ class TrapHandleModule(implicit val p: Parameters) extends Module with HasXSPara
   private val trapInfo = io.in.trapInfo
   private val privState = io.in.privState
   private val mstatus  = io.in.mstatus
+  private val sstatus  = io.in.sstatus
   private val vsstatus = io.in.vsstatus
   private val mnstatus = io.in.mnstatus
   private val mideleg = io.in.mideleg.asUInt
@@ -90,7 +91,7 @@ class TrapHandleModule(implicit val p: Parameters) extends Module with HasXSPara
 
   // sm/ssdbltrp
   private val m_EX_DT  = handleTrapUnderM  && mstatus.MDT.asBool  && hasTrap
-  private val s_EX_DT  = handleTrapUnderHS && mstatus.SDT.asBool  && hasTrap
+  private val s_EX_DT  = handleTrapUnderHS && sstatus.SDT.asBool  && hasTrap
   private val vs_EX_DT = handleTrapUnderVS && vsstatus.SDT.asBool && hasTrap
 
   private val dbltrpToMN = m_EX_DT && mnstatus.NMIE.asBool // NMI not allow double trap
@@ -136,6 +137,7 @@ class TrapHandleIO extends Bundle {
     })
     val privState = new PrivState
     val mstatus = new MstatusBundle
+    val sstatus = new SstatusBundle
     val vsstatus = new SstatusBundle
     val mnstatus = new MnstatusBundle
     val mideleg = new MidelegBundle

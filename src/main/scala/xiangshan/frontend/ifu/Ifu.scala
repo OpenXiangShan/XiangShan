@@ -662,7 +662,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheFlushWb.bits.canTrain  := false.B
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
-  uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt(VAddrBits - 1, 0)
+  uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt
   uncacheFlushWb.bits.taken     := false.B
   uncacheFlushWb.bits.ftqOffset := uncacheMisEndOffset.bits
   uncacheFlushWb.bits.isRVC     := uncacheIsRvc
@@ -736,7 +736,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val checkFlushWb = {
     val b         = Wire(Valid(new FrontendRedirect))
     val ftqIdx    = VecInit(wbAlignFetchBlock.map(_.ftqIdx))
-    val startAddr = VecInit(wbAlignFetchBlock.map(_.startVAddr.toUInt(VAddrBits - 1, 0)))
+    val startAddr = VecInit(wbAlignFetchBlock.map(_.startVAddr.toUInt))
     val select    = checkerRedirect.bits.blockSel || checkerRedirect.bits.isCrossBlockInstr
     val attribute = checkerRedirect.bits.attribute
     val canTrain = attribute.isDirect || attribute.isReturn ||

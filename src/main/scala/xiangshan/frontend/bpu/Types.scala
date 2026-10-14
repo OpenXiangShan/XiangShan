@@ -46,17 +46,11 @@ class TageTableInfo(
   def asTuple: (Int, Int, Int) =
     (Size, NumWays, HistoryLength)
 
-  def getNumSets(numBanks: Int): Int = {
-    require(numBanks > 0, "numBanks must be > 0")
-    Size / NumWays / numBanks
-  }
-
-  def getFoldedHistoryInfoSet(numBanks: Int, tagWidth: Int): Set[FoldedHistoryInfo] = {
-    require(numBanks > 0, "numBanks must be > 0")
+  def getFoldedHistoryInfoSet(tagWidth: Int): Set[FoldedHistoryInfo] = {
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       Set( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size / NumWays))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )
@@ -64,12 +58,11 @@ class TageTableInfo(
       Set[FoldedHistoryInfo]()
   }
 
-  def getTageFoldedHistoryInfo(numBanks: Int, tagWidth: Int): List[FoldedHistoryInfo] = {
-    require(numBanks > 0, "numBanks must be > 0")
+  def getTageFoldedHistoryInfo(tagWidth: Int): List[FoldedHistoryInfo] = {
     require(tagWidth > 0, "tagWidth must be > 0")
     if (HistoryLength > 0)
       List( // FoldedHistoryInfo(unfolded history length, folded history length)
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(getNumSets(numBanks)))),
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size / NumWays))),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth)),
         new FoldedHistoryInfo(HistoryLength, min(HistoryLength, tagWidth - 1))
       )

@@ -137,6 +137,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.dtlb.req.bits.frm_mabuf := false.B
   io.dtlb.req_kill     := false.B
   io.dtlb.resp.ready   := true.B
 
@@ -192,13 +194,13 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val csrCtrl = io.csrCtrl
   val tdata = Reg(Vec(TriggerNum, new MatchTriggerIO))
   val tEnableVec = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
-  tEnableVec := csrCtrl.mem_trigger.tEnableVec
-  when (csrCtrl.mem_trigger.tUpdate.valid) {
-    tdata(csrCtrl.mem_trigger.tUpdate.bits.addr) := csrCtrl.mem_trigger.tUpdate.bits.tdata
+  tEnableVec := csrCtrl.memTrigger.tEnableVec
+  when (csrCtrl.memTrigger.tUpdate.valid) {
+    tdata(csrCtrl.memTrigger.tUpdate.bits.addr) := csrCtrl.memTrigger.tUpdate.bits.tdata
   }
 
-  val debugMode = csrCtrl.mem_trigger.debugMode
-  val triggerCanRaiseBpExp = csrCtrl.mem_trigger.triggerCanRaiseBpExp
+  val debugMode = csrCtrl.memTrigger.debugMode
+  val triggerCanRaiseBpExp = csrCtrl.memTrigger.triggerCanRaiseBpExp
   val backendTriggerTimingVec = VecInit(tdata.map(_.timing))
   val backendTriggerChainVec = VecInit(tdata.map(_.chain))
   val backendTriggerHitVec = WireInit(VecInit(Seq.fill(TriggerNum)(false.B)))
@@ -405,11 +407,11 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       ))
     )
 
-    when (dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable) {
-      exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(hardwareError)    := dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
-    }
+    val canTriggerCacheError = dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cacheErrorEnable
+
+    exceptionVec(loadAccessFault)  := canTriggerCacheError && isLr && dcache_resp_tl_error.tl_denied
+    exceptionVec(storeAccessFault) := canTriggerCacheError && !isLr && dcache_resp_tl_error.tl_denied
+    exceptionVec(hardwareError)    := canTriggerCacheError && dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
 
     resp_data := resp_data_wire
     state := s_finish

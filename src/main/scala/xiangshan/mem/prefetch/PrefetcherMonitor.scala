@@ -6,9 +6,9 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
+import xiangshan.backend.rob.Rob.RobDebugRollingIO
 import xiangshan.mem.L1PrefetchReq
 import xiangshan.mem.HasL1PrefetchSourceParameter
-import xiangshan.backend.rob.RobDebugRollingIO
 
 class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
   val dynamic_depth = UInt(DEPTH_BITS.W)

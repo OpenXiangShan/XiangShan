@@ -24,10 +24,10 @@ import xiangshan.HasXSParameter
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
   val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
-    val mbmc_lock = reg.BME.asBool
-    reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+    val mbmcLock = reg.BME.asBool
+    reg.BME := Mux(wen && !mbmcLock, wdata.BME, reg.BME)
     reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-    reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
+    reg.BMA := Mux(wen && !mbmcLock, wdata.BMA, reg.BMA)
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
     reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
@@ -131,7 +131,20 @@ trait MachineLevel { self: NewCSR =>
     }
   }).setAddr(CSRs.mie)
 
-  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
+  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
+    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
+    reset_mtvec.foreach{ init =>
+      val shouldReset = RegNext(false.B, true.B)
+      when(shouldReset){
+        reg := init.asTypeOf(reg)
+      }.elsewhen(wen){
+        reg.addr := wdata.addr
+        reg.mode := Mux(XtvecMode.isLegal(wdata.mode), wdata.mode, reg.mode)
+      }.otherwise{
+        reg := reg
+      }
+    }
+  })
     .setAddr(CSRs.mtvec)
 
   // Todo: support "Stimecmp/Vstimecmp" Extension, Version 1.0.0
@@ -331,7 +344,7 @@ trait MachineLevel { self: NewCSR =>
 
     if (soc.IMSICParams.HasTEEIMSIC) {
       // bit 48 LCOFIP
-      regOut.LC48IP := aiaToCSR.notice_pending
+      regOut.LC48IP := aiaToCSR.noticePending
     }
   }).setAddr(CSRs.mip)
 
@@ -342,7 +355,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
+    val PMM   = EnvPMM(33, 32, wNoFilter).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
     val MLPE  = RO(10).withDescription("Machine landing-pad enable from the Zicfilp extension.")
     val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
     val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
@@ -438,7 +451,8 @@ trait MachineLevel { self: NewCSR =>
     val ALL = RO(hartIdLen - 1, 0).withDescription("Hardware thread identifier.")
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.regOut.ALL := hartid
+    val dmode  = IO(Input(Bool()))
+    this.regOut.ALL := (if(hartIDDmodeWidth > 0) Mux(dmode, hartid(hartIDDmodeWidth - 1, 0), hartid) else hartid)
   })
     .setAddr(CSRs.mhartid)
 

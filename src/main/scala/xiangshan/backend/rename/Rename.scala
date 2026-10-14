@@ -30,7 +30,8 @@ import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
 import xiangshan.backend.rename.freelist._
-import xiangshan.backend.rob.{RobEnqIO, RobPtr}
+import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.rob.Rob.RobEnqIO
 import xiangshan.mem.mdp._
 import xiangshan.backend.fu.FuType._
 import xiangshan.mem.{EewLog2, GenRealFlowNum, GenUSWholeEmul, LsqPtrPreCalculateIO}
@@ -390,7 +391,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // speculatively assign the sqIdx/lqIdx
   io.toLsqEnqCtrl.req.zipWithIndex.map{ case (port, i) =>
-    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i)
+    // Software prefetches terminate in S2 without completing an LQ entry.
+    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i) && !io.in(i).bits.isSoftPrefetch
     port.bits.num := uops(i).numLsElem // here will be change to io.in.bits in the future, this port need `numLsElem`
     port.bits.fuType := uops(i).fuType
   }
@@ -415,7 +417,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   isMove zip io.in.map(_.bits) foreach {
     case (move, in) => move := Mux(in.exceptionVec.orR, false.B, in.isMove)
   }
-  val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
+  val isSoftPrefetch = Wire(Vec(RenameWidth, Bool()))
+  isSoftPrefetch zip io.in.map(_.bits) foreach {
+    case (prefetch, in) => prefetch := Mux(in.exceptionVec.orR, false.B, in.isSoftPrefetch)
+  }
+  // Move elimination and software prefetches do not produce a writeback.
+  // Keep them in the ROB, but exclude them from the packed writeback count.
+  val noWriteback = VecInit(isMove.zip(isSoftPrefetch).map { case (move, prefetch) => move || prefetch })
+  val noWritebackMask = Cat(noWriteback.reverse)
+  val dropMask = noWritebackMask | Cat(fusionValidVec.reverse)
   val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
   def compactSlotNumWB(mask: UInt): UInt = {
     PopCount(mask & ~dropMask) +& PopCount(mask & numWBIs2Mask)
