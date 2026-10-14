@@ -167,7 +167,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altConf          = Mux(hasAlt, !alt.takenCtr.isWeak, io.fromMainBtb.baseConf(i))
     val providerTableIdx = OHToUInt(providerTableOH)
     val useAltOnNaIdx    = Cat(providerTableIdx, altConf)
-    val useAltOnNa       = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val useAltOnNa       = EnableAlt.B && useAltOnNaVec(useAltOnNaIdx).isPositive
 
     // If the entry is recognized as a newly allocated entry and USE_ALT_ON_NA is positive,
     // use the alternate prediction.
@@ -399,9 +399,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altConf           = Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate)
     val useAltOnNaIdx     = Cat(OHToUInt(providerTableOH), altConf)
     val currentUseAltOnNa = useAltOnNaVec(useAltOnNaIdx).isPositive
-    val useAltOnNa        = Mux(t2_useMeta, meta.useAltOnNa, currentUseAltOnNa)
+    val useAltOnNa        = EnableAlt.B && Mux(t2_useMeta, meta.useAltOnNa, currentUseAltOnNa)
     val useProvider       = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
-    val useAlt            = !useProvider && hasAlt
+    val useAlt            = EnableAlt.B && !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
     val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
@@ -426,7 +426,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     // Train the selector only when it can change the prediction.
     // When the weak provider and alternate/base disagree, exactly one of them is correct.
-    val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
+    val trainUseAltOnNa = EnableAlt.B && hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
     val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
     val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
