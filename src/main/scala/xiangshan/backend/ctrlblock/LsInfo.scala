@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.XSBundle
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.LoadReplayCauses
 
 class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
@@ -12,7 +13,7 @@ class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
 }
 
 class DebugLsInfo(implicit p: Parameters) extends XSBundle{
-  val s1_isTlbFirstMiss = Bool() // in s1
+  val s1_isTlbFirstMiss = Bool() // in s1; first-issue only (debug / InstTable)
   val s1_isLoadToLoadForward = Bool()
   val s2_isBankConflict = Bool()
   val s2_isDcacheFirstMiss = Bool() // in s2 (predicted result is in s1 when using WPU, real result is in s2)
@@ -67,9 +68,11 @@ object DebugLsInfo {
 }
 
 class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
+  val s1_isTlbMiss = Bool() // any issue; used by TEA ST_TLB
+  val s2_isDcacheMiss = Bool() // any issue; used by TEA ST_L1
   // unified processing at the end stage of load/store  ==> s2  ==> bug that will write error robIdx data
-  val s1_robIdx = UInt(log2Ceil(RobSize).W)
-  val s2_robIdx = UInt(log2Ceil(RobSize).W)
+  val s1_robIdx = new RobPtr
+  val s2_robIdx = new RobPtr
   val s3_robIdx = UInt(log2Ceil(RobSize).W)
 }
 

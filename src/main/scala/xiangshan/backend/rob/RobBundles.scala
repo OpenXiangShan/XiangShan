@@ -131,7 +131,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
     val needVTB = Bool()
-    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
+    val teaPsv = Vec(2, UInt(xiangshan.TeaEvent.width.W))
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // Preserve the former slot's exact trace metadata so a latter-slot squash
@@ -208,6 +208,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
   }
 
+  def collectTeaPsvBySlot(valid: Seq[Bool], isFormer: Seq[Bool], psv: Seq[UInt]): Vec[UInt] = {
+    require(valid.length == isFormer.length && valid.length == psv.length)
+    VecInit((0 until 2).map { slot =>
+      val slotIsFormer = (slot == 0).B
+      valid.indices.foldLeft(xiangshan.TeaPsvOps.empty) { case (acc, i) =>
+        acc | Mux(valid(i) && isFormer(i) === slotIsFormer, psv(i), xiangshan.TeaPsvOps.empty)
+      }
+    })
+  }
+
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
     robEntry.entryPairType := robEnq.entryPairType
     robEntry.noCompressReason := robEnq.noCompressReason
@@ -226,7 +236,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.rfWen := robEnq.rfWen
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
-    robEntry.teaPsv := robEnq.teaPsv
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.formerTraceBlockInPipe := robEnq.traceBlockInPipe

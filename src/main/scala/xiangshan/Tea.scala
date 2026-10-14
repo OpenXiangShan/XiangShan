@@ -1,9 +1,33 @@
+/***************************************************************************************
+* Copyright (c) 2024-2026 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package xiangshan
 
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
+/**
+ * TEA (Timing Event Analyzer) helpers.
+ *
+ * - PSV: per-instruction / packet sticky event bit-vector (see [[TeaEvent]]).
+ * - OIR: on-path interrupt/redirect sample marker (`TeaEntry.oirValid`), set when state is flushed.
+ * - pendingDrain: sample came from a delayed drained-state queue boundary.
+ * - delayed sample: when sample is due in stalled/drained state, capture cycle/state and wait
+ *   for the next real commit before emitting the sample (keeps original `pendingCycle`).
+ */
 object TeaEvent {
   val DR_L1  = 0
   val DR_TLB = 1
@@ -13,9 +37,8 @@ object TeaEvent {
   val FL_MO  = 5
   val ST_L1  = 6
   val ST_TLB = 7
-  val ST_LLC = 8
 
-  val width = ST_LLC + 1
+  val width = ST_TLB + 1
 
   def bit(idx: Int): UInt = {
     require(idx >= 0 && idx < width, s"TEA event index $idx out of range [0, $width)")
@@ -64,9 +87,9 @@ class TeaFlushCause(implicit p: Parameters) extends XSBundle {
 class TeaEntry(implicit p: Parameters) extends XSBundle {
   val cycle = UInt(64.W)
   val state = UInt(4.W)
-  val validMask = UInt(CommitWidth.W)
-  val pcVec = Vec(CommitWidth, UInt(VAddrBits.W))
-  val psvVec = Vec(CommitWidth, UInt(TeaEvent.width.W))
+  val validMask = UInt((2 * CommitWidth).W)
+  val pcVec = Vec(2 * CommitWidth, UInt(VAddrBits.W))
+  val psvVec = Vec(2 * CommitWidth, UInt(TeaEvent.width.W))
   val oirValid = Bool()
   val overflow = Bool()
   val pendingDrain = Bool()
@@ -78,9 +101,9 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val samplePeriod = Input(UInt(64.W))
     val state = Input(UInt(4.W))
     val hasCommit = Input(Bool())
-    val commitMask = Input(UInt(CommitWidth.W))
-    val commitPc = Input(Vec(CommitWidth, UInt(VAddrBits.W)))
-    val commitPsv = Input(Vec(CommitWidth, UInt(TeaEvent.width.W)))
+    val commitMask = Input(UInt((2 * CommitWidth).W))
+    val commitPc = Input(Vec(2 * CommitWidth, UInt(VAddrBits.W)))
+    val commitPsv = Input(Vec(2 * CommitWidth, UInt(TeaEvent.width.W)))
     val flushCause = Input(new TeaFlushCause()(p))
     val sampleValid = Output(Bool())
     val sample = Output(new TeaEntry()(p))
@@ -108,14 +131,14 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   when(acceptFlush) {
     sample.cycle := cycle
     sample.state := TeaState.flushed
-    sample.validMask := 1.U(CommitWidth.W)
+    sample.validMask := 1.U((2 * CommitWidth).W)
     sample.pcVec(0) := io.flushCause.pc
     sample.psvVec(0) := io.flushCause.psv
     sampleValid := true.B
   }.elsewhen(resolvePending) {
     sample.cycle := pendingCycle
     sample.state := pendingState
-    sample.validMask := 1.U(CommitWidth.W)
+    sample.validMask := 1.U((2 * CommitWidth).W)
     sample.pcVec(0) := io.commitPc(0)
     sample.psvVec(0) := io.commitPsv(0)
     sampleValid := true.B

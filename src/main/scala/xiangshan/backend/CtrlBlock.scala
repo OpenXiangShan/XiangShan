@@ -700,6 +700,9 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
+      val fusedTeaPsv = decodePipeRename(i).bits.teaPsv | decodePipeRename(i + 1).bits.teaPsv
+      rename.io.in(i).bits.teaPsv := fusedTeaPsv
+      dispatch.io.renameIn(i).bits.teaPsv := fusedTeaPsv
       // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
       rename.io.in(i + 1).bits.isMove := false.B
       rename.io.isFusionVec(i) := true.B
