@@ -575,6 +575,7 @@ trait HasXSParameter {
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasBerti = coreParams.prefetcher.exists(_.isInstanceOf[BertiParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
+  def hasTemporal = coreParams.prefetcher.exists(_.isInstanceOf[TemporalPrefetcherParams])
 
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension

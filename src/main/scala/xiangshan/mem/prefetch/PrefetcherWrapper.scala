@@ -149,7 +149,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
 
   /** Prefetchor
-    * L1: Stride, Berti
+    * L1: Stride, Berti, Temporal
     * L2: Stride, SMS, Berti
     * L3: Stride, Berti
     */
@@ -159,6 +159,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxStreamStride = prefetcherSeq.indexWhere(_.isInstanceOf[StreamStrideParams])
   val HasBerti = prefetcherSeq.exists(_.isInstanceOf[BertiParams])
   val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
+  val HasTemporal = prefetcherSeq.exists(_.isInstanceOf[TemporalPrefetcherParams])
+  val IdxTemporal = prefetcherSeq.indexWhere(_.isInstanceOf[TemporalPrefetcherParams])
 
   private val Seq(bothOff, strideOnBertiOff, strideOffBertiOn, bothOn) = Seq(0, 1, 2, 3)
   val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOnBertiOff)
@@ -298,6 +300,34 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l3_pf_arb.io.in(IdxBerti) <> pf.io.l3_req
 
   })
+
+  val temporalOpt: Option[L1TemporalPrefetcher] = if (HasTemporal) Some(Module(new L1TemporalPrefetcher)) else None
+  temporalOpt.foreach { pf =>
+    val enableTemporal = Constantin.createRecord(s"pf_enableL1TemporalPrefetcher$hartId", initValue = true)
+    pf.io.enable := enableTemporal && l1D_pf_enable
+    val mbistTemporalPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeL1Temporal", hasMbist)
+
+    // Train the demand stream, including hits, to preserve temporal address relationships.
+    // LoadUnit already excludes uncache accesses and exceptions from this training port.
+    for (i <- 0 until LD_TRAIN_WIDTH) {
+      val source = io.trainSource.s3_load(i)
+      val inPmem = PmemRanges.map(_.cover(source.bits.paddr)).reduce(_ || _)
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue &&
+        !source.bits.tlbMiss && !source.bits.is_from_hw_pf && inPmem
+      pf.io.ld_in(i).bits := source.bits
+      pf.io.ld_in(i).bits.uop.pc := Mux(io.trainSource.s3_ptrChasing(i), s2_loadPcVec(i), s3_loadPcVec(i))
+    }
+    pf.io.st_in.foreach { x =>
+      x.valid := false.B
+      x.bits := DontCare
+    }
+
+    io.tlb_req(IdxTemporal) <> pf.io.tlb_req
+    pf.io.pmp_resp := io.pmp_resp(IdxTemporal)
+    l1_pf_arb.io.in(IdxTemporal) <> pf.io.l1_req
+    pf.io.l2_req.ready := false.B
+    pf.io.l3_req.ready := false.B
+  }
 
   /**
    * load prefetch to l1 Dcache

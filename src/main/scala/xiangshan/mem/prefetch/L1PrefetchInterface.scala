@@ -36,6 +36,7 @@ trait HasL1PrefetchSourceParameter {
   def L1_HW_PREFETCH_STREAM = 3.U
   def L1_HW_PREFETCH_STORE  = 4.U
   def L1_HW_PREFETCH_BERTI = 5.U
+  def L1_HW_PREFETCH_TEMPORAL = 6.U
   
   // ------------------------------------------------------------------------------------------------------------------------
   // timeline: L1_HW_PREFETCH_NULL  --(pf by stream)--> L1_HW_PREFETCH_STREAM --(pf hit by load)--> L1_HW_PREFETCH_CLEAR
@@ -48,6 +49,7 @@ trait HasL1PrefetchSourceParameter {
   def isFromStride(value: UInt)      = value === L1_HW_PREFETCH_STRIDE
   def isFromStream(value: UInt)      = value === L1_HW_PREFETCH_STREAM
   def isFromBerti(value: UInt) = value === L1_HW_PREFETCH_BERTI
+  def isFromTemporal(value: UInt) = value === L1_HW_PREFETCH_TEMPORAL
 
   private val source2string = scala.collection.mutable.Map[String, BigInt]()
 }

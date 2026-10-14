@@ -49,6 +49,7 @@ import device.EnableJtag
 import huancun._
 import coupledL2._
 import coupledL2.prefetch._
+import xiangshan.mem.prefetch.TemporalPrefetcherParams
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -616,20 +617,38 @@ class WithCHI extends Config((_, _, _) => {
   case EnableCHI => true
 })
 
+case class WithL1TemporalPrefetcher(params: TemporalPrefetcherParams = TemporalPrefetcherParams())
+  extends Config((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(p => p.copy(
+      prefetcher = p.prefetcher.filterNot(_.isInstanceOf[TemporalPrefetcherParams]) :+ params
+    ))
+  })
+
+class WithoutL1TemporalPrefetcher extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(p => p.copy(
+    prefetcher = p.prefetcher.filterNot(_.isInstanceOf[TemporalPrefetcherParams])
+  ))
+})
+
 class CHIConfig(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = true)
+  WithL1TemporalPrefetcher()
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ new TLConfig(n)
     ++ new WithCHI
 )
 class KunminghuV2Config(n: Int = 1) extends CHIConfig(n) with DeprecatedConfigWarning
 
 class CHIMinimalConfig(n: Int = 1) extends Config(
-  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = true)
+  WithL1TemporalPrefetcher()
+    ++ L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
     ++ WithNKBL1D(32, ways = 4)
     ++ new TLMinimalConfig(n)
     ++ new WithCHI
 )
 class KunminghuV2MinimalConfig(n: Int = 1) extends CHIMinimalConfig(n) with DeprecatedConfigWarning
+
+// A/B baseline: identical CHI hierarchy with the L1 temporal prefetcher removed.
+class CHINoTemporalConfig(n: Int = 1) extends Config(new WithoutL1TemporalPrefetcher ++ new CHIConfig(n))
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
   (new CHIConfig(n)).alter((site, here, up) => {
