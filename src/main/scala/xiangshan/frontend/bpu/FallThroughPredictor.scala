@@ -31,8 +31,6 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
 
   io.sramResetDone := true.B
 
-  io.trainReady := true.B
-
   /* *** predict stage 0 *** */
   private val s0_fire    = io.stageCtrl.s0_fire
   private val s0_startPc = io.startPc

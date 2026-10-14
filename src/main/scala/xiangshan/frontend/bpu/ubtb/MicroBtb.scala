@@ -42,7 +42,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   addrFields.show(indent = 4)
 
   io.sramResetDone := true.B
-  io.trainReady    := true.B
 
   /* *** submodules *** */
   private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))
@@ -104,12 +103,12 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - select from fastTrain (Bpu s3) or resolveTrain (Backend) and latch
    */
   private val t0_useFast    = io.fastTrain.get.valid
-  private val t0_useResolve = io.stageCtrl.t0_fire && io.train.mispredictBranch.valid
+  private val t0_useResolve = io.train.valid && io.train.bits.mispredictBranch.valid
 
   // resolve's mispredict has higher priority
   private val t0_fire    = (t0_useFast || t0_useResolve) && io.enable
-  private val t0_startPc = Mux(t0_useResolve, io.train.startPc, io.fastTrain.get.bits.startPc)
-  private val t0_branch  = Mux(t0_useResolve, io.train.mispredictBranch.bits, io.fastTrain.get.bits.branch)
+  private val t0_startPc = Mux(t0_useResolve, io.train.bits.startPc, io.fastTrain.get.bits.startPc)
+  private val t0_branch  = Mux(t0_useResolve, io.train.bits.mispredictBranch.bits, io.fastTrain.get.bits.branch)
 
   private val t0_actualTaken = t0_branch.taken
   private val t0_position    = t0_branch.cfiPosition
