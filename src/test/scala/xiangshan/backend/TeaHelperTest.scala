@@ -1,34 +1,37 @@
+/***************************************************************************************
+* Copyright (c) 2024-2026 Institute of Computing Technology, Chinese Academy of Sciences
+*
+* XiangShan is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+*          http://license.coscl.org.cn/MulanPSL2
+*
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+*
+* See the Mulan PSL v2 for more details.
+***************************************************************************************/
+
 package xiangshan.backend
 
 import chisel3._
-import chisel3.util.{Cat, RegEnable}
+import chisel3.util.Decoupled
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, EnqRobUop, RenameOutUop}
 import xiangshan.backend.rob.RobBundles
-import xiangshan.backend.rob.RobBundles.RobEntryBundle
+import xiangshan.backend.dispatch.Dispatch
+import xiangshan.backend.fu.FuType
 import xiangshan.frontend.{BackendRedirectTopdown, FetchToIBuffer, HasFrontendParameters}
 import xiangshan.frontend.ibuffer.IBuffer
+import xiangshan.mem.{InstrType, LoadEntrance, LoadUnitS1, StoreEntrance, StoreUnitS1}
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
-import xiangshan.{TeaEntry, TeaEvent, TeaFlushCause, TeaFrontend, TeaSampleSelector}
 
 class TeaHelperTest extends XSTester {
   behavior of "TEA helper metadata"
 
   private def teaBitValue(event: Int): BigInt = BigInt(1) << event
-
-  class TeaFieldSmoke(p: Parameters) extends Module {
-    val io = IO(new Bundle {
-      val out = Output(UInt((TeaEvent.width * 6).W))
-    })
-    val cf = WireInit(0.U.asTypeOf(new CtrlFlow()(p)))
-    val decodeIn = WireInit(0.U.asTypeOf(new DecodeInUop()(p)))
-    val decodeOut = WireInit(0.U.asTypeOf(new DecodeOutUop()(p)))
-    val renameOut = WireInit(0.U.asTypeOf(new RenameOutUop()(p)))
-    val enqRob = WireInit(0.U.asTypeOf(new EnqRobUop()(p)))
-    val rob = WireInit(0.U.asTypeOf(new RobEntryBundle()(p)))
-    io.out := Cat(cf.teaPsv, decodeIn.teaPsv, decodeOut.teaPsv, renameOut.teaPsv, enqRob.teaPsv, rob.teaPsv)
-  }
 
   class TeaPropagationSmoke(p: Parameters) extends Module {
     private val ctrlTea = TeaPsvOps.setBit(TeaEvent.bit(TeaEvent.DR_L1), TeaEvent.FL_MB)
@@ -38,7 +41,6 @@ class TeaHelperTest extends XSTester {
       val decodeOutTea = Output(UInt(TeaEvent.width.W))
       val renameTea = Output(UInt(TeaEvent.width.W))
       val enqRobTea = Output(UInt(TeaEvent.width.W))
-      val robTea = Output(UInt(TeaEvent.width.W))
     })
 
     val cf = WireInit(0.U.asTypeOf(new CtrlFlow()(p)))
@@ -51,14 +53,21 @@ class TeaHelperTest extends XSTester {
     Bundles.connectSamePort(renameOut, decodeOut)
     val enqRob = WireInit(0.U.asTypeOf(new EnqRobUop()(p)))
     enqRob.connectEnqRobUop(renameOut)
-    val rob = WireInit(0.U.asTypeOf(new RobEntryBundle()(p)))
-    RobBundles.connectEnq(rob, enqRob)
 
     io.decodeInTea := decodeIn.teaPsv
     io.decodeOutTea := decodeOut.teaPsv
     io.renameTea := renameOut.teaPsv
     io.enqRobTea := enqRob.teaPsv
-    io.robTea := rob.teaPsv
+  }
+
+  class TeaCompressedRobPsvHarness extends Module {
+    val io = IO(new Bundle {
+      val valid = Input(Vec(4, Bool()))
+      val isFormer = Input(Vec(4, Bool()))
+      val psv = Input(Vec(4, UInt(TeaEvent.width.W)))
+      val out = Output(Vec(2, UInt(TeaEvent.width.W)))
+    })
+    io.out := RobBundles.collectTeaPsvBySlot(io.valid, io.isFormer, io.psv)
   }
 
   class PacketPsvHarness extends Module {
@@ -116,64 +125,135 @@ class TeaHelperTest extends XSTester {
     io.outTeaPsv := VecInit(ibuffer.io.out.map(_.bits.teaPsv))
   }
 
-  class IfuPacketPsvBackpressureHarness(implicit val p: Parameters) extends Module with HasFrontendParameters {
+  class TeaTlbMissHarness(implicit val p: Parameters) extends Module with HasXSParameter {
     val io = IO(new Bundle {
-      val inValid = Input(Bool())
-      val ready = Input(Bool())
-      val validMask = Input(Vec(4, Bool()))
-      val liveDrL1 = Input(Bool())
-      val liveDrTlb = Input(Bool())
-      val outValid = Output(Bool())
-      val outPsv = Output(Vec(4, UInt(TeaEvent.width.W)))
+      val valid = Input(Bool())
+      val miss = Input(Bool())
+      val replay = Input(Bool())
+      val prefetch = Input(Bool())
+      val kill = Input(Bool())
+      val loadMiss = Output(Bool())
+      val loadFirstMiss = Output(Bool())
+      val storeMiss = Output(Bool())
+      val storeFirstMiss = Output(Bool())
     })
+    val load = Module(new LoadUnitS1(backendParams.allExuParams.find(_.hasLoadFu).get)(p))
+    load.io.redirect := 0.U.asTypeOf(load.io.redirect)
+    load.io.kill := io.kill
+    load.io.specialMode := false.B
+    load.io.robHeadPtr := 0.U.asTypeOf(load.io.robHeadPtr)
+    load.io.tlbResp.valid := true.B
+    load.io.tlbResp.bits := 0.U.asTypeOf(load.io.tlbResp.bits)
+    load.io.tlbResp.bits.miss := io.miss
+    load.io.sqForwardResp := 0.U.asTypeOf(load.io.sqForwardResp)
+    load.io.uncacheBypassResp := 0.U.asTypeOf(load.io.uncacheBypassResp)
+    load.io.staNukeQueryReq := 0.U.asTypeOf(load.io.staNukeQueryReq)
+    load.io.csrTrigger := 0.U.asTypeOf(load.io.csrTrigger)
+    load.io.unalignTail.ready := true.B
+    load.io_pipeIn.get.valid := io.valid
+    load.io_pipeIn.get.bits := 0.U.asTypeOf(load.io_pipeIn.get.bits)
+    load.io_pipeIn.get.bits.entrance := Mux(io.prefetch, LoadEntrance.prefetchHiConf.U,
+      Mux(io.replay, LoadEntrance.replayHiPrio.U, LoadEntrance.scalarIssue.U))
+    load.io_pipeIn.get.bits.accessType.instrType := Mux(io.prefetch, InstrType.prefetch.U, InstrType.scalar.U)
+    load.io_pipeIn.get.bits.hasROBEntry := !io.prefetch
+    load.io_pipeOut.get.ready := true.B
 
-    val pending = RegInit(false.B)
-    val capture = io.inValid && (!pending || io.ready)
-    val packetValidMask = RegEnable(io.validMask, capture)
-    val livePsv = Mux(
-      io.liveDrTlb,
-      TeaPsvOps.setBit(
-        Mux(io.liveDrL1, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty),
-        TeaEvent.DR_TLB
-      ),
-      Mux(io.liveDrL1, TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty)
-    )
-    val packetPsv = RegEnable(livePsv, capture)
+    val store = Module(new StoreUnitS1(backendParams.allExuParams.find(_.hasStoreAddrFu).get)(p))
+    store.io.redirect := 0.U.asTypeOf(store.io.redirect)
+    store.io.csrTrigger := 0.U.asTypeOf(store.io.csrTrigger)
+    store.io.tlbResp.valid := true.B
+    store.io.tlbResp.bits := 0.U.asTypeOf(store.io.tlbResp.bits)
+    store.io.tlbResp.bits.miss := io.miss
+    store.io.unalignTail.ready := true.B
+    store.io.toUnalignQueue.ready := true.B
+    store.io.unalignHeadTlbHit := false.B
+    store.io_pipeIn.get.valid := io.valid
+    store.io_pipeIn.get.bits := 0.U.asTypeOf(store.io_pipeIn.get.bits)
+    store.io_pipeIn.get.bits.entrance := Mux(io.prefetch, StoreEntrance.prefetch.U, StoreEntrance.scalarIssue.U)
+    store.io_pipeIn.get.bits.accessType.instrType := Mux(io.prefetch, InstrType.prefetch.U, InstrType.scalar.U)
+    store.io_pipeIn.get.bits.isFirstIssue := !io.replay
+    store.io_pipeIn.get.bits.illegalIssue := io.kill
+    store.io_pipeOut.get.ready := true.B
 
-    when(capture) {
-      pending := true.B
-    }.elsewhen(pending && io.ready) {
-      pending := false.B
-    }
-
-    io.outValid := pending
-    io.outPsv := TeaFrontend.bindPacketPsv(packetValidMask, packetPsv)
+    io.loadMiss := load.io.debugInfo.isTlbMiss
+    io.loadFirstMiss := load.io.debugInfo.isTlbFirstMiss
+    io.storeMiss := store.io.debugInfo.s1_isTlbMiss
+    io.storeFirstMiss := store.io.debugInfo.s1_isTlbFirstMiss
   }
 
-  class TeaSelectorContractHarness(implicit val p: Parameters) extends Module with HasXSParameter {
+  class TeaDispatchHarness(implicit val p: Parameters) extends Module with HasXSParameter {
+    // Match Backend's parameter binding before constructing Dispatch.
+    backendParams.allExuParams.zipWithIndex.foreach { case (exu, i) =>
+      exu.bindBackendParam(backendParams)
+      exu.updateIQWakeUpConfigs(backendParams.iqWakeUpParams)
+      exu.updateExuIdx(i)
+    }
+    backendParams.allSchdParams.foreach(_.bindBackendParam(backendParams))
+    backendParams.allIssueParams.foreach(_.bindBackendParam(backendParams))
     val io = IO(new Bundle {
-      val enable = Input(Bool())
-      val samplePeriod = Input(UInt(64.W))
-      val state = Input(UInt(4.W))
-      val hasCommit = Input(Bool())
-      val commitMask = Input(UInt(CommitWidth.W))
-      val commitPc = Input(Vec(CommitWidth, UInt(VAddrBits.W)))
-      val commitPsv = Input(Vec(CommitWidth, UInt(TeaEvent.width.W)))
-      val flushCause = Input(new TeaFlushCause()(p))
-      val sampleValid = Output(Bool())
-      val sample = Output(new TeaEntry()(p))
+      val validMask = Input(UInt(RenameWidth.W))
+      val storeMask = Input(UInt(RenameWidth.W))
+      val robEmpty = Input(Bool())
+      val sqHasRoom = Input(Bool())
+      val flush = Input(Bool())
+      val inReady = Output(Bool())
+      val dispatchValid = Output(Vec(RenameWidth, Bool()))
+      val enqValid = Output(Vec(RenameWidth, Bool()))
+      val enqPsv = Output(Vec(RenameWidth, UInt(TeaEvent.width.W)))
     })
-    val selector = Module(new TeaSampleSelector()(p))
-    selector.io.enable := io.enable
-    selector.io.samplePeriod := io.samplePeriod
-    selector.io.state := io.state
-    selector.io.hasCommit := io.hasCommit
-    selector.io.commitMask := io.commitMask
-    selector.io.commitPc := io.commitPc
-    selector.io.commitPsv := io.commitPsv
-    selector.io.flushCause := io.flushCause
-    io.sampleValid := selector.io.sampleValid
-    io.sample := selector.io.sample
+    val dispatch = Module(new Dispatch()(p))
+    val renamed = Wire(Vec(RenameWidth, Decoupled(new RenameOutUop()(p))))
+    for (i <- 0 until RenameWidth) {
+      renamed(i).valid := io.validMask(i)
+      renamed(i).bits := 0.U.asTypeOf(renamed(i).bits)
+      renamed(i).bits.fuType := Mux(io.storeMask(i), FuType.stu.U, FuType.alu.U)
+      renamed(i).bits.firstUop := true.B
+      renamed(i).bits.lastUop := true.B
+      renamed(i).bits.lsqIdxStart.sqIdx.first_flag := true.B
+      renamed(i).bits.lsqIdxEnd.sqIdx.first_flag := true.B
+      renamed(i).bits.lsqIdxEnd.sqIdx.value := 1.U
+      renamed(i).bits.teaPsv := Mux(io.storeMask(i), TeaEvent.bit(TeaEvent.DR_L1), TeaPsvOps.empty)
+      dispatch.io.renameIn(i).valid := renamed(i).valid
+      dispatch.io.renameIn(i).bits := 0.U.asTypeOf(dispatch.io.renameIn(i).bits)
+      dispatch.io.renameIn(i).bits.fuType := renamed(i).bits.fuType
+    }
+    PipeGroupConnect(renamed, dispatch.io.fromRename, io.flush, dispatch.io.toRenameAllFire)
+    dispatch.io.enqRob.canAccept := true.B
+    dispatch.io.enqRob.canAcceptForDispatch := true.B
+    dispatch.io.enqRob.isEmpty := io.robEmpty
+    dispatch.io.enqRob.resp := 0.U.asTypeOf(dispatch.io.enqRob.resp)
+    dispatch.io.IQValidNumVec := 0.U.asTypeOf(dispatch.io.IQValidNumVec)
+    dispatch.io.toIssueQueues.foreach(_.ready := true.B)
+    dispatch.io.wbPregsInt := 0.U.asTypeOf(dispatch.io.wbPregsInt)
+    dispatch.io.wbPregsFp := 0.U.asTypeOf(dispatch.io.wbPregsFp)
+    dispatch.io.wbPregsV0 := 0.U.asTypeOf(dispatch.io.wbPregsV0)
+    dispatch.io.wbPregsVl := 0.U.asTypeOf(dispatch.io.wbPregsVl)
+    dispatch.io.wakeUpAll := 0.U.asTypeOf(dispatch.io.wakeUpAll)
+    dispatch.io.wakeUpFp := 0.U.asTypeOf(dispatch.io.wakeUpFp)
+    dispatch.io.wakeUpVec := 0.U.asTypeOf(dispatch.io.wakeUpVec)
+    dispatch.io.og0Cancel := 0.U.asTypeOf(dispatch.io.og0Cancel)
+    dispatch.io.ldCancel := 0.U.asTypeOf(dispatch.io.ldCancel)
+    dispatch.io.vlWriteBackInfo := 0.U.asTypeOf(dispatch.io.vlWriteBackInfo)
+    dispatch.io.fromLsqEnqCtrl := 0.U.asTypeOf(dispatch.io.fromLsqEnqCtrl)
+    dispatch.io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx.value := Mux(io.sqHasRoom, 2.U, 0.U)
+    dispatch.io.toLsqEnqCtrl.lsqEnqIO.canAccept := true.B
+    dispatch.io.toLsqEnqCtrl.lsqEnqIO.recoverStall := false.B
+    dispatch.io.toLsqEnqCtrl.lsqEnqIO.resp := 0.U.asTypeOf(dispatch.io.toLsqEnqCtrl.lsqEnqIO.resp)
+    dispatch.io.redirect := 0.U.asTypeOf(dispatch.io.redirect)
+    dispatch.io.redirect.valid := io.flush
+    dispatch.io.singleStep := false.B
+    dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
+    dispatch.io.stallReason.reason := 0.U.asTypeOf(dispatch.io.stallReason.reason)
+    dispatch.io.debugBlockBackward.foreach(_ := false.B)
+    dispatch.io.debugWaitForward.foreach(_ := false.B)
+    dispatch.io.debugIQValidNumVec.foreach(x => x := 0.U.asTypeOf(x))
+    dispatch.io.debugIQEnqHasIssuedVec.foreach(x => x := 0.U.asTypeOf(x))
+    dispatch.io.debugRobHeadStall.foreach(x => x := 0.U.asTypeOf(x))
+    dispatch.io.debugRobTrueCommit.foreach(_ := 0.U)
+    io.inReady := renamed.head.ready
+    io.dispatchValid := VecInit(dispatch.io.fromRename.map(_.valid))
+    io.enqValid := VecInit(dispatch.io.enqRob.req.map(_.valid))
+    io.enqPsv := VecInit(dispatch.io.enqRob.req.map(_.bits.teaPsv))
   }
 
   class TeaFlushCauseReplayHarness(implicit val p: Parameters) extends Module with HasXSParameter {
@@ -221,7 +301,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "preserve delayed sample timestamps and require a real commit" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(0.U)
       dut.io.state.poke(1.U)
@@ -241,8 +321,29 @@ class TeaHelperTest extends XSTester {
     }
   }
 
+  it should "sample every compressed ROB commit slot independently" in {
+    simulate(new TeaSampleSelector) { dut =>
+      dut.io.commitPc.length shouldBe 2 * config(XSCoreParamsKey).CommitWidth
+      dut.io.enable.poke(true.B)
+      dut.io.samplePeriod.poke(0.U)
+      dut.io.state.poke(TeaState.computing)
+      dut.io.hasCommit.poke(true.B)
+      dut.io.commitMask.poke(2.U)
+      dut.io.commitPc.foreach(_.poke(0.U))
+      dut.io.commitPsv.foreach(_.poke(0.U))
+      dut.io.commitPc(1).poke("h80001800".U)
+      dut.io.commitPsv(1).poke(TeaEvent.bit(TeaEvent.ST_L1))
+      dut.io.flushCause.valid.poke(false.B)
+
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(2.U)
+      dut.io.sample.pcVec(1).expect("h80001800".U)
+      dut.io.sample.psvVec(1).expect(TeaEvent.bit(TeaEvent.ST_L1))
+    }
+  }
+
   it should "keep wall-clock sampling cadence while a delayed sample is pending" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(2.U)
       dut.io.state.poke(1.U)
@@ -269,7 +370,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "resolve an old delayed sample and retain a new delayed boundary in the same cycle" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(0.U)
       dut.io.state.poke(1.U)
@@ -298,7 +399,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "clear delayed samples and overflow when sampling is disabled" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(0.U)
       dut.io.state.poke(1.U)
@@ -323,7 +424,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "report a dropped boundary as overflow and sample flushed only in walk" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(0.U)
       dut.io.state.poke(0.U)
@@ -344,7 +445,7 @@ class TeaHelperTest extends XSTester {
   }
 
   it should "prioritize a current flush cause over a pending delayed boundary" in {
-    simulate(new TeaSelectorContractHarness) { dut =>
+    simulate(new TeaSampleSelector) { dut =>
       dut.io.enable.poke(true.B)
       dut.io.samplePeriod.poke(0.U)
       dut.io.state.poke(TeaState.stalled)
@@ -404,16 +505,12 @@ class TeaHelperTest extends XSTester {
     }
   }
 
-  it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
-    TeaEvent.width shouldBe 9
-    TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
-    simulate(new TeaFieldSmoke(config)) { dut =>
-      dut.clock.step()
-      dut.io.out.getWidth shouldBe TeaEvent.width * 6
-    }
+  it should "define the active TEA event space" in {
+    TeaEvent.width shouldBe 8
+    TeaEvent.bit(TeaEvent.ST_TLB).getWidth shouldBe TeaEvent.width
   }
 
-  it should "propagate teaPsv through the decode, rename, enqueue, and ROB bundles" in {
+  it should "propagate teaPsv through the decode, rename, and enqueue bundles" in {
     val ctrlTea = teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.FL_MB)
 
     simulate(new TeaPropagationSmoke(config)) { dut =>
@@ -422,7 +519,23 @@ class TeaHelperTest extends XSTester {
       dut.io.decodeOutTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.renameTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.enqRobTea.expect(ctrlTea.U(TeaEvent.width.W))
-      dut.io.robTea.expect(ctrlTea.U(TeaEvent.width.W))
+    }
+  }
+
+  it should "keep compressed ROB slot PSV independent and OR uops within each slot" in {
+    simulate(new TeaCompressedRobPsvHarness) { dut =>
+      dut.io.valid.foreach(_.poke(true.B))
+      dut.io.isFormer(0).poke(true.B)
+      dut.io.isFormer(1).poke(false.B)
+      dut.io.isFormer(2).poke(true.B)
+      dut.io.isFormer(3).poke(false.B)
+      dut.io.psv(0).poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.psv(1).poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.psv(2).poke(TeaEvent.bit(TeaEvent.ST_TLB))
+      dut.io.psv(3).poke(TeaEvent.bit(TeaEvent.ST_L1))
+
+      dut.io.out(0).expect((teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.ST_TLB)).U)
+      dut.io.out(1).expect((teaBitValue(TeaEvent.FL_MB) | teaBitValue(TeaEvent.ST_L1)).U)
     }
   }
 
@@ -563,35 +676,132 @@ class TeaHelperTest extends XSTester {
     }
   }
 
-  it should "hold packet PSV stable under IFU to IBuffer backpressure" in {
-    simulate(new IfuPacketPsvBackpressureHarness()(config)) { dut =>
-      val drL1 = teaBitValue(TeaEvent.DR_L1)
-      dut.io.inValid.poke(true.B)
-      dut.io.ready.poke(false.B)
-      dut.io.validMask(0).poke(false.B)
-      dut.io.validMask(1).poke(true.B)
-      dut.io.validMask(2).poke(false.B)
-      dut.io.validMask(3).poke(true.B)
-      dut.io.liveDrL1.poke(true.B)
-      dut.io.liveDrTlb.poke(false.B)
-      dut.clock.step()
+  private val moduleTestConfig = config.alterPartial {
+    case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
+    case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false,
+      perfLevel = utility.XSPerfLevel.VERBOSE, perfDBHartID = 0)
+  }
 
-      dut.io.inValid.poke(false.B)
-      dut.io.liveDrL1.poke(false.B)
-      dut.io.liveDrTlb.poke(true.B)
+  it should "retain DR_SQ on the actual store after partial dispatch drains the ROB" in {
+    val coreParams = moduleTestConfig(XSCoreParamsKey)
+    val dispatchConfig = moduleTestConfig.alterPartial { case XSCoreParamsKey => coreParams }
+    simulate(new TeaDispatchHarness()(dispatchConfig)) { dut =>
+      dut.io.validMask.poke(0.U)
+      dut.io.storeMask.poke(2.U)
+      dut.io.robEmpty.poke(false.B)
+      dut.io.sqHasRoom.poke(false.B)
+      dut.io.flush.poke(false.B)
       dut.clock.step(3)
 
-      dut.io.outValid.expect(true.B)
-      dut.io.outPsv(0).expect(0.U)
-      dut.io.outPsv(1).expect(drL1.U(TeaEvent.width.W))
-      dut.io.outPsv(2).expect(0.U)
-      dut.io.outPsv(3).expect(0.U)
-
-      dut.io.ready.poke(true.B)
-      dut.io.outPsv(1).expect(drL1.U(TeaEvent.width.W))
+      dut.io.inReady.expect(true.B)
+      dut.io.validMask.poke(3.U) // ALU in lane 0, store in lane 1.
       dut.clock.step()
-      dut.io.outValid.expect(false.B)
+      dut.io.validMask.poke(0.U)
+      dut.io.enqValid(0).expect(true.B)
+      dut.io.enqPsv(0).expect(0.U)
+      dut.io.enqValid(1).expect(false.B)
+      dut.clock.step()
+      dut.io.dispatchValid(0).expect(false.B)
+      dut.io.dispatchValid(1).expect(true.B)
+
+      dut.io.robEmpty.poke(true.B)
+      dut.clock.step(2)
+      dut.io.sqHasRoom.poke(true.B)
+      dut.io.enqValid(1).expect(true.B)
+      dut.io.enqPsv(1).expect(5.U) // Preserve DR_L1 and add DR_SQ.
+      dut.clock.step()
+      dut.io.dispatchValid(1).expect(false.B)
+
+      // Consuming the delayed store must not tag the next, unblocked store.
+      dut.io.storeMask.poke(1.U)
+      dut.io.validMask.poke(1.U)
+      dut.clock.step()
+      dut.io.validMask.poke(0.U)
+      dut.io.enqValid(0).expect(true.B)
+      dut.io.enqPsv(0).expect(1.U)
+      dut.clock.step()
+
+      // SQ pressure while the ROB remains nonempty is not a drain event.
+      dut.io.robEmpty.poke(false.B)
+      dut.io.sqHasRoom.poke(false.B)
+      dut.io.storeMask.poke(2.U)
+      dut.io.validMask.poke(2.U)
+      dut.clock.step()
+      dut.io.validMask.poke(0.U)
+      dut.clock.step(2)
+      dut.io.sqHasRoom.poke(true.B)
+      dut.io.enqValid(1).expect(true.B)
+      dut.io.enqPsv(1).expect(1.U)
+      dut.clock.step()
+
+      // The original lane-0 case still carries the drain event.
+      dut.io.robEmpty.poke(true.B)
+      dut.io.sqHasRoom.poke(false.B)
+      dut.io.storeMask.poke(1.U)
+      dut.io.validMask.poke(1.U)
+      dut.clock.step()
+      dut.io.validMask.poke(0.U)
+      dut.clock.step(2)
+      dut.io.sqHasRoom.poke(true.B)
+      dut.io.enqValid(0).expect(true.B)
+      dut.io.enqPsv(0).expect(5.U)
+      dut.clock.step()
+
+      // Redirect discards a blocked store's pending event before a new group.
+      dut.io.sqHasRoom.poke(false.B)
+      dut.io.storeMask.poke(2.U)
+      dut.io.validMask.poke(2.U)
+      dut.clock.step()
+      dut.io.validMask.poke(0.U)
+      dut.clock.step(2)
+      dut.io.flush.poke(true.B)
+      dut.clock.step()
+      dut.io.dispatchValid(1).expect(false.B)
+      dut.io.flush.poke(false.B)
+      dut.io.sqHasRoom.poke(true.B)
+      dut.io.storeMask.poke(1.U)
+      dut.io.validMask.poke(1.U)
+      dut.clock.step()
+      dut.io.validMask.poke(0.U)
+      dut.io.enqValid(0).expect(true.B)
+      dut.io.enqPsv(0).expect(1.U)
+      dut.clock.step()
     }
   }
 
+  it should "capture actual TLB misses on replay without attributing invalid or killed requests" in {
+    simulate(new TeaTlbMissHarness()(moduleTestConfig)) { dut =>
+      dut.io.valid.poke(true.B)
+      dut.io.miss.poke(true.B)
+      dut.io.replay.poke(false.B)
+      dut.io.prefetch.poke(false.B)
+      dut.io.kill.poke(false.B)
+      dut.io.loadMiss.expect(true.B)
+      dut.io.loadFirstMiss.expect(true.B)
+      dut.io.storeMiss.expect(true.B)
+      dut.io.storeFirstMiss.expect(true.B)
+
+      dut.io.replay.poke(true.B)
+      dut.io.loadMiss.expect(true.B)
+      dut.io.loadFirstMiss.expect(false.B)
+      dut.io.storeMiss.expect(true.B)
+      dut.io.storeFirstMiss.expect(false.B)
+
+      dut.io.prefetch.poke(true.B)
+      dut.io.loadMiss.expect(false.B)
+      dut.io.storeMiss.expect(false.B)
+      dut.io.prefetch.poke(false.B)
+      dut.io.valid.poke(false.B)
+      dut.io.loadMiss.expect(false.B)
+      dut.io.storeMiss.expect(false.B)
+      dut.io.valid.poke(true.B)
+      dut.io.kill.poke(true.B)
+      dut.io.loadMiss.expect(false.B)
+      dut.io.storeMiss.expect(false.B)
+      dut.io.kill.poke(false.B)
+      dut.io.miss.poke(false.B)
+      dut.io.loadMiss.expect(false.B)
+      dut.io.storeMiss.expect(false.B)
+    }
+  }
 }
