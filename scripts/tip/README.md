@@ -4,7 +4,9 @@ This directory contains offline analysis helpers for XiangShan TIP data dumped i
 
 ## Inputs
 
-The tool expects a ChiselDB sqlite file containing a `Tip_<hartid>` table.
+The tool expects a ChiselDB sqlite file containing a `Tip_<hartid>` table from the current RTL with the default
+eight commit lanes. Generate the RTL with `--with-chiseldb` and `--enable-difftest` (or `--full-basicdiff`), since
+the PC columns require the debug metadata enabled by difftest.
 
 If `--db` is omitted, the script uses the latest `build/*.db`.
 
@@ -68,6 +70,8 @@ python3 scripts/tip/tip.py all \
 
 ## Options
 
+Place options after the subcommand, as in the examples above.
+
 - `--db`: explicit sqlite path
 - `--hart`: hart id, default `0`
 - `--out-dir`: output directory, default `$XDG_STATE_HOME/xiangshan/tip` (or `~/.local/state/xiangshan/tip`)
@@ -120,8 +124,10 @@ Commit type:
 - `1 = BRANCH`
 - `2 = LOAD`
 - `3 = STORE`
-- `>= 4 = FUSED_OR_OTHER`
 
-Replay and miss reports count dynamic head-entry residences, not logged cycles. Sticky flags contribute at most once per
-entry, and cumulative `replayCnt` contributes its maximum value for that entry. A new residence starts after a lane-0
+Commit reports count committed physical ROB entries. With ROB compression, an entry can contain several instructions;
+its reported PC and commit type describe the former slot. These reports do not count individual retired instructions.
+
+Replay and miss reports count valid dynamic head-entry residences, excluding empty ROB cycles. Sticky flags contribute
+at most once per entry, and cumulative `replayCnt` contributes its maximum value for that entry. A new residence starts after a lane-0
 commit, a PC change, a timestamp gap, or a replay-counter reset.
