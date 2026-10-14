@@ -468,6 +468,8 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   val stageInfo = Wire(chiselTypeOf(pipeOut.bits))
   connectSamePort(stageInfo, in)
+  // fullva after pointer masking (TLB EffectiveVa): it is what an exception writes to xtval, as in the load unit
+  stageInfo.fullva := fullva
   stageInfo.tlbHit.get := tlbHit
   stageInfo.tlbException.get := tlbException
   stageInfo.pbmt.get := pbmt
