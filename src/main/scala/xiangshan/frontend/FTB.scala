@@ -73,16 +73,18 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
 
   def getTarget(pc: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
     def getTarget(offLen: Int)(pc: UInt, lower: UInt, stat: UInt, last_stage: Option[Tuple2[UInt, Bool]] = None) = {
-      val h                = pc(VAddrBits - 1, offLen + 1)
-      val higher           = Wire(UInt((VAddrBits - offLen - 1).W))
-      val higher_plus_one  = Wire(UInt((VAddrBits - offLen - 1).W))
-      val higher_minus_one = Wire(UInt((VAddrBits - offLen - 1).W))
+      val addrWidth        = pc.getWidth
+      val h                = pc(addrWidth - 1, offLen + 1)
+      val higher           = Wire(UInt((addrWidth - offLen - 1).W))
+      val higher_plus_one  = Wire(UInt((addrWidth - offLen - 1).W))
+      val higher_minus_one = Wire(UInt((addrWidth - offLen - 1).W))
 
       // Switch between previous stage pc and current stage pc
       // Give flexibility for timing
       if (last_stage.isDefined) {
-        val last_stage_pc   = last_stage.get._1
-        val last_stage_pc_h = last_stage_pc(VAddrBits - 1, offLen + 1)
+        val last_stage_pc = last_stage.get._1
+        require(last_stage_pc.getWidth == addrWidth)
+        val last_stage_pc_h = last_stage_pc(addrWidth - 1, offLen + 1)
         val stage_en        = last_stage.get._2
         higher           := RegEnable(last_stage_pc_h, stage_en)
         higher_plus_one  := RegEnable(last_stage_pc_h + 1.U, stage_en)
@@ -102,7 +104,7 @@ class FtbSlot(val offsetLen: Int, val subOffsetLen: Option[Int] = None)(implicit
           lower(offLen - 1, 0),
           0.U(1.W)
         )
-      require(target.getWidth == VAddrBits)
+      require(target.getWidth == addrWidth)
       require(offLen != 0)
       target
     }
@@ -218,21 +220,23 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
     and the high bits last_stage_pc_middle that need to be added and subtracted from each other,
     and then concatenate them according to the carry situation to obtain brtarget and jmptarget
      */
-    val h_br                  = pc(VAddrBits - 1, BR_OFFSET_LEN + 1)
-    val higher_br             = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
-    val higher_plus_one_br    = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
-    val higher_minus_one_br   = Wire(UInt((VAddrBits - BR_OFFSET_LEN - 1).W))
-    val h_tail                = pc(VAddrBits - 1, JMP_OFFSET_LEN + 1)
-    val higher_tail           = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
-    val higher_plus_one_tail  = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
-    val higher_minus_one_tail = Wire(UInt((VAddrBits - JMP_OFFSET_LEN - 1).W))
+    val addrWidth             = pc.getWidth
+    val h_br                  = pc(addrWidth - 1, BR_OFFSET_LEN + 1)
+    val higher_br             = Wire(UInt((addrWidth - BR_OFFSET_LEN - 1).W))
+    val higher_plus_one_br    = Wire(UInt((addrWidth - BR_OFFSET_LEN - 1).W))
+    val higher_minus_one_br   = Wire(UInt((addrWidth - BR_OFFSET_LEN - 1).W))
+    val h_tail                = pc(addrWidth - 1, JMP_OFFSET_LEN + 1)
+    val higher_tail           = Wire(UInt((addrWidth - JMP_OFFSET_LEN - 1).W))
+    val higher_plus_one_tail  = Wire(UInt((addrWidth - JMP_OFFSET_LEN - 1).W))
+    val higher_minus_one_tail = Wire(UInt((addrWidth - JMP_OFFSET_LEN - 1).W))
     if (last_stage.isDefined) {
-      val last_stage_pc                  = last_stage.get._1
+      val last_stage_pc = last_stage.get._1
+      require(last_stage_pc.getWidth == addrWidth)
       val stage_en                       = last_stage.get._2
-      val last_stage_pc_higher           = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1), stage_en)
+      val last_stage_pc_higher           = RegEnable(last_stage_pc(addrWidth - 1, JMP_OFFSET_LEN + 1), stage_en)
       val last_stage_pc_middle           = RegEnable(last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1), stage_en)
-      val last_stage_pc_higher_plus_one  = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) + 1.U, stage_en)
-      val last_stage_pc_higher_minus_one = RegEnable(last_stage_pc(VAddrBits - 1, JMP_OFFSET_LEN + 1) - 1.U, stage_en)
+      val last_stage_pc_higher_plus_one  = RegEnable(last_stage_pc(addrWidth - 1, JMP_OFFSET_LEN + 1) + 1.U, stage_en)
+      val last_stage_pc_higher_minus_one = RegEnable(last_stage_pc(addrWidth - 1, JMP_OFFSET_LEN + 1) - 1.U, stage_en)
       val last_stage_pc_middle_plus_one =
         RegEnable(Cat(0.U(1.W), last_stage_pc(JMP_OFFSET_LEN, BR_OFFSET_LEN + 1)) + 1.U, stage_en)
       val last_stage_pc_middle_minus_one =
@@ -272,7 +276,7 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
         0.U(1.W)
       )
     ))
-    val tail_target = Wire(UInt(VAddrBits.W))
+    val tail_target = Wire(UInt(addrWidth.W))
     if (tailSlot.subOffsetLen.isDefined) {
       tail_target := Mux(
         tailSlot.sharing,
@@ -307,8 +311,8 @@ class FTBEntry(implicit p: Parameters) extends FTBEntry_part with FTBParams with
       )
     }
 
-    br_slots_targets.map(t => require(t.getWidth == VAddrBits))
-    require(tail_target.getWidth == VAddrBits)
+    br_slots_targets.map(t => require(t.getWidth == addrWidth))
+    require(tail_target.getWidth == addrWidth)
     val targets = VecInit(br_slots_targets :+ tail_target)
     targets
   }
@@ -789,9 +793,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ) {
     full_pred.fromFtbEntry(
       s2_ftb_entry,
-      s2_pc.getAddr(),
+      Cat(s2_pc_guard_dup(0), s2_pc.getAddr()),
       // Previous stage meta for better timing
-      Some(s1_pc, s1_fire),
+      Some(Cat(s1_pc_guard_dup(0), s1_pc), s1_fire),
       Some(s1_read_resp, s1_fire)
     )
   }
@@ -802,7 +806,11 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     full_pred & s3_ftb_entry & s3_pc & s2_pc & s2_fire <-
       io.out.s3.full_pred zip s3_ftb_entry_dup zip s3_pc_dup zip s2_pc_dup zip io.s2_fire
   )
-    full_pred.fromFtbEntry(s3_ftb_entry, s3_pc.getAddr(), Some((s2_pc.getAddr(), s2_fire)))
+    full_pred.fromFtbEntry(
+      s3_ftb_entry,
+      Cat(s3_pc_guard_dup(0), s3_pc.getAddr()),
+      Some((Cat(s2_pc_guard_dup(0), s2_pc.getAddr()), s2_fire))
+    )
 
   // Overwrite the fallThroughErr value
   io.out.s3.full_pred.zipWithIndex.map { case (fp, i) => fp.fallThroughErr := real_s3_fallThroughErr_dup(i) }
@@ -843,8 +851,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val u_meta  = update.meta.asTypeOf(new FTBMeta)
   val u_valid = update_valid && !update.old_entry && !s0_close_ftb_req
 
-  val (_, delay2_pc)    = DelayNWithValid(update_pc, u_valid, 2)
-  val (_, delay2_entry) = DelayNWithValid(update.ftb_entry, u_valid, 2)
+  val (_, delay2_pc)       = DelayNWithValid(update_pc, u_valid, 2)
+  val (_, delay2_pc_guard) = DelayNWithValid(io.update.bits.pcGuard, u_valid, 2)
+  val (_, delay2_entry)    = DelayNWithValid(update.ftb_entry, u_valid, 2)
 
   val update_now       = u_valid && u_meta.hit
   val update_need_read = u_valid && !u_meta.hit
@@ -858,8 +867,9 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftb_write.entry := Mux(update_now, update.ftb_entry, delay2_entry)
   ftb_write.tag   := ftbAddr.getTag(Mux(update_now, update_pc, delay2_pc))(tagLength - 1, 0)
 
-  val write_valid = (update_now || DelayN(u_valid && !u_meta.hit, 2)) && !update_need_read
-  val write_pc    = Mux(update_now, update_pc, delay2_pc)
+  val write_valid         = (update_now || DelayN(u_valid && !u_meta.hit, 2)) && !update_need_read
+  val write_pc            = Mux(update_now, update_pc, delay2_pc)
+  val write_pc_with_guard = Cat(Mux(update_now, io.update.bits.pcGuard, delay2_pc_guard), write_pc)
 
   ftbBank.io.update_write_data.valid := write_valid
   ftbBank.io.update_write_data.bits  := ftb_write
@@ -877,10 +887,10 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   ftbBank.io.update_access := u_valid && !u_meta.hit
   ftbBank.io.s1_fire       := io.s1_fire(0)
 
-  val ftb_write_fallThrough = ftb_write.entry.getFallThrough(write_pc)
+  val ftb_write_fallThrough = ftb_write.entry.getFallThrough(write_pc_with_guard)
   when(write_valid) {
     assert(
-      SignExt(write_pc, VAddrBits + 1) + (FetchWidth * 4).U >= ftb_write_fallThrough,
+      write_pc_with_guard + (FetchWidth * 4).U >= ftb_write_fallThrough,
       s"FTB write_entry fallThrough address error!"
     )
   }

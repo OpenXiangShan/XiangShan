@@ -61,7 +61,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.cfiUpdate.taken := dataModule.io.taken
       redirect.bits.cfiUpdate.predTaken := dataModule.io.pred_taken
       redirect.bits.cfiUpdate.target := addModule.io.target
-      redirect.bits.cfiUpdate.pc := io.in.bits.data.pc.get
+      redirect.bits.cfiUpdate.pc := pcExtend(VAddrBits, 0)
       redirect.bits.cfiUpdate.backendIAF := false.B
       redirect.bits.cfiUpdate.backendIPF := false.B
       redirect.bits.cfiUpdate.backendIGPF := false.B

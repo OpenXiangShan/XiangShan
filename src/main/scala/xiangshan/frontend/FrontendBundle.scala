@@ -92,7 +92,7 @@ class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with Has
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
-  val pc         = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc         = Vec(PredictWidth, UInt((VAddrBits + 1).W))
   val pd         = Vec(PredictWidth, new PreDecodeInfo) // TODO: redefine Predecode
   val ftqIdx     = new FtqPtr
   val ftqOffset  = UInt(log2Ceil(PredictWidth).W)
@@ -651,7 +651,7 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
   ) = {
     slot_valids := entry.brSlots.map(_.valid) :+ entry.tailSlot.valid
     // Keep FTB target generation at VAddrBits and extend only when entering the full prediction path.
-    targets              := VecInit(entry.getTargetVec(pc, last_stage_pc).map(SignExt(_, VAddrBits + 1)))
+    targets              := entry.getTargetVec(pc, last_stage_pc)
     jalr_target          := targets.last
     offsets              := entry.getOffsetVec
     is_jal               := entry.tailSlot.valid && entry.isJal
@@ -667,7 +667,7 @@ class FullBranchPrediction(val isNotS3: Boolean)(implicit p: Parameters) extends
     fallThroughErr := startLower >= endLowerwithCarry || endLowerwithCarry > (startLower + PredictWidth.U)
     fallThroughAddr := Mux(
       fallThroughErr,
-      SignExt(pc, VAddrBits + 1) + (FetchWidth * 4).U,
+      pc + (FetchWidth * 4).U,
       entry.getFallThrough(pc, last_stage_entry)
     )
   }
@@ -754,6 +754,7 @@ class BpuToFtqBundle(implicit p: Parameters) extends BranchPredictionResp {}
 
 class BranchPredictionUpdate(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val pc        = UInt(VAddrBits.W)
+  val pcGuard   = Bool()
   val spec_info = new SpeculativeInfo
   val ftb_entry = new FTBEntry()
 
