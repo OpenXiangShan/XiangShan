@@ -149,7 +149,9 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
-    out.uop(i).bits.opcode := opcodes(i) | cboOpcode
+    // cboOpcode is the complete opcode of a CBO instruction (cbo.inval becomes cbo.flush when xenvcfg.CBIE = 01)
+    // and 0 for every other instruction: select it, never OR it into the table's opcode (inval | flush = zero)
+    out.uop(i).bits.opcode := Mux(cboOpcode.orR, cboOpcode, opcodes(i))
     out.uop(i).bits.lsrc1 := Mux(isMop, 0.U, instFields.RS1)
     out.uop(i).bits.lsrc2 := Mux(isMop, 0.U, instFields.RS2)
     out.uop(i).bits.lsrc3 := instFields.FS3
