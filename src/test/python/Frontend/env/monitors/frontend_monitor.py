@@ -40,16 +40,27 @@ class ICacheRequestSnapshot:
     address: int
 
 
+@dataclass(frozen=True)
+class UncacheRequestSnapshot:
+    cycle: int
+    valid: int
+    address: int
+    mem_back_type_mm: int
+    mem_page_type_nc: int
+
+
 class FrontendMonitor:
     def __init__(self) -> None:
         self.interface = None
         self.from_ftq_if = None
         self.ptw_if = None
         self.icache_if = None
+        self.uncache_if = None
         self.ptw_get_gpa_provider = None
         self.dut = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
         self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
+        self.uncache_request_snapshot: Optional[UncacheRequestSnapshot] = None
         self.observations: list[Observation] = []
         self._checker = None
 
@@ -134,6 +145,9 @@ class FrontendMonitor:
     def bind_icache(self, icache_if) -> None:
         self.icache_if = icache_if
 
+    def bind_uncache(self, uncache_if) -> None:
+        self.uncache_if = uncache_if
+
     def bind_dut(self, dut) -> None:
         self.dut = dut
 
@@ -157,6 +171,18 @@ class FrontendMonitor:
             address=self._read(self.icache_if.a_bits_address),
         )
         return self.icache_request_snapshot
+
+    def capture_uncache_request(self, cycle: int) -> UncacheRequestSnapshot:
+        if self.uncache_if is None:
+            raise AssertionError("FrontendMonitor Uncache interface is not bound")
+        self.uncache_request_snapshot = UncacheRequestSnapshot(
+            cycle=int(cycle),
+            valid=self._read(self.uncache_if.a_valid),
+            address=self._read(self.uncache_if.a_bits_address),
+            mem_back_type_mm=self._read(self.uncache_if.a_bits_user_mem_back_type_mm),
+            mem_page_type_nc=self._read(self.uncache_if.a_bits_user_mem_page_type_nc),
+        )
+        return self.uncache_request_snapshot
 
     def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
         if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
@@ -203,10 +229,12 @@ class FrontendMonitor:
     def on_hardware_reset(self) -> None:
         self.cycle_snapshot = None
         self.icache_request_snapshot = None
+        self.uncache_request_snapshot = None
 
     def clear(self) -> None:
         self.cycle_snapshot = None
         self.icache_request_snapshot = None
+        self.uncache_request_snapshot = None
         self._checker.clear()
 
     def set_expected_pc(self, pc: int) -> None:
@@ -230,4 +258,4 @@ class FrontendMonitor:
         return [observation.pc for observation in self.observations[-limit:]]
 
 
-__all__ = ["Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot", "FrontendMonitor"]
+__all__ = ["Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot", "UncacheRequestSnapshot", "FrontendMonitor"]

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from env.agents.uncache_agent import UncacheAgent
 from env.model import MemoryModel
+from env.monitors.frontend_monitor import FrontendMonitor
 
 
 class _Signal:
@@ -36,9 +39,11 @@ def test_uncache_agent_returns_one_eight_byte_beat_and_records_attributes() -> N
     interface = _interface(mm=1, nc=1)
     agent = UncacheAgent(_memory())
     agent.interface = interface
+    monitor = FrontendMonitor()
+    monitor.bind_uncache(interface)
     agent.configure(latency=0)
 
-    agent.on_clock_edge(10)
+    agent.on_clock_edge(10, monitor.capture_uncache_request(10))
 
     assert int(interface.d_bits_data.value) == int.from_bytes(bytes(range(8)), "little")
     assert agent.get_stats()["response_bytes"] == 8
@@ -51,3 +56,23 @@ def test_uncache_agent_returns_one_eight_byte_beat_and_records_attributes() -> N
         }
     ]
 
+
+def test_uncache_agent_uses_monitored_request_snapshot() -> None:
+    interface = _interface(mm=1, nc=1)
+    agent = UncacheAgent(_memory())
+    agent.interface = interface
+    monitor = FrontendMonitor()
+    monitor.bind_uncache(interface)
+
+    request = monitor.capture_uncache_request(10)
+    interface.a_valid.value = 0
+    interface.a_bits_address.value += 8
+    interface.a_bits_user_mem_back_type_mm.value = 0
+    interface.a_bits_user_mem_page_type_nc.value = 0
+    agent.on_clock_edge(10, request)
+
+    assert agent.request_records == [
+        {"cycle": 10, "address": 0x80000000, "mem_back_type_mm": 1, "mem_page_type_nc": 1}
+    ]
+    with pytest.raises(AssertionError, match="stale request snapshot"):
+        agent.on_clock_edge(11, request)

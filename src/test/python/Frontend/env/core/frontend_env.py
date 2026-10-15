@@ -239,6 +239,7 @@ class FrontendEnv:
         self.backend_agent.bind(self.backend_ctrl_if)
         self.monitor.bind(self.backend_observe_if)
         self.monitor.bind_icache(self.icache_if)
+        self.monitor.bind_uncache(self.uncache_if)
         self.monitor.bind_dut(self.dut)
         self.monitor.bind_observation_interfaces(
             from_ftq_if=self.backend_from_ftq_if,
@@ -643,7 +644,8 @@ class FrontendEnv:
             icache_request = self.monitor.capture_icache_request(cycle)
             self.icache_agent.on_clock_edge(cycle, icache_request)
             self.icache_control_agent.on_clock_edge(cycle)
-            self.uncache_agent.on_clock_edge(cycle)
+            uncache_request = self.monitor.capture_uncache_request(cycle)
+            self.uncache_agent.on_clock_edge(cycle, uncache_request)
             ptw_flushes_before = int(self.ptw_agent.sfence_dropped_responses)
             self.ptw_agent.on_clock_edge(cycle)
             ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)

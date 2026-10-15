@@ -7,6 +7,7 @@ from typing import Callable, Dict, Optional
 
 from ..bundles import UncacheBundle
 from ..model.memory_model import MemoryModel
+from ..monitors.frontend_monitor import UncacheRequestSnapshot
 
 
 @dataclass
@@ -38,14 +39,6 @@ class UncacheAgent:
         self.request_addrs = []
         self.request_records = []
         self.response_addrs = []
-
-    @staticmethod
-    def _read(signal, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return default
 
     @staticmethod
     def _write(signal, value: int) -> None:
@@ -119,21 +112,19 @@ class UncacheAgent:
             return self.next_response_faults.popleft()
         return {}
 
-    def on_clock_edge(self, cycle: int) -> None:
+    def on_clock_edge(self, cycle: int, request: UncacheRequestSnapshot) -> None:
         if self.interface is None:
             return
+        if request.cycle != int(cycle):
+            raise AssertionError("UncacheAgent received a stale request snapshot")
         a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
         self._write(self.interface.a_ready, a_ready)
-        if self._read(self.interface.a_valid, 0) == 1 and a_ready == 1:
-            addr = self._read(self.interface.a_bits_address, 0)
+        if request.valid == 1 and a_ready == 1:
+            addr = request.address
             blk = self.memory.read_block(addr, self.response_bytes)
             data = int.from_bytes(blk, "little")
-            mem_back_type_mm = self._read(
-                getattr(self.interface, "a_bits_user_mem_back_type_mm", None), 0
-            )
-            mem_page_type_nc = self._read(
-                getattr(self.interface, "a_bits_user_mem_page_type_nc", None), 0
-            )
+            mem_back_type_mm = request.mem_back_type_mm
+            mem_page_type_nc = request.mem_page_type_nc
             latency = self.mmio_latency if self.memory.is_mmio(addr) else self.latency
             fault = self._next_fault_for_addr(addr)
             self.pending.append(
