@@ -50,7 +50,7 @@ def test_mmio_page_tail_rvi_preserves_half_pc_data_and_state(env):
     saved_half = [
         sample
         for sample in samples
-        if sample["last_request_addr"] == first_beat
+        if int(sample["cycle"]) >= int(first_page_resend[0]["cycle"])
         and int(sample["s1"]) == 1
         and int(sample["s1_data"]) == expected_half_data
         and int(sample["s1_pc"]) == expected_half_pc

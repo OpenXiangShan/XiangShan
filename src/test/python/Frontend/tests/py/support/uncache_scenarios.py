@@ -444,6 +444,11 @@ def _try_read_dut_signal(env, name: str) -> int | None:
                 signal = getter(str(name))
         if signal is None:
             return None
+        width = getattr(signal, "W", None)
+        if callable(width) and int(width()) > 32:
+            raw = signal.GetBytes()
+            data = raw if isinstance(raw, (bytes, bytearray)) else bytes(raw)
+            return int.from_bytes(data, byteorder="little", signed=False)
         value = getattr(signal, "value", None)
         if value is None:
             return None

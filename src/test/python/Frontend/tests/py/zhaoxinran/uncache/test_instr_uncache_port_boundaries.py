@@ -2622,17 +2622,18 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
         "reason": "s0 never recorded the first-page RVI half",
         "samples": transaction_samples[-16:],
     }
+    first_need_resend_cycle = min(int(sample["cycle"]) for sample in need_resend_samples)
     s1_recovery = [
         sample
-        for sample in transaction_samples
-        if sample["last_request_addr"] == first_beat
+        for sample in recovery_samples
+        if int(sample["cycle"]) >= first_need_resend_cycle
         and sample["s1"] == 1
         and int(sample["s1_data"]) == expected_half_data
         and int(sample["s1_pc"]) == expected_half_pc
     ]
     assert s1_recovery, {
         "reason": "s1 did not capture the first-page half-RVI payload",
-        "samples": transaction_samples[-16:],
+        "samples": recovery_samples[-16:],
         "expected_half_data": expected_half_data,
         "expected_half_pc": expected_half_pc,
     }
