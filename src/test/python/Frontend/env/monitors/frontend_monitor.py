@@ -60,11 +60,24 @@ class ICacheControlSnapshot:
     d_data: int
 
 
+@dataclass(frozen=True)
+class PTWAgentInputSnapshot:
+    cycle: int
+    sfence_valid: int
+    req_valid: int
+    req_vpn: int
+    req_s2xlate: int
+    req_get_gpa: int
+    resp_ready: int
+    context: dict[str, int]
+
+
 class FrontendMonitor:
     def __init__(self) -> None:
         self.interface = None
         self.from_ftq_if = None
         self.ptw_if = None
+        self.csr_ctrl_if = None
         self.icache_if = None
         self.uncache_if = None
         self.icache_control_if = None
@@ -74,6 +87,7 @@ class FrontendMonitor:
         self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
         self.uncache_request_snapshot: Optional[UncacheRequestSnapshot] = None
         self.icache_control_snapshot: Optional[ICacheControlSnapshot] = None
+        self.ptw_agent_input_snapshot: Optional[PTWAgentInputSnapshot] = None
         self.observations: list[Observation] = []
         self._checker = None
 
@@ -155,6 +169,9 @@ class FrontendMonitor:
         self.ptw_if = ptw_if
         self.ptw_get_gpa_provider = ptw_get_gpa_provider
 
+    def bind_ptw_context(self, csr_ctrl_if) -> None:
+        self.csr_ctrl_if = csr_ctrl_if
+
     def bind_icache(self, icache_if) -> None:
         self.icache_if = icache_if
 
@@ -214,6 +231,49 @@ class FrontendMonitor:
         )
         return self.icache_control_snapshot
 
+    def capture_ptw_agent_inputs(self, cycle: int) -> PTWAgentInputSnapshot:
+        if self.ptw_if is None or self.csr_ctrl_if is None:
+            raise AssertionError("FrontendMonitor PTW observation interfaces are not bound")
+        ptw = self.ptw_if
+        csr = self.csr_ctrl_if
+        req_valid = self._read(ptw.req_0_valid)
+        sfence_valid = self._read(ptw.sfence_valid)
+        context = {
+            "cycle": int(cycle),
+            "priv_imode": self._read(csr.io_tlbCsr_priv_imode, 3),
+            "priv_virt": self._read(csr.io_tlbCsr_priv_virt),
+            "satp_mode": self._read(csr.io_tlbCsr_satp_mode),
+            "satp_asid": self._read(csr.io_tlbCsr_satp_asid),
+            "satp_ppn": self._read(csr.io_tlbCsr_satp_ppn),
+            "vsatp_mode": self._read(csr.io_tlbCsr_vsatp_mode),
+            "vsatp_asid": self._read(csr.io_tlbCsr_vsatp_asid),
+            "vsatp_ppn": self._read(csr.io_tlbCsr_vsatp_ppn),
+            "hgatp_mode": self._read(csr.io_tlbCsr_hgatp_mode),
+            "hgatp_vmid": self._read(csr.io_tlbCsr_hgatp_vmid),
+            "hgatp_ppn": self._read(csr.io_tlbCsr_hgatp_ppn),
+            "sfence_valid": sfence_valid,
+            "sfence_bits_rs1": self._read(ptw.sfence_bits_rs1),
+            "sfence_bits_rs2": self._read(ptw.sfence_bits_rs2),
+            "sfence_bits_addr": self._read(ptw.sfence_bits_addr),
+            "sfence_bits_id": self._read(ptw.sfence_bits_id),
+            "sfence_bits_hv": self._read(ptw.sfence_bits_hv),
+            "sfence_bits_hg": self._read(ptw.sfence_bits_hg),
+        } if req_valid else {}
+        self.ptw_agent_input_snapshot = PTWAgentInputSnapshot(
+            cycle=int(cycle),
+            sfence_valid=sfence_valid,
+            req_valid=req_valid,
+            req_vpn=self._read(ptw.req_0_bits_vpn),
+            req_s2xlate=self._read(ptw.req_0_bits_s2xlate),
+            req_get_gpa=(
+                int(self.ptw_get_gpa_provider() or 0)
+                if req_valid and self.ptw_get_gpa_provider is not None else 0
+            ),
+            resp_ready=self._read(ptw.resp_ready, 1),
+            context=context,
+        )
+        return self.ptw_agent_input_snapshot
+
     def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
         if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
             raise AssertionError("FrontendMonitor observation interfaces are not bound")
@@ -231,7 +291,12 @@ class FrontendMonitor:
             "req_ready": req_ready,
             "req_vpn": self._read(self.ptw_if.req_0_bits_vpn),
             "req_s2xlate": self._read(self.ptw_if.req_0_bits_s2xlate),
-            "req_get_gpa": int(self.ptw_get_gpa_provider() or 0) if req_valid and req_ready else 0,
+            "req_get_gpa": (
+                self.ptw_agent_input_snapshot.req_get_gpa
+                if req_valid and req_ready and self.ptw_agent_input_snapshot is not None
+                and self.ptw_agent_input_snapshot.cycle == int(cycle)
+                else int(self.ptw_get_gpa_provider() or 0) if req_valid and req_ready else 0
+            ),
             "resp_valid": resp_valid,
             "resp_ready": self._read(self.ptw_if.resp_ready),
             "resp": {} if not resp_valid else {
@@ -261,12 +326,14 @@ class FrontendMonitor:
         self.icache_request_snapshot = None
         self.uncache_request_snapshot = None
         self.icache_control_snapshot = None
+        self.ptw_agent_input_snapshot = None
 
     def clear(self) -> None:
         self.cycle_snapshot = None
         self.icache_request_snapshot = None
         self.uncache_request_snapshot = None
         self.icache_control_snapshot = None
+        self.ptw_agent_input_snapshot = None
         self._checker.clear()
 
     def set_expected_pc(self, pc: int) -> None:
@@ -293,4 +360,5 @@ class FrontendMonitor:
 __all__ = [
     "Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot",
     "UncacheRequestSnapshot", "ICacheControlSnapshot", "FrontendMonitor",
+    "PTWAgentInputSnapshot",
 ]

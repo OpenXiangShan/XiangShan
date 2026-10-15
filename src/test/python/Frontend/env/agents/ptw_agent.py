@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 from ..bundles import PTWBundle
 from ..model.page_table_model import PageTableModel
 from ..model.ptw_response_source import NemuPtwResponseSource, PTWRequestSnapshot
+from ..monitors.frontend_monitor import PTWAgentInputSnapshot
 
 
 @dataclass
@@ -46,8 +47,7 @@ class PTWAgent:
         self.nemu_ptw_adapter = ""
         self._nemu_source: Optional[NemuPtwResponseSource] = None
         self.nemu_sync_hook: Optional[Callable[..., None]] = None
-        self.request_context_provider: Optional[Callable[[], Dict[str, int]]] = None
-        self.request_get_gpa_provider: Optional[Callable[[], Optional[int]]] = None
+        self.request_context_provider: Optional[Callable[[Dict[str, int]], Dict[str, int]]] = None
         self.pending = deque()
         self.active_resp: Optional[_PTWPending] = None
         self._resp_valid_driven = 0
@@ -67,14 +67,6 @@ class PTWAgent:
         self.last_compare_diff: Optional[Dict[str, Dict[str, Any]]] = None
 
     @staticmethod
-    def _read(signal, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return default
-
-    @staticmethod
     def _write(signal, value: int) -> None:
         try:
             signal.value = int(value)
@@ -89,11 +81,8 @@ class PTWAgent:
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
 
-    def set_request_context_provider(self, provider: Optional[Callable[[], Dict[str, int]]]) -> None:
+    def set_request_context_provider(self, provider: Optional[Callable[[Dict[str, int]], Dict[str, int]]]) -> None:
         self.request_context_provider = provider
-
-    def set_request_get_gpa_provider(self, provider: Optional[Callable[[], Optional[int]]]) -> None:
-        self.request_get_gpa_provider = provider
 
     def set_nemu_sync_hook(self, hook: Optional[Callable[..., None]]) -> None:
         self.nemu_sync_hook = hook
@@ -298,6 +287,7 @@ class PTWAgent:
         self,
         *,
         cycle: int,
+        raw_context: Dict[str, int],
         vpn: int,
         s2xlate: int,
         get_gpa: int,
@@ -307,7 +297,7 @@ class PTWAgent:
     ) -> PTWRequestSnapshot:
         context: Dict[str, int] = {}
         if self.request_context_provider is not None:
-            context = dict(self.request_context_provider() or {})
+            context = dict(self.request_context_provider(raw_context) or {})
         sequence_id = self.req_count + 1
         known_fields = {
             "sequence_id",
@@ -504,27 +494,25 @@ class PTWAgent:
         if self.interface is not None:
             self.interface.drive_idle()
 
-    def on_clock_edge(self, cycle: int) -> None:
+    def on_clock_edge(self, cycle: int, sampled: PTWAgentInputSnapshot) -> None:
         if self.interface is None:
             return
+        if sampled.cycle != int(cycle):
+            raise AssertionError("PTWAgent received a stale input snapshot")
 
         self.last_request_expectation = None
 
-        if self.flush_pending_on_sfence and self._read(self.interface.sfence_valid, 0) == 1:
+        if self.flush_pending_on_sfence and sampled.sfence_valid == 1:
             self._flush_pending(cycle)
 
         req_ready = self._compute_req_ready(cycle)
         self._write(self.interface.req_0_ready, req_ready)
 
-        req_valid = self._read(self.interface.req_0_valid, 0)
+        req_valid = sampled.req_valid
         if req_valid == 1 and req_ready == 1:
-            vpn = self._read(self.interface.req_0_bits_vpn, 0)
-            s2xlate = self._read(self.interface.req_0_bits_s2xlate, 0)
-            get_gpa = 0
-            if self.request_get_gpa_provider is not None:
-                internal_get_gpa = self.request_get_gpa_provider()
-                if internal_get_gpa is not None:
-                    get_gpa = int(internal_get_gpa)
+            vpn = sampled.req_vpn
+            s2xlate = sampled.req_s2xlate
+            get_gpa = sampled.req_get_gpa
             memidx_is_ld = 0
             memidx_is_st = 0
             memidx_idx = 0
@@ -540,9 +528,11 @@ class PTWAgent:
                     memidx_is_ld=memidx_is_ld,
                     memidx_is_st=memidx_is_st,
                     memidx_idx=memidx_idx,
+                    ptw_context=sampled.context,
                 )
             snapshot = self._build_request_snapshot(
                 cycle=cycle,
+                raw_context=sampled.context,
                 vpn=vpn,
                 s2xlate=s2xlate,
                 get_gpa=get_gpa,
@@ -627,7 +617,7 @@ class PTWAgent:
             "resp": dict(self.active_resp.resp),
         }
         self._drive_response(self.active_resp.resp, 1)
-        if self._read(self.interface.resp_ready, 1) == 1:
+        if sampled.resp_ready == 1:
             item = self.active_resp
             self.active_resp = None
             self.resp_count += 1

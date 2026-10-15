@@ -229,9 +229,6 @@ class FrontendEnv:
         self.uncache_agent.bind(self.uncache_if)
         self.ptw_agent.bind(self.ptw_if)
         self.ptw_agent.set_request_context_provider(self._build_ptw_request_context)
-        self.ptw_agent.set_request_get_gpa_provider(
-            lambda: read_internal_signal(self.dut, self.itlb_ptw_req_get_gpa_path)
-        )
         self.ptw_agent.set_nemu_sync_hook(self._sync_nemu_ptw_state)
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)
@@ -241,6 +238,7 @@ class FrontendEnv:
         self.monitor.bind_icache(self.icache_if)
         self.monitor.bind_uncache(self.uncache_if)
         self.monitor.bind_icache_control(self.icache_control_if)
+        self.monitor.bind_ptw_context(self.csr_ctrl_if)
         self.monitor.bind_dut(self.dut)
         self.monitor.bind_observation_interfaces(
             from_ftq_if=self.backend_from_ftq_if,
@@ -291,45 +289,33 @@ class FrontendEnv:
     def _compose_nemu_hgatp(mode: int, vmid: int, ppn: int) -> int:
         return ((int(mode) & 0xF) << 60) | ((int(vmid) & 0x3FFF) << 44) | (int(ppn) & ((1 << 44) - 1))
 
-    def _build_ptw_request_context(self) -> Dict[str, int]:
-        if self.ptw_if is None or self.csr_ctrl_if is None:
-            return {}
-        satp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_satp_mode, 0)
-        satp_asid = self._read(self.csr_ctrl_if.io_tlbCsr_satp_asid, 0)
-        satp_ppn = self._read(self.csr_ctrl_if.io_tlbCsr_satp_ppn, 0)
-        vsatp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, 0)
-        vsatp_asid = self._read(self.csr_ctrl_if.io_tlbCsr_vsatp_asid, 0)
-        vsatp_ppn = self._read(self.csr_ctrl_if.io_tlbCsr_vsatp_ppn, 0)
-        hgatp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, 0)
-        hgatp_vmid = self._read(self.csr_ctrl_if.io_tlbCsr_hgatp_vmid, 0)
-        hgatp_ppn = self._read(self.csr_ctrl_if.io_tlbCsr_hgatp_ppn, 0)
-        priv_virt = self._read(self.csr_ctrl_if.io_tlbCsr_priv_virt, 0)
+    def _build_ptw_request_context(self, raw_context: Dict[str, int]) -> Dict[str, int]:
+        satp_mode = raw_context["satp_mode"]
+        vsatp_mode = raw_context["vsatp_mode"]
+        hgatp_mode = raw_context["hgatp_mode"]
         satp_full = self._nemu_satp_override
         if satp_full is None:
-            satp_full = self._compose_nemu_satp(satp_mode, satp_asid, satp_ppn)
+            satp_full = self._compose_nemu_satp(satp_mode, raw_context["satp_asid"], raw_context["satp_ppn"])
         vsatp_full = self._nemu_vsatp_override
         if vsatp_full is None:
-            vsatp_full = self._compose_nemu_satp(vsatp_mode, vsatp_asid, vsatp_ppn)
+            vsatp_full = self._compose_nemu_satp(vsatp_mode, raw_context["vsatp_asid"], raw_context["vsatp_ppn"])
         hgatp_full = self._nemu_hgatp_override
         if hgatp_full is None:
-            hgatp_full = self._compose_nemu_hgatp(hgatp_mode, hgatp_vmid, hgatp_ppn)
+            hgatp_full = self._compose_nemu_hgatp(hgatp_mode, raw_context["hgatp_vmid"], raw_context["hgatp_ppn"])
         return {
-            "cycle": int(self.current_cycle),
-            "priv_imode": self._read(self.csr_ctrl_if.io_tlbCsr_priv_imode, 3),
-            "satp_mode": satp_mode,
-            "vsatp_mode": vsatp_mode,
-            "hgatp_mode": hgatp_mode,
-            "sfence_valid": self._read(self.ptw_if.sfence_valid, 0),
-            "sfence_bits_rs1": self._read(self.ptw_if.sfence_bits_rs1, 0),
-            "sfence_bits_rs2": self._read(self.ptw_if.sfence_bits_rs2, 0),
-            "sfence_bits_addr": self._read(self.ptw_if.sfence_bits_addr, 0),
-            "sfence_bits_id": self._read(self.ptw_if.sfence_bits_id, 0),
-            "sfence_bits_hv": self._read(self.ptw_if.sfence_bits_hv, 0),
-            "sfence_bits_hg": self._read(self.ptw_if.sfence_bits_hg, 0),
+            "cycle": raw_context["cycle"],
+            **{
+                key: raw_context[key]
+                for key in (
+                    "priv_imode", "satp_mode", "vsatp_mode", "hgatp_mode",
+                    "sfence_valid", "sfence_bits_rs1", "sfence_bits_rs2",
+                    "sfence_bits_addr", "sfence_bits_id", "sfence_bits_hv", "sfence_bits_hg",
+                )
+            },
             "satp": int(satp_full),
             "vsatp": int(vsatp_full),
             "hgatp": int(hgatp_full),
-            "virt": int(priv_virt),
+            "virt": int(raw_context["priv_virt"]),
         }
 
     def _get_nemu_sync_module(self) -> Any:
@@ -430,7 +416,7 @@ class FrontendEnv:
             )
         return entries
 
-    def _sync_nemu_ptw_state(self, **_request: Any) -> None:
+    def _sync_nemu_ptw_state(self, *, ptw_context: Dict[str, int], **_request: Any) -> None:
         if self.page_table.mode != "sv39" or self.csr_ctrl_if is None:
             self._clear_nemu_ptw_overrides()
             return
@@ -441,12 +427,12 @@ class FrontendEnv:
         stage1_entries = self._page_table_entries(self.page_table.pte_map)
         stage2_entries = self._page_table_entries(self.page_table.stage2_pte_map)
 
-        satp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_satp_mode, 0)
-        satp_asid = self._read(self.csr_ctrl_if.io_tlbCsr_satp_asid, 0)
-        vsatp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, 0)
-        vsatp_asid = self._read(self.csr_ctrl_if.io_tlbCsr_vsatp_asid, 0)
-        hgatp_mode = self._read(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, 0)
-        hgatp_vmid = self._read(self.csr_ctrl_if.io_tlbCsr_hgatp_vmid, 0)
+        satp_mode = ptw_context["satp_mode"]
+        satp_asid = ptw_context["satp_asid"]
+        vsatp_mode = ptw_context["vsatp_mode"]
+        vsatp_asid = ptw_context["vsatp_asid"]
+        hgatp_mode = ptw_context["hgatp_mode"]
+        hgatp_vmid = ptw_context["hgatp_vmid"]
 
         stage1_root_ppn = None
         if int(satp_mode) != 0 or int(vsatp_mode) != 0:
@@ -649,7 +635,8 @@ class FrontendEnv:
             uncache_request = self.monitor.capture_uncache_request(cycle)
             self.uncache_agent.on_clock_edge(cycle, uncache_request)
             ptw_flushes_before = int(self.ptw_agent.sfence_dropped_responses)
-            self.ptw_agent.on_clock_edge(cycle)
+            ptw_inputs = self.monitor.capture_ptw_agent_inputs(cycle)
+            self.ptw_agent.on_clock_edge(cycle, ptw_inputs)
             ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)
             if ptw_flushes_after > ptw_flushes_before:
                 self.translation_oracle.discard_pending_ptw_responses(
