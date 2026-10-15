@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from ..bundles.ptw import PTWBundle
 
@@ -14,16 +14,14 @@ class _BasePTWChecker:
         self.error_count = 0
         self.last_error: Optional[dict] = None
 
-    @staticmethod
-    def _read(signal: Any, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return int(default)
-
     def bind_env(self, env) -> None:
         self.env = env
+
+    def _sampled_ptw(self, cycle: int) -> dict:
+        snapshot = getattr(getattr(self.env, "monitor", None), "cycle_snapshot", None)
+        if snapshot is None or snapshot.cycle != int(cycle):
+            raise AssertionError("PTW checker requires a current FrontendMonitor snapshot")
+        return snapshot.ptw
 
     def set_event_sink(self, sink) -> None:
         self.event_sink = sink
@@ -60,36 +58,25 @@ class _BasePTWChecker:
 class PTWFullPpnChecker(_BasePTWChecker):
     def on_clock_edge(self, cycle: int) -> None:
         env = self.env
-        if env is None or getattr(env, "ptw_if", None) is None:
+        if env is None:
             return
-        ptw_if = env.ptw_if
-        snapshot = getattr(getattr(env, "monitor", None), "cycle_snapshot", None)
-        resp_valid = (
-            snapshot.ptw["resp_valid"]
-            if snapshot is not None and snapshot.cycle == int(cycle)
-            else self._read(ptw_if.resp_valid, 0)
-        )
-        if resp_valid != 1:
+        sampled_ptw = self._sampled_ptw(cycle)
+        if sampled_ptw["resp_valid"] != 1:
             return
         expected = getattr(env.ptw_agent, "get_last_drive_expectation", lambda: None)()
         if not expected:
             return
         resp = dict(expected.get("resp", {}))
-        sampled = snapshot.ptw["resp"] if snapshot is not None and snapshot.cycle == int(cycle) else None
+        sampled = sampled_ptw["resp"]
         self.checked_count += 1
         if int(resp.get("s1_entry_v", 0)) == 1 and int(resp.get("s1_entry_level", 0)) == 0:
             addr_low = int(resp.get("s1_addr_low", 0)) & 0x7
             expected_full_ppn = (
                 int(resp.get("s1_entry_ppn", 0)) << 3
             ) | (int(resp.get("s1_ppn_low", [0] * 8)[addr_low]) & 0x7)
-            if sampled is not None:
-                full_ppn = (
-                    int(sampled["s1_entry_ppn"]) << 3
-                ) | (int(sampled["s1_ppn_low"][addr_low]) & 0x7)
-            else:
-                full_ppn = (
-                    self._read(ptw_if.resp_bits_s1_entry_ppn) << 3
-                ) | (self._read(ptw_if.resp_bits_s1_ppn_low[addr_low]) & 0x7)
+            full_ppn = (
+                int(sampled["s1_entry_ppn"]) << 3
+            ) | (int(sampled["s1_ppn_low"][addr_low]) & 0x7)
             if full_ppn != expected_full_ppn:
                 self._record_error(
                     cycle,
@@ -113,14 +100,10 @@ class PTWRespInputChecker(_BasePTWChecker):
 
     def on_clock_edge(self, cycle: int) -> None:
         env = self.env
-        if env is None or getattr(env, "ptw_if", None) is None:
+        if env is None:
             return
-        ptw_if = env.ptw_if
-        monitor = getattr(env, "monitor", None)
-        snapshot = getattr(monitor, "cycle_snapshot", None)
-        sampled_ptw = snapshot.ptw if snapshot is not None and snapshot.cycle == int(cycle) else None
-        resp_valid = sampled_ptw["resp_valid"] if sampled_ptw is not None else self._read(ptw_if.resp_valid, 0)
-        if resp_valid != 1:
+        sampled_ptw = self._sampled_ptw(cycle)
+        if sampled_ptw["resp_valid"] != 1:
             return
         # The agent may consume active_resp in this same cycle when resp_ready
         # is high.  last_drive_expectation is the stable snapshot of the
@@ -132,23 +115,14 @@ class PTWRespInputChecker(_BasePTWChecker):
         mismatches = {}
         for signal_name in self._SCALAR_FIELDS:
             payload_key = signal_name.removeprefix("resp_bits_")
-            got = (
-                int(sampled_ptw["resp"][payload_key])
-                if sampled_ptw is not None
-                else self._read(getattr(ptw_if, signal_name), 0)
-            )
+            got = int(sampled_ptw["resp"][payload_key])
             exp = int(resp.get(payload_key, 0))
             if got != exp:
                 mismatches[payload_key] = {"expected": exp, "got": int(got)}
         for payload_key in self._ARRAY_FIELDS:
-            signals = getattr(ptw_if, f"resp_bits_{payload_key}")
             expected_values = resp.get(payload_key, [0] * 8)
-            for idx, signal in enumerate(signals):
-                got = (
-                    int(sampled_ptw["resp"][payload_key][idx])
-                    if sampled_ptw is not None
-                    else self._read(signal, 0)
-                )
+            for idx, value in enumerate(sampled_ptw["resp"][payload_key]):
+                got = int(value)
                 exp = int(expected_values[idx])
                 if got != exp:
                     mismatches[f"{payload_key}[{idx}]"] = {"expected": exp, "got": int(got)}

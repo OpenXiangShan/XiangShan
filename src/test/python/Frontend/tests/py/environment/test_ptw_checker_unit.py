@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
-from env.bundles.ptw import PTWBundle
 from env.checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
 from env.core.checkers import PTWFullPpnChecker as LegacyPTWFullPpnChecker
 from env.core.checkers import PTWRespInputChecker as LegacyPTWRespInputChecker
@@ -15,24 +12,6 @@ from env.runtime.dut_factory import FakeDUTFrontend
 def test_ptw_checkers_keep_legacy_imports() -> None:
     assert LegacyPTWFullPpnChecker is PTWFullPpnChecker
     assert LegacyPTWRespInputChecker is PTWRespInputChecker
-
-
-class _Signal:
-    def __init__(self, value: int = 0) -> None:
-        self.value = int(value)
-
-
-def _ptw_interface() -> SimpleNamespace:
-    interface = SimpleNamespace(**{
-        name: _Signal() for name in PTWBundle.SIGNAL_BINDINGS if name.startswith("resp_bits_")
-    })
-    interface.resp_valid = _Signal(1)
-    interface.resp_ready = _Signal(1)
-    for name in ("s1_ppn_low", "s1_valididx", "s1_pteidx"):
-        setattr(interface, f"resp_bits_{name}", [_Signal() for _ in range(8)])
-    for name, value in _response().items():
-        getattr(interface, f"resp_bits_{name}").value = value
-    return interface
 
 
 def _response() -> dict:
@@ -49,26 +28,22 @@ def _response() -> dict:
     }
 
 
-def _checker(*, ready: int, response: dict, events: list) -> PTWRespInputChecker:
-    interface = _ptw_interface()
-    interface.resp_ready.value = int(ready)
-    env = SimpleNamespace(
-        ptw_if=interface,
-        ptw_agent=SimpleNamespace(
-            # active_resp has already been consumed on a ready handshake.
-            get_active_drive_expectation=lambda: None,
-            get_last_drive_expectation=lambda: {"resp": dict(response)},
-        ),
-    )
-    checker = PTWRespInputChecker()
-    checker.bind_env(env)
+def _checker(*, cycle: int, ready: int, response: dict, events: list) -> PTWRespInputChecker:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    env.ptw_if.resp_valid.value = 1
+    env.ptw_if.resp_ready.value = int(ready)
+    for name, value in _response().items():
+        getattr(env.ptw_if, f"resp_bits_{name}").value = value
+    env.ptw_agent.last_drive_expectation = {"resp": dict(response)}
+    env.monitor.capture_cycle_observation(cycle)
+    checker = env.ptw_resp_input_checker
     checker.set_event_sink(events.append)
     return checker
 
 
 def test_ptw_response_checker_checks_ready_handshake_snapshot() -> None:
     events: list[dict] = []
-    checker = _checker(ready=1, response=_response(), events=events)
+    checker = _checker(cycle=17, ready=1, response=_response(), events=events)
 
     checker.on_clock_edge(17)
 
@@ -82,7 +57,7 @@ def test_ptw_response_checker_checks_ready_handshake_snapshot() -> None:
 
 def test_ptw_response_checker_checks_blocked_response_snapshot() -> None:
     events: list[dict] = []
-    checker = _checker(ready=0, response=_response(), events=events)
+    checker = _checker(cycle=18, ready=0, response=_response(), events=events)
 
     checker.on_clock_edge(18)
 
@@ -94,7 +69,7 @@ def test_ptw_response_checker_reports_payload_mismatch_as_error() -> None:
     events: list[dict] = []
     response = _response()
     response["s1_entry_ppn"] = 0x456
-    checker = _checker(ready=1, response=response, events=events)
+    checker = _checker(cycle=19, ready=1, response=response, events=events)
 
     with pytest.raises(AssertionError, match="PTW response input mismatch cycle=19 cursor=None"):
         checker.on_clock_edge(19)
@@ -113,7 +88,7 @@ def test_ptw_response_checker_catches_array_payload_mismatch() -> None:
     events: list[dict] = []
     response = _response()
     response["s1_ppn_low"] = [0, 0, 0, 7, 0, 0, 0, 0]
-    checker = _checker(ready=0, response=response, events=events)
+    checker = _checker(cycle=20, ready=0, response=response, events=events)
 
     with pytest.raises(AssertionError, match="PTW response input mismatch cycle=20"):
         checker.on_clock_edge(20)
@@ -121,6 +96,19 @@ def test_ptw_response_checker_catches_array_payload_mismatch() -> None:
     assert checker.get_stats()["last_error"]["details"] == {
         "s1_ppn_low[3]": {"expected": 7, "got": 0}
     }
+
+
+@pytest.mark.parametrize("checker_name", ["ptw_full_ppn_checker", "ptw_resp_input_checker"])
+def test_ptw_checker_requires_current_monitor_snapshot(checker_name: str) -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    checker = getattr(env, checker_name)
+
+    with pytest.raises(AssertionError, match="current FrontendMonitor snapshot"):
+        checker.on_clock_edge(21)
+
+    env.monitor.capture_cycle_observation(20)
+    with pytest.raises(AssertionError, match="current FrontendMonitor snapshot"):
+        checker.on_clock_edge(21)
 
 
 @pytest.mark.parametrize("ready", [0, 1])
