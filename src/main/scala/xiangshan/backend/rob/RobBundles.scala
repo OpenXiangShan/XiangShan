@@ -131,7 +131,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
     val needVTB = Bool()
-    val teaPsv = Vec(2, UInt(xiangshan.TeaEvent.width.W))
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // Preserve the former slot's exact trace metadata so a latter-slot squash
@@ -206,16 +205,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
     // debug_end
 
-  }
-
-  def collectTeaPsvBySlot(valid: Seq[Bool], isFormer: Seq[Bool], psv: Seq[UInt]): Vec[UInt] = {
-    require(valid.length == isFormer.length && valid.length == psv.length)
-    VecInit((0 until 2).map { slot =>
-      val slotIsFormer = (slot == 0).B
-      valid.indices.foldLeft(xiangshan.TeaPsvOps.empty) { case (acc, i) =>
-        acc | Mux(valid(i) && isFormer(i) === slotIsFormer, psv(i), xiangshan.TeaPsvOps.empty)
-      }
-    })
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
