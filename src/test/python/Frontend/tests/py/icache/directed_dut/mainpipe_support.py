@@ -6,14 +6,14 @@ from collections.abc import Callable, Sequence
 
 from env.core.transactions import CommitTarget
 from env.runtime.frontend_init import (
-    ConfigureAgent,
-    FrontendInitConfig,
     LoadProgram,
     ProgramImage,
     initialize_frontend,
     run_initialization_steps,
 )
 from env.sequences import RunUntilCommitSequence
+
+from .init_plans import make_cacheable_init_config
 
 from .programs import (
     BPU_TRAINING_BASE,
@@ -253,31 +253,9 @@ def warmup_commits(env, target_count: int = 4, max_cycles: int = 3000) -> int:
 def initialize_cacheable_stream(
     env, base: int, *, latency: int, samples: list[dict] | None = None
 ) -> list[dict]:
-    load_nops(env, int(base))
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": int(latency),
-                    "miss_latency": int(latency),
-                    "miss_rate": 1.0,
-                    "seed": 0x6219,
-                },
-            ),
-        ),
-    )
+    """Compatibility entry; keep observer registration explicit in new tests."""
     observed = samples if samples is not None else register_mainpipe_observer(env)
     initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=int(base),
-            bare_mode=True,
-            reset_cycles=20,
-        ),
+        env, make_cacheable_init_config(env.config, base, latency=latency)
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(int(base))
     return observed

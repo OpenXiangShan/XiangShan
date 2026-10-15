@@ -272,7 +272,13 @@ def test_bpu_stream_loads_before_reset_and_configures_icache_after_warmup(monkey
     assert env.current_cycle == 24
     assert [reset for reset, _, _ in samples] == [1] * 20 + [0] * 4
     assert all(word == 0x0001 and latency == 20 for _, word, latency in samples)
-    assert env.init_result.completed and env.init_result.end_cycle == 21
+    # Initialization now includes the warmup, so its record covers all 24 cycles.
+    assert env.init_result.completed and env.init_result.end_cycle == 24
+    assert env.init_result.program_bytes == 512
+    training = next(
+        step for step in env.init_result.steps if step.operation == "WarmBpuTraining"
+    )
+    assert (training.start_cycle, training.end_cycle) == (21, 24)
     assert env.monitor.expected_pc == 0x80000000
     assert env.icache_agent.hit_latency == 1
     assert env.icache_agent.miss_latency == 32

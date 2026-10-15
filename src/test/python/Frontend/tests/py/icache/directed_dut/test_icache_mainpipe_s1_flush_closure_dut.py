@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from env.runtime.frontend_init import (
     FrontendInitConfig,
+    initialize_frontend,
 )
 
 import os
@@ -16,16 +17,20 @@ from env.funcov.py.icache.flush_from_bpu import (
     ftq_ptr_matches_or_before,
     ftq_ptr_is_strictly_after_current,
 )
-from tests.py.icache.directed_dut.mainpipe_support import (
-    initialize_cacheable_stream as _initialize_cacheable_stream,
-)
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
-    initialize_bpu_s3_stream,
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
     trigger_bpu_s3_flush,
     wait_until,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_bpu_s3_init_config,
+    make_cacheable_init_config,
+)
+from tests.py.icache.directed_dut.mainpipe_support import (
+    register_mainpipe_observer,
 )
 
 
@@ -408,7 +413,7 @@ def _drive_bpu_s3_until_s2_hit(
 @pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
 def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=1))
 
     attempts = _cycle_limit("TB_ICACHE_S1_GLOBAL_FLUSH_HIT_ATTEMPTS", 48)
     for attempt in range(attempts):
@@ -453,7 +458,7 @@ def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
 @pytest.mark.funcov_bins("BIN-769")
 def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=48, samples=samples)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=48))
 
     _run_until(
         env,
@@ -480,7 +485,7 @@ def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
 def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples = _register_s1_observer(env)
-    initialize_bpu_s3_stream(env, seed=0x6617)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config, seed=26135))
     _drive_bpu_s3_until_s1_hit(
         env,
         "bpu_miss_keeps_s1",
@@ -501,7 +506,8 @@ def _run_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
 )
 @pytest.mark.funcov_bins("BIN-620")
 def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
-    _initialize_cacheable_stream(env, _BASE, latency=64)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=64))
 
     _run_until(
         env,
@@ -544,7 +550,7 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
 @pytest.mark.funcov_bins("BIN-621", "BIN-706")
 def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=1))
 
     attempts = _cycle_limit("TB_ICACHE_S1_REFILL_RACE_ATTEMPTS", 64)
     for attempt in range(attempts):
@@ -589,7 +595,7 @@ def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
 @pytest.mark.funcov_bins("BIN-675")
 def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=32, samples=samples)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=32))
 
     attempts = _cycle_limit("TB_ICACHE_S1_REGISTERED_REFILL_FLUSH_ATTEMPTS", 64)
     for attempt in range(attempts):
@@ -625,7 +631,7 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
 @pytest.mark.funcov_bins("BIN-645")
 def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=1))
 
     attempts = _cycle_limit("TB_ICACHE_S2_GLOBAL_FLUSH_ATTEMPTS", 64)
     for attempt in range(attempts):
@@ -673,7 +679,7 @@ def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
 @pytest.mark.funcov_bins("BIN-776")
 def test_tc_icache_mainpipe_bpu_s3_keeps_s2(env) -> None:
     samples = _register_s1_observer(env)
-    initialize_bpu_s3_stream(env, seed=0x6617)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config, seed=26135))
     _drive_bpu_s3_until_s2_hit(
         env,
         samples,

@@ -13,21 +13,63 @@ follow in this order when practical:
 The generic DUT layer at `tests/py/support/dut_support.py` owns cycle-limit
 parsing, ordered DUT signal lookup, and bounded polling/waits. It has no
 dependency on ICache or coverage. This directory's `support.py` adds coverage
-waits, soft-prefetch operations, predictor controls, and BPU stream operations.
+waits, soft-prefetch operations, and runtime predictor controls.
 `programs.py` owns instruction encoders, program layouts, and address constants.
-`mainpipe_support.py` owns cacheable startup, shared MainPipe observations, and
-dual-fetch transaction evidence. `refill_scenarios.py`, `branch_scenarios.py`,
+`init_plans.py` owns ICache startup plans and startup-specific steps.
+`mainpipe_support.py` owns shared MainPipe observations and dual-fetch
+transaction evidence. `refill_scenarios.py`, `branch_scenarios.py`,
 and `protection_scenarios.py` own the reusable execution flows and their
 behavior checks. Test modules keep their pytest parameters, coverage targets,
 scenario-specific sampling, stimulus timing, timeout evidence, and assertions.
 
-The shared BPU s3 stream is owned by `support.py` and `programs.py`, including
-its instruction generator, FTQ observation aliases, and bounded training wait.
-It loads through `run_initialization_steps` and starts through
-`initialize_frontend`. Loading/reset and warmup also have separate entry points
-for scenarios that configure agents between those operations.
-Keep the load/reset/warmup/agent-configuration order and training predicates
-when changing this stream.
+All explicit startup uses `env.runtime.frontend_init.initialize_frontend` with
+a plan from `init_plans.py`. Plan factories only construct configuration: they
+do not receive an env, access the DUT, register observers, or advance time.
+The common executor owns `before_reset`, `before_release`, and `after_reset`,
+and records each step's phase and start/end cycle in `env.init_result.steps`.
+Initialization results include post-reset warmup cycles and warmup failures.
+
+```python
+import pytest
+
+from env.runtime.frontend_init import FrontendInitConfig, initialize_frontend
+from tests.py.icache.directed_dut.init_plans import make_bpu_s3_init_config
+
+@pytest.mark.parametrize(
+    "frontend_init_config", [FrontendInitConfig(defer=True)], indirect=True
+)
+def test_example(env):
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
+    # Register observers at the scenario's required sampling boundary.
+    # Apply stimulus, wait for behavior, and assert the coverage evidence.
+```
+
+`make_cacheable_init_config`, `make_nop_init_config`, `make_dual_refill_init_config`,
+`make_missunit_init_config`, and `make_sv39_init_config` select the other shared
+startup flows. Use `make_program_init_config` for scenario-owned images and
+agent parameters. Its default `after_reset` explicitly clears the monitor and
+sets the expected PC; pass `after_reset=()` to preserve existing evidence, or
+provide an ordered tuple for a different post-reset sequence. The generic
+`initialize_frontend` itself still preserves errors and accumulated coverage.
+
+BPU program layout belongs to `programs.py`; its FTQ observation aliases and
+bounded training predicate belong to `WarmBpuTraining` in `init_plans.py`.
+`make_bpu_training_init_config` supports load/reset alone or `warmup=True`.
+`make_bpu_s3_init_config` warms before reconfiguring ICache and enabling the
+predictors. Keep this order and the existing training predicates.
+
+Runtime program loads, translation changes, agent reconfiguration and retraining
+continue to use `run_initialization_steps`; they must not add a hardware reset.
+Legacy startup helpers in `support.py` and `mainpipe_support.py` are thin
+compatibility wrappers around the plans. New scenarios call the common executor
+explicitly and keep observer registration separate from startup configuration.
+
+Existing fixture defaults and per-test `defer` markers are preserved. A test
+already using fixture startup must retain that boundary during this migration;
+removing an extra startup is a separate behavior change requiring DUT validation.
+Do not make this directory deferred by default while existing tests rely on
+fixture startup followed by runtime-only loading. Preserve observer boundaries
+and loader-specific `step_cycles`, including the one-cycle NOP loader.
 
 Keep the dependency direction as `test scenario -> local ICache support ->
 shared environment/generic DUT support`. Do not import test modules from

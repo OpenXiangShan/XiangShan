@@ -133,3 +133,48 @@ def build_dual_fetch_program() -> bytes:
 
 def build_nop_program(words: int = 256) -> bytes:
     return NOP.to_bytes(4, "little") * int(words)
+
+
+def build_fetch_loop_program(*, target_offset: int) -> bytes:
+    payload = bytearray(build_nop_program(64))
+    if target_offset:
+        payload[0:4] = encode_jal(0, target_offset).to_bytes(4, "little")
+    for index in range(7):
+        offset = int(target_offset) + index * 4
+        payload[offset : offset + 4] = NOP.to_bytes(4, "little")
+    tail = int(target_offset) + 7 * 4
+    payload[tail : tail + 4] = encode_jal(0, -7 * 4).to_bytes(4, "little")
+    return bytes(payload)
+
+
+def build_overlap2_program() -> bytes:
+    # Entry at +0x60 reaches B at +0x30; B returns to A at +0x50.
+    payload = bytearray(CNOP.to_bytes(2, "little") * 128)
+    payload[0x50:0x52] = encode_c_j(0x10).to_bytes(2, "little")
+    payload[0x70:0x72] = encode_c_j(-0x40).to_bytes(2, "little")
+    return bytes(payload)
+
+
+def build_idle_loop_program() -> bytes:
+    return encode_jal(0, 0).to_bytes(4, "little") + build_nop_program(255)
+
+
+def build_same_set_jump_program(
+    base: int, *, stride: int, line_count: int, segment_lines: int = 8
+) -> bytes:
+    targets = tuple(int(base) + index * int(stride) for index in range(line_count))
+    payload = bytearray(build_nop_program(32768))
+    for index, target in enumerate(targets):
+        branch = target + int(segment_lines) * 64 - 4
+        offset = branch - int(base)
+        payload[offset : offset + 4] = encode_jal(
+            0, targets[(index + 1) % len(targets)] - branch
+        ).to_bytes(4, "little")
+    return bytes(payload)
+
+
+def build_cross_line_probe_program() -> bytes:
+    payload = bytearray(CNOP.to_bytes(2, "little") * 128)
+    # A 32-bit NOP at byte 62 makes the fetch at +0x20 span two cachelines.
+    payload[62:66] = NOP.to_bytes(4, "little")
+    return bytes(payload)

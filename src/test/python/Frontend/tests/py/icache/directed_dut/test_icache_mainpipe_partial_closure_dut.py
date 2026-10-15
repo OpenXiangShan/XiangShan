@@ -7,25 +7,24 @@ modules and use the shared Frontend environment interfaces.
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
-    ConfigureAgent,
     FrontendInitConfig,
     initialize_frontend,
-    run_initialization_steps,
 )
 
 import os
 from collections.abc import Callable
 
 import pytest
-from tests.py.icache.directed_dut.support import cycle_limit as _cycle_limit, wait_until
+from tests.py.icache.directed_dut.support import (
+    cycle_limit as _cycle_limit,
+    wait_until,
+)
 
 from tests.py.icache.directed_dut.mainpipe_support import (
     CACHEABLE_BASE as _BASE,
-    DUAL_FETCH_BASE as _DUAL_BASE,
     completed_dual_transactions as _completed_dual_transactions,
-    initialize_cacheable_stream as _initialize_cacheable_stream,
-    load_two_fetch_loop as _load_two_fetch_loop,
     register_mainpipe_observer as _register_mainpipe_observer,
+    register_mainpipe_observer,
 )
 from tests.py.icache.directed_dut.protection_scenarios import (
     run_cross_page_pma_path as _run_cross_page_pma_path,
@@ -33,6 +32,13 @@ from tests.py.icache.directed_dut.protection_scenarios import (
     run_sector_lane_refill as _run_sector_lane_refill,
     run_cacheable_pending_redirect_to_pbmt_nc as _run_pbmt_nc_redirect,
 )
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_cacheable_init_config,
+    make_dual_refill_init_config,
+)
+
+
 pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1",
     reason="requires compiled DUT",
@@ -76,7 +82,8 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
 @pytest.mark.funcov_bins("BIN-624", "BIN-636", "BIN-715", "BIN-1009")
 def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
     env.icache_agent.inject_response_fault_at(_BASE, **fault)
-    _initialize_cacheable_stream(env, _BASE, latency=12)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=12))
 
     _wait_hit(env, "icache_mainpipe_s1_refill", "corrupt_refill_saved")
     _wait_hit(env, "icache_mainpipe_s1_protection", "tl_error_to_exception")
@@ -94,27 +101,7 @@ def test_tc_icache_mainpipe_fault_refill_dut(env, fault, refill_bin) -> None:
 @pytest.mark.funcov_bins("BIN-626")
 def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     samples = _register_mainpipe_observer(env)
-    _load_two_fetch_loop(env, _DUAL_BASE)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 8, "miss_latency": 8, "miss_rate": 1.0, "seed": 0x2524},
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=_DUAL_BASE,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_DUAL_BASE)
+    initialize_frontend(env, make_dual_refill_init_config(env.config, seed=9508))
 
     _run_until(
         env,

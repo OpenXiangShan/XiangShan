@@ -11,6 +11,7 @@ from env.core.transactions import ProgramImage
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.runtime.frontend_init import (
+    ClearMonitor,
     ConfigureAgent,
     FrontendInitConfig,
     InitCallback,
@@ -20,6 +21,8 @@ from env.runtime.frontend_init import (
     MapPage,
     PrepareTranslationScenario,
     SetMemoryRegion,
+    SetBpCtrl,
+    SetExpectedPc,
     WritePma,
     WritePmp,
     initialize_frontend,
@@ -200,6 +203,35 @@ def test_initialization_failure_preserves_original_exception_and_partial_result(
     assert env.init_result.completed is False
     assert env.init_result.program_bytes == 0
     assert env.init_result.steps[-1].phase == "after_reset"
+
+
+def test_monitor_clearing_and_predictor_controls_are_explicit_recorded_steps():
+    env = _env()
+    env.monitor.errors.append({"kind": "retained_until_requested"})
+    env.functional_coverage = {"existing_hit": True}
+    result = initialize_frontend(
+        env,
+        FrontendInitConfig(
+            reset_cycles=0,
+            after_reset=(
+                ClearMonitor(),
+                SetExpectedPc(0x80001000),
+                SetBpCtrl(ubtb_enable=0, abtb_enable=0, mbtb_enable=1),
+            ),
+        ),
+    )
+    assert env.get_errors() == []
+    assert env.functional_coverage == {"existing_hit": True}
+    assert env.monitor.expected_pc == 0x80001000
+    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable.value == 0
+    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_abtbEnable.value == 0
+    assert env.csr_ctrl_if.io_csrCtrl_bp_ctrl_mbtbEnable.value == 1
+    assert [step.operation for step in result.steps] == [
+        "ClearMonitor",
+        "SetExpectedPc",
+        "SetBpCtrl",
+    ]
+    assert result.end_cycle - result.start_cycle == 1
 
 
 def test_legacy_load_apis_preserve_return_values_cursor_and_cycle_timing(tmp_path):

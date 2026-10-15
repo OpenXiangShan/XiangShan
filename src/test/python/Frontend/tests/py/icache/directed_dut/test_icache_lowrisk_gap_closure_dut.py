@@ -14,6 +14,8 @@ from env.runtime.frontend_init import (
     ProgramImage,
     initialize_frontend,
     run_initialization_steps,
+    ClearMonitor,
+    SetExpectedPc,
 )
 
 
@@ -39,18 +41,27 @@ from tests.py.icache.directed_dut.support import (
     wait_coverage_hits,
     wait_until,
 )
-from tests.py.icache.directed_dut.mainpipe_support import (
-    initialize_cacheable_stream as _initialize_cacheable_stream,
-)
 from tests.py.icache.directed_dut.refill_scenarios import (
     run_asymmetric_dual_refill as _run_asymmetric_refill,
 )
-from tests.py.icache.directed_dut.support import (
-    load_and_reset_bpu_training_stream as _load_two_fetch_loop,
-    warm_bpu_training_stream as _warm_two_fetch_execution,
-)
 from tests.py.icache.directed_dut.programs import (
     build_bpu_training_program as _trained_short_block_loop,
+    build_cross_line_probe_program,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    WarmBpuTraining,
+    make_bpu_training_init_config,
+    make_cacheable_init_config,
+    SetBackendCanAccept,
+    SetIcachePrefetch,
+    make_nop_init_config,
+    make_mixed_sources_init_config,
+    make_same_set_jump_init_config,
+    make_trained_loop_init_config,
+)
+from tests.py.icache.directed_dut.mainpipe_support import (
+    register_mainpipe_observer,
 )
 
 
@@ -253,22 +264,6 @@ def _load_nops(env, base: int, *, words: int = 512) -> None:
     )
 
 
-def _load_idle_loop(env, base: int) -> None:
-    """Keep the reset-vector stream in one line while the directed probe runs."""
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=_jal(0, 0).to_bytes(4, "little")
-                    + _NOP.to_bytes(4, "little") * 255,
-                    base_addr=int(base),
-                )
-            ),
-        ),
-    )
-
-
 def _jal(rd: int, offset: int) -> int:
     """Encode a JAL whose signed immediate is within the architectural range."""
     assert int(offset) % 2 == 0
@@ -282,28 +277,6 @@ def _jal(rd: int, offset: int) -> int:
         | ((int(rd) & 0x1F) << 7)
         | 0x6F
     )
-
-
-def _load_same_set_jump_loop(
-    env,
-    base: int,
-    *,
-    stride: int,
-    line_count: int,
-    segment_lines: int = 8,
-) -> tuple[int, ...]:
-    """Load sequential segments whose anchors share one set and JAL in a loop."""
-    targets = tuple(int(base) + index * int(stride) for index in range(line_count))
-    payload = bytearray((_NOP.to_bytes(4, "little")) * 32768)
-    for index, target in enumerate(targets):
-        next_target = targets[(index + 1) % len(targets)]
-        branch = target + int(segment_lines) * 64 - 4
-        offset = branch - int(base)
-        payload[offset : offset + 4] = _jal(0, next_target - branch).to_bytes(4, "little")
-    run_initialization_steps(
-        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
-    )
-    return targets
 
 
 def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
@@ -624,7 +597,8 @@ def lowrisk_cleanup(env):
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000
     redirect = base + 0x100
-    _initialize_cacheable_stream(env, base, latency=32)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, base, latency=32))
 
     _run_until(
         env,
@@ -666,29 +640,12 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
 def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=512)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 32,
-                    "miss_rate": 1.0,
-                    "seed": 0x6255,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=32, seed=0x6255, words=512
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
 
     for layout in (
         (base + 0x100, base + 0x180),
@@ -725,8 +682,7 @@ def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
         "missing_sampler_domains": missing_domains,
         "required_configuration": "TB_FUNCOV_SAMPLER_DOMAINS=all",
     }
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
+    initialize_frontend(env, make_bpu_training_init_config(env.config, warmup=True))
 
     _wait_funcov_hit(
         env,
@@ -785,29 +741,17 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
     base = 0x8008_0000
     target = base + 0x08
 
-    _load_nops(env, base, words=512)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 16,
-                    "miss_rate": 1.0,
-                    "seed": 0x6610,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=target, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config,
+            base=int(base),
+            reset_vector=target,
+            latency=16,
+            seed=0x6610,
+            words=512,
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(target)
 
     _run_until(
         env,
@@ -870,7 +814,8 @@ def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
 def _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _initialize_cacheable_stream(env, base, latency=96)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, base, latency=96))
 
     _run_until(
         env,
@@ -897,24 +842,12 @@ def _run_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8006_0000
-    _load_nops(env, base, words=8192)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 1, "miss_latency": 24, "miss_rate": 1.0, "seed": 0x746},
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=24, seed=0x746, words=8192
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     env.step(32)
     env.backend_model.inject_redirect(base + 0x400, "ctrl_redirect", delay_cycles=0)
     _wait_funcov_hit(
@@ -941,8 +874,7 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     """Build normal WayLookup entries, then exercise read-side backpressure."""
     env = lowrisk_cleanup
-    _load_two_fetch_loop(env)
-    _warm_two_fetch_execution(env)
+    initialize_frontend(env, make_bpu_training_init_config(env.config, warmup=True))
 
     _wait_waylookup_occupancy(env, 2, max_cycles=4096)
     _wait_funcov_hits(
@@ -1020,29 +952,13 @@ def test_icache_waylookup_same_way_new_tag_update_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8060_0000
     same_set_stride = 0x4000
-    loop_targets = _load_same_set_jump_loop(
-        env,
-        base,
-        stride=same_set_stride,
-        line_count=4,
-    )
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 1, "miss_latency": 48, "miss_rate": 1.0, "seed": 0x731},
-            ),
-        ),
-    )
+    loop_targets = tuple(base + index * same_set_stride for index in range(4))
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_same_set_jump_init_config(
+            env.config, base, stride=same_set_stride, line_count=4
         ),
     )
-    _set_predictors(env, True)
-    env.backend_model.set_can_accept(1)
 
     # Fill the four ways with normal demand fetches.  Besides giving the SRAM
     # checker-valid instruction data, repeated execution trains all four JAL
@@ -1176,24 +1092,12 @@ def test_icache_waylookup_update_priority_over_write_dut(lowrisk_cleanup) -> Non
     """Update wins over a pending write, which resumes after the update."""
     env = lowrisk_cleanup
     base = 0x8070_0000
-    _load_nops(env, base, words=32768)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 1, "miss_latency": 32, "miss_rate": 1.0, "seed": 0x734},
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=32, seed=0x734, words=32768
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     _wait_funcov_hit(
         env,
         "icache_waylookup_update",
@@ -1212,24 +1116,12 @@ def test_icache_waylookup_flush_wins_write_dut(lowrisk_cleanup) -> None:
     """Flush immediately after an accepted write and discard the old entry."""
     env = lowrisk_cleanup
     base = 0x8080_0000
-    _load_nops(env, base, words=32768)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 1, "miss_latency": 24, "miss_rate": 1.0, "seed": 0x744},
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=24, seed=0x744, words=32768
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     _run_until(
         env,
         lambda: (
@@ -1284,7 +1176,8 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
         s1_pf=1,
         expected_result="page_fault",
     )
-    _initialize_cacheable_stream(env, pa, latency=24)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, pa, latency=24))
     _run_until(
         env,
         lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
@@ -1420,7 +1313,8 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
             ),
         ),
     )
-    _initialize_cacheable_stream(env, pa, latency=24)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, pa, latency=24))
     _run_until(
         env,
         lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
@@ -1473,24 +1367,12 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     # prefetches. Software prefetches are intentionally not driven because
     # PrefetchPipe excludes them from WayLookup writes.
     base = 0x8000_0000
-    _load_nops(env, base, words=4096)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 1, "miss_latency": 32, "miss_rate": 1.0, "seed": 0x680},
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=32, seed=0x680, words=4096
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
 
     env.backend_model.set_can_accept(0)
@@ -1535,36 +1417,9 @@ def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
     """Fill adjacent lines, then let the normal sequential stream exercise clean hits."""
     env = lowrisk_cleanup
     base = 0x800A_0000
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(payload=_trained_short_block_loop(), base_addr=base)
-            ),
-        ),
-    )
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 24,
-                    "miss_rate": 1.0,
-                    "seed": 0x6275,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
-        ),
+        env, make_trained_loop_init_config(env.config, base, seed=0x6275, warmup=False)
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     _run_until(
         env,
         lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 4,
@@ -1605,37 +1460,9 @@ def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
     """Train the existing two-fetch loop with both requested lines resident."""
     env = lowrisk_cleanup
     base = 0x8000_0000
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(payload=_trained_short_block_loop(), base_addr=base)
-            ),
-        ),
-    )
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 24,
-                    "miss_rate": 1.0,
-                    "seed": 0x6276,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
-        ),
+        env, make_trained_loop_init_config(env.config, base, seed=0x6276, warmup=True)
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
-    _warm_two_fetch_execution(env)
     run_initialization_steps(
         env,
         (
@@ -1667,34 +1494,25 @@ def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=32768)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 32,
-                    "miss_rate": 1.0,
-                    "seed": 0x6276,
-                },
-            ),
-        ),
-    )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
-        ),
-    )
     # Keep the first FTQ context live throughout the directed redirects.  This
     # prevents the synthetic redirect from selecting a committed FTQ context
     # while the ICache is deliberately stalled on refills.
-    env.backend_model.set_can_accept(0)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
+    initialize_frontend(
+        env,
+        make_nop_init_config(
+            env.config,
+            base=int(base),
+            latency=32,
+            seed=0x6276,
+            words=32768,
+            before_reset=(SetIcachePrefetch(bool(0)),),
+            after_reset=(
+                SetBackendCanAccept(bool(0)),
+                ClearMonitor(),
+                SetExpectedPc(base),
+            ),
+        ),
+    )
 
     target = base + 0x100
     # A sequential NOP stream can produce unrelated refills while the redirect
@@ -1810,7 +1628,7 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(loop_base)
     env.backend_model.inject_redirect(loop_base, "ctrl_redirect", delay_cycles=0)
-    _warm_two_fetch_execution(env)
+    run_initialization_steps(env, (WarmBpuTraining(),))
     trained_commit_count = int(env.backend_model.get_stats().get("commit_count", 0))
     _run_until(
         env,
@@ -1868,42 +1686,11 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     idle_base = 0x8000_0000
     target = 0x80A0_0000
-    _load_idle_loop(env, idle_base)
-    payload = bytearray((0x0001).to_bytes(2, "little") * 128)
-    # A 32-bit NOP beginning at byte 62 forces the fetch block at +0x20 to
-    # consume bytes from both cachelines.
-    payload[62:66] = _NOP.to_bytes(4, "little")
-    run_initialization_steps(
-        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=target)),)
-    )
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 48,
-                    "miss_rate": 1.0,
-                    "seed": 0x1139,
-                },
-            ),
-        ),
-    )
+    payload = build_cross_line_probe_program()
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=idle_base,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
+        make_mixed_sources_init_config(env.config, idle_base=idle_base, target=target),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(idle_base)
-    _set_predictors(env, False)
-    env.backend_model.set_can_accept(0)
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
     # Every ICache data-bank SRAM clears one set per cycle after reset.  A
     # refill accepted during that 256-cycle sweep can update metadata while
     # its data write is superseded by the SRAM's reset write.  Keep this
@@ -2005,29 +1792,10 @@ def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
     """Refetch a completed line so the hit-path sampler sees a real SRAM hit."""
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=256)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 32,
-                    "miss_rate": 1.0,
-                    "seed": 0x6277,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
-        ),
+        make_nop_init_config(env.config, base=int(base), latency=32, seed=0x6277),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
     initial_resp_line_count = int(env.icache_agent.get_stats()["resp_line_count"])
 
     _run_until(
@@ -2077,29 +1845,12 @@ def test_ifu_cacheable_backend_redirect_blocks_pending_response(lowrisk_cleanup)
     """Align a real backend redirect with an in-flight ICache-to-IFU response."""
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=512)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 32,
-                    "miss_rate": 1.0,
-                    "seed": 0x6278,
-                },
-            ),
-        ),
-    )
     initialize_frontend(
         env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
+        make_nop_init_config(
+            env.config, base=int(base), latency=32, seed=0x6278, words=512
         ),
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
 
     for attempt in range(48):
         for _ in range(4096):

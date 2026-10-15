@@ -5,8 +5,6 @@ from __future__ import annotations
 from env.runtime.frontend_init import (
     ConfigureAgent,
     FrontendInitConfig,
-    LoadProgram,
-    ProgramImage,
     initialize_frontend,
     run_initialization_steps,
 )
@@ -44,6 +42,10 @@ _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 
 from env.funcov.py.icache.signal_contract import (
     TO_IFU_MAP, TO_IFU_READY, TO_IFU_VALID, half_aligned_cross_line,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_fetch_loop_init_config,
 )
 
 
@@ -202,57 +204,13 @@ def _jal(rd: int, offset: int) -> int:
     )
 
 
-def _load_fetch_loop(env, base: int, *, target_offset: int) -> int:
-    target = int(base) + int(target_offset)
-    payload = bytearray((_NOP.to_bytes(4, "little")) * 64)
-    if target_offset:
-        payload[0:4] = _jal(0, target_offset).to_bytes(4, "little")
-    for index in range(7):
-        offset = int(target_offset) + index * 4
-        payload[offset : offset + 4] = _NOP.to_bytes(4, "little")
-    tail = int(target_offset) + 7 * 4
-    payload[tail : tail + 4] = _jal(0, -7 * 4).to_bytes(4, "little")
-    run_initialization_steps(
-        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
-    )
-    return target
-
-
-def _initialize_loop(env, base: int, *, target_offset: int, latency: int) -> list[dict[str, int]]:
-    target = _load_fetch_loop(env, int(base), target_offset=int(target_offset))
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": int(latency),
-                    "miss_latency": int(latency),
-                    "miss_rate": 1.0,
-                    "seed": 0x6608 + int(target_offset),
-                },
-            ),
-        ),
-    )
-    samples = _register_observer(env)
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=int(base),
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(int(base))
+def _wait_for_loop_target(env, target: int) -> None:
     _run_until(
         env,
         lambda: any(int(observation.pc) == target for observation in env.monitor.observations),
         max_cycles=_cycle_limit("TB_ICACHE_HITPATH_TARGET_WAIT", 6000),
         label=f"loop target 0x{target:x}",
     )
-    return samples
 
 
 @pytest.mark.parametrize(
@@ -260,7 +218,11 @@ def _initialize_loop(env, base: int, *, target_offset: int, latency: int) -> lis
 )
 @pytest.mark.funcov_bins("BIN-608")
 def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
-    samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)
+    samples = _register_observer(env)
+    initialize_frontend(
+        env, make_fetch_loop_init_config(env.config, _BASE, target_offset=0, latency=8)
+    )
+    _wait_for_loop_target(env, int(_BASE) + int(0))
     _wait_hit(env, "icache_mainpipe_s1_sram", "single_line_sram_hit")
     detail = env.functional_coverage.hit_detail(
         "icache_mainpipe_s1_sram", "single_line_sram_hit", coverpoint="hit_bank_behavior"
@@ -282,7 +244,14 @@ def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
 )
 @pytest.mark.funcov_bins("BIN-609", "BIN-1133")
 def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
-    samples = _initialize_loop(env, _CROSS_BASE, target_offset=0x34, latency=8)
+    samples = _register_observer(env)
+    initialize_frontend(
+        env,
+        make_fetch_loop_init_config(
+            env.config, _CROSS_BASE, target_offset=52, latency=8
+        ),
+    )
+    _wait_for_loop_target(env, int(_CROSS_BASE) + int(52))
     _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
     _wait_hit(
         env,
@@ -489,7 +458,11 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
 )
 @pytest.mark.funcov_bins("BIN-613")
 def test_tc_icache_mainpipe_hit_response_stall(env) -> None:
-    samples = _initialize_loop(env, _BASE, target_offset=0, latency=8)
+    samples = _register_observer(env)
+    initialize_frontend(
+        env, make_fetch_loop_init_config(env.config, _BASE, target_offset=0, latency=8)
+    )
+    _wait_for_loop_target(env, int(_BASE) + int(0))
     _wait_hit(env, "icache_mainpipe_s1_sram", "single_line_sram_hit")
 
     env.backend_model.set_can_accept(0)

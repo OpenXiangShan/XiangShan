@@ -32,15 +32,11 @@ from env.support import PmpPmaConfig
 from tests.py.icache.directed_dut.refill_scenarios import (
     run_trained_dual_refill as _run_trained_refill,
 )
-from tests.py.icache.directed_dut.programs import (
-    encode_c_j as _c_j,
-)
 from tests.py.icache.directed_dut.branch_scenarios import (
     run_large_loop_multi_segment as _run_large_loop,
 )
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
-    initialize_bpu_s3_stream as _initialize_bpu_s3_stream,
     read_dut_signal,
     restore_predictors as _restore_predictors,
     s0_sampling_window as _s0_sampling_window,
@@ -48,6 +44,13 @@ from tests.py.icache.directed_dut.support import (
     trigger_bpu_s3_flush as _trigger_bpu_s3_flush,
     wait_coverage_hits,
     wait_until,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_bpu_s3_init_config,
+    make_nop_init_config,
+    make_overlap2_init_config,
+    make_program_init_config,
 )
 
 
@@ -159,56 +162,6 @@ def _load_nops(env, base: int, *, words: int = 8192) -> None:
     )
 
 
-def _load_overlap2_loop(env, base: int) -> int:
-    # A starts at +0x60 and jumps to B at +0x30 without crossing a line.
-    # B crosses into the next line and jumps back to A at +0x50.  Once both
-    # branches are trained, consecutive FTQ entries repeat the Overlap2 layout.
-    noncross_entry = int(base) + 0x60
-    payload = bytearray((0x0001).to_bytes(2, "little") * 128)
-    payload[0x50:0x52] = _c_j(0x10).to_bytes(2, "little")
-    payload[0x70:0x72] = _c_j(-0x40).to_bytes(2, "little")
-    run_initialization_steps(
-        env, (LoadProgram(ProgramImage(payload=bytes(payload), base_addr=int(base))),)
-    )
-    return noncross_entry
-
-
-def _prepare_nops(
-    env,
-    base: int,
-    *,
-    latency: int,
-    seed: int,
-    words: int = 8192,
-) -> None:
-    _load_nops(env, base, words=words)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": int(latency),
-                    "miss_rate": 1.0,
-                    "seed": int(seed),
-                },
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=int(base),
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(int(base))
-
-
 def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, allow_fault: bool = False) -> None:
     """Do not end a coverage test before the affected fetch reaches its checker."""
     for _ in range(max_cycles):
@@ -258,7 +211,12 @@ def prefetchpipe_env(env):
 @pytest.mark.funcov_bins("BIN-656", "BIN-657", "BIN-663", "BIN-677")
 def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _prepare_nops(env, _SOFT_BASE, latency=48, seed=0x6657)
+    initialize_frontend(
+        env,
+        make_nop_init_config(
+            env.config, _SOFT_BASE, latency=48, seed=0x6657, words=8192
+        ),
+    )
     # Data-bank SRAMs sweep 256 sets after reset.  Do not let a soft refill
     # install metadata before its data bank can accept the corresponding write.
     env.step(300)
@@ -294,7 +252,7 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
 @pytest.mark.funcov_bins("BIN-654")
 def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _initialize_bpu_s3_stream(env)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
     run_initialization_steps(
         env,
         (
@@ -338,7 +296,7 @@ def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
 @pytest.mark.funcov_bins("BIN-653")
 def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _initialize_bpu_s3_stream(env)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
     _load_nops(env, _SOFT_BASE)
     run_initialization_steps(
         env,
@@ -386,7 +344,7 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
 @pytest.mark.funcov_bins("BIN-655")
 def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _initialize_bpu_s3_stream(env)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
     _load_nops(env, _SOFT_BASE)
     try:
         for attempt in range(64):
@@ -424,7 +382,12 @@ def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
 @pytest.mark.funcov_bins("BIN-664")
 def test_tc_icache_prefetchpipe_disabled(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _prepare_nops(env, _SOFT_BASE, latency=32, seed=0x6664)
+    initialize_frontend(
+        env,
+        make_nop_init_config(
+            env.config, _SOFT_BASE, latency=32, seed=0x6664, words=8192
+        ),
+    )
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
     for attempt in range(64):
         _present_soft_prefetch(
@@ -458,11 +421,8 @@ def _translation_state(
         assert not env.monitor.get_errors(), env.monitor.get_errors()[:4]
         initialize_frontend(
             env,
-            FrontendInitConfig(
-                env_config=env.config,
-                reset_vector=int(va),
-                bare_mode=False,
-                reset_cycles=20,
+            make_program_init_config(
+                env.config, reset_vector=int(va), after_reset=(), bare_mode=False
             ),
         )
     scenario = TranslationScenario(
@@ -500,7 +460,9 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     pa0 = 0x8040_0F00
     va0 = 0x4020_0F00
-    _prepare_nops(env, pa0, latency=32, seed=0x6678)
+    initialize_frontend(
+        env, make_nop_init_config(env.config, pa0, latency=32, seed=0x6678, words=8192)
+    )
     state = _translation_state(
         env,
         scenario_id="prefetchpipe-itlb-flush-retry-page-fault",
@@ -555,7 +517,9 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
     env = prefetchpipe_env
     pa = 0x8046_0F00
     va = 0x4026_0F00
-    _prepare_nops(env, pa, latency=32, seed=0x6679)
+    initialize_frontend(
+        env, make_nop_init_config(env.config, pa, latency=32, seed=0x6679, words=8192)
+    )
     state = _translation_state(
         env,
         scenario_id="prefetchpipe-meta-resend-backpressure",
@@ -677,7 +641,10 @@ def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> N
     """Keep an exact prefetch probe live across its clean refill window."""
     env = prefetchpipe_env
     base = _SOFT_BASE + 0x2_0000
-    _prepare_nops(env, base, latency=96, seed=0x6659, words=32768)
+    initialize_frontend(
+        env,
+        make_nop_init_config(env.config, base, latency=96, seed=0x6659, words=32768),
+    )
     env.set_bp_ctrl_enable(
         ubtb_enable=0,
         abtb_enable=0,
@@ -738,7 +705,10 @@ def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> N
 def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     base = _SOFT_BASE
-    _prepare_nops(env, base, latency=64, seed=0x6660, words=32768)
+    initialize_frontend(
+        env,
+        make_nop_init_config(env.config, base, latency=64, seed=0x6660, words=32768),
+    )
 
     same_set_stride = 0x4000
     resident_by_way: dict[int, int] = {}
@@ -799,7 +769,12 @@ def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
 def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     target = _SOFT_BASE + 0x6000
-    _prepare_nops(env, _SOFT_BASE, latency=32, seed=0x6667)
+    initialize_frontend(
+        env,
+        make_nop_init_config(
+            env.config, _SOFT_BASE, latency=32, seed=0x6667, words=8192
+        ),
+    )
     env.icache_agent.inject_response_fault_at(target, corrupt=1)
     for _ in range(64):
         _present_soft_prefetch(env, (target,))
@@ -855,32 +830,7 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
 def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     base = _SOFT_BASE + 0x1_0000
-    noncross_entry = _load_overlap2_loop(env, base)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 16,
-                    "miss_rate": 1.0,
-                    "seed": 0x6779,
-                },
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=noncross_entry,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(noncross_entry)
+    initialize_frontend(env, make_overlap2_init_config(env.config, base))
     for _ in range(1200):
         if int(env.backend_model.get_stats().get("commit_count", 0)) >= 96:
             break
@@ -968,7 +918,9 @@ def test_tc_icache_prefetchpipe_protection(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     pa = 0x8044_0F00
     va = 0x4024_0F00
-    _prepare_nops(env, pa, latency=32, seed=0x6668)
+    initialize_frontend(
+        env, make_nop_init_config(env.config, pa, latency=32, seed=0x6668, words=8192)
+    )
     state = _translation_state(
         env,
         scenario_id="prefetchpipe-cacheable-page-fault",

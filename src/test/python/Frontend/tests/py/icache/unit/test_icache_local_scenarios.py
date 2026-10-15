@@ -310,7 +310,7 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
     monkeypatch, scenario_name
 ):
     monkeypatch.setattr(
-        protection_scenarios, "_initialize_sv39_fetch", lambda *args, **kwargs: None
+        protection_scenarios, "initialize_frontend", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
         protection_scenarios,
@@ -321,7 +321,9 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
         protection_scenarios, "TranslationScenarioBuilder", _ScenarioProbe
     )
     with pytest.raises(_StopScenario) as raised:
-        getattr(protection_scenarios, scenario_name)(SimpleNamespace())
+        getattr(protection_scenarios, scenario_name)(
+            SimpleNamespace(config=EnvConfig())
+        )
     scenario = raised.value.args[0]
     if scenario_name == "run_pmp_execute_denied":
         assert (scenario.va, scenario.pa) == (0x80000000, 0x80001000)
@@ -343,7 +345,7 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
 
 def test_sector_lane_scenario_preserves_reuse_without_another_ptw(monkeypatch):
     monkeypatch.setattr(
-        protection_scenarios, "_initialize_sv39_fetch", lambda *args, **kwargs: None
+        protection_scenarios, "initialize_frontend", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
         protection_scenarios,
@@ -362,7 +364,7 @@ def test_sector_lane_scenario_preserves_reuse_without_another_ptw(monkeypatch):
         protection_scenarios, "TranslationScenarioSequence", SequenceProbe
     )
     with pytest.raises(_StopScenario) as raised:
-        protection_scenarios.run_sector_lane_refill(SimpleNamespace())
+        protection_scenarios.run_sector_lane_refill(SimpleNamespace(config=EnvConfig()))
     first, second = raised.value.args[0]
     assert first.page_indexes == (0,)
     assert first.scenario.page_count == 2
@@ -378,12 +380,15 @@ def test_pbmt_redirect_scenario_configures_agents_before_starting(monkeypatch):
         lambda env: ([(0x80000000, 1, True)], []),
     )
 
-    def stop_at_startup(env, **kwargs):
-        calls.append(("startup", kwargs))
+    def stop_at_startup(env, config):
+        for step in config.before_reset:
+            step.run(env)
+        calls.append(("startup", {"reset_vector": config.reset_vector}))
         raise _StopScenario
 
-    monkeypatch.setattr(protection_scenarios, "_initialize_sv39_fetch", stop_at_startup)
+    monkeypatch.setattr(protection_scenarios, "initialize_frontend", stop_at_startup)
     env = SimpleNamespace(
+        config=EnvConfig(),
         current_cycle=0,
         icache_agent=SimpleNamespace(
             configure=lambda **kwargs: calls.append(("icache", kwargs))

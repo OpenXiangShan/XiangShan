@@ -5,6 +5,7 @@ from env.runtime.frontend_init import (
     LoadProgram,
     ProgramImage,
     run_initialization_steps,
+    initialize_frontend,
 )
 
 
@@ -16,8 +17,12 @@ from tests.py.icache.directed_dut.support import (
     drive_soft_prefetch as _drive_soft_prefetch,
     read_dut_signal,
 )
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_cacheable_init_config,
+)
 from tests.py.icache.directed_dut.mainpipe_support import (
-    initialize_cacheable_stream as _initialize_cacheable_stream,
+    register_mainpipe_observer,
 )
 
 
@@ -55,7 +60,8 @@ pytestmark = pytest.mark.skipif(
 )
 def test_icache_sram_ecc_refetch(env, kind, bin_name):
     base = target = 0x80040000
-    _initialize_cacheable_stream(env, base, latency=8)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, base, latency=8))
     run_initialization_steps(
         env,
         (

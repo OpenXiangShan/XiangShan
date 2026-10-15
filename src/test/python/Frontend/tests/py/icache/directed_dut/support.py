@@ -7,12 +7,13 @@ test module. These helpers only centralize operations with identical behavior.
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
-    ConfigureAgent,
-    FrontendInitConfig,
-    LoadProgram,
-    ProgramImage,
     initialize_frontend,
-    run_initialization_steps,
+)
+
+from .init_plans import (
+    WarmBpuTraining,
+    make_bpu_s3_init_config,
+    make_bpu_training_init_config,
 )
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -42,20 +43,6 @@ _BPU_S0_WINDOW_SIGNALS = {
     "s1_ready": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_ready",
         "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s1_ready",
-    ),
-}
-
-
-_BPU_TRAINING_SIGNALS = {
-    "ftq_valid": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_valid",
-    ),
-    "ftq_ready": (
-        "Frontend_top.Frontend._inner_icache_io_fromFtq_toMainPipe_ready",
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_ready",
-    ),
-    "ftq_req1_valid": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
     ),
 }
 
@@ -215,103 +202,22 @@ def drive_soft_prefetch(env, addresses: Iterable[int]) -> None:
     clear_soft_prefetch(env)
 
 
-def _read_bpu_training_signal(recorder, key: str) -> int:
-    names = _BPU_TRAINING_SIGNALS[key]
-    value = recorder._read_first_dut_signal(recorder.env.dut, names)
-    assert value is not None, {
-        "reason": "required directed-flow observation is unavailable",
-        "label": str(key),
-        "candidates": list(names),
-    }
-    return int(value)
-
-
 def warm_bpu_training_stream(env, *, max_cycles: int | None = None) -> dict:
-    recorder = getattr(env, "functional_coverage", None)
-    assert (
-        recorder is not None
-    ), "directed flow tests require the canonical funcov recorder"
-    assert getattr(recorder, "env", None) is env
-    if max_cycles is None:
-        max_cycles = cycle_limit("TB_TWO_FETCH_TRAIN_MAX_CYCLES", 4000)
-    for _ in range(max(0, int(max_cycles))):
-        env.step(1)
-        dual_request_fire = (
-            _read_bpu_training_signal(recorder, "ftq_valid") == 1
-            and _read_bpu_training_signal(recorder, "ftq_ready") == 1
-            and _read_bpu_training_signal(recorder, "ftq_req1_valid") == 1
-        )
-        if (
-            int(env.backend_model.get_stats().get("commit_count", 0)) >= 1
-            and int(env.icache_agent.get_stats().get("req_count", 0)) >= 4
-            and recorder.key_hit("ifu_cfi_decode_type", "jal")
-            and recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
-            and recorder.key_hit("two_fetch_delivery", "dual_fire")
-            and dual_request_fire
-        ):
-            return {
-                "cycle": int(env.current_cycle),
-                "icache": env.icache_agent.get_stats(),
-                "backend": env.backend_model.get_stats(),
-            }
-    raise AssertionError(
-        {
-            "reason": "short-block loop did not reach dual-eligible frontend execution",
-            "max_cycles": int(max_cycles),
-            "icache": env.icache_agent.get_stats(),
-            "backend": env.backend_model.get_stats(),
-            "monitor_errors": env.monitor.get_errors(),
-        }
-    )
+    """Compatibility entry for runtime training of an already running stream."""
+    return WarmBpuTraining(max_cycles=max_cycles).run(env)
 
 
 _warm_bpu_training_stream = warm_bpu_training_stream
 
 
 def load_and_reset_bpu_training_stream(env) -> None:
-    """Load the BPU training program and reset, without warming or configuring agents."""
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=_build_bpu_training_program(), base_addr=_BPU_TRAINING_BASE
-                )
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=_BPU_TRAINING_BASE,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_BPU_TRAINING_BASE)
+    """Compatibility entry; new scenarios execute the plan explicitly."""
+    initialize_frontend(env, make_bpu_training_init_config(env.config))
 
 
 def initialize_bpu_s3_stream(env, *, seed: int = 0x6605) -> None:
-    """Prepare the shared live BPU s3 stream used by ICache scenarios."""
-    load_and_reset_bpu_training_stream(env)
-    warm_bpu_training_stream(env)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 1,
-                    "miss_latency": 32,
-                    "miss_rate": 0.0,
-                    "seed": int(seed),
-                },
-            ),
-        ),
-    )
-    set_predictors(env, True)
+    """Compatibility entry; new scenarios execute the plan explicitly."""
+    initialize_frontend(env, make_bpu_s3_init_config(env.config, seed=seed))
 
 
 def trigger_bpu_s3_flush(env) -> None:

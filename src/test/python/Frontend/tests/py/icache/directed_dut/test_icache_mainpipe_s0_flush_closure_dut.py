@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from env.runtime.frontend_init import (
     FrontendInitConfig,
+    initialize_frontend,
 )
 
 import os
@@ -15,16 +16,20 @@ from env.funcov.py.icache.flush_from_bpu import (
     ftq_ptr_matches_or_before,
     ftq_ptr_is_strictly_after_current,
 )
-from tests.py.icache.directed_dut.mainpipe_support import (
-    initialize_cacheable_stream as _initialize_cacheable_stream,
-)
 from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
-    initialize_bpu_s3_stream,
     read_dut_signal as _try_read,
     restore_predictors as _restore_predictors,
     s0_sampling_window,
     wait_coverage_hit,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_bpu_s3_init_config,
+    make_cacheable_init_config,
+)
+from tests.py.icache.directed_dut.mainpipe_support import (
+    register_mainpipe_observer,
 )
 
 
@@ -178,7 +183,8 @@ def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
     env.register_cycle_observer(
         lambda _cycle, active_env: samples.append(_snapshot(active_env))
     )
-    _initialize_cacheable_stream(env, _BASE, latency=8)
+    register_mainpipe_observer(env)
+    initialize_frontend(env, make_cacheable_init_config(env.config, _BASE, latency=8))
 
     attempts = _cycle_limit("TB_ICACHE_S0_GLOBAL_FLUSH_ATTEMPTS", 24)
     for attempt in range(attempts):
@@ -347,7 +353,7 @@ def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
     samples: list[dict] = []
     env.register_cycle_observer(lambda _cycle, active_env: samples.append(_snapshot(active_env)))
-    initialize_bpu_s3_stream(env)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
     _drive_bpu_s3_until_hit(
         env,
         "bpu_miss_allows_entry",

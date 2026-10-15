@@ -45,6 +45,42 @@ class ConfigureAgent:
 
 
 @dataclass(frozen=True)
+class ClearMonitor:
+    """Explicitly discard monitor errors, observations, and counters."""
+
+    def run(self, env: FrontendEnv) -> None:
+        env.monitor.clear()
+
+
+@dataclass(frozen=True)
+class SetExpectedPc:
+    pc: int
+
+    def run(self, env: FrontendEnv) -> None:
+        env.monitor.set_expected_pc(int(self.pc))
+
+
+@dataclass(frozen=True)
+class SetBpCtrl:
+    ubtb_enable: int = 1
+    abtb_enable: int = 1
+    mbtb_enable: int = 1
+    tage_enable: int = 1
+    sc_enable: int = 1
+    ittage_enable: int = 1
+
+    def run(self, env: FrontendEnv) -> None:
+        env.set_bp_ctrl_enable(
+            ubtb_enable=int(self.ubtb_enable),
+            abtb_enable=int(self.abtb_enable),
+            mbtb_enable=int(self.mbtb_enable),
+            tage_enable=int(self.tage_enable),
+            sc_enable=int(self.sc_enable),
+            ittage_enable=int(self.ittage_enable),
+        )
+
+
+@dataclass(frozen=True)
 class MapPage:
     vpn: int
     ppn: int
@@ -497,6 +533,9 @@ __all__ = [
     "LoadProgramFile",
     "LoadGoldenTrace",
     "ConfigureAgent",
+    "ClearMonitor",
+    "SetExpectedPc",
+    "SetBpCtrl",
     "MapPage",
     "ClearPageTable",
     "SetMemoryRegion",

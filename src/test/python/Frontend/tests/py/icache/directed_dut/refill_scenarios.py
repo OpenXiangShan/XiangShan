@@ -3,44 +3,23 @@
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
-    ConfigureAgent,
-    FrontendInitConfig,
     initialize_frontend,
-    run_initialization_steps,
 )
 
 from .mainpipe_support import (
-    DUAL_FETCH_BASE as _DUAL_BASE,
     completed_dual_transactions as _completed_dual_transactions,
-    load_two_fetch_loop as _load_two_fetch_loop,
     register_mainpipe_observer as _register_mainpipe_observer,
     run_until as _run_until,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_dual_refill_init_config,
 )
 
 
 def run_trained_dual_refill(env) -> None:
     samples = _register_mainpipe_observer(env)
-    _load_two_fetch_loop(env, _DUAL_BASE)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {"hit_latency": 8, "miss_latency": 8, "miss_rate": 1.0, "seed": 0x2524},
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=_DUAL_BASE,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_DUAL_BASE)
+    initialize_frontend(env, make_dual_refill_init_config(env.config, seed=9508))
     assert _run_until(
         env,
         lambda: any(
@@ -113,32 +92,9 @@ def run_trained_dual_refill(env) -> None:
 
 def run_asymmetric_dual_refill(env, expected_pattern, evict_req) -> None:
     samples = _register_mainpipe_observer(env)
-    _load_two_fetch_loop(env, _DUAL_BASE)
-    run_initialization_steps(
-        env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": 8,
-                    "miss_latency": 8,
-                    "miss_rate": 1.0,
-                    "seed": 9508 + int(evict_req),
-                },
-            ),
-        ),
-    )
     initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config,
-            reset_vector=_DUAL_BASE,
-            bare_mode=True,
-            reset_cycles=20,
-        ),
+        env, make_dual_refill_init_config(env.config, seed=9508 + int(evict_req))
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_DUAL_BASE)
     assert _run_until(
         env,
         lambda: any(

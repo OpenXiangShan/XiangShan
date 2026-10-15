@@ -2,10 +2,7 @@
 
 from env.runtime.frontend_init import (
     FrontendInitConfig,
-    LoadProgram,
-    ProgramImage,
     initialize_frontend,
-    run_initialization_steps,
 )
 
 
@@ -16,8 +13,12 @@ import pytest
 from tests.py.icache.directed_dut import test_icache_mainpipe_s0_flush_closure_dut as s0
 from tests.py.icache.directed_dut import test_icache_mainpipe_s1_flush_closure_dut as s1
 from tests.py.icache.directed_dut.support import (
-    initialize_bpu_s3_stream,
     restore_predictors,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_bpu_s3_init_config,
+    make_live_cfi_init_config,
 )
 
 
@@ -32,25 +33,7 @@ def test_bpu_scheduler_drives_live_identity_resolve(env):
     # Use decoded control-flow instructions so the captured identity is a
     # legal source for directed resolve injection.  JAL x0,+4 keeps execution
     # inside the loaded image while providing an exact decoded target.
-    jal_x0_plus_4 = 0x0040006F
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=jal_x0_plus_4.to_bytes(4, "little") * 16, base_addr=base
-                )
-            ),
-        ),
-    )
-    initialize_frontend(
-        env,
-        FrontendInitConfig(
-            env_config=env.config, reset_vector=base, bare_mode=True, reset_cycles=20
-        ),
-    )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
+    initialize_frontend(env, make_live_cfi_init_config(env.config, base))
     identity = env.bpu_ftq_scheduler.wait_live_identity(
         cfi_only=True,
         max_cycles=1000,
@@ -92,7 +75,7 @@ def test_bpu_scheduler_drives_live_identity_resolve(env):
 def test_icache_scheduled_bpu_matching_flush(env, stage, bin_name):
     module = s0 if stage == 0 else s1
     module._require_bpu_s3_ftq_observable(env)
-    initialize_bpu_s3_stream(env)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config))
     scheduler = env.bpu_ftq_scheduler
     samples = []
     env.register_cycle_observer(lambda _, active: samples.append(module._snapshot(active)))

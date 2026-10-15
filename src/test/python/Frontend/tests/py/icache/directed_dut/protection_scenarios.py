@@ -7,7 +7,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from env.runtime.frontend_init import ConfigureAgent, run_initialization_steps
+from env.runtime.frontend_init import (
+    initialize_frontend,
+)
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationScenario,
@@ -28,13 +30,17 @@ from tests.py.support.uncache_scenarios import (
     _UNCACHE_BEAT_BYTES,
     _configure_exec_attrs_16k,
     _force_redirect_to,
-    _initialize_sv39_fetch,
     _prepare_sv39_dual_nc_cacheable_stream,
     _pulse_sfence,
     _wait_for_observed_pc,
     _wait_for_observed_pc_sequence,
     _wait_for_request_addr,
     _wait_for_resp_count,
+)
+
+from tests.py.icache.directed_dut.init_plans import (
+    make_sv39_init_config,
+    make_pbmt_redirect_init_config,
 )
 
 
@@ -105,7 +111,9 @@ def run_cross_page_pma_path(env):
     payload = (
         int(_ADDI_X0_X0_0).to_bytes(4, "little") + int(_CNOP).to_bytes(2, "little") * 64
     )
-    _initialize_sv39_fetch(env, reset_vector=cross_page_va)
+    initialize_frontend(
+        env, make_sv39_init_config(env.config, reset_vector=cross_page_va)
+    )
     scenario = TranslationScenario(
         scenario_id="atp-090-cross-page-pma-dut",
         va=cross_page_va,
@@ -194,7 +202,9 @@ def run_cross_page_pma_path(env):
 
 
 def run_pmp_execute_denied(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    initialize_frontend(
+        env, make_sv39_init_config(env.config, reset_vector=_NORMAL_BASE)
+    )
     scenario = TranslationScenario(
         scenario_id="atp-076-sv39-pmp-execute-denied-dut",
         va=_NORMAL_BASE,
@@ -248,7 +258,9 @@ def run_pmp_execute_denied(env):
 
 
 def run_sector_lane_refill(env):
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    initialize_frontend(
+        env, make_sv39_init_config(env.config, reset_vector=_NORMAL_BASE)
+    )
     scenario = TranslationScenario(
         scenario_id="sv39-sector-lane-reuse-dut",
         va=_NORMAL_BASE,
@@ -333,22 +345,16 @@ def run_cacheable_pending_redirect_to_pbmt_nc(
 ):
     nc_expected, cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
     nc_pcs = [pc for pc, _, _ in nc_expected]
-    env.uncache_agent.configure(latency=uncache_latency, mmio_latency=uncache_latency)
-    run_initialization_steps(
+    initialize_frontend(
         env,
-        (
-            ConfigureAgent(
-                "icache",
-                {
-                    "hit_latency": icache_latency,
-                    "miss_latency": icache_latency,
-                    "miss_rate": 0.0,
-                    "seed": agent_seed,
-                },
-            ),
+        make_pbmt_redirect_init_config(
+            env.config,
+            reset_vector=_NORMAL_ALT_BASE,
+            uncache_latency=uncache_latency,
+            icache_latency=icache_latency,
+            agent_seed=agent_seed,
         ),
     )
-    _initialize_sv39_fetch(env, reset_vector=_NORMAL_ALT_BASE)
     _configure_exec_attrs_16k(env, base_addr=2147483648)
     _force_redirect_to(env, _NORMAL_ALT_BASE)
     assert _wait_for_icache_req_count(
