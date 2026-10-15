@@ -674,7 +674,7 @@ def env(dut, request, frontend_init_config):
         session_coverage = _session_toffee_coverage(request)
         session_coverage.add(toffee_sink.cov_groups)
         session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))
-        if request.config.getoption("--toffee-report"):
+        if request.config.getoption("--toffee-report", default=False):
             from toffee_test.reporter import set_func_coverage
 
             set_func_coverage(request, toffee_sink.cov_groups)

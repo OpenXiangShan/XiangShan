@@ -294,7 +294,7 @@ def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
     assert "create_toffee_runtime(" in source
     assert "session_coverage.add(toffee_sink.cov_groups)" in source
     assert "session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))" in source
-    assert 'request.config.getoption("--toffee-report")' in source
+    assert 'request.config.getoption("--toffee-report", default=False)' in source
     assert "set_func_coverage(request, toffee_sink.cov_groups)" in source
     assert "audit_recorder" not in source
     assert 'collector.write(path or (_funcov_dir() / "toffee.funcov.json"))' in source
