@@ -5,9 +5,16 @@ from types import SimpleNamespace
 import pytest
 
 from env.bundles.ptw import PTWBundle
-from env.core.checkers import PTWRespInputChecker
+from env.checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
+from env.core.checkers import PTWFullPpnChecker as LegacyPTWFullPpnChecker
+from env.core.checkers import PTWRespInputChecker as LegacyPTWRespInputChecker
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
+
+
+def test_ptw_checkers_keep_legacy_imports() -> None:
+    assert LegacyPTWFullPpnChecker is PTWFullPpnChecker
+    assert LegacyPTWRespInputChecker is PTWRespInputChecker
 
 
 class _Signal:

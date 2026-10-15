@@ -13,6 +13,7 @@ from ..agents.icache_ecc_injection_agent import ICacheECCInjectionAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from ..checkers.frontend_flow_checker import FrontendFlowChecker
+from ..checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
 from ..checkers.translation_scenario_checker import TranslationScenarioChecker
 from .backend_model import BackendModel
 from ..bundles import (
@@ -30,7 +31,6 @@ from ..bundles import (
     bind_bundle_required,
 )
 from toffee.bundle import DummySignal
-from .checkers import PTWFullPpnChecker, PTWRespInputChecker
 from ..support.env_config import DEFAULT_ENV_CONFIG, EnvConfig
 from ..support.logging_utils import configure_env_logging, parse_log_level
 from ..support.pmp_pma import (
