@@ -22,6 +22,7 @@ EVENTS = ("DR_L1", "DR_TLB", "DR_SQ", "FL_MB", "FL_EX", "FL_MO", "ST_L1", "ST_TL
 INCOMPLETE = {-1: "Cancelled", -2: "Unresolved", -3: "Unknown target/cause"}
 STATES = ("Computing", "Stalled", "Flushed", "Drained")
 SPEC_EXCLUSIONS = ((0x10000000, 0x10100000), (0x80000000, 0x80000C00))
+XLEN_MASK = (1 << 64) - 1
 
 
 def signature(psv):
@@ -32,6 +33,10 @@ def signature(psv):
 
 def target_key(row, prefix):
     return tuple(row[prefix + field] for field in ("ALLOCATIONCYCLE", "ROBINDEX", "RANK"))
+
+
+def normalize_pc(pc):
+    return None if pc is None else pc & XLEN_MASK
 
 
 def load_data(path, label, args):
@@ -74,7 +79,7 @@ def load_data(path, label, args):
             if state not in range(4) or not 0 <= mask < (1 << width) or (state == 0 and not mask):
                 raise ValueError(f"{path}: invalid state/valid mask in row {row['ID']}")
             if state in (0, 2):
-                return ([(row[f"PCVEC_{i}"], row[f"PSVVEC_{i}"])
+                return ([(normalize_pc(row[f"PCVEC_{i}"]), row[f"PSVVEC_{i}"])
                          for i in range(width) if mask & (1 << i)] or [(None, -3)])
             if state == 1:
                 if not row["TARGETVALID"]:
@@ -85,7 +90,8 @@ def load_data(path, label, args):
                 final = drains[index] if index < len(drains) else None
             if final is None:
                 return [(None, -2)]
-            return [(final["MEMBER_PC"], -1 if final["CANCELLED"] else final["MEMBER_PSV"])]
+            return [(normalize_pc(final["MEMBER_PC"]),
+                     -1 if final["CANCELLED"] else final["MEMBER_PSV"])]
 
         def select(lanes):
             return [lane for lane in lanes if not args.spec_checkpoint or lane[0] is None or

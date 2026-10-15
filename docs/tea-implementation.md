@@ -1,6 +1,6 @@
 # 香山 TEA 实现机制：压缩 ROB 下的指令级时间归因
 
-本文描述当前工作区的 TEA 实现，包括架构指令元数据、完成跟踪、周期采样、延迟归因及 PICS 计算。对应实现基于 HEAD `c5f74292d6ca5ffe67588752b86123bbca086aa8` 上的本地修改，记录日期为 2026-10-15。
+本文描述当前工作区的 TEA 实现，包括架构指令元数据、完成跟踪、周期采样、延迟归因及 PICS 计算。对应实现基于 HEAD `a549cc7b9e75af6fdeae87e323013d4ad39467d4` 上的本地修改，记录日期为 2026-10-15。
 
 TEA 保留功能 ROB 原有的压缩、执行和提交决策，额外维护 debug 元数据。每个采样边界先判断周期状态，再确定归因指令，最后按照指令的性能签名向量 PSV（Performance Signature Vector）累计时间权重。
 
@@ -55,7 +55,7 @@ Rename 使用原始有效向量 `validVec`、压缩成员 mask 和 fusion 信息
 | `psv` | 当前成员的初始事件签名 |
 | `numWB` | 预期写回数量，用于多成员 Slot 的成员完成跟踪 |
 
-PC 直接来自原始指令的 debug 元数据，不根据 `PC+4` 或指令长度重建；TEA 没有独立保存 RVC 长度字段。
+PC 直接来自原始指令的 debug 元数据，不根据 `PC+4` 或指令长度重建；成员在 ROB 分配时按当时的指令地址转换模式扩展到 `XLEN`，Sv39/Sv48 使用符号扩展，bare 和 x4 模式使用零扩展。TEA 没有独立保存 RVC 长度字段。
 
 完整成员集合通过一个 packet 级 sideband 跟随 Rename→Dispatch 保持，并与实际 ROB 入队流水对齐。物理 Entry 首次分配时，安装它的全部成员，包括尚未实际 Dispatch 的成员。后续成员真正被 ROB 接受时，再合并各自的入队 PSV。
 
@@ -125,7 +125,7 @@ PSV_new = PSV_old OR 新增事件 mask
 
 ## 5. 采样节奏和状态分类
 
-`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器。`enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔；默认 period 为 1，period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
+构建时 `WITH_TEA=1` 独立控制 TEA tracker、selector 和数据库记录逻辑是否 elaboration。启用该构建开关后，`TeaSampleSelector` 每周期推进自己的 `cycle` 计数器；运行时 `enableTea` 控制新样本，`teaSamplePeriod` 控制固定间隔。默认 period 为 1，period 为 0 时当前实现也逐周期采样。重新启用时 countdown 为零，会立即开始采样。
 
 采样间隔按周期推进，不等待先前目标退休。关闭采样后，debug 成员和恢复原因仍继续跟踪，已采样目标及待处理的 Drained 后继仍可产生终结记录。
 
@@ -190,6 +190,8 @@ Flushed 使用保存的原因快照，不像 Stalled 那样等待目标退休后
 
 Computing 和已知原因的 Flushed 从边界表直接读取 PC/PSV。Stalled 按 target 关联成员终结记录；Drained 按时间关联未来第一条 `ISDRAIN=1` 的记录。`STAMP` 不参与关联。
 
+PC 字段按 `XLEN` 记录。SQLite 会把最高位为 1 的 64 位整数读成负数，离线脚本在聚合、过滤和 ELF 匹配前统一恢复为无符号 64 位地址。
+
 同一成员被采样 100 次，可以只有一条成员终结记录，供 100 条边界共同关联。终结记录只针对被采中的 Stalled 成员和待处理的 Drained 后继，不记录全部退休指令的独立终结日志。
 
 `VALIDMASK_n` 按每个物理提交项的 `RenameWidth` 位分块。默认是 8 个 8 位整数，避免把含 bit 63 的无符号 64 位 mask 直接写入 SQLite 而损失精度。数组中的位置对应提交 Entry lane 与成员 rank，不固定代表两个 Slot。
@@ -249,7 +251,7 @@ Computing 的 N 在 PC 排除前计算。四条指令各得 1/4，即使过滤�
 EMU 构建需要 ChiselDB、Constantin 和 backend debug PC 支持。当前使用的构建命令为：
 
 ```bash
-proxychains -q make emu WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j64 \
+proxychains -q make emu WITH_TEA=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 -j64 \
   NOOP_HOME=/nfs/home/wujiabin/work/xs-env/XiangShan2-wt-tea-correctness
 ```
 
@@ -290,7 +292,7 @@ python3 scripts/tea_visualize.py build/tea.db \
 
 ## 10. 当前验证范围
 
-已有 17 项硬件测试、3 项分析测试及 6 组整机 NEMU DiffTest 通过。定向程序、CoreMark 5k 窗口、中断与非法指令程序的 TEA 开关对照，显示指令数和核周期一致；三份 period=1 数据库的边界连续、总权重守恒。
+已有 18 项硬件测试、4 项分析测试及 6 组整机 NEMU DiffTest 通过。定向程序、CoreMark 5k 窗口、中断与非法指令程序的 TEA 开关对照，显示指令数和核周期一致；三份 period=1 数据库的边界连续、总权重守恒。新增测试覆盖 Sv39 地址符号扩展、bare 地址零扩展，以及 SQLite 有符号 64 位 PC 到 ELF 地址的匹配。新增 PC 扩展和 elaboration 开关后尚未重新运行整机 DiffTest。
 
 定向结果包含：除法 B 的 643 个 Stalled 边界，融合两条指令和 eliminated move 各 32 次架构退休，ECALL 的 544 个 FL_EX 恢复边界。具体命令、数据和图表见[验证报告](../reports/tea-members-verification.md)。
 

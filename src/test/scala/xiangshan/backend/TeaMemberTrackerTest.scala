@@ -25,6 +25,9 @@ class TeaMemberTrackerTest extends XSTester {
   private val trackerConfig = config.alterPartial {
     case XSCoreParamsKey => config(XSCoreParamsKey).copy(RobSize = 8, RenameWidth = 4, CommitWidth = 2)
   }
+  private val sv39TrackerConfig = trackerConfig.alterPartial {
+    case XSCoreParamsKey => trackerConfig(XSCoreParamsKey).copy(HasHExtension = false, EnableSv48 = false)
+  }
 
   private def ptr(port: RobPtr, former: Boolean = true, flag: Boolean = false): Unit = {
     port.value.poke(0.U)
@@ -34,6 +37,11 @@ class TeaMemberTrackerTest extends XSTester {
 
   private def init(dut: TeaMemberTracker): Unit = {
     dut.io.cycle.poke(10.U)
+    dut.io.addrTransType.bare.poke(true.B)
+    dut.io.addrTransType.sv39.poke(false.B)
+    dut.io.addrTransType.sv39x4.poke(false.B)
+    dut.io.addrTransType.sv48.poke(false.B)
+    dut.io.addrTransType.sv48x4.poke(false.B)
     dut.io.alloc.foreach(_.valid.poke(false.B))
     dut.io.enqPsv.foreach(_.valid.poke(false.B))
     dut.io.writeback.foreach(_.valid.poke(false.B))
@@ -191,6 +199,33 @@ class TeaMemberTrackerTest extends XSTester {
       dut.io.stalled.valid.expect(true.B)
       dut.io.slotReady(0)(0).poke(true.B)
       dut.io.stalled.valid.expect(false.B)
+    }
+  }
+
+  it should "preserve full PCs using the allocation-time address translation mode" in {
+    simulate(new TeaMemberTracker(3, 2)(sv39TrackerConfig)) { dut =>
+      init(dut)
+      dut.io.addrTransType.bare.poke(false.B)
+      dut.io.addrTransType.sv39.poke(true.B)
+      alloc(dut, 0)
+      dut.io.alloc(0).bits.pc.poke("h7f80001000".U)
+      dut.clock.step()
+      dut.io.alloc(0).valid.poke(false.B)
+      dut.io.read(0).pc.expect("hffffffff80001000".U)
+
+      dut.io.commits(0).valid.poke(true.B)
+      dut.clock.step()
+      dut.io.commits(0).valid.poke(false.B)
+      dut.io.addrTransType.bare.poke(true.B)
+      dut.io.addrTransType.sv39.poke(false.B)
+      alloc(dut, 0)
+      dut.io.alloc(0).bits.robIdx.flag.poke(true.B)
+      dut.io.alloc(0).bits.pc.poke("h7f80001000".U)
+      ptr(dut.io.head, flag = true)
+      ptr(dut.io.readPtr(0), flag = true)
+      dut.clock.step()
+      dut.io.alloc(0).valid.poke(false.B)
+      dut.io.read(0).pc.expect("h0000007f80001000".U)
     }
   }
 }

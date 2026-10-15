@@ -80,7 +80,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vlReadPorts  = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new RenameOutUop))
-    val teaMembers = Option.when(backendParams.debugEn)(Output(Vec(RenameWidth, Valid(new TeaRenameMember))))
+    val teaMembers = Option.when(backendParams.teaEn)(Output(Vec(RenameWidth, Valid(new TeaRenameMember))))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
