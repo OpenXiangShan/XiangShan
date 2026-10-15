@@ -141,11 +141,13 @@ Cycle attribution:
 
 - Computing: the cycle is divided evenly across every architectural instruction committed in that cycle. ROB
   compression and fusion are expanded using the architectural PC metadata captured before Rename removes followers.
-- Stalled: the cycle is assigned to the oldest unfinished architectural instruction in the physical ROB head entry.
+- Stalled: the cycle is assigned to the oldest unfinished architectural instruction in the physical ROB head entry
+  (`STALLPC`).
   Debug-only outstanding-writeback tracking preserves this identity when several instructions share a compressed slot.
 - Flushed: cycles where the ROB is empty because of a redirect are assigned to the offending instruction retained in
   the OIR. Recovery cycles with instructions still in the ROB remain Computing or Stalled, as required by TIP.
-- Drained: empty-ROB frontend cycles are buffered and assigned to the first subsequent valid ROB-head instruction.
+- Drained: empty-ROB frontend cycles are buffered and assigned to the first architectural instruction of the first
+  subsequent valid physical ROB entry (`FIRSTARCHPC`), independently of its dynamic stalled PC.
 
 The sum of `cycles` in `time_profile.csv` plus `unattributed_cycles` equals `total_cycles`. Normally coverage is 100%.
 Only a trailing drained interval with no subsequent instruction in the dump remains unresolved; it is reported in
@@ -162,7 +164,8 @@ The supplemental commit-type and commit-PC reports count committed physical ROB 
 entry can contain several instructions; its reported PC and commit type describe the first slot. Use
 `time_profile.csv`, not these reports, for TIP hotspots.
 
-Replay and miss reports count valid dynamic head-entry residences, excluding empty ROB cycles. Sticky flags contribute
-at most once per entry, and cumulative `replayCnt` contributes its maximum value for that entry. A new residence starts
-after a lane-0 commit, a PC change, a timestamp gap, or a replay-counter reset. These reports cover only residences
-observed while the entry is at the ROB head; they are not whole-program replay totals.
+Replay and miss reports count valid dynamic physical ROB-entry residences, excluding empty ROB cycles. The physical
+entry identity (`ENTRYID` plus `ENTRYGENERATION`) is used for deduplication; changes to `STALLPC` do not start a new
+residence. Sticky flags contribute at most once per entry, and cumulative `replayCnt` contributes its maximum value for
+that entry. A new residence starts after an entry identity change, a timestamp gap, or a replay-counter reset. These
+reports cover only residences observed while the entry is at the ROB head; they are not whole-program replay totals.

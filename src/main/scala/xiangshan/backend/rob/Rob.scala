@@ -395,7 +395,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(VecInit(Seq.fill(2)(false.B))))
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
-  val debug_archPendingWbs = Reg(Vec(RobSize, Vec(RenameWidth, NumWB())))
+  val debug_archPendingWbs = Option.when(backendParams.debugEn)(Reg(Vec(RobSize, Vec(RenameWidth, NumWB()))))
   val enqHalfWritten = RegInit(VecInit(Seq.fill(RobSize)(VecInit(Seq.fill(2)(false.B)))))
 
   private def slotIndex(ptr: RobPtr): UInt = (!ptr.isFormer).asUInt
@@ -420,87 +420,97 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val state = RegInit(s_idle)
   val state_next = Wire(chiselTypeOf(state))
 
-  val tip_computing :: tip_stalled :: tip_flushed :: tip_drained :: Nil = Enum(4)
-  val tipFlushEvent = io.flushOut.valid || io.redirect.valid
-  val tipFlushPtr = Mux(io.flushOut.valid, io.flushOut.bits.robIdx, io.redirect.bits.robIdx)
-  val tipSlotPc = debugMeta(debug_microOp(tipFlushPtr.value)(slotIndex(tipFlushPtr))).pc
-  val tipRedirectPc = Mux(io.redirect.bits.debugIsCtrl, io.redirect.bits.pc,
-    Mux(io.redirect.bits.debugIsMemVio, io.redirect.bits.target, tipSlotPc))
-  val tipFlushPc = Mux(io.flushOut.valid, tipSlotPc, tipRedirectPc)
-  val tipOffendingPc = RegEnable(tipFlushPc, 0.U(VAddrBits.W), tipFlushEvent)
-  val tipFlushPending = RegInit(false.B)
-  when(tipFlushEvent) {
-    tipFlushPending := true.B
-  }.elsewhen(uopCanEnqueue.asUInt.orR) {
-    tipFlushPending := false.B
-  }
-  val tipFlushActive = tipFlushPending || tipFlushEvent
-  val tipOffendingActive = tipFlushActive
-  val tipHeadEntry = robEntries(deqPtr.value)
-  val tipHeadDebug = debugMeta(debug_microOp(deqPtr.value).head)
-  val tipHeadInstrCount = decodeTraceInstrCount(tipHeadEntry.traceBlockInPipe.iretire)
-  val tipHeadArchValid = VecInit((0 until RenameWidth).map { i =>
-    tipHeadDebug.archPcValid(i) && PopCount(tipHeadDebug.archPcValid(i, 0)) <= tipHeadInstrCount
-  })
-  val tipHeadPending = VecInit((0 until RenameWidth).map { i =>
-    tipHeadArchValid(i) && debug_archPendingWbs(deqPtr.value)(i).orR
-  })
-  val tipHeadSelect = PriorityEncoderOH(Mux(tipHeadPending.asUInt.orR, tipHeadPending, tipHeadArchValid))
-  val tipHeadPc = Mux1H(tipHeadSelect, tipHeadDebug.archPcs)
-  val tip_state = WireInit(0.U(4.W))
-  when(!isEmpty) {  // One or more inst in ROB
-    when(io.commits.isCommit && PopCount(io.commits.commitValid) =/= 0.U) {
-      tip_state := tip_computing
-    }.otherwise {
-      tip_state := tip_stalled
+  if (backendParams.debugEn) {
+    val tip_computing :: tip_stalled :: tip_flushed :: tip_drained :: Nil = Enum(4)
+    val tipFlushEvent = io.flushOut.valid || io.redirect.valid
+    val tipFlushPtr = Mux(io.flushOut.valid, io.flushOut.bits.robIdx, io.redirect.bits.robIdx)
+    val tipSlotPc = debugMeta(debug_microOp(tipFlushPtr.value)(slotIndex(tipFlushPtr))).pc
+    val tipRedirectPc = Mux(io.redirect.bits.debugIsCtrl, io.redirect.bits.pc,
+      Mux(io.redirect.bits.debugIsMemVio, io.redirect.bits.target, tipSlotPc))
+    val tipFlushPc = Mux(io.flushOut.valid, tipSlotPc, tipRedirectPc)
+    val tipOffendingPc = RegEnable(tipFlushPc, 0.U(VAddrBits.W), tipFlushEvent)
+    val tipFlushPending = RegInit(false.B)
+    when(tipFlushEvent) {
+      tipFlushPending := true.B
+    }.elsewhen(uopCanEnqueue.asUInt.orR) {
+      tipFlushPending := false.B
     }
-  }.otherwise {
-    tip_state := Mux(tipOffendingActive, tip_flushed, tip_drained)
-  }
-  class TipEntry()(implicit p: Parameters) extends XSBundle {
-    val state = UInt(4.W)
-    val commitPcs = Vec(CommitWidth * RenameWidth, UInt(VAddrBits.W))
-    val commitValid = Vec(CommitWidth * RenameWidth, Bool())
-    val headPc = UInt(VAddrBits.W)
-    val headValid = Bool()
-    val offendingPc = UInt(VAddrBits.W)
-    val offendingValid = Bool()
-    val commits = new RobCommitIO()      // info of commit
-    val redirect = Valid(new Redirect)   // info of redirect
-    val redirect_pc = UInt(VAddrBits.W)  // PC of the redirect uop
-    val debugLsInfo = new DebugLsInfo()
-  }
-  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry, basicDB = true)
-  val tip_data = Wire(new TipEntry())
-  tip_data.state := tip_state
-  for (i <- 0 until CommitWidth) {
-    val debug = debugMeta(debug_microOp(deqPtrVec(i).value).head)
-    val archMask = debug.archPcValid
-    val survivingArchPcs = VecInit((0 until RenameWidth).map { j =>
-      archMask(j) && PopCount(archMask(j, 0)) <= instrSizeCommit(i)
+    val tipFlushActive = tipFlushPending || tipFlushEvent
+    val tipOffendingActive = tipFlushActive
+    val tipHeadEntry = robEntries(deqPtr.value)
+    val tipHeadDebug = debugMeta(debug_microOp(deqPtr.value).head)
+    val tipHeadInstrCount = decodeTraceInstrCount(tipHeadEntry.traceBlockInPipe.iretire)
+    val tipHeadArchValid = VecInit((0 until RenameWidth).map { i =>
+      tipHeadDebug.archPcValid(i) && PopCount(tipHeadDebug.archPcValid(i, 0)) <= tipHeadInstrCount
     })
-    when(io.commits.isCommit && io.commits.commitValid(i)) {
-      assert(PopCount(survivingArchPcs) === instrSizeCommit(i))
+    val tipHeadPending = VecInit((0 until RenameWidth).map { i =>
+      tipHeadArchValid(i) && debug_archPendingWbs.get(deqPtr.value)(i).orR
+    })
+    val tipHeadSelect = PriorityEncoderOH(Mux(tipHeadPending.asUInt.orR, tipHeadPending, tipHeadArchValid))
+    val tipHeadPc = Mux1H(tipHeadSelect, tipHeadDebug.archPcs)
+    val tip_state = WireInit(0.U(4.W))
+    when(!isEmpty) {  // One or more inst in ROB
+      when(io.commits.isCommit && PopCount(io.commits.commitValid) =/= 0.U) {
+        tip_state := tip_computing
+      }.otherwise {
+        tip_state := tip_stalled
+      }
+    }.otherwise {
+      tip_state := Mux(tipOffendingActive, tip_flushed, tip_drained)
     }
-    for (j <- 0 until RenameWidth) {
-      val index = i * RenameWidth + j
-      tip_data.commitPcs(index) := debug.archPcs(j)
-      tip_data.commitValid(index) :=
-        io.commits.isCommit && io.commits.commitValid(i) && survivingArchPcs(j)
+    class TipEntry()(implicit p: Parameters) extends XSBundle {
+      val state = UInt(4.W)
+      val commitPcs = Vec(CommitWidth * RenameWidth, UInt(VAddrBits.W))
+      val commitValid = Vec(CommitWidth * RenameWidth, Bool())
+      val entryId = UInt(log2Ceil(RobSize).W)
+      val entryGeneration = Bool()
+      val entryValid = Bool()
+      val firstArchPc = UInt(VAddrBits.W)
+      val firstArchValid = Bool()
+      val stallPc = UInt(VAddrBits.W)
+      val stallValid = Bool()
+      val offendingPc = UInt(VAddrBits.W)
+      val offendingValid = Bool()
+      val commits = new RobCommitIO()      // info of commit
+      val redirect = Valid(new Redirect)   // info of redirect
+      val redirect_pc = UInt(VAddrBits.W)  // PC of the redirect uop
+      val debugLsInfo = new DebugLsInfo()
     }
+    val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry, basicDB = true)
+    val tip_data = Wire(new TipEntry())
+    tip_data.state := tip_state
+    for (i <- 0 until CommitWidth) {
+      val debug = debugMeta(debug_microOp(deqPtrVec(i).value).head)
+      val archMask = debug.archPcValid
+      val survivingArchPcs = VecInit((0 until RenameWidth).map { j =>
+        archMask(j) && PopCount(archMask(j, 0)) <= instrSizeCommit(i)
+      })
+      when(io.commits.isCommit && io.commits.commitValid(i)) {
+        assert(PopCount(survivingArchPcs) === instrSizeCommit(i))
+      }
+      for (j <- 0 until RenameWidth) {
+        val index = i * RenameWidth + j
+        tip_data.commitPcs(index) := debug.archPcs(j)
+        tip_data.commitValid(index) :=
+          io.commits.isCommit && io.commits.commitValid(i) && survivingArchPcs(j)
+      }
+    }
+    tip_data.entryId := deqPtr.value
+    tip_data.entryGeneration := deqPtr.flag
+    tip_data.entryValid := !isEmpty && tipHeadEntry.valid
+    val firstArchSelect = PriorityEncoderOH(tipHeadDebug.archPcValid)
+    tip_data.firstArchPc := Mux1H(firstArchSelect, tipHeadDebug.archPcs)
+    tip_data.firstArchValid := tip_data.entryValid && tipHeadDebug.archPcValid.orR
+    tip_data.stallPc := tipHeadPc
+    tip_data.stallValid := tip_data.entryValid
+    tip_data.offendingPc := Mux(tipFlushEvent, tipFlushPc, tipOffendingPc)
+    tip_data.offendingValid := tipOffendingActive
+    tip_data.commits := io.commits
+    tip_data.redirect := io.redirect
+    tip_data.redirect_pc := tipRedirectPc
+    tip_data.debugLsInfo := debug_lsInfo(io.commits.robIdx(0).value)
+    tip_table.log(tip_data, true.B, "", clock, reset)
   }
-  tip_data.headPc := tipHeadPc
-  tip_data.headValid := !isEmpty && tipHeadEntry.valid
-  tip_data.offendingPc := Mux(tipFlushEvent, tipFlushPc, tipOffendingPc)
-  tip_data.offendingValid := tipOffendingActive
-  tip_data.commits := io.commits
-  // Walk reads can replace commit metadata; replay data still describes the dequeue head.
-  tip_data.commits.info(0).debug_pc.foreach(_ := tipHeadPc)
-  tip_data.commits.info(0).commit_v := robEntries(deqPtr.value).valid
-  tip_data.redirect := io.redirect
-  tip_data.redirect_pc := tipRedirectPc
-  tip_data.debugLsInfo := debug_lsInfo(io.commits.robIdx(0).value)
-  tip_table.log(tip_data, true.B, "", clock, reset)
 
   val exceptionGen = Module(new ExceptionGen(params))
   val exceptionDataRead = exceptionGen.io.state
@@ -1612,22 +1622,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
     val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
     val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
-    val enqArchNumWbs = Mux1H(enqOH, io.enq.req.map(req => debugMeta(req.bits).archNumWbs))
-    val storedArchDebug = debugMeta(debug_microOp(i).head)
-    for (j <- 0 until RenameWidth) {
-      val archWbCnt = if (backendParams.debugEn) {
-        PopCount(io.writeback.map { writeback =>
+    if (backendParams.debugEn) {
+      val enqArchNumWbs = Mux1H(enqOH, io.enq.req.map(req => debugMeta(req.bits).archNumWbs))
+      val storedArchDebug = debugMeta(debug_microOp(i).head)
+      for (j <- 0 until RenameWidth) {
+        val archWbCnt = PopCount(io.writeback.map { writeback =>
           writeback.valid &&
           writeback.bits.robIdx.value === i.U &&
           writeback.bits.debug_seqNum.get.seqNum === storedArchDebug.archSeqNums(j).seqNum
         })
-      } else {
-        0.U
-      }
-      when(!robEntries(i).valid && instCanEnqFlag) {
-        debug_archPendingWbs(i)(j) := enqArchNumWbs(j)
-      }.elsewhen(robEntries(i).valid) {
-        debug_archPendingWbs(i)(j) := saturatingDecPacked(debug_archPendingWbs(i)(j), archWbCnt)
+        when(!robEntries(i).valid && instCanEnqFlag) {
+          debug_archPendingWbs.get(i)(j) := enqArchNumWbs(j)
+        }.elsewhen(robEntries(i).valid) {
+          debug_archPendingWbs.get(i)(j) := saturatingDecPacked(debug_archPendingWbs.get(i)(j), archWbCnt)
+        }
       }
     }
     when(robEntries(i).valid && needFlushWriteBack){

@@ -25,8 +25,13 @@ create table Tip_0(
   STAMP int not null,
   SITE text,
 {TIP_ATTRIBUTION_SCHEMA},
-  HEADPC int not null,
-  HEADVALID int not null,
+  ENTRYID int not null,
+  ENTRYGENERATION int not null,
+  ENTRYVALID int not null,
+  FIRSTARCHPC int not null,
+  FIRSTARCHVALID int not null,
+  STALLPC int not null,
+  STALLVALID int not null,
   OFFENDINGPC int not null,
   OFFENDINGVALID int not null,
   COMMITS_ISCOMMIT int not null,
@@ -87,6 +92,19 @@ def insert_tip_row(conn: sqlite3.Connection, **values):
     row = dict.fromkeys(columns, 0)
     row.update(SITE="", COMMITS_INFO_0_COMMIT_V=1)
     row.update(values)
+    if "ENTRYVALID" not in values:
+        row["ENTRYVALID"] = int(values.get("STATE", 0) != 3)
+    if "FIRSTARCHPC" not in values:
+        row["FIRSTARCHPC"] = values.get(
+            "COMMITPCS_0",
+            values.get("COMMITS_INFO_0_DEBUG_PC", values.get("STALLPC", 0)),
+        )
+    if "FIRSTARCHVALID" not in values:
+        row["FIRSTARCHVALID"] = row["ENTRYVALID"]
+    if "STALLPC" not in values:
+        row["STALLPC"] = row["FIRSTARCHPC"]
+    if "STALLVALID" not in values:
+        row["STALLVALID"] = row["ENTRYVALID"]
     placeholders = ", ".join(["?"] * len(columns))
     column_list = ", ".join(columns)
     conn.execute(
@@ -114,8 +132,8 @@ class TipScriptTest(unittest.TestCase):
             COMMITVALID_0=1,
             COMMITPCS_1=0x104,
             COMMITVALID_1=1,
-            HEADPC=0x100,
-            HEADVALID=1,
+            STALLPC=0x100,
+            STALLVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x100,
             COMMITS_INFO_1_DEBUG_PC=0x104,
             COMMITS_INFO_0_COMMITTYPE=2,
@@ -125,8 +143,8 @@ class TipScriptTest(unittest.TestCase):
             conn,
             STATE=1,
             STAMP=1,
-            HEADPC=0x100,
-            HEADVALID=1,
+            STALLPC=0x100,
+            STALLVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x100,
             COMMITS_INFO_0_COMMITTYPE=2,
             DEBUGLSINFO_S3_ISREPLAY=1,
@@ -157,8 +175,8 @@ class TipScriptTest(unittest.TestCase):
             COMMITS_COMMITVALID_0=1,
             COMMITPCS_0=0x108,
             COMMITVALID_0=1,
-            HEADPC=0x108,
-            HEADVALID=1,
+            STALLPC=0x108,
+            STALLVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x108,
             COMMITS_INFO_0_COMMITTYPE=3,
             DEBUGLSINFO_S2_ISDCACHEFIRSTMISS=1,
@@ -215,13 +233,20 @@ class TipScriptTest(unittest.TestCase):
             conn.execute("delete from Tip_0")
             insert_tip_row(conn, STATE=3, STAMP=0, COMMITS_INFO_0_COMMIT_V=0)
             insert_tip_row(conn, STATE=3, STAMP=1, COMMITS_INFO_0_COMMIT_V=0)
-            insert_tip_row(conn, STATE=1, STAMP=2, HEADPC=0x300, HEADVALID=1)
+            insert_tip_row(
+                conn,
+                STATE=1,
+                STAMP=2,
+                FIRSTARCHPC=0x300,
+                FIRSTARCHVALID=1,
+                STALLPC=0x304,
+                STALLVALID=1,
+            )
             rows, summary = queries.fetch_time_profile(conn, 0)
 
-        self.assertEqual(rows[0]["pc"], "0x300")
-        self.assertEqual(rows[0]["drained_cycles"], 2.0)
-        self.assertEqual(rows[0]["stalled_cycles"], 1.0)
-        self.assertEqual(rows[0]["cycles"], 3.0)
+        by_pc = {row["pc"]: row for row in rows}
+        self.assertEqual(by_pc["0x300"]["drained_cycles"], 2.0)
+        self.assertEqual(by_pc["0x304"]["stalled_cycles"], 1.0)
         self.assertEqual(summary["attributed_cycles"], 3.0)
 
     def test_time_profile_decimal_output_conserves_three_way_commit_cycle(self):
@@ -237,8 +262,8 @@ class TipScriptTest(unittest.TestCase):
                 COMMITVALID_1=1,
                 COMMITPCS_2=0x108,
                 COMMITVALID_2=1,
-                HEADPC=0x100,
-                HEADVALID=1,
+                STALLPC=0x100,
+                STALLVALID=1,
             )
             rows, summary = queries.fetch_time_profile(conn, 0)
 
@@ -261,8 +286,8 @@ class TipScriptTest(unittest.TestCase):
                 COMMITVALID_1=1,
                 COMMITPCS_2=0x108,
                 COMMITVALID_2=1,
-                HEADPC=0x100,
-                HEADVALID=1,
+                STALLPC=0x100,
+                STALLVALID=1,
             )
             rows = queries.fetch_commit_width_summary(conn, 0)
 
@@ -333,6 +358,7 @@ class TipScriptTest(unittest.TestCase):
                     conn,
                     STATE=1,
                     STAMP=stamp,
+                    ENTRYID=1,
                     COMMITS_ISCOMMIT=is_commit,
                     COMMITS_COMMITVALID_0=is_commit,
                     COMMITS_INFO_0_DEBUG_PC=0x400,
@@ -348,6 +374,37 @@ class TipScriptTest(unittest.TestCase):
         self.assertEqual(replay["dcache_first_miss"], 1)
         self.assertEqual(replay["replay_cnt_sum"], 3)
 
+    def test_replay_does_not_split_when_dynamic_stall_pc_changes(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("delete from Tip_0")
+            for stamp, pc in [(0, 0x100), (1, 0x104)]:
+                insert_tip_row(
+                    conn,
+                    STATE=1,
+                    STAMP=stamp,
+                    ENTRYID=7,
+                    FIRSTARCHPC=0x100,
+                    FIRSTARCHVALID=1,
+                    STALLPC=pc,
+                    STALLVALID=1,
+                    DEBUGLSINFO_S3_ISREPLAY=1,
+                    DEBUGLSINFO_REPLAYCNT=3,
+                )
+            rows = queries.fetch_replay_event_rows(conn, 0, top=None)
+
+        self.assertEqual(rows, [{
+            "pc_raw": 0x100,
+            "pc": "0x100",
+            "count": 1,
+            "fast_replay": 0,
+            "slow_replay": 0,
+            "rs_replay": 0,
+            "bank_conflict": 0,
+            "dcache_first_miss": 0,
+            "forward_fail": 0,
+            "replay_cnt_sum": 3,
+        }])
+
     def test_replay_keeps_walk_residence_and_ignores_invalid_heads(self):
         with sqlite3.connect(self.db) as conn:
             conn.execute("delete from Tip_0")
@@ -362,6 +419,7 @@ class TipScriptTest(unittest.TestCase):
                     conn,
                     STAMP=stamp,
                     STATE=state,
+                    ENTRYVALID=valid,
                     COMMITS_INFO_0_COMMIT_V=valid,
                     COMMITS_ISCOMMIT=committed,
                     COMMITS_COMMITVALID_0=committed,

@@ -60,7 +60,17 @@ def _tip_commit_columns(conn: sqlite3.Connection, table: str) -> list[tuple[str,
         if name.removeprefix("COMMITVALID_").isdigit()
     )
     pairs = [(f"COMMITVALID_{index}", f"COMMITPCS_{index}") for index in indices]
-    required = {"HEADVALID", "HEADPC", "OFFENDINGVALID", "OFFENDINGPC"}
+    required = {
+        "ENTRYID",
+        "ENTRYGENERATION",
+        "ENTRYVALID",
+        "FIRSTARCHVALID",
+        "FIRSTARCHPC",
+        "STALLVALID",
+        "STALLPC",
+        "OFFENDINGVALID",
+        "OFFENDINGPC",
+    }
     missing = required - columns
     missing.update(pc for _, pc in pairs if pc not in columns)
     if not pairs or missing:
@@ -130,7 +140,15 @@ def _round_cycle_column(values: list[Fraction], places: int = 9) -> list[Decimal
 def fetch_time_profile(conn: sqlite3.Connection, hart: int) -> tuple[list[dict], dict]:
     table = ensure_tip_table(conn, hart)
     commit_columns = _tip_commit_columns(conn, table)
-    select_columns = ["STATE", "HEADVALID", "HEADPC", "OFFENDINGVALID", "OFFENDINGPC"]
+    select_columns = [
+        "STATE",
+        "FIRSTARCHVALID",
+        "FIRSTARCHPC",
+        "STALLVALID",
+        "STALLPC",
+        "OFFENDINGVALID",
+        "OFFENDINGPC",
+    ]
     select_columns.extend(column for pair in commit_columns for column in pair)
     cursor = conn.execute(
         f"select {', '.join(select_columns)} from {table} order by ID"
@@ -164,8 +182,8 @@ def fetch_time_profile(conn: sqlite3.Connection, hart: int) -> tuple[list[dict],
     for row in cursor:
         total_cycles += 1
         state = value(row, "STATE")
-        if pending_drained and value(row, "HEADVALID"):
-            attribute(value(row, "HEADPC"), "drained", Fraction(pending_drained))
+        if pending_drained and value(row, "FIRSTARCHVALID"):
+            attribute(value(row, "FIRSTARCHPC"), "drained", Fraction(pending_drained))
             pending_drained = 0
 
         if state == 0:
@@ -176,9 +194,9 @@ def fetch_time_profile(conn: sqlite3.Connection, hart: int) -> tuple[list[dict],
             for pc in pcs:
                 attribute(pc, "computing", weight)
         elif state == 1:
-            if not value(row, "HEADVALID"):
-                raise ValueError("stalled TIP row has no valid ROB-head PC")
-            attribute(value(row, "HEADPC"), "stalled", Fraction(1))
+            if not value(row, "STALLVALID"):
+                raise ValueError("stalled TIP row has no valid stall PC")
+            attribute(value(row, "STALLPC"), "stalled", Fraction(1))
         elif state == 2:
             if not value(row, "OFFENDINGVALID"):
                 raise ValueError("flushed TIP row has no valid offending PC")
@@ -361,9 +379,9 @@ def _replay_entries_cte(table: str) -> str:
     return f"""
         with ordered as (
           select STAMP,
-                 COMMITS_INFO_0_DEBUG_PC as pc_raw,
-                 COMMITS_ISCOMMIT,
-                 COMMITS_COMMITVALID_0,
+                 ENTRYID as rob_entry_id,
+                 ENTRYGENERATION as rob_entry_generation,
+                 FIRSTARCHPC as pc_raw,
                  DEBUGLSINFO_S3_ISREPLAY as is_replay,
                  DEBUGLSINFO_S3_ISREPLAYFAST as fast_replay,
                  DEBUGLSINFO_S3_ISREPLAYSLOW as slow_replay,
@@ -373,18 +391,18 @@ def _replay_entries_cte(table: str) -> str:
                  DEBUGLSINFO_S2_ISFORWARDFAIL as forward_fail,
                  DEBUGLSINFO_REPLAYCNT as replay_cnt,
                  lag(STAMP) over (order by {order}) as prev_stamp,
-                 lag(COMMITS_INFO_0_DEBUG_PC) over (order by {order}) as prev_pc,
-                 lag(DEBUGLSINFO_REPLAYCNT) over (order by {order}) as prev_replay_cnt,
-                 lag(COMMITS_ISCOMMIT and COMMITS_COMMITVALID_0) over (order by {order}) as prev_committed
+                 lag(ENTRYID) over (order by {order}) as prev_entry_id,
+                 lag(ENTRYGENERATION) over (order by {order}) as prev_entry_generation,
+                 lag(DEBUGLSINFO_REPLAYCNT) over (order by {order}) as prev_replay_cnt
           from {table}
-          where STATE != 3 and COMMITS_INFO_0_COMMIT_V=1
+          where STATE != 3 and ENTRYVALID=1 and FIRSTARCHVALID=1
         ), boundaries as (
           select *,
                  case when prev_stamp is null
                             or STAMP != prev_stamp + 1
-                            or pc_raw != prev_pc
+                            or rob_entry_id != prev_entry_id
+                            or rob_entry_generation != prev_entry_generation
                             or replay_cnt < prev_replay_cnt
-                            or prev_committed
                       then 1 else 0 end as new_entry
           from ordered
         ), grouped as (
@@ -393,7 +411,7 @@ def _replay_entries_cte(table: str) -> str:
           from boundaries
         ), replay_entries as (
           select entry_id,
-                 pc_raw,
+                 max(pc_raw) as pc_raw,
                  max(is_replay) as is_replay,
                  max(fast_replay) as fast_replay,
                  max(slow_replay) as slow_replay,
@@ -403,7 +421,7 @@ def _replay_entries_cte(table: str) -> str:
                  max(forward_fail) as forward_fail,
                  max(replay_cnt) as replay_cnt
           from grouped
-          group by entry_id, pc_raw
+          group by entry_id
           having max(is_replay)=1
               or max(bank_conflict)=1
               or max(dcache_first_miss)=1
