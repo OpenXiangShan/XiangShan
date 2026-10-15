@@ -40,7 +40,7 @@ class TeaCompletion(implicit p: Parameters) extends XSBundle {
 private class TeaStoredMember(implicit p: Parameters) extends XSBundle {
   val isFormer = Bool()
   val owner = UInt(log2Ceil(RenameWidth).W)
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(XLEN.W)
   val psv = UInt(TeaEvent.width.W)
   val remaining = UInt(NormalUopNumWidth.W)
 }
@@ -49,6 +49,7 @@ private class TeaStoredMember(implicit p: Parameters) extends XSBundle {
 class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val cycle = Input(UInt(64.W))
+    val addrTransType = Input(new AddrTransType)
     val alloc = Input(Vec(RenameWidth, Valid(new TeaRenameMember)))
     val enqPsv = Input(Vec(RenameWidth, Valid(new TeaPsvUpdate)))
     val writeback = Input(Vec(writebackPorts, Valid(new TeaCompletion)))
@@ -117,7 +118,7 @@ class TeaMemberTracker(writebackPorts: Int, eventPorts: Int)(implicit p: Paramet
           assert(PopCount(allocOH) === 1.U, "duplicate TEA architectural member")
           members(entry)(rank).isFormer := allocMember.robIdx.isFormer
           members(entry)(rank).owner := allocMember.owner
-          members(entry)(rank).pc := allocMember.pc
+          members(entry)(rank).pc := io.addrTransType.extend(allocMember.pc, XLEN)
           members(entry)(rank).psv := mergedPsv(allocMember.robIdx, rank.U, allocMember.psv)
           members(entry)(rank).remaining := allocMember.numWB
         }
