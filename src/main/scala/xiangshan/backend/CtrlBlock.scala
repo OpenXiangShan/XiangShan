@@ -700,9 +700,6 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      val fusedTeaPsv = decodePipeRename(i).bits.teaPsv | decodePipeRename(i + 1).bits.teaPsv
-      rename.io.in(i).bits.teaPsv := fusedTeaPsv
-      dispatch.io.renameIn(i).bits.teaPsv := fusedTeaPsv
       // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
       rename.io.in(i + 1).bits.isMove := false.B
       rename.io.isFusionVec(i) := true.B
@@ -777,6 +774,10 @@ class CtrlBlockImp(
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
 
+  val teaDispatchMembers = rename.io.teaMembers.map { members =>
+    RegEnable(members, renameOut.map(_.fire).reduce(_ || _))
+  }
+
   rename.io.debugOutValidVec.foreach(_ := dispatch.io.fromRename.map(_.valid))
 
 
@@ -797,6 +798,9 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
+  rob.io.teaMembers.foreach { members =>
+    members := RegEnable(teaDispatchMembers.get, dispatch.io.enqRob.req.map(_.valid).reduce(_ || _))
+  }
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpFp  := io.toDispatch.wakeUpFp
