@@ -1373,7 +1373,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
   val redirectAll = RegInit(false.B)
   when(io.redirect.valid){
-    redirectBegin := Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.value - 1.U, io.redirect.bits.robIdx.value)
+    redirectBegin := Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(),
+      Mux(io.redirect.bits.robIdx.value === 0.U, (RobSize - 1).U, io.redirect.bits.robIdx.value - 1.U),
+      io.redirect.bits.robIdx.value
+    )
     redirectEnd := enqPtr.value
     // Only former+flushItself removes the redirect entry itself.  A latter-slot
     // redirect must retain the former slot even when the physical range wraps.
