@@ -4,9 +4,11 @@ from argparse import Namespace
 from pathlib import Path
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
-from tea_visualize import load_data
+from tea_visualize import annotate_elf, load_data
 
 
 class TeaAnalysisTest(unittest.TestCase):
@@ -30,7 +32,7 @@ class TeaAnalysisTest(unittest.TestCase):
                 if cycle in (0, 8):
                     row.update(STATE=0, VALIDMASK_0=1, PCVEC_0=0x10000000)
                     if cycle == 0:
-                        row.update(VALIDMASK_0=3, PCVEC_1=0x90000004)
+                        row.update(VALIDMASK_0=3, PCVEC_1=0xFFFFFFFF80001000 - (1 << 64))
                     else:
                         row.update(VALIDMASK_7=128, PCVEC_63=0x90000008)
                 elif cycle in (1, 2, 3, 4):
@@ -75,7 +77,15 @@ class TeaAnalysisTest(unittest.TestCase):
         run = self.load(spec_checkpoint=True)
         self.assertAlmostEqual(run["summary"]["sample_weight"], 8)
         self.assertEqual(run["summary"]["excluded_lanes"], 2)
-        self.assertEqual(run["weights"][0x90000004][0], 0.5)
+        self.assertEqual(run["weights"][0xFFFFFFFF80001000][0], 0.5)
+
+    def test_full_width_kernel_pc_matches_elf(self):
+        pc = 0xFFFFFFFF80001000
+        run = self.load()
+        self.assertIn(pc, run["weights"])
+        objdump = SimpleNamespace(stdout="ffffffff80001000:\t00000013\tnop\n")
+        with patch("tea_visualize.subprocess.run", return_value=objdump):
+            self.assertEqual(annotate_elf(Path("kernel.elf"), {pc}, "objdump"), {pc: "nop"})
 
 
 if __name__ == "__main__":

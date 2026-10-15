@@ -39,6 +39,8 @@ Cancelled、Unresolved、Unknown target/cause 在图表、CSV 和总权重中单
 
 `VALIDMASK_n` 是按物理提交项分块的成员 mask，避免 SQLite 对 64 位无符号
 mask 的精度损失。`CYCLE` 是采样边界，`STAMP` 不用于关联。
+`PCVEC_n` 和 `MEMBER_PC` 是按地址转换模式扩展后的 64 位 PC；SQLite 返回的
+负整数会在聚合、过滤和 ELF 匹配前恢复为无符号地址。
 汇总的 rows 是窗口内全部边界，selected_rows 和事件数经过 PC 过滤；
 sample_weight 包含未完成归因。等周期、无丢样时状态比例可用于估计时间占比，
 PSV bit 次数仍是指令签名出现次数，不是独立事件发生次数。
