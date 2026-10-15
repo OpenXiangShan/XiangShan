@@ -101,3 +101,10 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"rep_{report.when}", report)
+    if report.failed and os.getenv("TB_FAILURE_LOG", "").strip():
+        path = Path(os.environ["TB_FAILURE_LOG"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n===== {item.nodeid} [{report.when}] =====\n")
+            handle.write(report.longreprtext)
+            handle.write("\n")
