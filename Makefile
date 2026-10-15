@@ -163,12 +163,29 @@ endif
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 override DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
-# co-simulation with DRAMsim3
+# co-simulation with DRAMsim3 and MCSim
+MEMORY_BACKEND_COUNT := $(words $(filter 1,$(WITH_DRAMSIM3) $(WITH_MCSIM)))
+ifneq ($(filter-out 0 1,$(MEMORY_BACKEND_COUNT)),)
+$(error WITH_DRAMSIM3 and WITH_MCSIM are mutually exclusive)
+endif
+
 ifeq ($(WITH_DRAMSIM3),1)
 ifndef DRAMSIM3_HOME
 $(error DRAMSIM3_HOME is not set)
 endif
 override SIM_ARGS += --with-dramsim3
+endif
+
+# co-simulation with MCSim timing and DifftestMem data
+MCSIM_EMU_DEPS :=
+MCSIM_DIFTEST_ARGS :=
+MCSIM_HOME ?= $(NOOP_HOME)/MCSim
+MCSIM_CPU_FREQ_MHZ ?= 3000
+MCSIM_CXX ?= clang++
+ifeq ($(WITH_MCSIM),1)
+override SIM_ARGS += --with-mcsim
+MCSIM_EMU_DEPS += mcsim-verilator-lib
+MCSIM_DIFTEST_ARGS += WITH_MCSIM=1 MCSIM_HOME=$(MCSIM_HOME) MCSIM_CPU_FREQ_MHZ=$(MCSIM_CPU_FREQ_MHZ)
 endif
 
 # SimAXIMem size in GB (for sim-verilog only)
@@ -323,6 +340,9 @@ init:
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
 	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
 
+mcsim-verilator-lib:
+	$(MAKE) -C $(MCSIM_HOME) verilator-lib CXX=$(MCSIM_CXX)
+
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
 init-force:
@@ -348,11 +368,14 @@ reformat:
 	mill xiangshan.reformat
 
 # verilator simulation
-emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
+emu-mk: sim-verilog $(MCSIM_EMU_DEPS)
+	$(MAKE) -C ./difftest emu-mk SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)" $(MCSIM_DIFTEST_ARGS)
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(MCSIM_DIFTEST_ARGS)
+
+emu-run: emu
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(MCSIM_DIFTEST_ARGS)
 
 gsim: sim-verilog
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
@@ -385,4 +408,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog gsim emu emu-run clean help init init-force mcsim-verilator-lib bump bsp $(REF_SO)
