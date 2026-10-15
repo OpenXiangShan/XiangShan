@@ -74,7 +74,6 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
   val slotHeadRvcMask = UInt(2.W)
   val predTaken = Bool()
   val needVTB = Bool()
-  val teaPsv = Vec(2, UInt(xiangshan.TeaEvent.width.W))
 
   val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
   // Preserve the former slot's exact trace metadata so a latter-slot squash
@@ -327,17 +326,4 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
 class RobFlushPcInfo(implicit p: Parameters) extends XSBundle {
   val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
   val flushIsRVC = Bool()
-}
-
-object RobBundles {
-  def collectTeaPsvBySlot(valid: Seq[Bool], isFormer: Seq[Bool], psv: Seq[UInt]): Vec[UInt] = {
-    require(valid.length == isFormer.length && valid.length == psv.length)
-    VecInit((0 until 2).map { slot =>
-      val slotIsFormer = (slot == 0).B
-      valid.indices.foldLeft(xiangshan.TeaPsvOps.empty) { case (acc, i) =>
-        acc | Mux(valid(i) && isFormer(i) === slotIsFormer, psv(i), xiangshan.TeaPsvOps.empty)
-      }
-    })
-  }
-
 }

@@ -20,7 +20,6 @@ import chisel3.util.Decoupled
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, EnqRobUop, RenameOutUop}
-import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.dispatch.Dispatch
 import xiangshan.backend.fu.FuType
 import xiangshan.frontend.{BackendRedirectTopdown, FetchToIBuffer, HasFrontendParameters}
@@ -58,16 +57,6 @@ class TeaHelperTest extends XSTester {
     io.decodeOutTea := decodeOut.teaPsv
     io.renameTea := renameOut.teaPsv
     io.enqRobTea := enqRob.teaPsv
-  }
-
-  class TeaCompressedRobPsvHarness extends Module {
-    val io = IO(new Bundle {
-      val valid = Input(Vec(4, Bool()))
-      val isFormer = Input(Vec(4, Bool()))
-      val psv = Input(Vec(4, UInt(TeaEvent.width.W)))
-      val out = Output(Vec(2, UInt(TeaEvent.width.W)))
-    })
-    io.out := RobBundles.collectTeaPsvBySlot(io.valid, io.isFormer, io.psv)
   }
 
   class PacketPsvHarness extends Module {
@@ -256,39 +245,6 @@ class TeaHelperTest extends XSTester {
     io.enqPsv := VecInit(dispatch.io.enqRob.req.map(_.bits.teaPsv))
   }
 
-  class TeaFlushCauseReplayHarness(implicit val p: Parameters) extends Module with HasXSParameter {
-    val io = IO(new Bundle {
-      val enable = Input(Bool())
-      val triggerFlush = Input(Bool())
-      val sampleValid = Output(Bool())
-      val sample = Output(new TeaEntry()(p))
-    })
-
-    val flushCause = RegInit(0.U.asTypeOf(new TeaFlushCause()(p)))
-    when (io.triggerFlush) {
-      flushCause.valid := true.B
-      flushCause.pc := "h80004000".U
-      flushCause.psv := TeaEvent.bit(TeaEvent.FL_EX)
-    }
-
-    val selector = Module(new TeaSampleSelector()(p))
-    selector.io.enable := io.enable
-    selector.io.samplePeriod := 0.U
-    selector.io.state := TeaState.flushed
-    selector.io.hasCommit := false.B
-    selector.io.commitMask := 0.U
-    selector.io.commitPc := 0.U.asTypeOf(selector.io.commitPc)
-    selector.io.commitPsv := 0.U.asTypeOf(selector.io.commitPsv)
-    selector.io.flushCause := flushCause
-
-    when (selector.io.sampleValid && selector.io.sample.oirValid) {
-      flushCause.valid := false.B
-    }
-
-    io.sampleValid := selector.io.sampleValid
-    io.sample := selector.io.sample
-  }
-
   class TeaStateHarness extends Module {
     val io = IO(new Bundle {
       val empty = Input(Bool())
@@ -300,184 +256,104 @@ class TeaHelperTest extends XSTester {
     io.state := TeaState.classify(io.empty, io.walking, io.hasCommit, io.flushCauseValid)
   }
 
-  it should "preserve delayed sample timestamps and require a real commit" in {
-    simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
-      dut.io.state.poke(1.U)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.clock.step()
-      dut.io.sampleValid.expect(false.B)
-
-      dut.io.state.poke(0.U)
-      dut.io.hasCommit.poke(true.B)
-      dut.io.commitMask.poke(1.U)
-      dut.io.commitPc(0).poke("h80001000".U)
-      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.state.expect(1.U)
-      dut.io.sample.cycle.expect(0.U)
-    }
+  private def initSelector(dut: TeaSampleSelector): Unit = {
+    dut.io.enable.poke(true.B)
+    dut.io.samplePeriod.poke(1.U)
+    dut.io.commitMask.poke(0.U)
+    dut.io.commitPc.foreach(_.poke(0.U))
+    dut.io.commitPsv.foreach(_.poke(0.U))
+    dut.io.stalledTarget.valid.poke(false.B)
+    dut.io.flushCause.valid.poke(false.B)
   }
 
-  it should "sample every compressed ROB commit slot independently" in {
+  it should "preserve every stalled boundary and expand all architectural commit members" in {
     simulate(new TeaSampleSelector) { dut =>
-      dut.io.commitPc.length shouldBe 2 * config(XSCoreParamsKey).CommitWidth
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
+      initSelector(dut)
+      dut.io.commitPc.length shouldBe config(XSCoreParamsKey).RenameWidth * config(XSCoreParamsKey).CommitWidth
+      dut.io.state.poke(TeaState.stalled)
+      dut.io.stalledTarget.valid.poke(true.B)
+      dut.io.stalledTarget.bits.allocationCycle.poke(17.U)
+      dut.io.stalledTarget.bits.robIndex.poke(2.U)
+      dut.io.stalledTarget.bits.rank.poke(1.U)
+      for (cycle <- 0 until 100) {
+        dut.io.sampleValid.expect(true.B)
+        dut.io.sample.cycle.expect(cycle.U)
+        dut.io.sample.state.expect(TeaState.stalled)
+        dut.io.sample.targetValid.expect(true.B)
+        dut.io.sample.target.rank.expect(1.U)
+        dut.io.sample.target.allocationCycle.expect(17.U)
+        dut.clock.step()
+      }
       dut.io.state.poke(TeaState.computing)
-      dut.io.hasCommit.poke(true.B)
-      dut.io.commitMask.poke(2.U)
-      dut.io.commitPc.foreach(_.poke(0.U))
-      dut.io.commitPsv.foreach(_.poke(0.U))
+      dut.io.commitMask.poke(3.U)
+      dut.io.commitPc(0).poke("h80001000".U)
       dut.io.commitPc(1).poke("h80001800".U)
       dut.io.commitPsv(1).poke(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.flushCause.valid.poke(false.B)
-
       dut.io.sampleValid.expect(true.B)
-      dut.io.sample.validMask.expect(2.U)
+      dut.io.sample.cycle.expect(100.U)
+      dut.io.sample.state.expect(TeaState.computing)
+      dut.io.sample.validMask(0).expect(3.U)
+      dut.io.sample.pcVec(0).expect("h80001000".U)
       dut.io.sample.pcVec(1).expect("h80001800".U)
       dut.io.sample.psvVec(1).expect(TeaEvent.bit(TeaEvent.ST_L1))
     }
   }
 
-  it should "keep wall-clock sampling cadence while a delayed sample is pending" in {
+  it should "keep wall-clock sampling cadence through long stalls" in {
     simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(2.U)
-      dut.io.state.poke(1.U)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.io.flushCause.valid.poke(false.B)
-      dut.clock.step()
-
-      dut.clock.step()
-      dut.io.sampleValid.expect(false.B)
-      dut.io.sample.overflow.expect(true.B)
-      dut.clock.step()
-
-      dut.io.state.poke(0.U)
-      dut.io.hasCommit.poke(true.B)
-      dut.io.commitMask.poke(1.U)
-      dut.io.commitPc(0).poke("h80002000".U)
-      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.state.expect(1.U)
-      dut.io.sample.cycle.expect(0.U)
-      dut.io.sample.overflow.expect(true.B)
-    }
-  }
-
-  it should "resolve an old delayed sample and retain a new delayed boundary in the same cycle" in {
-    simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
-      dut.io.state.poke(1.U)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.io.flushCause.valid.poke(false.B)
-      dut.clock.step()
-
-      dut.io.hasCommit.poke(true.B)
-      dut.io.commitMask.poke(1.U)
-      dut.io.commitPc(0).poke("h80002100".U)
-      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.state.expect(1.U)
-      dut.io.sample.cycle.expect(0.U)
-      dut.io.sample.overflow.expect(false.B)
-      dut.clock.step()
-
-      dut.io.state.poke(0.U)
-      dut.io.commitPc(0).poke("h80002200".U)
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.state.expect(1.U)
-      dut.io.sample.cycle.expect(1.U)
-      dut.io.sample.overflow.expect(true.B)
-    }
-  }
-
-  it should "clear delayed samples and overflow when sampling is disabled" in {
-    simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
-      dut.io.state.poke(1.U)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.io.flushCause.valid.poke(false.B)
-      dut.clock.step(2)
-
-      dut.io.enable.poke(false.B)
-      dut.clock.step()
-
-      dut.io.enable.poke(true.B)
-      dut.io.state.poke(0.U)
-      dut.io.hasCommit.poke(true.B)
-      dut.io.commitMask.poke(1.U)
-      dut.io.commitPc(0).poke("h80002300".U)
-      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.state.expect(0.U)
-      dut.io.sample.overflow.expect(false.B)
-    }
-  }
-
-  it should "report a dropped boundary as overflow and sample flushed only in walk" in {
-    simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
-      dut.io.state.poke(0.U)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.clock.step()
-      dut.io.sampleValid.expect(false.B)
-      dut.io.sample.overflow.expect(true.B)
-
-      dut.io.state.poke(2.U)
-      dut.io.flushCause.valid.poke(true.B)
-      dut.io.flushCause.pc.poke("h80002000".U)
-      dut.io.flushCause.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.oirValid.expect(true.B)
-      dut.io.sample.overflow.expect(true.B)
-    }
-  }
-
-  it should "prioritize a current flush cause over a pending delayed boundary" in {
-    simulate(new TeaSampleSelector) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.samplePeriod.poke(0.U)
+      initSelector(dut)
+      dut.io.samplePeriod.poke(3.U)
       dut.io.state.poke(TeaState.stalled)
-      dut.io.hasCommit.poke(false.B)
-      dut.io.commitMask.poke(0.U)
-      dut.io.flushCause.valid.poke(false.B)
-      dut.clock.step()
+      for (cycle <- 0 until 12) {
+        dut.io.sampleValid.expect((cycle % 3 == 0).B)
+        dut.io.sample.cycle.expect(cycle.U)
+        dut.clock.step()
+      }
+    }
+  }
 
+  it should "resolve drained samples to the first valid successor after sampling is disabled" in {
+    simulate(new TeaSampleSelector) { dut =>
+      initSelector(dut)
+      dut.io.state.poke(TeaState.drained)
+      for (cycle <- 0 until 5) {
+        dut.io.sampleValid.expect(true.B)
+        dut.io.sample.cycle.expect(cycle.U)
+        dut.io.drainFinal.valid.expect(false.B)
+        dut.clock.step()
+      }
+      dut.io.enable.poke(false.B)
+      dut.io.state.poke(TeaState.computing)
+      dut.io.commitMask.poke(8.U)
+      dut.io.commitPc(3).poke("h80002100".U)
+      dut.io.commitPsv(3).poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.sampleValid.expect(false.B)
+      dut.io.drainFinal.valid.expect(true.B)
+      dut.io.drainFinal.bits.cycle.expect(5.U)
+      dut.io.drainFinal.bits.member.pc.expect("h80002100".U)
+      dut.io.drainFinal.bits.member.psv.expect(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.drainFinal.valid.expect(false.B)
+    }
+  }
+
+  it should "retain a flush cause across all recovery boundaries" in {
+    simulate(new TeaSampleSelector) { dut =>
+      initSelector(dut)
       dut.io.state.poke(TeaState.flushed)
       dut.io.flushCause.valid.poke(true.B)
       dut.io.flushCause.pc.poke("h80003000".U)
       dut.io.flushCause.psv.poke(TeaEvent.bit(TeaEvent.FL_EX))
+      for (_ <- 0 until 5) {
+        dut.io.sampleValid.expect(true.B)
+        dut.io.sample.validMask(0).expect(1.U)
+        dut.io.sample.pcVec(0).expect("h80003000".U)
+        dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_EX))
+        dut.clock.step()
+      }
+      dut.io.flushCause.valid.poke(false.B)
       dut.io.sampleValid.expect(true.B)
-      dut.io.sample.oirValid.expect(true.B)
-      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_EX))
-      dut.io.sample.overflow.expect(true.B)
-    }
-  }
-
-  it should "consume a remembered flush cause after emitting its OIR sample" in {
-    simulate(new TeaFlushCauseReplayHarness) { dut =>
-      dut.io.enable.poke(true.B)
-      dut.io.triggerFlush.poke(true.B)
-      dut.clock.step()
-
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.oirValid.expect(true.B)
-      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_EX))
-
-      dut.io.triggerFlush.poke(false.B)
-      dut.clock.step()
-      dut.io.sampleValid.expect(false.B)
+      dut.io.sample.validMask.foreach(_.expect(0.U))
     }
   }
 
@@ -498,6 +374,7 @@ class TeaHelperTest extends XSTester {
 
       dut.io.walking.poke(false.B)
       dut.io.hasCommit.poke(true.B)
+      dut.io.flushCauseValid.poke(true.B)
       dut.io.state.expect(TeaState.computing)
 
       dut.io.hasCommit.poke(false.B)
@@ -519,23 +396,6 @@ class TeaHelperTest extends XSTester {
       dut.io.decodeOutTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.renameTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.enqRobTea.expect(ctrlTea.U(TeaEvent.width.W))
-    }
-  }
-
-  it should "keep compressed ROB slot PSV independent and OR uops within each slot" in {
-    simulate(new TeaCompressedRobPsvHarness) { dut =>
-      dut.io.valid.foreach(_.poke(true.B))
-      dut.io.isFormer(0).poke(true.B)
-      dut.io.isFormer(1).poke(false.B)
-      dut.io.isFormer(2).poke(true.B)
-      dut.io.isFormer(3).poke(false.B)
-      dut.io.psv(0).poke(TeaEvent.bit(TeaEvent.DR_L1))
-      dut.io.psv(1).poke(TeaEvent.bit(TeaEvent.FL_MB))
-      dut.io.psv(2).poke(TeaEvent.bit(TeaEvent.ST_TLB))
-      dut.io.psv(3).poke(TeaEvent.bit(TeaEvent.ST_L1))
-
-      dut.io.out(0).expect((teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.ST_TLB)).U)
-      dut.io.out(1).expect((teaBitValue(TeaEvent.FL_MB) | teaBitValue(TeaEvent.ST_L1)).U)
     }
   }
 
