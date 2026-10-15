@@ -634,19 +634,21 @@ class FrontendEnv:
         if in_reset:
             self.icache_agent.reset()
             self.icache_control_agent.reset()
+            self.uncache_agent.reset()
+            self.ptw_agent.reset()
         else:
             self.icache_agent.on_clock_edge(cycle)
             self.icache_control_agent.on_clock_edge(cycle)
-        self.uncache_agent.on_clock_edge(cycle)
-        ptw_flushes_before = int(self.ptw_agent.sfence_dropped_responses)
-        self.ptw_agent.on_clock_edge(cycle)
-        ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)
-        if ptw_flushes_after > ptw_flushes_before:
-            self.translation_oracle.discard_pending_ptw_responses(
-                int(cycle), agent_dropped=ptw_flushes_after - ptw_flushes_before
-            )
-        self.ptw_full_ppn_checker.on_clock_edge(cycle)
-        self.ptw_resp_input_checker.on_clock_edge(cycle)
+            self.uncache_agent.on_clock_edge(cycle)
+            ptw_flushes_before = int(self.ptw_agent.sfence_dropped_responses)
+            self.ptw_agent.on_clock_edge(cycle)
+            ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)
+            if ptw_flushes_after > ptw_flushes_before:
+                self.translation_oracle.discard_pending_ptw_responses(
+                    int(cycle), agent_dropped=ptw_flushes_after - ptw_flushes_before
+                )
+            self.ptw_full_ppn_checker.on_clock_edge(cycle)
+            self.ptw_resp_input_checker.on_clock_edge(cycle)
         if in_reset:
             self.backend_model.on_hardware_reset(cycle)
             self.backend_agent.drive_reset_idle()

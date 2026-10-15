@@ -84,6 +84,11 @@ class UncacheAgent:
             self.mmio_latency,
         )
 
+    def reset(self) -> None:
+        self.pending.clear()
+        if self.interface is not None:
+            self.interface.drive_idle()
+
     def set_a_ready(self, value: Optional[int]) -> None:
         self.a_ready_override = None if value is None else (1 if int(value) else 0)
 

@@ -494,6 +494,16 @@ class PTWAgent:
             level="INFO",
         )
 
+    def reset(self) -> None:
+        self.pending.clear()
+        self.active_resp = None
+        self._resp_valid_driven = 0
+        self._driven_response_payload = None
+        self.last_drive_expectation = None
+        self.last_request_expectation = None
+        if self.interface is not None:
+            self.interface.drive_idle()
+
     def on_clock_edge(self, cycle: int) -> None:
         if self.interface is None:
             return
