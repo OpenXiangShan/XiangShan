@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from env.model.memory_model import MemoryModel
-from env.core.frontend_flow_checker import FrontendFlowChecker
+from env.checkers.frontend_flow_checker import FrontendFlowChecker
 from env.support import fold_pc, require_matching_foldpc
 
 

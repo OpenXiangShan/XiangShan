@@ -23,7 +23,7 @@ from env.model.backend_runtime import BackendObservationSnapshot
 from env.model import GoldenTrace
 from env.model import PageTableModel
 from env.model import TraceEntry
-from env.core.frontend_flow_checker import FrontendFlowChecker
+from env.checkers.frontend_flow_checker import FrontendFlowChecker
 from env.support import fold_pc
 
 
