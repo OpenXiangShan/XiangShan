@@ -381,9 +381,13 @@ object AXI4MemorySlave {
     slave: AXI4SlaveNode,
     memByte: Long,
     useBlackBox: Boolean = false,
-    dynamicLatency: Boolean = false
+    dynamicLatency: Boolean = false,
+    useMCCosim: Boolean = false
   )(implicit p: Parameters): AXI4MemorySlave = {
-    val memory = if (dynamicLatency) {
+    require(!(dynamicLatency && useMCCosim), "DRAMSim3 and mc-cosim DDR memory backends are mutually exclusive")
+    val memory = if (useMCCosim) {
+      LazyModule(new AXI4MCDDRWrapper(slave, memByte, useBlackBox))
+    } else if (dynamicLatency) {
       LazyModule(new AXI4MemoryWrapper(slave, memByte, useBlackBox))
     } else {
       LazyModule(new AXI4RAMWrapper(slave, memByte, useBlackBox))
