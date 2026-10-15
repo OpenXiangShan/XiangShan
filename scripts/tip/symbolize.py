@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set
 
@@ -49,6 +50,10 @@ def _unknown_symbol(pc: str) -> Dict[str, object]:
 TEXT_SYMBOL_TYPES = {"T", "t", "W", "w"}
 
 
+class _ToolFailure(RuntimeError):
+    pass
+
+
 def _collect_symbols(elf: Path) -> List[tuple[int, int, str]]:
     try:
         result = subprocess.run(
@@ -58,8 +63,9 @@ def _collect_symbols(elf: Path) -> List[tuple[int, int, str]]:
             capture_output=True,
             timeout=TIMEOUT_SECONDS,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return []
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as error:
+        detail = str(error) or type(error).__name__
+        raise _ToolFailure(f"nm failed for {elf}: {detail}") from error
     symbols: List[tuple[int, int, str]] = []
     for line in result.stdout.splitlines():
         parts = line.strip().split(maxsplit=3)
@@ -87,8 +93,9 @@ def _resolve_locations(elf: Path, pcs: Iterable[str]) -> Dict[str, dict[str, obj
             capture_output=True,
             timeout=TIMEOUT_SECONDS,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return {}
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as error:
+        detail = str(error) or type(error).__name__
+        raise _ToolFailure(f"addr2line failed for {elf}: {detail}") from error
     lines_iter = iter(result.stdout.splitlines())
     resolved: Dict[str, dict[str, object]] = {}
     for pc in pcs:
@@ -146,7 +153,7 @@ class ElfResolver:
         self.pc_mode = pc_mode
         self._elf_identity = self._identity()
         self._cache_identity = f"{self._elf_identity}|pc_bits={pc_bits}|pc_mode={pc_mode}"
-        self._cache_file: Dict[str, object] = {"version": 3, "elfs": {}}
+        self._cache_file: Dict[str, object] = {"version": 4, "elfs": {}}
         self._cache: Dict[str, dict[str, object]] = self._load_cache()
 
     def _identity(self) -> str:
@@ -161,7 +168,7 @@ class ElfResolver:
             return {}
         try:
             data = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and data.get("version") == 3 and isinstance(data.get("elfs"), dict):
+            if isinstance(data, dict) and data.get("version") == 4 and isinstance(data.get("elfs"), dict):
                 self._cache_file = data
                 entries = data["elfs"].get(self._cache_identity, {})
                 if isinstance(entries, dict):
@@ -190,15 +197,32 @@ class ElfResolver:
             missing.append(pc)
             seen.add(pc)
         if missing:
-            resolved = self._resolve_missing(missing)
-            self._cache.update(resolved)
-            self._store_cache()
-        return {pc: self._cache.get(pc, _unknown_symbol(pc)) for pc in normalized}
+            resolved, cacheable = self._resolve_missing(missing)
+            if cacheable:
+                self._cache.update(resolved)
+                self._store_cache()
+        else:
+            resolved = {}
+        return {
+            pc: self._cache.get(pc, resolved.get(pc, _unknown_symbol(pc)))
+            for pc in normalized
+        }
 
-    def _resolve_missing(self, pcs: List[str]) -> Dict[str, dict[str, object]]:
-        symbols = _collect_symbols(self.elf)
+    def _resolve_missing(self, pcs: List[str]) -> tuple[Dict[str, dict[str, object]], bool]:
+        cacheable = True
+        try:
+            symbols = _collect_symbols(self.elf)
+        except _ToolFailure as error:
+            print(f"warning: {error}; results from this attempt were not cached", file=sys.stderr)
+            symbols = []
+            cacheable = False
         lookup_pcs = [_lookup_pc(pc, self.pc_bits, self.pc_mode) for pc in pcs]
-        locations = _resolve_locations(self.elf, lookup_pcs)
+        try:
+            locations = _resolve_locations(self.elf, lookup_pcs)
+        except _ToolFailure as error:
+            print(f"warning: {error}; results from this attempt were not cached", file=sys.stderr)
+            locations = {}
+            cacheable = False
         resolved: Dict[str, dict[str, object]] = {}
         sorted_symbols = sorted(symbols)
         for pc, lookup_pc in zip(pcs, lookup_pcs):
@@ -229,7 +253,7 @@ class ElfResolver:
                 "location": entry.get("location", "<unknown>:0"),
                 "symbol_offset": symbol_offset,
             }
-        return resolved
+        return resolved, cacheable
 
 
 def symbolize_rows(rows: List[dict], resolver: ElfResolver, pc_field: str) -> List[dict]:

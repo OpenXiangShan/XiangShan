@@ -374,6 +374,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uopDbg.instr := in.instr
       val slotMask = Mux(slotIsFormer(i), formerSlotMaskVec(i), latterSlotMaskVec(i))
       uopDbg.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse))
+      uopDbg.archPcValid := compressMaskVec(i)
+      for (k <- 0 until RenameWidth) {
+        uopDbg.archPcs(k) := io.in(k).bits.debug.map(_.pc).getOrElse(0.U)
+        uopDbg.archSeqNums(k) := io.in(k).bits.debug.map(_.debug_seqNum).getOrElse(0.U.asTypeOf(InstSeqNum()))
+        val eliminatedMove = io.in(k).bits.isMove && !io.in(k).bits.exceptionVec.orR
+        uopDbg.archNumWbs(k) := Mux(io.in(k).valid && !eliminatedMove, io.in(k).bits.numWB, 0.U)
+      }
       // Only assign performance counters in debugInfo
       uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
       uopDbg.perfDebugInfo.renameTime := GTimer()

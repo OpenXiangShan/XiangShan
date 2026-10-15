@@ -329,6 +329,10 @@ object Bundles {
     val debug_seqNum = InstSeqNum()
     val instr = UInt(32.W)
     val fusionNum = UInt(log2Ceil(RenameWidth / 2 + 1).W)
+    val archPcs = Vec(RenameWidth, UInt(VAddrBits.W))
+    val archSeqNums = Vec(RenameWidth, InstSeqNum())
+    val archNumWbs = Vec(RenameWidth, NumWB())
+    val archPcValid = UInt(RenameWidth.W)
     val perfDebugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
   }

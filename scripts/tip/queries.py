@@ -1,13 +1,15 @@
 import csv
 import glob
 import sqlite3
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 
 
 STATE_NAMES = {
     0: "computing",
     1: "stalled",
-    2: "walk",
+    2: "flushed",
     3: "drained",
 }
 
@@ -50,6 +52,23 @@ def ensure_tip_table(conn: sqlite3.Connection, hart: int) -> str:
     return table
 
 
+def _tip_commit_columns(conn: sqlite3.Connection, table: str) -> list[tuple[str, str]]:
+    columns = {row[1] for row in conn.execute(f"pragma table_info({table})")}
+    indices = sorted(
+        int(name.removeprefix("COMMITVALID_"))
+        for name in columns
+        if name.removeprefix("COMMITVALID_").isdigit()
+    )
+    pairs = [(f"COMMITVALID_{index}", f"COMMITPCS_{index}") for index in indices]
+    required = {"HEADVALID", "HEADPC", "OFFENDINGVALID", "OFFENDINGPC"}
+    missing = required - columns
+    missing.update(pc for _, pc in pairs if pc not in columns)
+    if not pairs or missing:
+        details = ", ".join(sorted(missing)) if missing else "COMMITVALID_*/COMMITPCS_*"
+        raise ValueError(f"{table} does not contain the TIP attribution schema: {details}")
+    return pairs
+
+
 def _execute_dicts(conn: sqlite3.Connection, sql: str, params=()) -> list[dict]:
     cursor = conn.execute(sql, params)
     rows = cursor.fetchall()
@@ -76,11 +95,7 @@ def fetch_state_summary(conn: sqlite3.Connection, hart: int) -> list[dict]:
 
 def fetch_commit_width_summary(conn: sqlite3.Connection, hart: int) -> list[dict]:
     table = ensure_tip_table(conn, hart)
-    width_expr = (
-        "COMMITS_COMMITVALID_0 + COMMITS_COMMITVALID_1 + COMMITS_COMMITVALID_2 + "
-        "COMMITS_COMMITVALID_3 + COMMITS_COMMITVALID_4 + COMMITS_COMMITVALID_5 + "
-        "COMMITS_COMMITVALID_6 + COMMITS_COMMITVALID_7"
-    )
+    width_expr = " + ".join(valid for valid, _ in _tip_commit_columns(conn, table))
     return _execute_dicts(
         conn,
         f"""
@@ -92,6 +107,114 @@ def fetch_commit_width_summary(conn: sqlite3.Connection, hart: int) -> list[dict
         order by commit_width
         """
     )
+
+
+def _round_cycle_column(values: list[Fraction], places: int = 9) -> list[Decimal]:
+    scale = 10 ** places
+    scaled = [value * scale for value in values]
+    units = [value.numerator // value.denominator for value in scaled]
+    target = sum(values) * scale
+    if target.denominator != 1:
+        raise ValueError("TIP cycle column does not sum to a whole output unit")
+    remainder = target.numerator - sum(units)
+    order = sorted(
+        range(len(values)),
+        key=lambda index: (-(scaled[index] - units[index]), index),
+    )
+    for index in order[:remainder]:
+        units[index] += 1
+    decimal_scale = Decimal(scale)
+    return [Decimal(value) / decimal_scale for value in units]
+
+
+def fetch_time_profile(conn: sqlite3.Connection, hart: int) -> tuple[list[dict], dict]:
+    table = ensure_tip_table(conn, hart)
+    commit_columns = _tip_commit_columns(conn, table)
+    select_columns = ["STATE", "HEADVALID", "HEADPC", "OFFENDINGVALID", "OFFENDINGPC"]
+    select_columns.extend(column for pair in commit_columns for column in pair)
+    cursor = conn.execute(
+        f"select {', '.join(select_columns)} from {table} order by ID"
+    )
+    column_index = {description[0]: index for index, description in enumerate(cursor.description)}
+
+    def value(row, column: str):
+        return row[column_index[column]]
+
+    totals: dict[int, dict[str, Fraction]] = {}
+    total_cycles = 0
+    attributed_cycles = Fraction(0)
+    pending_drained = 0
+
+    def attribute(pc: int, state_name: str, cycles: Fraction) -> None:
+        nonlocal attributed_cycles
+        entry = totals.setdefault(
+            pc,
+            {
+                "cycles": Fraction(0),
+                "computing_cycles": Fraction(0),
+                "stalled_cycles": Fraction(0),
+                "flushed_cycles": Fraction(0),
+                "drained_cycles": Fraction(0),
+            },
+        )
+        entry["cycles"] += cycles
+        entry[f"{state_name}_cycles"] += cycles
+        attributed_cycles += cycles
+
+    for row in cursor:
+        total_cycles += 1
+        state = value(row, "STATE")
+        if pending_drained and value(row, "HEADVALID"):
+            attribute(value(row, "HEADPC"), "drained", Fraction(pending_drained))
+            pending_drained = 0
+
+        if state == 0:
+            pcs = [value(row, pc) for valid, pc in commit_columns if value(row, valid)]
+            if not pcs:
+                raise ValueError("computing TIP row has no committed architectural instruction")
+            weight = Fraction(1, len(pcs))
+            for pc in pcs:
+                attribute(pc, "computing", weight)
+        elif state == 1:
+            if not value(row, "HEADVALID"):
+                raise ValueError("stalled TIP row has no valid ROB-head PC")
+            attribute(value(row, "HEADPC"), "stalled", Fraction(1))
+        elif state == 2:
+            if not value(row, "OFFENDINGVALID"):
+                raise ValueError("flushed TIP row has no valid offending PC")
+            attribute(value(row, "OFFENDINGPC"), "flushed", Fraction(1))
+        elif state == 3:
+            pending_drained += 1
+        else:
+            raise ValueError(f"unknown TIP state: {state}")
+
+    unattributed_cycles = pending_drained
+    pcs = sorted(totals, key=lambda pc: (-totals[pc]["cycles"], pc))
+    state_columns = {}
+    for state_name in STATE_NAMES.values():
+        column = f"{state_name}_cycles"
+        state_columns[column] = _round_cycle_column([totals[pc][column] for pc in pcs])
+
+    rows = []
+    for index, pc in enumerate(pcs):
+        columns = {name: values[index] for name, values in state_columns.items()}
+        cycles = sum(columns.values(), Decimal(0))
+        rows.append(
+            {
+                "pc_raw": pc,
+                "pc": f"0x{pc:x}",
+                "cycles": cycles,
+                "percent": round(100.0 * float(totals[pc]["cycles"]) / total_cycles, 6) if total_cycles else 0.0,
+                **columns,
+            }
+        )
+    summary = {
+        "total_cycles": total_cycles,
+        "attributed_cycles": float(attributed_cycles),
+        "unattributed_cycles": unattributed_cycles,
+        "coverage_percent": round(100.0 * attributed_cycles / total_cycles, 6) if total_cycles else 0.0,
+    }
+    return rows, summary
 
 
 def _commit_union(table: str, columns: str) -> str:

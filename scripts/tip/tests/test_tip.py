@@ -1,22 +1,34 @@
 import csv
 import io
+import json
 import os
 import sqlite3
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from scripts.tip import plot, queries, tip
 
 
-TIP_SCHEMA = """
+TIP_ATTRIBUTION_SCHEMA = ",\n".join(
+    f"  COMMITPCS_{index} int not null,\n  COMMITVALID_{index} int not null"
+    for index in range(64)
+)
+
+TIP_SCHEMA = f"""
 create table Tip_0(
   ID integer primary key autoincrement,
   STATE int not null,
   STAMP int not null,
   SITE text,
+{TIP_ATTRIBUTION_SCHEMA},
+  HEADPC int not null,
+  HEADVALID int not null,
+  OFFENDINGPC int not null,
+  OFFENDINGVALID int not null,
   COMMITS_ISCOMMIT int not null,
   COMMITS_ISWALK int not null,
   COMMITS_INFO_0_COMMIT_V int not null,
@@ -70,34 +82,16 @@ create table Tip_0(
 );
 """
 
-TIP_COLUMNS = [
-    "STATE", "STAMP", "SITE", "COMMITS_ISCOMMIT", "COMMITS_ISWALK",
-    "COMMITS_INFO_0_COMMIT_V",
-    "COMMITS_COMMITVALID_0", "COMMITS_COMMITVALID_1", "COMMITS_COMMITVALID_2", "COMMITS_COMMITVALID_3",
-    "COMMITS_COMMITVALID_4", "COMMITS_COMMITVALID_5", "COMMITS_COMMITVALID_6", "COMMITS_COMMITVALID_7",
-    "COMMITS_INFO_0_DEBUG_PC", "COMMITS_INFO_1_DEBUG_PC", "COMMITS_INFO_2_DEBUG_PC", "COMMITS_INFO_3_DEBUG_PC",
-    "COMMITS_INFO_4_DEBUG_PC", "COMMITS_INFO_5_DEBUG_PC", "COMMITS_INFO_6_DEBUG_PC", "COMMITS_INFO_7_DEBUG_PC",
-    "COMMITS_INFO_0_COMMITTYPE", "COMMITS_INFO_1_COMMITTYPE", "COMMITS_INFO_2_COMMITTYPE", "COMMITS_INFO_3_COMMITTYPE",
-    "COMMITS_INFO_4_COMMITTYPE", "COMMITS_INFO_5_COMMITTYPE", "COMMITS_INFO_6_COMMITTYPE", "COMMITS_INFO_7_COMMITTYPE",
-    "REDIRECT_VALID", "REDIRECT_PC", "REDIRECT_BITS_DEBUGISCTRL", "REDIRECT_BITS_DEBUGISMEMVIO",
-    "REDIRECT_BITS_TARGET", "DEBUGLSINFO_S3_ISREPLAY", "DEBUGLSINFO_S3_ISREPLAYFAST",
-    "DEBUGLSINFO_S3_ISREPLAYSLOW", "DEBUGLSINFO_S3_ISREPLAYRS", "DEBUGLSINFO_S2_ISBANKCONFLICT",
-    "DEBUGLSINFO_S2_ISDCACHEFIRSTMISS", "DEBUGLSINFO_S2_ISFORWARDFAIL", "DEBUGLSINFO_REPLAYCNT",
-    "DEBUGLSINFO_REPLAYCAUSE_0", "DEBUGLSINFO_REPLAYCAUSE_1", "DEBUGLSINFO_REPLAYCAUSE_2", "DEBUGLSINFO_REPLAYCAUSE_3",
-    "DEBUGLSINFO_REPLAYCAUSE_4", "DEBUGLSINFO_REPLAYCAUSE_5", "DEBUGLSINFO_REPLAYCAUSE_6", "DEBUGLSINFO_REPLAYCAUSE_7",
-    "DEBUGLSINFO_REPLAYCAUSE_8", "DEBUGLSINFO_REPLAYCAUSE_9",
-]
-
-
 def insert_tip_row(conn: sqlite3.Connection, **values):
-    row = dict.fromkeys(TIP_COLUMNS, 0)
+    columns = [column[1] for column in conn.execute("pragma table_info(Tip_0)") if column[1] != "ID"]
+    row = dict.fromkeys(columns, 0)
     row.update(SITE="", COMMITS_INFO_0_COMMIT_V=1)
     row.update(values)
-    placeholders = ", ".join(["?"] * len(TIP_COLUMNS))
-    columns = ", ".join(TIP_COLUMNS)
+    placeholders = ", ".join(["?"] * len(columns))
+    column_list = ", ".join(columns)
     conn.execute(
-        f"insert into Tip_0({columns}) values ({placeholders})",
-        tuple(row[column] for column in TIP_COLUMNS),
+        f"insert into Tip_0({column_list}) values ({placeholders})",
+        tuple(row[column] for column in columns),
     )
 
 
@@ -116,6 +110,12 @@ class TipScriptTest(unittest.TestCase):
             COMMITS_ISCOMMIT=1,
             COMMITS_COMMITVALID_0=1,
             COMMITS_COMMITVALID_1=1,
+            COMMITPCS_0=0x100,
+            COMMITVALID_0=1,
+            COMMITPCS_1=0x104,
+            COMMITVALID_1=1,
+            HEADPC=0x100,
+            HEADVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x100,
             COMMITS_INFO_1_DEBUG_PC=0x104,
             COMMITS_INFO_0_COMMITTYPE=2,
@@ -125,6 +125,8 @@ class TipScriptTest(unittest.TestCase):
             conn,
             STATE=1,
             STAMP=1,
+            HEADPC=0x100,
+            HEADVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x100,
             COMMITS_INFO_0_COMMITTYPE=2,
             DEBUGLSINFO_S3_ISREPLAY=1,
@@ -138,6 +140,8 @@ class TipScriptTest(unittest.TestCase):
             STATE=2,
             STAMP=2,
             COMMITS_ISWALK=1,
+            OFFENDINGPC=0x200,
+            OFFENDINGVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x200,
             COMMITS_INFO_0_COMMITTYPE=1,
             REDIRECT_VALID=1,
@@ -151,6 +155,10 @@ class TipScriptTest(unittest.TestCase):
             STAMP=3,
             COMMITS_ISCOMMIT=1,
             COMMITS_COMMITVALID_0=1,
+            COMMITPCS_0=0x108,
+            COMMITVALID_0=1,
+            HEADPC=0x108,
+            HEADVALID=1,
             COMMITS_INFO_0_DEBUG_PC=0x108,
             COMMITS_INFO_0_COMMITTYPE=3,
             DEBUGLSINFO_S2_ISDCACHEFIRSTMISS=1,
@@ -174,7 +182,7 @@ class TipScriptTest(unittest.TestCase):
         state_counts = {row["state_name"]: row["count"] for row in state_rows}
         self.assertEqual(state_counts["computing"], 2)
         self.assertEqual(state_counts["stalled"], 1)
-        self.assertEqual(state_counts["walk"], 1)
+        self.assertEqual(state_counts["flushed"], 1)
         commit_rows = queries.fetch_commit_width_summary(conn, 0)
         commit_counts = {row["commit_width"]: row["count"] for row in commit_rows}
         self.assertEqual(commit_counts[1], 1)
@@ -185,6 +193,80 @@ class TipScriptTest(unittest.TestCase):
         replay_rows = queries.fetch_replay_event_rows(conn, 0, top=5)
         self.assertEqual(replay_rows[0]["pc"], "0x100")
         conn.close()
+
+    def test_time_profile_attributes_every_cycle(self):
+        with sqlite3.connect(self.db) as conn:
+            rows, summary = queries.fetch_time_profile(conn, 0)
+
+        by_pc = {row["pc"]: row for row in rows}
+        self.assertEqual(by_pc["0x100"]["cycles"], 1.5)
+        self.assertEqual(by_pc["0x100"]["computing_cycles"], 0.5)
+        self.assertEqual(by_pc["0x100"]["stalled_cycles"], 1.0)
+        self.assertEqual(by_pc["0x104"]["cycles"], 0.5)
+        self.assertEqual(by_pc["0x200"]["flushed_cycles"], 1.0)
+        self.assertEqual(by_pc["0x108"]["computing_cycles"], 1.0)
+        self.assertEqual(summary["total_cycles"], 4)
+        self.assertEqual(summary["attributed_cycles"], 4.0)
+        self.assertEqual(summary["unattributed_cycles"], 0)
+        self.assertEqual(summary["coverage_percent"], 100.0)
+
+    def test_time_profile_assigns_drained_cycles_to_next_head(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("delete from Tip_0")
+            insert_tip_row(conn, STATE=3, STAMP=0, COMMITS_INFO_0_COMMIT_V=0)
+            insert_tip_row(conn, STATE=3, STAMP=1, COMMITS_INFO_0_COMMIT_V=0)
+            insert_tip_row(conn, STATE=1, STAMP=2, HEADPC=0x300, HEADVALID=1)
+            rows, summary = queries.fetch_time_profile(conn, 0)
+
+        self.assertEqual(rows[0]["pc"], "0x300")
+        self.assertEqual(rows[0]["drained_cycles"], 2.0)
+        self.assertEqual(rows[0]["stalled_cycles"], 1.0)
+        self.assertEqual(rows[0]["cycles"], 3.0)
+        self.assertEqual(summary["attributed_cycles"], 3.0)
+
+    def test_time_profile_decimal_output_conserves_three_way_commit_cycle(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("delete from Tip_0")
+            insert_tip_row(
+                conn,
+                STATE=0,
+                STAMP=0,
+                COMMITPCS_0=0x100,
+                COMMITVALID_0=1,
+                COMMITPCS_1=0x104,
+                COMMITVALID_1=1,
+                COMMITPCS_2=0x108,
+                COMMITVALID_2=1,
+                HEADPC=0x100,
+                HEADVALID=1,
+            )
+            rows, summary = queries.fetch_time_profile(conn, 0)
+
+        self.assertEqual(sum((row["cycles"] for row in rows), Decimal(0)), Decimal(1))
+        self.assertEqual(sum((row["computing_cycles"] for row in rows), Decimal(0)), Decimal(1))
+        self.assertEqual(summary["attributed_cycles"], 1.0)
+
+    def test_architectural_commit_width_uses_tip_valids(self):
+        with sqlite3.connect(self.db) as conn:
+            conn.execute("delete from Tip_0")
+            insert_tip_row(
+                conn,
+                STATE=0,
+                STAMP=0,
+                COMMITS_ISCOMMIT=1,
+                COMMITS_COMMITVALID_0=1,
+                COMMITPCS_0=0x100,
+                COMMITVALID_0=1,
+                COMMITPCS_1=0x104,
+                COMMITVALID_1=1,
+                COMMITPCS_2=0x108,
+                COMMITVALID_2=1,
+                HEADPC=0x100,
+                HEADVALID=1,
+            )
+            rows = queries.fetch_commit_width_summary(conn, 0)
+
+        self.assertEqual(rows, [{"commit_width": 3, "count": 1}])
 
     def test_event_row_queries(self):
         with sqlite3.connect(self.db) as conn:
@@ -386,6 +468,75 @@ class TipScriptTest(unittest.TestCase):
         self.assertEqual(result["0x80001080"]["location"], "<unknown>:0")
 
     @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_does_not_cache_tool_failures(self, run_mock):
+        elf = self.base / "program.elf"
+        cache = self.base / "symbols.json"
+        elf.write_bytes(b"elf")
+        run_mock.side_effect = FileNotFoundError()
+
+        from scripts.tip import symbolize
+
+        stderr = io.StringIO()
+        with patch("sys.stderr", new=stderr):
+            failed = symbolize.ElfResolver(elf, cache_path=cache).resolve_many(["0x100"])
+        self.assertEqual(failed["0x100"]["function"], "<unknown>")
+        self.assertIn("not cached", stderr.getvalue())
+
+        run_mock.reset_mock()
+        run_mock.side_effect = [
+            Mock(stdout="00000100 00000010 T recovered\n", returncode=0),
+            Mock(stdout="recovered\nsrc/recovered.c:7\n", returncode=0),
+        ]
+        recovered = symbolize.ElfResolver(elf, cache_path=cache).resolve_many(["0x100"])
+
+        self.assertEqual(recovered["0x100"]["function"], "recovered")
+        self.assertEqual(run_mock.call_count, 2)
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_caches_successful_unknown_result(self, run_mock):
+        elf = self.base / "program.elf"
+        cache = self.base / "symbols.json"
+        elf.write_bytes(b"elf")
+        run_mock.side_effect = [
+            Mock(stdout="", returncode=0),
+            Mock(stdout="??\n??:0\n", returncode=0),
+        ]
+
+        from scripts.tip import symbolize
+
+        first = symbolize.ElfResolver(elf, cache_path=cache).resolve_many(["0x100"])
+        run_mock.reset_mock()
+        second = symbolize.ElfResolver(elf, cache_path=cache).resolve_many(["0x100"])
+
+        self.assertEqual(first["0x100"]["function"], "<unknown>")
+        self.assertEqual(second["0x100"]["function"], "<unknown>")
+        run_mock.assert_not_called()
+
+    @patch("scripts.tip.symbolize.subprocess.run")
+    def test_elf_resolver_ignores_pre_failure_fix_cache(self, run_mock):
+        elf = self.base / "program.elf"
+        cache = self.base / "symbols.json"
+        elf.write_bytes(b"elf")
+
+        from scripts.tip import symbolize
+
+        resolver = symbolize.ElfResolver(elf)
+        old_identity = f"{resolver._elf_identity}|pc_bits=39|pc_mode=sign"
+        cache.write_text(json.dumps({
+            "version": 3,
+            "elfs": {old_identity: {"0x100": {"function": "<unknown>"}}},
+        }), encoding="utf-8")
+        run_mock.side_effect = [
+            Mock(stdout="00000100 00000010 T recovered\n", returncode=0),
+            Mock(stdout="recovered\nsrc/recovered.c:7\n", returncode=0),
+        ]
+
+        recovered = symbolize.ElfResolver(elf, cache_path=cache).resolve_many(["0x100"])
+
+        self.assertEqual(recovered["0x100"]["function"], "recovered")
+        self.assertEqual(run_mock.call_count, 2)
+
+    @patch("scripts.tip.symbolize.subprocess.run")
     def test_elf_resolver_resolve_many_multi_pc(self, run_mock):
         run_mock.side_effect = [
             Mock(
@@ -502,8 +653,23 @@ class TipScriptTest(unittest.TestCase):
         ):
             args = tip.build_parser().parse_args(["summary"])
 
-        self.assertEqual(Path(args.out_dir), state_home / "xiangshan" / "tip")
+        self.assertIsNone(args.out_dir)
         self.assertEqual(Path(args.sym_cache), cache_home / "xiangshan" / "tip" / "symbols.json")
+
+    def test_default_output_dir_isolated_by_database_and_hart(self):
+        state_home = self.base / "state"
+        db_a = self.base / "a" / "tip.db"
+        db_b = self.base / "b" / "tip.db"
+        with patch.dict(os.environ, {"XDG_STATE_HOME": str(state_home)}):
+            a_hart0 = tip.default_out_dir(db_a, 0)
+            b_hart0 = tip.default_out_dir(db_b, 0)
+            a_hart1 = tip.default_out_dir(db_a, 1)
+            a_hart0_again = tip.default_out_dir(db_a, 0)
+
+        self.assertNotEqual(a_hart0, b_hart0)
+        self.assertNotEqual(a_hart0, a_hart1)
+        self.assertEqual(a_hart0, a_hart0_again)
+        self.assertEqual(a_hart0.parent.parent, state_home / "xiangshan" / "tip")
 
     def test_plot_helpers_create_pngs(self):
         out_dir = self.base / "plots"
@@ -517,12 +683,14 @@ class TipScriptTest(unittest.TestCase):
             {"commit_width": 2, "count": 1},
         ]
         pc_rows = [{"pc": "0x100", "count": 3}, {"pc": "0x108", "count": 1}]
+        time_rows = [{"pc": "0x100", "cycles": 2.5}, {"pc": "0x108", "cycles": 1.5}]
         redirect_rows = [{"target": "0x300", "count": 1}]
         plot.plot_state_distribution(state_rows, out_dir / "state.png")
         plot.plot_commit_width_distribution(commit_rows, out_dir / "commit.png")
         plot.plot_pc_hotspots(pc_rows, out_dir / "pc.png")
+        plot.plot_time_profile(time_rows, out_dir / "time.png")
         plot.plot_redirect_targets(redirect_rows, out_dir / "redirect.png")
-        for name in ["state.png", "commit.png", "pc.png", "redirect.png"]:
+        for name in ["state.png", "commit.png", "pc.png", "time.png", "redirect.png"]:
             path = out_dir / name
             self.assertTrue(path.exists(), name)
             self.assertGreater(path.stat().st_size, 0, name)
@@ -530,6 +698,8 @@ class TipScriptTest(unittest.TestCase):
     @patch("scripts.tip.symbolize.ElfResolver")
     def test_cli_all_generates_outputs(self, resolver_ctor):
         out_dir = self.base / "results"
+        out_dir.mkdir()
+        (out_dir / "symbolized_commits.csv").write_text("stale", encoding="utf-8")
         buf = io.StringIO()
         with redirect_stdout(buf):
             rc = tip.main([
@@ -547,10 +717,13 @@ class TipScriptTest(unittest.TestCase):
             "state_summary.csv",
             "commit_width_summary.csv",
             "commit_type_summary.csv",
+            "time_profile.csv",
+            "tip_attribution_summary.csv",
             "pc_hotspots.csv",
             "redirect_targets.csv",
             "replay_hotspots.csv",
             "state_distribution.png",
+            "top_time_profile.png",
             "commit_width_distribution.png",
             "top_pc_hotspots.png",
             "redirect_targets.png",
@@ -603,7 +776,7 @@ class TipScriptTest(unittest.TestCase):
             pc_bits=48,
             pc_mode="zero",
         )
-        symbol_path = out_dir / "symbolized_commits.csv"
+        symbol_path = out_dir / "symbolized_time_profile.csv"
         self.assertTrue(symbol_path.exists(), symbol_path)
         with symbol_path.open(newline="", encoding="utf-8") as fp:
             rows = list(csv.DictReader(fp))
@@ -643,6 +816,7 @@ class TipScriptTest(unittest.TestCase):
         ])
         self.assertEqual(rc, 0)
         self.assertTrue((out_dir / "symbolized_commits.csv").exists())
+        self.assertTrue((out_dir / "symbolized_time_profile.csv").exists())
 
 
 if __name__ == "__main__":

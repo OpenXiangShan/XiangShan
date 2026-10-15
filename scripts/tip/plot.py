@@ -54,6 +54,17 @@ def plot_pc_hotspots(rows: list[dict], out_path: Path | str) -> None:
     )
 
 
+def plot_time_profile(rows: list[dict], out_path: Path | str) -> None:
+    _bar_plot(
+        [row["pc"] for row in rows],
+        [float(row["cycles"]) for row in rows],
+        "TIP Time Profile",
+        "PC",
+        "Attributed Cycles",
+        out_path,
+    )
+
+
 def plot_redirect_targets(rows: list[dict], out_path: Path | str) -> None:
     _bar_plot(
         [row["target"] for row in rows],
