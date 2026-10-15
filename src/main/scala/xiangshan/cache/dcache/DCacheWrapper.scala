@@ -1547,15 +1547,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wbTxnIdBase = releaseIdBase.U(8.W)
   val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
 
-  val rxsnpArb = Wire(Decoupled(new FlitSNP))
-  val rxsnpSel = VecInit((0 until nCCHIChannels).map(ch => io.cchi(ch).dnSNP.valid))
-  rxsnpArb.valid := rxsnpSel.asUInt.orR
-  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until nCCHIChannels).map(ch => io.cchi(ch).dnSNP.bits))
+  val rxsnpArb = Module(new RRArbiter(new FlitSNP, nCCHIChannels, initLastGrant = true))
   for (ch <- 0 until nCCHIChannels) {
-    io.cchi(ch).dnSNP.ready := rxsnpArb.ready && rxsnpSel(ch)
+    rxsnpArb.io.in(ch) <> io.cchi(ch).dnSNP
   }
-  val rxsnpChannel = OHToUInt(rxsnpSel.asUInt)
-  probeQueue.io.rxsnp_channel := rxsnpChannel
+  probeQueue.io.rxsnp_channel := rxsnpArb.io.chosen
 
   for (ch <- 0 until nCCHIChannels) {
     io.cchi(ch).upREQ <> missQueue.io.txreq(ch)
@@ -1587,9 +1583,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       Mux(rxrspToWb, wb.io.rxrsp(ch).ready, true.B))
   }
 
-  val snp = rxsnpArb.bits
+  val snp = rxsnpArb.io.out.bits
   val snp_addr = Cat(snp.Addr, 0.U(3.W))
-  missQueue.io.probe.req.valid := rxsnpArb.valid
+  missQueue.io.probe.req.valid := rxsnpArb.io.out.valid
   missQueue.io.probe.req.bits.addr := snp_addr
   if (DCacheAboveIndexOffset > DCacheTagOffset) {
     missQueue.io.probe.req.bits.vaddr := Cat(
@@ -1601,7 +1597,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     missQueue.io.probe.req.bits.vaddr := snp_addr
   }
 
-  block_decoupled(rxsnpArb, probeQueue.io.rxsnp, missQueue.io.probe.block)
+  block_decoupled(rxsnpArb.io.out, probeQueue.io.rxsnp, missQueue.io.probe.block)
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace

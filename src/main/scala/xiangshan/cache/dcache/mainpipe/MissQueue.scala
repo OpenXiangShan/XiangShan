@@ -350,7 +350,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  io.channel_sel := Mux(RegNext(io.req.fire), selectCCHIChannel(req.address), 0.U)
+  io.channel_sel := selectCCHIChannel(req.address)
 
   io.req.ready := state === s_idle
   assert(!(io.req.fire && io.req.bits.opcode === 3.U), "cbo.zero must not use CCHI REQ")
