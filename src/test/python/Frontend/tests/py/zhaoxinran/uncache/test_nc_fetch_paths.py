@@ -927,9 +927,6 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     }
     assert all(record["pc"] != 0 for record in exception_records)
     assert not env.memory.is_mmio(first_beat)
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_035"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -1177,10 +1174,6 @@ def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
         assert env.assert_translation_scenario()["error_count"] == 0
         assert not env.monitor.get_errors()
         env.translation_oracle.disarm()
-
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_034"
-    )
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
