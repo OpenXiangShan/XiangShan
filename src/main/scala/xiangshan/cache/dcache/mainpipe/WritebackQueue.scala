@@ -34,7 +34,7 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val chi_txn_id = UInt(DCacheCCHI.dnTxnIdWidth.W) // SNP TxnID for probe response; unused for voluntary EVT
   val chi_tgt_id = UInt(DCacheCCHI.dnNodeIdWidth.W) // SNP SrcID, echoed as SnpResp/SnpRespData TgtID
   val trace_tag = UInt(1.W)
-  val chi_channel = UInt(memChannelBits.W) // snoop resp only
+  val chi_channel = UInt(CCHIChannelBits.W) // snoop resp only
 }
 
 class WritebackReqWodata(implicit p: Parameters) extends WritebackReqCtrl {
@@ -83,7 +83,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
 
     val block_addr  = Output(Valid(UInt()))
-    val resp_channel = Output(UInt(memChannelBits.W))
+    val resp_channel = Output(UInt(CCHIChannelBits.W))
   })
 
   // Entry lifecycle: invalid (free) / out (driving TX) / wait (for DnRSP).
@@ -123,7 +123,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   val snp_txn_id = Reg(UInt(DCacheCCHI.dnTxnIdWidth.W))
   val snp_tgt_id = Reg(UInt(DCacheCCHI.dnNodeIdWidth.W))
   val trace_tag = Reg(UInt(1.W))
-  val resp_channel = Reg(UInt(memChannelBits.W))
+  val resp_channel = Reg(UInt(CCHIChannelBits.W))
 
   io.req.ready := false.B
   io.txevt.valid := false.B
@@ -151,7 +151,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     snp_tgt_id := io.req.bits.chi_tgt_id
     trace_tag := io.req.bits.trace_tag
     resp_channel := Mux(io.req.bits.voluntary,
-      selectMemChannel(io.req.bits.addr),
+      selectCCHIChannel(io.req.bits.addr),
       io.req.bits.chi_channel)
     got_dbid := false.B
     got_comp := false.B
@@ -296,10 +296,10 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
     val req_ready_dup = Vec(nDupWbReady, Output(Bool()))
-    val txevt = Vec(numMemChannels, DecoupledIO(new FlitEVT))
-    val txrsp = Vec(numMemChannels, DecoupledIO(new FlitUpRSP))
-    val txdat = Vec(numMemChannels, DecoupledIO(new FlitUpDAT))
-    val rxrsp = Vec(numMemChannels, Flipped(DecoupledIO(new FlitDnRSP)))
+    val txevt = Vec(nCCHIChannels, DecoupledIO(new FlitEVT))
+    val txrsp = Vec(nCCHIChannels, DecoupledIO(new FlitUpRSP))
+    val txdat = Vec(nCCHIChannels, DecoupledIO(new FlitUpDAT))
+    val rxrsp = Vec(nCCHIChannels, Flipped(DecoupledIO(new FlitDnRSP)))
 
     val miss_req_conflict_check = Vec(MissReqPortCount, Flipped(Valid(UInt())))
     val block_miss_req = Vec(MissReqPortCount, Output(Bool()))
@@ -315,7 +315,7 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
 
   req.ready := alloc && !block_conflict
 
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     io.txevt(ch).valid := false.B
     io.txevt(ch).bits := DontCare
     io.txrsp(ch).valid := false.B
@@ -351,22 +351,22 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
 
       entry.io.rxrsp.valid := false.B
       entry.io.rxrsp.bits := DontCare
-      for (ch <- 0 until numMemChannels) {
+      for (ch <- 0 until nCCHIChannels) {
         when (io.rxrsp(ch).valid && io.rxrsp(ch).bits.TxnID === entry_id) {
           entry.io.rxrsp <> io.rxrsp(ch)
         }
       }
   }
 
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     io.rxrsp(ch).ready := VecInit(entries.map(_.io.rxrsp.ready)).asUInt.orR
   }
 
-  if (numMemChannels > 1) {
-    val demuxedEvt = entries.map(e => demuxByChannel(e.io.txevt, e.io.resp_channel, numMemChannels))
-    val demuxedRsp = entries.map(e => demuxByChannel(e.io.txrsp, e.io.resp_channel, numMemChannels))
-    val demuxedDat = entries.map(e => demuxByChannel(e.io.txdat, e.io.resp_channel, numMemChannels))
-    for (ch <- 0 until numMemChannels) {
+  if (nCCHIChannels > 1) {
+    val demuxedEvt = entries.map(e => demuxByCCHIChannel(e.io.txevt, e.io.resp_channel, nCCHIChannels))
+    val demuxedRsp = entries.map(e => demuxByCCHIChannel(e.io.txrsp, e.io.resp_channel, nCCHIChannels))
+    val demuxedDat = entries.map(e => demuxByCCHIChannel(e.io.txdat, e.io.resp_channel, nCCHIChannels))
+    for (ch <- 0 until nCCHIChannels) {
       lowestArb(io.txevt(ch), demuxedEvt.map(_(ch)))
       lowestArb(io.txrsp(ch), demuxedRsp.map(_(ch)))
       lowestArb(io.txdat(ch), demuxedDat.map(_(ch)))
@@ -400,7 +400,7 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
     XSPerfAccumulate(s"block_miss_req_$i", io.block_miss_req(i))
   }
 
-  if (numMemChannels >= 2) {
+  if (nCCHIChannels >= 2) {
     XSPerfAccumulate("dual_channel_release", io.txevt(0).valid && io.txevt(1).valid)
     XSPerfAccumulate("dual_channel_releaseAck", io.rxrsp(0).valid && io.rxrsp(1).valid)
   }

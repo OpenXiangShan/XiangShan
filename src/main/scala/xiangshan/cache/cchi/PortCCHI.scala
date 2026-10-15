@@ -110,15 +110,11 @@ object DCacheCCHI {
     }
 
     def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt, growParam: UInt, fullOverwrite: Bool, srcId: UInt): Unit = {
-      // alias is at most TagAlias_Width bits; a wider one would truncate silently below
-      require(alias.getWidth <= req.paramCCHI.TagAlias_Width,
-        s"alias is ${alias.getWidth}b but FlitREQ.TagAlias is ${req.paramCCHI.TagAlias_Width}b")
+      require(alias.getWidth <= req.paramCCHI.TagAlias_Width, s"alias is ${alias.getWidth}b but FlitREQ.TagAlias is ${req.paramCCHI.TagAlias_Width}b")
       fillReq(req, expCompData = !fullOverwrite, srcId)
       req.TxnID := txnId
       req.Addr := addr(47, 0)
       req.TagAlias := alias
-      // fullOverwrite: whole-line store miss → MakeUnique (NtoT/BtoT grow unused)
-      // growParam NtoB: load miss from Invalid → ReadShared; else NtoT/BtoT → ReadUnique
       req.Opcode := Mux(fullOverwrite, CCHIOpcode.MakeUnique.U,
         Mux(growParam === TLPermissions.NtoB, CCHIOpcode.ReadShared.U, CCHIOpcode.ReadUnique.U))
     }

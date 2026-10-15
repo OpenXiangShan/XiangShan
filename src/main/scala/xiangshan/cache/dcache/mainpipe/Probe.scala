@@ -32,7 +32,7 @@ class ProbeReq(implicit p: Parameters) extends DCacheBundle
   val vaddr  = UInt(VAddrBits.W) // l2 uses vaddr index to probe l1
   val param  = UInt(TLPermissions.bdWidth.W)
   val trace_tag = UInt(1.W)
-  val snp_channel = UInt(memChannelBits.W)
+  val snp_channel = UInt(CCHIChannelBits.W)
 
   def dump(cond: Bool) = {
     XSDebug(cond, "ProbeReq source: %d opcode: %d addr: %x param: %d\n",
@@ -132,7 +132,7 @@ class ProbeQueue()(implicit p: Parameters) extends DCacheModule with HasPerfEven
 {
   val io = IO(new Bundle {
     val rxsnp = Flipped(DecoupledIO(new FlitSNP))
-    val rxsnp_channel = Input(UInt(memChannelBits.W))
+    val rxsnp_channel = Input(UInt(CCHIChannelBits.W))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
     val update_resv_set = Input(Bool())
