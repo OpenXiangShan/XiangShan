@@ -26,12 +26,14 @@ import pytest
 from env.sequences import (
     WayLookupCapacitySequence,
     TranslationScenario,
+    TranslationPmpPmaEntry,
 )
-from env.sequences import TranslationPmpPmaEntry
 from env.funcov.py.icache.icache_waylookup_funcov import (
     _SIGNALS as _WAYLOOKUP_SIGNALS,
 )
-from env.support.pmp_pma import PmpPmaConfig
+from env.support.pmp_pma import (
+    PmpPmaConfig,
+)
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
     drive_soft_prefetch as _drive_soft_prefetch_common,
@@ -40,16 +42,6 @@ from tests.py.icache.directed_dut.support import (
     wait_coverage_hit,
     wait_coverage_hits,
     wait_until,
-)
-from tests.py.icache.directed_dut.refill_scenarios import (
-    run_asymmetric_dual_refill as _run_asymmetric_refill,
-)
-from tests.py.icache.directed_dut.programs import (
-    build_bpu_training_program as _trained_short_block_loop,
-    build_cross_line_probe_program,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
     WarmBpuTraining,
     make_bpu_training_init_config,
     make_cacheable_init_config,
@@ -59,9 +51,14 @@ from tests.py.icache.directed_dut.init_plans import (
     make_mixed_sources_init_config,
     make_same_set_jump_init_config,
     make_trained_loop_init_config,
-)
-from tests.py.icache.directed_dut.mainpipe_support import (
     register_mainpipe_observer,
+    run_until,
+    completed_dual_transactions,
+    make_dual_refill_init_config,
+)
+from tests.py.icache.directed_dut.programs import (
+    build_bpu_training_program as _trained_short_block_loop,
+    build_cross_line_probe_program,
 )
 
 
@@ -72,6 +69,112 @@ pytestmark = pytest.mark.skipif(
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
+
+
+def run_asymmetric_dual_refill(env, expected_pattern, evict_req) -> None:
+    samples = register_mainpipe_observer(env)
+    initialize_frontend(
+        env, make_dual_refill_init_config(env.config, seed=9508 + int(evict_req))
+    )
+    assert run_until(
+        env,
+        lambda: any(
+            (
+                item["pattern"] == "hit_hit"
+                and item["req0_addr"] & ~63 != item["req1_addr"] & ~63
+                for item in completed_dual_transactions(samples)
+            )
+        ),
+        max_cycles=2000,
+    ), {
+        "reason": "no cross-line resident dual transaction was trained",
+        "patterns": completed_dual_transactions(samples)[-16:],
+    }
+    resident = next(
+        (
+            item
+            for item in reversed(completed_dual_transactions(samples))
+            if item["pattern"] == "hit_hit"
+            and item["req0_addr"] & ~63 != item["req1_addr"] & ~63
+        )
+    )
+    req_addrs = (int(resident["req0_addr"]), int(resident["req1_addr"]))
+    fault_line = req_addrs[int(evict_req)] & ~63
+    split = len(samples)
+    split_cycle = int(samples[-1]["cycle"])
+    env.icache_agent.inject_response_fault_at(fault_line, corrupt=1)
+    fencei = getattr(env.dut, "io_fencei", None)
+    assert fencei is not None, {"missing_dut_signal": "io_fencei"}
+    fencei.value = 1
+    env.step(1)
+    fencei.value = 0
+    assert run_until(
+        env,
+        lambda: any(
+            (
+                int(record["address"]) == fault_line and int(record["corrupt"]) == 1
+                for record in env.icache_agent.get_stats().get("response_records", [])
+            )
+        ),
+        max_cycles=4000,
+    ), {
+        "reason": "faulted post-fence line never returned",
+        "fault_line": hex(fault_line),
+        "icache": env.icache_agent.get_stats(),
+    }
+    clean_line = req_addrs[1 - int(evict_req)] & ~63
+    assert any(
+        (
+            int(record["cycle"]) >= split_cycle
+            and int(record["address"]) == clean_line
+            and (int(record["corrupt"]) == 0)
+            and (int(record["denied"]) == 0)
+            for record in env.icache_agent.get_stats().get("response_records", [])
+        )
+    ), {
+        "reason": "the companion line did not complete a clean refill",
+        "clean_line": hex(clean_line),
+        "icache": env.icache_agent.get_stats(),
+    }
+    assert run_until(
+        env, lambda: int(env.monitor.exception_mark_count) > 0, max_cycles=1000
+    ), {"reason": "fault-suppressed refill did not reach the IFU exception path"}
+    assert run_until(
+        env,
+        lambda: any(
+            (
+                item["pattern"] == expected_pattern and item["registered_exact"]
+                for item in completed_dual_transactions(samples[split:])
+            )
+        ),
+        max_cycles=4000,
+    ), {
+        "reason": "fault-suppressed post-fence refill did not produce the target dual pattern",
+        "expected_pattern": expected_pattern,
+        "fault_line": hex(fault_line),
+        "req_addrs": [hex(addr) for addr in req_addrs],
+        "patterns": completed_dual_transactions(samples[split:])[-16:],
+        "icache": env.icache_agent.get_stats(),
+    }
+    result = next(
+        (
+            item
+            for item in completed_dual_transactions(samples[split:])
+            if item["pattern"] == expected_pattern and item["registered_exact"]
+        )
+    )
+    assert int(result["fire_cycle"]) >= max(
+        (cycle for cycle in result["registered_cycles"] if cycle is not None)
+    )
+    recorder = getattr(env, "functional_coverage", None)
+    assert recorder is not None
+    detail = recorder.hit_detail_by_bin_id("BIN-887")
+    assert detail is not None
+    evidence = detail["evidence"][-1]
+    assert tuple(evidence["source_valids"]) == (1, 1)
+    assert tuple(evidence["source_tags"]) == tuple(evidence["wb_tags"])
+    assert len(evidence["source_tags"]) == 2
+    assert not env.monitor.get_errors()
 
 
 def _miss_request_snapshot(env) -> dict[str, int | None]:
@@ -261,21 +364,6 @@ def _load_nops(env, base: int, *, words: int = 512) -> None:
                 )
             ),
         ),
-    )
-
-
-def _jal(rd: int, offset: int) -> int:
-    """Encode a JAL whose signed immediate is within the architectural range."""
-    assert int(offset) % 2 == 0
-    assert -(1 << 20) <= int(offset) < (1 << 20)
-    imm = int(offset) & 0x1F_FFFF
-    return (
-        (((imm >> 20) & 1) << 31)
-        | (((imm >> 1) & 0x3FF) << 21)
-        | (((imm >> 11) & 1) << 20)
-        | (((imm >> 12) & 0xFF) << 12)
-        | ((int(rd) & 0x1F) << 7)
-        | 0x6F
     )
 
 
@@ -933,7 +1021,7 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
 @pytest.mark.funcov_bins("BIN-733")
 def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
-    _run_asymmetric_refill(env, expected_pattern="hit_miss", evict_req=1)
+    run_asymmetric_dual_refill(env, expected_pattern="hit_miss", evict_req=1)
     _wait_funcov_hit(
         env,
         "icache_waylookup_update",

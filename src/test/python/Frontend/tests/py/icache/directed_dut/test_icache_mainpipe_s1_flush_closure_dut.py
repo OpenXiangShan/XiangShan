@@ -8,7 +8,9 @@ from env.runtime.frontend_init import (
 )
 
 import os
-from collections.abc import Callable
+from collections.abc import (
+    Callable,
+)
 
 import pytest
 
@@ -23,13 +25,8 @@ from tests.py.icache.directed_dut.support import (
     restore_predictors as _restore_predictors,
     trigger_bpu_s3_flush,
     wait_until,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
     make_bpu_s3_init_config,
     make_cacheable_init_config,
-)
-from tests.py.icache.directed_dut.mainpipe_support import (
     register_mainpipe_observer,
 )
 

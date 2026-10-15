@@ -11,12 +11,24 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
+from env.runtime.frontend_init import (
+    LoadProgram,
+    ProgramImage,
+    initialize_frontend,
+    run_initialization_steps,
+)
 from env.support.env_config import EnvConfig
 from tests.py.icache.directed_dut import (
-    branch_scenarios,
-    mainpipe_support,
+    scenarios,
+    support,
     programs,
-    protection_scenarios,
+)
+
+from tests.py.icache.directed_dut import (
+    test_icache_mainpipe_partial_closure_dut as protection_cases,
+)
+from tests.py.icache.directed_dut import (
+    test_icache_prefetchpipe_closure_dut as prefetch_cases,
 )
 
 
@@ -82,11 +94,13 @@ class _RecordingEnv:
 
 def test_nop_loaders_preserve_their_distinct_cycle_counts():
     env = _RecordingEnv()
-    mainpipe_support.load_nops(env, 0x80040000, words=4)
+    run_initialization_steps(
+        env, (LoadProgram(ProgramImage(programs.build_nop_program(4), 0x80040000)),)
+    )
     assert env.trace == [("load", 0x80040000, b"\x13\0\0\0" * 4)]
     assert env.current_cycle == 0
 
-    mainpipe_support.load_nop_program(env, words=4)
+    support.load_nop_program(env, words=4)
     assert env.trace[-2:] == [
         ("load", 0x80000000, b"\x13\0\0\0" * 4),
         ("step", 1),
@@ -96,14 +110,23 @@ def test_nop_loaders_preserve_their_distinct_cycle_counts():
 
 def test_dual_fetch_loader_does_not_advance_or_reset_the_stream():
     env = _RecordingEnv()
-    mainpipe_support.load_two_fetch_loop(env, programs.DUAL_FETCH_BASE)
+    run_initialization_steps(
+        env,
+        (
+            LoadProgram(
+                ProgramImage(
+                    programs.build_dual_fetch_program(), programs.DUAL_FETCH_BASE
+                )
+            ),
+        ),
+    )
     assert env.trace == [("load", 0x80060000, programs.build_dual_fetch_program())]
     assert env.current_cycle == 0
 
 
 def test_cacheable_startup_loads_and_configures_before_reset():
     env = FrontendEnv(FakeDUTFrontend())
-    for aliases in mainpipe_support._SIGNALS.values():
+    for aliases in support._MAINPIPE_SIGNALS.values():
         setattr(env.dut, aliases[0], SimpleNamespace(value=0))
     observed = []
     env.register_cycle_observer(
@@ -112,8 +135,12 @@ def test_cacheable_startup_loads_and_configures_before_reset():
         )
     )
 
-    samples = mainpipe_support.initialize_cacheable_stream(
-        env, programs.CACHEABLE_BASE, latency=7
+    samples = support.register_mainpipe_observer(env)
+    initialize_frontend(
+        env,
+        support.make_cacheable_init_config(
+            env.config, programs.CACHEABLE_BASE, latency=7
+        ),
     )
 
     assert env.current_cycle == 21
@@ -164,7 +191,7 @@ def test_dual_transactions_preserve_patterns_addresses_and_registered_evidence(
         _dual_sample(2, misses=misses, fire=1),
         _dual_sample(3, misses=misses, fire=1),
     ]
-    transactions = mainpipe_support.completed_dual_transactions(samples)
+    transactions = support.completed_dual_transactions(samples)
     assert len(transactions) == 1
     transaction = transactions[0]
     assert transaction["pattern"] == pattern
@@ -175,7 +202,7 @@ def test_dual_transactions_preserve_patterns_addresses_and_registered_evidence(
 
 
 def test_dual_transactions_reject_late_registered_evidence():
-    transactions = mainpipe_support.completed_dual_transactions(
+    transactions = support.completed_dual_transactions(
         [
             _dual_sample(0, misses=(1, 1), raw=1),
             _dual_sample(2, misses=(1, 1), registered=1),
@@ -187,7 +214,7 @@ def test_dual_transactions_reject_late_registered_evidence():
 
 def test_mainpipe_wait_accepts_a_condition_produced_by_the_final_step():
     env = _RecordingEnv()
-    assert mainpipe_support.run_until(env, lambda: env.current_cycle == 2, max_cycles=2)
+    assert support.run_until(env, lambda: env.current_cycle == 2, max_cycles=2)
     assert env.trace == [("step", 1), ("step", 1)]
 
 
@@ -272,9 +299,10 @@ def test_random_branch_scenarios_preserve_programs_timing_and_replay(
     derived_seed,
 ):
     monkeypatch.setenv("TB_SEED", str(seed))
-    monkeypatch.setattr(branch_scenarios, "RunUntilCommitSequence", _CommitWait)
+    owner = prefetch_cases if scenario == "run_large_loop_multi_segment" else scenarios
+    monkeypatch.setattr(owner, "RunUntilCommitSequence", _CommitWait)
     env = _RecordingEnv()
-    getattr(branch_scenarios, scenario)(env)
+    getattr(owner, scenario)(env)
 
     load = next(event for event in env.trace if event[0] == "load")
     assert load[1] == 0x80000000
@@ -310,20 +338,16 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
     monkeypatch, scenario_name
 ):
     monkeypatch.setattr(
-        protection_scenarios, "initialize_frontend", lambda *args, **kwargs: None
+        protection_cases, "initialize_frontend", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
-        protection_scenarios,
+        protection_cases,
         "_randomize_translation_timing",
         lambda env, scenario: scenario,
     )
-    monkeypatch.setattr(
-        protection_scenarios, "TranslationScenarioBuilder", _ScenarioProbe
-    )
+    monkeypatch.setattr(protection_cases, "TranslationScenarioBuilder", _ScenarioProbe)
     with pytest.raises(_StopScenario) as raised:
-        getattr(protection_scenarios, scenario_name)(
-            SimpleNamespace(config=EnvConfig())
-        )
+        getattr(protection_cases, scenario_name)(SimpleNamespace(config=EnvConfig()))
     scenario = raised.value.args[0]
     if scenario_name == "run_pmp_execute_denied":
         assert (scenario.va, scenario.pa) == (0x80000000, 0x80001000)
@@ -345,10 +369,10 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
 
 def test_sector_lane_scenario_preserves_reuse_without_another_ptw(monkeypatch):
     monkeypatch.setattr(
-        protection_scenarios, "initialize_frontend", lambda *args, **kwargs: None
+        protection_cases, "initialize_frontend", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
-        protection_scenarios,
+        protection_cases,
         "_randomize_translation_timing",
         lambda env, scenario: scenario,
     )
@@ -360,11 +384,9 @@ def test_sector_lane_scenario_preserves_reuse_without_another_ptw(monkeypatch):
         def run(self, env):
             raise _StopScenario(self.actions)
 
-    monkeypatch.setattr(
-        protection_scenarios, "TranslationScenarioSequence", SequenceProbe
-    )
+    monkeypatch.setattr(protection_cases, "TranslationScenarioSequence", SequenceProbe)
     with pytest.raises(_StopScenario) as raised:
-        protection_scenarios.run_sector_lane_refill(SimpleNamespace(config=EnvConfig()))
+        protection_cases.run_sector_lane_refill(SimpleNamespace(config=EnvConfig()))
     first, second = raised.value.args[0]
     assert first.page_indexes == (0,)
     assert first.scenario.page_count == 2
@@ -375,7 +397,7 @@ def test_sector_lane_scenario_preserves_reuse_without_another_ptw(monkeypatch):
 def test_pbmt_redirect_scenario_configures_agents_before_starting(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        protection_scenarios,
+        protection_cases,
         "_prepare_sv39_dual_nc_cacheable_stream",
         lambda env: ([(0x80000000, 1, True)], []),
     )
@@ -386,7 +408,7 @@ def test_pbmt_redirect_scenario_configures_agents_before_starting(monkeypatch):
         calls.append(("startup", {"reset_vector": config.reset_vector}))
         raise _StopScenario
 
-    monkeypatch.setattr(protection_scenarios, "initialize_frontend", stop_at_startup)
+    monkeypatch.setattr(protection_cases, "initialize_frontend", stop_at_startup)
     env = SimpleNamespace(
         config=EnvConfig(),
         current_cycle=0,
@@ -398,7 +420,7 @@ def test_pbmt_redirect_scenario_configures_agents_before_starting(monkeypatch):
         ),
     )
     with pytest.raises(_StopScenario):
-        protection_scenarios.run_cacheable_pending_redirect_to_pbmt_nc(env)
+        protection_cases.run_cacheable_pending_redirect_to_pbmt_nc(env)
     assert calls == [
         ("uncache", {"latency": 16, "mmio_latency": 16}),
         (

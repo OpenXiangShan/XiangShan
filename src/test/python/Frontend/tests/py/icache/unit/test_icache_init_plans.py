@@ -13,7 +13,10 @@ from env.runtime.frontend_init import (
     initialize_frontend,
 )
 from env.support.env_config import EnvConfig
-from tests.py.icache.directed_dut import init_plans, programs
+from tests.py.icache.directed_dut import (
+    support,
+    programs,
+)
 from tests.py.icache.unit.test_icache_directed_support import _BpuTrainingCoverage
 
 
@@ -51,23 +54,23 @@ def test_relocated_program_builders_preserve_original_bytes(builder, kwargs, dig
     "factory,kwargs,base,first_halfword,latency",
     [
         (
-            init_plans.make_cacheable_init_config,
+            support.make_cacheable_init_config,
             {"base": 0x80040000, "latency": 7},
             0x80040000,
             0x13,
             7,
         ),
-        (init_plans.make_dual_refill_init_config, {}, 0x80060000, 0x0413, 8),
+        (support.make_dual_refill_init_config, {}, 0x80060000, 0x0413, 8),
         (
-            init_plans.make_fetch_loop_init_config,
+            support.make_fetch_loop_init_config,
             {"base": 0x80040000, "target_offset": 0, "latency": 8},
             0x80040000,
             0x13,
             8,
         ),
-        (init_plans.make_overlap2_init_config, {"base": 0x80050000}, 0x80050000, 1, 16),
+        (support.make_overlap2_init_config, {"base": 0x80050000}, 0x80050000, 1, 16),
         (
-            init_plans.make_missunit_init_config,
+            support.make_missunit_init_config,
             {"latency": 48, "prefetch_enabled": False, "backend_can_accept": False},
             0x80100000,
             0x13,
@@ -106,7 +109,7 @@ def test_plans_prepare_program_and_agent_before_all_reset_edges(
     )
     assert env.monitor.expected_pc == config.reset_vector
     assert result.completed and result.end_cycle == 21
-    if factory is init_plans.make_missunit_init_config:
+    if factory is support.make_missunit_init_config:
         assert all(prefetch == 0 for _, _, _, prefetch in samples)
         assert env.backend_model.can_accept == 0
 
@@ -123,7 +126,7 @@ def test_sv39_notification_preserves_the_extra_live_cycle_and_pc():
         )
     )
     result = initialize_frontend(
-        env, init_plans.make_sv39_init_config(env.config, reset_vector=0x40000FFE)
+        env, support.make_sv39_init_config(env.config, reset_vector=0x40000FFE)
     )
     assert samples == [(1, 0)] * 20 + [(0, 0), (0, 1)]
     assert env.dut.io_tlbCsr_satp_changed.value == 0
@@ -141,7 +144,7 @@ def test_plan_retains_explicit_program_load_edge_and_can_preserve_errors():
     env.register_cycle_observer(
         lambda _, active: samples.append(int(active.dut.reset.value))
     )
-    config = init_plans.make_program_init_config(
+    config = support.make_program_init_config(
         env.config,
         reset_vector=0x80000000,
         reset_cycles=2,
@@ -166,7 +169,7 @@ def test_bpu_warmup_failure_is_recorded_and_does_not_apply_later_configuration(
     env.functional_coverage = _BpuTrainingCoverage(env)
     monkeypatch.setenv("TB_TWO_FETCH_TRAIN_MAX_CYCLES", "2")
     with pytest.raises(AssertionError, match="short-block loop"):
-        initialize_frontend(env, init_plans.make_bpu_s3_init_config(env.config))
+        initialize_frontend(env, support.make_bpu_s3_init_config(env.config))
     result = env.init_result
     assert not result.completed and result.end_cycle == 23
     assert result.steps[-1].operation == "WarmBpuTraining"
@@ -175,7 +178,7 @@ def test_bpu_warmup_failure_is_recorded_and_does_not_apply_later_configuration(
 
 
 def test_reusing_a_plan_does_not_share_monitor_or_memory_state():
-    plan = init_plans.make_cacheable_init_config(EnvConfig(), 0x80040000, latency=7)
+    plan = support.make_cacheable_init_config(EnvConfig(), 0x80040000, latency=7)
     first, second = FrontendEnv(FakeDUTFrontend()), FrontendEnv(FakeDUTFrontend())
     initialize_frontend(first, plan)
     first.memory.load_bin(b"\x99", 0x80040000)
@@ -192,7 +195,7 @@ def test_same_set_startup_preserves_monitor_evidence():
     env.monitor.errors.append(error)
     initialize_frontend(
         env,
-        init_plans.make_same_set_jump_init_config(
+        support.make_same_set_jump_init_config(
             env.config,
             0x80600000,
             stride=0x4000,
@@ -209,7 +212,7 @@ def test_mixed_sources_startup_loads_both_images_and_stops_backend():
     env = FrontendEnv(FakeDUTFrontend())
     result = initialize_frontend(
         env,
-        init_plans.make_mixed_sources_init_config(
+        support.make_mixed_sources_init_config(
             env.config,
             idle_base=0x80000000,
             target=0x80A00000,

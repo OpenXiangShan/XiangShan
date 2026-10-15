@@ -19,21 +19,27 @@ from env.runtime.frontend_init import (
 
 
 import os
-from collections.abc import Iterable
+from collections.abc import (
+    Iterable,
+)
 
 import pytest
 
-from env.funcov.py.icache.icache_prefetchpipe_funcov import _read_prefetch
+from env.funcov.py.icache.icache_prefetchpipe_funcov import (
+    _read_prefetch,
+)
 from env.sequences import (
     TranslationScenario,
     TranslationPmpPmaEntry,
+    RunUntilCommitSequence,
 )
-from env.support import PmpPmaConfig
-from tests.py.icache.directed_dut.refill_scenarios import (
+from env.support import (
+    PmpPmaConfig,
+    record_scenario,
+    scenario_rng,
+)
+from tests.py.icache.directed_dut.scenarios import (
     run_trained_dual_refill as _run_trained_refill,
-)
-from tests.py.icache.directed_dut.branch_scenarios import (
-    run_large_loop_multi_segment as _run_large_loop,
 )
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
@@ -44,13 +50,25 @@ from tests.py.icache.directed_dut.support import (
     trigger_bpu_s3_flush as _trigger_bpu_s3_flush,
     wait_coverage_hits,
     wait_until,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
     make_bpu_s3_init_config,
     make_nop_init_config,
     make_overlap2_init_config,
     make_program_init_config,
+    randomize_resolve_delays,
+)
+
+import hashlib
+import logging
+from env.core.transactions import (
+    CommitTarget,
+)
+from tests.py.icache.directed_dut.programs import (
+    NOP,
+    encode_jal as _jal,
+    encode_beq as _beq,
+    encode_bne as _bne,
+    instructions_to_bytes as _instructions_to_bytes,
+    program_image as _program_image,
 )
 
 
@@ -60,6 +78,102 @@ pytestmark = pytest.mark.skipif(
 )
 _NOP = 0x0000_0013
 _SOFT_BASE = 0x8004_0000
+
+
+logger = logging.getLogger(__name__)
+
+
+def run_large_loop_multi_segment(env):
+    """Large program (>=1000 instrs) split into N_SEG segments chained by JALs.
+
+    Each segment has per-segment BEQ (always-taken) and BNE (always-not-taken)
+    branches at randomized density, plus an end-of-segment JAL.  Segments 0..N-2
+    end with a forward JAL to the next segment start; segment N-1 ends with a
+    backward JAL to BASE, forming one large outer loop.
+
+    Assertions:
+      - commits >= target_commits (no deadlock)
+      - no monitor errors
+      - jump count >= N_SEG (each segment's JAL committed at least once)
+      - branch count >= 1 if any BEQ/BNE was placed
+    """
+    scenario_key = "zhaoxinran/multi-branch/large-loop-multi-segment"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    prog_size = rng.choice([1024, 1280, 1536])
+    N_SEG = rng.randint(3, 6)
+    seg_len = prog_size // N_SEG
+    min_d, max_d = randomize_resolve_delays(rng, env)
+    n_beq_placed = 0
+    n_bne_placed = 0
+    prog = [NOP] * prog_size
+    segment_parameters = []
+    for i in range(N_SEG):
+        seg_start = i * seg_len
+        jal_pos = seg_start + seg_len - 1
+        skip = rng.randint(1, 3)
+        beq_density = rng.uniform(0.05, 0.15)
+        bne_density = rng.uniform(0.05, 0.15)
+        segment_parameters.append(
+            {"skip": skip, "beq_density": beq_density, "bne_density": bne_density}
+        )
+        for s in range(seg_start, seg_start + seg_len - 1):
+            pos_within_seg = s - seg_start
+            effective_skip = min(skip, seg_len - 2 - pos_within_seg)
+            if effective_skip < 1:
+                pass
+            elif rng.random() < beq_density:
+                prog[s] = _beq(0, 0, effective_skip * 4)
+                n_beq_placed += 1
+            elif rng.random() < bne_density:
+                prog[s] = _bne(0, 0, effective_skip * 4)
+                n_bne_placed += 1
+        if i < N_SEG - 1:
+            prog[jal_pos] = _jal(0, ((i + 1) * seg_len - jal_pos) * 4)
+        else:
+            prog[jal_pos] = _jal(0, -jal_pos * 4)
+    target_commits = prog_size // 3 + N_SEG
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "prog_size": prog_size,
+            "segment_count": N_SEG,
+            "segment_length": seg_len,
+            "segments": segment_parameters,
+            "n_beq": n_beq_placed,
+            "n_bne": n_bne_placed,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
+    logger.info(
+        "seed=%d prog_size=%d N_SEG=%d seg_len=%d n_beq=%d n_bne=%d resolve_delay=[%d,%d] target_commits=%d",
+        seed,
+        prog_size,
+        N_SEG,
+        seg_len,
+        n_beq_placed,
+        n_bne_placed,
+        min_d,
+        max_d,
+        target_commits,
+    )
+    run_initialization_steps(
+        env, (LoadProgram(image=_program_image(prog), step_cycles=1),)
+    )
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=30000)
+    ).run(env)
+    stats = env.branch_checker.get_stats()
+    logger.info("commits=%d stats=%s", commits, stats)
+    assert commits >= target_commits
+    assert not env.monitor.get_errors()
+    assert stats["by_type"]["jump"] >= N_SEG
+    if n_beq_placed > 0 or n_bne_placed > 0:
+        assert stats["by_type"]["branch"] >= 1
 
 
 def _recorder(env):
@@ -800,7 +914,7 @@ def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
 )
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
-    _run_large_loop(env)
+    run_large_loop_multi_segment(env)
     _wait_bins(
         env,
         [

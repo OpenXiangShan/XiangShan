@@ -10,24 +10,18 @@ from __future__ import annotations
 from env.runtime.frontend_init import (
     ConfigureAgent,
     FrontendInitConfig,
-    LoadProgram,
-    ProgramImage,
     initialize_frontend,
     run_initialization_steps,
 )
 
 
 import os
-from collections.abc import Callable
+from collections.abc import (
+    Callable,
+)
 
 import pytest
 
-from env.sequences import (
-    TranslationPmpPmaEntry,
-    TranslationScenario,
-    TranslationScenarioBuilder,
-)
-from env.support.pmp_pma import PmpPmaConfig
 from tests.py.icache.directed_dut.support import (
     clear_soft_prefetch as _clear_soft_prefetch,
     read_dut_signal,
@@ -35,9 +29,6 @@ from tests.py.icache.directed_dut.support import (
     set_predictors as _set_predictors,
     wait_coverage_hits,
     wait_until,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
     make_missunit_init_config,
 )
 
@@ -127,20 +118,6 @@ def _snapshot(env) -> dict[str, int | None]:
         for field in ("valid", "issue", "flush", "fencei", "blkPAddr", "vSetIdx"):
             sample[f"mshr_{index}_{field}"] = _read(env, prefix + field)
     return sample
-
-
-def _load_nops(env, base: int, *, words: int = 4096) -> None:
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=(_NOP.to_bytes(4, "little")) * int(words),
-                    base_addr=int(base),
-                )
-            ),
-        ),
-    )
 
 
 def _set_soft_prefetch(env, addresses: list[int]) -> None:

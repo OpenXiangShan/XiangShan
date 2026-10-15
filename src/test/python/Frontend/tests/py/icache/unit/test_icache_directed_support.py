@@ -7,10 +7,15 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
+from env.runtime.frontend_init import initialize_frontend
+from tests.py.icache.directed_dut.programs import (
+    build_bpu_training_program,
+)
 from tests.py.icache.directed_dut.support import (
-    _build_bpu_training_program,
-    _warm_bpu_training_stream,
-    initialize_bpu_s3_stream,
+    WarmBpuTraining,
+    make_bpu_s3_init_config,
+    _require_mainpipe_signal,
+    read_dut_signal,
     wait_coverage_hits,
 )
 
@@ -21,6 +26,30 @@ class _Coverage:
 
     def key_hit(self, group, bin_name):
         return (group, bin_name) in self.hits
+
+
+def test_mainpipe_required_lookup_retries_late_signals_and_retains_diagnostics():
+    env = SimpleNamespace(dut=SimpleNamespace())
+    aliases = ("missing_alias", "exported_later")
+    with pytest.raises(AssertionError) as raised:
+        _require_mainpipe_signal(env, aliases)
+    assert raised.value.args[0] == {"missing_internal_signals": list(aliases)}
+
+    env.dut.exported_later = SimpleNamespace(value=7)
+    assert _require_mainpipe_signal(env, aliases) == 7
+    env.dut.exported_later.value = 9
+    assert _require_mainpipe_signal(env, aliases) == 9
+
+
+def test_signal_lookup_keeps_recorder_snapshot_separate_from_live_pin():
+    env = SimpleNamespace(
+        dut=SimpleNamespace(pin=SimpleNamespace(value=5)),
+        functional_coverage=SimpleNamespace(
+            _read_first_dut_signal=lambda dut, names: 9
+        ),
+    )
+    assert read_dut_signal(env, "pin", prefer_recorder=True) == 9
+    assert read_dut_signal(env, "pin") == 5
 
 
 class _Env:
@@ -110,7 +139,7 @@ def test_wait_coverage_hits_reports_only_the_targets_still_missing():
 
 
 def test_bpu_training_program_preserves_the_original_instruction_bytes():
-    payload = _build_bpu_training_program()
+    payload = build_bpu_training_program()
 
     assert len(payload) == 512
     # Golden digest of the original eight-block RVC stream, before relocation.
@@ -186,7 +215,7 @@ class _BpuTrainingEnv:
 def test_bpu_warmup_accepts_the_final_cycle_and_always_steps_before_sampling():
     env = _BpuTrainingEnv(ready_cycle=2)
 
-    result = _warm_bpu_training_stream(env, max_cycles=2)
+    result = WarmBpuTraining(max_cycles=2).run(env)
 
     assert result == {
         "cycle": 2,
@@ -207,7 +236,7 @@ def test_bpu_warmup_requires_all_training_conditions(missing):
     env = _BpuTrainingEnv(missing=missing)
 
     with pytest.raises(AssertionError) as raised:
-        _warm_bpu_training_stream(env, max_cycles=2)
+        WarmBpuTraining(max_cycles=2).run(env)
 
     assert env.steps == [1, 1]
     assert raised.value.args[0] == {
@@ -224,7 +253,7 @@ def test_bpu_warmup_preserves_the_environment_cycle_limit(monkeypatch):
     env = _BpuTrainingEnv(ready_cycle=3)
 
     with pytest.raises(AssertionError) as raised:
-        _warm_bpu_training_stream(env)
+        WarmBpuTraining().run(env)
 
     assert env.current_cycle == 2
     assert raised.value.args[0]["max_cycles"] == 2
@@ -234,7 +263,7 @@ def test_bpu_warmup_reports_an_unavailable_signal_without_further_steps():
     env = _BpuTrainingEnv(missing="unavailable_ftq_valid")
 
     with pytest.raises(AssertionError) as raised:
-        _warm_bpu_training_stream(env, max_cycles=2)
+        WarmBpuTraining(max_cycles=2).run(env)
 
     assert env.steps == [1]
     assert raised.value.args[0]["label"] == "ftq_valid"
@@ -267,7 +296,7 @@ def test_bpu_stream_loads_before_reset_and_configures_icache_after_warmup(monkey
         )
     )
 
-    initialize_bpu_s3_stream(env, seed=0x6617)
+    initialize_frontend(env, make_bpu_s3_init_config(env.config, seed=0x6617))
 
     assert env.current_cycle == 24
     assert [reset for reset, _, _ in samples] == [1] * 20 + [0] * 4

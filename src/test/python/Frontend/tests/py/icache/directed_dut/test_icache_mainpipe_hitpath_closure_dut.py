@@ -12,21 +12,23 @@ from env.runtime.frontend_init import (
 
 import os
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import (
+    Callable,
+    Sequence,
+)
 
 import pytest
 
-from tests.py.icache.directed_dut.mainpipe_support import (
+from tests.py.icache.directed_dut.support import (
     load_nop_program as _load_nop_program,
     warmup_commits as _warmup_commits,
-)
-from tests.py.icache.directed_dut.branch_scenarios import (
-    run_multi_branch_random_positions as _run_multi_branch_positions,
-)
-from tests.py.icache.directed_dut.support import (
     cycle_limit as _cycle_limit,
     read_dut_signal,
     wait_until,
+    make_fetch_loop_init_config,
+)
+from tests.py.icache.directed_dut.scenarios import (
+    run_multi_branch_random_positions as _run_multi_branch_positions,
 )
 
 
@@ -41,11 +43,10 @@ _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 
 from env.funcov.py.icache.signal_contract import (
-    TO_IFU_MAP, TO_IFU_READY, TO_IFU_VALID, half_aligned_cross_line,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
-    make_fetch_loop_init_config,
+    TO_IFU_MAP,
+    TO_IFU_READY,
+    TO_IFU_VALID,
+    half_aligned_cross_line,
 )
 
 
@@ -190,18 +191,6 @@ def _direct_alignment_matches(sample: dict[str, int]) -> bool:
         )
         expected |= aligned_map & sample[f"aligned_mask_{index}"]
     return sample["to_ifu_maybe_rvc_map"] == (expected & 0xFFFF_FFFF)
-
-
-def _jal(rd: int, offset: int) -> int:
-    imm = int(offset) & 0x1F_FFFF
-    return (
-        (((imm >> 20) & 1) << 31)
-        | (((imm >> 1) & 0x3FF) << 21)
-        | (((imm >> 11) & 1) << 20)
-        | (((imm >> 12) & 0xFF) << 12)
-        | ((int(rd) & 0x1F) << 7)
-        | 0x6F
-    )
 
 
 def _wait_for_loop_target(env, target: int) -> None:

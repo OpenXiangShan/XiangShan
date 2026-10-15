@@ -16,12 +16,7 @@ import pytest
 from tests.py.icache.directed_dut.support import (
     drive_soft_prefetch as _drive_soft_prefetch,
     read_dut_signal,
-)
-
-from tests.py.icache.directed_dut.init_plans import (
     make_cacheable_init_config,
-)
-from tests.py.icache.directed_dut.mainpipe_support import (
     register_mainpipe_observer,
 )
 
