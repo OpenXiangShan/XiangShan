@@ -13,6 +13,7 @@ from ..agents.icache_ecc_injection_agent import ICacheECCInjectionAgent
 from ..agents.ptw_agent import PTWAgent
 from ..agents.uncache_agent import UncacheAgent
 from ..checkers.frontend_flow_checker import FrontendFlowChecker
+from ..checkers.translation_scenario_checker import TranslationScenarioChecker
 from .backend_model import BackendModel
 from ..bundles import (
     BackendCtrlBundle,
@@ -45,7 +46,6 @@ from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.backend_runtime import CfVecCycleSnapshot
 from ..model.branch_checker import BranchChecker
 from ..monitors.frontend_monitor import FrontendMonitor
-from ..monitors.translation_permission_oracle import TranslationPermissionOracle
 
 
 class FrontendEnv:
@@ -135,7 +135,7 @@ class FrontendEnv:
             "ptw_agent": PTWAgent(self.page_table),
             "ptw_full_ppn_checker": PTWFullPpnChecker(),
             "ptw_resp_input_checker": PTWRespInputChecker(),
-            "translation_oracle": TranslationPermissionOracle(),
+            "translation_checker": TranslationScenarioChecker(),
             "backend_agent": BackendAgent(),
             "backend_model": BackendModel(
                 ftq_size=self.config.backend.ftq_size,
@@ -164,7 +164,8 @@ class FrontendEnv:
         self.ptw_agent = collaborators["ptw_agent"]
         self.ptw_full_ppn_checker = collaborators["ptw_full_ppn_checker"]
         self.ptw_resp_input_checker = collaborators["ptw_resp_input_checker"]
-        self.translation_oracle = collaborators["translation_oracle"]
+        self.translation_checker = collaborators["translation_checker"]
+        self.translation_oracle = self.translation_checker
         self.backend_agent = collaborators["backend_agent"]
         self.backend_model = collaborators["backend_model"]
 
@@ -232,7 +233,7 @@ class FrontendEnv:
         self.ptw_agent.set_nemu_sync_hook(self._sync_nemu_ptw_state)
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)
-        self.translation_oracle.bind_env(self)
+        self.translation_checker.bind_env(self)
         self.backend_agent.bind(self.backend_ctrl_if)
         self.monitor.bind(self.backend_observe_if)
         self.monitor.bind_icache(self.icache_if)
@@ -276,7 +277,7 @@ class FrontendEnv:
             self.ptw_agent,
             self.ptw_full_ppn_checker,
             self.ptw_resp_input_checker,
-            self.translation_oracle,
+            self.translation_checker,
             self.flow_checker,
             self.backend_model,
         )
@@ -639,7 +640,7 @@ class FrontendEnv:
             self.ptw_agent.on_clock_edge(cycle, ptw_inputs)
             ptw_flushes_after = int(self.ptw_agent.sfence_dropped_responses)
             if ptw_flushes_after > ptw_flushes_before:
-                self.translation_oracle.discard_pending_ptw_responses(
+                self.translation_checker.discard_pending_ptw_responses(
                     int(cycle), agent_dropped=ptw_flushes_after - ptw_flushes_before
                 )
             self.monitor.capture_cycle_observation(cycle)
@@ -657,7 +658,7 @@ class FrontendEnv:
         else:
             self._begin_backend_cycle(cycle)
             self.flow_checker.on_clock_edge(cycle)
-            self.translation_oracle.on_clock_edge(cycle)
+            self.translation_checker.on_clock_edge(cycle)
             self._drive_backend_cycle(cycle)
         # Cycle observers run after the environment has driven backend and
         # agent state.  Native Toffee direct models use a read-once snapshot;
@@ -1235,7 +1236,7 @@ class FrontendEnv:
             s2xlate=int(state.scenario.s2xlate),
             priv_imode=int(state.scenario.priv_imode),
         )
-        return self.translation_oracle.arm(
+        return self.translation_checker.arm(
             state,
             translation_epoch=state_epoch,
             page_indexes=page_indexes,
@@ -1243,7 +1244,7 @@ class FrontendEnv:
         )
 
     def assert_translation_scenario(self) -> dict:
-        return self.translation_oracle.assert_complete()
+        return self.translation_checker.assert_complete()
 
     def get_stats(self) -> dict:
         out = {
@@ -1252,7 +1253,7 @@ class FrontendEnv:
             "uncache": self.uncache_agent.get_stats(),
             "ptw": self.ptw_agent.get_stats(),
             "ptw_resp_input_checker": self.ptw_resp_input_checker.get_stats(),
-            "translation_oracle": self.translation_oracle.get_stats(),
+            "translation_oracle": self.translation_checker.get_stats(),
             "backend": self.backend_model.get_stats(),
             "branch": self.branch_checker.get_stats(),
         }
