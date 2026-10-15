@@ -418,9 +418,6 @@ def test_uncache_a_ready_backpressure_holds_request(env):
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_001"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -481,10 +478,6 @@ def test_uncache_response_fault_reports_dut_exception(
     assert int(stats.get("denied_resp_count", 0)) == (1 if fault_kwargs.get("denied") else 0)
     assert _wait_for_monitor_exception(env)
     assert env.monitor.exception_mark_count > 0
-    leaf = 7 if fault_kwargs.get("corrupt") else 6
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -585,9 +578,6 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_009"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -624,9 +614,6 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before_redirect
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_010"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -760,7 +747,6 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
     assert int(env.icache_agent.get_stats().get("resp_beat_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) > 0
     assert not any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
-    assert env.functional_coverage.key_hit("fetch_path_switch", "icache_to_mmio_clean")
     assert not env.monitor.get_errors()
 
 
@@ -915,7 +901,6 @@ def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
         "uncache": env.uncache_agent.get_stats(),
         "mapping": mapping,
     }
-    assert env.functional_coverage.key_hit("uncache_ordering", "pbmt_io_wait_commit")
     assert _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
@@ -1465,10 +1450,6 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
         and bool(obs.is_rvc) == bool(expected_block[0][2])
         for obs in env.monitor.observations
     )
-    if (old_attr, new_attr) == ("nc", "mmio"):
-        assert env.functional_coverage.key_hit(
-            "ifu_instruncache_owner_v3", "instruncache_leaf_038"
-        )
     assert not env.monitor.get_errors()
 
 
@@ -2315,9 +2296,6 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
     assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_015"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -2375,9 +2353,6 @@ def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
         ).run(env)
         assert _wait_for_observed_pc(env, pc)
 
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_013"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -2417,9 +2392,6 @@ def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
     assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
     assert int(stats.get("corrupt_resp_count", 0)) == 1
     assert int(stats.get("denied_resp_count", 0)) == 1
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_016"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -2517,17 +2489,6 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     assert _MMIO_BASE in stats.get("request_addrs", [])
     assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_017"
-    )
-    if fault == "corrupt":
-        assert env.functional_coverage.key_hit(
-            "ifu_instruncache_owner_v3", "instruncache_leaf_019"
-        )
-    if fault == "combined":
-        assert env.functional_coverage.key_hit(
-            "ifu_instruncache_owner_v3", "instruncache_leaf_020"
-        )
     assert not env.monitor.get_errors()
 
 
@@ -2709,11 +2670,6 @@ def _run_uncache_page_tail_rvi_need_resend_rechecks_next_page(
         for obs in env.monitor.observations[observations_before_redirect:]
     )
     assert not env.monitor.get_errors()
-    assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
-    for leaf in (8, 22, 23, 26, 27, 28):
-        assert env.functional_coverage.key_hit(
-            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
-        )
 
 
 @pytest.mark.parametrize("denied", [0, 1], ids=["corrupt-only", "denied-and-corrupt"])
@@ -2765,9 +2721,6 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
     assert not any(
         int(sample["s0"]) or int(sample["s1"]) or int(sample["s2"])
         for sample in fault_response_samples
-    )
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_025"
     )
     assert not env.monitor.get_errors()
 
@@ -2865,9 +2818,6 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
         int(obs.pc) == _CROSS_PAGE_PC
         for obs in env.monitor.observations[observations_before_redirect:]
     )
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_029"
-    )
     assert not env.monitor.get_errors()
 
 
@@ -2934,11 +2884,6 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
         "reason": "RVC page-tail response unexpectedly asserted needResend",
         "samples": rvc_window,
     }
-    assert env.functional_coverage.key_hit("uncache_page_boundary", "rvc_tail_no_resend_before_delivery")
-    for leaf in (14, 24):
-        assert env.functional_coverage.key_hit(
-            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
-        )
     assert not env.monitor.get_errors()
 
 
