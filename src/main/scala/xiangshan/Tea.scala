@@ -85,7 +85,7 @@ class TeaTarget(implicit p: Parameters) extends XSBundle {
 
 class TeaMemberResult(implicit p: Parameters) extends XSBundle {
   val target = new TeaTarget
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(XLEN.W)
   val psv = UInt(TeaEvent.width.W)
 }
 
@@ -98,7 +98,7 @@ class TeaDelayedFinal(implicit p: Parameters) extends XSBundle {
 
 class TeaFlushCause(implicit p: Parameters) extends XSBundle {
   val valid = Bool()
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(XLEN.W)
   val psv = UInt(TeaEvent.width.W)
 }
 
@@ -108,7 +108,7 @@ class TeaEntry(implicit p: Parameters) extends XSBundle {
   val state = UInt(4.W)
   // Keep database integers below 2^63 even when the full mask has 64 bits.
   val validMask = Vec(CommitWidth, UInt(RenameWidth.W))
-  val pcVec = Vec(CommitWidth * RenameWidth, UInt(VAddrBits.W))
+  val pcVec = Vec(CommitWidth * RenameWidth, UInt(XLEN.W))
   val psvVec = Vec(CommitWidth * RenameWidth, UInt(TeaEvent.width.W))
   val targetValid = Bool()
   val target = new TeaTarget
@@ -121,7 +121,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val samplePeriod = Input(UInt(64.W))
     val state = Input(UInt(4.W))
     val commitMask = Input(UInt(width.W))
-    val commitPc = Input(Vec(width, UInt(VAddrBits.W)))
+    val commitPc = Input(Vec(width, UInt(XLEN.W)))
     val commitPsv = Input(Vec(width, UInt(TeaEvent.width.W)))
     val stalledTarget = Input(Valid(new TeaTarget))
     val flushCause = Input(new TeaFlushCause)
