@@ -8,6 +8,7 @@ from typing import Callable, Dict, Optional
 
 from ..bundles import ICacheBundle
 from ..model.memory_model import MemoryModel
+from ..monitors.frontend_monitor import ICacheRequestSnapshot
 
 
 @dataclass
@@ -46,14 +47,6 @@ class ICacheAgent:
         self._next_response_faults = deque()
         self._response_faults_by_addr: Dict[int, deque] = {}
         self.a_ready_override: Optional[int] = None
-
-    @staticmethod
-    def _read(signal, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return default
 
     @staticmethod
     def _write(signal, value: int) -> None:
@@ -177,14 +170,14 @@ class ICacheAgent:
             return self._next_response_faults.popleft()
         return {"denied": 0, "corrupt": 0, "beat": None}
 
-    def _handle_request(self, cycle: int) -> None:
+    def _handle_request(self, cycle: int, request: ICacheRequestSnapshot) -> None:
         assert self.interface is not None
         a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
         self._write(self.interface.a_ready, a_ready)
-        if self._read(self.interface.a_valid, 0) != 1 or a_ready != 1:
+        if request.valid != 1 or a_ready != 1:
             return
-        source = self._read(self.interface.a_bits_source, 0)
-        addr = self._read(self.interface.a_bits_address, 0)
+        source = request.source
+        addr = request.address
         beat0, beat1 = self.memory.read_cacheline(addr, line_bytes=64)
         is_miss = self.rng.random() < self.miss_rate
         latency = self.miss_latency if is_miss else self.hit_latency
@@ -286,10 +279,12 @@ class ICacheAgent:
             level="DEBUG",
         )
 
-    def on_clock_edge(self, cycle: int) -> None:
+    def on_clock_edge(self, cycle: int, request: ICacheRequestSnapshot) -> None:
         if self.interface is None:
             return
-        self._handle_request(cycle)
+        if request.cycle != int(cycle):
+            raise AssertionError("ICacheAgent received a stale request snapshot")
+        self._handle_request(cycle, request)
         self._drive_response(cycle)
 
     def get_stats(self) -> dict:

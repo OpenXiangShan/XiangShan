@@ -45,7 +45,7 @@ def test_pre_drive_observer_samples_before_agents_and_regular_observer(monkeypat
 
     env.register_pre_drive_cycle_observer(lambda _cycle, _env: order.append("pre"))
     env.register_cycle_observer(lambda _cycle, _env: order.append("regular"))
-    monkeypatch.setattr(env.icache_agent, "on_clock_edge", lambda _cycle: order.append("icache"))
+    monkeypatch.setattr(env.icache_agent, "on_clock_edge", lambda _cycle, _request: order.append("icache"))
     monkeypatch.setattr(env.uncache_agent, "on_clock_edge", lambda _cycle: order.append("uncache"))
     monkeypatch.setattr(env.ptw_agent, "on_clock_edge", lambda _cycle: order.append("ptw"))
     monkeypatch.setattr(env.ptw_full_ppn_checker, "on_clock_edge", lambda _cycle: None)

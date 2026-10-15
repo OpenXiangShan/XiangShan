@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.support import fold_pc
@@ -88,3 +90,23 @@ def test_frontend_monitor_redirect_uses_captured_pre_backend_value() -> None:
     assert env.monitor.last_dut_redirect["target_pc"] == 0x1000
     assert env.monitor._recovery_target_pc == 0x1000
     assert env.monitor._skip_cfvec_until_cycle == 11
+
+
+def test_icache_agent_uses_monitored_request_snapshot() -> None:
+    dut = FakeDUTFrontend()
+    env = FrontendEnv(dut, register_callbacks=False)
+    pc = 0x8000_1000
+    env.memory.load_bin(b"\x13\x00\x00\x00" * 16, pc)
+    dut.auto_inner_icache_client_out_a_valid.value = 1
+    dut.auto_inner_icache_client_out_a_bits_source.value = 2
+    dut.auto_inner_icache_client_out_a_bits_address.value = pc
+
+    request = env.monitor.capture_icache_request(7)
+    dut.auto_inner_icache_client_out_a_valid.value = 0
+    dut.auto_inner_icache_client_out_a_bits_address.value = pc + 64
+    env.icache_agent.on_clock_edge(7, request)
+
+    assert env.icache_agent.request_records[0]["address"] == pc
+    assert env.icache_agent.request_records[0]["source"] == 2
+    with pytest.raises(AssertionError, match="stale request snapshot"):
+        env.icache_agent.on_clock_edge(8, request)

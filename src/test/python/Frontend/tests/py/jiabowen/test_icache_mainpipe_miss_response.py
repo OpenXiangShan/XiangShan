@@ -8,6 +8,7 @@ import pytest
 
 from env.agents.icache_agent import ICacheAgent
 from env.model import MemoryModel
+from env.monitors.frontend_monitor import FrontendMonitor
 from env.runtime.pylib import frontend_offset_path
 from env.support.pc_utils import fold_pc
 
@@ -440,6 +441,12 @@ def _unit_icache_interface() -> SimpleNamespace:
     )
 
 
+def _unit_icache_monitor(interface) -> FrontendMonitor:
+    monitor = FrontendMonitor()
+    monitor.bind_icache(interface)
+    return monitor
+
+
 @pytest.mark.parametrize(
     "fault,expected_denied,expected_corrupt",
     [
@@ -457,15 +464,16 @@ def test_icache_agent_fault_injection_obeys_tilelink_contract(
     agent = ICacheAgent(memory)
     interface = _unit_icache_interface()
     agent.interface = interface
+    monitor = _unit_icache_monitor(interface)
     agent.configure(hit_latency=0, miss_latency=0, miss_rate=1.0, seed=1)
     agent.inject_response_fault_at(_BASE + 8, **fault)
 
     interface.a_valid.value = 1
     interface.a_bits_source.value = 2
     interface.a_bits_address.value = _BASE
-    agent.on_clock_edge(10)
+    agent.on_clock_edge(10, monitor.capture_icache_request(10))
     interface.a_valid.value = 0
-    agent.on_clock_edge(11)
+    agent.on_clock_edge(11, monitor.capture_icache_request(11))
 
     stats = agent.get_stats()
     assert int(stats["resp_line_count"]) == 1
@@ -483,15 +491,16 @@ def test_icache_agent_fault_injection_can_select_one_refill_beat(beat) -> None:
     agent = ICacheAgent(memory)
     interface = _unit_icache_interface()
     agent.interface = interface
+    monitor = _unit_icache_monitor(interface)
     agent.configure(hit_latency=0, miss_latency=0, miss_rate=1.0, seed=1)
     agent.inject_response_fault_at(_BASE, corrupt=1, beat=beat)
 
     interface.a_valid.value = 1
     interface.a_bits_source.value = 2
     interface.a_bits_address.value = _BASE
-    agent.on_clock_edge(10)
+    agent.on_clock_edge(10, monitor.capture_icache_request(10))
     interface.a_valid.value = 0
-    agent.on_clock_edge(11)
+    agent.on_clock_edge(11, monitor.capture_icache_request(11))
 
     stats = agent.get_stats()
     assert [int(item["corrupt"]) for item in stats["response_records"]] == [
@@ -521,17 +530,18 @@ def test_icache_agent_a_ready_override_applies_backpressure() -> None:
     agent = ICacheAgent(memory)
     interface = _unit_icache_interface()
     agent.interface = interface
+    monitor = _unit_icache_monitor(interface)
     interface.a_valid.value = 1
     interface.a_bits_source.value = 0
     interface.a_bits_address.value = _BASE
 
     agent.set_a_ready(0)
-    agent.on_clock_edge(10)
+    agent.on_clock_edge(10, monitor.capture_icache_request(10))
     assert int(interface.a_ready.value) == 0
     assert int(agent.get_stats()["req_count"]) == 0
 
     agent.set_a_ready(None)
-    agent.on_clock_edge(11)
+    agent.on_clock_edge(11, monitor.capture_icache_request(11))
     assert int(interface.a_ready.value) == 1
     assert int(agent.get_stats()["req_count"]) == 1
 

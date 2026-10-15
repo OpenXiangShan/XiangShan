@@ -32,14 +32,24 @@ class FrontendCycleSnapshot:
     ptw: dict
 
 
+@dataclass(frozen=True)
+class ICacheRequestSnapshot:
+    cycle: int
+    valid: int
+    source: int
+    address: int
+
+
 class FrontendMonitor:
     def __init__(self) -> None:
         self.interface = None
         self.from_ftq_if = None
         self.ptw_if = None
+        self.icache_if = None
         self.ptw_get_gpa_provider = None
         self.dut = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
+        self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
         self.observations: list[Observation] = []
         self._checker = None
 
@@ -121,6 +131,9 @@ class FrontendMonitor:
         self.ptw_if = ptw_if
         self.ptw_get_gpa_provider = ptw_get_gpa_provider
 
+    def bind_icache(self, icache_if) -> None:
+        self.icache_if = icache_if
+
     def bind_dut(self, dut) -> None:
         self.dut = dut
 
@@ -133,6 +146,17 @@ class FrontendMonitor:
             return self._read(signals[int(slot)])
         except (IndexError, TypeError):
             return 0
+
+    def capture_icache_request(self, cycle: int) -> ICacheRequestSnapshot:
+        if self.icache_if is None:
+            raise AssertionError("FrontendMonitor ICache interface is not bound")
+        self.icache_request_snapshot = ICacheRequestSnapshot(
+            cycle=int(cycle),
+            valid=self._read(self.icache_if.a_valid),
+            source=self._read(self.icache_if.a_bits_source),
+            address=self._read(self.icache_if.a_bits_address),
+        )
+        return self.icache_request_snapshot
 
     def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
         if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
@@ -178,9 +202,11 @@ class FrontendMonitor:
 
     def on_hardware_reset(self) -> None:
         self.cycle_snapshot = None
+        self.icache_request_snapshot = None
 
     def clear(self) -> None:
         self.cycle_snapshot = None
+        self.icache_request_snapshot = None
         self._checker.clear()
 
     def set_expected_pc(self, pc: int) -> None:
@@ -204,4 +230,4 @@ class FrontendMonitor:
         return [observation.pc for observation in self.observations[-limit:]]
 
 
-__all__ = ["Observation", "FrontendCycleSnapshot", "FrontendMonitor"]
+__all__ = ["Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot", "FrontendMonitor"]
