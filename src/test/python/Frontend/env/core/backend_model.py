@@ -16,6 +16,7 @@ from ..model.backend_runtime import (
     BackendObservationSnapshot,
     CfVecCycleSnapshot,
     CfVecSlotSnapshot,
+    capture_cfvec_snapshot as read_cfvec_snapshot,
 )
 from ..model.backend_state import (
     ActiveWrongPathEpisode,
@@ -3029,48 +3030,15 @@ class BackendModel:
 
     def capture_cfvec_snapshot(self) -> CfVecCycleSnapshot:
         assert self.observe_if is not None
-        slots = []
-        exception_signals = (
-            (1, "cfvec_exception_vec_1"),
-            (2, "cfvec_exception_vec_2"),
-            (12, "cfvec_exception_vec_12"),
-            (19, "cfvec_exception_vec_19"),
-            (20, "cfvec_exception_vec_20"),
-        )
-        for slot in range(8):
-            valid = bool(self._read_cfvec_slot_signal("cfvec_valid", slot))
-            if not valid:
-                slots.append(CfVecSlotSnapshot(slot=slot))
-                continue
-            exception_bits = 0
-            for bit, name in exception_signals:
-                if self._read_cfvec_slot_signal(name, slot):
-                    exception_bits |= 1 << int(bit)
-            pred_taken = bool(self._read_cfvec_slot_signal("cfvec_pred_taken", slot))
-            slots.append(
-                CfVecSlotSnapshot(
-                    slot=slot,
-                    valid=True,
-                    foldpc=self._read_cfvec_slot_signal("cfvec_foldpc", slot),
-                    instr=self._read_cfvec_slot_signal("cfvec_instr", slot),
-                    is_rvc=bool(self._read_cfvec_slot_signal("cfvec_is_rvc", slot)),
-                    pred_taken=pred_taken,
-                    # The current cfVec ABI exposes predTaken only. Its use as
-                    # fixed_taken remains equivalent for backend CFI handling:
-                    # direct/indirect jumps are decoded as taken independently,
-                    # while conditional branches use predTaken.
-                    fixed_taken=pred_taken,
-                    ftq_flag=self._read_cfvec_slot_signal("cfvec_ftq_ptr_flag", slot),
-                    ftq_value=self._read_cfvec_slot_signal("cfvec_ftq_ptr_value", slot),
-                    ftq_offset=self._read_cfvec_slot_signal("cfvec_ftq_offset", slot),
-                    is_last=bool(self._read_cfvec_slot_signal("cfvec_is_last_in_ftq_entry", slot)),
-                    exception_bits=exception_bits,
-                )
-            )
-        snapshot = CfVecCycleSnapshot(cycle=int(self.current_cycle), slots=tuple(slots))
+        snapshot = read_cfvec_snapshot(self.current_cycle, self._read_cfvec_slot_signal)
+        self.accept_cfvec_snapshot(snapshot)
+        return snapshot
+
+    def accept_cfvec_snapshot(self, snapshot: CfVecCycleSnapshot) -> None:
+        if int(snapshot.cycle) != int(self.current_cycle):
+            raise AssertionError("BackendModel received a stale cfVec snapshot")
         self._cfvec_cycle_snapshot = snapshot
         self._cfvec_snapshot_pc_cache.clear()
-        return snapshot
 
     def _snapshot_bound_observation(self) -> BackendObservationSnapshot:
         return BackendObservationSnapshot(

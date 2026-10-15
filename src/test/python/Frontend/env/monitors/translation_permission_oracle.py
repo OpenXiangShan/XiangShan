@@ -591,16 +591,27 @@ class TranslationPermissionOracle:
             if redirect_count > int(self.active["redirect_count_at_arm"]):
                 self.active["fetch_observation_ready"] = True
                 self.active["fetch_observation_not_before"] = int(cycle) + 2
+        snapshot = getattr(self.env.monitor, "cycle_snapshot", None)
+        if snapshot is not None and snapshot.cycle != int(cycle):
+            snapshot = None
+        sampled_ptw = None if snapshot is None else snapshot.ptw
         ptw_if = getattr(self.env, "ptw_if", None)
         request = getattr(self.env.ptw_agent, "get_last_request_expectation", lambda: None)()
-        if request is not None and int(request["cycle"]) == int(cycle):
+        if sampled_ptw is not None and sampled_ptw["req_valid"] and sampled_ptw["req_ready"]:
+            self.observe_ptw_request(
+                cycle,
+                vpn=int(sampled_ptw["req_vpn"]),
+                s2xlate=int(sampled_ptw["req_s2xlate"]),
+                get_gpa=int(sampled_ptw["req_get_gpa"]),
+            )
+        elif sampled_ptw is None and request is not None and int(request["cycle"]) == int(cycle):
             self.observe_ptw_request(
                 cycle,
                 vpn=int(request["vpn"]),
                 s2xlate=int(request["s2xlate"]),
                 get_gpa=int(request["get_gpa"]),
             )
-        elif ptw_if is not None and self._read(ptw_if.req_0_valid) and self._read(ptw_if.req_0_ready):
+        elif sampled_ptw is None and ptw_if is not None and self._read(ptw_if.req_0_valid) and self._read(ptw_if.req_0_ready):
             self.observe_ptw_request(
                 cycle,
                 vpn=self._read(ptw_if.req_0_bits_vpn),
@@ -609,11 +620,9 @@ class TranslationPermissionOracle:
             )
         expectation = getattr(self.env.ptw_agent, "get_last_drive_expectation", lambda: None)()
         if (
-            ptw_if is not None
-            and self._read(ptw_if.resp_valid)
-            and self._read(ptw_if.resp_ready)
-            and expectation
-        ):
+            (sampled_ptw is not None and sampled_ptw["resp_valid"] and sampled_ptw["resp_ready"])
+            or (sampled_ptw is None and ptw_if is not None and self._read(ptw_if.resp_valid) and self._read(ptw_if.resp_ready))
+        ) and expectation:
             self.observe_ptw_response(
                 cycle,
                 vpn=int(expectation["vpn"]),
@@ -633,20 +642,33 @@ class TranslationPermissionOracle:
         if observe_if is None:
             return
         for slot in range(8):
-            if not self._read(observe_if.cfvec_valid[slot]):
+            sampled_cfvec = None if snapshot is None else snapshot.cfvec.slots[slot]
+            if not (bool(sampled_cfvec.valid) if sampled_cfvec is not None else self._read(observe_if.cfvec_valid[slot])):
                 continue
-            resolver = getattr(self.env.backend_model, "observed_cfvec_pc", None)
+            resolver = getattr(
+                self.env.backend_model,
+                "observed_cfvec_snapshot_pc" if sampled_cfvec is not None else "observed_cfvec_pc",
+                None,
+            )
             if not callable(resolver):
                 raise AssertionError("translation oracle requires an FTQ-backed cfVec PC resolver")
             self.observe_cfvec(
                 cycle,
-                pc=int(resolver(slot)),
-                folded_pc=self._read(observe_if.cfvec_foldpc[slot]),
+                pc=int(resolver(snapshot.cfvec, slot) if sampled_cfvec is not None else resolver(slot)),
+                folded_pc=int(sampled_cfvec.foldpc) if sampled_cfvec is not None else self._read(observe_if.cfvec_foldpc[slot]),
                 exception_bits={
-                    bit: self._read(getattr(observe_if, f"cfvec_exception_vec_{bit}")[slot])
+                    bit: (
+                        int(bool(sampled_cfvec.exception_bits & (1 << bit)))
+                        if sampled_cfvec is not None
+                        else self._read(getattr(observe_if, f"cfvec_exception_vec_{bit}")[slot])
+                    )
                     for bit in _EXCEPTION_BITS
                 },
-                cross_page=bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot])),
+                cross_page=(
+                    bool(sampled_cfvec.cross_page_ipf_fix)
+                    if sampled_cfvec is not None
+                    else bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot]))
+                ),
             )
 
     def assert_complete(self) -> dict:

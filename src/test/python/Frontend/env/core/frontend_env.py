@@ -4,7 +4,6 @@ import logging
 import os
 from importlib import import_module
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable, Dict, Optional
 
 from ..agents.backend_agent import BackendAgent
@@ -44,7 +43,6 @@ from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.backend_runtime import CfVecCycleSnapshot
 from ..model.branch_checker import BranchChecker
-from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
 from ..monitors.translation_permission_oracle import TranslationPermissionOracle
 
@@ -129,7 +127,6 @@ class FrontendEnv:
         return {
             "branch_checker": branch_checker,
             "monitor": FrontendMonitor(memory=self.memory, page_table=self.page_table, branch_checker=branch_checker),
-            "backend_observe_monitor": BackendObserveMonitor(),
             "icache_agent": ICacheAgent(self.memory),
             "icache_control_agent": ICacheControlAgent(),
             "uncache_agent": UncacheAgent(self.memory),
@@ -158,7 +155,6 @@ class FrontendEnv:
     def _apply_collaborators(self, collaborators: Dict[str, object]) -> None:
         self.branch_checker = collaborators["branch_checker"]
         self.monitor = collaborators["monitor"]
-        self.backend_observe_monitor = collaborators["backend_observe_monitor"]
         self.icache_agent = collaborators["icache_agent"]
         self.icache_control_agent = collaborators["icache_control_agent"]
         self.uncache_agent = collaborators["uncache_agent"]
@@ -211,13 +207,6 @@ class FrontendEnv:
         except Exception:
             return default
 
-    def _backend_observe_bind_target(self):
-        return SimpleNamespace(
-            io_backend_fromFtq_wen=self.backend_from_ftq_if.io_backend_fromFtq_wen,
-            io_backend_fromFtq_ftqIdx=self.backend_from_ftq_if.io_backend_fromFtq_ftqIdx,
-            io_backend_fromFtq_startPc_addr=self.backend_from_ftq_if.io_backend_fromFtq_startPc_addr,
-        )
-
     def _create_interfaces(self) -> None:
         self.clock_reset = bind_bundle_required(ClockResetBundle, self.dut)
         self.csr_ctrl_if = bind_bundle_required(CSRControlBundle, self.dut)
@@ -245,8 +234,12 @@ class FrontendEnv:
         self.ptw_resp_input_checker.bind_env(self)
         self.translation_oracle.bind_env(self)
         self.backend_agent.bind(self.backend_ctrl_if)
-        self.backend_observe_monitor.bind(self._backend_observe_bind_target())
         self.monitor.bind(self.backend_observe_if)
+        self.monitor.bind_observation_interfaces(
+            from_ftq_if=self.backend_from_ftq_if,
+            ptw_if=self.ptw_if,
+            ptw_get_gpa_provider=lambda: read_internal_signal(self.dut, self.itlb_ptw_req_get_gpa_path),
+        )
         if hasattr(self.backend_model, "bind_interfaces"):
             self.backend_model.bind_interfaces(
                 drive_if=self.backend_ctrl_if,
@@ -471,9 +464,12 @@ class FrontendEnv:
 
     def _begin_backend_cycle(self, cycle: int) -> CfVecCycleSnapshot:
         self.backend_model.begin_cycle(cycle)
-        observation = self.backend_observe_monitor.snapshot()
-        self.backend_model.consume_backend_observation(observation)
-        return self.backend_model.capture_cfvec_snapshot()
+        snapshot = self.monitor.cycle_snapshot
+        if snapshot is None or snapshot.cycle != int(cycle):
+            raise AssertionError("FrontendMonitor has no current pre-backend observation")
+        self.backend_model.consume_backend_observation(snapshot.backend)
+        self.backend_model.accept_cfvec_snapshot(snapshot.cfvec)
+        return snapshot.cfvec
 
     def _drive_backend_cycle(self, cycle: int) -> None:
         actions = self.backend_model.plan_cycle_actions()
@@ -647,6 +643,7 @@ class FrontendEnv:
                 self.translation_oracle.discard_pending_ptw_responses(
                     int(cycle), agent_dropped=ptw_flushes_after - ptw_flushes_before
                 )
+            self.monitor.capture_cycle_observation(cycle)
             self.ptw_full_ppn_checker.on_clock_edge(cycle)
             self.ptw_resp_input_checker.on_clock_edge(cycle)
         if in_reset:

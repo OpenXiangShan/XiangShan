@@ -5,7 +5,12 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
 from ..bundles import BackendObserveBundle
-from ..model.backend_runtime import CfVecCycleSnapshot
+from ..bundles.ptw import PTWBundle
+from ..model.backend_runtime import (
+    BackendObservationSnapshot,
+    CfVecCycleSnapshot,
+    capture_cfvec_snapshot,
+)
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
@@ -23,6 +28,15 @@ class Observation:
     pred_taken: bool
 
 
+@dataclass(frozen=True)
+class FrontendCycleSnapshot:
+    cycle: int
+    backend: BackendObservationSnapshot
+    cfvec: CfVecCycleSnapshot
+    redirect: dict
+    ptw: dict
+
+
 class FrontendMonitor:
     def __init__(
         self,
@@ -33,6 +47,10 @@ class FrontendMonitor:
     ) -> None:
         self.logger = logging.getLogger("env.monitor")
         self.interface = None
+        self.from_ftq_if = None
+        self.ptw_if = None
+        self.ptw_get_gpa_provider = None
+        self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
         self.memory = memory
         self.page_table = page_table
         self.branch_checker = branch_checker
@@ -236,6 +254,60 @@ class FrontendMonitor:
             raise TypeError("FrontendMonitor requires an explicitly bound BackendObserveBundle")
         self.interface = target
 
+    def bind_observation_interfaces(self, *, from_ftq_if, ptw_if, ptw_get_gpa_provider) -> None:
+        self.from_ftq_if = from_ftq_if
+        self.ptw_if = ptw_if
+        self.ptw_get_gpa_provider = ptw_get_gpa_provider
+
+    def _read_cfvec_slot(self, name: str, slot: int) -> int:
+        signals = getattr(self.interface, name, ())
+        try:
+            return self._read(signals[int(slot)])
+        except (IndexError, TypeError):
+            return 0
+
+    def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
+        if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
+            raise AssertionError("FrontendMonitor observation interfaces are not bound")
+        backend = BackendObservationSnapshot(
+            from_ftq_wen=self._read(self.from_ftq_if.io_backend_fromFtq_wen),
+            from_ftq_ftq_idx=self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx),
+            from_ftq_start_pc_addr=self._read(self.from_ftq_if.io_backend_fromFtq_startPc_addr),
+        )
+        cfvec = capture_cfvec_snapshot(cycle, self._read_cfvec_slot)
+        req_valid = self._read(self.ptw_if.req_0_valid)
+        req_ready = self._read(self.ptw_if.req_0_ready)
+        resp_valid = self._read(self.ptw_if.resp_valid)
+        ptw = {
+            "req_valid": req_valid,
+            "req_ready": req_ready,
+            "req_vpn": self._read(self.ptw_if.req_0_bits_vpn),
+            "req_s2xlate": self._read(self.ptw_if.req_0_bits_s2xlate),
+            "req_get_gpa": int(self.ptw_get_gpa_provider() or 0) if req_valid and req_ready else 0,
+            "resp_valid": resp_valid,
+            "resp_ready": self._read(self.ptw_if.resp_ready),
+            "resp": {} if not resp_valid else {
+                name.removeprefix("resp_bits_"): self._read(getattr(self.ptw_if, name))
+                for name in PTWBundle.SIGNAL_BINDINGS if name.startswith("resp_bits_")
+            },
+        }
+        if resp_valid:
+            for name in ("s1_ppn_low", "s1_valididx", "s1_pteidx"):
+                ptw["resp"][name] = tuple(
+                    self._read(signal) for signal in getattr(self.ptw_if, f"resp_bits_{name}")
+                )
+        redirect = {
+            "valid": self._read(self.interface.redirect_valid),
+            "pc": self._read(self.interface.redirect_bits_pc),
+            "target": self._read(self.interface.redirect_bits_target),
+            "taken": self._read(self.interface.redirect_bits_taken),
+            "level": self._read_dut_signal("io_backend_toFtq_redirect_bits_level"),
+            "debug_is_ctrl": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl"),
+            "debug_is_mem_vio": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio"),
+        }
+        self.cycle_snapshot = FrontendCycleSnapshot(int(cycle), backend, cfvec, redirect, ptw)
+        return self.cycle_snapshot
+
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
 
@@ -273,11 +345,6 @@ class FrontendMonitor:
             return False
         return int(getattr(trace, "cursor", 0)) >= len(getattr(trace, "entries", ()))
 
-    def _redirect_target_requires_cfvec(self, target_pc: int) -> bool:
-        if self.memory is not None and self.memory.is_mmio(int(target_pc)):
-            return False
-        return True
-
     def _emit(self, cycle: int, event_type: str, payload: Dict, level: str = "INFO") -> None:
         if self.event_sink is None:
             return
@@ -305,6 +372,7 @@ class FrontendMonitor:
         self.last_dut_redirect = None
         self._skip_cfvec_until_cycle = None
         self._recovery_target_pc = None
+        self.cycle_snapshot = None
 
     def set_translation_context(self, *, s2xlate: int, priv_imode: int) -> None:
         self._translation_s2xlate = int(s2xlate)
@@ -360,26 +428,36 @@ class FrontendMonitor:
         return True
 
     def _observe_dut_redirect_for_cfvec_check(self, cycle: int) -> None:
-        if self._read(self.interface.redirect_valid, 0) != 1:
+        sampled = self.cycle_snapshot if self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle) else None
+        redirect = sampled.redirect if sampled is not None else {
+            "valid": self._read(self.interface.redirect_valid),
+            "pc": self._read(self.interface.redirect_bits_pc),
+            "target": self._read(self.interface.redirect_bits_target),
+            "taken": self._read(self.interface.redirect_bits_taken),
+            "level": self._read_dut_signal("io_backend_toFtq_redirect_bits_level"),
+            "debug_is_ctrl": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl"),
+            "debug_is_mem_vio": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio"),
+        }
+        if int(redirect["valid"]) != 1:
             return
         # Redirect target is a 51-bit GuardedPc; cfVec and the checker model
         # use the architectural 50-bit PC after RTL `.unGuard`.
-        target_pc = int(self._read(self.interface.redirect_bits_target, 0)) & ((1 << 50) - 1)
+        target_pc = int(redirect["target"]) & ((1 << 50) - 1)
         self.last_dut_redirect = {
             "cycle": int(cycle),
-            "pc": int(self._read(self.interface.redirect_bits_pc, 0)),
+            "pc": int(redirect["pc"]),
             "target_pc": int(target_pc),
-            "taken": int(self._read(self.interface.redirect_bits_taken, 0)),
-            "level": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_level", 0)),
-            "debug_is_ctrl": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl", 0)),
-            "debug_is_mem_vio": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio", 0)),
+            "taken": int(redirect["taken"]),
+            "level": int(redirect["level"]),
+            "debug_is_ctrl": int(redirect["debug_is_ctrl"]),
+            "debug_is_mem_vio": int(redirect["debug_is_mem_vio"]),
         }
         self._skip_cfvec_until_cycle = int(cycle) + 1
         if self.backend_model is not None:
             note_redirect = getattr(self.backend_model, "note_dut_redirect_observed", None)
             if callable(note_redirect):
                 note_redirect(int(cycle))
-        self._recovery_target_pc = int(target_pc) if self._redirect_target_requires_cfvec(int(target_pc)) else None
+        self._recovery_target_pc = int(target_pc)
         self.expected_pc = None
         self.wait_sync_after_redirect = False
         self.redirect_grace = 0
@@ -388,9 +466,9 @@ class FrontendMonitor:
             cycle,
             "monitor.dut_redirect",
             {
-                "pc": int(self._read(self.interface.redirect_bits_pc, 0)),
+                "pc": int(redirect["pc"]),
                 "target_pc": int(target_pc),
-                "taken": int(self._read(self.interface.redirect_bits_taken, 0)),
+                "taken": int(redirect["taken"]),
             },
             level="DEBUG",
         )
@@ -402,6 +480,8 @@ class FrontendMonitor:
     ) -> None:
         if self.interface is None:
             return
+        if cfvec_snapshot is None and self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle):
+            cfvec_snapshot = self.cycle_snapshot.cfvec
         if cfvec_snapshot is not None and int(cfvec_snapshot.cycle) != int(cycle):
             raise AssertionError(
                 f"stale cfVec snapshot: snapshot_cycle={int(cfvec_snapshot.cycle)} "

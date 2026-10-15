@@ -293,7 +293,7 @@ def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
         monitor.on_clock_edge(12)
 
 
-def test_dut_redirect_to_mmio_target_does_not_require_recovery_cfvec() -> None:
+def test_dut_redirect_to_mmio_target_waits_for_recovery_cfvec() -> None:
     monitor = FrontendMonitor(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
@@ -311,7 +311,35 @@ def test_dut_redirect_to_mmio_target_does_not_require_recovery_cfvec() -> None:
     monitor.on_clock_edge(12)
 
     assert monitor.get_errors() == []
-    assert all(obs.pc != 0 for obs in monitor.observations)
+    assert monitor._recovery_target_pc == 0x1000
+
+    _set_first_cfvec(interface, 0x1000)
+    interface.cfvec_exception_vec_1[0].value = 1
+    monitor.on_clock_edge(13)
+
+    assert monitor.get_errors() == []
+    assert monitor._recovery_target_pc is None
+    assert monitor.observations[0].pc == 0x1000
+    assert monitor.exception_mark_count == 1
+
+
+def test_dut_redirect_to_mmio_target_rejects_wrong_first_cfvec() -> None:
+    monitor = FrontendMonitor(memory=MemoryModel())
+    interface = _ObserveIf()
+    monitor.interface = interface
+    monitor.attach_backend_model(_BackendModel(interface))
+
+    _drive_redirect_to_monitor(monitor, interface, pc=0x8000_1000, target=0x1000)
+    monitor.on_clock_edge(10)
+    _set_redirect(interface, valid=0)
+    monitor.on_clock_edge(11)
+    _set_first_cfvec(interface, 0x1004)
+    interface.cfvec_exception_vec_1[0].value = 1
+    monitor.on_clock_edge(12)
+
+    assert monitor.get_errors()[0]["kind"] == "REDIRECT_RECOVERY_TARGET_MISMATCH"
+    assert monitor.get_errors()[0]["expected"] == 0x1000
+    assert monitor.get_errors()[0]["actual"] == 0x1004
 
 
 def test_dut_redirect_clears_stale_ftq_tracking_before_recovery_target() -> None:
