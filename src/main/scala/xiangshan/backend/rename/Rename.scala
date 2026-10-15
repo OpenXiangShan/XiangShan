@@ -80,6 +80,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val vlReadPorts  = Vec(RenameWidth, new RatReadPort(log2Ceil(VlLogicRegs)))
     // to dispatch1
     val out = Vec(RenameWidth, DecoupledIO(new RenameOutUop))
+    val teaMembers = Option.when(backendParams.debugEn)(Output(Vec(RenameWidth, Valid(new TeaRenameMember))))
     // for snapshots
     val snpt = Input(new SnapshotPort)
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
@@ -382,6 +383,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   private val fuType       = uops.map(_.fuType)
 
+  io.teaMembers.foreach { members =>
+    for (i <- 0 until RenameWidth) {
+      val ownerLane = if (i == 0) i.U else Mux(io.isFusionVec(i - 1), (i - 1).U, i.U)
+      val mask = VecInit(compressMaskVec)(ownerLane)
+      val leader = PriorityEncoder(mask & VecInit(io.in.map(_.valid)).asUInt)
+      members(i).valid := io.validVec(i) && io.in(i).bits.firstUop
+      members(i).bits.robIdx := uops(leader).robIdx
+      members(i).bits.robIdx.isFormer := VecInit(formerSlotMaskVec)(ownerLane)(i)
+      members(i).bits.rank := PopCount(mask & ((BigInt(1) << i) - 1).U(RenameWidth.W))
+      members(i).bits.owner := uops(ownerLane).debug.get.perfDebugInfo.teaMemberRank
+      members(i).bits.pc := io.in(i).bits.debug.get.pc
+      members(i).bits.psv := io.in(i).bits.teaPsv
+      members(i).bits.numWB := Mux(io.in(i).bits.isMove || uops(i).hasException, 0.U, io.in(i).bits.numWB)
+    }
+  }
+
   private val isAMOVec      = fuType.map(fuTypeItem => FuType.isAMO(fuTypeItem))
 
   uops.zipWithIndex.map { case(u, i) =>
@@ -497,6 +514,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     })).asFormer
     uops(i).robIdx.isFormer := slotIsFormer(i)
     uops(i).chanelIdx := i.U
+    uops(i).debug.foreach(_.perfDebugInfo.teaMemberRank := PopCount(compressMaskVec(i) & ((BigInt(1) << i) - 1).U(RenameWidth.W)))
     uops(i).firstUop := io.in(i).bits.firstUop && isEntryHeadLane(i)
     uops(i).lastUop := io.in(i).bits.lastUop && isEntryTailLane(i)
     val formerMask = formerSlotMaskVec(i)
