@@ -549,7 +549,7 @@ def dut(request):
     coverage = _dut_coverage_path(request, _data_dir())
     yield dut
     try:
-        if hasattr(dut, "FlushWaveform"):
+        if _is_enabled("TB_ENABLE_FST_DUMP", default="1") and hasattr(dut, "FlushWaveform"):
             dut.FlushWaveform()
     except Exception:
         logger.exception("dut waveform flush failed")
