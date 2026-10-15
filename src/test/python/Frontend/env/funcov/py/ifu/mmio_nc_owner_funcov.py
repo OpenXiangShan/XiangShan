@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Optional
+from weakref import WeakKeyDictionary
 
+from ....runtime.pylib import frontend_offset_path
 from ....support.pc_utils import fold_pc
+from ....support.signal_utils import _lookup_pin
+from ...registry import decode_signal_inventory_name
 from .instr_uncache_owner_funcov import (
     initialize_instr_uncache_owner_coverage_state,
     sample_instr_uncache_owner_coverage,
@@ -50,9 +56,39 @@ _INSTR_UNCACHE_PREFIXES = (
     "Frontend_top.Frontend.inner_instrUncache.",
     "Frontend_top.Frontend._inner_instrUncache_",
 )
+_DIRECT_SIGNAL_CACHE: WeakKeyDictionary[Any, dict[str, Any]] = WeakKeyDictionary()
+
+
+@lru_cache(maxsize=2)
+def _registered_signal_names(path: Path) -> Optional[set[str]]:
+    if not path.exists():
+        return None
+    with path.open(encoding="utf-8") as source:
+        return {
+            decode_signal_inventory_name(line[len("  - name: ") :])
+            for line in source
+            if line.startswith("  - name: ")
+        }
 
 
 def _read(recorder, dut, *names: str) -> Optional[int]:
+    if recorder is None:
+        cache = _DIRECT_SIGNAL_CACHE.setdefault(dut, {})
+        registered = _registered_signal_names(frontend_offset_path())
+        for name in names:
+            if name not in cache:
+                signal = getattr(dut, name, None)
+                if signal is None and (registered is None or name in registered):
+                    signal = _lookup_pin(dut, str(name))
+                cache[name] = signal
+            signal = cache[name]
+            value = getattr(signal, "value", None)
+            if value is not None:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
     return recorder._read_first_dut_signal(dut, tuple(str(name) for name in names))
 
 
@@ -129,6 +165,8 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
 
 
 def reset_mmio_nc_owner_coverage_state(recorder) -> None:
+    if recorder is None:
+        return
     initialize_mmio_nc_owner_coverage_state(recorder)
 
 

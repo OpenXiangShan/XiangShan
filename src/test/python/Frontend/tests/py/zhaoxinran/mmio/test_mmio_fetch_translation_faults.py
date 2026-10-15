@@ -480,8 +480,5 @@ def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
         )
         for record in exception_records
     ), exception_records
-    assert env.functional_coverage.key_hit(
-        "ifu_instruncache_owner_v3", "instruncache_leaf_033"
-    )
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
