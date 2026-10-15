@@ -23,7 +23,7 @@ from env.model.backend_runtime import BackendObservationSnapshot
 from env.model import GoldenTrace
 from env.model import PageTableModel
 from env.model import TraceEntry
-from env.monitors.frontend_monitor import FrontendMonitor
+from env.core.frontend_flow_checker import FrontendFlowChecker
 from env.support import fold_pc
 
 
@@ -464,7 +464,7 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     assert interface.cfvec_exception_vec_19[0].read_count == 1
     assert interface.cfvec_exception_vec_20[0].read_count == 1
 
-    monitor = FrontendMonitor()
+    monitor = FrontendFlowChecker()
     monitor.interface = interface
     monitor.attach_backend_model(model)
     monitor.on_clock_edge(7, snapshot)

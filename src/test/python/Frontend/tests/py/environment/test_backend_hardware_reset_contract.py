@@ -177,7 +177,7 @@ def test_environment_reset_does_not_observe_or_plan_backend_or_clear_errors(monk
     env.translation_oracle.active = active
     called = []
     for obj, name in ((env, "_begin_backend_cycle"), (env, "_drive_backend_cycle"),
-                      (env.monitor, "on_clock_edge"), (env.translation_oracle, "on_clock_edge")):
+                      (env.flow_checker, "on_clock_edge"), (env.translation_oracle, "on_clock_edge")):
         monkeypatch.setattr(obj, name, lambda *_args, **_kwargs: pytest.fail("backend observed/planned under reset"))
     for obj in (env.ptw_agent, env.uncache_agent, env.ptw_full_ppn_checker, env.ptw_resp_input_checker):
         monkeypatch.setattr(obj, "on_clock_edge", lambda _cycle: None)

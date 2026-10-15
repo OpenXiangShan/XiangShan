@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Optional
 
 from ..bundles import BackendObserveBundle
 from ..bundles.ptw import PTWBundle
@@ -11,10 +10,6 @@ from ..model.backend_runtime import (
     CfVecCycleSnapshot,
     capture_cfvec_snapshot,
 )
-from ..model.branch_checker import BranchChecker
-from ..model.memory_model import MemoryModel
-from ..model.page_table_model import PageTableModel
-from ..support.rvc_decoder import expand_rvc
 
 
 @dataclass
@@ -38,138 +33,72 @@ class FrontendCycleSnapshot:
 
 
 class FrontendMonitor:
-    def __init__(
-        self,
-        memory: Optional[MemoryModel] = None,
-        page_table: Optional[PageTableModel] = None,
-        branch_checker: Optional[BranchChecker] = None,
-        redirect_sync_max: int = 32,
-    ) -> None:
-        self.logger = logging.getLogger("env.monitor")
+    def __init__(self) -> None:
         self.interface = None
         self.from_ftq_if = None
         self.ptw_if = None
         self.ptw_get_gpa_provider = None
+        self.dut = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
-        self.memory = memory
-        self.page_table = page_table
-        self.branch_checker = branch_checker
-        self.expected_pc: Optional[int] = None
-        self.redirect_grace = 0
-        self.wait_sync_after_redirect = False
-        self.errors: List[dict] = []
-        self.observations: List[Observation] = []
+        self.observations: list[Observation] = []
+        self._checker = None
 
-        self.cycles_total = 0
-        self.slots_total = 0
-        self.slots_valid = 0
-        self.redirect_count = 0
-        self.exception_mark_count = 0
-        self.foldpc_recovery_count = 0
-        self.instr_compare_skipped_count = 0
-        self.current_cycle = 0
-        self.event_sink: Optional[Callable[[Dict], None]] = None
-        self.redirect_sync_max: int = int(redirect_sync_max)
-        self.redirect_sync_deadline: int = 0
-        self.backend_model = None
-        self.last_dut_redirect: Optional[dict] = None
-        self._skip_cfvec_until_cycle: Optional[int] = None
-        self._recovery_target_pc: Optional[int] = None
-        self._translation_s2xlate: Optional[int] = None
-        self._translation_priv_imode: int = 1
-        self._fetch_fault_outstanding = False
-        self._fetch_fault_redirect_count = 0
+    # Existing test and API callers still read checker state through env.monitor.
+    @property
+    def errors(self) -> list[dict]:
+        return self._checker.errors
 
-    def _golden_step_bytes(self, pc: int) -> int:
-        if self.memory is None:
-            return 4
-        try:
-            half = int(self._read_expected_fetch_raw(int(pc), 2)[0] or 0) & 0xFFFF
-            return 2 if (half & 0x3) != 0x3 else 4
-        except Exception:
-            return 4
+    @property
+    def expected_pc(self) -> Optional[int]:
+        return self._checker.expected_pc
 
-    def _translate_fetch_addr(self, va: int) -> tuple[Optional[int], dict]:
-        if self.page_table is None:
-            return int(va), {"mode": "bare", "va": int(va), "pa": int(va), "ok": True}
-        kwargs = {}
-        if self._translation_s2xlate is not None:
-            kwargs = {
-                "s2xlate": int(self._translation_s2xlate),
-                "priv_imode": int(self._translation_priv_imode),
-            }
-        pa, ok, info = self.page_table.translate(int(va), **kwargs)
-        meta = dict(info or {})
-        meta["va"] = int(va)
-        meta["ok"] = bool(ok)
-        if ok:
-            meta["pa"] = int(pa)
-            return int(pa), meta
-        return None, meta
+    @property
+    def exception_mark_count(self) -> int:
+        return self._checker.exception_mark_count
 
-    def _read_expected_fetch_raw(self, pc: int, size: int) -> tuple[Optional[int], dict]:
-        if self.memory is None:
-            return None, {"ok": False, "reason": "no_memory"}
-        value = 0
-        last_meta: dict = {"ok": True, "mode": "bare", "va": int(pc), "pa": int(pc)}
-        for off in range(int(size)):
-            pa, meta = self._translate_fetch_addr(int(pc) + int(off))
-            last_meta = meta
-            if pa is None:
-                return None, meta
-            value |= (int(self.memory.read_u8(int(pa))) & 0xFF) << (8 * int(off))
-        return int(value), last_meta
+    @property
+    def redirect_count(self) -> int:
+        return self._checker.redirect_count
 
-    @staticmethod
-    def _decode_b_imm(instr: int) -> int:
-        imm = (
-            (((instr >> 31) & 0x1) << 12)
-            | (((instr >> 7) & 0x1) << 11)
-            | (((instr >> 25) & 0x3F) << 5)
-            | (((instr >> 8) & 0xF) << 1)
-        )
-        if imm & (1 << 12):
-            imm -= 1 << 13
-        return imm
+    @property
+    def last_dut_redirect(self) -> Optional[dict]:
+        return self._checker.last_dut_redirect
 
-    @staticmethod
-    def _decode_j_imm(instr: int) -> int:
-        imm = (
-            (((instr >> 31) & 0x1) << 20)
-            | (((instr >> 12) & 0xFF) << 12)
-            | (((instr >> 20) & 0x1) << 11)
-            | (((instr >> 21) & 0x3FF) << 1)
-        )
-        if imm & (1 << 20):
-            imm -= 1 << 21
-        return imm
+    @property
+    def _recovery_target_pc(self) -> Optional[int]:
+        return self._checker._recovery_target_pc
 
-    def _golden_next_pc(self, pc: int, instr: int, is_rvc: bool, pred_taken: bool) -> Optional[int]:
-        """Return next expected PC after this instruction, or None for indirect jumps."""
-        step = 2 if is_rvc else 4
-        opc = instr & 0x7F
-        if opc == 0x6F:
-            return (pc + self._decode_j_imm(instr)) & 0xFFFFFFFFFFFFFFFF
-        if opc == 0x63 and pred_taken:
-            return (pc + self._decode_b_imm(instr)) & 0xFFFFFFFFFFFFFFFF
-        if opc == 0x67:
-            return None
-        return pc + step
+    @property
+    def redirect_grace(self) -> int:
+        return self._checker.redirect_grace
 
-    @staticmethod
-    def _sequential_next_pc(pc: int, is_rvc: bool) -> int:
-        step = 2 if is_rvc else 4
-        return (int(pc) + step) & 0xFFFFFFFFFFFFFFFF
+    @redirect_grace.setter
+    def redirect_grace(self, value: int) -> None:
+        self._checker.redirect_grace = int(value)
 
-    def _suppress_pc_mismatch(self, is_sync: bool) -> bool:
-        if is_sync:
-            return False
-        if self.wait_sync_after_redirect:
-            return True
-        if self.redirect_grace > 0:
-            self.redirect_grace -= 1
-            return True
-        return False
+    @property
+    def redirect_sync_max(self) -> int:
+        return self._checker.redirect_sync_max
+
+    @redirect_sync_max.setter
+    def redirect_sync_max(self, value: int) -> None:
+        self._checker.redirect_sync_max = int(value)
+
+    @property
+    def wait_sync_after_redirect(self) -> bool:
+        return self._checker.wait_sync_after_redirect
+
+    @wait_sync_after_redirect.setter
+    def wait_sync_after_redirect(self, value: bool) -> None:
+        self._checker.wait_sync_after_redirect = bool(value)
+
+    @property
+    def _skip_cfvec_until_cycle(self) -> Optional[int]:
+        return self._checker._skip_cfvec_until_cycle
+
+    @_skip_cfvec_until_cycle.setter
+    def _skip_cfvec_until_cycle(self, value: Optional[int]) -> None:
+        self._checker._skip_cfvec_until_cycle = None if value is None else int(value)
 
     @staticmethod
     def _read(signal, default: int = 0) -> int:
@@ -179,75 +108,8 @@ class FrontendMonitor:
         except Exception:
             return default
 
-    @staticmethod
-    def _is_add_mv_form(instr: int) -> Optional[tuple[int, int]]:
-        val = int(instr) & 0xFFFFFFFF
-        if (val & 0x7F) != 0x33:
-            return None
-        funct3 = (val >> 12) & 0x7
-        funct7 = (val >> 25) & 0x7F
-        rs1 = (val >> 15) & 0x1F
-        rs2 = (val >> 20) & 0x1F
-        rd = (val >> 7) & 0x1F
-        if funct3 == 0 and funct7 == 0 and rs1 == 0:
-            return int(rd), int(rs2)
-        return None
-
-    @staticmethod
-    def _is_addi_mv_form(instr: int) -> Optional[tuple[int, int]]:
-        val = int(instr) & 0xFFFFFFFF
-        if (val & 0x7F) != 0x13:
-            return None
-        funct3 = (val >> 12) & 0x7
-        imm12 = (val >> 20) & 0xFFF
-        rs1 = (val >> 15) & 0x1F
-        rd = (val >> 7) & 0x1F
-        if funct3 == 0 and imm12 == 0:
-            return int(rd), int(rs1)
-        return None
-
-    @staticmethod
-    def _is_addi_x0_hint_form(instr: int) -> bool:
-        val = int(instr) & 0xFFFFFFFF
-        if (val & 0x7F) != 0x13:
-            return False
-        funct3 = (val >> 12) & 0x7
-        rs1 = (val >> 15) & 0x1F
-        rd = (val >> 7) & 0x1F
-        return funct3 == 0 and rs1 == 0 and rd == 0
-
-    @classmethod
-    def _instr_equivalent_for_compare(cls, expected: int, actual: int, is_rvc: bool) -> bool:
-        exp = int(expected) & 0xFFFFFFFF
-        got = int(actual) & 0xFFFFFFFF
-        if exp == got:
-            return True
-        if not bool(is_rvc):
-            return False
-        if cls._is_addi_x0_hint_form(exp) and cls._is_addi_x0_hint_form(got):
-            return True
-        exp_add = cls._is_add_mv_form(exp)
-        got_addi = cls._is_addi_mv_form(got)
-        if exp_add is not None and got_addi is not None and exp_add == got_addi:
-            return True
-        exp_addi = cls._is_addi_mv_form(exp)
-        got_add = cls._is_add_mv_form(got)
-        if exp_addi is not None and got_add is not None and exp_addi == got_add:
-            return True
-        return False
-
-    def _read_dut_signal(self, name: str, default: int = 0) -> int:
-        env = getattr(self.backend_model, "env", None) if self.backend_model is not None else None
-        dut = getattr(env, "dut", None) if env is not None else None
-        if dut is None:
-            return int(default)
-        pin = getattr(dut, name, None)
-        if pin is None:
-            return int(default)
-        try:
-            return int(pin.value)
-        except Exception:
-            return int(default)
+    def _read_dut_signal(self, name: str) -> int:
+        return self._read(getattr(self.dut, name, None))
 
     def bind(self, target) -> None:
         if not isinstance(target, BackendObserveBundle):
@@ -258,6 +120,12 @@ class FrontendMonitor:
         self.from_ftq_if = from_ftq_if
         self.ptw_if = ptw_if
         self.ptw_get_gpa_provider = ptw_get_gpa_provider
+
+    def bind_dut(self, dut) -> None:
+        self.dut = dut
+
+    def attach_checker(self, checker) -> None:
+        self._checker = checker
 
     def _read_cfvec_slot(self, name: str, slot: int) -> int:
         signals = getattr(self.interface, name, ())
@@ -308,547 +176,32 @@ class FrontendMonitor:
         self.cycle_snapshot = FrontendCycleSnapshot(int(cycle), backend, cfvec, redirect, ptw)
         return self.cycle_snapshot
 
-    def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
-        self.event_sink = sink
-
-    def attach_backend_model(self, backend_model) -> None:
-        self.backend_model = backend_model
-
-    def _observed_cfvec_pc(
-        self,
-        slot: int,
-        snapshot: Optional[CfVecCycleSnapshot] = None,
-    ) -> int:
-        if snapshot is not None:
-            snapshot_resolver = getattr(self.backend_model, "observed_cfvec_snapshot_pc", None)
-            if callable(snapshot_resolver):
-                return int(snapshot_resolver(snapshot, int(slot)))
-        resolver = getattr(self.backend_model, "observed_cfvec_pc", None)
-        if not callable(resolver):
-            raise AssertionError("FrontendMonitor requires an FTQ-backed cfVec PC resolver")
-        return int(resolver(int(slot)))
-
-    def _ftq_identity_tracking_active(self) -> bool:
-        if self.backend_model is None:
-            return True
-        recovery_active = getattr(self.backend_model, "_recovery_phase_active", None)
-        if callable(recovery_active) and bool(recovery_active()):
-            return False
-        wrong_path_active = getattr(self.backend_model, "_has_active_wrong_path_episode", None)
-        if callable(wrong_path_active) and bool(wrong_path_active()):
-            return False
-        return True
-
-    def _golden_trace_complete(self) -> bool:
-        trace = getattr(self.backend_model, "golden_trace", None) if self.backend_model is not None else None
-        if trace is None:
-            return False
-        return int(getattr(trace, "cursor", 0)) >= len(getattr(trace, "entries", ()))
-
-    def _emit(self, cycle: int, event_type: str, payload: Dict, level: str = "INFO") -> None:
-        if self.event_sink is None:
-            return
-        self.event_sink(
-            {
-                "type": event_type,
-                "source": "frontend_monitor",
-                "cycle": int(cycle),
-                "level": level,
-                "payload": payload,
-            }
-        )
-
-    def set_expected_pc(self, pc: int) -> None:
-        self.expected_pc = int(pc)
-        self.wait_sync_after_redirect = False
-
-    def on_hardware_reset(self, cycle: int, reset_vector: int) -> None:
-        """Drop transient recovery tracking, retaining every error/observation."""
-        self.current_cycle = int(cycle)
-        self.expected_pc = int(reset_vector)
-        self.redirect_grace = 0
-        self.wait_sync_after_redirect = False
-        self.redirect_sync_deadline = 0
-        self.last_dut_redirect = None
-        self._skip_cfvec_until_cycle = None
-        self._recovery_target_pc = None
+    def on_hardware_reset(self) -> None:
         self.cycle_snapshot = None
 
-    def set_translation_context(self, *, s2xlate: int, priv_imode: int) -> None:
-        self._translation_s2xlate = int(s2xlate)
-        self._translation_priv_imode = int(priv_imode)
+    def clear(self) -> None:
+        self.cycle_snapshot = None
+        self._checker.clear()
+
+    def set_expected_pc(self, pc: int) -> None:
+        self._checker.set_expected_pc(pc)
 
     def notify_redirect(self, target_pc: int, reason: str = "", grace_cycles: int = 2) -> None:
-        self.expected_pc = None
-        self.redirect_grace = max(0, int(grace_cycles))
-        self.wait_sync_after_redirect = False
-        self.redirect_sync_deadline = 0
-        self.redirect_count += 1
-        self.logger.info(
-            "redirect notified: target=0x%x reason=%s grace=%d",
-            int(target_pc),
-            str(reason),
-            self.redirect_grace,
-        )
-        self._emit(self.current_cycle, "monitor.redirect", {"target_pc": int(target_pc), "reason": str(reason)})
-        self._emit(
-            self.current_cycle,
-            "monitor.pc_track",
-            {
-                "frontend_pc": None,
-                "golden_pc": int(target_pc),
-                "frontend_valid": False,
-                "redirect_update": True,
-                "reason": str(reason),
-            },
-            level="DEBUG",
-        )
+        self._checker.notify_redirect(target_pc, reason=reason, grace_cycles=grace_cycles)
 
-    def _record_error(self, **kwargs) -> None:
-        self.errors.append(kwargs)
-        pretty_kwargs = dict(kwargs)
-        if str(pretty_kwargs.get("kind", "")) == "PC_MISMATCH":
-            for key in ("expected", "actual"):
-                if key in pretty_kwargs:
-                    pretty_kwargs[key] = f"0x{int(pretty_kwargs[key]):x}"
-        self.logger.warning("monitor error: %s", pretty_kwargs)
-        self._emit(int(kwargs.get("cycle", 0)), "monitor.error", kwargs, level="WARNING")
+    def set_translation_context(self, *, s2xlate: int, priv_imode: int) -> None:
+        self._checker.set_translation_context(s2xlate=s2xlate, priv_imode=priv_imode)
 
-    def _try_resync_after_redirect(self, pc: int) -> bool:
-        if self.redirect_count <= 0:
-            return False
-        if self.backend_model is None or not hasattr(self.backend_model, "resync_golden_cursor_to_pc"):
-            return False
-        if not self.backend_model.resync_golden_cursor_to_pc(int(pc)):
-            return False
-        self.expected_pc = int(pc)
-        self.wait_sync_after_redirect = False
-        self.redirect_grace = 2
-        self.logger.info("monitor resynced after redirect: pc=0x%x", int(pc))
-        return True
-
-    def _observe_dut_redirect_for_cfvec_check(self, cycle: int) -> None:
-        sampled = self.cycle_snapshot if self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle) else None
-        redirect = sampled.redirect if sampled is not None else {
-            "valid": self._read(self.interface.redirect_valid),
-            "pc": self._read(self.interface.redirect_bits_pc),
-            "target": self._read(self.interface.redirect_bits_target),
-            "taken": self._read(self.interface.redirect_bits_taken),
-            "level": self._read_dut_signal("io_backend_toFtq_redirect_bits_level"),
-            "debug_is_ctrl": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl"),
-            "debug_is_mem_vio": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio"),
-        }
-        if int(redirect["valid"]) != 1:
-            return
-        # Redirect target is a 51-bit GuardedPc; cfVec and the checker model
-        # use the architectural 50-bit PC after RTL `.unGuard`.
-        target_pc = int(redirect["target"]) & ((1 << 50) - 1)
-        self.last_dut_redirect = {
-            "cycle": int(cycle),
-            "pc": int(redirect["pc"]),
-            "target_pc": int(target_pc),
-            "taken": int(redirect["taken"]),
-            "level": int(redirect["level"]),
-            "debug_is_ctrl": int(redirect["debug_is_ctrl"]),
-            "debug_is_mem_vio": int(redirect["debug_is_mem_vio"]),
-        }
-        self._skip_cfvec_until_cycle = int(cycle) + 1
-        if self.backend_model is not None:
-            note_redirect = getattr(self.backend_model, "note_dut_redirect_observed", None)
-            if callable(note_redirect):
-                note_redirect(int(cycle))
-        self._recovery_target_pc = int(target_pc)
-        self.expected_pc = None
-        self.wait_sync_after_redirect = False
-        self.redirect_grace = 0
-        self.redirect_sync_deadline = 0
-        self._emit(
-            cycle,
-            "monitor.dut_redirect",
-            {
-                "pc": int(redirect["pc"]),
-                "target_pc": int(target_pc),
-                "taken": int(redirect["taken"]),
-            },
-            level="DEBUG",
-        )
-
-    def on_clock_edge(
-        self,
-        cycle: int,
-        cfvec_snapshot: Optional[CfVecCycleSnapshot] = None,
-    ) -> None:
-        if self.interface is None:
-            return
-        if cfvec_snapshot is None and self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle):
-            cfvec_snapshot = self.cycle_snapshot.cfvec
-        if cfvec_snapshot is not None and int(cfvec_snapshot.cycle) != int(cycle):
-            raise AssertionError(
-                f"stale cfVec snapshot: snapshot_cycle={int(cfvec_snapshot.cycle)} "
-                f"monitor_cycle={int(cycle)}"
-            )
-
-        self.current_cycle = int(cycle)
-        self._observe_dut_redirect_for_cfvec_check(cycle)
-        self.cycles_total += 1
-        self.slots_total += 8
-        if self._golden_trace_complete():
-            return
-        cycle_golden_start = self.expected_pc
-        if self.backend_model is not None:
-            backend_golden_pc = self.backend_model.current_cycle_start_golden_pc()
-            if backend_golden_pc is not None:
-                cycle_golden_start = int(backend_golden_pc)
-        cycle_frontend_pc: Optional[int] = None
-        cycle_frontend_instr = 0
-        cycle_frontend_slot = -1
-        cycle_frontend_is_rvc = False
-        cycle_frontend_pred_taken = False
-        cycle_frontend_slots: List[dict] = []
-        ftq_identity_tracking_active = self._ftq_identity_tracking_active()
-
-        skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
-        recovery_first_cfvec_seen = False
-        if (
-            self._fetch_fault_outstanding
-            and int(self.redirect_count) > int(self._fetch_fault_redirect_count)
-            and not self.wait_sync_after_redirect
-        ):
-            self._fetch_fault_outstanding = False
-        self._fetch_fault_redirect_count = 0
-        for i in range(8):
-            cfvec = None if cfvec_snapshot is None else cfvec_snapshot.slots[i]
-            valid = (
-                self._read(self.interface.cfvec_valid[i], 0) == 1
-                if cfvec is None
-                else bool(cfvec.valid)
-            )
-            if skip_cfvec or not valid:
-                continue
-
-            pc = self._observed_cfvec_pc(i, cfvec_snapshot)
-            if cfvec is None:
-                folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
-                instr = self._read(self.interface.cfvec_instr[i], 0)
-                is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
-                pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
-                ex_sum = (
-                    self._read(self.interface.cfvec_exception_vec_1[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_2[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_12[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_19[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_20[i], 0)
-                )
-            else:
-                folded_pc = int(cfvec.foldpc)
-                instr = int(cfvec.instr)
-                is_rvc = bool(cfvec.is_rvc)
-                pred_taken = bool(cfvec.pred_taken)
-                ex_sum = int(cfvec.exception_bits)
-            if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
-                recovery_first_cfvec_seen = True
-                target_pc = int(self._recovery_target_pc)
-                if int(pc) != int(target_pc):
-                    self._record_error(
-                        cycle=cycle,
-                        slot=i,
-                        kind="REDIRECT_RECOVERY_TARGET_MISMATCH",
-                        expected=target_pc,
-                        actual=int(pc),
-                    )
-                    return
-                self._recovery_target_pc = None
-                self.expected_pc = int(pc)
-                self.wait_sync_after_redirect = False
-                self.redirect_grace = 0
-                self.redirect_sync_deadline = 0
-                if int(ex_sum) > 0:
-                    self.foldpc_recovery_count += 1
-                    self._emit(
-                        cycle,
-                        "monitor.exception_foldpc_recovery",
-                        {
-                            "slot": int(i),
-                            "expected_pc": target_pc,
-                            "foldpc": int(folded_pc),
-                        },
-                        level="DEBUG",
-                    )
-
-            self.slots_valid += 1
-            obs = Observation(
-                cycle=cycle,
-                slot=i,
-                pc=pc,
-                foldpc=int(folded_pc),
-                instr=instr,
-                is_rvc=is_rvc,
-                pred_taken=pred_taken,
-            )
-            self.observations.append(obs)
-            if self.branch_checker is not None:
-                self.branch_checker.observe(obs)
-            cycle_frontend_slots.append(
-                {
-                    "slot": int(i),
-                    "pc": int(pc),
-                    "foldpc": int(folded_pc),
-                    "instr": int(instr),
-                    "is_rvc": bool(is_rvc),
-                    "pred_taken": bool(pred_taken),
-                }
-            )
-            if cycle_frontend_pc is None:
-                cycle_frontend_pc = int(pc)
-                cycle_frontend_instr = int(instr)
-                cycle_frontend_slot = int(i)
-                cycle_frontend_is_rvc = bool(is_rvc)
-                cycle_frontend_pred_taken = bool(pred_taken)
-
-            golden_pc = self.expected_pc if self.expected_pc is not None else pc
-            has_ftq_identity = True
-            ftq_expected_pc: Optional[int] = int(pc)
-
-            if ex_sum > 0:
-                self.exception_mark_count += 1
-                self._fetch_fault_outstanding = True
-                self._fetch_fault_redirect_count = int(self.redirect_count)
-
-            if has_ftq_identity and ftq_identity_tracking_active and not self.wait_sync_after_redirect:
-                is_sync = (ftq_expected_pc is None) or (int(pc) == int(ftq_expected_pc))
-            else:
-                is_sync = (golden_pc is None) or (pc == golden_pc)
-            if (
-                has_ftq_identity
-                and ftq_identity_tracking_active
-                and not self.wait_sync_after_redirect
-                and ftq_expected_pc is not None
-                and int(pc) != int(ftq_expected_pc)
-            ):
-                if self._try_resync_after_redirect(int(pc)):
-                    golden_pc = int(pc)
-                    ftq_expected_pc = int(pc)
-                    is_sync = True
-                else:
-                    self._record_error(
-                        cycle=cycle,
-                        slot=i,
-                        kind="PC_MISMATCH",
-                        expected=int(ftq_expected_pc),
-                        actual=int(pc),
-                    )
-            elif (
-                not has_ftq_identity
-                and golden_pc is not None
-                and pc != golden_pc
-                and not self._suppress_pc_mismatch(is_sync)
-            ):
-                if self._try_resync_after_redirect(int(pc)):
-                    golden_pc = int(pc)
-                    is_sync = True
-                else:
-                    self._record_error(
-                        cycle=cycle,
-                        slot=i,
-                        kind="PC_MISMATCH",
-                        expected=golden_pc,
-                        actual=pc,
-                    )
-
-            if (
-                self.memory is not None
-                and not self.wait_sync_after_redirect
-                and self.redirect_grace == 0
-                and int(ex_sum) == 0
-                and not self._fetch_fault_outstanding
-            ):
-                fetch_size = 2 if is_rvc else 4
-                raw_fetch, fetch_meta = self._read_expected_fetch_raw(int(pc), fetch_size)
-                if raw_fetch is None:
-                    exp = None
-                    if ex_sum == 0:
-                        self._record_error(
-                            cycle=cycle,
-                            slot=i,
-                            kind="INSTR_TRANSLATION_FAULT",
-                            pc=int(pc),
-                            detail=fetch_meta,
-                        )
-                elif is_rvc:
-                    raw16 = int(raw_fetch) & 0xFFFF
-                    try:
-                        exp = expand_rvc(raw16)
-                    except ValueError:
-                        self._record_error(
-                            cycle=cycle,
-                            slot=i,
-                            kind="CFVEC_PC_SIZE_MEMORY_MISMATCH",
-                            pc=pc,
-                            raw16=raw16,
-                            instr=int(instr),
-                        )
-                        exp = None
-                else:
-                    exp = int(raw_fetch) & 0xFFFFFFFF
-                got = int(instr) & 0xFFFFFFFF
-                if exp is not None and not self._instr_equivalent_for_compare(exp, got, bool(is_rvc)):
-                    self._record_error(
-                        cycle=cycle,
-                        slot=i,
-                        kind="INSTR_MISMATCH",
-                        pc=pc,
-                        expected=exp,
-                        actual=got,
-                    )
-
-            if self.wait_sync_after_redirect and not is_sync:
-                pass
-            else:
-                if self.wait_sync_after_redirect and is_sync:
-                    self.wait_sync_after_redirect = False
-                    self.redirect_grace = 4 if self.expected_pc is None else 2
-                if (
-                    has_ftq_identity
-                    and ftq_identity_tracking_active
-                    and not self.wait_sync_after_redirect
-                    and ftq_expected_pc is not None
-                ):
-                    ref_pc = int(ftq_expected_pc)
-                else:
-                    ref_pc = int(golden_pc) if golden_pc is not None else int(pc)
-                next_pc = self._golden_next_pc(ref_pc, int(instr), bool(is_rvc), bool(pred_taken))
-                if next_pc is None:
-                    if has_ftq_identity and ftq_identity_tracking_active and not self.wait_sync_after_redirect:
-                        self.expected_pc = None
-                    else:
-                        self.wait_sync_after_redirect = True
-                        self.expected_pc = None
-                        self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
-                else:
-                    if (
-                        not has_ftq_identity
-                        and int(next_pc) != self._sequential_next_pc(ref_pc, bool(is_rvc))
-                    ):
-                        self.wait_sync_after_redirect = True
-                        self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
-                    self.expected_pc = next_pc
-
-        if self.wait_sync_after_redirect and self.current_cycle >= self.redirect_sync_deadline:
-            if (
-                cycle_frontend_pc is None
-                and self.backend_model is not None
-                and hasattr(self.backend_model, "has_pending_work")
-                and self.backend_model.has_pending_work()
-            ):
-                self.redirect_sync_deadline += 1
-                return
-            env = getattr(self.backend_model, "env", None) if self.backend_model is not None else None
-            if env is not None:
-                try:
-                    from ..api import api_Frontend_capture_frontend_stall_snapshot, _format_stall_snapshot
-
-                    snapshot = api_Frontend_capture_frontend_stall_snapshot(env)
-                    self.logger.warning("redirect timeout snapshot: %s", _format_stall_snapshot(snapshot))
-                except Exception as exc:
-                    self.logger.warning("redirect timeout snapshot capture failed: %s", exc)
-            self._record_error(
-                cycle=cycle,
-                kind="REDIRECT_TIMEOUT",
-                expected_pc=self.expected_pc,
-            )
-            self.wait_sync_after_redirect = False
-            self.expected_pc = None
-
-        if self._skip_cfvec_until_cycle is not None and int(cycle) >= int(self._skip_cfvec_until_cycle):
-            self._skip_cfvec_until_cycle = None
-
-        self._emit(
-            cycle,
-            "monitor.raw_fetch",
-            {
-                "golden_pc": int(cycle_golden_start) if cycle_golden_start is not None else None,
-                "golden_slots": (
-                    self.backend_model.current_cycle_start_golden_window(len(cycle_frontend_slots))
-                    if self.backend_model is not None and hasattr(self.backend_model, "current_cycle_start_golden_window")
-                    else ([int(cycle_golden_start)] if cycle_golden_start is not None and cycle_frontend_slots else [])
-                ),
-                "slots": cycle_frontend_slots,
-            },
-            level="DEBUG",
-        )
-
-        if cycle_frontend_pc is not None:
-            golden_track_pc = cycle_golden_start if cycle_golden_start is not None else cycle_frontend_pc
-        else:
-            golden_track_pc = cycle_golden_start
-        if golden_track_pc is not None:
-            self._emit(
-                cycle,
-                "monitor.pc_track",
-                {
-                    "slot": int(cycle_frontend_slot),
-                    "frontend_pc": int(cycle_frontend_pc) if cycle_frontend_pc is not None else None,
-                    "frontend_instr": int(cycle_frontend_instr) if cycle_frontend_pc is not None else None,
-                    "golden_pc": int(golden_track_pc),
-                    "frontend_valid": bool(cycle_frontend_pc is not None),
-                    "is_rvc": bool(cycle_frontend_is_rvc),
-                    "pred_taken": bool(cycle_frontend_pred_taken),
-                    "frontend_slots": cycle_frontend_slots,
-                    "redirect_update": False,
-                },
-                level="DEBUG",
-            )
-
-    def get_errors(self) -> List[dict]:
-        return list(self.errors)
-
-    def recent_pcs(self, limit: int = 32) -> List[int]:
-        if limit <= 0:
-            return []
-        return [o.pc for o in self.observations[-limit:]]
+    def get_errors(self) -> list[dict]:
+        return self._checker.get_errors()
 
     def get_stats(self) -> dict:
-        bubble_ratio = 0.0
-        if self.slots_total > 0:
-            bubble_ratio = 1.0 - (self.slots_valid / float(self.slots_total))
-        avg_fetch_width = 0.0
-        if self.cycles_total > 0:
-            avg_fetch_width = self.slots_valid / float(self.cycles_total)
-        return {
-            "cycles_total": self.cycles_total,
-            "slots_total": self.slots_total,
-            "slots_valid": self.slots_valid,
-            "bubble_ratio": bubble_ratio,
-            "avg_fetch_width": avg_fetch_width,
-            "redirect_count": self.redirect_count,
-            "exception_mark_count": self.exception_mark_count,
-            "foldpc_recovery_count": self.foldpc_recovery_count,
-            "instr_compare_skipped_count": self.instr_compare_skipped_count,
-            "error_count": len(self.errors),
-        }
+        return self._checker.get_stats()
 
-    def clear(self) -> None:
-        self.errors.clear()
-        self.observations.clear()
-        self.cycles_total = 0
-        self.slots_total = 0
-        self.slots_valid = 0
-        self.redirect_count = 0
-        self.exception_mark_count = 0
-        self.foldpc_recovery_count = 0
-        self.instr_compare_skipped_count = 0
-        self.current_cycle = 0
-        self.expected_pc = None
-        self.redirect_grace = 0
-        self.wait_sync_after_redirect = False
-        self.redirect_sync_deadline = 0
-        self.last_dut_redirect = None
-        self._skip_cfvec_until_cycle = None
-        self._recovery_target_pc = None
-        self._translation_s2xlate = None
-        self._translation_priv_imode = 1
-        self._fetch_fault_outstanding = False
-        self._fetch_fault_redirect_count = 0
+    def recent_pcs(self, limit: int = 32) -> list[int]:
+        if limit <= 0:
+            return []
+        return [observation.pc for observation in self.observations[-limit:]]
 
 
-__all__ = ["Observation", "FrontendMonitor"]
+__all__ = ["Observation", "FrontendCycleSnapshot", "FrontendMonitor"]

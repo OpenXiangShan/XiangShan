@@ -29,6 +29,7 @@ from ..bundles import (
 )
 from toffee.bundle import DummySignal
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
+from .frontend_flow_checker import FrontendFlowChecker
 from ..support.env_config import DEFAULT_ENV_CONFIG, EnvConfig
 from ..support.logging_utils import configure_env_logging, parse_log_level
 from ..support.pmp_pma import (
@@ -126,7 +127,8 @@ class FrontendEnv:
         branch_checker = BranchChecker()
         return {
             "branch_checker": branch_checker,
-            "monitor": FrontendMonitor(memory=self.memory, page_table=self.page_table, branch_checker=branch_checker),
+            "monitor": FrontendMonitor(),
+            "flow_checker": FrontendFlowChecker(memory=self.memory, page_table=self.page_table, branch_checker=branch_checker),
             "icache_agent": ICacheAgent(self.memory),
             "icache_control_agent": ICacheControlAgent(),
             "uncache_agent": UncacheAgent(self.memory),
@@ -155,6 +157,7 @@ class FrontendEnv:
     def _apply_collaborators(self, collaborators: Dict[str, object]) -> None:
         self.branch_checker = collaborators["branch_checker"]
         self.monitor = collaborators["monitor"]
+        self.flow_checker = collaborators["flow_checker"]
         self.icache_agent = collaborators["icache_agent"]
         self.icache_control_agent = collaborators["icache_control_agent"]
         self.uncache_agent = collaborators["uncache_agent"]
@@ -235,11 +238,13 @@ class FrontendEnv:
         self.translation_oracle.bind_env(self)
         self.backend_agent.bind(self.backend_ctrl_if)
         self.monitor.bind(self.backend_observe_if)
+        self.monitor.bind_dut(self.dut)
         self.monitor.bind_observation_interfaces(
             from_ftq_if=self.backend_from_ftq_if,
             ptw_if=self.ptw_if,
             ptw_get_gpa_provider=lambda: read_internal_signal(self.dut, self.itlb_ptw_req_get_gpa_path),
         )
+        self.flow_checker.bind_monitor(self.monitor)
         if hasattr(self.backend_model, "bind_interfaces"):
             self.backend_model.bind_interfaces(
                 drive_if=self.backend_ctrl_if,
@@ -252,9 +257,10 @@ class FrontendEnv:
             collaborator.set_event_sink(self.event_sink)
 
     def _connect_collaborators(self) -> None:
-        self.monitor.attach_backend_model(self.backend_model)
+        self.monitor.attach_checker(self.flow_checker)
+        self.flow_checker.attach_backend_model(self.backend_model)
         self.backend_model.attach_env(self)
-        self.backend_model.attach_monitor(self.monitor)
+        self.backend_model.attach_monitor(self.flow_checker)
         self.backend_model.attach_branch_checker(self.branch_checker)
 
     def _register_callbacks(self, register_callbacks: bool) -> None:
@@ -270,7 +276,7 @@ class FrontendEnv:
             self.ptw_full_ppn_checker,
             self.ptw_resp_input_checker,
             self.translation_oracle,
-            self.monitor,
+            self.flow_checker,
             self.backend_model,
         )
 
@@ -649,14 +655,15 @@ class FrontendEnv:
         if in_reset:
             self.backend_model.on_hardware_reset(cycle)
             self.backend_agent.drive_reset_idle()
-            self.monitor.on_hardware_reset(
+            self.monitor.on_hardware_reset()
+            self.flow_checker.on_hardware_reset(
                 cycle, self._read(self.clock_reset.io_reset_vector_addr, 0) << 1,
             )
             # An armed oracle is not silently completed/disarmed. Its existing
             # evidence/errors remain, but reset cycles are not transactions.
         else:
             self._begin_backend_cycle(cycle)
-            self.monitor.on_clock_edge(cycle)
+            self.flow_checker.on_clock_edge(cycle)
             self.translation_oracle.on_clock_edge(cycle)
             self._drive_backend_cycle(cycle)
         # Cycle observers run after the environment has driven backend and
@@ -1223,7 +1230,7 @@ class FrontendEnv:
         return True
 
     def get_errors(self) -> list:
-        return self.monitor.get_errors()
+        return self.flow_checker.get_errors()
 
     def arm_translation_scenario(self, state, *, page_indexes=None, expect_ptw: bool = True) -> dict:
         state_epoch = int(state.translation_epoch)
@@ -1231,7 +1238,7 @@ class FrontendEnv:
             raise ValueError(
                 f"cannot arm translation scenario from epoch {state_epoch} after environment advanced to {self.translation_epoch}"
             )
-        self.monitor.set_translation_context(
+        self.flow_checker.set_translation_context(
             s2xlate=int(state.scenario.s2xlate),
             priv_imode=int(state.scenario.priv_imode),
         )
@@ -1247,7 +1254,7 @@ class FrontendEnv:
 
     def get_stats(self) -> dict:
         out = {
-            "monitor": self.monitor.get_stats(),
+            "monitor": self.flow_checker.get_stats(),
             "icache": self.icache_agent.get_stats(),
             "uncache": self.uncache_agent.get_stats(),
             "ptw": self.ptw_agent.get_stats(),

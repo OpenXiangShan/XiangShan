@@ -357,7 +357,7 @@ class TranslationScenarioSequence:
             if action.redirect_txn is not None and int(action.redirect_txn.target_pc) != int(target_pc):
                 raise ValueError("translation phase target_pc must match redirect transaction target_pc")
             env.monitor.clear()
-            env.monitor.set_expected_pc(target_pc)
+            env.flow_checker.set_expected_pc(target_pc)
             env.arm_translation_scenario(
                 state,
                 page_indexes=action.page_indexes,

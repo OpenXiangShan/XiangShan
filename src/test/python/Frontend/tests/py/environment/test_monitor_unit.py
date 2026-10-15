@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from env.model.memory_model import MemoryModel
-from env.monitors.frontend_monitor import FrontendMonitor
+from env.core.frontend_flow_checker import FrontendFlowChecker
 from env.support import fold_pc, require_matching_foldpc
 
 
@@ -80,15 +80,15 @@ def _set_second_cfvec(interface: _ObserveIf, pc: int) -> None:
     interface.cfvec_foldpc[1].value = fold_pc(int(pc))
 
 
-def _new_monitor() -> tuple[FrontendMonitor, _ObserveIf]:
-    monitor = FrontendMonitor()
+def _new_monitor() -> tuple[FrontendFlowChecker, _ObserveIf]:
+    monitor = FrontendFlowChecker()
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
     return monitor, interface
 
 
-def _drive_redirect_to_monitor(monitor: FrontendMonitor, interface: _ObserveIf, *, pc: int, target: int) -> None:
+def _drive_redirect_to_monitor(monitor: FrontendFlowChecker, interface: _ObserveIf, *, pc: int, target: int) -> None:
     monitor.notify_redirect(target)
     _set_redirect(interface, valid=1, pc=pc, target=target)
 
@@ -110,12 +110,12 @@ def test_dut_redirect_skips_cfvec_at_t_and_t_plus_one() -> None:
 
 
 def test_rvc_addi_x0_hint_matches_canonical_nop() -> None:
-    assert FrontendMonitor._instr_equivalent_for_compare(0x00100013, 0x00000013, True) is True
-    assert FrontendMonitor._instr_equivalent_for_compare(0x00100013, 0x00000013, False) is False
+    assert FrontendFlowChecker._instr_equivalent_for_compare(0x00100013, 0x00000013, True) is True
+    assert FrontendFlowChecker._instr_equivalent_for_compare(0x00100013, 0x00000013, False) is False
 
 
 def test_monitor_does_not_replace_zero_cfvec_instr_from_memory() -> None:
-    monitor = FrontendMonitor(memory=MemoryModel())
+    monitor = FrontendFlowChecker(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
@@ -133,7 +133,7 @@ def test_monitor_does_not_replace_zero_cfvec_instr_from_memory() -> None:
 def test_monitor_reports_cfvec_pc_size_memory_mismatch_for_invalid_raw16() -> None:
     memory = MemoryModel()
     memory.write_u16(0x8000_3248, 0)
-    monitor = FrontendMonitor(memory=memory)
+    monitor = FrontendFlowChecker(memory=memory)
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
@@ -151,7 +151,7 @@ def test_monitor_reports_cfvec_pc_size_memory_mismatch_for_invalid_raw16() -> No
 def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
     memory = MemoryModel()
     memory.write_u16(0x8000_3248, 0)
-    monitor = FrontendMonitor(memory=memory)
+    monitor = FrontendFlowChecker(memory=memory)
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
@@ -169,7 +169,7 @@ def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
 
 def test_reported_fetch_fault_suppresses_following_instr_compare() -> None:
     memory = MemoryModel()
-    monitor = FrontendMonitor(memory=memory)
+    monitor = FrontendFlowChecker(memory=memory)
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
@@ -294,7 +294,7 @@ def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
 
 
 def test_dut_redirect_to_mmio_target_waits_for_recovery_cfvec() -> None:
-    monitor = FrontendMonitor(memory=MemoryModel())
+    monitor = FrontendFlowChecker(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))
@@ -324,7 +324,7 @@ def test_dut_redirect_to_mmio_target_waits_for_recovery_cfvec() -> None:
 
 
 def test_dut_redirect_to_mmio_target_rejects_wrong_first_cfvec() -> None:
-    monitor = FrontendMonitor(memory=MemoryModel())
+    monitor = FrontendFlowChecker(memory=MemoryModel())
     interface = _ObserveIf()
     monitor.interface = interface
     monitor.attach_backend_model(_BackendModel(interface))

@@ -491,7 +491,7 @@ def initialize_frontend(
                 else None
             ),
         )
-        env.monitor.set_expected_pc(reset_vector)
+        env.flow_checker.set_expected_pc(reset_vector)
         _run_steps(env, config.after_reset, "after_reset", result)
         result.completed = True
     finally:
