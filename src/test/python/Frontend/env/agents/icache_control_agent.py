@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
 from ..bundles import ICacheControlBundle
+from ..monitors.frontend_monitor import ICacheControlSnapshot
 
 
 _PUT_FULL_DATA = 0
@@ -39,14 +40,6 @@ class ICacheControlAgent:
         self.response_count = 0
         self.requests: list[dict] = []
         self.responses: list[dict] = []
-
-    @staticmethod
-    def _read(signal, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return default
 
     @staticmethod
     def _write(signal, value: int) -> None:
@@ -121,13 +114,13 @@ class ICacheControlAgent:
         if self.interface is not None:
             self.interface.drive_idle()
 
-    def _drive_request(self, cycle: int) -> None:
+    def _drive_request(self, cycle: int, snapshot: ICacheControlSnapshot) -> None:
         request = self.outstanding
         if (
             request is not None
             and request.driven
             and not request.accepted
-            and self._read(self.interface.a_ready) == 1
+            and snapshot.a_ready == 1
         ):
             request.accepted = True
             request.accepted_cycle = int(cycle)
@@ -155,7 +148,7 @@ class ICacheControlAgent:
         self._write(self.interface.a_bits_data, request.data)
         request.driven = True
 
-    def _check_response(self, cycle: int) -> None:
+    def _check_response(self, cycle: int, snapshot: ICacheControlSnapshot) -> None:
         request = self.outstanding
         ready = int(
             request is not None
@@ -163,7 +156,7 @@ class ICacheControlAgent:
             and request.accepted_cycle is not None
             and int(cycle) > request.accepted_cycle
         )
-        valid = self._read(self.interface.d_valid)
+        valid = snapshot.d_valid
         if valid != 1:
             self._write(self.interface.d_ready, ready)
             return
@@ -173,9 +166,9 @@ class ICacheControlAgent:
             self._write(self.interface.d_ready, 0)
             return
         actual = {
-            "opcode": self._read(self.interface.d_bits_opcode),
-            "size": self._read(self.interface.d_bits_size),
-            "source": self._read(self.interface.d_bits_source),
+            "opcode": snapshot.d_opcode,
+            "size": snapshot.d_size,
+            "source": snapshot.d_source,
         }
         expected = {
             "opcode": _ACCESS_ACK_DATA if request.opcode == _GET else _ACCESS_ACK,
@@ -190,7 +183,7 @@ class ICacheControlAgent:
         record = {
             "cycle": int(cycle),
             **actual,
-            "data": self._read(self.interface.d_bits_data),
+            "data": snapshot.d_data,
         }
         self.responses.append(record)
         self.response_count += 1
@@ -198,11 +191,13 @@ class ICacheControlAgent:
         self._write(self.interface.d_ready, 1)
         self._emit(cycle, "handshake.icache_control_d", record)
 
-    def on_clock_edge(self, cycle: int) -> None:
+    def on_clock_edge(self, cycle: int, snapshot: ICacheControlSnapshot) -> None:
         if self.interface is None:
             return
-        self._drive_request(cycle)
-        self._check_response(cycle)
+        if snapshot.cycle != int(cycle):
+            raise AssertionError("ICacheControlAgent received a stale snapshot")
+        self._drive_request(cycle, snapshot)
+        self._check_response(cycle, snapshot)
 
     def get_stats(self) -> dict:
         return {

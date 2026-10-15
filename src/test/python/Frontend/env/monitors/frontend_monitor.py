@@ -49,6 +49,17 @@ class UncacheRequestSnapshot:
     mem_page_type_nc: int
 
 
+@dataclass(frozen=True)
+class ICacheControlSnapshot:
+    cycle: int
+    a_ready: int
+    d_valid: int
+    d_opcode: int
+    d_size: int
+    d_source: int
+    d_data: int
+
+
 class FrontendMonitor:
     def __init__(self) -> None:
         self.interface = None
@@ -56,11 +67,13 @@ class FrontendMonitor:
         self.ptw_if = None
         self.icache_if = None
         self.uncache_if = None
+        self.icache_control_if = None
         self.ptw_get_gpa_provider = None
         self.dut = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
         self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
         self.uncache_request_snapshot: Optional[UncacheRequestSnapshot] = None
+        self.icache_control_snapshot: Optional[ICacheControlSnapshot] = None
         self.observations: list[Observation] = []
         self._checker = None
 
@@ -148,6 +161,9 @@ class FrontendMonitor:
     def bind_uncache(self, uncache_if) -> None:
         self.uncache_if = uncache_if
 
+    def bind_icache_control(self, icache_control_if) -> None:
+        self.icache_control_if = icache_control_if
+
     def bind_dut(self, dut) -> None:
         self.dut = dut
 
@@ -183,6 +199,20 @@ class FrontendMonitor:
             mem_page_type_nc=self._read(self.uncache_if.a_bits_user_mem_page_type_nc),
         )
         return self.uncache_request_snapshot
+
+    def capture_icache_control(self, cycle: int) -> ICacheControlSnapshot:
+        if self.icache_control_if is None:
+            raise AssertionError("FrontendMonitor ICache control interface is not bound")
+        self.icache_control_snapshot = ICacheControlSnapshot(
+            cycle=int(cycle),
+            a_ready=self._read(self.icache_control_if.a_ready),
+            d_valid=self._read(self.icache_control_if.d_valid),
+            d_opcode=self._read(self.icache_control_if.d_bits_opcode),
+            d_size=self._read(self.icache_control_if.d_bits_size),
+            d_source=self._read(self.icache_control_if.d_bits_source),
+            d_data=self._read(self.icache_control_if.d_bits_data),
+        )
+        return self.icache_control_snapshot
 
     def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
         if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
@@ -230,11 +260,13 @@ class FrontendMonitor:
         self.cycle_snapshot = None
         self.icache_request_snapshot = None
         self.uncache_request_snapshot = None
+        self.icache_control_snapshot = None
 
     def clear(self) -> None:
         self.cycle_snapshot = None
         self.icache_request_snapshot = None
         self.uncache_request_snapshot = None
+        self.icache_control_snapshot = None
         self._checker.clear()
 
     def set_expected_pc(self, pc: int) -> None:
@@ -258,4 +290,7 @@ class FrontendMonitor:
         return [observation.pc for observation in self.observations[-limit:]]
 
 
-__all__ = ["Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot", "UncacheRequestSnapshot", "FrontendMonitor"]
+__all__ = [
+    "Observation", "FrontendCycleSnapshot", "ICacheRequestSnapshot",
+    "UncacheRequestSnapshot", "ICacheControlSnapshot", "FrontendMonitor",
+]
