@@ -57,6 +57,7 @@ def pytest_configure(config):
     )
 
 
+@pytest.hookimpl(optionalhook=True)
 def pytest_testnodedown(node, error):
     del error
     report_path = node.workeroutput.get("toffee_report_path")
