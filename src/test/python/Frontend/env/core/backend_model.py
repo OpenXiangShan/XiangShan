@@ -10,7 +10,7 @@ from toffee.bundle import DummySignal
 
 from ..agents.backend_agent import BackendAgent
 from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
-from ..support.pc_utils import pc_from_ftq_start, require_matching_foldpc
+from ..support.pc_utils import fold_pc, pc_from_ftq_start
 from ..model.backend_runtime import (
     BackendCycleActions,
     BackendObservationSnapshot,
@@ -132,6 +132,8 @@ class BackendModel:
         self.ibuf_full_streak = 0
         self._ftq_start_pc_cache: Dict[int, int] = {}
         self._ftq_start_pc_by_value: Dict[int, int] = {}
+        self._ftq_previous_start_pc_cache: Dict[int, int] = {}
+        self._ftq_previous_start_pc_by_value: Dict[int, int] = {}
         self._ftq_group_pc_history: Dict[tuple[int, int], list[tuple[int, bool]]] = {}
         self._pc_group_occurrences: Dict[int, list[tuple[int, int, int]]] = {}
         self._pending_level0_target_ftq: Optional[tuple[int, int]] = None
@@ -653,6 +655,8 @@ class BackendModel:
         state.ibuf_full_streak = int(self.ibuf_full_streak)
         state.ftq_start_pc_cache = self._ftq_start_pc_cache
         state.ftq_start_pc_by_value = self._ftq_start_pc_by_value
+        state.ftq_previous_start_pc_cache = self._ftq_previous_start_pc_cache
+        state.ftq_previous_start_pc_by_value = self._ftq_previous_start_pc_by_value
         state.ftq_group_pc_history = self._ftq_group_pc_history
         state.pc_group_occurrences = self._pc_group_occurrences
         state.pending_level0_target_ftq = self._pending_level0_target_ftq
@@ -685,6 +689,8 @@ class BackendModel:
         self.ibuf_full_streak = int(state.ibuf_full_streak)
         self._ftq_start_pc_cache = state.ftq_start_pc_cache
         self._ftq_start_pc_by_value = state.ftq_start_pc_by_value
+        self._ftq_previous_start_pc_cache = state.ftq_previous_start_pc_cache
+        self._ftq_previous_start_pc_by_value = state.ftq_previous_start_pc_by_value
         self._ftq_group_pc_history = state.ftq_group_pc_history
         self._pc_group_occurrences = state.pc_group_occurrences
         self._pending_level0_target_ftq = state.pending_level0_target_ftq
@@ -2825,6 +2831,11 @@ class BackendModel:
     def _ftq_transition_without_last_is_expected(self) -> bool:
         if self._current_ftq_entry is None:
             return False
+        # The full-core Frontend ABI does not expose isLastInFtqEntry. In
+        # that ABI, observing the next FTQ pointer is the boundary evidence
+        # for the current entry, including the normal cacheable path.
+        if self._missing_cfvec_boundary_bit():
+            return True
         if bool(self._current_ftq_entry.has_redirect):
             return True
         return self._has_active_wrong_path_episode() or self._recovery_phase_active()
@@ -2982,6 +2993,39 @@ class BackendModel:
         except (IndexError, TypeError):
             return int(default)
         return self._read(signal, int(default))
+
+    def _missing_cfvec_boundary_bit(self) -> bool:
+        return "cfvec_is_last_in_ftq_entry" in getattr(
+            self.observe_if, "_missing_optional_attrs", ()
+        )
+
+    def _cfvec_uses_uncache_fetch(self, pc: int) -> bool:
+        physical_pc = int(pc)
+        pbmt = 0
+        page_table = getattr(self.env, "page_table", None)
+        if page_table is not None:
+            physical_pc, ok, metadata = page_table.translate(int(pc))
+            if not ok:
+                return False
+            # TLB gives nonzero stage-1 PBMT priority over stage-2 PBMT.
+            pbmt = int(metadata.get("stage1_pbmt", 0)) or int(metadata.get("stage2_pbmt", 0))
+        if pbmt in (1, 2):
+            return True
+        pma_cacheable_for_addr = getattr(self.env, "pma_cacheable_for_addr", None)
+        if callable(pma_cacheable_for_addr):
+            cacheable = pma_cacheable_for_addr(int(physical_pc))
+            if cacheable is not None:
+                return not bool(cacheable)
+        memory = getattr(self.env, "memory", None)
+        if memory is None:
+            return False
+        is_mmio = getattr(memory, "is_mmio", None)
+        if callable(is_mmio):
+            return bool(is_mmio(int(physical_pc)))
+        return any(
+            int(start) <= int(physical_pc) <= int(end)
+            for start, end in getattr(memory, "mmio_ranges", ())
+        )
 
     def capture_cfvec_snapshot(self) -> CfVecCycleSnapshot:
         assert self.observe_if is not None
@@ -3617,8 +3661,15 @@ class BackendModel:
         if int(observation.from_ftq_wen):
             ftq_idx = int(observation.from_ftq_ftq_idx)
             start_pc = self._decode_backend_addr(int(observation.from_ftq_start_pc_addr))
+            previous = self._ftq_start_pc_cache.get(ftq_idx)
+            if previous is not None and int(previous) != int(start_pc):
+                self._ftq_previous_start_pc_cache[ftq_idx] = int(previous)
             self._ftq_start_pc_cache[ftq_idx] = start_pc
-            self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
+            value_key = ftq_idx & 0x3F
+            previous_by_value = self._ftq_start_pc_by_value.get(value_key)
+            if previous_by_value is not None and int(previous_by_value) != int(start_pc):
+                self._ftq_previous_start_pc_by_value[value_key] = int(previous_by_value)
+            self._ftq_start_pc_by_value[value_key] = start_pc
 
     def _resolve_cfvec_pc(
         self,
@@ -3631,24 +3682,35 @@ class BackendModel:
         observed_foldpc: int,
     ) -> int:
         ftq_key = (int(ftq_flag) << 6) | (int(ftq_value) & 0x3F)
-        start_pc = self._ftq_start_pc_cache.get(
-            ftq_key,
+        start_candidates = []
+        for start_pc in (
+            self._ftq_start_pc_cache.get(ftq_key),
+            self._ftq_previous_start_pc_cache.get(ftq_key),
             self._ftq_start_pc_by_value.get(int(ftq_value)),
-        )
-        if start_pc is None:
+            self._ftq_previous_start_pc_by_value.get(int(ftq_value)),
+        ):
+            if start_pc is not None and int(start_pc) not in start_candidates:
+                start_candidates.append(int(start_pc))
+        if not start_candidates:
             raise AssertionError(
                 "cfVec references an FTQ entry without an observed start PC: "
                 f"slot={slot} ftq=({int(ftq_flag)},{int(ftq_value)}) "
                 f"offset={int(ftq_offset)} foldpc=0x{int(observed_foldpc):x}"
             )
-        pc = pc_from_ftq_start(int(start_pc), int(ftq_offset), bool(is_rvc))
-        try:
-            return require_matching_foldpc(pc, int(observed_foldpc))
-        except AssertionError as exc:
-            raise AssertionError(
-                f"{exc}; slot={slot} ftq=({int(ftq_flag)},{int(ftq_value)}) "
-                f"offset={int(ftq_offset)} is_rvc={int(is_rvc)}"
-            ) from exc
+        derived = [
+            pc_from_ftq_start(start_pc, int(ftq_offset), bool(is_rvc))
+            for start_pc in start_candidates
+        ]
+        for pc in derived:
+            if fold_pc(pc) == int(observed_foldpc):
+                return int(pc)
+        raise AssertionError(
+            "cfVec foldpc does not match FTQ-derived PC: "
+            f"pc=0x{derived[0]:x} expected_foldpc=0x{fold_pc(derived[0]):x} "
+            f"observed_foldpc=0x{int(observed_foldpc):x}; "
+            f"slot={slot} ftq=({int(ftq_flag)},{int(ftq_value)}) "
+            f"offset={int(ftq_offset)} is_rvc={int(is_rvc)}"
+        )
 
     def observed_cfvec_pc(self, slot: int) -> int:
         """Return the full PC derived from native cfVec and FTQ observations."""
@@ -3925,6 +3987,9 @@ class BackendModel:
             ftq_value = int(cfvec.ftq_value)
             ftq_offset = int(cfvec.ftq_offset)
             is_last = bool(cfvec.is_last)
+            if not is_last and self._missing_cfvec_boundary_bit():
+                # The IFU enqueues one instruction for an uncache fetch.
+                is_last = self._cfvec_uses_uncache_fetch(int(pc))
             exception_bits = int(cfvec.exception_bits)
 
             recovery_target_pc = self._current_recovery_target_pc()
@@ -4585,6 +4650,13 @@ class BackendModel:
                     int(pre_flush_current_ftq[1]),
                 )
             self._cfvec_queue_flush_wrong_path()
+            if not flush_itself and bool(payload.get("source_bound", False)):
+                self._cfvec_queue_close_current_ftq_span(int(ftq_flag), int(ftq_value))
+                if (
+                    self._current_ftq_entry is not None
+                    and self._ftq_entry_matches(self._current_ftq_entry, int(ftq_flag), int(ftq_value))
+                ):
+                    self._seal_current_ftq_entry(observed_last_in_entry=True)
             self._mark_active_wrong_path_redirect_driven(
                 int(target_pc),
                 expected_recovery_ftq=expected_recovery_ftq,

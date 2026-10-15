@@ -54,6 +54,7 @@ def _bind_bundle(bundle_type: type[Bundle], dut, *, required: bool):
     bundle = bundle_type()
     signal_bindings = getattr(bundle_type, "SIGNAL_BINDINGS", {})
     optional_attrs = set(getattr(bundle_type, "OPTIONAL_ATTRS", ()))
+    missing_optional_attrs = set()
 
     for attr_name in dir(bundle):
         if attr_name.startswith("_"):
@@ -62,6 +63,8 @@ def _bind_bundle(bundle_type: type[Bundle], dut, *, required: bool):
         if isinstance(attr_value, Signal):
             signal_name = signal_bindings.get(attr_name, attr_name)
             use_required = required and attr_name not in optional_attrs
+            if not use_required and getattr(dut, str(signal_name), None) is None:
+                missing_optional_attrs.add(attr_name)
             setattr(
                 bundle,
                 attr_name,
@@ -71,7 +74,11 @@ def _bind_bundle(bundle_type: type[Bundle], dut, *, required: bool):
             )
             continue
         use_required = required and attr_name not in optional_attrs
+        if not use_required and isinstance(attr_value, SignalList):
+            if any(getattr(dut, str(signal_name), None) is None for signal_name in attr_value.names):
+                missing_optional_attrs.add(attr_name)
         _bind_bundle_member(attr_value, dut, bundle_type=bundle_type, required=use_required)
+    bundle._missing_optional_attrs = frozenset(missing_optional_attrs)
     return bundle
 
 

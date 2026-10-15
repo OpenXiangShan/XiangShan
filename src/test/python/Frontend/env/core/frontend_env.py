@@ -86,6 +86,7 @@ class FrontendEnv:
         self._cycle_observers = []
         self.csr_write_log = []
         self._pmp_pma_cfg_words = {"pmp": {}, "pma": {}}
+        self._pma_napot_entries: Dict[int, tuple[int, int, bool]] = {}
         self.bp_ctrl_ubtb_enable = 1 if int(bp_ctrl_ubtb_enable) else 0
         self.bp_ctrl_abtb_enable = 1 if int(bp_ctrl_abtb_enable) else 0
         self.bp_ctrl_mbtb_enable = 1 if int(bp_ctrl_mbtb_enable) else 0
@@ -685,6 +686,7 @@ class FrontendEnv:
     def reset(self, cycles: int = 20, *, before_release: Optional[Callable[[], None]] = None) -> None:
         self.logger.info("reset dut: cycles=%d", int(cycles))
         self._emit_event("control.reset", {"cycles": int(cycles)})
+        self._pma_napot_entries.clear()
         self._write(self.clock_reset.reset, 1)
         self.step(cycles)
         if before_release is not None:
@@ -948,6 +950,13 @@ class FrontendEnv:
             self.write_distributed_csr(cfg_csr, cfg_word, settle_cycles=settle_cycles)
             self.write_distributed_csr(addr_csr, encoded_addr, settle_cycles=settle_cycles)
         self._pmp_pma_cfg_words[normalized_kind][cfg_csr] = cfg_word
+        if normalized_kind == "pma":
+            if ((cfg_byte >> 3) & 0x3) == 3:
+                self._pma_napot_entries[int(index)] = (
+                    int(addr), int(addr) + int(size), bool(config.cacheable)
+                )
+            else:
+                self._pma_napot_entries.pop(int(index), None)
         record = {
             "kind": normalized_kind,
             "index": int(index),
@@ -958,6 +967,13 @@ class FrontendEnv:
         }
         self._emit_event(f"control.{normalized_kind}_entry_write", record)
         return record
+
+    def pma_cacheable_for_addr(self, addr: int) -> Optional[bool]:
+        for index in sorted(self._pma_napot_entries):
+            start, end, cacheable = self._pma_napot_entries[index]
+            if start <= int(addr) < end:
+                return cacheable
+        return None
 
     def write_pmp_entry(
         self,

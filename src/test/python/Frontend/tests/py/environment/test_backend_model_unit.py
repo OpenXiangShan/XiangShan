@@ -21,6 +21,7 @@ from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model.backend_runtime import BackendObservationSnapshot
 from env.model import GoldenTrace
+from env.model import PageTableModel
 from env.model import TraceEntry
 from env.monitors.frontend_monitor import FrontendMonitor
 from env.support import fold_pc
@@ -386,6 +387,34 @@ def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expecte
     assert model.observed_cfvec_pc(0) == expected_pc
 
 
+def test_observed_cfvec_pc_uses_previous_start_after_ftq_reuse() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    ftq_idx = 1
+    model.consume_backend_observation(
+        BackendObservationSnapshot(
+            from_ftq_wen=1,
+            from_ftq_ftq_idx=ftq_idx,
+            from_ftq_start_pc_addr=0x80000080 >> 1,
+        )
+    )
+    model.consume_backend_observation(
+        BackendObservationSnapshot(
+            from_ftq_wen=1,
+            from_ftq_ftq_idx=ftq_idx,
+            from_ftq_start_pc_addr=0x8000011C >> 1,
+        )
+    )
+    interface.cfvec_ftq_ptr_flag[0].value = 0
+    interface.cfvec_ftq_ptr_value[0].value = ftq_idx
+    interface.cfvec_ftq_offset[0].value = 8
+    interface.cfvec_is_rvc[0].value = 1
+    interface.cfvec_foldpc[0].value = fold_pc(0x80000090)
+
+    assert model.observed_cfvec_pc(0) == 0x80000090
+
+
 def test_observed_cfvec_pc_rejects_missing_ftq_context() -> None:
     model = BackendModel()
     model.observe_if = _ObserveIf()
@@ -447,6 +476,132 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     assert model._cfvec_queue[0].pred_taken is True
     assert interface.cfvec_foldpc[0].read_count == 1
     assert interface.cfvec_ftq_ptr_value[0].read_count == 1
+
+
+@pytest.mark.parametrize(
+    ("pc", "expected_last"),
+    ((0x10001000, True), (0x80001000, False)),
+)
+def test_missing_cfvec_boundary_bit_closes_physical_mmio_entry(pc: int, expected_last: bool) -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
+    model.observe_if = interface
+    model.env = SimpleNamespace(memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]))
+    model.current_cycle = 1
+    _set_first_cfvec(model, interface, pc, ftq_value=3)
+
+    model._sample_cfvec()
+
+    assert model._cfvec_queue[0].is_last_in_entry is expected_last
+
+
+@pytest.mark.parametrize(
+    ("va", "pa", "pbmt", "expected_last"),
+    (
+        (0x10001000, 0x80001000, 0, False),
+        (0x80001000, 0x10001000, 0, True),
+        (0x80001000, 0x80002000, 1, True),
+        (0x80001000, 0x80002000, 2, True),
+    ),
+)
+def test_missing_cfvec_boundary_bit_uses_pa_and_pbmt(
+    va: int, pa: int, pbmt: int, expected_last: bool
+) -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
+    model.observe_if = interface
+    model.env = SimpleNamespace(
+        memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]),
+        page_table=PageTableModel("sv39"),
+    )
+    model.env.page_table.map_page(va >> 12, pa >> 12, pbmt=pbmt)
+    model.current_cycle = 1
+    _set_first_cfvec(model, interface, va, ftq_value=3)
+
+    model._sample_cfvec()
+
+    assert model._cfvec_queue[0].is_last_in_entry is expected_last
+
+
+def test_missing_cfvec_boundary_bit_does_not_classify_failed_translation_as_mmio() -> None:
+    model = BackendModel()
+    model.env = SimpleNamespace(
+        memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]),
+        page_table=PageTableModel("sv39"),
+    )
+
+    assert model._cfvec_uses_uncache_fetch(0x10001000) is False
+
+
+def test_missing_cfvec_boundary_bit_uses_stage2_pbmt_when_stage1_is_pma() -> None:
+    model = BackendModel()
+    model.env = SimpleNamespace(page_table=PageTableModel("sv39"))
+    va = 0x80001000
+    guest_ppn = 0x40000
+    model.env.page_table.map_page(va >> 12, guest_ppn)
+    model.env.page_table.map_stage2_page(guest_ppn, 0x80002, pbmt=1)
+
+    assert model._cfvec_uses_uncache_fetch(va) is True
+
+
+def test_missing_cfvec_boundary_bit_ignores_historical_uncache_requests() -> None:
+    model = BackendModel()
+    model.env = SimpleNamespace(
+        memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]),
+        uncache_agent=SimpleNamespace(
+            request_records=[
+                {
+                    "address": 0x80001000,
+                    "mem_back_type_mm": 0,
+                    "mem_page_type_nc": 1,
+                }
+            ]
+        ),
+    )
+
+    assert model._cfvec_uses_uncache_fetch(0x80001000) is False
+
+
+def test_missing_cfvec_boundary_bit_uses_programmed_pma_over_memory_range() -> None:
+    model = BackendModel()
+    model.env = SimpleNamespace(
+        page_table=PageTableModel("sv39"),
+        memory=SimpleNamespace(mmio_ranges=[]),
+        pma_cacheable_for_addr=lambda addr: False if addr == 0x80001000 else None,
+    )
+    model.env.page_table.map_page(0x80000000 >> 12, 0x80001000 >> 12, pbmt=0)
+
+    assert model._cfvec_uses_uncache_fetch(0x80000000) is True
+
+
+def test_missing_cfvec_boundary_bit_closes_cacheable_entry_on_next_ftq_pointer() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
+    model.observe_if = interface
+    model.current_cycle = 1
+
+    first_pc = 0x80001000
+    second_pc = 0x80001020
+    for slot, (pc, ftq_value) in enumerate(((first_pc, 3), (second_pc, 4))):
+        interface.cfvec_valid[slot].value = 1
+        interface.cfvec_foldpc[slot].value = fold_pc(pc)
+        interface.cfvec_ftq_ptr_value[slot].value = ftq_value
+        interface.cfvec_ftq_offset[slot].value = 0
+        model._ftq_start_pc_by_value[ftq_value] = pc + 2
+
+    model._sample_cfvec()
+
+    assert list(model._cfvec_queue)[0].ftq_value == 3
+    assert list(model._cfvec_queue)[0].is_last_in_entry is True
+    assert list(model._cfvec_queue)[1].ftq_value == 4
+    assert list(model._cfvec_queue)[1].is_last_in_entry is False
+    assert model._current_ftq_entry is not None
+    assert model._current_ftq_entry.ftq_value == 4
+    assert list(model.ftq_entries)[0].ftq_value == 3
+    assert list(model.ftq_entries)[0].dispatch_complete is True
 
 
 def test_ftq_start_pc_cache_unguards_high_half_pc() -> None:
@@ -1034,6 +1189,27 @@ def test_source_bound_control_redirect_rejects_non_cfi_source() -> None:
             reason="control-flow",
             redirect_class=BackendRedirectClass.CONTROL_FLOW,
         )
+
+
+def test_source_bound_flush_after_closes_surviving_ftq_entry() -> None:
+    model, source = _source_bound_cfi_model()
+    source.path_state = PATH_STATE_CORRECT
+    model._current_ftq_entry = FtqEntry(ftq_flag=source.ftq_flag, ftq_value=source.ftq_value)
+    model.inject_redirect_from_cfvec(
+        source_pc=source.pc,
+        source_ftq_flag=source.ftq_flag,
+        source_ftq_value=source.ftq_value,
+        source_ftq_offset=source.ftq_offset,
+        target_pc=0x80000100,
+        reason="attribute-transition",
+        level=0,
+    )
+
+    model._plan_redirect_payload(model.pending_events[0].payload)
+
+    assert source.is_last_in_entry is True
+    assert model._current_ftq_entry is None
+    assert model.ftq_entries[0].dispatch_complete is True
 
 
 def test_memory_violation_redirect_rejects_fault_or_satp_flush() -> None:
@@ -1654,11 +1830,20 @@ def test_ready_redirect_to_committed_ftq_entry_asserts_instead_of_dropping() -> 
         model._ready_redirect_for_cycle()
 
 
-def test_ftq_transition_without_last_is_unexpected_on_normal_path() -> None:
+def test_ftq_transition_without_last_is_unexpected_when_boundary_signal_exists() -> None:
     model = BackendModel()
     model._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=20)
 
     assert model._ftq_transition_without_last_is_expected() is False
+
+
+def test_ftq_transition_without_last_is_expected_when_boundary_signal_is_missing() -> None:
+    model = BackendModel()
+    model.observe_if = _ObserveIf()
+    model.observe_if._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
+    model._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=20)
+
+    assert model._ftq_transition_without_last_is_expected() is True
 
 
 def test_ftq_transition_without_last_is_expected_when_redirect_interrupted() -> None:

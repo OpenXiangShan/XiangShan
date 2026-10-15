@@ -135,6 +135,8 @@ class BackendState:
     ibuf_full_streak: int = 0
     ftq_start_pc_cache: dict[int, int] = field(default_factory=dict)
     ftq_start_pc_by_value: dict[int, int] = field(default_factory=dict)
+    ftq_previous_start_pc_cache: dict[int, int] = field(default_factory=dict)
+    ftq_previous_start_pc_by_value: dict[int, int] = field(default_factory=dict)
     ftq_group_pc_history: dict[tuple[int, int], list[tuple[int, bool]]] = field(default_factory=dict)
     pc_group_occurrences: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
