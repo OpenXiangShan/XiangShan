@@ -1982,7 +1982,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
 }
 
 class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
-  private val numMemChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.numMemChannels
+  private val nCCHIChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.nCCHIChannels
   val redirect = Flipped(ValidIO(new Redirect))
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param)))
@@ -2016,7 +2016,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val sbufferForward = new SbufferForward
   val uncacheForward = new UncacheForward
   val mshrForward = new DCacheForward
-  val tldForward = Vec(numMemChannels, new DCacheForward)
+  val tldForward = Vec(nCCHIChannels, new DCacheForward)
   val uncacheBypass = new UncacheBypass
   // Nuke check with StoreUnit
   val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))

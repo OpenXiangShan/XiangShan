@@ -107,7 +107,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
-    val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
+    val l2_hint = Input(Vec(nCCHIChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
     val l2PfqBusy = Input(Bool())
@@ -124,7 +124,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
     // Compact CHI Type 1 DCache / Type 4 ICache / Type 4 PTW; forwarded to L2Top
-    val dcache_cchi = Vec(numMemChannelsFromDcache, new CCHIType1Port)
+    val dcache_cchi = Vec(nCCHIChannelsFromDcache, new CCHIType1Port)
     val icache_cchi = new CCHIType4Port
     val ptw_cchi = new CCHIType4Port
   })

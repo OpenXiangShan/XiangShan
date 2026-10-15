@@ -43,7 +43,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val probe_snp_src_id = UInt(DCacheCCHI.dnNodeIdWidth.W)
   val probe_snp_trace_tag = UInt(1.W)
   val probe_snp_make_invalid = Bool()
-  val probe_snp_channel = UInt(memChannelBits.W)
+  val probe_snp_channel = UInt(CCHIChannelBits.W)
 
   // request info
   // reqs from Store, AMO use this

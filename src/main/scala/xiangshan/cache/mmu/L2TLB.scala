@@ -748,7 +748,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
-    difftest.index := (1 + numMemChannelsFromDcache).U   // 0=ICache, 1..numMemChannels=DCache, 1+numMemChannels=L2TLB
+    difftest.index := (1 + nCCHIChannelsFromDcache).U   // 0=ICache, 1..nCCHIChannels=DCache, 1+nCCHIChannels=L2TLB
     difftest.valid := cache.io.refill.valid
     difftest.addr := RegEnable(difftest_ptw_addr(RegEnable(txnId, lastFire)), refill_valid_d1)
     difftest.data := RegEnable(refill_data.asTypeOf(difftest.data), refill_valid_d1)

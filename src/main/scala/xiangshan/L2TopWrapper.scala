@@ -217,13 +217,13 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
       val chi = Option.when(isOpenLLC)(new PortIO)
       val decoupledCHI = Option.when(isZhuJiang)(new DecoupledPortIO)
       val nodeID = Some(Input(UInt(NodeIDWidth.W)))
-      val dcache_cchi = Flipped(Vec(numMemChannelsFromDcache, new CCHIType1Port))
+      val dcache_cchi = Flipped(Vec(nCCHIChannelsFromDcache, new CCHIType1Port))
       val icache_cchi = Flipped(new CCHIType4Port)
       val ptw_cchi = Flipped(new CCHIType4Port)
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
-      val l2_hint = Vec(numMemChannelsFromDcache, ValidIO(new L2ToL1Hint()))
+      val l2_hint = Vec(nCCHIChannelsFromDcache, ValidIO(new L2ToL1Hint()))
       val l2_fdbk_pf_ctrl = Output(new L2ToL1PfCtrl)
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
@@ -350,7 +350,7 @@ class L2TopWrapperInlined()(implicit p: Parameters) extends LazyModule
     l3_pf_recv_node.foreach { n => dontTouch(n.in.head._1) }
 
     if (enableL2) {
-      require(cchiUpstream.type1.size == numMemChannelsFromDcache)
+      require(cchiUpstream.type1.size == nCCHIChannelsFromDcache)
       require(cchiUpstream.type4.size >= 2)
 
       val l2cfg = new L2Configuration(

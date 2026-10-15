@@ -309,7 +309,7 @@ class MinimalConfig(n: Int = 1) extends Config(
     })
 )
 
-case class WithNKBL1D(n: Int, ways: Int = 8, numMemChannels: Int = 1) extends Config((site, here, up) => {
+case class WithNKBL1D(n: Int, ways: Int = 8, nCCHIChannels: Int = 2) extends Config((site, here, up) => {
   case XSTileKey =>
     val sets = n * 1024 / ways / 64
     up(XSTileKey).map(_.copy(
@@ -323,12 +323,12 @@ case class WithNKBL1D(n: Int, ways: Int = 8, numMemChannels: Int = 1) extends Co
         nProbeEntries = 8,
         nReleaseEntries = 18,
         nMaxPrefetchEntry = 6,
-        numMemChannels = numMemChannels,
+        nCCHIChannels = nCCHIChannels,
         enableTagEcc = true,
         enableDataEcc = true,
         cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
       )),
-      cchiUpstream = L1CCHIUpstream(numMemChannels)
+      cchiUpstream = L1CCHIUpstream(nCCHIChannels)
     ))
 })
 
@@ -611,7 +611,7 @@ class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ ZhuJiangConfig("32MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
-    ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
+    ++ WithNKBL1D(64, ways = 4, nCCHIChannels = 2)
     ++ new BaseConfig(n)
 )
 

@@ -59,15 +59,9 @@ case class DCacheParameters
   enableTagEcc: Boolean = false,
   cacheCtrlAddressOpt: Option[AddressSet] = None,
 
-  // ========== Dual-channel support ==========
-  // Number of memory channels for L1-L2 interface
-  // 1 = single channel (default)
-  // 2 = dual channel (2x bandwidth potential)
-  numMemChannels: Int = 1,
-
-  // Channel selection strategy
-  // true = select by address set低位
-  // false : unsupported for now
+  // Number of CCHI channels for DCache-L2 interface
+  nCCHIChannels: Int = 2,
+  // Channel selection strategy: true = select by address set low bits. false = unsupported for now
   channelSelByAddr: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
@@ -150,13 +144,10 @@ trait HasDCacheParameters
   val EnableTagEcc = cacheParams.enableTagEcc
 
   // ========== Multi-channel support ==========
-  val numMemChannels = cacheParams.numMemChannels
-  val memChannelBits = log2Up(numMemChannels max 2)
+  val nCCHIChannels = cacheParams.nCCHIChannels
+  val CCHIChannelBits = log2Up(nCCHIChannels max 2)
   val channelSelByAddr = cacheParams.channelSelByAddr
-  val hasDualChannel = numMemChannels > 1
-  require(numMemChannels == 1 || numMemChannels == 2, s"numMemChannels must be in range [1,2], got $numMemChannels")
-  require(!channelSelByAddr || isPow2(numMemChannels),
-    s"channelSelByAddr requires numMemChannels to be a power of 2, got $numMemChannels")
+  require(nCCHIChannels == 1 || nCCHIChannels == 2, s"nCCHIChannels must be in range [1,2], got $nCCHIChannels")
 
   // banked dcache support
   val DCacheSetDiv = 1
@@ -375,17 +366,16 @@ trait HasDCacheParameters
   }
   val numReplaceRespPorts = 2
 
-  def selectMemChannel(addr: UInt, id: UInt = 0.U): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else id(memChannelBits - 1, 0)
+  def selectCCHIChannel(addr: UInt, id: UInt = 0.U): UInt = {
+    if (nCCHIChannels > 1) {
+      if (channelSelByAddr) get_block(addr)(CCHIChannelBits - 1, 0) else id(CCHIChannelBits - 1, 0)
     } else {
-      0.U(memChannelBits.W)
+      0.U(CCHIChannelBits.W)
     }
   }
 
   // Demux a DecoupledIO source into N channels based on the channel select signal.
-  def demuxByChannel[T <: Data](source: DecoupledIO[T], channel: UInt, n: Int): Vec[DecoupledIO[T]] = {
+  def demuxByCCHIChannel[T <: Data](source: DecoupledIO[T], channel: UInt, n: Int): Vec[DecoupledIO[T]] = {
     val outputs = Wire(Vec(n, chiselTypeOf(source)))
     for (i <- 0 until n) {
       outputs(i).valid := source.valid && channel === i.U
@@ -852,11 +842,11 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
-  val loadWakeup = Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup()))
+  val loadWakeup = Vec(nCCHIChannels, ValidIO(new DCacheLoadWakeup()))
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
-  val forward_D = Flipped(Vec(LoadPipelineWidth, Vec(cfg.numMemChannels, new DCacheForward)))
+  val forward_D = Flipped(Vec(LoadPipelineWidth, Vec(nCCHIChannels, new DCacheForward)))
   val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
   val forward_mshrStData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
@@ -883,8 +873,8 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
-  val l2_hint = Vec(cfg.numMemChannels, Input(Valid(new L2ToL1Hint())))
-  val cchi = Vec(cfg.numMemChannels, new CCHIType1Port)
+  val l2_hint = Vec(nCCHIChannels, Input(Valid(new L2ToL1Hint())))
+  val cchi = Vec(nCCHIChannels, new CCHIType1Port)
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
@@ -1352,7 +1342,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   io.lsu.forward_D.zipWithIndex.foreach { case (forwards, i) =>
-    for (ch <- 0 until numMemChannels) {
+    for (ch <- 0 until nCCHIChannels) {
       forwardCompData(forwards(ch), io.cchi(ch).dnDAT, i)
     }
   }
@@ -1363,7 +1353,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     wakeup.bits := 0.U.asTypeOf(wakeup.bits)
   }
 
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     val compDataWakeup = io.cchi(ch).dnDAT.valid &&
       CCHIOpcode.CompData.is(io.cchi(ch).dnDAT.bits.Opcode, io.cchi(ch).dnDAT.valid) &&
       io.cchi(ch).dnDAT.bits.TxnID < cfg.nMissEntries.U
@@ -1558,16 +1548,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
 
   val rxsnpArb = Wire(Decoupled(new FlitSNP))
-  val rxsnpSel = VecInit((0 until numMemChannels).map(ch => io.cchi(ch).dnSNP.valid))
+  val rxsnpSel = VecInit((0 until nCCHIChannels).map(ch => io.cchi(ch).dnSNP.valid))
   rxsnpArb.valid := rxsnpSel.asUInt.orR
-  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until numMemChannels).map(ch => io.cchi(ch).dnSNP.bits))
-  for (ch <- 0 until numMemChannels) {
+  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until nCCHIChannels).map(ch => io.cchi(ch).dnSNP.bits))
+  for (ch <- 0 until nCCHIChannels) {
     io.cchi(ch).dnSNP.ready := rxsnpArb.ready && rxsnpSel(ch)
   }
   val rxsnpChannel = OHToUInt(rxsnpSel.asUInt)
   probeQueue.io.rxsnp_channel := rxsnpChannel
 
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     io.cchi(ch).upREQ <> missQueue.io.txreq(ch)
     lowestArb(io.cchi(ch).upRSP, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
     io.cchi(ch).upEVT <> wb.io.txevt(ch)
@@ -1715,7 +1705,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // assertions
   // dcache should only deal with DRAM addresses
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     when (io.cchi(ch).upREQ.fire) {
       assert(PmemRanges.map(_.cover(io.cchi(ch).upREQ.bits.Addr)).reduce(_ || _))
     }
@@ -1768,7 +1758,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // }
   // XSPerfAccumulate("access_early_replace", PopCount(Cat(access_early_replace)))
   // ========== Multi-channel hint/grant perf counters ==========
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     val chSuffix = s"_$ch"
 
     val grant_data_fire = io.cchi(ch).dnDAT.fire &&

@@ -238,7 +238,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
 
-    val loadWakeup = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
+    val loadWakeup = Flipped(Vec(cfg.nCCHIChannels, ValidIO(new DCacheLoadWakeup())))
 
     // from StoreQueue
     val stAddrReadySqPtr = Input(new SqPtr)
@@ -257,7 +257,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ldWbPtr = Input(new LqPtr)
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
-    val l2_hint  = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
+    val l2_hint  = Input(Vec(cfg.nCCHIChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
     val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))

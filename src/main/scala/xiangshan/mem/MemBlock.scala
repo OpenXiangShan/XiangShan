@@ -359,7 +359,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val debug_ls = new DebugLSIO
-    val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
+    val l2_hint = Input(Vec(nCCHIChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
@@ -394,7 +394,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
 
     // DCache Compact CHI Type 1 (cacheable); DCache <-> MemBlock buffer
-    val outer_dcache_cchi = Vec(numMemChannelsFromDcache, new CCHIType1Port)
+    val outer_dcache_cchi = Vec(nCCHIChannelsFromDcache, new CCHIType1Port)
 
     // ICache Compact CHI Type 4 (cacheable refill); Frontend <-> MemBlock buffer
     val inner_icache_cchi = Flipped(new CCHIType4Port)
@@ -1267,7 +1267,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
 
-  for (ch <- 0 until numMemChannelsFromDcache) {
+  for (ch <- 0 until nCCHIChannelsFromDcache) {
     CCHIBuffer(dcache.io.cchi(ch), io.outer_dcache_cchi(ch))
   }
 

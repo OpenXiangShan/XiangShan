@@ -195,15 +195,6 @@ trait HasMissReqFunction extends HasDCacheParameters
   *  +---------------------------------------------------------------------+                  +-------------------------+
   */
 
-// Parallel pipeline register array for multiple enqueue ports (using reqNum)
-class MissReqPipeRegArray(numPorts: Int)(implicit p: Parameters) extends Bundle {
-  val regs = Vec(numPorts, new MissReqPipeRegBundle)
-  val valid = Vec(numPorts, Bool())
-
-  def has_valid(): Bool = valid.asUInt.orR
-  def valid_count(): UInt = PopCount(valid)
-}
-
 // Analysis result for each request in cycle 0
 class ReqAnalysisResult(nReq: Int, nMissEntries: Int)(implicit p: Parameters) extends Bundle {
   // Strategy for each request: each bit represents a strategy
@@ -293,7 +284,7 @@ class MissReqPipeRegBundle()(implicit p: Parameters) extends DCacheBundle
       get_alias(req.vaddr),
       grow_param,
       req.full_overwrite,
-      cchiDcacheSrcId(selectMemChannel(req.addr, mshr_id))
+      cchiDcacheSrcId(selectCCHIChannel(req.addr, mshr_id))
     )
     acquire
   }
@@ -314,7 +305,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
     val resp_to_lsq = DecoupledIO(new CMOResp)
     val wfi = Flipped(new WfiReqBundle)
-    val channel_sel = Output(UInt(memChannelBits.W))
+    val channel_sel = Output(UInt(CCHIChannelBits.W))
   })
 
   val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
@@ -359,7 +350,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  io.channel_sel := Mux(RegNext(io.req.fire), selectMemChannel(req.address), 0.U)
+  io.channel_sel := Mux(RegNext(io.req.fire), selectCCHIChannel(req.address), 0.U)
 
   io.req.ready := state === s_idle
   assert(!(io.req.fire && io.req.bits.opcode === 3.U), "cbo.zero must not use CCHI REQ")
@@ -370,7 +361,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     cmoTxnId.U,
     req.address,
     req.opcode,
-    cchiDcacheSrcId(selectMemChannel(req.address))
+    cchiDcacheSrcId(selectCCHIChannel(req.address))
   )
 
   io.rxrsp.ready := state === s_wresp
@@ -415,7 +406,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     val rxdat = Flipped(DecoupledIO(new FlitDnDAT))
     val rxrsp = Flipped(DecoupledIO(new FlitDnRSP))
     val txrsp = DecoupledIO(new FlitUpRSP)
-    val channel_sel = Output(UInt(memChannelBits.W))
+    val channel_sel = Output(UInt(CCHIChannelBits.W))
 
     // client requests, queryME receive all miss_req now
     val queryME = Vec(reqNum, Flipped(new DCacheMEQueryIOBundle))
@@ -552,7 +543,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
   val full_overwrite = Reg(Bool())
 
-  val channel_sel = Mux(req_valid, selectMemChannel(req.addr, io.id), 0.U)
+  val channel_sel = Mux(req_valid, selectCCHIChannel(req.addr, io.id), 0.U)
   io.channel_sel := channel_sel
 
   val got_dataid0 = RegInit(false.B)
@@ -1124,12 +1115,12 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
     val queryMQ = Vec(reqNum, Flipped(new DCacheMQQueryIOBundle))
 
-    val txreq = Vec(numMemChannels, DecoupledIO(new FlitREQ))
-    val txrsp = Vec(numMemChannels, DecoupledIO(new FlitUpRSP))
-    val rxdat = Vec(numMemChannels, Flipped(DecoupledIO(new FlitDnDAT)))
-    val rxrsp = Vec(numMemChannels, Flipped(DecoupledIO(new FlitDnRSP)))
+    val txreq = Vec(nCCHIChannels, DecoupledIO(new FlitREQ))
+    val txrsp = Vec(nCCHIChannels, DecoupledIO(new FlitUpRSP))
+    val rxdat = Vec(nCCHIChannels, Flipped(DecoupledIO(new FlitDnDAT)))
+    val rxrsp = Vec(nCCHIChannels, Flipped(DecoupledIO(new FlitDnRSP)))
 
-    val l2_hint = Input(Vec(numMemChannels, Valid(new L2ToL1Hint()))) // Hint from L2 Cache
+    val l2_hint = Input(Vec(nCCHIChannels, Valid(new L2ToL1Hint()))) // Hint from L2 Cache
 
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
@@ -1186,7 +1177,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
   // Parallel pipeline registers for queryMQ path (reqNum ports)
   val parallel_pipe_regs = RegInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MissReqPipeRegBundle))))
-  val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(memChannelBits.W))))
+  val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(CCHIChannelBits.W))))
 
   val acquire_from_pipereg_vec = Wire(Vec(reqNum, chiselTypeOf(io.txreq(0))))
 
@@ -1651,18 +1642,18 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     io.rxdat(ch).ready := true.B
     when (io.rxdat(ch).valid) {
       assert(CCHIOpcode.CompData.is(io.rxdat(ch).bits.Opcode, io.rxdat(ch).valid), "DnDAT should only be CompData")
       assert(io.rxdat(ch).bits.TxnID < cfg.nMissEntries.U, "DnDAT TxnID must be MSHR id")
     }
   }
-  val rxrspIsCompCMO = (0 until numMemChannels).map { ch =>
+  val rxrspIsCompCMO = (0 until nCCHIChannels).map { ch =>
     io.rxrsp(ch).valid && CCHIOpcode.CompCMO.is(io.rxrsp(ch).bits.Opcode, io.rxrsp(ch).valid) &&
     io.rxrsp(ch).bits.TxnID === cmoTxnId.U
   }
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     io.rxrsp(ch).ready := Mux(rxrspIsCompCMO(ch), cmo_unit.io.rxrsp.ready, true.B)
   }
 
@@ -1691,7 +1682,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
       e.io.rxdat.bits := DontCare
       e.io.rxrsp.valid := false.B
       e.io.rxrsp.bits := DontCare
-      for (ch <- 0 until numMemChannels) {
+      for (ch <- 0 until nCCHIChannels) {
         when (io.rxdat(ch).valid && io.rxdat(ch).bits.TxnID === i.U) {
           e.io.rxdat <> io.rxdat(ch)
         }
@@ -1736,7 +1727,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
       e.io.l2_hint.bits := DontCare
       val entryHintMatches = io.l2_hint.map(hint => hint.valid && hint.bits.sourceId === i.U)
       assert(PopCount(VecInit(entryHintMatches)) <= 1.U, "multiple l2_hint hits for one miss entry")
-      for (ch <- 0 until numMemChannels) {
+      for (ch <- 0 until nCCHIChannels) {
         when(entryHintMatches(ch)) {
           e.io.l2_hint <> io.l2_hint(ch)
         }
@@ -1750,7 +1741,7 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   io.cmo_resp <> cmo_unit.io.resp_to_lsq
   cmo_unit.io.rxrsp.valid := false.B
   cmo_unit.io.rxrsp.bits := DontCare
-  for (ch <- 0 until numMemChannels) {
+  for (ch <- 0 until nCCHIChannels) {
     when (rxrspIsCompCMO(ch)) {
       cmo_unit.io.rxrsp <> io.rxrsp(ch)
     }
@@ -1772,19 +1763,19 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   }
 
   for(i <- 0 until reqNum) {
-    parallel_regs_channel(i) := selectMemChannel(
+    parallel_regs_channel(i) := selectCCHIChannel(
       parallel_pipe_regs(i).req.addr, parallel_pipe_regs(i).mshr_id)
   }
 
-  if (numMemChannels > 1) {
+  if (nCCHIChannels > 1) {
     val demuxedPipeTxreq = acquire_from_pipereg_vec.zipWithIndex.map { case (aq, i) =>
-      demuxByChannel(aq, parallel_regs_channel(i), numMemChannels)
+      demuxByCCHIChannel(aq, parallel_regs_channel(i), nCCHIChannels)
     }
-    val demuxedEntryTxreq = entries.map(e => demuxByChannel(e.io.txreq, e.io.channel_sel, numMemChannels))
-    val demuxedEntryTxrsp = entries.map(e => demuxByChannel(e.io.txrsp, e.io.channel_sel, numMemChannels))
-    val demuxedCmoTxreq = demuxByChannel(cmo_unit.io.txreq, cmo_unit.io.channel_sel, numMemChannels)
+    val demuxedEntryTxreq = entries.map(e => demuxByCCHIChannel(e.io.txreq, e.io.channel_sel, nCCHIChannels))
+    val demuxedEntryTxrsp = entries.map(e => demuxByCCHIChannel(e.io.txrsp, e.io.channel_sel, nCCHIChannels))
+    val demuxedCmoTxreq = demuxByCCHIChannel(cmo_unit.io.txreq, cmo_unit.io.channel_sel, nCCHIChannels)
 
-    for (ch <- 0 until numMemChannels) {
+    for (ch <- 0 until nCCHIChannels) {
       val pipeTxreq = demuxedPipeTxreq.map(_(ch))
       val entryTxreq = demuxedEntryTxreq.map(_(ch))
       val cmoTxreq = demuxedCmoTxreq(ch)
@@ -1882,17 +1873,17 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
       e.io.refill_to_ldq.valid && e.io.refill_to_ldq.bits.hasdata && e.io.refill_to_ldq.bits.refill_done
     ))
     val refillDiffMask = refillDiffValidVec.asUInt
-    assert(PopCount(refillDiffMask) <= numMemChannels.U, s"simultaneous refills must not exceed numMemChannels ($numMemChannels)")
+    assert(PopCount(refillDiffMask) <= nCCHIChannels.U, s"simultaneous refills must not exceed nCCHIChannels ($nCCHIChannels)")
 
     var remainMask = refillDiffMask
-    for (ch <- 0 until numMemChannels) {
+    for (ch <- 0 until nCCHIChannels) {
       val oh = PriorityEncoderOH(remainMask)
       val valid = remainMask.orR
       remainMask = remainMask & ~oh
 
       val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
       difftest.coreid := io.hartId
-      difftest.index  := (1 + ch).U   // 0=ICache, 1..numMemChannels=DCache, 1+numMemChannels=L2TLB
+      difftest.index  := (1 + ch).U   // 0=ICache, 1..nCCHIChannels=DCache, 1+nCCHIChannels=L2TLB
       difftest.valid  := valid
       difftest.addr   := Mux1H(oh, entries.map(_.io.refill_to_ldq.bits.addr))
       difftest.data   := Mux1H(oh, entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)))

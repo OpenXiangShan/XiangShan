@@ -290,8 +290,8 @@ case class XSCoreParameters
   )),
   // Shared L1/L2 Compact CHI upstream table. L2TopWrapper passes this as L2Configuration.upstream to oceanus.l2.L2Top;
   // D$/I$/PTW SrcIDs are looked up from the same object. Type1 order = D$ channel index.
-  // Keep in sync with dcacheParametersOpt.numMemChannels (WithNKBL1D updates both).
-  cchiUpstream: L2UpstreamTable = L1CCHIUpstream(1),
+  // Keep in sync with dcacheParametersOpt.nCCHIChannels (WithNKBL1D updates both).
+  cchiUpstream: L2UpstreamTable = L1CCHIUpstream(nDcacheCh = 2),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
     ways = 8,
@@ -306,9 +306,6 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
 ){
-  require(cchiUpstream.type1.size == dcacheParametersOpt.map(_.numMemChannels).getOrElse(1),
-          s"cchiUpstream Type1 count ${cchiUpstream.type1.size} must equal DCache numMemChannels")
-
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
     // single letter extensions, in canonical order
@@ -887,7 +884,7 @@ trait HasXSParameter {
   def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
 
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
-  def numMemChannelsFromDcache = coreParams.dcacheParametersOpt.map(_.numMemChannels).getOrElse(1)
+  def nCCHIChannelsFromDcache = coreParams.dcacheParametersOpt.map(_.nCCHIChannels).getOrElse(2)
 
   def cchiUpstream: L2UpstreamTable = coreParams.cchiUpstream
   def cchiDcacheSrcId(ch: UInt): UInt = VecInit(cchiUpstream.type1.map(e => e.nid.U))(ch)
