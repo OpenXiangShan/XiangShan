@@ -340,6 +340,7 @@ endif
 
 FRONTEND_BUILD_DIR = ./build-frontend
 FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
+FRONTEND_BUILD_LOCK = $(abspath $(FRONTEND_BUILD_DIR)/.frontend-build.lock)
 FRONTEND_BUILD_MANIFEST = $(FRONTEND_BUILD_DIR)/frontend_build_manifest.$(FRONTEND_SIM).json
 FRONTEND_PYLIB_ROOT = $(FRONTEND_BUILD_DIR)/pylib-$(FRONTEND_SIM)
 FRONTEND_PYLIB_DIR = $(FRONTEND_PYLIB_ROOT)/Frontend
@@ -425,10 +426,15 @@ $(FRONTEND_CONFIG_FILE): FORCE
 	fi
 
 frontend:
+	@mkdir -p "$(FRONTEND_BUILD_DIR)"
+	@flock "$(FRONTEND_BUILD_LOCK)" "$(MAKE)" --no-print-directory frontend-locked
+.PHONY: frontend
+
+frontend-locked:
 	@if [ -L "$(FRONTEND_RTL_DIR)" ]; then rm -f "$(FRONTEND_RTL_DIR)"; fi
 	$(MAKE) verilog BUILD_DIR=$(FRONTEND_BUILD_DIR)
 	$(MAKE) frontend-full-rtl-picker BUILD_DIR=$(FRONTEND_BUILD_DIR)
-.PHONY: frontend
+.PHONY: frontend-locked
 
 frontend-verilator:
 	$(MAKE) frontend FRONTEND_SIM=verilator
