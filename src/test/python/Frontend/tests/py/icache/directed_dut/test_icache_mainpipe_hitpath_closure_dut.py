@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+from env.core.transactions import CommitTarget
 from env.runtime.frontend_init import (
     ConfigureAgent,
     FrontendInitConfig,
+    LoadProgram,
     initialize_frontend,
     run_initialization_steps,
 )
 
 
+import hashlib
+import logging
 import os
 import random
 from collections.abc import (
@@ -19,6 +23,15 @@ from collections.abc import (
 
 import pytest
 
+from env.sequences import RunUntilCommitSequence
+from env.support import record_scenario, scenario_rng
+from tests.py.icache.directed_dut.programs import (
+    NOP,
+    encode_beq as _beq,
+    encode_jal as _jal,
+    instructions_to_bytes as _instructions_to_bytes,
+    program_image as _program_image,
+)
 from tests.py.icache.directed_dut.support import (
     load_nop_program as _load_nop_program,
     warmup_commits as _warmup_commits,
@@ -26,11 +39,11 @@ from tests.py.icache.directed_dut.support import (
     read_dut_signal,
     wait_until,
     make_fetch_loop_init_config,
-)
-from tests.py.icache.directed_dut.scenarios import (
-    run_multi_branch_random_positions as _run_multi_branch_positions,
+    randomize_resolve_delays,
 )
 
+
+logger = logging.getLogger(__name__)
 
 pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1",
@@ -200,6 +213,78 @@ def _wait_for_loop_target(env, target: int) -> None:
         max_cycles=_cycle_limit("TB_ICACHE_HITPATH_TARGET_WAIT", 6000),
         label=f"loop target 0x{target:x}",
     )
+
+
+def _run_multi_branch_positions(env):
+    """Multiple JAL/BEQ at stride-spaced random positions; backward JAL loop at end.
+
+    Program layout:
+        [0, stride, 2*stride, ...]  — each randomly JAL+4 or BEQ+4 (skip 1 NOP)
+        [prog_size - 1]             — JAL back to BASE (infinite loop)
+        everywhere else             — NOP
+
+    Randomized: prog_size, stride, branch type at each slot, resolve delays.
+    """
+    scenario_key = "zhaoxinran/multi-branch/random-positions"
+    base_seed, seed, rng = scenario_rng(scenario_key)
+    prog_size = rng.choice([64, 96, 128])
+    stride = rng.randint(2, 5)
+    min_d, max_d = randomize_resolve_delays(rng, env)
+    prog = [NOP] * prog_size
+    prog[prog_size - 1] = _jal(0, -(prog_size - 1) * 4)
+    n_jal = 0
+    n_beq = 0
+    positions = []
+    for pos in range(0, prog_size // 2, stride):
+        if rng.random() < 0.5:
+            prog[pos] = _jal(0, 4)
+            n_jal += 1
+        else:
+            prog[pos] = _beq(0, 0, 4)
+            n_beq += 1
+        positions.append(pos)
+    n_placed = n_jal + n_beq
+    target_commits = max(n_placed * 3, 10)
+    record_scenario(
+        env,
+        scenario_key,
+        base_seed=base_seed,
+        seed=seed,
+        parameters={
+            "prog_size": prog_size,
+            "stride": stride,
+            "positions": positions,
+            "n_jal": n_jal,
+            "n_beq": n_beq,
+            "resolve_delay": [min_d, max_d],
+            "target_commits": target_commits,
+            "program_sha256": hashlib.sha256(_instructions_to_bytes(prog)).hexdigest(),
+        },
+    )
+    logger.info(
+        "seed=%d prog_size=%d stride=%d positions=%s n_jal=%d n_beq=%d resolve_delay=[%d,%d] target_commits=%d",
+        seed,
+        prog_size,
+        stride,
+        positions,
+        n_jal,
+        n_beq,
+        min_d,
+        max_d,
+        target_commits,
+    )
+    run_initialization_steps(
+        env, (LoadProgram(image=_program_image(prog), step_cycles=1),)
+    )
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=5000)
+    ).run(env)
+    stats = env.branch_checker.get_stats()
+    logger.info("commits=%d stats=%s", commits, stats)
+    assert commits >= target_commits
+    assert stats["by_type"]["jump"] >= 1
+    if n_beq > 0:
+        assert stats["by_type"]["branch"] >= 1
 
 
 @pytest.mark.parametrize(

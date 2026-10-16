@@ -19,11 +19,13 @@ from env.runtime.frontend_init import (
 )
 from env.support.env_config import EnvConfig
 from tests.py.icache.directed_dut import (
-    scenarios,
     support,
     programs,
 )
 
+from tests.py.icache.directed_dut import (
+    test_icache_mainpipe_hitpath_closure_dut as hitpath_cases,
+)
 from tests.py.icache.directed_dut import (
     test_icache_mainpipe_partial_closure_dut as protection_cases,
 )
@@ -297,10 +299,19 @@ def test_random_branch_scenarios_preserve_programs_timing_and_replay(
     derived_seed,
 ):
     monkeypatch.setenv("TB_SEED", str(seed))
-    owner = prefetch_cases if scenario == "run_large_loop_multi_segment" else scenarios
+    owner, run_scenario = {
+        "run_multi_branch_random_positions": (
+            hitpath_cases,
+            hitpath_cases._run_multi_branch_positions,
+        ),
+        "run_large_loop_multi_segment": (
+            prefetch_cases,
+            prefetch_cases.run_large_loop_multi_segment,
+        ),
+    }[scenario]
     monkeypatch.setattr(owner, "RunUntilCommitSequence", _CommitWait)
     env = _RecordingEnv()
-    getattr(owner, scenario)(env)
+    run_scenario(env)
 
     load = next(event for event in env.trace if event[0] == "load")
     assert load[1] == 0x80000000

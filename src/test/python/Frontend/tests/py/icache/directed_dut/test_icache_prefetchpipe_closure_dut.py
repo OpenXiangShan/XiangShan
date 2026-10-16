@@ -42,21 +42,22 @@ from env.support import (
     record_scenario,
     scenario_rng,
 )
-from tests.py.icache.directed_dut.scenarios import (
-    run_trained_dual_refill as _run_trained_refill,
-)
 from tests.py.icache.directed_dut.support import (
     SetBackendCanAccept,
     SetIcachePrefetch,
     clear_soft_prefetch as _clear_soft_prefetch,
+    completed_dual_transactions as _completed_dual_transactions,
     read_dut_signal,
+    register_mainpipe_observer as _register_mainpipe_observer,
     restore_predictors as _restore_predictors,
+    run_until as _run_until,
     s0_sampling_window as _s0_sampling_window,
     set_soft_prefetch as _set_soft_prefetch_common,
     trigger_bpu_s3_flush as _trigger_bpu_s3_flush,
     wait_coverage_hits,
     wait_until,
     make_bpu_s3_init_config,
+    make_dual_refill_init_config,
     make_nop_init_config,
     make_overlap2_init_config,
     make_program_init_config,
@@ -88,6 +89,79 @@ _SOFT_BASE = 0x8004_0000
 
 
 logger = logging.getLogger(__name__)
+
+
+def _run_trained_refill(env) -> None:
+    samples = _register_mainpipe_observer(env)
+    initialize_frontend(env, make_dual_refill_init_config(env.config, seed=9508))
+    assert _run_until(
+        env,
+        lambda: any(
+            (
+                item["pattern"] == "hit_hit"
+                for item in _completed_dual_transactions(samples)
+            )
+        ),
+        max_cycles=2000,
+    ), {
+        "reason": "trained loop never issued and delivered two resident blocks",
+        "patterns": _completed_dual_transactions(samples)[-16:],
+        "dual_valid_cycles": sum(
+            (
+                sample["s1_valid"] == 1 and sample["s1_req1_valid"] == 1
+                for sample in samples
+            )
+        ),
+        "dual_fire_cycles": sum(
+            (
+                sample["s1_fire"] == 1 and sample["s1_req1_valid"] == 1
+                for sample in samples
+            )
+        ),
+        "icache": env.icache_agent.get_stats(),
+        "monitor_observations": len(env.monitor.observations),
+        "branch_checker": env.branch_checker.get_stats(),
+    }
+    hit_hit = next(
+        (
+            item
+            for item in reversed(_completed_dual_transactions(samples))
+            if item["pattern"] == "hit_hit"
+        )
+    )
+    assert hit_hit["req0_addr"] != hit_hit["req1_addr"]
+    assert hit_hit["registered_exact"] is True
+    split = len(samples)
+    fencei = getattr(env.dut, "io_fencei", None)
+    assert fencei is not None, {"missing_dut_signal": "io_fencei"}
+    fencei.value = 1
+    env.step(1)
+    fencei.value = 0
+    assert _run_until(
+        env,
+        lambda: any(
+            (
+                item["pattern"] == "miss_miss" and item["registered_exact"]
+                for item in _completed_dual_transactions(samples[split:])
+            )
+        ),
+        max_cycles=2000,
+    ), {
+        "reason": "fence.i did not create a completed dual miss/refill transaction",
+        "patterns": _completed_dual_transactions(samples[split:])[-16:],
+        "icache": env.icache_agent.get_stats(),
+    }
+    miss_miss = next(
+        (
+            item
+            for item in _completed_dual_transactions(samples[split:])
+            if item["pattern"] == "miss_miss" and item["registered_exact"]
+        )
+    )
+    assert int(miss_miss["fire_cycle"]) >= max(
+        (cycle for cycle in miss_miss["registered_cycles"] if cycle is not None)
+    )
+    assert not env.monitor.get_errors()
 
 
 def run_large_loop_multi_segment(env):

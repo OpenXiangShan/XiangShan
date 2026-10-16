@@ -10,26 +10,26 @@ follow in this order when practical:
 4. Check the hardware behavior, checker errors, and intended coverage evidence.
 5. Restore changed test inputs in a fixture teardown or `finally` block.
 
-This directory has three helper modules:
+This directory has two helper modules:
 
 | Module | Responsibility |
 | --- | --- |
 | `support.py` | Startup plans, signal lookup, waits, MainPipe observations, transaction analysis, and runtime controls |
 | `programs.py` | Instruction encoders, program layouts, and address constants |
-| `scenarios.py` | Complete execution flows used by multiple DUT cases |
 
 `support.py` is ordered as signal lookup/coverage waits, MainPipe sampling and
 transaction analysis, runtime controls/loading, then startup steps and plan
 factories. Import program builders and address constants directly from
 `programs.py`; avoid forwarding aliases and alternate startup entry points.
 
-`scenarios.py` currently shares random-position branch execution and trained
-dual-refill execution. The large-loop flow belongs to its PrefetchPipe test,
-asymmetric corrupt refill belongs to its WayLookup test, and protection flows
-belong to the MainPipe partial tests. Single-case flows stay beside the test
-that owns their stimulus and assertions. Test modules retain pytest parameters,
-coverage targets, scenario-specific sampling, stimulus timing, timeout evidence,
-and assertions.
+Complete execution flows stay in their owning DUT test modules, including
+flows reused by several cases within one module. Random-position branch
+execution belongs to the MainPipe hitpath tests; trained dual-refill execution
+and the large-loop flow belong to the PrefetchPipe tests. Asymmetric corrupt
+refill belongs to the WayLookup tests, and protection flows belong to the
+MainPipe partial tests. Keep one local helper for each reused flow. Test
+modules retain pytest parameters, coverage targets, scenario-specific sampling,
+stimulus timing, timeout evidence, and assertions.
 
 The generic DUT layer at `tests/py/support/dut_support.py` owns cycle-limit
 parsing, cached DUT signal lookup, and bounded polling/waits. It has no
