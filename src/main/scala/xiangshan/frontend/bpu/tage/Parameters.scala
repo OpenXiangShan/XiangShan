@@ -42,8 +42,12 @@ case class TageParameters(
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 5,
-    EnableTageTrace:       Boolean = false
-) {}
+    EnableTageTrace:       Boolean = false,
+    // Provider-only prediction experiment; set true to restore alt/base selection.
+    EnableAlt: Boolean = false
+) {
+  require(TableInfos.nonEmpty, "TageParameters: TableInfos cannot be empty")
+}
 
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
@@ -81,4 +85,5 @@ trait HasTageParameters extends HasBpuParameters {
   def NumUsefulCtrSramFolds: Int = tageParameters.NumUsefulCtrSramFolds
 
   def EnableTageTrace: Boolean = tageParameters.EnableTageTrace
+  def EnableAlt:       Boolean = tageParameters.EnableAlt
 }
