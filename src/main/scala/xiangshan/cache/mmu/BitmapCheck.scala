@@ -30,7 +30,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 
 class bitmapReqBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val bmppn = UInt(ppnLen.W)
-    val id = UInt(log2Up(l2tlbParams.llptwsize+2).W)
+    val id = UInt(log2Up(PtwMemReqCount).W)
     val vpn = UInt(vpnLen.W)
     val level = UInt(log2Up(Level).W)
     val way_info = UInt(l2tlbParams.l0nWays.W)
@@ -42,7 +42,7 @@ class bitmapReqBundle(implicit p: Parameters) extends XSBundle with HasPtwConst 
 class bitmapRespBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
     val cf = Bool()
     val cfs = Vec(tlbcontiguous,Bool())
-    val id = UInt(log2Up(l2tlbParams.llptwsize+2).W)
+    val id = UInt(log2Up(PtwMemReqCount).W)
 }
 
 class BitmapWakeup(implicit p: Parameters) extends PtwBundle {
@@ -59,7 +59,7 @@ class bitmapEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val vpn = UInt(vpnLen.W)
   val s2xlate = UInt(2.W)
   val id = UInt(bMemID.W)
-  val wait_id = UInt(log2Up(l2tlbParams.llptwsize+2).W)
+  val wait_id = UInt(log2Up(BitmapSize).W)
   // bitmap check faild? : 0 success, 1 faild
   val cf = Bool()
   val hit = Bool()
@@ -78,7 +78,7 @@ class bitmapIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst 
       val id = Output(UInt(bMemID.W))
       val value = Output(UInt(blockBits.W))
     }))
-    val req_mask = Input(Vec(l2tlbParams.llptwsize+2, Bool()))
+    val req_mask = Input(Vec(BitmapSize, Bool()))
   }
   val req = Flipped(DecoupledIO(new bitmapReqBundle()))
   val resp = DecoupledIO(new bitmapRespBundle())
@@ -125,10 +125,10 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val flush = sfence.valid || csr.satp.changed || csr.vsatp.changed || csr.hgatp.changed || csr.priv.virt_changed
   val bitmap_base = csr.mbmc.BMA << 6
 
-  val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize+2)(0.U.asTypeOf(new bitmapEntry()))))
+  val entries = RegInit(VecInit(Seq.fill(BitmapSize)(0.U.asTypeOf(new bitmapEntry()))))
   // add pmp check
   val state_idle :: state_addr_check :: state_cache_req :: state_cache_resp  ::state_mem_req :: state_mem_waiting :: state_mem_out :: Nil = Enum(7)
-  val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize+2)(state_idle)))
+  val state = RegInit(VecInit(Seq.fill(BitmapSize)(state_idle)))
 
   val is_emptys = state.map(_ === state_idle)
   val is_cache_req = state.map (_ === state_cache_req)
@@ -142,18 +142,18 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
 
   val mem_ptr = ParallelPriorityEncoder(is_having)
-  val mem_arb = Module(new RRArbiterInit(new bitmapEntry(), l2tlbParams.llptwsize+2))
+  val mem_arb = Module(new RRArbiterInit(new bitmapEntry(), BitmapSize))
 
   val bitmapdata = Wire(Vec(blockBits / XLEN, UInt(XLEN.W)))
   bitmapdata := io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, UInt(XLEN.W)))
 
-  for (i <- 0 until l2tlbParams.llptwsize+2) {
+  for (i <- 0 until BitmapSize) {
     mem_arb.io.in(i).bits := entries(i)
     mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
   }
 
-  val cache_req_arb = Module(new Arbiter(new bitmapCacheReqBundle(),l2tlbParams.llptwsize + 2))
-  for (i <- 0 until l2tlbParams.llptwsize+2) {
+  val cache_req_arb = Module(new Arbiter(new bitmapCacheReqBundle(),BitmapSize))
+  for (i <- 0 until BitmapSize) {
     cache_req_arb.io.in(i).valid := is_cache_req(i)
     cache_req_arb.io.in(i).bits.tag := entries(i).ppn
     cache_req_arb.io.in(i).bits.order := i.U;
@@ -166,7 +166,9 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   )
   val dup_req_fire = mem_arb.io.out.fire && dupBitmapPPN(req_real_ppn, mem_arb.io.out.bits.ppn)
   val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w}
-  val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
+  val bitmapRespSlot = Wire(UInt(log2Ceil(BitmapSize).W))
+  bitmapRespSlot := io.mem.resp.bits.id - BitmapMemReqBase.U
+  val dup_wait_resp = io.mem.resp.fire && VecInit(dup_vec_wait)(bitmapRespSlot)
   val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
 
   val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
@@ -251,7 +253,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
       )
       val cm_dup_req_fire = mem_arb.io.out.fire && dupBitmapPPN(entries(i).ppn, mem_arb.io.out.bits.ppn)
       val cm_dup_vec_wait = cm_dup_vec.zip(is_waiting).map{case (d, w) => d && w}
-      val cm_dup_wait_resp = io.mem.resp.fire && VecInit(cm_dup_vec_wait)(io.mem.resp.bits.id - (l2tlbParams.llptwsize + 2).U)
+      val cm_dup_wait_resp = io.mem.resp.fire && VecInit(cm_dup_vec_wait)(bitmapRespSlot)
       val cm_wait_id = Mux(cm_dup_req_fire, mem_arb.io.chosen, ParallelMux(cm_dup_vec_wait zip entries.map(_.wait_id)))
       val cm_to_wait = Cat(cm_dup_vec_wait).orR || cm_dup_req_fire
       val cm_to_mem_out = cm_dup_wait_resp
@@ -295,7 +297,8 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   when (io.mem.resp.fire) {
     state.indices.map{i =>
-      when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id + (l2tlbParams.llptwsize + 2).U) {
+      when (state(i) === state_mem_waiting &&
+        io.mem.resp.bits.id === entries(i).wait_id + BitmapMemReqBase.U(bMemID.W)) {
         state(i) := state_mem_out
         val index = getBitmapAddr(entries(i).ppn)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
         entries(i).data := bitmapdata(index)
@@ -337,7 +340,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   io.mem.req.bits.addr := getBitmapAddr(mem_arb.io.out.bits.ppn)
-  io.mem.req.bits.id := mem_arb.io.chosen + (l2tlbParams.llptwsize + 2).U
+  io.mem.req.bits.id := mem_arb.io.chosen + BitmapMemReqBase.U(bMemID.W)
   mem_arb.io.out.ready := io.mem.req.ready
 
   io.mem.resp.ready := waiting
@@ -363,13 +366,13 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
 
 // add bitmap cache
 class bitmapCacheReqBundle(implicit p: Parameters) extends PtwBundle{
-  val order = UInt((l2tlbParams.llptwsize + 2).W)
+  val order = UInt(BitmapSize.W)
   val tag = UInt(ppnLen.W)
 }
 class bitmapCacheRespBundle(implicit p: Parameters) extends PtwBundle{
   val hit = Bool()
   val cfs = Vec(tlbcontiguous,Bool())
-  val order = UInt((l2tlbParams.llptwsize + 2).W)
+  val order = UInt(BitmapSize.W)
   def apply(hit : Bool, cfs : Vec[Bool], order : UInt) = {
     this.hit := hit
     this.cfs := cfs
