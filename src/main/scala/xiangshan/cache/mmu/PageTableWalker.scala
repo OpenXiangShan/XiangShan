@@ -574,6 +574,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
   }
 
+  when (io.resp.fire) {
+    // After io.resp.fire, full_gvpn_reg is no longer valid. 
+    // Clear it to prevent nonsense guest page fault from it.
+    full_gvpn_reg := 0.U
+  }
 
   when (flush) {
     idle := true.B
