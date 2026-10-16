@@ -823,7 +823,7 @@ module ddr_wrapper (
         .m_rready(rready_mc_ch1)
     );
 
-    baiyang_mc_cosim_channel #(
+    baiyang_channel #(
         .CHANNEL_ID(0)
     ) u_baiyang_ch0 (
         .clk(core_ddrc_core_clk),
@@ -874,7 +874,7 @@ module ddr_wrapper (
         .pslverr(apb_pslverr_ch0)
     );
 
-    baiyang_mc_cosim_channel #(
+    baiyang_channel #(
         .CHANNEL_ID(1)
     ) u_baiyang_ch1 (
         .clk(core_ddrc_core_clk),
@@ -926,7 +926,7 @@ module ddr_wrapper (
     );
 endmodule
 
-module baiyang_mc_cosim_channel #(
+module baiyang_channel #(
     parameter int unsigned CHANNEL_ID = 0
 ) (
     input  logic         clk,

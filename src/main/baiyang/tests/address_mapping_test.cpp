@@ -98,11 +98,11 @@ void expect_failure(const std::string& name, const std::string& contents) {
 int main() {
     try {
         const std::array<const char*, 5> mappings = {
-            "src/main/mc_cosim/address_mapping_baiyang_dual.ini",
-            "src/main/mc_cosim/address_mapping_bank_col_bg.ini",
-            "src/main/mc_cosim/address_mapping_bank_col_bg_channel.ini",
-            "src/main/mc_cosim/address_mapping_bank_col_bg_noch.ini",
-            "src/main/mc_cosim/address_mapping_banklow.ini",
+            "src/main/baiyang/address_mapping_baiyang_dual.ini",
+            "src/main/baiyang/address_mapping_bank_col_bg.ini",
+            "src/main/baiyang/address_mapping_bank_col_bg_channel.ini",
+            "src/main/baiyang/address_mapping_bank_col_bg_noch.ini",
+            "src/main/baiyang/address_mapping_banklow.ini",
         };
         for (const char* path : mappings) {
             test_mapping(path);

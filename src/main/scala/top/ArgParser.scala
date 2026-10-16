@@ -40,7 +40,7 @@ object ArgParser {
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
-      |--with-mc-cosim
+      |--with-baiyang
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
@@ -111,9 +111,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)
           }), tail)
-        case "--with-mc-cosim" :: tail =>
+        case "--with-baiyang" :: tail =>
           nextOption(config.alter((site, here, up) => {
-            case DebugOptionsKey => up(DebugOptionsKey).copy(UseMCCosim = true)
+            case DebugOptionsKey => up(DebugOptionsKey).copy(UseBaiyang = true)
           }), tail)
         case "--with-chiseldb" :: tail =>
           nextOption(config.alter((site, here, up) => {

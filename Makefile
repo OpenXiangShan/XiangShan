@@ -163,10 +163,10 @@ endif
 RELEASE_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 override DEBUG_ARGS += $(MFC_ARGS) $(COMMON_EXTRA_ARGS)
 
-# co-simulation with DRAMsim3 and Baiyang mc-cosim
-MEMORY_BACKEND_COUNT := $(words $(filter 1,$(WITH_DRAMSIM3) $(WITH_MC_COSIM)))
+# memory backends
+MEMORY_BACKEND_COUNT := $(words $(filter 1,$(WITH_DRAMSIM3) $(WITH_BAIYANG)))
 ifneq ($(filter-out 0 1,$(MEMORY_BACKEND_COUNT)),)
-$(error WITH_DRAMSIM3 and WITH_MC_COSIM are mutually exclusive)
+$(error WITH_DRAMSIM3 and WITH_BAIYANG are mutually exclusive)
 endif
 
 ifeq ($(WITH_DRAMSIM3),1)
@@ -176,17 +176,7 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
-# co-simulation with Baiyang DDR wrapper
-MC_COSIM_DIFTEST_ARGS :=
-BAIYANG_HOME ?= $(NOOP_HOME)/YuQuan
-BAIYANG_BUILD_DIR ?= $(BAIYANG_HOME)/build
-BAIYANG_TOP ?= $(BAIYANG_BUILD_DIR)/BY_mc_top.sv
-BAIYANG_EMU_DEPS :=
-ifeq ($(WITH_MC_COSIM),1)
-override SIM_ARGS += --with-mc-cosim
-BAIYANG_EMU_DEPS += baiyang-verilog
-MC_COSIM_DIFTEST_ARGS += WITH_MC_COSIM=1 BAIYANG_HOME=$(BAIYANG_HOME)
-endif
+include scripts/Makefile.baiyang.mk
 
 # SimAXIMem size in GB (for sim-verilog only)
 ifneq ($(SIM_MEM_SIZE),)
@@ -340,19 +330,6 @@ init:
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
 	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
 
-baiyang-init:
-ifeq ($(wildcard $(BAIYANG_HOME)/Makefile),)
-	git submodule update --init $(GIT_FORCE_FLAG) YuQuan
-else
-	@echo "Using existing Baiyang sources at $(BAIYANG_HOME)"
-endif
-
-baiyang-verilog: baiyang-init
-	$(MAKE) -C $(BAIYANG_HOME) clean
-	$(MAKE) -C $(BAIYANG_HOME) verilog
-	cd $(BAIYANG_HOME) && python3 $(NOOP_HOME)/scripts/rename_baiyang.py
-	test -f $(BAIYANG_TOP)
-
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
 init-force:
@@ -379,13 +356,13 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog $(BAIYANG_EMU_DEPS)
-	$(MAKE) -C ./difftest emu-mk SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)" $(MC_COSIM_DIFTEST_ARGS)
+	$(MAKE) -C ./difftest emu-mk SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)" $(BAIYANG_DIFTEST_ARGS)
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(MC_COSIM_DIFTEST_ARGS)
+	$(MAKE) -C ./difftest emu SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(BAIYANG_DIFTEST_ARGS)
 
 emu-run: emu
-	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(MC_COSIM_DIFTEST_ARGS)
+	$(MAKE) -C ./difftest emu-run SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) $(BAIYANG_DIFTEST_ARGS)
 
 gsim: sim-verilog
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)

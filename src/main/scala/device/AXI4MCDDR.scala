@@ -29,7 +29,7 @@ class MCCosimPreloadDoneHelper extends ExtModule with HasExtModuleInline {
   val done  = IO(Output(Bool()))
 
   private val verilogLines = Seq(
-    "import \"DPI-C\" function bit mc_cosim_preload_done();",
+    "import \"DPI-C\" function bit baiyang_preload_done();",
     "",
     "module MCCosimPreloadDoneHelper(",
     "  input  clock,",
@@ -41,7 +41,7 @@ class MCCosimPreloadDoneHelper extends ExtModule with HasExtModuleInline {
     "  if (reset) begin",
     "    done <= 1'b0;",
     "  end else begin",
-    "    done <= mc_cosim_preload_done();",
+    "    done <= baiyang_preload_done();",
     "  end",
     "end",
     "",
