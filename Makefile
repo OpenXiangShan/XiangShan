@@ -176,17 +176,7 @@ endif
 override SIM_ARGS += --with-dramsim3
 endif
 
-# co-simulation with MCSim timing and DifftestMem data
-MCSIM_EMU_DEPS :=
-MCSIM_DIFTEST_ARGS :=
-MCSIM_HOME ?= $(NOOP_HOME)/MCSim
-MCSIM_CPU_FREQ_MHZ ?= 3000
-MCSIM_CXX ?= clang++
-ifeq ($(WITH_MCSIM),1)
-override SIM_ARGS += --with-mcsim
-MCSIM_EMU_DEPS += mcsim-verilator-lib
-MCSIM_DIFTEST_ARGS += WITH_MCSIM=1 MCSIM_HOME=$(MCSIM_HOME) MCSIM_CPU_FREQ_MHZ=$(MCSIM_CPU_FREQ_MHZ)
-endif
+include scripts/Makefile.mcsim.mk
 
 # SimAXIMem size in GB (for sim-verilog only)
 ifneq ($(SIM_MEM_SIZE),)
@@ -339,9 +329,6 @@ init:
 	git submodule update --init $(GIT_FORCE_FLAG)
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
 	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
-
-mcsim-verilator-lib:
-	$(MAKE) -C $(MCSIM_HOME) verilator-lib CXX=$(MCSIM_CXX)
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
