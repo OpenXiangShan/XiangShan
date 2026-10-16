@@ -725,6 +725,12 @@ object AddrTransType {
   }
 }
 
+class CacheErrorType extends Bundle {
+  val ce = Bool()
+  val ued = Bool()
+  val uec = Bool()
+}
+
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
   val source = Output(new Bundle() {
@@ -741,6 +747,8 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
     val atom = Bool()
   })
   val paddr = Output(UInt(PAddrBits.W))
+
+  val errorType = Output(new CacheErrorType)
 
   // report error and paddr to beu
   // bus error unit will receive error info iff ecc_error.valid

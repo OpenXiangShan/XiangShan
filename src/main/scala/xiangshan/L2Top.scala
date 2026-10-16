@@ -163,8 +163,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   // filter out in-core addresses before sent to mmio_port
   // Option[AddressSet] ++ Option[AddressSet] => List[AddressSet]
   private def icacheCtrlAddressOpt: Option[AddressSet] = Option.when(icacheCtrlEnabled)(icacheCtrlAddress)
-  private def dcacheCtrlAddressOpt: Option[AddressSet] = dcacheParameters.cacheCtrlAddressOpt
-  private def cacheAddressSet: Seq[AddressSet] = (icacheCtrlAddressOpt ++ dcacheCtrlAddressOpt).toSeq
+  private def cacheAddressSet: Seq[AddressSet] = icacheCtrlAddressOpt.toSeq
   private def mmioFilters = (if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet) :+ soc.BEURange
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=

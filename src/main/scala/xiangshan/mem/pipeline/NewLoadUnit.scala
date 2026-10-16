@@ -1288,6 +1288,8 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // DCache response
     val dcacheError = Input(Bool())
+    val dcachePoison = Input(Bool())
+    val dcacheReplay = Input(Bool())
 
     // Unalign head from S4
     val unalignConcat = Flipped(ValidIO(new LoadStageIO))
@@ -1360,8 +1362,10 @@ class LoadUnitS3(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val troubleMaker = in.troubleMaker.get
-  val cause = in.cause.get
-  val causeOrR = in.causeOrR.get
+  val eccReplay = troubleMaker && io.dcacheReplay
+  val cause = WireInit(in.cause.get)
+  cause(C_DR) := in.cause.get(C_DR) || eccReplay
+  val causeOrR = cause.asUInt.orR
   val shouldReplay = causeOrR || in.shouldFastReplay.get
 
   assert(!pipeIn.valid || !accessType.isHwPrefetch(), "HwPrefetch should be killed in S2")
@@ -1416,7 +1420,8 @@ class LoadUnitS3(param: ExeUnitParams)(
     *
     * Noted that exception can affect control signals for wakeup and writeback
     */
-  val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
+  val dcacheError = io.csrCtrl.cache_error_enable && troubleMaker &&
+    (io.dcachePoison || EnableAccurateLoadError.B && io.dcacheError)
   val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
   val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
   val exceptionVec = ExceptSparseVec.mux2(
@@ -1438,8 +1443,8 @@ class LoadUnitS3(param: ExeUnitParams)(
     in.tlbException.get.vaNeedExt
   )
 
-  val s3ShouldWakeup = in.shouldWakeup.get && !dcacheError
-  val s3ShouldWriteback = in.shouldWriteback.get || dcacheError
+  val s3ShouldWakeup = in.shouldWakeup.get && !dcacheError && !eccReplay
+  val s3ShouldWriteback = (in.shouldWriteback.get || dcacheError) && !eccReplay
   val shouldWakeup = s3ShouldWakeup && (!s4HeadValid || s4HeadShouldWakeup)
   val shouldWriteback = Mux(
     s4HeadValid,
@@ -1463,7 +1468,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   )
   val allowRRBankConflictFastReplay = !rrBankConflictFastReplayCandidate || rrBankConflictFastReplayGrant
   val allowFastReplay = io.fastReplay.ready && allowRRBankConflictFastReplay
-  val doFastReplay = shouldFastReplay && allowFastReplay
+  val doFastReplay = shouldFastReplay && allowFastReplay && !eccReplay
   val fastReplay = Wire(new FastReplayIO)
   connectSamePort(fastReplay, in)
   fastReplay.cause.get := 0.U.asTypeOf(fastReplay.cause.get)
@@ -2146,6 +2151,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // S3
   s3.io.redirect := io.redirect
   s3.io.dcacheError := io.dcache.resp.bits.error_delayed
+  s3.io.dcachePoison := io.dcache.resp.bits.tl_error_delayed.asUInt.orR
+  s3.io.dcacheReplay := io.dcache.resp.bits.ecc_replay_delayed
   io.ldout <> s3.io.ldout
   io.vldout := s3.io.vldout
   io.lqWrite <> s3.io.lqWrite

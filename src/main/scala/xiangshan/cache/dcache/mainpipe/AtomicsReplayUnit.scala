@@ -73,6 +73,12 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req := DontCare
     pipe_req.miss := false.B
     pipe_req.probe := false.B
+    pipe_req.local_evict := false.B
+    pipe_req.local_evict_probe := false.B
+    pipe_req.local_evict_tag := false.B
+    pipe_req.local_evict_clean_only := false.B
+    pipe_req.local_evict_way_en := 0.U
+    pipe_req.local_evict_enc_tag := 0.U
     pipe_req.probe_need_data := false.B
     pipe_req.source := AMO_SOURCE.U
     pipe_req.cmd    := req.cmd
