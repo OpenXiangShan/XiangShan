@@ -24,11 +24,9 @@ import freechips.rocketchip.tilelink.TLBundleD
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
-import utility.Constantin
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
-import xiangshan.XSCoreParamsKey
 
 class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModule with ICacheAddrHelper {
   class ICacheMissUnitIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
@@ -89,7 +87,6 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   prefetchDemux.io.in <> io.prefetchReq
   prefetchDemux.io.in.valid := io.prefetchReq.valid && !prefetchHit
   io.prefetchReq.ready      := prefetchDemux.io.in.ready || prefetchHit
-  acquireArb.io.in.last <> prefetchArb.io.out
 
   // mem_acquire connect
   io.memAcquire.valid     := acquireArb.io.out.valid
@@ -97,8 +94,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   acquireArb.io.out.ready := io.memAcquire.ready
 
   private val allMshr = (0 until NumAllMshr).map { i =>
-    val isFetch = i < NumFetchMshr
-    val mshr    = Module(new ICacheMshr(edge, isFetch, i))
+    val mshr = Module(new ICacheMshr(edge, i))
     mshr.io.fencei               := io.fencei
     mshr.io.wfi.wfiReq           := io.wfi.wfiReq
     mshr.io.lookUps(0).req.valid := io.fetchReq.valid
@@ -106,7 +102,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     mshr.io.lookUps(1).req.valid := io.prefetchReq.valid
     mshr.io.lookUps(1).req.bits  := io.prefetchReq.bits
     mshr.io.victimWay            := io.victim.resp.way
-    if (isFetch) {
+    if (mshr.isFetch) {
       mshr.io.flush := false.B
       mshr.io.req <> fetchDemux.io.out(i)
       acquireArb.io.in(i) <> mshr.io.acquire
@@ -117,6 +113,8 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     }
     mshr
   }
+
+  acquireArb.io.in.last <> prefetchArb.io.out
 
   /**
     ******************************************************************************
@@ -203,7 +201,7 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     * invalid mshr when finish transition
     ******************************************************************************
     */
-  (0 until NumAllMshr).foreach(i => allMshr(i).io.invalid := lastFireNext && (idNext === i.U))
+  allMshr.foreach(mshr => mshr.io.finish := lastFireNext && idNext === mshr.id.U)
 
   /* *****************************************************************************
    * respond to fetch and write SRAM
@@ -264,14 +262,18 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
   io.wfi.wfiSafe := allMshr.map(_.io.wfi.wfiSafe).reduce(_ && _)
 
   /* *** perf *** */
-  // Total requests, duplicate requests will be excluded.
+  // Valid requests (Total - Duplicate)
   XSPerfAccumulate("enqFetchReq", fetchDemux.io.in.fire)
   XSPerfAccumulate("enqPrefetchReq", prefetchDemux.io.in.fire)
 
-  // Duplicate requests
+  // Duplicated requests
   XSPerfAccumulate("duplicateFetchReq", fetchHit)
   XSPerfAccumulate("duplicatePrefetchReq", prefetchHit) // includes prefetchHitFetchReq
   XSPerfAccumulate("prefetchHitFetchReq", prefetchHitFetchReq)
+
+  // Sent requests (Total - Duplicated - Cancelled)
+  XSPerfAccumulate("sentFetchReq", io.memAcquire.fire && io.memAcquire.bits.source < NumFetchMshr.U)
+  XSPerfAccumulate("sentPrefetchReq", io.memAcquire.fire && io.memAcquire.bits.source >= NumFetchMshr.U)
 
   // Mshr occupancy
   XSPerfHistogram(
@@ -279,14 +281,23 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
     PopCount(fetchDemux.io.out.map(_.ready)),
     true.B,
     0,
-    NumFetchMshr
+    NumFetchMshr + 1 // emptyCnt can be [0, NumMshr], but XSPerfHistogram accepts [start, end), so +1 here
   )
   XSPerfHistogram(
     "prefetchMshrEmptyCnt",
     PopCount(prefetchDemux.io.out.map(_.ready)),
     true.B,
     0,
-    NumPrefetchMshr
+    NumPrefetchMshr + 1 // same +1 here
+  )
+
+  XSPerfHistogram(
+    "responseLatency",
+    MuxCase(0.U, allMshr.map(mshr => (idNext === mshr.id.U) -> mshr.io.perf_latency)),
+    lastFireNext,
+    0,
+    200,
+    10
   )
 
   // missTrace
