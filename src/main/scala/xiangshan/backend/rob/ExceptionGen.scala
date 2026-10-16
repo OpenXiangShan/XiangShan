@@ -105,6 +105,9 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val varith_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
 
   // Zicfilp: landing-pad label checks write back through the jump unit.
+  // LPAD 阅读：非零标签不匹配来自 JumpUnit 的执行写回，必须加入现有最老异常选择。
+  // 缺少/不对齐 LPAD 的错误则从上面的 Decode 入队异常进入；两路最终都由 ROB 精确处理。
+  // 后面的年龄选择/redirect 过滤可丢弃错误推测路径的异常，执行单元不会直接进入 handler。
   val jmp_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.exists(_.isJmp)).map(_._1)
   val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, jmp_wb).filter(_.nonEmpty)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))

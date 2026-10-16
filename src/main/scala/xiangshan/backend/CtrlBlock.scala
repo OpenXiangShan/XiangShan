@@ -457,6 +457,8 @@ class CtrlBlockImp(
   }
 
   // Zicfilp architectural ELP follows only instructions that actually commit.
+  // LPAD 阅读：提交侧接线。isCommit 排除 ROB walk；Decode/执行完成都不能直接更新架构 ELP。
+  // 先读 archZicfilp.scala 的一位状态，再沿 rob.io.ZicfilpELP 到 Rob.scala 看 trap 快照。
   val archZicfilp = Option.when(HasZicfilp)(Module(new ArchZicfilp))
   archZicfilp.foreach { arch =>
     for (i <- 0 until CommitWidth) {
@@ -465,6 +467,7 @@ class CtrlBlockImp(
       arch.io.commitLPAD(i) := rob.io.commits.info(i).ZicfilpLPAD.get
     }
     arch.io.enable := io.fromCSR.toDecode.enableZicfilp.get
+    // ROB 先捕获旧 ELP，再在这个已寄存的 exception.valid 周期请求架构态清零。
     arch.io.trap := rob.io.exception.valid
     arch.io.xret.valid := s1_s3_redirect.valid && s1_s3_redirect.bits.ZicfilpXRetValid.get
     arch.io.xret.bits := s1_s3_redirect.bits.ZicfilpRetELP.get
@@ -518,6 +521,8 @@ class CtrlBlockImp(
 
   // Zicfilp
   if (HasZicfilp) {
+    // LPAD 阅读：redirect 恢复路径。当前拍与延迟拍请求可能交叠，先按 ROB 年龄选最老者。
+    // 错误路径曾在 Decode 设置/清除过 specELP，不能在 flush 后原样继续使用那个状态。
     val decodeRedirectCandidates = Seq(s1_s3_redirect, s2_s4_redirect)
     val decodeOldestRedirectOH = Redirect.selectOldestRedirect(decodeRedirectCandidates)
     val decodeOldestRedirect = Mux1H(decodeOldestRedirectOH, decodeRedirectCandidates)
@@ -525,6 +530,8 @@ class CtrlBlockImp(
     val enableZicfilp = io.fromCSR.toDecode.enableZicfilp.get
 
     decode.in.ZicfilpRedirect.get.valid := decodeHasNewRedirect
+    // 合法 xRET 用本次返回的 RetELP；受保护 JALR 且 LPE=1 恢复 1，重新检查正确目标。
+    // 当前其他 redirect 恢复 0，依赖现有重定向类型/边界约束，并没有通用 ELP checkpoint 数组。
     decode.in.ZicfilpRedirect.get.bits := Mux(
       decodeOldestRedirect.bits.ZicfilpXRetValid.get,
       decodeOldestRedirect.bits.ZicfilpRetELP.get,
@@ -725,6 +732,9 @@ class CtrlBlockImp(
     }
   }
 
+  // LPAD 阅读：PipelineConnect 内含 payload 寄存器，只在 Decode 输出 fire 时锁存整条 uop。
+  // 因而 stall 时 LPADValid 可持续为 1，却不会被重复接收；恢复接收的沿将这个标志保存下来，
+  // 同一沿 Spec 可以清 ELP。以后执行用已保存的标志，不能拿实时 ELP 代替。
   private val decodePipeRename = Wire(Vec(RenameWidth, DecoupledIO(new DecodeOutUop)))
   for (i <- 0 until RenameWidth) {
     PipelineConnect(decode.out.uop(i), decodePipeRename(i), rename.io.in(i).ready,

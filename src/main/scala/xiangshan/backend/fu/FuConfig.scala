@@ -245,6 +245,7 @@ object FuConfig {
       Seq(IntData()), // jal -> Seq(ja, link)
     ),
     piped = true,
+    // LPAD 阅读：Imm_U 让 AUIPC/LPAD 的 20 位标签可在 JumpUnit 输入处重建，供 [31:12] 比较。
     immType = Set(Imm_I(), Imm_J(), Imm_U()),
   )
 

@@ -51,6 +51,8 @@ case class Imm_B() extends Imm(12, SelImm.IMM_SB) {
 }
 
 case class Imm_U() extends Imm(20, SelImm.IMM_U) {
+  // LPAD 复用这条 U 型立即数通路：Decode 只存 inst[31:12] 的 20 位标签，执行前补低 12 位 0。
+  // lpad 0x12345 的指令为 0x12345017；提取得 0x12345，重建得 0x12345000，opcode 不参与比较。
   override def do_toImm32(minBits: UInt): UInt = Cat(minBits(len - 1, 0), 0.U(12.W))
 
   override def minBitsFromInstr(instr: UInt): UInt = {

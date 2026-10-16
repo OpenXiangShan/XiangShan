@@ -130,6 +130,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   csrMod.io.fromRob.trap.valid := csrIn.exception.valid
   csrMod.io.fromRob.trap.bits.pc := csrIn.exception.bits.pc
+  // LPAD 阅读：连同 PC/异常一起传递 ROB 锁存的旧 ELP，不在此处重新采样实时状态。
   csrMod.io.fromRob.trap.bits.ZicfilpELP.zip(csrIn.exception.bits.ZicfilpELP).foreach { case (sink, source) => sink := source }
   csrMod.io.fromRob.trap.bits.instr := csrIn.exception.bits.instr
   csrMod.io.fromRob.trap.bits.pcGPA := csrIn.exception.bits.gpaddr
@@ -362,6 +363,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.backendIGPF := csrMod.io.xretTargetPc.bits.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.isMisPred := false.B
+  // LPAD 阅读：只有合法返回才携带 ELP 恢复语义；非法/虚拟指令异常的 xRET 不能恢复状态。
+  // RetELP 已在 NewCSR 按“返回目标模式的 LPE”算好，与这次返回目标/redirect 一起传递。
   val legalXRetOut = io.out.valid && isXRetReg && !csrModOut.EX_II && !csrModOut.EX_VI
   redirect.ZicfilpXRetValid.foreach(_ := legalXRetOut)
   redirect.ZicfilpRetELP.foreach(_ := csrModOut.retELP.getOrElse(false.B))

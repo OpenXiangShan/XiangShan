@@ -200,6 +200,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
       sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
       // Zicfilp
+      // LPAD 阅读：手工组装 FU 当前输入时显式传递检查标志，JumpUnit 据此选择标签检查语义。
       sink.bits.ctrl.ZicfilpInfos.foreach(x => x := source.bits.ctrl.ZicfilpInfos.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
       sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
@@ -237,6 +238,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       sink.frm.foreach(_ := source.ctrl.frm.get)
       // Zicfilp
+      // 流水控制也携带同一份 uop 元数据；不能在此处用实时 ELP 重新计算 LPADValid。
       sink.ZicfilpInfos.foreach(x => x := source.ctrl.ZicfilpInfos.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)

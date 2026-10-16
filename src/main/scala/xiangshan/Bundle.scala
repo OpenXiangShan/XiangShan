@@ -84,9 +84,11 @@ object RSFeedbackType {
   }
 }
 
-// Zicfilp
+// LPAD 阅读：随 uop 穿过 Rename/Issue/EXU 的两位控制，不保存 20 位标签或 x7 数据。
 class ZicfilpInfo(implicit p: Parameters) extends XSBundle {
+  // 原指令是受保护 JALR：设置 ELP，并为执行 redirect 提供恢复语义。
   val ZicfilpJalr = Bool()
+  // 当前 LPAD 必须检查标签：已结合 Decode 时的 LPE/推测 ELP，之后按 uop 保存。
   val ZicfilpLPADValid = Bool()
 }
 
@@ -229,6 +231,8 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val debugIsMemVio = Bool()
 
   // Zicfilp
+  // ELP 恢复元数据：受保护 JALR 恢复 1；合法 xRET 使用随请求携带的 RetELP。
+  // 恢复值与 redirect 一起走流水，不在这里保存指令标签。
   val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
   val ZicfilpXRetValid = OptionWrapper(HasZicfilp, Bool())
   val ZicfilpRetELP = OptionWrapper(HasZicfilp, Bool())

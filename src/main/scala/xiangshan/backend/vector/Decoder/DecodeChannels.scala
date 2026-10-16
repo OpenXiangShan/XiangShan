@@ -97,6 +97,8 @@ class DecodeChannels(
 //  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
   val simpleDecodeChannelM2: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, simpleExts))
+  // LPAD 阅读：当前 AUIPC(含 rd=x0) 命中 Simple 通道；Pseudo 的 uopTable 没有 LPAD。
+  // 每个输入位置的各 decoder 并行观察指令，选择/缓冲后才在 DecodeStage 做 LPAD 控制覆盖。
   val pseudoDecodeChannel: Definition[PseudoDecodeChannel] = Definition(new PseudoDecodeChannel())
   val scalarMultiUopDecodeChannel = Option.when(scalarMultiUopInsts.nonEmpty)(
     Definition(new ScalarMultiUopDecodeChannel(scalarMultiUopInsts, scalarMultiUopExts)))
@@ -165,6 +167,8 @@ class DecodeChannels(
 
   // should be 0~7
   val uopBufferNumNext = Wire(UInt(log2Up(uopBufferSize).W))
+  // LPAD stall：下游不接收且没有 redirect 时，有效数量寄存器保持，不能提前丢掉 jr 等余下 uop。
+  // redirect 则优先把有效数量置 0；buffer 的旧数据即使还在寄存器中，也不再是有效指令。
   val uopBufferNum = RegEnable(uopBufferNumNext, 0.U(log2Up(uopBufferSize).W), out.uops.head.valid && in.renameCanAccept || in.redirect)
 
   val uopBufferValid = Wire(Vec(uopBufferSize, Bool()))
@@ -268,6 +272,7 @@ class DecodeChannels(
   }
 
   uopBufferNumNext := Mux(in.redirect, 0.U, uopBufferCtrlDecoder.out.uopBufferNum)
+  // 只有接收当前输出组时才改写剩余 uop 的 buffer 内容；ready=0 时内容也保持。
   uopBufferUpdateVec := uopBufferCtrlDecoder.out.bufferValids.map(_ && in.renameCanAccept)
   uopBufferValid := uopBufferCtrlDecoder.out.bufferValids
 
@@ -321,6 +326,7 @@ class DecodeChannels(
 
 
   for (i <- 0 until mopWidth) {
+    // ready=0 反压到输入，上游继续保留尚未被接收的指令；Spec 的 fire 同时为 0。
     in.mops(i).ready := uopBufferCtrlDecoder.out.acceptVec(i) && in.renameCanAccept
   }
 

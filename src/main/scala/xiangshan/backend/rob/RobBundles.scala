@@ -262,7 +262,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownCancelSource.foreach(_ := IQCancelSource.none)
     robEntry.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
     robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
-    // Zicfilp
+    // LPAD 阅读：入队时保存指令类别，提交时再由 ArchZicfilp 按顺序改变 ELP。
+    // 保存的是 LPAD 分类，不是瞬时 LPADValid 或标签值；标签失败通过异常阻止提交。
     robEntry.ZicfilpJalr.zip(robEnq.ZicfilpInfos).foreach { case (sink, source) =>
       sink := source.ZicfilpJalr
     }
@@ -301,7 +302,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.basicDebug.foreach(_ := robEntry.basicDebug.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
     robCommitEntry.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
-    // Zicfilp
+    // 类别从 ROB 条目复制到提交接口；是否真的提交还由 CtrlBlock 的 commitValid 门控。
     robCommitEntry.ZicfilpJalr.zip(robEntry.ZicfilpJalr).foreach { case (sink, source) =>
       sink := source
     }

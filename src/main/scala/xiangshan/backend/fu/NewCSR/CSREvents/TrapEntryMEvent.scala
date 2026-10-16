@@ -110,6 +110,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     (tvalFillPcPlus2                   ) -> (trapPC + 2.U),
     (tvalFillMemVaddr || isLSGuestExcp ) -> trapMemVA,
     (tvalFillInst                      ) -> trapInst,
+    // LPAD 的 software-check 使用 cause=18，tval=2 标识 landing-pad fault。
     (isZicfilp                         ) -> 2.U,
   ))
 
@@ -146,6 +147,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
   out.mstatus.bits.MDT          := 1.U
+  // LPAD 阅读：把 trap 前架构 ELP 的快照保存为 MPELP，MRET 再按返回模式 LPE 决定是否恢复。
+  // handler 使用的实时 archELP 在另一模块清为 0；保存字段与实时状态是两个不同寄存器。
   out.mstatus.bits.MPELP        := current.ZicfilpELP.getOrElse(false.B)
   out.mepc.bits.epc             := Mux(satpFlushFirstFetchFault,
                                     trapPC(63, 1),

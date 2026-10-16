@@ -27,7 +27,8 @@ object NumWbField extends DecodeField[InstPattern, UInt] {
             // HSV_B, HSV_H, HSV_W, HSV_D,
             case HyperStoreInstPattern() => 2
           }
-          // JAL, JALR, AUIPC if rd not zero (RD==0 is in PseudoDecodeChannel, not here)
+          // JAL/JALR rd≠0 拆成 link+jump；rd=0 由 Pseudo 通道只生成一条 jump。
+          // AUIPC(含 rd=0) 仍在 Simple 通道，只有一条 uop/一次完成回写，不在下面集合中。
           case inst if numWbIs2IfRdNotZeroInsts.contains(inst.name) => 2
           case _: CboInstPattern => 2
           case _ => 1

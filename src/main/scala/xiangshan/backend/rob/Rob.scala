@@ -911,6 +911,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exceptionDebug = debugMeta(exceptionUop)
   io.exception.valid := RegNext(exceptionHappen)
   io.exception.bits.pc := RegEnable(exceptionDebug.pc, exceptionHappen)
+  // LPAD 阅读：在 exceptionHappen 这一拍末沿捕获“异常边界的旧架构 ELP”。
+  // 例：JALR 已提交、LPAD 错误或尚未提交，则旧值=1，即使 Decode 的 specELP 已经是 0。
+  // 下一拍 exception.valid=1 使 ArchZicfilp 请求清零，之后 CSR 仍用此 payload 快照保存 xPELP。
+  // 若 CSR 改读届时的实时 archELP，可能拿到已清零的 0，导致 xRET 漏掉入口检查。
   io.exception.bits.ZicfilpELP.foreach(_ := RegEnable(io.ZicfilpELP.get, exceptionHappen))
   io.exception.bits.gpaddr := io.readGPAMemData.gpaddr
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE

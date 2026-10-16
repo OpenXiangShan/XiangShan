@@ -490,6 +490,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
+    // LPAD stall：各位置共用同一 ready 条件。Decode/Spec 依赖整组按序接收，不能让年轻 LPAD 越过老指令。
     io.in(i).ready := !io.in(0).valid || canOut
 
     uops(i).robIdx := robIdxHead.addEntries(PopCount(io.in.zip(isEntryTailLane).take(i).map { case (in, isEntryTail) =>
@@ -552,6 +553,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).dirtyFs := io.in(i).bits.fpWen
     uops(i).dirtyVs := io.in(i).bits.dirtyVs
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
+    // LPAD 阅读：Decode 已设 srcType0=整数寄存器、lsrc0=7，这里选择 RAT 返回的 x7 物理编号。
+    // 例如返回 p42，表示要读/等待编号 42；此时不是读出 x7 的数据 0x12345000。
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(intReadPortsData(i)(1), fpReadPortsData(i)(1), vecReadPortsData(i)(1)))
     uops(i).psrc(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(fpReadPortsData(i)(2), vecReadPortsData(i)(2)))
@@ -746,6 +749,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // psrc(n) + pdest(1)
   // bypassCond(j)(i)(k): src(j) of uop(i) depends on dest of uop(k)
+  // LPAD 阅读：同一拍较老 LUI 写 x7、较年轻 LPAD 读 x7 时，RAT 可能仍给出拍初旧映射 p20。
+  // 这里比较 ldest/lsrc，再将 LUI 新分配的 pdest=p42 旁路给 LPAD.psrc0。
+  // 这是“物理编号旁路”，不要求 LUI 已算出结果；实际数据稍后由 Issue/Datapath 等待和读取。
   val bypassCond: Vec[MixedVec[UInt]] = Wire(Vec(numRegSrc, MixedVec(List.tabulate(RenameWidth-1)(i => UInt((i+1).W)))))
   // bypassCondV0(i)(k): v0 of uop(i) depends on destV0 of uop(k)
   val bypassCondV0: MixedVec[UInt] = Wire(MixedVec(Seq.tabulate(RenameWidth - 1)(i => UInt((i + 1).W))))
@@ -768,6 +774,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         val indexMatch = in.bits.ldest === lsrc
         val writeMatch = intRen && needIntDest(k) || fpRen && needFpDest(k) || vecRen && needVecDest(k)
         // Break false dependency: link uop's dest should not bypass to jr uop's psrc(0)
+        // 仅豁免同一跳转拆分产生的 link→jr 假依赖。LPAD 的 isJ/isJr=0，不在这项豁免中：
+        // jalr x7,0(x10) 的 link 会写 x7，目标 LPAD 必须依赖这个新版本，读到返回地址。
         val linkToJrFalseDep = (srcIdx == 0).B && (k == i - 1).B &&
           (in.bits.isJ || in.bits.isJr) && in.bits.firstUop && !in.bits.lastUop &&
           (io.in(i).bits.isJ || io.in(i).bits.isJr) && io.in(i).bits.lastUop && !io.in(i).bits.firstUop
@@ -778,6 +786,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     bypassCondV0(i - 1) := VecInit(io.in.take(i).map(_.bits.v0Wen && io.in(i).bits.v0Ren)).asUInt
     bypassCondVl(i - 1) := VecInit(io.in.take(i).map(_.bits.vlWen && io.in(i).bits.vlRen)).asUInt
     // For the LUI instruction: psrc(0) is from register file and should always be zero.
+    // 从老到年轻折叠匹配项，最后一个匹配者获胜，即程序顺序上最近的更老生产者。
+    // LPAD 的 psrc 一经保存进下游条目，就不会随年轻指令再次改写 x7 的 RAT 映射而变化。
     io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
       (z, next) => Mux(next._2, next._1, z)
     })

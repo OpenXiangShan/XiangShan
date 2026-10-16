@@ -24,6 +24,9 @@ object CanRobCompressField extends BoolDecodeField[InstPattern] {
 
   }
 
+  // LPAD 阅读：这是让 canRobCompress 字段取 0 的“指令名”集合，AUIPC 在其中。
+  // 宏在生成译码表时取名字；运行时硬件没有字符串查询，也不据此选 Simple/Pseudo 通道。
+  // 本分支用该位参与高密度 ROB 的 simple 分类；LPAD 独立条目另由 CompressUnit.changesELP 保证。
   val falseInsts: Set[String] = getVariableNameSeq(
     LB, LBU, LH, LHU, LW, LWU, LD,
     SB, SH, SW, SD,

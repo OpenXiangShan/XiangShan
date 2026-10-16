@@ -894,6 +894,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.iMode.PRVM := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.PRVM, PRVM)
         in.iMode.V := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.V, V)
+        // LPAD 阅读：ROB trap 使用随异常锁存的旧 ELP；此刻实时 archELP 可能已为 handler 清零。
+        // 该值随后进入 TrapEntryM/HS/VS 等事件，写入对应 CSR 的 xPELP 保存字段。
         in.ZicfilpELP.foreach { sink =>
           sink := Mux(hasTrap, io.fromRob.trap.bits.ZicfilpELP.get, io.ZicfilpELP.getOrElse(false.B))
         }
@@ -1080,6 +1082,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
 
   // Zicfilp: younger instructions may already have been decoded with the old xLPE value.
+  // LPAD 阅读：LPE 改值时 flush 年轻指令，使它们按新 enable 重新译码。
+  // 仅改 CSR 位不足以撤回队列/流水寄存器里已经形成的旧 LPADValid 和异常控制。
   val zicfilpLPEChange = if (HasZicfilp) {
     Seq(
       mseccfg.w.wen && mseccfg.w.wdataFields.MLPE =/= mseccfg.regOut.MLPE,
@@ -1208,6 +1212,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     waitIMSICValid -> imsic_EX_VI,
   )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := flushPipe
+  // LPAD 阅读：返回时恢复 ELP = 保存的 xPELP && 返回目标模式的 LPE。
+  // 必须使用 xRET 算出的目标特权级/虚拟化状态，不能使用 handler 当前模式的 enable。
   io.out.bits.retELP.foreach { out =>
     def targetLPE(targetPrv: UInt, targetVirtual: Bool): Bool = MuxCase(false.B, Seq(
       (targetPrv === PrivMode.M.asUInt) -> mseccfg.regOut.MLPE.asBool,
@@ -1223,6 +1229,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       legalSret  -> (sretPELP && targetLPE(sretEvent.out.privState.bits.PRVM.asUInt, sretEvent.out.privState.bits.V.asBool)),
       legalDret  -> (dcsr.regOut.PELP.asBool && targetLPE(dretEvent.out.privState.bits.PRVM.asUInt, dretEvent.out.privState.bits.V.asBool)),
     ))
+    // 返回事件可能清除 CSR 中的 xPELP；先随本次事务保存算出的恢复值，之后随 redirect 传出。
     out := DataHoldBypass(restoredELP, false.B, normalCSRValid)
   }
 
@@ -1649,6 +1656,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.SSEVec.senvcfgSSE := (if (HasShadowStack) RegNext(senvcfg.regOut.SSE.asUInt) else DontCare)
 
   // Zicfilp
+  // LPAD 阅读：运行时使能信号的来源。按当前特权级选择对应 CSR 的 LPE，送往 Decode/提交侧。
+  // 这是 1 位模式选择逻辑；HasZicfilp=false 时整个可选接口不生成。
   io.toDecode.enableZicfilp.foreach { enable =>
     enable := MuxCase(false.B, Seq(
       isModeM  -> mseccfg.regOut.MLPE.asBool,

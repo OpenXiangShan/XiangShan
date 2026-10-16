@@ -110,6 +110,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := intRFBankRen(iqIdx)(exuIdx).get(srcIdx).asUInt.orR
           arbInSeq(srcIdx).bits.bankValidVec.foreach(_ := intRFBankRen(iqIdx)(exuIdx).get(srcIdx))
+          // LPAD 阅读：若取寄存器数据，这里把绑定的 x7 物理编号送入已有读端口仲裁器。
+          // 例如 psrc0=42 就读 p42；最终实际数据还可由 BypassNetwork 选择执行结果旁路。
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx
