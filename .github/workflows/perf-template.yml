@@ -65,7 +65,7 @@ jobs:
           fi
 
       - name: Checkout code at specific commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
           fetch-depth: 0
