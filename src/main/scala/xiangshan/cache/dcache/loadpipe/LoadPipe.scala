@@ -588,7 +588,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // Report tag, data, and L2 errors with their physical address.
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   io.error.bits.paddr := s3_paddr
-  io.error.bits.report_to_beu := io.error.valid && (io.error.bits.source.tag || io.error.bits.source.data)
   io.error.bits.errorType.ce := s3_ce
   io.error.bits.errorType.ued := false.B
   io.error.bits.errorType.uec := s3_uec || s3_flag_error

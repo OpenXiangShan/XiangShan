@@ -101,7 +101,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2PfCtrl = Output(new PrefetchCtrlFromCore)
     val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
-    val beu_errors = Output(new XSL1BusErrors())
+    val reri_errors = Output(new XSRERIErrors())
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
@@ -192,7 +192,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.outer_reset_vector := io.reset_vector
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
-  memBlock.io.inner_beu_errors_icache <> frontend.io.error
+  memBlock.io.inner_reri_errors_icache <> frontend.io.error
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
@@ -246,10 +246,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   io.teemsiAck zip memBlock.io.outer_teemsi_ack foreach { case (io_teemsiAck, memBlock_outer_teemsi_ack) =>
     io_teemsiAck := memBlock_outer_teemsi_ack
   }
-  io.beu_errors.icache <> memBlock.io.outer_beu_errors_icache
-  io.beu_errors.dcache <> memBlock.io.dcacheError
-  io.beu_errors.uncache <> memBlock.io.uncacheError
-  io.beu_errors.l2 <> DontCare
+  io.reri_errors.icache <> memBlock.io.outer_reri_errors_icache
+  io.reri_errors.dcache <> memBlock.io.dcacheError
+  io.reri_errors.uncache <> memBlock.io.uncacheError
+  io.reri_errors.l2 <> DontCare
   io.l2PfCtrl := memBlock.io.outer_l2PfCtrl
 
   memBlock.io.resetInFrontendBypass.fromFrontend := frontend.io.resetInFrontend

@@ -1282,7 +1282,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s3_refill_resp := s3_fire && s3_req.miss
   XSError(s2_valid && s2_way_en.andR, "s2_way_en should not be all 1")
 
-  // Report the error to BEU and the cache-error CSR one cycle after the data response.
+  // Report the error to RERI and the cache-error CSR one cycle after the data response.
   io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
   val s2_probe_tag_ce = s2_req.probe && s2_need_tag && !s2_probe_tag_uec &&
     Mux(s2_req.local_evict, (s2_tag_correctable & s2_way_en).orR,
@@ -1294,7 +1294,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_uec_event = s3_error_beu && GatedValidRegNext(s2_fire && !s2_should_not_report_ecc_error)
   val s3_ce_event = (s3_tag_ce_event || s3_data_ce_event) && !s3_uec_event
   io.error.valid := s3_ce_event || s3_uec_event
-  io.error.bits.report_to_beu := io.error.valid && (io.error.bits.source.tag || io.error.bits.source.data)
   io.error.bits.errorType.ce := s3_ce_event
   io.error.bits.errorType.ued := false.B
   io.error.bits.errorType.uec := !s3_ce_event && s3_error_beu

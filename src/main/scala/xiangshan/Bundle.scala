@@ -748,17 +748,19 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   })
   val paddr = Output(UInt(PAddrBits.W))
 
+  // RERI error classifications are mutually exclusive for one event.
   val errorType = Output(new CacheErrorType)
 
-  // report error and paddr to beu
-  // bus error unit will receive error info iff ecc_error.valid
-  val report_to_beu = Output(Bool())
-
-  def toL1BusErrorUnitInfo(valid: Bool): L1BusErrorUnitInfo = {
-    val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := valid && report_to_beu
-    beu_info.ecc_error.bits := paddr
-    beu_info
+  def toRERIErrorInfo(valid: Bool): RERIErrorInfo = {
+    val reriInfo = Wire(new RERIErrorInfo)
+    reriInfo.ecc_error.valid := valid
+    reriInfo.ecc_error.bits := paddr
+    reriInfo.errorType.ce := valid && errorType.ce
+    reriInfo.errorType.ued := valid && errorType.ued
+    reriInfo.errorType.uec := valid && errorType.uec
+    reriInfo.tag := valid && source.tag
+    reriInfo.data := valid && source.data
+    reriInfo
   }
 }
 

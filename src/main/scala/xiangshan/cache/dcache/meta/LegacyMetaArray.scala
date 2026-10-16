@@ -91,7 +91,6 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
     cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
   })
-  io.error.bits.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
   io.error.bits.errorType.ce := false.B
   io.error.bits.errorType.ued := false.B
   io.error.bits.errorType.uec := RegNext(io.read.fire) && Cat(ecc_errors).orR

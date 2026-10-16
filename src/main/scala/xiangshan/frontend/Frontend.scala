@@ -49,7 +49,7 @@ import utility.sram.SramHelper
 import xiangshan.CustomCSRCtrlIO
 import xiangshan.DebugOptionsKey
 import xiangshan.FrontendToCtrlIO
-import xiangshan.L1BusErrorUnitInfo
+import xiangshan.RERIErrorInfo
 import xiangshan.SfenceBundle
 import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.TlbCsrBundle
@@ -78,7 +78,7 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val backend:      FrontendToCtrlIO = new FrontendToCtrlIO
   val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
     Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
-  val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
+  val error: RERIErrorInfo = Output(new RERIErrorInfo)
 
   // ctrl
   val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
@@ -265,7 +265,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   instrUncache.io.flush := false.B
 
   private val errorReg = RegNext(icache.io.error)
-  io.error <> RegNext(errorReg.bits.toL1BusErrorUnitInfo(errorReg.valid))
+  io.error <> RegNext(errorReg.bits.toRERIErrorInfo(errorReg.valid))
 
   icache.io.hartId := io.hartId
 

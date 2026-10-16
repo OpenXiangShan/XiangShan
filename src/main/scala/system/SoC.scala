@@ -73,7 +73,7 @@ case class SoCParameters
   ),
   TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
-  BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
+  RERIRange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
   APLICRange: AddressSet = AddressSet(0x31100000L, 0x3ffff),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
@@ -254,7 +254,7 @@ trait HasPeripheralRanges {
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
     "TIMER" -> soc.TIMERRange,
     "SYSCNT" -> soc.SYSCNTRange,
-    "BEU"   -> soc.BEURange,
+    "RERI"  -> soc.RERIRange,
     "PLIC"  -> soc.PLICRange,
     "APLIC" -> soc.APLICRange,
     "PLL"   -> soc.PLLRange,
