@@ -393,7 +393,7 @@ case class L2CacheConfig
     val l2p = site(XSTileKey).head.L2CacheParamsOpt.getOrElse(L2Param())
     L2Params(
       physicalAddrWidth = 48,
-      mshrSize = l2p.mshrs,
+      mshrSize = 32,
       ways = 4,
       sets = l2p.sets * l2p.ways / 4,
       blockBytes = l2p.blockBytes,
