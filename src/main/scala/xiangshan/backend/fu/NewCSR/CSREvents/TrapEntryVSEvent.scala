@@ -83,7 +83,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
-  private val isZicfilp      = isException && EX_SWC.U === highPrioTrapNO
+  private val isZicfilp      = isException && EX_SWC2.U === highPrioTrapNO
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here

@@ -200,6 +200,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       val vsatp = Valid(UInt(SatpMode.getWidth.W))
       // debug
       val debugMode = Bool()
+      // One-cycle entry pulse for Debug/RNMI/MN paths. Unlike debugMode, this
+      // is asserted only on entry and is consumed by ArchZicfilp.
+      val zicfilpEntryClear = OptionWrapper(HasZicfilp, Bool())
       val singleStepFlag = Bool()
       // trigger
       val frontendTrigger = new FrontendTdataDistributeIO()
@@ -1354,6 +1357,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
   entryDebugMode := debugMod.io.out.hasDebugTrap && !debugMode
+
+  // RNMI and double-trap use the CSR trap machinery as well. Export the entry
+  // event so ArchZicfilp can clear live ELP even when the entry is not exposed
+  // as an ordinary ROB exception at the CtrlBlock boundary.
+  io.status.zicfilpEntryClear.foreach { clear =>
+    clear := entryDebugMode || (hasTrap && nmi) || dbltrpToMN
+  }
 
   trapEntryDEvent.valid                           := entryDebugMode
   trapEntryDEvent.in.hasDebugIntr                 := debugMod.io.out.hasDebugIntr
