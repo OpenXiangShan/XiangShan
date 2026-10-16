@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Callable, Dict, Optional
 
 from ..support.pc_utils import fold_pc
 
@@ -22,14 +22,6 @@ class TranslationScenarioChecker:
         self._ptw_requests: list[dict] = []
         self._icache_cursor = 0
         self._uncache_cursor = 0
-
-    @staticmethod
-    def _read(signal: Any, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return int(default if value is None else value)
-        except Exception:
-            return int(default)
 
     def bind_env(self, env) -> None:
         self.env = env
@@ -475,27 +467,6 @@ class TranslationScenarioChecker:
         self.active["observed_fetch_pas"].append(actual_pa)
         self.active["fetch_seen"] = True
 
-    def _read_internal_signal(self, name: str) -> Optional[int]:
-        dut = getattr(self.env, "dut", None)
-        if dut is None or bool(getattr(dut, "_is_fake_frontend_dut", False)):
-            return None
-        getter = getattr(dut, "GetInternalSignal", None)
-        if not callable(getter):
-            return None
-        try:
-            signal = getter(name)
-            value = getattr(signal, "value", None)
-            return None if value is None else int(value)
-        except Exception:
-            return None
-
-    def _read_ptw_request_get_gpa(self, ptw_if) -> int:
-        path = self.env.itlb_ptw_req_get_gpa_path
-        internal_get_gpa = self._read_internal_signal(path)
-        if internal_get_gpa is not None:
-            return internal_get_gpa
-        return 0
-
     def observe_cfvec(
         self,
         cycle: int,
@@ -586,43 +557,24 @@ class TranslationScenarioChecker:
     def on_clock_edge(self, cycle: int) -> None:
         if self.active is None or self.env is None:
             return
+        snapshot = getattr(self.env.monitor, "cycle_snapshot", None)
+        if snapshot is None or snapshot.cycle != int(cycle):
+            raise AssertionError("translation checker requires a current FrontendMonitor snapshot")
         if not self.active["fetch_observation_ready"]:
             redirect_count = int(getattr(getattr(self.env, "monitor", None), "redirect_count", 0))
             if redirect_count > int(self.active["redirect_count_at_arm"]):
                 self.active["fetch_observation_ready"] = True
                 self.active["fetch_observation_not_before"] = int(cycle) + 2
-        snapshot = getattr(self.env.monitor, "cycle_snapshot", None)
-        if snapshot is not None and snapshot.cycle != int(cycle):
-            snapshot = None
-        sampled_ptw = None if snapshot is None else snapshot.ptw
-        ptw_if = getattr(self.env, "ptw_if", None)
-        request = getattr(self.env.ptw_agent, "get_last_request_expectation", lambda: None)()
-        if sampled_ptw is not None and sampled_ptw["req_valid"] and sampled_ptw["req_ready"]:
+        sampled_ptw = snapshot.ptw
+        if sampled_ptw["req_valid"] and sampled_ptw["req_ready"]:
             self.observe_ptw_request(
                 cycle,
                 vpn=int(sampled_ptw["req_vpn"]),
                 s2xlate=int(sampled_ptw["req_s2xlate"]),
                 get_gpa=int(sampled_ptw["req_get_gpa"]),
             )
-        elif sampled_ptw is None and request is not None and int(request["cycle"]) == int(cycle):
-            self.observe_ptw_request(
-                cycle,
-                vpn=int(request["vpn"]),
-                s2xlate=int(request["s2xlate"]),
-                get_gpa=int(request["get_gpa"]),
-            )
-        elif sampled_ptw is None and ptw_if is not None and self._read(ptw_if.req_0_valid) and self._read(ptw_if.req_0_ready):
-            self.observe_ptw_request(
-                cycle,
-                vpn=self._read(ptw_if.req_0_bits_vpn),
-                s2xlate=self._read(ptw_if.req_0_bits_s2xlate),
-                get_gpa=self._read_ptw_request_get_gpa(ptw_if),
-            )
         expectation = getattr(self.env.ptw_agent, "get_last_drive_expectation", lambda: None)()
-        if (
-            (sampled_ptw is not None and sampled_ptw["resp_valid"] and sampled_ptw["resp_ready"])
-            or (sampled_ptw is None and ptw_if is not None and self._read(ptw_if.resp_valid) and self._read(ptw_if.resp_ready))
-        ) and expectation:
+        if sampled_ptw["resp_valid"] and sampled_ptw["resp_ready"] and expectation:
             self.observe_ptw_response(
                 cycle,
                 vpn=int(expectation["vpn"]),
@@ -638,37 +590,22 @@ class TranslationScenarioChecker:
         for pa in uncache_addrs[self._uncache_cursor :]:
             self.observe_fetch_request(cycle, path="uncache", pa=pa)
         self._uncache_cursor = len(uncache_addrs)
-        observe_if = getattr(self.env, "backend_observe_if", None)
-        if observe_if is None:
-            return
         for slot in range(8):
-            sampled_cfvec = None if snapshot is None else snapshot.cfvec.slots[slot]
-            if not (bool(sampled_cfvec.valid) if sampled_cfvec is not None else self._read(observe_if.cfvec_valid[slot])):
+            sampled_cfvec = snapshot.cfvec.slots[slot]
+            if not sampled_cfvec.valid:
                 continue
-            resolver = getattr(
-                self.env.backend_model,
-                "observed_cfvec_snapshot_pc" if sampled_cfvec is not None else "observed_cfvec_pc",
-                None,
-            )
+            resolver = getattr(self.env.backend_model, "observed_cfvec_snapshot_pc", None)
             if not callable(resolver):
                 raise AssertionError("translation checker requires an FTQ-backed cfVec PC resolver")
             self.observe_cfvec(
                 cycle,
-                pc=int(resolver(snapshot.cfvec, slot) if sampled_cfvec is not None else resolver(slot)),
-                folded_pc=int(sampled_cfvec.foldpc) if sampled_cfvec is not None else self._read(observe_if.cfvec_foldpc[slot]),
+                pc=int(resolver(snapshot.cfvec, slot)),
+                folded_pc=int(sampled_cfvec.foldpc),
                 exception_bits={
-                    bit: (
-                        int(bool(sampled_cfvec.exception_bits & (1 << bit)))
-                        if sampled_cfvec is not None
-                        else self._read(getattr(observe_if, f"cfvec_exception_vec_{bit}")[slot])
-                    )
+                    bit: int(bool(sampled_cfvec.exception_bits & (1 << bit)))
                     for bit in _EXCEPTION_BITS
                 },
-                cross_page=(
-                    bool(sampled_cfvec.cross_page_ipf_fix)
-                    if sampled_cfvec is not None
-                    else bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot]))
-                ),
+                cross_page=bool(sampled_cfvec.cross_page_ipf_fix),
             )
 
     def assert_complete(self) -> dict:

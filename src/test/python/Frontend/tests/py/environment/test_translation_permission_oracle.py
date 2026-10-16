@@ -678,7 +678,7 @@ def test_oracle_accepts_pmp_configured_fetch_without_internal_permission_samplin
     assert env.assert_translation_scenario()["error_count"] == 0
 
 
-def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_absent() -> None:
+def test_oracle_uses_monitored_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_absent() -> None:
     dut = _PmpProbeDut()
     env = FrontendEnv(dut, register_callbacks=False)
     scenario = TranslationScenario(
@@ -701,6 +701,7 @@ def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_abse
     dut.io_ptw_req_0_bits_getGpa.value = 0
     dut._internal_signals[frontend_itlb_ptw_req_get_gpa_path()] = FakeSignal(1)
 
+    env.monitor.capture_cycle_observation(12)
     env.translation_oracle.on_clock_edge(12)
 
     request = next(record for record in env.translation_oracle.get_stats()["records"] if record["kind"] == "ptw_request")
@@ -709,6 +710,21 @@ def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_abse
         "s2xlate": state.expected_ptw_request["s2xlate"],
         "get_gpa": 1,
     }
+
+
+@pytest.mark.parametrize("snapshot_cycle", [None, 11])
+def test_oracle_requires_current_monitor_snapshot(snapshot_cycle: int | None) -> None:
+    env, _ = _state(
+        scenario_id="oracle-snapshot-required",
+        va=0x8020_0004,
+        pa=0x8040_0004,
+        pte=TranslationPte(v=1, r=1, x=1, a=1),
+    )
+    if snapshot_cycle is not None:
+        env.monitor.capture_cycle_observation(snapshot_cycle)
+
+    with pytest.raises(AssertionError, match="current FrontendMonitor snapshot"):
+        env.translation_oracle.on_clock_edge(12)
 
 
 def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
