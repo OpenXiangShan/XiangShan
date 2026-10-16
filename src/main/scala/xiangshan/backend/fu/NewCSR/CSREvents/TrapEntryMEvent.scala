@@ -76,7 +76,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isFetchMalAddr = in.isFetchMalAddr
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
-  private val isZicfilp      = isException && ExceptionNO.EX_SWC.U === highPrioTrapNO
+  private val isZicfilp      = isException && ExceptionNO.EX_SWC2.U === highPrioTrapNO
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO

@@ -111,6 +111,8 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   // Debug Mode
   // val singleStep = Output(Bool())
   val debugMode = Output(Bool())
+  // One-cycle Debug/RNMI/MN entry pulse for architectural LPAD state clearing.
+  val zicfilpEntryClear = OptionWrapper(HasZicfilp, Output(Bool()))
   // Custom microarchiture ctrl signal
   val customCtrl = Output(new CustomCSRCtrlIO)
   // instruction fetch address translation type
