@@ -60,8 +60,8 @@ class MainBtbAlignBank(
         // similar to Read.Req.startPc, calculated in MainBtb top
         val startPc:  Pc                     = new Pc
         val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
-        // Training only requires SRAM meta; VBTB will re-read it
-        val meta:          Vec[MainBtbMetaEntry] = Vec(NumWay, new MainBtbMetaEntry)
+        // SRAM metadata followed by the VBTB entry actually exposed during prediction.
+        val meta:          Vec[MainBtbMetaEntry] = Vec(NumWay + 1, new MainBtbMetaEntry)
         val posHigherBits: UInt                  = UInt(AlignBankIdxLen.W)
         // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
         // but we still pass it through a port anyway,
@@ -235,7 +235,8 @@ class MainBtbAlignBank(
   private val t1_needWrite        = w.req.bits.needWrite
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
-  private val t1_meta             = w.req.bits.meta
+  private val t1_meta             = w.req.bits.meta.take(NumWay)
+  private val t1_vbtbMeta         = w.req.bits.meta.last
   private val t1_posHigherBits    = w.req.bits.posHigherBits
   private val t1_mispredictInfo   = w.req.bits.mispredictInfo
   private val t1_setIdx           = getSetIndex(t1_startPc)
@@ -262,8 +263,14 @@ class MainBtbAlignBank(
   )
   private val t1_vbtbHit = t1_vbtbHitMask.orR
 
+  // A resident VBTB entry may have been hidden by an earlier-position entry.
+  // Only repair in place if this branch was actually exposed during prediction
+  // and is still resident; otherwise let the mispredict allocate in MainBtb.
+  private val t1_vbtbPredHit      = t1_vbtbMeta.hit(t1_mispredictInfo.bits)
+  private val t1_vbtbTrainInPlace = t1_vbtbHit && t1_vbtbPredHit
+
   // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbHit && t1_mispredictInfo.valid && (
+  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbTrainInPlace && t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
@@ -293,8 +300,8 @@ class MainBtbAlignBank(
     b.io.writeEntry.req.bits.hit     := t1_hit
   }
 
-  // Update an existing VBTB entry when the exact entry was hit.
-  private val t1_vbtbEntryNeedUpdate = t1_needWrite && t1_vbtbHit && t1_mispredictInfo.valid && (
+  // Repair the VBTB payload only when the branch is being trained in place.
+  private val t1_vbtbEntryNeedUpdate = t1_needWrite && t1_vbtbTrainInPlace && t1_mispredictInfo.valid && (
     t1_mispredictInfo.bits.attribute.needIttage ||
       !(t1_mispredictInfo.bits.attribute === Mux1H(t1_vbtbHitMask, vbtbEntries.map(_.entry.attribute)))
   )
