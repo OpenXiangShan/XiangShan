@@ -56,11 +56,11 @@ _IFU_UNCACHE_REQ_VALID_SIGNALS = (
 )
 _NC_TIMING_DIRECT_SIGNALS = {
     "backend_redirect": ("Frontend_top.Frontend.inner_ftq.backendRedirect_valid",),
-    "ifu_flush": ("s2_flush",),
-    "uncache_resp_valid": ("uncacheUnit.io_resp_valid",),
-    "instr_uncache_resp_valid": ("inner_instrUncache.io_toIfu_resp_valid",),
-    "wb_path_valid": ("wbValid",),
-    "wb_redirect": ("wbRedirect_valid",),
+    "ifu_flush": ("Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_flush",),
+    "uncache_resp_valid": ("Frontend_top.Frontend.inner_ifu.uncacheUnit.__Vtogcov__io_resp_valid",),
+    "instr_uncache_resp_valid": ("Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid",),
+    "wb_path_valid": ("Frontend_top.Frontend.inner_ifu.wbValid",),
+    "wb_redirect": ("Frontend_top.Frontend.inner_ifu.__Vtogcov__wbRedirect_valid",),
 }
 
 
