@@ -526,7 +526,7 @@ object Bundles {
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf || params.inVfSchd)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
-    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
+    val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -554,7 +554,7 @@ object Bundles {
     val vm       = Option.when(params.issueBlockParam.inVfSchd)(Bool())
     val vtype    = Option.when(params.readVlRf)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
-    val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
+    val uopIdx   = Option.when(params.issueBlockParam.inVfSchd || params.issueBlockParam.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
     // from rename
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -655,6 +655,7 @@ object Bundles {
     val frm             = Frm()
     val oldVType        = VType()
     val vtype           = VType()
+    val vl              = Vl()
     val vlsInstr        = Bool()
     val fflagsWen       = Bool()
     val isMove          = Bool()
@@ -973,7 +974,7 @@ object Bundles {
     val imm            = Option.when(exuParams.needImm)(UInt(exuParams.deqImmTypesMaxLen.W))
     val frm            = Option.when(exuParams.needSrcFrm)(Frm())
     val vm       = Option.when(iqParams.inVfSchd)(Bool())
-    val uopIdx   = Option.when(iqParams.inVfSchd)(UopIdx())
+    val uopIdx   = Option.when(iqParams.inVfSchd || iqParams.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(iqParams.inVfSchd)(Bool())
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
@@ -1184,7 +1185,7 @@ object Bundles {
     val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
     val vm            = if (params.needVPUCtrl)   Some(Bool())                        else None
-    val uopIdx        = if (params.needVPUCtrl)   Some(UopIdx())                      else None
+    val uopIdx        = if (params.needVPUCtrl || params.hasLoadFu) Some(UopIdx())      else None
     val lastUop       = if (params.needVPUCtrl)   Some(Bool())                        else None
     val frm           = if (params.needSrcFrm)    Some(Frm())                         else None
     val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
@@ -1279,6 +1280,8 @@ object Bundles {
       uop.perfDebugInfo  := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
       uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
       uop.vtype          := this.vtype.getOrElse(0.U.asTypeOf(VType()))
+      uop.vl             := this.vl.getOrElse(0.U.asTypeOf(Vl()))
+      uop.uopIdx         := this.uopIdx.getOrElse(0.U.asTypeOf(UopIdx()))
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
@@ -1302,7 +1305,7 @@ object Bundles {
     val vlWen          = Option.when(params.needVlWen)(Bool())
     val fflagsWen      = Option.when(params.writeFflags)(Bool())
     val vm             = Option.when(params.needVPUCtrl)(Bool())
-    val uopIdx         = Option.when(params.needVPUCtrl)(UopIdx())
+    val uopIdx         = Option.when(params.needVPUCtrl || params.hasLoadFu)(UopIdx())
     val lastUop        = Option.when(params.needVPUCtrl)(Bool())
     val frm            = Option.when(params.needSrcFrm)(Frm())
     val oldVType       = Option.when(params.writeVType)(VType())

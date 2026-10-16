@@ -2198,8 +2198,15 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits
   io.ldout.toFpRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.data.getWidth - 1, 0))
   io.ldout.toIntRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.data.getWidth - 1, 0))
-  io.vldout.toVecRf.foreach(_.bits := dataPath.io.s3ShiftData)
-  io.vldout.toV0Rf.foreach(_.bits := dataPath.io.s3ShiftData)
+  val vldPipe = s3.io_pipeIn.get.bits
+  val vldByteCount = vldPipe.uop.vl << LSUOpType.vecElemSize(vldPipe.uop.fuOpType)
+  val vldByteOffset = vldPipe.uop.uopIdx << log2Ceil(VLEN / 8)
+  val vldData = VecInit((0 until VLEN / 8).map { i =>
+    val byte = dataPath.io.s3ShiftData(8 * i + 7, 8 * i)
+    Mux(vldPipe.uop.vtype.vta && vldByteOffset + i.U >= vldByteCount, "hff".U(8.W), byte)
+  }).asUInt
+  io.vldout.toVecRf.foreach(_.bits := vldData)
+  io.vldout.toV0Rf.foreach(_.bits := vldData)
 
   // rr bank-conflict fast replay arbiter
   val rrBankConflictFastReplay = io.rrBankConflictFastReplay
