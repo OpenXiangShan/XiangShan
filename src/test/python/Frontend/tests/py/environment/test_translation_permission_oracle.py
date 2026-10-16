@@ -4,7 +4,6 @@ import pytest
 
 from env.checkers.translation_scenario_checker import TranslationScenarioChecker
 from env.core.frontend_env import FrontendEnv
-from env.monitors.translation_permission_oracle import TranslationPermissionOracle
 from env.runtime.dut_factory import FakeDUTFrontend, FakeSignal
 from env.runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from env.sequences import (
@@ -20,12 +19,11 @@ from env.sequences import (
 from env.support import PmpPmaConfig, fold_pc
 
 
-def test_translation_checker_keeps_existing_oracle_import_and_env_alias() -> None:
+def test_translation_checker_keeps_env_alias() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
 
     assert isinstance(env.translation_checker, TranslationScenarioChecker)
     assert env.translation_oracle is env.translation_checker
-    assert TranslationPermissionOracle is TranslationScenarioChecker
 
 
 class _PmpProbeDut(FakeDUTFrontend):
