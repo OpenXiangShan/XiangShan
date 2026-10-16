@@ -20,6 +20,7 @@ from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model.backend_runtime import BackendObservationSnapshot
+from env.monitors.frontend_monitor import FrontendCycleSnapshot
 from env.model import GoldenTrace
 from env.model import PageTableModel
 from env.model import TraceEntry
@@ -467,7 +468,7 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     monitor = FrontendFlowChecker()
     monitor.interface = interface
     monitor.attach_backend_model(model)
-    monitor.on_clock_edge(7, snapshot)
+    monitor.on_clock_edge(7, FrontendCycleSnapshot(7, BackendObservationSnapshot(), snapshot, {"valid": 0}, {}))
     model._sample_cfvec(snapshot)
 
     assert monitor.observations[0].pc == 0x80001000

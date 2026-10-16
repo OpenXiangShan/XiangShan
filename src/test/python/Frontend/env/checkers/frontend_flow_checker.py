@@ -143,14 +143,6 @@ class FrontendFlowChecker:
         return False
 
     @staticmethod
-    def _read(signal, default: int = 0) -> int:
-        try:
-            value = getattr(signal, "value", None)
-            return default if value is None else int(value)
-        except Exception:
-            return default
-
-    @staticmethod
     def _is_add_mv_form(instr: int) -> Optional[tuple[int, int]]:
         val = int(instr) & 0xFFFFFFFF
         if (val & 0x7F) != 0x33:
@@ -207,19 +199,6 @@ class FrontendFlowChecker:
             return True
         return False
 
-    def _read_dut_signal(self, name: str, default: int = 0) -> int:
-        env = getattr(self.backend_model, "env", None) if self.backend_model is not None else None
-        dut = getattr(env, "dut", None) if env is not None else None
-        if dut is None:
-            return int(default)
-        pin = getattr(dut, name, None)
-        if pin is None:
-            return int(default)
-        try:
-            return int(pin.value)
-        except Exception:
-            return int(default)
-
     def bind_monitor(self, monitor) -> None:
         self.monitor = monitor
         self.interface = monitor.interface
@@ -238,16 +217,12 @@ class FrontendFlowChecker:
     def _observed_cfvec_pc(
         self,
         slot: int,
-        snapshot: Optional[CfVecCycleSnapshot] = None,
+        snapshot: CfVecCycleSnapshot,
     ) -> int:
-        if snapshot is not None:
-            snapshot_resolver = getattr(self.backend_model, "observed_cfvec_snapshot_pc", None)
-            if callable(snapshot_resolver):
-                return int(snapshot_resolver(snapshot, int(slot)))
-        resolver = getattr(self.backend_model, "observed_cfvec_pc", None)
+        resolver = getattr(self.backend_model, "observed_cfvec_snapshot_pc", None)
         if not callable(resolver):
             raise AssertionError("FrontendFlowChecker requires an FTQ-backed cfVec PC resolver")
-        return int(resolver(int(slot)))
+        return int(resolver(snapshot, int(slot)))
 
     def _ftq_identity_tracking_active(self) -> bool:
         if self.backend_model is None:
@@ -347,17 +322,8 @@ class FrontendFlowChecker:
         self.logger.info("monitor resynced after redirect: pc=0x%x", int(pc))
         return True
 
-    def _observe_dut_redirect_for_cfvec_check(self, cycle: int) -> None:
-        sampled = self.cycle_snapshot if self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle) else None
-        redirect = sampled.redirect if sampled is not None else {
-            "valid": self._read(self.interface.redirect_valid),
-            "pc": self._read(self.interface.redirect_bits_pc),
-            "target": self._read(self.interface.redirect_bits_target),
-            "taken": self._read(self.interface.redirect_bits_taken),
-            "level": self._read_dut_signal("io_backend_toFtq_redirect_bits_level"),
-            "debug_is_ctrl": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl"),
-            "debug_is_mem_vio": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio"),
-        }
+    def _observe_dut_redirect_for_cfvec_check(self, cycle: int, snapshot: FrontendCycleSnapshot) -> None:
+        redirect = snapshot.redirect
         if int(redirect["valid"]) != 1:
             return
         # Redirect target is a 51-bit GuardedPc; cfVec and the checker model
@@ -396,20 +362,18 @@ class FrontendFlowChecker:
     def on_clock_edge(
         self,
         cycle: int,
-        cfvec_snapshot: Optional[CfVecCycleSnapshot] = None,
+        snapshot: Optional[FrontendCycleSnapshot] = None,
     ) -> None:
         if self.interface is None:
             return
-        if cfvec_snapshot is None and self.cycle_snapshot is not None and self.cycle_snapshot.cycle == int(cycle):
-            cfvec_snapshot = self.cycle_snapshot.cfvec
-        if cfvec_snapshot is not None and int(cfvec_snapshot.cycle) != int(cycle):
-            raise AssertionError(
-                f"stale cfVec snapshot: snapshot_cycle={int(cfvec_snapshot.cycle)} "
-                f"monitor_cycle={int(cycle)}"
-            )
+        if snapshot is None:
+            snapshot = self.cycle_snapshot
+        if snapshot is None or snapshot.cycle != int(cycle) or snapshot.cfvec.cycle != int(cycle):
+            raise AssertionError("FrontendFlowChecker requires a current FrontendMonitor snapshot")
+        cfvec_snapshot = snapshot.cfvec
 
         self.current_cycle = int(cycle)
-        self._observe_dut_redirect_for_cfvec_check(cycle)
+        self._observe_dut_redirect_for_cfvec_check(cycle, snapshot)
         self.cycles_total += 1
         self.slots_total += 8
         if self._golden_trace_complete():
@@ -437,34 +401,16 @@ class FrontendFlowChecker:
             self._fetch_fault_outstanding = False
         self._fetch_fault_redirect_count = 0
         for i in range(8):
-            cfvec = None if cfvec_snapshot is None else cfvec_snapshot.slots[i]
-            valid = (
-                self._read(self.interface.cfvec_valid[i], 0) == 1
-                if cfvec is None
-                else bool(cfvec.valid)
-            )
-            if skip_cfvec or not valid:
+            cfvec = cfvec_snapshot.slots[i]
+            if skip_cfvec or not cfvec.valid:
                 continue
 
             pc = self._observed_cfvec_pc(i, cfvec_snapshot)
-            if cfvec is None:
-                folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
-                instr = self._read(self.interface.cfvec_instr[i], 0)
-                is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
-                pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
-                ex_sum = (
-                    self._read(self.interface.cfvec_exception_vec_1[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_2[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_12[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_19[i], 0)
-                    + self._read(self.interface.cfvec_exception_vec_20[i], 0)
-                )
-            else:
-                folded_pc = int(cfvec.foldpc)
-                instr = int(cfvec.instr)
-                is_rvc = bool(cfvec.is_rvc)
-                pred_taken = bool(cfvec.pred_taken)
-                ex_sum = int(cfvec.exception_bits)
+            folded_pc = int(cfvec.foldpc)
+            instr = int(cfvec.instr)
+            is_rvc = bool(cfvec.is_rvc)
+            pred_taken = bool(cfvec.pred_taken)
+            ex_sum = int(cfvec.exception_bits)
             if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
                 recovery_first_cfvec_seen = True
                 target_pc = int(self._recovery_target_pc)

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 from env.model.memory_model import MemoryModel
 from env.checkers.frontend_flow_checker import FrontendFlowChecker
+from env.monitors.frontend_monitor import FrontendMonitor
 from env.support import fold_pc, require_matching_foldpc
 
 
@@ -31,6 +36,7 @@ class _ObserveIf:
         self.cfvec_exception_vec_12 = [_Signal() for _ in range(8)]
         self.cfvec_exception_vec_19 = [_Signal() for _ in range(8)]
         self.cfvec_exception_vec_20 = [_Signal() for _ in range(8)]
+        self.cfvec_cross_page_ipf_fix = [_Signal() for _ in range(8)]
 
 
 class _Trace:
@@ -47,10 +53,10 @@ class _BackendModel:
     def current_cycle_start_golden_pc(self):
         return None
 
-    def observed_cfvec_pc(self, slot: int) -> int:
+    def observed_cfvec_snapshot_pc(self, snapshot, slot: int) -> int:
         assert self.interface is not None
         pc = int(self.interface.cfvec_full_pc[int(slot)])
-        return require_matching_foldpc(pc, int(self.interface.cfvec_foldpc[int(slot)].value))
+        return require_matching_foldpc(pc, int(snapshot.slots[int(slot)].foldpc))
 
 
 def _set_redirect(interface: _ObserveIf, *, valid: int, pc: int = 0, target: int = 0) -> None:
@@ -80,12 +86,39 @@ def _set_second_cfvec(interface: _ObserveIf, pc: int) -> None:
     interface.cfvec_foldpc[1].value = fold_pc(int(pc))
 
 
-def _new_monitor() -> tuple[FrontendFlowChecker, _ObserveIf]:
-    monitor = FrontendFlowChecker()
+def _new_monitor(memory: MemoryModel | None = None) -> tuple[FrontendFlowChecker, _ObserveIf]:
+    monitor = FrontendFlowChecker(memory=memory)
     interface = _ObserveIf()
-    monitor.interface = interface
+    sampler = FrontendMonitor()
+    sampler.interface = interface
+    sampler.from_ftq_if = SimpleNamespace(
+        io_backend_fromFtq_wen=_Signal(),
+        io_backend_fromFtq_ftqIdx=_Signal(),
+        io_backend_fromFtq_startPc_addr=_Signal(),
+    )
+    sampler.ptw_if = SimpleNamespace(
+        req_0_valid=_Signal(), req_0_ready=_Signal(), req_0_bits_vpn=_Signal(),
+        req_0_bits_s2xlate=_Signal(), resp_valid=_Signal(), resp_ready=_Signal(),
+    )
+    monitor.bind_monitor(sampler)
     monitor.attach_backend_model(_BackendModel(interface))
     return monitor, interface
+
+
+def _tick(monitor: FrontendFlowChecker, cycle: int) -> None:
+    monitor.monitor.capture_cycle_observation(cycle)
+    monitor.on_clock_edge(cycle)
+
+
+@pytest.mark.parametrize("sample_cycle", [None, 9])
+def test_checker_requires_current_monitor_snapshot(sample_cycle: int | None) -> None:
+    monitor, interface = _new_monitor()
+    _set_first_cfvec(interface, 0x1000)
+    if sample_cycle is not None:
+        monitor.monitor.capture_cycle_observation(sample_cycle)
+
+    with pytest.raises(AssertionError, match="current FrontendMonitor snapshot"):
+        monitor.on_clock_edge(10)
 
 
 def _drive_redirect_to_monitor(monitor: FrontendFlowChecker, interface: _ObserveIf, *, pc: int, target: int) -> None:
@@ -98,11 +131,11 @@ def test_dut_redirect_skips_cfvec_at_t_and_t_plus_one() -> None:
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     _set_first_cfvec(interface, 0x1008)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     assert monitor.get_errors() == []
     assert monitor.observations == []
@@ -115,15 +148,12 @@ def test_rvc_addi_x0_hint_matches_canonical_nop() -> None:
 
 
 def test_monitor_does_not_replace_zero_cfvec_instr_from_memory() -> None:
-    monitor = FrontendFlowChecker(memory=MemoryModel())
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=MemoryModel())
 
     _set_first_cfvec(interface, 0x8000_1000)
     interface.cfvec_instr[0].value = 0
     interface.cfvec_is_rvc[0].value = 0
-    monitor.on_clock_edge(20)
+    _tick(monitor, 20)
 
     assert monitor.get_errors()[0]["kind"] == "INSTR_MISMATCH"
     assert monitor.get_errors()[0]["expected"] == 0x13
@@ -133,15 +163,12 @@ def test_monitor_does_not_replace_zero_cfvec_instr_from_memory() -> None:
 def test_monitor_reports_cfvec_pc_size_memory_mismatch_for_invalid_raw16() -> None:
     memory = MemoryModel()
     memory.write_u16(0x8000_3248, 0)
-    monitor = FrontendFlowChecker(memory=memory)
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=memory)
 
     _set_first_cfvec(interface, 0x8000_3248)
     interface.cfvec_instr[0].value = 0x13
     interface.cfvec_is_rvc[0].value = 1
-    monitor.on_clock_edge(20)
+    _tick(monitor, 20)
 
     assert monitor.get_errors()[0]["kind"] == "CFVEC_PC_SIZE_MEMORY_MISMATCH"
     assert monitor.get_errors()[0]["pc"] == 0x8000_3248
@@ -151,16 +178,13 @@ def test_monitor_reports_cfvec_pc_size_memory_mismatch_for_invalid_raw16() -> No
 def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
     memory = MemoryModel()
     memory.write_u16(0x8000_3248, 0)
-    monitor = FrontendFlowChecker(memory=memory)
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=memory)
 
     _set_first_cfvec(interface, 0x8000_3248)
     interface.cfvec_instr[0].value = 0x05130000
     interface.cfvec_is_rvc[0].value = 1
     interface.cfvec_exception_vec_2[0].value = 1
-    monitor.on_clock_edge(20)
+    _tick(monitor, 20)
 
     assert monitor.get_errors() == []
     assert monitor.observations[0].pc == 0x8000_3248
@@ -169,20 +193,17 @@ def test_monitor_skips_instr_compare_for_exception_marked_cfvec() -> None:
 
 def test_reported_fetch_fault_suppresses_following_instr_compare() -> None:
     memory = MemoryModel()
-    monitor = FrontendFlowChecker(memory=memory)
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=memory)
 
     _set_first_cfvec(interface, 0x40)
     interface.cfvec_instr[0].value = 0
     interface.cfvec_exception_vec_1[0].value = 1
-    monitor.on_clock_edge(20)
+    _tick(monitor, 20)
 
     interface.cfvec_exception_vec_1[0].value = 0
     interface.cfvec_instr[0].value = 0
     _set_first_cfvec(interface, 0x44)
-    monitor.on_clock_edge(21)
+    _tick(monitor, 21)
 
     assert monitor.get_errors() == []
     assert monitor.exception_mark_count == 1
@@ -194,13 +215,13 @@ def test_dut_redirect_skip_window_does_not_wait_for_target_cfvec() -> None:
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     interface.cfvec_valid[0].value = 0
-    monitor.on_clock_edge(11)
-    monitor.on_clock_edge(12)
-    monitor.on_clock_edge(13)
+    _tick(monitor, 11)
+    _tick(monitor, 12)
+    _tick(monitor, 13)
 
     assert monitor.get_errors() == []
 
@@ -210,11 +231,11 @@ def test_dut_redirect_skips_model_observation_window_until_recovery_check() -> N
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     _set_first_cfvec(interface, 0x1008)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     assert monitor.get_errors() == []
     assert monitor.observations == []
@@ -226,14 +247,14 @@ def test_dut_redirect_first_sampled_cfvec_after_skip_must_be_target() -> None:
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     _set_first_cfvec(interface, 0x1008)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     _set_first_cfvec(interface, 0x2004)
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors()[0]["kind"] == "REDIRECT_RECOVERY_TARGET_MISMATCH"
     assert monitor.get_errors()[0]["expected"] == 0x2000
@@ -246,13 +267,13 @@ def test_redirect_recovery_accepts_ftq_derived_exception_pc_with_matching_foldpc
     target = 0x8000_0FFE
 
     _drive_redirect_to_monitor(monitor, interface, pc=target, target=target)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
     _set_redirect(interface, valid=0)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     _set_first_cfvec(interface, target)
     interface.cfvec_exception_vec_1[0].value = 1
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors() == []
     assert monitor.get_stats()["exception_mark_count"] == 1
@@ -265,11 +286,11 @@ def test_redirect_recovery_unguards_high_half_target() -> None:
     guarded_pc = (1 << 51) - 0x2000
 
     _set_redirect(interface, valid=1, pc=0x1004, target=guarded_pc)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
     _set_redirect(interface, valid=0)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
     _set_first_cfvec(interface, high_pc)
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors() == []
     assert monitor.last_dut_redirect["target_pc"] == high_pc
@@ -280,42 +301,37 @@ def test_redirect_recovery_rejects_ftq_derived_pc_with_wrong_foldpc() -> None:
     target = 0x8000_0FFE
 
     _drive_redirect_to_monitor(monitor, interface, pc=target, target=target)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
     _set_redirect(interface, valid=0)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     _set_first_cfvec(interface, target)
     interface.cfvec_foldpc[0].value = fold_pc(target) ^ 1
     interface.cfvec_exception_vec_1[0].value = 1
-    import pytest
-
     with pytest.raises(AssertionError, match="cfVec foldpc does not match FTQ-derived PC"):
-        monitor.on_clock_edge(12)
+        _tick(monitor, 12)
 
 
 def test_dut_redirect_to_mmio_target_waits_for_recovery_cfvec() -> None:
-    monitor = FrontendFlowChecker(memory=MemoryModel())
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=MemoryModel())
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x8000_1000, target=0x1000)
     _set_first_cfvec(interface, 0x8000_1004)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     _set_first_cfvec(interface, 0x8000_1008)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     interface.cfvec_valid[0].value = 0
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors() == []
     assert monitor._recovery_target_pc == 0x1000
 
     _set_first_cfvec(interface, 0x1000)
     interface.cfvec_exception_vec_1[0].value = 1
-    monitor.on_clock_edge(13)
+    _tick(monitor, 13)
 
     assert monitor.get_errors() == []
     assert monitor._recovery_target_pc is None
@@ -324,18 +340,15 @@ def test_dut_redirect_to_mmio_target_waits_for_recovery_cfvec() -> None:
 
 
 def test_dut_redirect_to_mmio_target_rejects_wrong_first_cfvec() -> None:
-    monitor = FrontendFlowChecker(memory=MemoryModel())
-    interface = _ObserveIf()
-    monitor.interface = interface
-    monitor.attach_backend_model(_BackendModel(interface))
+    monitor, interface = _new_monitor(memory=MemoryModel())
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x8000_1000, target=0x1000)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
     _set_redirect(interface, valid=0)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
     _set_first_cfvec(interface, 0x1004)
     interface.cfvec_exception_vec_1[0].value = 1
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors()[0]["kind"] == "REDIRECT_RECOVERY_TARGET_MISMATCH"
     assert monitor.get_errors()[0]["expected"] == 0x1000
@@ -346,18 +359,18 @@ def test_dut_redirect_clears_stale_ftq_tracking_before_recovery_target() -> None
     monitor, interface = _new_monitor()
 
     _set_first_cfvec(interface, 0x1000, ftq_value=7, ftq_offset=0)
-    monitor.on_clock_edge(8)
+    _tick(monitor, 8)
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004, ftq_value=7, ftq_offset=2)
-    monitor.on_clock_edge(10)
+    _tick(monitor, 10)
 
     _set_redirect(interface, valid=0)
     _set_first_cfvec(interface, 0x1008, ftq_value=7, ftq_offset=4)
-    monitor.on_clock_edge(11)
+    _tick(monitor, 11)
 
     _set_first_cfvec(interface, 0x2000, ftq_value=7, ftq_offset=0)
-    monitor.on_clock_edge(12)
+    _tick(monitor, 12)
 
     assert monitor.get_errors() == []
     assert [obs.pc for obs in monitor.observations] == [0x1000, 0x2000]
@@ -369,7 +382,7 @@ def test_monitor_ignores_cfvec_after_golden_trace_complete() -> None:
 
     _set_first_cfvec(interface, 0)
     interface.cfvec_is_rvc[0].value = 1
-    monitor.on_clock_edge(20)
+    _tick(monitor, 20)
 
     assert monitor.get_errors() == []
     assert monitor.observations == []
