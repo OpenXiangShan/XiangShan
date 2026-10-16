@@ -83,6 +83,23 @@ from startup configuration. Startup wrappers and unused loader aliases have
 been removed; unit tests exercise the plans, public initialization steps and
 runtime helpers directly.
 
+Build ordinary NOP payloads with `programs.build_nop_program`. The shared runtime
+`load_nop_program` retains its one-cycle default; callers replacing a zero-cycle
+loader must supply `step_cycles=0` and their original word count and base address.
+
+Preparation remains at the scenario's existing boundary. Initial control steps
+use phase `initial_controls`; `WaitCycles(300)` records the existing SRAM sweep
+wait as `sram_init_wait`. These records belong to `env.init_preparation_history`.
+They preserve the completed startup's `env.init_result` and completion event.
+
+Translation preparation uses `PrepareTranslationScenario(arm=False)` with phase
+`translation_prepare`, followed at the original activation boundary by explicit
+`ClearMonitor`, `SetExpectedPc`, and `ArmTranslationScenario` steps with phase
+`translation_activate`. Preserve each call's page selection and the order: arm
+restores monitor translation context after clear. The arm step uses the current
+testcase's state and retains the environment's epoch validation. Later rearming
+and redirects remain part of the owning scenario's stimulus.
+
 Existing fixture defaults and per-test `defer` markers are preserved. A test
 already using fixture startup must retain that boundary during this migration;
 removing an extra startup is a separate behavior change requiring DUT validation.

@@ -94,9 +94,7 @@ class _RecordingEnv:
 
 def test_nop_loaders_preserve_their_distinct_cycle_counts():
     env = _RecordingEnv()
-    run_initialization_steps(
-        env, (LoadProgram(ProgramImage(programs.build_nop_program(4), 0x80040000)),)
-    )
+    support.load_nop_program(env, words=4, base_addr=0x80040000, step_cycles=0)
     assert env.trace == [("load", 0x80040000, b"\x13\0\0\0" * 4)]
     assert env.current_cycle == 0
 
@@ -323,12 +321,8 @@ class _StopScenario(Exception):
     pass
 
 
-class _ScenarioProbe:
-    def __init__(self, env):
-        pass
-
-    def build(self, scenario):
-        raise _StopScenario(scenario)
+def _stop_translation_preparation(step, env):
+    raise _StopScenario(step.scenario)
 
 
 @pytest.mark.parametrize(
@@ -345,7 +339,9 @@ def test_protection_scenarios_preserve_permissions_and_page_boundaries(
         "_randomize_translation_timing",
         lambda env, scenario: scenario,
     )
-    monkeypatch.setattr(protection_cases, "TranslationScenarioBuilder", _ScenarioProbe)
+    monkeypatch.setattr(
+        protection_cases.PrepareTranslationScenario, "run", _stop_translation_preparation
+    )
     with pytest.raises(_StopScenario) as raised:
         getattr(protection_cases, scenario_name)(SimpleNamespace(config=EnvConfig()))
     scenario = raised.value.args[0]

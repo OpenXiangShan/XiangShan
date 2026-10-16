@@ -8,11 +8,15 @@ sampled only to align public stimulus with the transaction stage under test.
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
+    ArmTranslationScenario,
+    ClearMonitor,
     ConfigureAgent,
     FrontendInitConfig,
     LoadProgram,
     PrepareTranslationScenario,
-    ProgramImage,
+    SetBpCtrl,
+    SetExpectedPc,
+    WaitCycles,
     initialize_frontend,
     run_initialization_steps,
 )
@@ -42,6 +46,8 @@ from tests.py.icache.directed_dut.scenarios import (
     run_trained_dual_refill as _run_trained_refill,
 )
 from tests.py.icache.directed_dut.support import (
+    SetBackendCanAccept,
+    SetIcachePrefetch,
     clear_soft_prefetch as _clear_soft_prefetch,
     read_dut_signal,
     restore_predictors as _restore_predictors,
@@ -55,6 +61,7 @@ from tests.py.icache.directed_dut.support import (
     make_overlap2_init_config,
     make_program_init_config,
     randomize_resolve_delays,
+    load_nop_program,
 )
 
 import hashlib
@@ -64,6 +71,7 @@ from env.core.transactions import (
 )
 from tests.py.icache.directed_dut.programs import (
     NOP,
+    build_nop_program,
     encode_jal as _jal,
     encode_beq as _beq,
     encode_bne as _bne,
@@ -76,7 +84,6 @@ pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1",
     reason="requires compiled DUT",
 )
-_NOP = 0x0000_0013
 _SOFT_BASE = 0x8004_0000
 
 
@@ -262,20 +269,6 @@ def _wait_refill_waymask(env, address: int, *, max_cycles: int = 4096) -> int:
     return result
 
 
-def _load_nops(env, base: int, *, words: int = 8192) -> None:
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=(_NOP.to_bytes(4, "little")) * int(words),
-                    base_addr=int(base),
-                )
-            ),
-        ),
-    )
-
-
 def _wait_checked_cfvec(env, *, min_slots: int = 32, max_cycles: int = 4096, allow_fault: bool = False) -> None:
     """Do not end a coverage test before the affected fetch reaches its checker."""
     for _ in range(max_cycles):
@@ -333,7 +326,7 @@ def test_tc_icache_prefetchpipe_soft_arbitration(prefetchpipe_env) -> None:
     )
     # Data-bank SRAMs sweep 256 sets after reset.  Do not let a soft refill
     # install metadata before its data bank can accept the corresponding write.
-    env.step(300)
+    run_initialization_steps(env, (WaitCycles(300),), phase="sram_init_wait")
     targets = {
         ("icache_prefetchpipe_s0_entry", "soft_priority_over_ftq"),
         ("icache_prefetchpipe_s0_entry", "multi_soft_single_accept"),
@@ -411,7 +404,7 @@ def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
 def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     initialize_frontend(env, make_bpu_s3_init_config(env.config))
-    _load_nops(env, _SOFT_BASE)
+    load_nop_program(env, words=8192, base_addr=_SOFT_BASE, step_cycles=0)
     run_initialization_steps(
         env,
         (
@@ -459,7 +452,7 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
 def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     initialize_frontend(env, make_bpu_s3_init_config(env.config))
-    _load_nops(env, _SOFT_BASE)
+    load_nop_program(env, words=8192, base_addr=_SOFT_BASE, step_cycles=0)
     try:
         for attempt in range(64):
             if _hit(env, "icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush"):
@@ -502,7 +495,9 @@ def test_tc_icache_prefetchpipe_disabled(prefetchpipe_env) -> None:
             env.config, _SOFT_BASE, latency=32, seed=0x6664, words=8192
         ),
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    run_initialization_steps(
+        env, (SetIcachePrefetch(False),), phase="initial_controls"
+    )
     for attempt in range(64):
         _present_soft_prefetch(
             env,
@@ -543,7 +538,7 @@ def _translation_state(
         scenario_id=scenario_id,
         va=int(va),
         pa=int(pa),
-        payload=(_NOP.to_bytes(4, "little")) * 1024,
+        payload=build_nop_program(1024),
         page_count=2,
         mode="sv39",
         ptw_response_latency=int(latency),
@@ -562,7 +557,9 @@ def _translation_state(
         ),) if reset_entry else (),
     )
     return run_initialization_steps(
-        env, (PrepareTranslationScenario(scenario, arm=False),)
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
     )[0].value
 
 
@@ -588,9 +585,15 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
         page_fault=True,
         reset_entry=True,
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va0)
-    env.arm_translation_scenario(state, page_indexes=(0,))
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(va0),
+            ArmTranslationScenario(state, page_indexes=(0,)),
+        ),
+        phase="translation_activate",
+    )
     for attempt in range(32):
         for _ in range(512):
             if _signal(env, "s1_valid") == 1 and _signal(
@@ -642,9 +645,15 @@ def test_tc_icache_prefetchpipe_meta_resend_backpressure(prefetchpipe_env) -> No
         latency=32,
         reset_entry=True,
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va)
-    env.arm_translation_scenario(state, page_indexes=(0, 1))
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(va),
+            ArmTranslationScenario(state, page_indexes=(0, 1)),
+        ),
+        phase="translation_activate",
+    )
 
     for _ in range(4096):
         if _signal(env, "s1_valid") == 1 and _signal(env, "s1_wait_itlb") == 1:
@@ -759,16 +768,15 @@ def test_tc_icache_prefetchpipe_clean_refill_updates_meta(prefetchpipe_env) -> N
         env,
         make_nop_init_config(env.config, base, latency=96, seed=0x6659, words=32768),
     )
-    env.set_bp_ctrl_enable(
-        ubtb_enable=0,
-        abtb_enable=0,
-        mbtb_enable=0,
-        tage_enable=0,
-        sc_enable=0,
-        ittage_enable=0,
+    run_initialization_steps(
+        env,
+        (
+            SetBpCtrl(0, 0, 0, 0, 0, 0),
+            SetIcachePrefetch(True),
+            SetBackendCanAccept(False),
+        ),
+        phase="initial_controls",
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
-    env.backend_model.set_can_accept(0)
 
     for episode in range(8):
         if _hit(env, "icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"):
@@ -1043,9 +1051,15 @@ def test_tc_icache_prefetchpipe_protection(prefetchpipe_env) -> None:
         latency=8,
         page_fault=True,
     )
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va)
-    env.arm_translation_scenario(state, page_indexes=(0, 1))
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(va),
+            ArmTranslationScenario(state, page_indexes=(0, 1)),
+        ),
+        phase="translation_activate",
+    )
     env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
     _wait_bins(
         env,

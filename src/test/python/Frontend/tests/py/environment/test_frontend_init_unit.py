@@ -11,6 +11,7 @@ from env.core.transactions import ProgramImage
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.runtime.frontend_init import (
+    ArmTranslationScenario,
     ClearMonitor,
     ConfigureAgent,
     FrontendInitConfig,
@@ -23,9 +24,11 @@ from env.runtime.frontend_init import (
     SetMemoryRegion,
     SetBpCtrl,
     SetExpectedPc,
+    WaitCycles,
     WritePma,
     WritePmp,
     initialize_frontend,
+    run_initialization_steps,
 )
 from env.sequences.translation_scenarios import TranslationScenario
 from env.support.env_config import EnvConfig, SV39_ENV_CONFIG
@@ -234,6 +237,48 @@ def test_monitor_clearing_and_predictor_controls_are_explicit_recorded_steps():
     assert result.end_cycle - result.start_cycle == 1
 
 
+@pytest.mark.parametrize("cycles", [0, 300])
+def test_runtime_wait_preserves_startup_evidence_and_records_observed_cycles(cycles):
+    env = _env()
+    startup = initialize_frontend(env, FrontendInitConfig(reset_cycles=1))
+    startup_metadata = startup.metadata()
+    start = env.current_cycle
+    error = {"kind": "retained_during_wait"}
+    env.monitor.errors.append(error)
+    env.functional_coverage = {"existing_hit": True}
+    observed = []
+    env.register_cycle_observer(
+        lambda cycle, tb: observed.append((cycle, int(tb.dut.reset.value)))
+    )
+
+    records = run_initialization_steps(
+        env, (WaitCycles(cycles),), phase="sram_init_wait"
+    )
+
+    assert env.current_cycle == start + cycles
+    assert observed == [(cycle, 0) for cycle in range(start + 1, start + cycles + 1)]
+    assert env.init_result is startup and startup.metadata() == startup_metadata
+    assert env.init_history == [startup]
+    assert env.get_errors() == [error]
+    assert env.functional_coverage == {"existing_hit": True}
+    assert records == env.init_preparation_history
+    assert records[0].phase == "sram_init_wait"
+    assert (records[0].start_cycle, records[0].end_cycle) == (start, start + cycles)
+
+
+def test_negative_runtime_wait_fails_without_clocking_or_restarting():
+    env = _env()
+    startup = initialize_frontend(env, FrontendInitConfig(reset_cycles=1))
+    start = env.current_cycle
+
+    with pytest.raises(ValueError, match="wait cycles must be non-negative"):
+        run_initialization_steps(env, (WaitCycles(-1),), phase="sram_init_wait")
+
+    assert env.current_cycle == start and env.init_history == [startup]
+    record = env.init_preparation_history[-1]
+    assert record.start_cycle == record.end_cycle == start
+
+
 def test_legacy_load_apis_preserve_return_values_cursor_and_cycle_timing(tmp_path):
     env = _env()
     initialize_frontend(env, FrontendInitConfig(reset_cycles=0))
@@ -356,6 +401,104 @@ def test_translation_plan_controls_oracle_before_first_active_edge(arm):
     assert (released[0]["active"] is not None) == arm
     assert result.steps[0].value.scenario is scenario
     assert env.memory.read_u32(scenario.pa) == 0x13
+
+
+@pytest.mark.parametrize(
+    "page_indexes,expect_ptw,selected_pages",
+    [
+        (None, True, [0, 1]),
+        ((0,), True, [0]),
+        ((0, 1), True, [0, 1]),
+        ((1,), False, [1]),
+    ],
+)
+def test_runtime_translation_activation_preserves_pages_context_and_startup(
+    page_indexes, expect_ptw, selected_pages
+):
+    env = _env()
+    startup = initialize_frontend(env, FrontendInitConfig(reset_cycles=1))
+    startup_metadata = startup.metadata()
+    scenario = TranslationScenario(
+        "runtime-activation",
+        0x40000000,
+        0x80001000,
+        b"\x13\0\0\0" * 2048,
+        page_count=2,
+    )
+    error = {"kind": "retained_until_activation"}
+    env.monitor.errors.append(error)
+    env.functional_coverage = {"existing_hit": True}
+    state = run_initialization_steps(
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
+    )[0].value
+    assert state.scenario is scenario
+    assert env.translation_oracle.get_active() is None
+    assert env.get_errors() == [error]
+    activation_cycle = env.current_cycle
+
+    records = run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(scenario.va),
+            ArmTranslationScenario(state, page_indexes, expect_ptw),
+        ),
+        phase="translation_activate",
+    )
+
+    active = env.translation_oracle.get_active()
+    assert active["selected_pages"] == selected_pages
+    assert len(active["expected_ptw_requests"]) == (
+        len(selected_pages) if expect_ptw else 0
+    )
+    assert records[-1].value == active
+    assert env.monitor.expected_pc == scenario.va and env.get_errors() == []
+    # ClearMonitor discards this context; arm must restore it after the clear.
+    assert env.monitor._translation_s2xlate == scenario.s2xlate
+    assert env.current_cycle == activation_cycle
+    assert env.init_result is startup and startup.metadata() == startup_metadata
+    assert env.init_history == [startup]
+    assert env.functional_coverage == {"existing_hit": True}
+    assert all(
+        record.phase == "translation_activate"
+        and record.start_cycle == record.end_cycle == activation_cycle
+        for record in records
+    )
+
+
+@pytest.mark.parametrize("invalid_state", ["stale_epoch", "undeclared_page"])
+def test_runtime_arm_preserves_validation_errors_without_reset_or_monitor_clear(
+    invalid_state,
+):
+    env = _env()
+    startup = initialize_frontend(env, FrontendInitConfig(reset_cycles=1))
+    scenario = TranslationScenario(
+        "invalid-runtime-activation", 0x40000000, 0x80001000, b"\x13\0\0\0" * 16
+    )
+    state = run_initialization_steps(
+        env, (PrepareTranslationScenario(scenario, arm=False),)
+    )[0].value
+    if invalid_state == "stale_epoch":
+        env.update_translation_context(satp_asid=1)
+        step = ArmTranslationScenario(state)
+        message = "cannot arm translation scenario from epoch"
+    else:
+        step = ArmTranslationScenario(state, page_indexes=(1,))
+        message = "page_indexes must select declared scenario pages"
+    start = env.current_cycle
+    error = {"kind": "must_survive_failed_arm"}
+    env.monitor.errors.append(error)
+
+    with pytest.raises(ValueError, match=message):
+        run_initialization_steps(env, (step,), phase="translation_activate")
+
+    assert env.current_cycle == start and env.init_history == [startup]
+    assert env.get_errors() == [error]
+    assert env.translation_oracle.get_active() is None
+    record = env.init_preparation_history[-1]
+    assert record.start_cycle == record.end_cycle == start
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ import os
 
 import pytest
 
+from tests.py.icache.directed_dut.programs import build_nop_program
 from tests.py.icache.directed_dut.support import (
     drive_soft_prefetch as _drive_soft_prefetch,
     read_dut_signal,
@@ -62,7 +63,7 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
         (
             LoadProgram(
                 ProgramImage(
-                    payload=(0x13).to_bytes(4, "little") * 1024, base_addr=target
+                    payload=build_nop_program(1024), base_addr=target
                 )
             ),
         ),
@@ -96,7 +97,7 @@ def test_icache_sram_ecc_refetch(env, kind, bin_name):
                 (
                     LoadProgram(
                         ProgramImage(
-                            payload=(0x13).to_bytes(4, "little") * 16, base_addr=second
+                            payload=build_nop_program(16), base_addr=second
                         )
                     ),
                 ),

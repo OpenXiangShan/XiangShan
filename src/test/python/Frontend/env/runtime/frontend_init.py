@@ -34,6 +34,20 @@ LoadProgramFile = LoadProgramFileSequence
 
 
 @dataclass(frozen=True)
+class WaitCycles:
+    """Advance time at an explicit preparation boundary without a reset."""
+
+    cycles: int
+
+    def run(self, env: FrontendEnv) -> None:
+        cycles = int(self.cycles)
+        if cycles < 0:
+            raise ValueError("wait cycles must be non-negative")
+        if cycles:
+            env.step(cycles)
+
+
+@dataclass(frozen=True)
 class ConfigureAgent:
     agent: str
     parameters: Mapping[str, Any] = field(default_factory=dict)
@@ -280,6 +294,22 @@ class PrepareTranslationScenario:
             )
             env.arm_translation_scenario(state, page_indexes=indexes)
         return state
+
+
+@dataclass(frozen=True)
+class ArmTranslationScenario:
+    """Activate a testcase-owned state without rebuilding or clearing evidence."""
+
+    state: Any
+    page_indexes: tuple[int, ...] | None = None
+    expect_ptw: bool = True
+
+    def run(self, env: FrontendEnv) -> dict:
+        return env.arm_translation_scenario(
+            self.state,
+            page_indexes=self.page_indexes,
+            expect_ptw=self.expect_ptw,
+        )
 
 
 @dataclass(frozen=True)
@@ -532,6 +562,7 @@ __all__ = [
     "LoadProgram",
     "LoadProgramFile",
     "LoadGoldenTrace",
+    "WaitCycles",
     "ConfigureAgent",
     "ClearMonitor",
     "SetExpectedPc",
@@ -546,6 +577,7 @@ __all__ = [
     "SetBackendPolicy",
     "AttachGoldenTrace",
     "PrepareTranslationScenario",
+    "ArmTranslationScenario",
     "RunSequence",
     "InitCallback",
     "initialize_frontend",

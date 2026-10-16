@@ -458,13 +458,20 @@ def run_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
     return bool(predicate())
 
 
-def load_nop_program(env, words: int = 256, base_addr: int = BPU_TRAINING_BASE) -> None:
-    # This loader historically advances one cycle; cacheable startup does not.
+def load_nop_program(
+    env,
+    words: int = 256,
+    base_addr: int = BPU_TRAINING_BASE,
+    *,
+    step_cycles: int = 1,
+) -> None:
+    # Preserve the historical one-cycle default; runtime-only loads can opt out.
     run_initialization_steps(
         env,
         (
             LoadProgram(
-                ProgramImage(build_nop_program(words), base_addr), step_cycles=1
+                ProgramImage(build_nop_program(words), base_addr),
+                step_cycles=step_cycles,
             ),
         ),
     )

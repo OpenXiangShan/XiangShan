@@ -7,6 +7,7 @@ It does not force internal MSHR, queue, ready, or coverage-model state.
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
+    ArmTranslationScenario,
     ConfigureAgent,
     FrontendInitConfig,
     LoadProgram,
@@ -16,6 +17,7 @@ from env.runtime.frontend_init import (
     run_initialization_steps,
     ClearMonitor,
     SetExpectedPc,
+    WaitCycles,
 )
 
 
@@ -55,10 +57,12 @@ from tests.py.icache.directed_dut.support import (
     run_until,
     completed_dual_transactions,
     make_dual_refill_init_config,
+    load_nop_program,
 )
 from tests.py.icache.directed_dut.programs import (
     build_bpu_training_program as _trained_short_block_loop,
     build_cross_line_probe_program,
+    build_nop_program,
 )
 
 
@@ -66,7 +70,6 @@ pytestmark = pytest.mark.skipif(
     os.getenv("TB_ENABLE_DUT_TESTS") != "1",
     reason="requires compiled DUT",
 )
-_NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 
@@ -351,20 +354,6 @@ _IFU_CACHEABLE_REQ_VALID = (
     "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
     "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_toIfu_req_valid",
 )
-
-
-def _load_nops(env, base: int, *, words: int = 512) -> None:
-    run_initialization_steps(
-        env,
-        (
-            LoadProgram(
-                ProgramImage(
-                    payload=(_NOP.to_bytes(4, "little")) * int(words),
-                    base_addr=int(base),
-                )
-            ),
-        ),
-    )
 
 
 def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
@@ -794,7 +783,7 @@ def test_icache_mainpipe_s0_entry_data_backpressure_dut(lowrisk_cleanup) -> None
     env = lowrisk_cleanup
     base = 0x8000_0000
 
-    _load_nops(env, base, words=512)
+    load_nop_program(env, words=512, base_addr=base, step_cycles=0)
     _run_until(
         env,
         lambda: int(env.backend_model.get_stats().get("commit_count", 0)) >= 4,
@@ -1252,7 +1241,7 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     va = 0x8020_0F00
     pa = 0x8040_0F00
-    payload = (_NOP.to_bytes(4, "little")) * 512
+    payload = build_nop_program(512)
     scenario = TranslationScenario(
         scenario_id="waylookup-cacheable-instruction-page-fault",
         va=va,
@@ -1273,12 +1262,20 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
         label="cacheline refill before ITLB exception",
     )
     state = run_initialization_steps(
-        env, (PrepareTranslationScenario(scenario, arm=False),)
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
     )[0].value
 
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va)
-    env.arm_translation_scenario(state, page_indexes=(0,))
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(va),
+            ArmTranslationScenario(state, page_indexes=(0,)),
+        ),
+        phase="translation_activate",
+    )
     # Capture the exception through a port-0-only request first.  BIN-741 is
     # defined on the empty-queue, single-write edge, so a concurrent soft
     # prefetch here would make that condition structurally impossible.
@@ -1365,7 +1362,7 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     # entry base to the required 4-KiB grain.
     va = 0x8021_0000
     pa = 0x8041_0000
-    payload = (_NOP.to_bytes(4, "little")) * 512
+    payload = build_nop_program(512)
     scenario = TranslationScenario(
         scenario_id="cacheable-hit-pmp-instruction-access-fault",
         va=va,
@@ -1410,12 +1407,20 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
         label="cacheline refill before PMP exception",
     )
     state = run_initialization_steps(
-        env, (PrepareTranslationScenario(scenario, arm=False),)
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
     )[0].value
 
-    env.monitor.clear()
-    env.monitor.set_expected_pc(va)
-    env.arm_translation_scenario(state, page_indexes=(0,))
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(va),
+            ArmTranslationScenario(state, page_indexes=(0,)),
+        ),
+        phase="translation_activate",
+    )
     env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
     _run_until(
         env,
@@ -1461,9 +1466,11 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
             env.config, base=int(base), latency=32, seed=0x680, words=4096
         ),
     )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
-
-    env.backend_model.set_can_accept(0)
+    run_initialization_steps(
+        env,
+        (SetIcachePrefetch(True), SetBackendCanAccept(False)),
+        phase="initial_controls",
+    )
     capacity = WayLookupCapacitySequence(env)
     max_cycles = int(os.getenv("TB_WAYLOOKUP_CAPACITY_MAX_CYCLES", "12000"))
     for _ in range(max_cycles):
@@ -1783,7 +1790,7 @@ def test_icache_mainpipe_mixed_sram_mshr_sources_dut(lowrisk_cleanup) -> None:
     # refill accepted during that 256-cycle sweep can update metadata while
     # its data write is superseded by the SRAM's reset write.  Keep this
     # directed warmup outside that initialization window.
-    env.step(300)
+    run_initialization_steps(env, (WaitCycles(300),), phase="sram_init_wait")
     phase_cycle = int(env.current_cycle)
     for _ in range(64):
         _drive_soft_prefetch(env, [target])

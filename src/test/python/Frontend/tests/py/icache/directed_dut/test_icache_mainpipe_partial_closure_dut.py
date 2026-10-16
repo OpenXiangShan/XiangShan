@@ -7,8 +7,13 @@ modules and use the shared Frontend environment interfaces.
 from __future__ import annotations
 
 from env.runtime.frontend_init import (
+    ArmTranslationScenario,
+    ClearMonitor,
     FrontendInitConfig,
+    PrepareTranslationScenario,
+    SetExpectedPc,
     initialize_frontend,
+    run_initialization_steps,
 )
 
 import os
@@ -39,7 +44,6 @@ from dataclasses import (
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationScenario,
-    TranslationScenarioBuilder,
     TranslationSectorLane,
     TranslationScenarioPhase,
     TranslationScenarioSequence,
@@ -222,10 +226,20 @@ def run_cross_page_pma_path(env):
         ),
     )
     scenario = _randomize_translation_timing(env, scenario)
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(cross_page_va)
-    env.arm_translation_scenario(state)
+    state = run_initialization_steps(
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
+    )[0].value
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(cross_page_va),
+            ArmTranslationScenario(state),
+        ),
+        phase="translation_activate",
+    )
     _force_redirect_to(env, cross_page_va)
     assert _wait_for_request_addr(env, next_page_pa, max_cycles=12000), {
         "ptw": env.ptw_agent.get_stats(),
@@ -298,10 +312,20 @@ def run_pmp_execute_denied(env):
         ),
     )
     scenario = _randomize_translation_timing(env, scenario)
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(scenario.va)
-    env.arm_translation_scenario(state)
+    state = run_initialization_steps(
+        env,
+        (PrepareTranslationScenario(scenario, arm=False),),
+        phase="translation_prepare",
+    )[0].value
+    run_initialization_steps(
+        env,
+        (
+            ClearMonitor(),
+            SetExpectedPc(scenario.va),
+            ArmTranslationScenario(state),
+        ),
+        phase="translation_activate",
+    )
     _force_redirect_to(env, scenario.va)
     for _ in range(6000):
         env.step(1)
