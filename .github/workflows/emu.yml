@@ -12,8 +12,7 @@ env:
   NOOP_HOME: ${{ github.workspace }}
   NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
-  WAVE_HOME: /nfs/home/ci-runner/xs-wave/${{ github.run_number }}
-  PERF_HOME: /nfs/home/ci-runner/xs-perf/${{ github.run_number }}
+  PERF_HOME: /nfs/home/ci-runner/emu-misc/${{ github.run_number }}
   GCPT_RESTORE_BIN: /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
 
 jobs:
@@ -60,22 +59,31 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/gsim
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build GSIM emu
         run: |
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator gsim \
-            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
-            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-            --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
-            --trace-fst
+          if [ -f ${PERF_HOME}/emu ]; then
+            echo "EMU already built, skip build"
+            mkdir -p ${GITHUB_WORKSPACE}/build
+            cp ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+          else
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --emulator gsim \
+              --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+              --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+              --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+              --trace-fst
+            cp ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          fi
       - name: GSIM Test - Linux
         run: |
           # TODO: remove --disable-fork to enable lightSSS when gsim supports it
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 1 \
             --disable-fork \
             --ci linux-hello-opensbi \
@@ -100,23 +108,32 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/simfrontend
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build Simfrontend EMU
         run: |
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator verilator --threads 8 \
-            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
-            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-            --simfrontend \
-            --trace-fst
+          if [ -f ${PERF_HOME}/emu ]; then
+            echo "EMU already built, skip build"
+            mkdir -p ${GITHUB_WORKSPACE}/build
+            cp ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+          else
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --emulator verilator --threads 8 \
+              --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+              --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+              --simfrontend \
+              --trace-fst
+            cp ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          fi
       - name: Simfrontend Test - SPEC06 astar
         id: astar_simfrontend
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 8 \
             --max-instr 5000000 \
             --ci astar \
@@ -130,7 +147,7 @@ jobs:
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 8 \
             --max-instr 5000000 \
             --ci milc \
@@ -144,7 +161,7 @@ jobs:
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 8 \
             --max-instr 5000000 \
             --ci xalancbmk \
@@ -181,7 +198,9 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/mc
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
           # determine emulation threads, verilator 5.050+ has refactored multi-threading,
@@ -196,23 +215,30 @@ jobs:
           echo "EMU_THREADS=$EMU_THREADS" >> $GITHUB_ENV
       - name: Build MC EMU
         run: |
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator verilator --threads ${EMU_THREADS} \
-             --num-cores 2 --emu-optimize "" \
-             --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
-             --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
-             --trace-fst --trace-all
+          if [ -f ${PERF_HOME}/emu ]; then
+            echo "EMU already built, skip build"
+            mkdir -p ${GITHUB_WORKSPACE}/build
+            cp ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+          else
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --emulator verilator --threads ${EMU_THREADS} \
+               --num-cores 2 --emu-optimize "" \
+               --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+               --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
+               --trace-fst --trace-all
+            cp ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          fi
       - name: MC Test - Basics
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads ${EMU_THREADS} \
             --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
             --ci mc-tests 2> /dev/zero
       - name: MC Test - SMP Linux
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads ${EMU_THREADS} \
             --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
             --ci linux-hello-smp-new 2> /dev/null
@@ -237,23 +263,32 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/zhujiang
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build ZhuJiang EMU
         run: |
-          # Same emu compile flow as EMU Basics Test.
-          # --llc ZhuJiang selects L3; --num-cores 1 selects single-core RTL.
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
-            --emulator verilator --threads 8 --num-cores 1 --llc ZhuJiang \
-            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
-            --trace-fst
+          if [ -f ${PERF_HOME}/emu ]; then
+            echo "EMU already built, skip build"
+            mkdir -p ${GITHUB_WORKSPACE}/build
+            cp ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+          else
+            # Same emu compile flow as EMU Basics Test.
+            # --llc ZhuJiang selects L3; --num-cores 1 selects single-core RTL.
+            python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+              --emulator verilator --threads 8 --num-cores 1 --llc ZhuJiang \
+              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+              --trace-fst
+            cp ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          fi
       - name: ZhuJiang Test - CoreMark
         id: coremark
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 8 \
             --ci coremark \
             2> stderr.log | tee stdout.log
@@ -285,7 +320,9 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/simv
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Generate Verilog for VCS
@@ -297,13 +334,13 @@ jobs:
       # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
       # - name: V Extension Test - rvv-test
       #   run: |
-      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $PERF_HOME` --ci-vcs rvv-test"
       - name: Simple Test - CoreMark 1 iteration
         run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs coremark-1-iteration"
+          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $PERF_HOME` --ci-vcs coremark-1-iteration"
       # - name: Simple Test - MicroBench
       #   run: |
-      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $PERF_HOME` --ci-vcs microbench --am=/nfs/home/share/ci-workloads/nexus-am/"
       # - name: Basic Test - cputest
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs cputest --am=/nfs/home/share/ci-workloads/nexus-am/" 2> /dev/zero
@@ -348,7 +385,9 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          PERF_HOME=${PERF_HOME}/check-verilog
+          echo "PERF_HOME=${PERF_HOME}" >> $GITHUB_ENV
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Check top wiring
@@ -392,7 +431,7 @@ jobs:
             --threads 8 --config MinimalConfig --release --trace-fst
       - name: Run MinimalConfig - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $PERF_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
       - name: Generate NOC XiangShan
         run: |
