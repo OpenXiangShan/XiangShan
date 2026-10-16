@@ -6,8 +6,10 @@
 #
 # Environment:
 #   TB_ENABLE_DUT_TESTS=1            Enable DUT integration tests.
-#   TB_REG_LOG_DIR=<dir>             Log directory (default: Frontend/logs).
-#   TB_REG_LOG_FILE=<path>           Explicit log path; overrides the timestamped default.
+#   TB_ARTIFACT_DIR=<dir>            Run artifact root (default: build-frontend/artifacts/<run_id>).
+#   TB_REG_LOG_DIR=<dir>             Explicit log directory (timestamped filename).
+#   TB_REG_LOG_FILE=<path>           Explicit log path; overrides the log directory.
+#                                     Default: <artifact_root>/pytest.log.
 #   TB_ENV_LOG_LEVEL=<level>         Environment log level (default: INFO).
 #   TB_LOG_CLI_LEVEL=<level>         Pytest CLI log level (default: TB_ENV_LOG_LEVEL, then WARNING).
 #   TB_PYTEST_DISABLE_RERUNFAILURES=0
@@ -26,14 +28,17 @@ REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 source "${SCRIPT_DIR}/frontend_pylib.sh"
 FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 
-LOG_DIR="${TB_REG_LOG_DIR:-${FRONTEND_DIR}/logs}"
-mkdir -p "${LOG_DIR}"
+cd "${REPO_DIR}"
+RUN_ID="${TB_RUN_ID:-frontend_pytest_$(date +%Y%m%d_%H%M%S_%N)_$$}"
+export TB_RUN_ID="${RUN_ID}"
+ARTIFACT_DIR="${TB_ARTIFACT_DIR:-$(frontend_artifacts_root_path "${REPO_DIR}")/${RUN_ID}}"
 
 if [[ -n "${TB_REG_LOG_FILE:-}" ]]; then
   LOG_FILE="${TB_REG_LOG_FILE}"
+elif [[ -n "${TB_REG_LOG_DIR:-}" ]]; then
+  LOG_FILE="${TB_REG_LOG_DIR}/pytest_$(date +%Y%m%d_%H%M%S).log"
 else
-  TS="$(date +%Y%m%d_%H%M%S)"
-  LOG_FILE="${LOG_DIR}/pytest_${TS}.log"
+  LOG_FILE="${ARTIFACT_DIR}/pytest.log"
 fi
 
 mkdir -p "$(dirname "${LOG_FILE}")"
@@ -58,11 +63,9 @@ if [[ "${INCLUDE_FUNCOV_CLOSURE_PENDING}" == "1" ]]; then
 else
   echo "[frontend] excluding funcov closure pending reachability checks"
 fi
-RUN_ID="${TB_RUN_ID:-frontend_pytest_$(date +%Y%m%d_%H%M%S_%N)_$$}"
-export TB_RUN_ID="${RUN_ID}"
 REPORT_ARGS=()
 if [[ "${ENABLE_TOFFEE_HTML_REPORT}" != "0" ]]; then
-  REPORT_DIR="${REPO_DIR}/build-frontend/artifacts/${RUN_ID}/funcov"
+  REPORT_DIR="${ARTIFACT_DIR}/funcov"
   mkdir -p "${REPORT_DIR}"
   REPORT_ARGS=(--toffee-report --report-dir "${REPORT_DIR}" --report-name funcov.html)
   echo "[frontend] native toffee HTML report: ${REPORT_DIR}/funcov.html"
@@ -73,7 +76,6 @@ else
   echo "[frontend] running: pytest -q --capture=sys -o log_cli=true --log-cli-level=${CLI_LEVEL} ${REPORT_ARGS[*]} ${PENDING_ARGS[*]} $*"
 fi
 
-cd "${REPO_DIR}"
 export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
 PYTEST_CMD=(pytest -q --capture=sys -o log_cli=true --log-cli-level="${CLI_LEVEL}")
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
