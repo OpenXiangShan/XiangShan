@@ -16,7 +16,6 @@ from ..model.backend_runtime import (
     BackendObservationSnapshot,
     CfVecCycleSnapshot,
     CfVecSlotSnapshot,
-    capture_cfvec_snapshot as read_cfvec_snapshot,
 )
 from ..model.backend_state import (
     ActiveWrongPathEpisode,
@@ -2987,14 +2986,6 @@ class BackendModel:
     def current_frontend_observation(self) -> BackendObservationSnapshot:
         return self._last_observation
 
-    def _read_cfvec_slot_signal(self, name: str, slot: int, default: int = 0) -> int:
-        signals = getattr(self.observe_if, str(name), None)
-        try:
-            signal = signals[int(slot)]
-        except (IndexError, TypeError):
-            return int(default)
-        return self._read(signal, int(default))
-
     def _missing_cfvec_boundary_bit(self) -> bool:
         return "cfvec_is_last_in_ftq_entry" in getattr(
             self.observe_if, "_missing_optional_attrs", ()
@@ -3028,25 +3019,11 @@ class BackendModel:
             for start, end in getattr(memory, "mmio_ranges", ())
         )
 
-    def capture_cfvec_snapshot(self) -> CfVecCycleSnapshot:
-        assert self.observe_if is not None
-        snapshot = read_cfvec_snapshot(self.current_cycle, self._read_cfvec_slot_signal)
-        self.accept_cfvec_snapshot(snapshot)
-        return snapshot
-
     def accept_cfvec_snapshot(self, snapshot: CfVecCycleSnapshot) -> None:
         if int(snapshot.cycle) != int(self.current_cycle):
             raise AssertionError("BackendModel received a stale cfVec snapshot")
         self._cfvec_cycle_snapshot = snapshot
         self._cfvec_snapshot_pc_cache.clear()
-
-    def _snapshot_bound_observation(self) -> BackendObservationSnapshot:
-        return BackendObservationSnapshot(
-            from_ftq_wen=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_wen", None)),
-            from_ftq_ftq_idx=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_ftqIdx", None)),
-            from_ftq_start_pc_addr=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_startPc_addr", None)),
-            ibuf_full=0,
-        )
 
     def _bound_backend_agent(self) -> BackendAgent:
         assert self.drive_if is not None
@@ -3681,17 +3658,11 @@ class BackendModel:
         )
 
     def observed_cfvec_pc(self, slot: int) -> int:
-        """Return the full PC derived from native cfVec and FTQ observations."""
-        assert self.observe_if is not None
-        slot = int(slot)
-        return self._resolve_cfvec_pc(
-            slot=slot,
-            ftq_flag=self._read(self.observe_if.cfvec_ftq_ptr_flag[slot], 0),
-            ftq_value=self._read(self.observe_if.cfvec_ftq_ptr_value[slot], 0),
-            ftq_offset=self._read(self.observe_if.cfvec_ftq_offset[slot], 0),
-            is_rvc=bool(self._read(self.observe_if.cfvec_is_rvc[slot], 0)),
-            observed_foldpc=self._read(self.observe_if.cfvec_foldpc[slot], 0),
-        )
+        """Return the full PC derived from the current monitored cfVec slot."""
+        snapshot = self._cfvec_cycle_snapshot
+        if snapshot is None or snapshot.cycle != int(self.current_cycle):
+            raise AssertionError("BackendModel requires the active cfVec snapshot for the current cycle")
+        return self.observed_cfvec_snapshot_pc(snapshot, int(slot))
 
     def observed_cfvec_snapshot_pc(self, snapshot: CfVecCycleSnapshot, slot: int) -> int:
         if snapshot is not self._cfvec_cycle_snapshot:
@@ -3728,14 +3699,6 @@ class BackendModel:
             if self.observed_cfvec_snapshot_pc(snapshot, slot) == int(target_pc):
                 return True
         return False
-
-    def _first_later_cfvec_slot_pc(self, current_slot: int) -> Optional[int]:
-        assert self.observe_if is not None
-        for slot in range(int(current_slot) + 1, 8):
-            if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
-                continue
-            return self.observed_cfvec_pc(slot)
-        return None
 
     def _record_ftq_group_pc(self, ftq_flag: int, ftq_value: int, pc: int, is_rvc: bool) -> None:
         group = (int(ftq_flag), int(ftq_value))
@@ -3891,10 +3854,9 @@ class BackendModel:
             self._skip_cfvec_until_cycle = None
         if snapshot is None:
             snapshot = self._cfvec_cycle_snapshot
-        if snapshot is None or int(snapshot.cycle) != int(self.current_cycle):
-            snapshot = self.capture_cfvec_snapshot()
         if (
-            snapshot is not self._cfvec_cycle_snapshot
+            snapshot is None
+            or snapshot is not self._cfvec_cycle_snapshot
             or int(snapshot.cycle) != int(self.current_cycle)
         ):
             raise AssertionError("BackendModel requires the active cfVec snapshot for the current cycle")
@@ -5036,11 +4998,15 @@ class BackendModel:
             agent = self._bound_backend_agent()
             agent.drive_reset_idle()
             return
+        cycle_monitor = getattr(self.env, "monitor", None)
+        if cycle_monitor is None:
+            raise AssertionError("BackendModel standalone cycle requires a FrontendMonitor")
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()
         agent.start_cycle(self.can_accept, self.wfi_req, self.backend_empty_for_dut())
-        self.consume_backend_observation(self._snapshot_bound_observation())
-        self.capture_cfvec_snapshot()
+        snapshot = cycle_monitor.capture_cycle_observation(cycle)
+        self.consume_backend_observation(snapshot.backend)
+        self.accept_cfvec_snapshot(snapshot.cfvec)
         actions = self.plan_cycle_actions()
         agent.drive_ftq_idx_ahead(actions.ftq_idx_ahead)
         agent.drive_resolves(actions.resolve_entries)

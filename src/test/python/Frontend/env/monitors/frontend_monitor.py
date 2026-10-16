@@ -194,6 +194,11 @@ class FrontendMonitor:
         except (IndexError, TypeError):
             return 0
 
+    def capture_cfvec_snapshot(self, cycle: int) -> CfVecCycleSnapshot:
+        if self.interface is None:
+            raise AssertionError("FrontendMonitor observation interface is not bound")
+        return capture_cfvec_snapshot(cycle, self._read_cfvec_slot)
+
     def capture_icache_request(self, cycle: int) -> ICacheRequestSnapshot:
         if self.icache_if is None:
             raise AssertionError("FrontendMonitor ICache interface is not bound")
@@ -282,7 +287,7 @@ class FrontendMonitor:
             from_ftq_ftq_idx=self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx),
             from_ftq_start_pc_addr=self._read(self.from_ftq_if.io_backend_fromFtq_startPc_addr),
         )
-        cfvec = capture_cfvec_snapshot(cycle, self._read_cfvec_slot)
+        cfvec = self.capture_cfvec_snapshot(cycle)
         req_valid = self._read(self.ptw_if.req_0_valid)
         req_ready = self._read(self.ptw_if.req_0_ready)
         resp_valid = self._read(self.ptw_if.resp_valid)

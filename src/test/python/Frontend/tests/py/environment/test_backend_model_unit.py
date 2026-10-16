@@ -20,7 +20,7 @@ from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
 from env.model.backend_state import RESOLVE_STATE_PENDING
 from env.model.backend_runtime import BackendObservationSnapshot
-from env.monitors.frontend_monitor import FrontendCycleSnapshot
+from env.monitors.frontend_monitor import FrontendCycleSnapshot, FrontendMonitor
 from env.model import GoldenTrace
 from env.model import PageTableModel
 from env.model import TraceEntry
@@ -85,6 +85,36 @@ def _set_first_cfvec(
     interface.cfvec_ftq_ptr_value[0].value = int(ftq_value)
     interface.cfvec_is_rvc[0].value = int(bool(is_rvc))
     model._ftq_start_pc_by_value[int(ftq_value)] = int(pc) + (0 if is_rvc else 2)
+
+
+def _capture_cfvec(model: BackendModel, interface: _ObserveIf):
+    monitor = FrontendMonitor()
+    monitor.interface = interface
+    snapshot = monitor.capture_cfvec_snapshot(model.current_cycle)
+    model.accept_cfvec_snapshot(snapshot)
+    return snapshot
+
+
+def _sample_cfvec(model: BackendModel, interface: _ObserveIf) -> None:
+    _capture_cfvec(model, interface)
+    model._sample_cfvec()
+
+
+def test_backend_model_requires_current_monitor_snapshot_for_cfvec() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 10
+    _set_first_cfvec(model, interface, 0x80001000)
+
+    with pytest.raises(AssertionError, match="active cfVec snapshot"):
+        model._sample_cfvec()
+    _capture_cfvec(model, interface)
+    model.current_cycle = 11
+    with pytest.raises(AssertionError, match="active cfVec snapshot"):
+        model._sample_cfvec()
+    with pytest.raises(AssertionError, match="active cfVec snapshot"):
+        model.observed_cfvec_pc(0)
 
 
 def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
@@ -378,12 +408,14 @@ def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expecte
     model = BackendModel()
     interface = _ObserveIf()
     model.observe_if = interface
+    interface.cfvec_valid[0].value = 1
     interface.cfvec_ftq_ptr_flag[0].value = 1
     interface.cfvec_ftq_ptr_value[0].value = 3
     interface.cfvec_ftq_offset[0].value = 5
     interface.cfvec_is_rvc[0].value = int(is_rvc)
     interface.cfvec_foldpc[0].value = fold_pc(expected_pc)
     model._ftq_start_pc_by_value[3] = 0x80001000
+    _capture_cfvec(model, interface)
 
     assert model.observed_cfvec_pc(0) == expected_pc
 
@@ -412,6 +444,8 @@ def test_observed_cfvec_pc_uses_previous_start_after_ftq_reuse() -> None:
     interface.cfvec_ftq_offset[0].value = 8
     interface.cfvec_is_rvc[0].value = 1
     interface.cfvec_foldpc[0].value = fold_pc(0x80000090)
+    interface.cfvec_valid[0].value = 1
+    _capture_cfvec(model, interface)
 
     assert model.observed_cfvec_pc(0) == 0x80000090
 
@@ -419,6 +453,7 @@ def test_observed_cfvec_pc_uses_previous_start_after_ftq_reuse() -> None:
 def test_observed_cfvec_pc_rejects_missing_ftq_context() -> None:
     model = BackendModel()
     model.observe_if = _ObserveIf()
+    _capture_cfvec(model, model.observe_if)
 
     with pytest.raises(AssertionError, match="without an observed start PC"):
         model.observed_cfvec_pc(0)
@@ -428,8 +463,10 @@ def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
     model = BackendModel()
     interface = _ObserveIf()
     model.observe_if = interface
+    interface.cfvec_valid[0].value = 1
     interface.cfvec_foldpc[0].value = fold_pc(0x80001000) ^ 1
     model._ftq_start_pc_by_value[0] = 0x80001002
+    _capture_cfvec(model, interface)
 
     with pytest.raises(AssertionError, match="foldpc does not match FTQ-derived PC"):
         model.observed_cfvec_pc(0)
@@ -444,7 +481,7 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     interface.cfvec_pred_taken[0].value = 1
     interface.cfvec_exception_vec_12[0].value = 1
 
-    snapshot = model.capture_cfvec_snapshot()
+    snapshot = _capture_cfvec(model, interface)
 
     assert snapshot.slots[0].valid is True
     assert snapshot.slots[0].pred_taken is True
@@ -492,7 +529,7 @@ def test_missing_cfvec_boundary_bit_closes_physical_mmio_entry(pc: int, expected
     model.current_cycle = 1
     _set_first_cfvec(model, interface, pc, ftq_value=3)
 
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     assert model._cfvec_queue[0].is_last_in_entry is expected_last
 
@@ -521,7 +558,7 @@ def test_missing_cfvec_boundary_bit_uses_pa_and_pbmt(
     model.current_cycle = 1
     _set_first_cfvec(model, interface, va, ftq_value=3)
 
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     assert model._cfvec_queue[0].is_last_in_entry is expected_last
 
@@ -593,7 +630,7 @@ def test_missing_cfvec_boundary_bit_closes_cacheable_entry_on_next_ftq_pointer()
         interface.cfvec_ftq_offset[slot].value = 0
         model._ftq_start_pc_by_value[ftq_value] = pc + 2
 
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     assert list(model._cfvec_queue)[0].ftq_value == 3
     assert list(model._cfvec_queue)[0].is_last_in_entry is True
@@ -1298,6 +1335,7 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
     )
 
     _set_first_cfvec(model, interface, 0x1004)
+    _capture_cfvec(model, interface)
     actions = model.plan_cycle_actions()
 
     assert actions.redirect_payload is not None
@@ -1307,18 +1345,21 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
     model.current_cycle = 11
     model.note_dut_redirect_observed(11)
     _set_first_cfvec(model, interface, 0x1008)
+    _capture_cfvec(model, interface)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
 
     model.current_cycle = 12
     _set_first_cfvec(model, interface, 0x1010)
+    _capture_cfvec(model, interface)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
 
     model.current_cycle = 13
     _set_first_cfvec(model, interface, 0x2000, ftq_value=1)
+    _capture_cfvec(model, interface)
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004, 0x2000]
@@ -1347,6 +1388,7 @@ def test_redirect_flush_samples_current_cfvec_before_arming_recovery() -> None:
         )
     )
     _set_first_cfvec(model, interface, 0x1004)
+    _capture_cfvec(model, interface)
 
     actions = model.plan_cycle_actions()
 
@@ -1380,7 +1422,7 @@ def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None
     _set_first_cfvec(model, interface, 0x2004, ftq_value=1)
 
     with pytest.raises(AssertionError, match="redirect recovery first cfvec is not target"):
-        model._sample_cfvec()
+        _sample_cfvec(model, interface)
 
     assert list(model._cfvec_queue) == []
 
@@ -1397,7 +1439,7 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
     interface.cfvec_pred_taken[0].value = 1
     interface.cfvec_exception_vec_2[0].value = 1
 
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     assert len(model._cfvec_queue) == 1
     entry = model._cfvec_queue[0]
@@ -1423,7 +1465,7 @@ def test_access_fault_cfvec_queues_backend_iaf_redirect() -> None:
     interface.cfvec_instr[0].value = 0
     interface.cfvec_exception_vec_1[0].value = 1
 
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     fault = model._cfvec_queue[-1]
     assert fault.exception_bits == (1 << 1)
@@ -1517,7 +1559,7 @@ def test_packet_after_fetch_fault_continues_that_fault() -> None:
 
     _set_first_cfvec(model, interface, 0x40, ftq_value=33)
     interface.cfvec_instr[0].value = 0
-    model._sample_cfvec()
+    _sample_cfvec(model, interface)
 
     assert model._active_wrong_path_episode() is not None
     assert model._active_wrong_path_episode()["origin_index"] == 0

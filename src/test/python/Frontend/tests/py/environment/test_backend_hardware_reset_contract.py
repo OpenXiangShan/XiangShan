@@ -10,7 +10,7 @@ from env.model.backend_runtime import BackendObservationSnapshot
 from env.model.backend_state import BackendEvent, FtqEntry
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.runtime.dut_factory import FakeDUTFrontend
-from tests.py.environment.test_backend_model_unit import _ObserveIf, _queue_instr
+from tests.py.environment.test_backend_model_unit import _ObserveIf, _capture_cfvec, _queue_instr
 
 
 def _dirty_model():
@@ -135,10 +135,36 @@ def test_standalone_backend_callback_also_gates_reset(monkeypatch):
     assert model.get_stats()["commit_count"] == 21
 
 
+def test_standalone_backend_callback_uses_frontend_monitor_snapshot():
+    dut = FakeDUTFrontend()
+    env = FrontendEnv(dut, register_callbacks=False)
+    model = env.backend_model
+    model.bind(dut)
+    dut.reset.value = 0
+
+    model.on_clock_edge(101)
+
+    assert env.monitor.cycle_snapshot is not None
+    assert model._cfvec_cycle_snapshot is env.monitor.cycle_snapshot.cfvec
+    assert model.current_frontend_observation() is env.monitor.cycle_snapshot.backend
+
+
+def test_standalone_backend_callback_requires_frontend_monitor(monkeypatch):
+    dut = FakeDUTFrontend()
+    model = BackendModel()
+    model.bind(dut)
+    dut.reset.value = 0
+    monkeypatch.setattr(model, "_bound_backend_agent", lambda: pytest.fail("drove before checking monitor"))
+
+    with pytest.raises(AssertionError, match="requires a FrontendMonitor"):
+        model.on_clock_edge(101)
+
+
 def test_old_pc_mapping_unavailable_after_reset_then_new_mapping_is_required():
     model = _dirty_model()
     model.observe_if = _ObserveIf()
     model.on_hardware_reset(100)
+    _capture_cfvec(model, model.observe_if)
     with pytest.raises(AssertionError, match="without an observed start PC"):
         model.observed_cfvec_pc(0)
     model.consume_backend_observation(BackendObservationSnapshot(
