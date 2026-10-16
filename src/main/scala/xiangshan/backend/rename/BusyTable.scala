@@ -141,6 +141,9 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     rename alloc => wbMask  //TODO we still need wbMask because wakeUp signal is partial now
   in wakeUpMask, we filter ogCancel and loadTransCancel at the same cycle
    */
+  // LPAD 阅读：本表跟踪物理寄存器能否提供结果，1=busy、0=ready，按物理编号索引。
+  // 例如 LPAD.psrc0=p42，生产 p42 的指令尚未就绪时，LPAD 需等待对应唤醒/写回。
+  // 这不是 ELP 状态，也不保存标签；它与所有普通整数源依赖共用。
   val table = VecInit((0 until numPhyPregs).zip(tableUpdate).map{ case (idx, update) =>
     RegEnable(update, 0.U(1.W), allocMask(idx) || ldCancelMask(idx) || wakeUpMask(idx) || wbMask(idx))
   }).asUInt
@@ -162,6 +165,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   }
 
   io.read.foreach{ case res =>
+    // 同拍刚分配的物理目的也应视为 busy，不能因寄存器尚未更新而误报 ready。
     val readBypass = VecInit(io.allocPregs.map(x => x.valid && x.bits === res.req))
     res.resp := !(table(res.req) || readBypass.asUInt.orR)
     res.loadDependency := (if (needLoadCancel) loadDependency(res.req) else 0.U.asTypeOf(res.loadDependency))

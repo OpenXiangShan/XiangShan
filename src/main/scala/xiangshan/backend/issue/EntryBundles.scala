@@ -32,6 +32,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val issueTimer            = UInt(params.issueTimerWidth.W)
     val deqPortIdx            = UInt(1.W)
 
+    // LPAD 阅读：若 x7 对应的物理源尚未就绪，这条 LPAD 的普通发射条件不能满足。
+    // 这里只是该 Issue 条目等待数据，不等同于 Decode 接口 ready=0；队列有空间仍可接收其他 uop。
+    // 另有现有 IQ 快速唤醒路径，可提前安排发射并用旁路提供数据，取消/重发仍按通用机制处理。
     def srcReady: Bool        = {
       VecInit(srcStatus.map(_.srcState).map(SrcState.isReady)).asUInt.andR &&
         srcStatusVl.map(_.srcState).map(SrcState.isReady).getOrElse(true.B) &&
@@ -50,6 +53,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
   }
 
   class SrcStatus(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+    // LPAD 例：psrc=42 表示 x7 的这一物理版本；srcState 记就绪状态，dataSources 选取数通路。
+    // 此处保存的是源编号/状态，不是 x7 数值；实际值在 Datapath/Bypass 准备。
     val psrc                  = UInt(params.rdPregIdxWidth.W)
     val srcType               = SrcType()
     val srcState              = SrcState()
@@ -215,6 +220,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                   else
                                     commonIn.issueResp.finalSuccess)
     common.deqSuccess         := status.issued && finalSuccess && !common.srcLoadCancelVec.asUInt.orR
+    // 写回携带 pdest，wakeUp 用它与条目 psrc/srcType 匹配；LPAD 无需专用的 x7 唤醒逻辑。
     common.srcWakeupByWB      := commonIn.wakeUpFromWB.map{ bundle =>
                                     val psrcSrcTypeVec = status.srcStatus.map(_.psrc) zip status.srcStatus.map(_.srcType)
                                     if (params.numRegSrc == 3) {

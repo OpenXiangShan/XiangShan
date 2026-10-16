@@ -202,6 +202,9 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       println(s"[BypassNetWork] ${exuParm.name}")
       println(s"[BypassNetWork] exuIdx = ${exuIdx}")
       println(s"[BypassNetWork] srcIdx = ${srcIdx}")
+      // LPAD 阅读：走到这里才选择实际操作数数据。对有效 LPAD 的 src0，就是先前绑定的 x7 版本。
+      // Rename 的 bypass 传 p42 等编号；这里的 forward/bypass 则传 p42 生产者算出的实际数值。
+      // 结果已在物理寄存器中可读时可选寄存器/已有缓存；结果正到达时可选已有数据旁路。
       val originSrc = Mux1H(
         Seq(
           readForward    -> Mux1H(forwardOrBypassValidVec3(exuIdx)(srcIdx), forwardDataVec),
@@ -223,6 +226,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val nextPcOffset = exuInput.bits.getNextPcOffset()
       val isJR = FuType.isJump(fuType) && JumpOpType.jumpUopisjr(fuOpType)
       val isLPAD = exuInput.bits.ZicfilpInfos.map(_.ZicfilpLPADValid).getOrElse(false.B)
+      // LPAD 的 imm 是标签重建值，不是 PC 相对位移，所以与 JR 一样关闭 PC offset 叠加。
+      // 例：紧凑标签 0x12345 经 Imm_U 得到 0x12345000，JumpUnit 再取 [31:12] 比较。
       val immBJU = imm + Mux(isJR || isLPAD, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = fromDPs(exuIdx).bits.imm.get
       exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType)) && exuParm.hasCSR.B, immCsrFence, immBJU)

@@ -134,6 +134,8 @@ object Bundles {
       this.isFetchMalAddr := source.backendException
       this.vtype            := source.vtype
       this.specvtype        := source.specvtype
+      // LPAD 阅读：从实际 PC 只保留“是否 4 字节对齐”这 1 位，随指令缓冲传给 Decode。
+      // 独立于可选 debug.pc：即使不生成 debug PC 字段，也必须能检查 LPAD 对齐。
       this.ZicfilpPCAligned.foreach(_ := source.pc(1, 0) === 0.U)
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
@@ -202,6 +204,7 @@ object Bundles {
     val latency = Latency()
     // Zicfilp
     val ZicfilpInfos = OptionWrapper(HasZicfilp, new ZicfilpInfo)
+    // LPAD 编码及 PC 对齐的分类位，送往 ROB/提交；与“本次要检查”的 LPADValid 不同。
     val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
 
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
@@ -1102,6 +1105,7 @@ object Bundles {
       this.sqIdx.foreach(_ := source.sqIdx.get)
 
       // Zicfilp metadata is carried by the issue-queue dequeue payload.
+      // LPAD 阅读：Issue 出队后仍需保留该 uop 的检查标志，否则 JumpUnit 无法区分 LPAD 与普通 j。
       this.ZicfilpInfos.foreach(_ := source.ZicfilpInfos.get)
     }
   }
@@ -1761,6 +1765,7 @@ object Bundles {
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
     val pc = UInt((VAddrData().dataWidth + 1).W)
+    // ROB 在异常边界锁存的旧架构 ELP，随异常请求送到 CSR；不是实时推测 ELP。
     val ZicfilpELP = OptionWrapper(HasZicfilp, Bool())
     val instr = UInt(32.W)
     val commitType = CommitType()

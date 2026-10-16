@@ -105,6 +105,9 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   })
   val cannotCompressVec = VecInit(io.in.zip(isVectorInstrVec).map { case (x, isVectorInstr) =>
     // Zicfilp: ELP-changing instructions must keep a dedicated ROB entry.
+    // LPAD 阅读：ROB 只携带一组 JALR/LPAD 类别位，不能把多个 ELP 改变边界压成一个条目。
+    // 保留独立条目语义，才能在 JALR 已提交而 LPAD 未提交时准确保存 archELP=1。
+    // 这是类别约束，运行时 LPE=0 时这些指令也可能因此不能压缩。
     val changesELP = if (HasZicfilp) {
       x.bits.ZicfilpInfos.get.ZicfilpJalr || x.bits.ZicfilpLPAD.get
     } else {
