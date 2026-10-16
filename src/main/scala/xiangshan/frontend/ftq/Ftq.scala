@@ -33,6 +33,7 @@ import utility.XSPerfHistogram
 import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import utility.XSPerfSeqRolling
+import xiangshan.CallRetCommit
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
@@ -115,7 +116,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // metaQueue stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
-  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
@@ -218,7 +218,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
     metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
-    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
 
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
@@ -505,12 +504,18 @@ class Ftq(implicit p: Parameters) extends FtqModule
     commitPtr := commitPtr + 1.U
   }
 
-  commitQueue.io.backendCommit := io.fromBackend.callRetCommit
+  private val reWrite = Wire(Valid(new CallRetCommit))
+  reWrite.valid                           := redirect.valid
+  reWrite.bits.ftqPtr                     := redirect.bits.ftqIdx
+  reWrite.bits.rasAction                  := redirect.bits.attribute.rasAction
+  commitQueue.io.bpuWrite.valid           := RegNext(io.fromBpu.meta.valid, init = false.B)
+  commitQueue.io.bpuWrite.bits.ftqPtr     := RegNext(io.fromBpu.s3FtqPtr)
+  commitQueue.io.bpuWrite.bits.commitMeta := RegNext(io.fromBpu.meta.bits.commitMeta)
+  commitQueue.io.reWrite                  := RegNext(reWrite, init = 0.U.asTypeOf(Valid(new CallRetCommit)))
+  commitQueue.io.commit                   := commit
 
-  io.toBpu.commit.valid                     := commitQueue.io.bpuTrain.valid
-  io.toBpu.commit.bits.meta                 := metaQueueCommit(commitQueue.io.bpuTrain.bits.ftqPtr.value)
-  io.toBpu.commit.bits.attribute.branchType := DontCare
-  io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
+  io.toBpu.commit.valid     := commitQueue.io.bpuTrain.valid
+  io.toBpu.commit.bits.meta := commitQueue.io.bpuTrain.bits
 
   // --------------------------------------------------------------------------------
   // Performance monitoring

@@ -310,12 +310,12 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
 
 // metadata for commit training (e.g. ras)
 class BpuCommitMeta(implicit p: Parameters) extends BpuBundle {
-  val ras: RasCommitMeta = new RasCommitMeta
+  val ras:       RasCommitMeta   = new RasCommitMeta
+  val attribute: BranchAttribute = new BranchAttribute
 }
 
 class BpuCommit(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val meta:      BpuCommitMeta   = new BpuCommitMeta
-  val attribute: BranchAttribute = new BranchAttribute
+  val meta: BpuCommitMeta = new BpuCommitMeta
 }
 
 // metadata for redirect (e.g. speculative state recovery) & training (e.g. rasPtr, phr)
