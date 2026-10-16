@@ -102,7 +102,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   for (c & fp & e <- ctrs zip s1_possible_full_preds zip s1_all_entries) {
     fp.hit      := DontCare
     fp.multiHit := false.B
-    fp.fromFtbEntry(e, s1_pc_dup(0))
+    fp.fromFtbEntry(e, Cat(s1_pc_guard_dup(0), s1_pc_dup(0)))
     for (i <- 0 until numBr) {
       fp.br_taken_mask(i) := c(i)(1) || e.strong_bias(i)
     }
@@ -175,11 +175,11 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   // Illegal check for FTB entry writing
-  val uftb_write_pc          = RegEnable(u_pc, u_valid)
+  val uftb_write_pc          = RegEnable(Cat(io.update.bits.pcGuard, u_pc), u_valid)
   val uftb_write_fallThrough = u_s1_ftb_entry.getFallThrough(uftb_write_pc)
   when(u_s1_valid && u_s1_hit) {
     assert(
-      SignExt(uftb_write_pc, VAddrBits + 1) + (FetchWidth * 4).U >= uftb_write_fallThrough,
+      uftb_write_pc + (FetchWidth * 4).U >= uftb_write_fallThrough,
       s"FauFTB write entry fallThrough address error!"
     )
   }
