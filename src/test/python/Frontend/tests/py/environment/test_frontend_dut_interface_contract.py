@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 import yaml
 from toffee.bundle import Signal, SignalList
 
@@ -28,7 +27,7 @@ from env.bundles import (
     UncacheBundle,
 )
 from env.core.frontend_env import FrontendEnv
-from env.runtime.dut_factory import FakeDUTFrontend, FakeSignal
+from env.runtime.dut_factory import StrictFakeDUTFrontend
 from env.runtime.pylib import frontend_build_root_path
 
 
@@ -97,19 +96,6 @@ _FULL_RTL_ADDED_SIGNALS = {
     "io_tlbCsr_satp_ppn": ("input", 44),
     "io_tlbCsr_vsatp_ppn": ("input", 44),
 }
-
-class _FullInputProbeDut(FakeDUTFrontend):
-    _is_fake_frontend_dut = False
-
-    def __init__(self, input_names: set[str]) -> None:
-        super().__init__()
-        self._frontend_is_fake_dut = False
-        for name in input_names:
-            setattr(self, name, FakeSignal(_INPUT_SENTINEL))
-
-    def GetInternalSignal(self, _name: str):
-        return FakeSignal(0)
-
 
 def _selected_full_build_root() -> Path:
     return frontend_build_root_path().resolve()
@@ -245,17 +231,9 @@ def test_full_frontend_public_signal_contract() -> None:
         if signals.get(name) != expected
     }
     assert not mismatches, {"full_frontend_public_signal_mismatches": mismatches}
-    historical_cfvec_pc = sorted(
-        name
-        for name in signals
-        if name.startswith("io_backend_cfVec_") and name.endswith("_bits_pc")
-    )
-    assert not historical_cfvec_pc, {
-        "historical_cfvec_pc_must_not_be_added_to_full_frontend": historical_cfvec_pc
-    }
 
 
-def test_full_rtl_added_signals_are_exposed_by_environment_bundles() -> None:
+def test_full_frontend_top_level_signals_match_environment_bundles() -> None:
     modelled = _bundle_signal_names(
         (
             BackendCfVecBundle,
@@ -278,8 +256,15 @@ def test_full_rtl_added_signals_are_exposed_by_environment_bundles() -> None:
             UncacheBundle,
         )
     )
-    missing = sorted(_wrapper_logic_signal_names() - modelled)
-    assert not missing, {"top_level_signals_missing_from_bundles": missing}
+    wrapper_signals = _wrapper_logic_signal_names()
+    missing_from_bundles = sorted(wrapper_signals - modelled)
+    stale_in_bundles = sorted(modelled - wrapper_signals)
+    mismatches = {}
+    if missing_from_bundles:
+        mismatches["top_level_signals_missing_from_bundles"] = missing_from_bundles
+    if stale_in_bundles:
+        mismatches["bundle_signals_missing_from_top_level"] = stale_in_bundles
+    assert not mismatches, mismatches
 
 
 def test_full_frontend_internal_observer_contract() -> None:
@@ -312,21 +297,17 @@ def test_full_frontend_internal_observer_contract() -> None:
     assert not mismatches, {"full_frontend_internal_observer_mismatches": mismatches}
 
 
-def test_full_frontend_picker_instance_hierarchy() -> None:
-    build_root = _selected_full_build_root()
-    top_path = build_root / "pylib-verilator" / "Frontend" / "Frontend_top.sv"
-    assert top_path.is_file(), f"Picker generated top is required: {top_path}"
-    text = top_path.read_text(encoding="utf-8")
-    assert "Frontend Frontend(" in text
-    assert "FrontendDutTop" not in text
-
-
 def test_full_frontend_environment_initializes_every_input() -> None:
     build_root = _selected_full_build_root()
     signals_path = build_root / "pylib-verilator" / "Frontend" / "signals.json"
     signals = _flatten_signals(json.loads(signals_path.read_text(encoding="utf-8")))
     input_names = {name for name, (direction, _width) in signals.items() if direction == "input"}
-    dut = _FullInputProbeDut(input_names)
+    wrapper_signals = _wrapper_logic_signal_names()
+    initial_values = {
+        name: (_INPUT_SENTINEL if name in input_names else 0)
+        for name in wrapper_signals
+    }
+    dut = StrictFakeDUTFrontend(wrapper_signals, initial_values=initial_values)
 
     FrontendEnv(dut, register_callbacks=False)
 

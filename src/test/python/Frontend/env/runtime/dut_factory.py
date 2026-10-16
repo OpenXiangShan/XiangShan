@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable, Mapping
 from logging import Logger, getLogger
 
 
@@ -36,7 +37,7 @@ class FakeSignal:
 
 
 class FakeDUTFrontend:
-    """Fallback DUT used when the compiled Frontend pylib is unavailable."""
+    """Permissive fallback DUT used by Python-only unit tests."""
 
     _is_fake_frontend_dut = True
 
@@ -95,6 +96,35 @@ class FakeDUTFrontend:
 
     def WaveformPaused(self) -> int:
         return int(self._waveform_paused)
+
+
+class StrictFakeDUTFrontend(FakeDUTFrontend):
+    """DUT-shaped fake that rejects signals outside an explicit inventory."""
+
+    _is_fake_frontend_dut = False
+
+    def __init__(
+        self,
+        signal_names: Iterable[str],
+        initial_values: Mapping[str, int] | None = None,
+    ) -> None:
+        super().__init__()
+        self._frontend_is_fake_dut = False
+        known_names = frozenset(str(name) for name in signal_names)
+        values = {str(name): int(value) for name, value in (initial_values or {}).items()}
+        unknown_values = sorted(set(values) - known_names)
+        if unknown_values:
+            raise ValueError(f"initial values reference unknown DUT signals: {unknown_values}")
+        for name in known_names:
+            setattr(self, name, FakeSignal(values.get(name, 0)))
+
+    def __getattr__(self, name: str):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        raise AttributeError(f"unknown DUT signal: {name}")
+
+    def GetInternalSignal(self, _name: str):
+        return FakeSignal(0)
 
 
 def create_frontend_dut(

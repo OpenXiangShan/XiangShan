@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import pytest
+
 from env.support.env_config import DEFAULT_ENV_CONFIG, SV39_ENV_CONFIG
-from env.runtime.dut_factory import FakeDUTFrontend
+from env.runtime.dut_factory import FakeDUTFrontend, StrictFakeDUTFrontend
 from env.core.frontend_env import FrontendEnv
+
+
+def test_strict_fake_dut_rejects_unknown_signals() -> None:
+    dut = StrictFakeDUTFrontend({"known_signal"}, initial_values={"known_signal": 7})
+
+    assert dut.known_signal.value == 7
+    with pytest.raises(AttributeError, match="unknown DUT signal"):
+        _ = dut.unknown_signal
 
 
 def test_bare_mode_initialize_keeps_fetch_in_machine_mode() -> None:
