@@ -64,7 +64,7 @@ def _register_flow_snapshot_observer(env):
         sample = _flow_snapshot(active_env)
         sample["cycle"] = int(cycle)
         sample["cfvec_valid"] = int(
-            any(int(signal.value) for signal in active_env.backend_observe_if.cfvec_valid)
+            any(int(signal.value) for signal in active_env.backend_cfvec_if.cfvec_valid)
         )
         snapshots.append(sample)
 

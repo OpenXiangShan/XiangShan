@@ -20,7 +20,7 @@ class FrontendFlowChecker:
         redirect_sync_max: int = 32,
     ) -> None:
         self.logger = logging.getLogger("env.frontend_flow_checker")
-        self.interface = None
+        self.cfvec_if = None
         self.monitor = None
         self.memory = memory
         self.page_table = page_table
@@ -201,7 +201,7 @@ class FrontendFlowChecker:
 
     def bind_monitor(self, monitor) -> None:
         self.monitor = monitor
-        self.interface = monitor.interface
+        self.cfvec_if = monitor.cfvec_if
         self.observations = monitor.observations
 
     @property
@@ -364,7 +364,7 @@ class FrontendFlowChecker:
         cycle: int,
         snapshot: Optional[FrontendCycleSnapshot] = None,
     ) -> None:
-        if self.interface is None:
+        if self.cfvec_if is None:
             return
         if snapshot is None:
             snapshot = self.cycle_snapshot

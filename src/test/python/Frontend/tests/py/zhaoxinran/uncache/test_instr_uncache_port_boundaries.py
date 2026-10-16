@@ -953,12 +953,12 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
     commit_count_before = int(env.backend_model.commit_count)
     saw_req_progress_without_commit = False
     for _ in range(12000):
-        assert int(env.backend_ctrl_if.commit_valid.value) == 0
+        assert int(env.backend_to_ftq_if.commit_valid.value) == 0
         req_count_before = int(env.uncache_agent.get_stats().get("req_count", 0))
         if req_count_before >= target_req_count:
             break
         env.step(1)
-        assert int(env.backend_ctrl_if.commit_valid.value) == 0
+        assert int(env.backend_to_ftq_if.commit_valid.value) == 0
         req_count_after = int(env.uncache_agent.get_stats().get("req_count", 0))
         saw_req_progress_without_commit |= req_count_after > req_count_before
         if req_count_after >= target_req_count:
@@ -1063,7 +1063,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     env.step(blocked_cycles)
     req_without_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
 
-    assert int(env.backend_ctrl_if.commit_valid.value) == 0
+    assert int(env.backend_to_ftq_if.commit_valid.value) == 0
     assert int(env.backend_model.commit_count) == commit_count_before
     assert req_without_commit == req_before_commit
 

@@ -476,7 +476,7 @@ def initialize_frontend(
             "hgatp_ppn",
         ):
             env._write(
-                getattr(env.csr_ctrl_if, f"io_tlbCsr_{field_name}"),
+                getattr(env.tlb_csr_if, f"io_tlbCsr_{field_name}"),
                 int(getattr(ptw_config, field_name)),
             )
         env.reset(

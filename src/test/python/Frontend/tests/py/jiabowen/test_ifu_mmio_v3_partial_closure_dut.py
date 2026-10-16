@@ -237,7 +237,7 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
                     ),
                 )
             )
-        monitor_if = active_env.monitor.interface
+        monitor_if = active_env.monitor.cfvec_if
         for slot in range(8):
             if int(monitor_if.cfvec_valid[slot].value) != 1:
                 continue

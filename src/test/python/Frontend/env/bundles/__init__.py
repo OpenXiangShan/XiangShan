@@ -3,16 +3,21 @@ from __future__ import annotations
 from toffee import Bundle
 from toffee.bundle import DummySignal, Signal, SignalList
 
-from .backend_ctrl import BackendCtrlBundle
-from .backend_from_ftq import BackendFromFtqBundle
-from .backend_observe import BackendObserveBundle
-from .clock_reset import ClockResetBundle
-from .csr_control import CSRControlBundle
-from .dft_control import DFTControlBundle
-from .frontend_performance import FrontendPerformanceBundle
-from .icache import ICacheBundle
-from .icache_control import ICacheControlBundle
+from .backend import (
+    BackendCfVecBundle,
+    BackendFromFtqBundle,
+    BackendFromIfuBundle,
+    BackendStatusBundle,
+    BackendToFtqBundle,
+    BackendToIBufBundle,
+    BackendWfiBundle,
+)
+from .csr import CSRControlBundle, TlbCsrBundle
+from .dft import DFTControlBundle
+from .frontend import ClockResetBundle, EccErrorBundle, SoftPrefetchBundle
+from .icache import ICacheBundle, ICacheControlBundle
 from .ptw import PTWBundle
+from .performance import FrontendPerformanceBundle
 from .uncache import UncacheBundle
 
 
@@ -93,16 +98,23 @@ def bind_bundle_optional(bundle_type: type[Bundle], dut):
 
 
 __all__ = [
-    "BackendCtrlBundle",
+    "BackendCfVecBundle",
     "BackendFromFtqBundle",
-    "BackendObserveBundle",
+    "BackendFromIfuBundle",
+    "BackendStatusBundle",
+    "BackendToFtqBundle",
+    "BackendToIBufBundle",
+    "BackendWfiBundle",
     "CSRControlBundle",
     "ClockResetBundle",
     "DFTControlBundle",
+    "EccErrorBundle",
     "FrontendPerformanceBundle",
     "ICacheBundle",
     "ICacheControlBundle",
     "PTWBundle",
+    "SoftPrefetchBundle",
+    "TlbCsrBundle",
     "UncacheBundle",
     "bind_bundle_optional",
     "bind_bundle_required",

@@ -17,16 +17,23 @@ from ..checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
 from ..checkers.translation_scenario_checker import TranslationScenarioChecker
 from .backend_model import BackendModel
 from ..bundles import (
-    BackendCtrlBundle,
+    BackendCfVecBundle,
     BackendFromFtqBundle,
-    BackendObserveBundle,
+    BackendFromIfuBundle,
+    BackendStatusBundle,
+    BackendToFtqBundle,
+    BackendToIBufBundle,
+    BackendWfiBundle,
     CSRControlBundle,
     ClockResetBundle,
     DFTControlBundle,
+    EccErrorBundle,
     FrontendPerformanceBundle,
     ICacheBundle,
     ICacheControlBundle,
     PTWBundle,
+    SoftPrefetchBundle,
+    TlbCsrBundle,
     UncacheBundle,
     bind_bundle_required,
 )
@@ -214,14 +221,21 @@ class FrontendEnv:
     def _create_interfaces(self) -> None:
         self.clock_reset = bind_bundle_required(ClockResetBundle, self.dut)
         self.csr_ctrl_if = bind_bundle_required(CSRControlBundle, self.dut)
+        self.tlb_csr_if = bind_bundle_required(TlbCsrBundle, self.dut)
         self.dft_ctrl_if = bind_bundle_required(DFTControlBundle, self.dut)
+        self.soft_prefetch_if = bind_bundle_required(SoftPrefetchBundle, self.dut)
+        self.ecc_error_if = bind_bundle_required(EccErrorBundle, self.dut)
         self.icache_if = bind_bundle_required(ICacheBundle, self.dut)
         self.icache_control_if = bind_bundle_required(ICacheControlBundle, self.dut)
         self.uncache_if = bind_bundle_required(UncacheBundle, self.dut)
         self.ptw_if = bind_bundle_required(PTWBundle, self.dut)
-        self.backend_ctrl_if = bind_bundle_required(BackendCtrlBundle, self.dut)
-        self.backend_observe_if = bind_bundle_required(BackendObserveBundle, self.dut)
+        self.backend_cfvec_if = bind_bundle_required(BackendCfVecBundle, self.dut)
+        self.backend_status_if = bind_bundle_required(BackendStatusBundle, self.dut)
         self.backend_from_ftq_if = bind_bundle_required(BackendFromFtqBundle, self.dut)
+        self.backend_from_ifu_if = bind_bundle_required(BackendFromIfuBundle, self.dut)
+        self.backend_to_ftq_if = bind_bundle_required(BackendToFtqBundle, self.dut)
+        self.backend_to_ibuf_if = bind_bundle_required(BackendToIBufBundle, self.dut)
+        self.backend_wfi_if = bind_bundle_required(BackendWfiBundle, self.dut)
         self.performance_if = bind_bundle_required(FrontendPerformanceBundle, self.dut)
 
     def _bind_collaborators(self) -> None:
@@ -234,13 +248,19 @@ class FrontendEnv:
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)
         self.translation_checker.bind_env(self)
-        self.backend_agent.bind(self.backend_ctrl_if)
-        self.monitor.bind(self.backend_observe_if)
+        self.backend_agent.bind(
+            to_ftq_if=self.backend_to_ftq_if,
+            to_ibuf_if=self.backend_to_ibuf_if,
+            status_if=self.backend_status_if,
+            wfi_if=self.backend_wfi_if,
+        )
+        self.monitor.bind_cfvec(self.backend_cfvec_if)
+        self.monitor.bind_backend_to_ftq(self.backend_to_ftq_if)
+        self.monitor.bind_backend_from_ifu(self.backend_from_ifu_if)
         self.monitor.bind_icache(self.icache_if)
         self.monitor.bind_uncache(self.uncache_if)
         self.monitor.bind_icache_control(self.icache_control_if)
-        self.monitor.bind_ptw_context(self.csr_ctrl_if)
-        self.monitor.bind_dut(self.dut)
+        self.monitor.bind_ptw_context(self.tlb_csr_if)
         self.monitor.bind_observation_interfaces(
             from_ftq_if=self.backend_from_ftq_if,
             ptw_if=self.ptw_if,
@@ -249,9 +269,12 @@ class FrontendEnv:
         self.flow_checker.bind_monitor(self.monitor)
         if hasattr(self.backend_model, "bind_interfaces"):
             self.backend_model.bind_interfaces(
-                drive_if=self.backend_ctrl_if,
-                observe_if=self.backend_observe_if,
+                to_ftq_if=self.backend_to_ftq_if,
+                cfvec_if=self.backend_cfvec_if,
                 from_ftq_if=self.backend_from_ftq_if,
+                to_ibuf_if=self.backend_to_ibuf_if,
+                status_if=self.backend_status_if,
+                wfi_if=self.backend_wfi_if,
             )
         else:
             self.backend_model.bind(self.dut)
@@ -501,122 +524,17 @@ class FrontendEnv:
             sc_enable=self.bp_ctrl_sc_enable,
             ittage_enable=self.bp_ctrl_ittage_enable,
         )
+        self.tlb_csr_if.drive_idle()
         self.dft_ctrl_if.drive_idle()
+        self.soft_prefetch_if.drive_idle()
         self.icache_if.drive_idle()
         self.icache_control_if.drive_idle()
         self.uncache_if.drive_idle()
         self.ptw_if.drive_idle()
-        self.backend_ctrl_if.drive_idle()
-        self._init_unbound_top_inputs()
-
-    def _init_unbound_top_inputs(self) -> None:
-        # FrontendTop currently exposes more top-level inputs than the Python env
-        # bundles model. Drive the unbound ones to deterministic reset values so
-        # the DUT does not depend on simulator-specific input initialization.
-        scalar_defaults = {
-            "io_hartId": 0,
-            "io_softPrefetch_0_valid": 0,
-            "io_softPrefetch_0_bits_vaddr": 0,
-            "io_softPrefetch_1_valid": 0,
-            "io_softPrefetch_1_bits_vaddr": 0,
-            "io_softPrefetch_2_valid": 0,
-            "io_softPrefetch_2_bits_vaddr": 0,
-            "io_backend_toFtq_ftqIdxAhead_bits_flag": 0,
-            "io_backend_toFtq_ftqIdxAhead_bits_value": 0,
-            "io_backend_toIBuf_commitVType_hasVsetvl": 0,
-            "io_backend_toIBuf_commitVType_vtype_bits_illegal": 0,
-            "io_backend_toIBuf_commitVType_vtype_bits_vlmul": 0,
-            "io_backend_toIBuf_commitVType_vtype_bits_vma": 0,
-            "io_backend_toIBuf_commitVType_vtype_bits_vsew": 0,
-            "io_backend_toIBuf_commitVType_vtype_bits_vta": 0,
-            "io_backend_toIBuf_commitVType_vtype_valid": 0,
-            "io_backend_toIBuf_resumingVType": 0,
-            "io_backend_toIBuf_vsetvlVType_illegal": 0,
-            "io_backend_toIBuf_vsetvlVType_vlmul": 0,
-            "io_backend_toIBuf_vsetvlVType_vma": 0,
-            "io_backend_toIBuf_vsetvlVType_vsew": 0,
-            "io_backend_toIBuf_vsetvlVType_vta": 0,
-            "io_backend_toIBuf_walkToArchVType": 0,
-            "io_backend_toIBuf_walkVType_bits_illegal": 0,
-            "io_backend_toIBuf_walkVType_bits_vlmul": 0,
-            "io_backend_toIBuf_walkVType_bits_vma": 0,
-            "io_backend_toIBuf_walkVType_bits_vsew": 0,
-            "io_backend_toIBuf_walkVType_bits_vta": 0,
-            "io_backend_toIBuf_walkVType_valid": 0,
-            "io_testOnlyPtwReqCtrlEnable": 0,
-            "io_testOnlyPtwReqCtrlFire": 0,
-            "io_testOnlyPtwReqCtrlBitsVpn": 0,
-            "io_testOnlyPtwReqCtrlBitsS2xlate": 0,
-            "io_testOnlyPtwReqCtrlBitsGetGpa": 0,
-            "io_testOnlyPtwReqCtrlBitsMemidxIsLd": 0,
-            "io_testOnlyPtwReqCtrlBitsMemidxIsSt": 0,
-            "io_testOnlyPtwReqCtrlBitsMemidxIdx": 0,
-            "io_testOnlyPtwReqReady": 0,
-            "io_tlbCsr_mbmc_KEYIDEN": 0,
-            "io_tlbCsr_mbmc_BME": 0,
-            "io_tlbCsr_mbmc_CMODE": 0,
-            "io_tlbCsr_priv_debug": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_enable": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_enable": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_train_on_hit": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_enable_agt": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_enable_pht": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_active_threshold": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_active_stride": 0,
-            "io_csrCtrl_pf_ctrl_l1D_pf_enable_stride": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_store_only": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_recv_enable": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_pbop_enable": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_vbop_enable": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_tp_enable": 0,
-            "io_csrCtrl_pf_ctrl_l2_pf_delay_latency": 0,
-            "io_csrCtrl_pf_ctrl_berti_enable": 0,
-            "io_csrCtrl_lvpred_disable": 0,
-            "io_csrCtrl_no_spec_load": 0,
-            "io_csrCtrl_storeset_wait_store": 0,
-            "io_csrCtrl_storeset_no_fast_wakeup": 0,
-            "io_csrCtrl_lvpred_timeout": 0,
-            "io_csrCtrl_bp_ctrl_rasEnable": 1,
-            "io_csrCtrl_sbuffer_threshold": 0,
-            "io_csrCtrl_soft_prefetch_enable": 0,
-            "io_csrCtrl_uncache_write_outstanding_enable": 0,
-            "io_csrCtrl_hd_misalign_st_enable": 0,
-            "io_csrCtrl_hd_misalign_ld_enable": 0,
-            "io_csrCtrl_power_down_enable": 0,
-            "io_csrCtrl_flush_l2_enable": 0,
-            "io_csrCtrl_fusion_enable": 0,
-            "io_csrCtrl_wfi_enable": 0,
-            "io_csrCtrl_distribute_csr_w_bits_addr": 0,
-            "io_csrCtrl_distribute_csr_w_bits_data": 0,
-            "io_csrCtrl_singlestep": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_valid": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_addr": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load": 0,
-            "io_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2": 0,
-            "io_csrCtrl_frontend_trigger_tEnableVec_0": 0,
-            "io_csrCtrl_frontend_trigger_tEnableVec_1": 0,
-            "io_csrCtrl_frontend_trigger_tEnableVec_2": 0,
-            "io_csrCtrl_frontend_trigger_tEnableVec_3": 0,
-            "io_csrCtrl_frontend_trigger_debugMode": 0,
-            "io_csrCtrl_frontend_trigger_triggerCanRaiseBpExp": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing": 0,
-            "io_csrCtrl_mem_trigger_tUpdate_bits_tdata_execute": 0,
-            "io_csrCtrl_virtMode": 0,
-            "io_debugTopDown_robHeadVaddr_valid": 0,
-            "io_debugTopDown_robHeadVaddr_bits_addr": 0,
-            "io_dft_ram_ctl": 0,
-        }
-        for name, value in scalar_defaults.items():
-            self._write(getattr(self.dut, name, None), value)
-
-        for idx in range(8):
-            self._write(getattr(self.dut, f"io_backend_cfVec_{idx}_ready", None), 1)
+        self.backend_status_if.drive_idle()
+        self.backend_to_ftq_if.drive_idle()
+        self.backend_to_ibuf_if.drive_idle()
+        self.backend_wfi_if.drive_idle()
 
     def _on_clock_edge(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
@@ -865,10 +783,10 @@ class FrontendEnv:
             "priv_virt": bool(priv_virt),
         }
         signals = {
-            "satp": self.csr_ctrl_if.io_tlbCsr_satp_changed,
-            "vsatp": self.csr_ctrl_if.io_tlbCsr_vsatp_changed,
-            "hgatp": self.csr_ctrl_if.io_tlbCsr_hgatp_changed,
-            "priv_virt": self.csr_ctrl_if.io_tlbCsr_priv_virt_changed,
+            "satp": self.tlb_csr_if.io_tlbCsr_satp_changed,
+            "vsatp": self.tlb_csr_if.io_tlbCsr_vsatp_changed,
+            "hgatp": self.tlb_csr_if.io_tlbCsr_hgatp_changed,
+            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virt_changed,
         }
         for name, signal in signals.items():
             if changed[name]:
@@ -883,10 +801,10 @@ class FrontendEnv:
 
     def release_tlb_csr_changes(self, prepared: dict) -> None:
         signals = {
-            "satp": self.csr_ctrl_if.io_tlbCsr_satp_changed,
-            "vsatp": self.csr_ctrl_if.io_tlbCsr_vsatp_changed,
-            "hgatp": self.csr_ctrl_if.io_tlbCsr_hgatp_changed,
-            "priv_virt": self.csr_ctrl_if.io_tlbCsr_priv_virt_changed,
+            "satp": self.tlb_csr_if.io_tlbCsr_satp_changed,
+            "vsatp": self.tlb_csr_if.io_tlbCsr_vsatp_changed,
+            "hgatp": self.tlb_csr_if.io_tlbCsr_hgatp_changed,
+            "priv_virt": self.tlb_csr_if.io_tlbCsr_priv_virt_changed,
         }
         for name, signal in signals.items():
             if bool(prepared.get(name, False)):
@@ -1086,8 +1004,8 @@ class FrontendEnv:
         }
         ptw_policy = self.page_table.set_ptw_pbmte_policy(machine=machine, hypervisor=hypervisor)
         signals = {
-            "machine": self.csr_ctrl_if.io_tlbCsr_mPBMTE,
-            "hypervisor": self.csr_ctrl_if.io_tlbCsr_hPBMTE,
+            "machine": self.tlb_csr_if.io_tlbCsr_mPBMTE,
+            "hypervisor": self.tlb_csr_if.io_tlbCsr_hPBMTE,
         }
         driven = {}
         unsupported = []
@@ -1157,10 +1075,10 @@ class FrontendEnv:
     def prepare_translation_context_change(self, **kwargs) -> dict:
         """Drive translation context fields and changed pins without stepping."""
         groups = {
-            "satp": ((kwargs.get("satp_mode"), self.csr_ctrl_if.io_tlbCsr_satp_mode), (kwargs.get("satp_asid"), self.csr_ctrl_if.io_tlbCsr_satp_asid), (kwargs.get("satp_ppn"), self.csr_ctrl_if.io_tlbCsr_satp_ppn)),
-            "vsatp": ((kwargs.get("vsatp_mode"), self.csr_ctrl_if.io_tlbCsr_vsatp_mode), (kwargs.get("vsatp_asid"), self.csr_ctrl_if.io_tlbCsr_vsatp_asid), (kwargs.get("vsatp_ppn"), self.csr_ctrl_if.io_tlbCsr_vsatp_ppn)),
-            "hgatp": ((kwargs.get("hgatp_mode"), self.csr_ctrl_if.io_tlbCsr_hgatp_mode), (kwargs.get("hgatp_vmid"), self.csr_ctrl_if.io_tlbCsr_hgatp_vmid), (kwargs.get("hgatp_ppn"), self.csr_ctrl_if.io_tlbCsr_hgatp_ppn)),
-            "priv_virt": ((kwargs.get("priv_imode"), self.csr_ctrl_if.io_tlbCsr_priv_imode), (kwargs.get("priv_virt"), self.csr_ctrl_if.io_tlbCsr_priv_virt)),
+            "satp": ((kwargs.get("satp_mode"), self.tlb_csr_if.io_tlbCsr_satp_mode), (kwargs.get("satp_asid"), self.tlb_csr_if.io_tlbCsr_satp_asid), (kwargs.get("satp_ppn"), self.tlb_csr_if.io_tlbCsr_satp_ppn)),
+            "vsatp": ((kwargs.get("vsatp_mode"), self.tlb_csr_if.io_tlbCsr_vsatp_mode), (kwargs.get("vsatp_asid"), self.tlb_csr_if.io_tlbCsr_vsatp_asid), (kwargs.get("vsatp_ppn"), self.tlb_csr_if.io_tlbCsr_vsatp_ppn)),
+            "hgatp": ((kwargs.get("hgatp_mode"), self.tlb_csr_if.io_tlbCsr_hgatp_mode), (kwargs.get("hgatp_vmid"), self.tlb_csr_if.io_tlbCsr_hgatp_vmid), (kwargs.get("hgatp_ppn"), self.tlb_csr_if.io_tlbCsr_hgatp_ppn)),
+            "priv_virt": ((kwargs.get("priv_imode"), self.tlb_csr_if.io_tlbCsr_priv_imode), (kwargs.get("priv_virt"), self.tlb_csr_if.io_tlbCsr_priv_virt)),
         }
         changed_groups = {name: any(value is not None for value, _signal in members) for name, members in groups.items()}
         for members in groups.values():

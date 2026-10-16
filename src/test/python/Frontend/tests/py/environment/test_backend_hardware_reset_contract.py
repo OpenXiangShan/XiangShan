@@ -162,9 +162,9 @@ def test_standalone_backend_callback_requires_frontend_monitor(monkeypatch):
 
 def test_old_pc_mapping_unavailable_after_reset_then_new_mapping_is_required():
     model = _dirty_model()
-    model.observe_if = _ObserveIf()
+    model.cfvec_if = _ObserveIf()
     model.on_hardware_reset(100)
-    _capture_cfvec(model, model.observe_if)
+    _capture_cfvec(model, model.cfvec_if)
     with pytest.raises(AssertionError, match="without an observed start PC"):
         model.observed_cfvec_pc(0)
     model.consume_backend_observation(BackendObservationSnapshot(

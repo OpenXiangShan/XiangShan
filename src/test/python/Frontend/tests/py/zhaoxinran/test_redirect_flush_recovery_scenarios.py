@@ -158,7 +158,7 @@ def _register_main_fetch_observer(env) -> list[dict[str, int]]:
         samples.append(
             {
                 "cycle": int(cycle),
-                "redirect": int(current_env.backend_ctrl_if.redirect_valid.value),
+                "redirect": int(current_env.backend_to_ftq_if.redirect_valid.value),
                 "valid": uncache._require_first_dut_signal(
                     current_env, _MAIN_FETCH_VALID_SIGNALS
                 ),
@@ -182,7 +182,7 @@ def _register_uncache_redirect_observer(
         if target_pc is not None:
             target_seen = int(
                 any(
-                    int(current_env.backend_observe_if.cfvec_valid[slot].value or 0) == 1
+                    int(current_env.backend_cfvec_if.cfvec_valid[slot].value or 0) == 1
                     and current_env.observed_cfvec_pc(slot) == int(target_pc)
                     for slot in range(8)
                 )
@@ -209,7 +209,7 @@ def _register_uncache_redirect_observer(
                     current_env, _IBUFFER_READY_SIGNALS
                 ),
                 "backend_redirect": int(
-                    current_env.backend_ctrl_if.redirect_valid.value
+                    current_env.backend_to_ftq_if.redirect_valid.value
                 ),
                 "target_seen": target_seen,
             }

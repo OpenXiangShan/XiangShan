@@ -60,7 +60,7 @@ def _capture_metadata(env):
                     readable[path] = int(value)
                     assert int(value) == state[stem], {"alias_disagreement": readable, "stem": stem}
             canaries[stem] = readable
-        gp = active_env.backend_observe_if
+        gp = active_env.backend_from_ifu_if
         state["gpaddr"] = {
             "wen": int(gp.gpaddr_mem_wen.value), "waddr": int(gp.gpaddr_mem_waddr.value),
             "addr": int(gp.gpaddr_mem_gpaddr.value),

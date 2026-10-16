@@ -9,7 +9,15 @@ from typing import Callable, Deque, Dict, Optional
 from toffee.bundle import DummySignal
 
 from ..agents.backend_agent import BackendAgent
-from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, bind_bundle_optional
+from ..bundles import (
+    BackendCfVecBundle,
+    BackendFromFtqBundle,
+    BackendStatusBundle,
+    BackendToFtqBundle,
+    BackendToIBufBundle,
+    BackendWfiBundle,
+    bind_bundle_optional,
+)
 from ..support.pc_utils import fold_pc, pc_from_ftq_start
 from ..model.backend_runtime import (
     BackendCycleActions,
@@ -71,10 +79,13 @@ class BackendModel:
     ) -> None:
         self.logger = logging.getLogger("env.backend_model")
         self.dut = None
-        self.drive_if = None
-        self.observe_if = None
+        self.to_ftq_if = None
+        self.cfvec_if = None
         self._cfvec_is_last_observable = True
         self.from_ftq_if = None
+        self.to_ibuf_if = None
+        self.status_if = None
+        self.wfi_if = None
         self.env = None
         self.monitor = None
         self.branch_checker = None
@@ -2868,9 +2879,12 @@ class BackendModel:
     def bind(self, dut) -> None:
         self.dut = dut
         self.bind_interfaces(
-            drive_if=bind_bundle_optional(BackendCtrlBundle, dut),
-            observe_if=bind_bundle_optional(BackendObserveBundle, dut),
+            to_ftq_if=bind_bundle_optional(BackendToFtqBundle, dut),
+            cfvec_if=bind_bundle_optional(BackendCfVecBundle, dut),
             from_ftq_if=bind_bundle_optional(BackendFromFtqBundle, dut),
+            to_ibuf_if=bind_bundle_optional(BackendToIBufBundle, dut),
+            status_if=bind_bundle_optional(BackendStatusBundle, dut),
+            wfi_if=bind_bundle_optional(BackendWfiBundle, dut),
         )
 
     @staticmethod
@@ -2881,11 +2895,23 @@ class BackendModel:
         except Exception:
             return default
 
-    def bind_interfaces(self, *, drive_if, observe_if, from_ftq_if) -> None:
-        self.drive_if = drive_if
-        self.observe_if = observe_if
+    def bind_interfaces(
+        self,
+        *,
+        to_ftq_if,
+        cfvec_if,
+        from_ftq_if,
+        to_ibuf_if,
+        status_if,
+        wfi_if,
+    ) -> None:
+        self.to_ftq_if = to_ftq_if
+        self.cfvec_if = cfvec_if
         self.from_ftq_if = from_ftq_if
-        is_last_signals = getattr(observe_if, "cfvec_is_last_in_ftq_entry", ())
+        self.to_ibuf_if = to_ibuf_if
+        self.status_if = status_if
+        self.wfi_if = wfi_if
+        is_last_signals = getattr(cfvec_if, "cfvec_is_last_in_ftq_entry", ())
         self._cfvec_is_last_observable = bool(is_last_signals) and any(
             not isinstance(signal, DummySignal) for signal in is_last_signals
         )
@@ -2988,7 +3014,7 @@ class BackendModel:
 
     def _missing_cfvec_boundary_bit(self) -> bool:
         return "cfvec_is_last_in_ftq_entry" in getattr(
-            self.observe_if, "_missing_optional_attrs", ()
+            self.cfvec_if, "_missing_optional_attrs", ()
         )
 
     def _cfvec_uses_uncache_fetch(self, pc: int) -> bool:
@@ -3026,9 +3052,17 @@ class BackendModel:
         self._cfvec_snapshot_pc_cache.clear()
 
     def _bound_backend_agent(self) -> BackendAgent:
-        assert self.drive_if is not None
+        assert self.to_ftq_if is not None
+        assert self.to_ibuf_if is not None
+        assert self.status_if is not None
+        assert self.wfi_if is not None
         agent = BackendAgent()
-        agent.bind(self.drive_if)
+        agent.bind(
+            to_ftq_if=self.to_ftq_if,
+            to_ibuf_if=self.to_ibuf_if,
+            status_if=self.status_if,
+            wfi_if=self.wfi_if,
+        )
         return agent
 
     def set_golden_trace(self, trace: Optional[GoldenTrace], *, start_cursor: int = 0) -> None:
@@ -3847,7 +3881,7 @@ class BackendModel:
         )
 
     def _sample_cfvec(self, snapshot: Optional[CfVecCycleSnapshot] = None) -> None:
-        assert self.observe_if is not None
+        assert self.cfvec_if is not None
         if self._skip_cfvec_until_cycle is not None:
             if int(self.current_cycle) <= int(self._skip_cfvec_until_cycle):
                 return
@@ -4960,7 +4994,7 @@ class BackendModel:
         self._activate_visible_queue_call_ret_commit_group()
         self._clear_stale_auxiliary_states()
         self._watchdog(observation)
-        if self.observe_if is not None:
+        if self.cfvec_if is not None:
             self._sample_cfvec(self._cfvec_cycle_snapshot)
         ftq_idx_ahead = self._ready_ftq_idx_ahead_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
@@ -4991,7 +5025,14 @@ class BackendModel:
         )
 
     def on_clock_edge(self, cycle: int) -> None:
-        if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None:
+        if (
+            self.to_ftq_if is None
+            or self.cfvec_if is None
+            or self.from_ftq_if is None
+            or self.to_ibuf_if is None
+            or self.status_if is None
+            or self.wfi_if is None
+        ):
             return
         if self._read(getattr(self.dut, "reset", None)):
             self.on_hardware_reset(cycle)

@@ -26,7 +26,7 @@ def _capture_cfvec_exceptions(env) -> list[dict]:
     records: list[dict] = []
 
     def capture(cycle: int, active_env) -> None:
-        observe = active_env.backend_observe_if
+        observe = active_env.backend_cfvec_if
         for slot in range(8):
             if int(observe.cfvec_valid[slot].value) != 1:
                 continue

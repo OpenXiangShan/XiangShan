@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..bundles import BackendObserveBundle
+from ..bundles import BackendCfVecBundle, BackendFromIfuBundle, BackendToFtqBundle
 from ..bundles.ptw import PTWBundle
 from ..model.backend_runtime import (
     BackendObservationSnapshot,
@@ -74,7 +74,9 @@ class PTWAgentInputSnapshot:
 
 class FrontendMonitor:
     def __init__(self) -> None:
-        self.interface = None
+        self.cfvec_if = None
+        self.backend_to_ftq_if = None
+        self.backend_from_ifu_if = None
         self.from_ftq_if = None
         self.ptw_if = None
         self.csr_ctrl_if = None
@@ -82,7 +84,6 @@ class FrontendMonitor:
         self.uncache_if = None
         self.icache_control_if = None
         self.ptw_get_gpa_provider = None
-        self.dut = None
         self.cycle_snapshot: Optional[FrontendCycleSnapshot] = None
         self.icache_request_snapshot: Optional[ICacheRequestSnapshot] = None
         self.uncache_request_snapshot: Optional[UncacheRequestSnapshot] = None
@@ -156,13 +157,20 @@ class FrontendMonitor:
         except Exception:
             return default
 
-    def _read_dut_signal(self, name: str) -> int:
-        return self._read(getattr(self.dut, name, None))
+    def bind_cfvec(self, target) -> None:
+        if not isinstance(target, BackendCfVecBundle):
+            raise TypeError("FrontendMonitor requires an explicitly bound BackendCfVecBundle")
+        self.cfvec_if = target
 
-    def bind(self, target) -> None:
-        if not isinstance(target, BackendObserveBundle):
-            raise TypeError("FrontendMonitor requires an explicitly bound BackendObserveBundle")
-        self.interface = target
+    def bind_backend_to_ftq(self, target) -> None:
+        if not isinstance(target, BackendToFtqBundle):
+            raise TypeError("FrontendMonitor requires an explicitly bound BackendToFtqBundle")
+        self.backend_to_ftq_if = target
+
+    def bind_backend_from_ifu(self, target) -> None:
+        if not isinstance(target, BackendFromIfuBundle):
+            raise TypeError("FrontendMonitor requires an explicitly bound BackendFromIfuBundle")
+        self.backend_from_ifu_if = target
 
     def bind_observation_interfaces(self, *, from_ftq_if, ptw_if, ptw_get_gpa_provider) -> None:
         self.from_ftq_if = from_ftq_if
@@ -181,21 +189,18 @@ class FrontendMonitor:
     def bind_icache_control(self, icache_control_if) -> None:
         self.icache_control_if = icache_control_if
 
-    def bind_dut(self, dut) -> None:
-        self.dut = dut
-
     def attach_checker(self, checker) -> None:
         self._checker = checker
 
     def _read_cfvec_slot(self, name: str, slot: int) -> int:
-        signals = getattr(self.interface, name, ())
+        signals = getattr(self.cfvec_if, name, ())
         try:
             return self._read(signals[int(slot)])
         except (IndexError, TypeError):
             return 0
 
     def capture_cfvec_snapshot(self, cycle: int) -> CfVecCycleSnapshot:
-        if self.interface is None:
+        if self.cfvec_if is None:
             raise AssertionError("FrontendMonitor observation interface is not bound")
         return capture_cfvec_snapshot(cycle, self._read_cfvec_slot)
 
@@ -280,7 +285,12 @@ class FrontendMonitor:
         return self.ptw_agent_input_snapshot
 
     def capture_cycle_observation(self, cycle: int) -> FrontendCycleSnapshot:
-        if self.interface is None or self.from_ftq_if is None or self.ptw_if is None:
+        if (
+            self.cfvec_if is None
+            or self.backend_to_ftq_if is None
+            or self.from_ftq_if is None
+            or self.ptw_if is None
+        ):
             raise AssertionError("FrontendMonitor observation interfaces are not bound")
         backend = BackendObservationSnapshot(
             from_ftq_wen=self._read(self.from_ftq_if.io_backend_fromFtq_wen),
@@ -315,13 +325,13 @@ class FrontendMonitor:
                     self._read(signal) for signal in getattr(self.ptw_if, f"resp_bits_{name}")
                 )
         redirect = {
-            "valid": self._read(self.interface.redirect_valid),
-            "pc": self._read(self.interface.redirect_bits_pc),
-            "target": self._read(self.interface.redirect_bits_target),
-            "taken": self._read(self.interface.redirect_bits_taken),
-            "level": self._read_dut_signal("io_backend_toFtq_redirect_bits_level"),
-            "debug_is_ctrl": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl"),
-            "debug_is_mem_vio": self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio"),
+            "valid": self._read(self.backend_to_ftq_if.redirect_valid),
+            "pc": self._read(self.backend_to_ftq_if.redirect_bits_pc),
+            "target": self._read(self.backend_to_ftq_if.redirect_bits_target),
+            "taken": self._read(self.backend_to_ftq_if.redirect_bits_taken),
+            "level": self._read(self.backend_to_ftq_if.redirect_bits_level),
+            "debug_is_ctrl": self._read(self.backend_to_ftq_if.redirect_bits_debug_is_ctrl),
+            "debug_is_mem_vio": self._read(self.backend_to_ftq_if.redirect_bits_debug_is_mem_vio),
         }
         self.cycle_snapshot = FrontendCycleSnapshot(int(cycle), backend, cfvec, redirect, ptw)
         return self.cycle_snapshot

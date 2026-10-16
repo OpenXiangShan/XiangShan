@@ -21,6 +21,9 @@ class _ObserveIf:
         self.redirect_bits_pc = _Signal()
         self.redirect_bits_target = _Signal()
         self.redirect_bits_taken = _Signal()
+        self.redirect_bits_level = _Signal()
+        self.redirect_bits_debug_is_ctrl = _Signal()
+        self.redirect_bits_debug_is_mem_vio = _Signal()
         self.cfvec_valid = [_Signal() for _ in range(8)]
         self.cfvec_full_pc = [0 for _ in range(8)]
         self.cfvec_foldpc = [_Signal() for _ in range(8)]
@@ -48,14 +51,14 @@ class _Trace:
 class _BackendModel:
     def __init__(self, interface: _ObserveIf | None = None, *, trace_complete: bool = False) -> None:
         self.golden_trace = _Trace() if trace_complete else None
-        self.interface = interface
+        self.cfvec_if = interface
 
     def current_cycle_start_golden_pc(self):
         return None
 
     def observed_cfvec_snapshot_pc(self, snapshot, slot: int) -> int:
-        assert self.interface is not None
-        pc = int(self.interface.cfvec_full_pc[int(slot)])
+        assert self.cfvec_if is not None
+        pc = int(self.cfvec_if.cfvec_full_pc[int(slot)])
         return require_matching_foldpc(pc, int(snapshot.slots[int(slot)].foldpc))
 
 
@@ -90,7 +93,8 @@ def _new_monitor(memory: MemoryModel | None = None) -> tuple[FrontendFlowChecker
     monitor = FrontendFlowChecker(memory=memory)
     interface = _ObserveIf()
     sampler = FrontendMonitor()
-    sampler.interface = interface
+    sampler.cfvec_if = interface
+    sampler.backend_to_ftq_if = interface
     sampler.from_ftq_if = SimpleNamespace(
         io_backend_fromFtq_wen=_Signal(),
         io_backend_fromFtq_ftqIdx=_Signal(),

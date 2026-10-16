@@ -135,7 +135,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
     records: dict[str, list[dict]] = {"redirects": [], "cfvec": []}
 
     def capture(cycle: int, active_env) -> None:
-        ctrl = active_env.backend_ctrl_if
+        ctrl = active_env.backend_to_ftq_if
         if int(ctrl.redirect_valid.value) == 1:
             records["redirects"].append(
                 {
@@ -154,7 +154,7 @@ def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
                 }
             )
 
-        observe = active_env.backend_observe_if
+        observe = active_env.backend_cfvec_if
         for slot in range(8):
             if int(observe.cfvec_valid[slot].value) != 1:
                 continue

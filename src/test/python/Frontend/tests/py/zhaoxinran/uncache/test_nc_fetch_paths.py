@@ -98,7 +98,7 @@ def _register_nc_timing_observer(env) -> list[dict]:
         )
         sample["tl_d_valid"] = int(current_env.uncache_if.d_valid.value)
         sample["backend_redirect_drive"] = int(
-            current_env.backend_ctrl_if.redirect_valid.value
+            current_env.backend_to_ftq_if.redirect_valid.value
         )
         samples.append(sample)
 
@@ -177,7 +177,7 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
     records: list[dict] = []
 
     def capture(cycle, current_env) -> None:
-        observe = current_env.backend_observe_if
+        observe = current_env.backend_cfvec_if
         for slot in range(8):
             if int(observe.cfvec_valid[slot].value) != 1:
                 continue

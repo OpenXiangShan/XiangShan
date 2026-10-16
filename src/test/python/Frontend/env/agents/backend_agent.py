@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Optional
 
-from ..bundles import BackendCtrlBundle
+from ..bundles import BackendStatusBundle, BackendToFtqBundle, BackendToIBufBundle, BackendWfiBundle
 from ..core.transactions import BackendRedirectClass, FtqIdxAheadTxn
 from ..model.backend_state import FtqEntry, ResolveEntry
 
@@ -11,8 +11,10 @@ class BackendAgent:
     _PC_BITS = 50
 
     def __init__(self) -> None:
-        self.interface = None
         self._drive_if = None
+        self._to_ibuf_if = None
+        self._status_if = None
+        self._wfi_if = None
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels: set[int] = set()
@@ -26,11 +28,19 @@ class BackendAgent:
         except Exception:
             return
 
-    def bind(self, target) -> None:
-        if not isinstance(target, BackendCtrlBundle):
-            raise TypeError(f"BackendAgent.bind requires a backend control interface, got {type(target).__name__}")
-        self.interface = target
-        self._drive_if = target
+    def bind(self, *, to_ftq_if, to_ibuf_if, status_if, wfi_if) -> None:
+        if not isinstance(to_ftq_if, BackendToFtqBundle):
+            raise TypeError(f"BackendAgent.bind requires BackendToFtqBundle, got {type(to_ftq_if).__name__}")
+        if not isinstance(to_ibuf_if, BackendToIBufBundle):
+            raise TypeError(f"BackendAgent.bind requires BackendToIBufBundle, got {type(to_ibuf_if).__name__}")
+        if not isinstance(status_if, BackendStatusBundle):
+            raise TypeError(f"BackendAgent.bind requires BackendStatusBundle, got {type(status_if).__name__}")
+        if not isinstance(wfi_if, BackendWfiBundle):
+            raise TypeError(f"BackendAgent.bind requires BackendWfiBundle, got {type(wfi_if).__name__}")
+        self._drive_if = to_ftq_if
+        self._to_ibuf_if = to_ibuf_if
+        self._status_if = status_if
+        self._wfi_if = wfi_if
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels.clear()
@@ -68,6 +78,12 @@ class BackendAgent:
         """Force every backend output idle at a hardware epoch boundary."""
         assert self._drive_if is not None
         self._drive_if.drive_idle()
+        if self._to_ibuf_if is not None:
+            self._to_ibuf_if.drive_idle()
+        if self._status_if is not None:
+            self._status_if.drive_idle()
+        if self._wfi_if is not None:
+            self._wfi_if.drive_idle()
         self._commit_valid_driven = False
         self._redirect_valid_driven = False
         self._resolve_valid_channels.clear()
@@ -75,11 +91,13 @@ class BackendAgent:
         self._ftq_idx_ahead_valid_driven = False
 
     def start_cycle(self, can_accept: int, wfi_req: int = 0, backend_empty: int = 1) -> None:
-        assert self._drive_if is not None
-        self._write(self._drive_if.can_accept, int(can_accept))
-        self._write(self._drive_if.backend_empty, 1 if int(backend_empty) else 0)
+        assert self._to_ibuf_if is not None
+        assert self._status_if is not None
+        assert self._wfi_if is not None
+        self._write(self._to_ibuf_if.decode_can_accept, int(can_accept))
+        self._write(self._status_if.backend_empty, 1 if int(backend_empty) else 0)
         self.clear_one_shot_signals()
-        self._write(self._drive_if.wfi_req, 1 if int(wfi_req) else 0)
+        self._write(self._wfi_if.wfi_req, 1 if int(wfi_req) else 0)
 
     def drive_ftq_idx_ahead(self, txn: Optional[FtqIdxAheadTxn]) -> None:
         assert self._drive_if is not None

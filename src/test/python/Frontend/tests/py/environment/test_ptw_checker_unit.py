@@ -131,12 +131,12 @@ def test_ptw_agent_uses_monitored_request_and_context() -> None:
     env.monitor.ptw_get_gpa_provider = lambda: 1
     env.ptw_if.req_0_valid.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
-    env.csr_ctrl_if.io_tlbCsr_priv_imode.value = 1
+    env.tlb_csr_if.io_tlbCsr_priv_imode.value = 1
 
     sampled = env.monitor.capture_ptw_agent_inputs(10)
     env.ptw_if.req_0_valid.value = 0
     env.ptw_if.req_0_bits_vpn.value = 0
-    env.csr_ctrl_if.io_tlbCsr_priv_imode.value = 3
+    env.tlb_csr_if.io_tlbCsr_priv_imode.value = 3
     env.monitor.ptw_get_gpa_provider = lambda: 0
     env.ptw_agent.on_clock_edge(10, sampled)
 
@@ -183,9 +183,9 @@ def test_ptw_nemu_sync_uses_monitored_csr_before_request_context(monkeypatch) ->
     env.ptw_agent.set_nemu_sync_hook(sync)
     env.ptw_if.req_0_valid.value = 1
     env.ptw_if.req_0_bits_vpn.value = 0x80001
-    env.csr_ctrl_if.io_tlbCsr_satp_mode.value = 8
+    env.tlb_csr_if.io_tlbCsr_satp_mode.value = 8
     sampled = env.monitor.capture_ptw_agent_inputs(10)
-    env.csr_ctrl_if.io_tlbCsr_satp_mode.value = 0
+    env.tlb_csr_if.io_tlbCsr_satp_mode.value = 0
     env.ptw_agent.on_clock_edge(10, sampled)
 
     assert synced == [8]

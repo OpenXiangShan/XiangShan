@@ -177,7 +177,7 @@ def test_address_translation_gstage_provenance(
 
     for _ in range(6000):
         env.step(1)
-        gpaddr_if = env.backend_observe_if
+        gpaddr_if = env.backend_from_ifu_if
         if int(gpaddr_if.gpaddr_mem_wen.value):
             gpaddr_writes.append(
                 (

@@ -89,7 +89,7 @@ def _set_first_cfvec(
 
 def _capture_cfvec(model: BackendModel, interface: _ObserveIf):
     monitor = FrontendMonitor()
-    monitor.interface = interface
+    monitor.cfvec_if = interface
     snapshot = monitor.capture_cfvec_snapshot(model.current_cycle)
     model.accept_cfvec_snapshot(snapshot)
     return snapshot
@@ -103,7 +103,7 @@ def _sample_cfvec(model: BackendModel, interface: _ObserveIf) -> None:
 def test_backend_model_requires_current_monitor_snapshot_for_cfvec() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 10
     _set_first_cfvec(model, interface, 0x80001000)
 
@@ -407,7 +407,7 @@ def test_ready_resolve_rejects_stale_queue_index() -> None:
 def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expected_pc) -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     interface.cfvec_valid[0].value = 1
     interface.cfvec_ftq_ptr_flag[0].value = 1
     interface.cfvec_ftq_ptr_value[0].value = 3
@@ -423,7 +423,7 @@ def test_observed_cfvec_pc_uses_ftq_context_and_validates_foldpc(is_rvc, expecte
 def test_observed_cfvec_pc_uses_previous_start_after_ftq_reuse() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     ftq_idx = 1
     model.consume_backend_observation(
         BackendObservationSnapshot(
@@ -452,8 +452,8 @@ def test_observed_cfvec_pc_uses_previous_start_after_ftq_reuse() -> None:
 
 def test_observed_cfvec_pc_rejects_missing_ftq_context() -> None:
     model = BackendModel()
-    model.observe_if = _ObserveIf()
-    _capture_cfvec(model, model.observe_if)
+    model.cfvec_if = _ObserveIf()
+    _capture_cfvec(model, model.cfvec_if)
 
     with pytest.raises(AssertionError, match="without an observed start PC"):
         model.observed_cfvec_pc(0)
@@ -462,7 +462,7 @@ def test_observed_cfvec_pc_rejects_missing_ftq_context() -> None:
 def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     interface.cfvec_valid[0].value = 1
     interface.cfvec_foldpc[0].value = fold_pc(0x80001000) ^ 1
     model._ftq_start_pc_by_value[0] = 0x80001002
@@ -475,7 +475,7 @@ def test_observed_cfvec_pc_rejects_foldpc_mismatch() -> None:
 def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.begin_cycle(7)
     _set_first_cfvec(model, interface, 0x80001000, ftq_value=3)
     interface.cfvec_pred_taken[0].value = 1
@@ -503,7 +503,7 @@ def test_cfvec_snapshot_is_shared_without_repeated_dut_reads() -> None:
     assert interface.cfvec_exception_vec_20[0].read_count == 1
 
     monitor = FrontendFlowChecker()
-    monitor.interface = interface
+    monitor.cfvec_if = interface
     monitor.attach_backend_model(model)
     monitor.on_clock_edge(7, FrontendCycleSnapshot(7, BackendObservationSnapshot(), snapshot, {"valid": 0}, {}))
     model._sample_cfvec(snapshot)
@@ -524,7 +524,7 @@ def test_missing_cfvec_boundary_bit_closes_physical_mmio_entry(pc: int, expected
     model = BackendModel()
     interface = _ObserveIf()
     interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.env = SimpleNamespace(memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]))
     model.current_cycle = 1
     _set_first_cfvec(model, interface, pc, ftq_value=3)
@@ -549,7 +549,7 @@ def test_missing_cfvec_boundary_bit_uses_pa_and_pbmt(
     model = BackendModel()
     interface = _ObserveIf()
     interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.env = SimpleNamespace(
         memory=SimpleNamespace(mmio_ranges=[(0x10000000, 0x10002000)]),
         page_table=PageTableModel("sv39"),
@@ -618,7 +618,7 @@ def test_missing_cfvec_boundary_bit_closes_cacheable_entry_on_next_ftq_pointer()
     model = BackendModel()
     interface = _ObserveIf()
     interface._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 1
 
     first_pc = 0x80001000
@@ -1314,7 +1314,7 @@ def test_recovery_target_requires_expected_recovery_ftq() -> None:
 def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 10
     model.pending_events.append(
         BackendEvent(
@@ -1368,7 +1368,7 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
 def test_redirect_flush_samples_current_cfvec_before_arming_recovery() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 10
     model.pending_events.append(
         BackendEvent(
@@ -1409,7 +1409,7 @@ def test_observed_dut_redirect_extends_cfvec_skip_from_observed_cycle() -> None:
 def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 12
     model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
         origin_index=0,
@@ -1430,7 +1430,7 @@ def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None
 def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> None:
     model = BackendModel()
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 20
     model.golden_trace = _EmptyTrace()
 
@@ -1455,7 +1455,7 @@ def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> No
 def test_access_fault_cfvec_queues_backend_iaf_redirect() -> None:
     model = BackendModel(random_seed=1)
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 20
     model.set_golden_trace(
         GoldenTrace([TraceEntry(index=0, pc=0x80003240, instr=0x10050663, size=4)])
@@ -1539,7 +1539,7 @@ def test_older_mismatch_redirect_drops_younger_fetch_fault_redirect() -> None:
 def test_packet_after_fetch_fault_continues_that_fault() -> None:
     model = BackendModel(random_seed=1)
     interface = _ObserveIf()
-    model.observe_if = interface
+    model.cfvec_if = interface
     model.current_cycle = 20
     model.golden_trace = GoldenTrace(
         [TraceEntry(index=0, pc=0x80000D30, instr=0x13, size=4)]
@@ -1882,8 +1882,8 @@ def test_ftq_transition_without_last_is_unexpected_when_boundary_signal_exists()
 
 def test_ftq_transition_without_last_is_expected_when_boundary_signal_is_missing() -> None:
     model = BackendModel()
-    model.observe_if = _ObserveIf()
-    model.observe_if._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
+    model.cfvec_if = _ObserveIf()
+    model.cfvec_if._missing_optional_attrs = frozenset({"cfvec_is_last_in_ftq_entry"})
     model._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=20)
 
     assert model._ftq_transition_without_last_is_expected() is True

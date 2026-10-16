@@ -8,10 +8,23 @@ import yaml
 from toffee.bundle import Signal, SignalList
 
 from env.bundles import (
+    BackendCfVecBundle,
+    BackendFromFtqBundle,
+    BackendFromIfuBundle,
+    BackendStatusBundle,
+    BackendToFtqBundle,
+    BackendToIBufBundle,
+    BackendWfiBundle,
     CSRControlBundle,
+    ClockResetBundle,
+    DFTControlBundle,
+    EccErrorBundle,
     FrontendPerformanceBundle,
     ICacheBundle,
     ICacheControlBundle,
+    PTWBundle,
+    SoftPrefetchBundle,
+    TlbCsrBundle,
     UncacheBundle,
 )
 from env.core.frontend_env import FrontendEnv
@@ -208,6 +221,16 @@ def _bundle_signal_names(bundle_types: tuple[type, ...]) -> set[str]:
     return names
 
 
+def _wrapper_logic_signal_names() -> set[str]:
+    top_path = _selected_full_build_root() / "pylib-verilator" / "Frontend" / "Frontend_top.sv"
+    names = set()
+    for line in top_path.read_text(encoding="utf-8").splitlines():
+        fields = line.strip().rstrip(";").split()
+        if len(fields) >= 2 and fields[0] == "logic":
+            names.add(fields[-1])
+    return names
+
+
 def test_full_frontend_public_signal_contract() -> None:
     build_root = _selected_full_build_root()
     pylib = build_root / "pylib-verilator" / "Frontend"
@@ -235,15 +258,28 @@ def test_full_frontend_public_signal_contract() -> None:
 def test_full_rtl_added_signals_are_exposed_by_environment_bundles() -> None:
     modelled = _bundle_signal_names(
         (
+            BackendCfVecBundle,
+            BackendFromFtqBundle,
+            BackendFromIfuBundle,
+            BackendStatusBundle,
+            BackendToFtqBundle,
+            BackendToIBufBundle,
+            BackendWfiBundle,
             CSRControlBundle,
+            ClockResetBundle,
+            DFTControlBundle,
+            EccErrorBundle,
             FrontendPerformanceBundle,
             ICacheBundle,
             ICacheControlBundle,
+            PTWBundle,
+            SoftPrefetchBundle,
+            TlbCsrBundle,
             UncacheBundle,
         )
     )
-    missing = sorted(set(_FULL_RTL_ADDED_SIGNALS) - modelled)
-    assert not missing, {"full_rtl_added_signals_missing_from_bundles": missing}
+    missing = sorted(_wrapper_logic_signal_names() - modelled)
+    assert not missing, {"top_level_signals_missing_from_bundles": missing}
 
 
 def test_full_frontend_internal_observer_contract() -> None:

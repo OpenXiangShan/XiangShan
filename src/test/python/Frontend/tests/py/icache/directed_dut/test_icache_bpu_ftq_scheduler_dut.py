@@ -42,7 +42,7 @@ def test_bpu_scheduler_drives_live_identity_resolve(env):
     env.backend_model.set_can_accept(0)
     observed = []
     def sample(_cycle, active):
-        bundle = active.backend_ctrl_if
+        bundle = active.backend_to_ftq_if
         for lane in range(3):
             if int(bundle.resolve_valid[lane].value):
                 observed.append((int(bundle.resolve_bits_ftq_idx_flag[lane].value),

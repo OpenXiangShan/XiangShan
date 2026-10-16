@@ -29,7 +29,7 @@ def _capture_gpaddr_writes(env) -> list[dict]:
     records: list[dict] = []
 
     def capture(cycle: int, active_env) -> None:
-        observe = active_env.backend_observe_if
+        observe = active_env.backend_from_ifu_if
         if int(observe.gpaddr_mem_wen.value) != 1:
             return
         records.append(
@@ -50,7 +50,7 @@ def _capture_cfvec_deliveries(env) -> list[dict]:
     records: list[dict] = []
 
     def capture(cycle: int, active_env) -> None:
-        observe = active_env.backend_observe_if
+        observe = active_env.backend_cfvec_if
         for slot in range(8):
             if int(observe.cfvec_valid[slot].value) != 1:
                 continue
