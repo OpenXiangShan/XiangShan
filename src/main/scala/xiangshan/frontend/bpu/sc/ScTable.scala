@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.sc
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.PrunedAddr
@@ -88,7 +89,9 @@ class ScTable(
   io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)
 
   private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
-  io.predictReadResp := Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+  private val predictReadData = Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+  // Preserve the prediction response across s1 stalls while training reads share the SRAM banks.
+  io.predictReadResp := DataHoldBypass(predictReadData, RegNext(io.predictReadReq.valid, init = false.B))
 
   private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
   io.trainReadResp := Mux1H(trainReadBankMaskNext, sram.map(_.io.r.resp.data))
