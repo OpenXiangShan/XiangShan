@@ -1391,6 +1391,12 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
             complete_sample_seq,
             ppn_reuse_history_size);
     end
+    // Publish only after the DUT-visible response has been sampled.  UID issue
+    // can then prove an L1 hit without consulting a pending/live entry.
+    data.record_completed_tlb_response(
+        driving_req.entry_snapshot,
+        driving_req.request_token,
+        complete_sample_seq);
     record_update_count = data.complete_waiting_uid_records_by_response(
         driving_req.entry_snapshot,
         actual_response_csr_snapshot);

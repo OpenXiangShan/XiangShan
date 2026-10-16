@@ -18,15 +18,460 @@ class io_mem_to_ooo_ctrl_agent_agent_monitor  extends tcnt_monitor_base#(virtual
     extern virtual function void build_phase(uvm_phase phase);
     extern task run_phase(uvm_phase phase);
     extern task mon_data();
+    extern function bit read_rollback_hdl(input string path,
+                                          output uvm_hdl_data_t value);
+    extern function bit probe_rollback_hdl(input string path,
+                                           output uvm_hdl_data_t value,
+                                           output bit known);
+    extern function void sample_rollback_diagnostics(
+        ref memblock_sync_pkg::dispatch_raw_ctrl_t raw);
+    extern function void log_uncache_resource_snapshot(
+        input longint unsigned sample_seq,
+        input bit rob_flag,
+        input bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rob_value);
+
+    bit uncache_snapshot_valid;
+    int unsigned uncache_nack_diag_count;
+    logic [15:0] previous_uncache_lq_req_valid;
+    logic [15:0][1:0] previous_uncache_lq_state;
+    logic [15:0] previous_uncache_lq_need_flush_reg;
+    logic [15:0] previous_uncache_top_valid;
+    logic [15:0] previous_uncache_top_inflight;
+    logic [15:0] previous_uncache_top_wait_return;
 endclass:io_mem_to_ooo_ctrl_agent_agent_monitor
 
 function io_mem_to_ooo_ctrl_agent_agent_monitor::new(string name, uvm_component parent);
     super.new(name,parent);
+    uncache_snapshot_valid = 1'b0;
+    uncache_nack_diag_count = 0;
 endfunction:new
 
 function void io_mem_to_ooo_ctrl_agent_agent_monitor::build_phase(uvm_phase phase);
     super.build_phase(phase);
 endfunction:build_phase
+
+function bit io_mem_to_ooo_ctrl_agent_agent_monitor::read_rollback_hdl(
+    input string path,
+    output uvm_hdl_data_t value);
+    // uvm_hdl_read writes the referenced signal into the low bits.  Start the
+    // unused upper bits at zero so X/Z checking reflects the signal itself.
+    value = '0;
+    if (!uvm_hdl_read(path, value)) begin
+        `uvm_error("ROLLBACK_XMR", $sformatf("cannot read %s", path))
+        return 1'b0;
+    end
+    if ($isunknown(value)) begin
+        `uvm_error("ROLLBACK_XMR", $sformatf("X/Z sampled from %s", path))
+        return 1'b0;
+    end
+    return 1'b1;
+endfunction:read_rollback_hdl
+
+function bit io_mem_to_ooo_ctrl_agent_agent_monitor::probe_rollback_hdl(
+    input string path,
+    output uvm_hdl_data_t value,
+    output bit known);
+    value = '0;
+    known = 1'b0;
+    if (!uvm_hdl_read(path, value)) begin
+        return 1'b0;
+    end
+    known = !$isunknown(value);
+    return 1'b1;
+endfunction:probe_rollback_hdl
+
+function void io_mem_to_ooo_ctrl_agent_agent_monitor::sample_rollback_diagnostics(
+    ref memblock_sync_pkg::dispatch_raw_ctrl_t raw);
+    int selected_idx;
+    int selected_count;
+
+    raw.rollback_diag_valid = 1'b1;
+    raw.rollback_diag_complete = 1'b1;
+
+    // All mirrors are sampled by the same clocking block as memoryViolation.
+    // This keeps the arbiter proof in one simulator sampling region.
+    for (int idx = 0; idx < 6; idx++) begin
+        if (!$isunknown(this.vif.mon_mp.mon_cb.rollback_winner_vec[idx])) begin
+            raw.rollback_winner_known[idx] = 1'b1;
+            raw.rollback_winner[idx] =
+                &this.vif.mon_mp.mon_cb.rollback_winner_vec[idx];
+        end
+    end
+
+    selected_idx = -1;
+    selected_count = 0;
+    for (int idx = 0; idx < 6; idx++) begin
+        if (raw.rollback_winner_known[idx] && raw.rollback_winner[idx]) begin
+            selected_idx = idx;
+            selected_count++;
+        end
+    end
+    if (selected_count == 0) begin
+        raw.rollback_diag_valid = 1'b0;
+        raw.rollback_diag_complete = 1'b0;
+        return;
+    end
+    if (selected_count != 1 || selected_idx < 0) begin
+        raw.rollback_diag_complete = 1'b0;
+        `uvm_error("ROLLBACK_XMR",
+                   $sformatf("cannot prove unique rollback winner known=0x%0h winner=0x%0h",
+                             raw.rollback_winner_known, raw.rollback_winner))
+        return;
+    end
+
+    // Candidate valid remains optional for inactive non-winners.  The selected
+    // lane and every known-active lane retain strict payload checks.
+    for (int idx = 0; idx < 6; idx++) begin
+        if (!$isunknown(this.vif.mon_mp.mon_cb.rollback_candidate_valid[idx])) begin
+            raw.rollback_candidate_known[idx] = 1'b1;
+            raw.rollback_candidate_valid[idx] =
+                this.vif.mon_mp.mon_cb.rollback_candidate_valid[idx];
+        end
+    end
+    if (!raw.rollback_candidate_known[selected_idx]) begin
+        raw.rollback_diag_complete = 1'b0;
+        `uvm_error("ROLLBACK_XMR",
+                   $sformatf("selected rollback input %0d valid is X/Z at clocking sample",
+                             selected_idx))
+        return;
+    end
+    if (!raw.rollback_candidate_valid[selected_idx]) begin
+        raw.rollback_diag_complete = 1'b0;
+        `uvm_error("ROLLBACK_XMR",
+                   $sformatf("selected rollback input %0d is not valid", selected_idx))
+        return;
+    end
+
+    // Only candidates known active own meaningful ROB/level payload.  The
+    // selected one is therefore always covered; known non-selected actives
+    // remain visible for arbitration diagnostics.
+    for (int idx = 0; idx < 6; idx++) begin
+        if (!raw.rollback_candidate_known[idx] ||
+            !raw.rollback_candidate_valid[idx]) begin
+            continue;
+        end
+
+        if ($isunknown({
+                this.vif.mon_mp.mon_cb.rollback_candidate_rob_flag[idx],
+                this.vif.mon_mp.mon_cb.rollback_candidate_rob_value[idx],
+                this.vif.mon_mp.mon_cb.rollback_candidate_level[idx]})) begin
+            raw.rollback_diag_complete = 1'b0;
+            `uvm_error("ROLLBACK_XMR",
+                       $sformatf("active rollback input %0d payload is X/Z at clocking sample",
+                                 idx))
+            return;
+        end
+        raw.rollback_candidate_rob_flag[idx] =
+            this.vif.mon_mp.mon_cb.rollback_candidate_rob_flag[idx];
+        raw.rollback_candidate_rob_value[idx] =
+            this.vif.mon_mp.mon_cb.rollback_candidate_rob_value[idx];
+        raw.rollback_candidate_level[idx] =
+            this.vif.mon_mp.mon_cb.rollback_candidate_level[idx];
+    end
+
+    if (selected_idx < 3) begin
+        if ($isunknown({
+                this.vif.mon_mp.mon_cb.rollback_lu_vp_match_fail[selected_idx],
+                this.vif.mon_mp.mon_cb.rollback_lu_ldld_resp_valid[selected_idx],
+                this.vif.mon_mp.mon_cb.rollback_lu_rep_frm_fetch[selected_idx],
+                this.vif.mon_mp.mon_cb.rollback_lu_ldld_rep_inst[selected_idx],
+                this.vif.mon_mp.mon_cb.rollback_lu_frm_mis_flush[selected_idx]})) begin
+            raw.rollback_diag_complete = 1'b0;
+            `uvm_error("ROLLBACK_XMR",
+                       $sformatf("selected LoadUnit %0d reason is X/Z at clocking sample",
+                                 selected_idx))
+            return;
+        end
+        raw.rollback_lu_vp_match_fail[selected_idx] =
+            this.vif.mon_mp.mon_cb.rollback_lu_vp_match_fail[selected_idx];
+        raw.rollback_lu_ldld_resp_valid[selected_idx] =
+            this.vif.mon_mp.mon_cb.rollback_lu_ldld_resp_valid[selected_idx];
+        raw.rollback_lu_rep_frm_fetch[selected_idx] =
+            this.vif.mon_mp.mon_cb.rollback_lu_rep_frm_fetch[selected_idx];
+        raw.rollback_lu_ldld_rep_inst[selected_idx] =
+            this.vif.mon_mp.mon_cb.rollback_lu_ldld_rep_inst[selected_idx];
+        raw.rollback_lu_frm_mis_flush[selected_idx] =
+            this.vif.mon_mp.mon_cb.rollback_lu_frm_mis_flush[selected_idx];
+        raw.rollback_lu_reason_known[selected_idx] = 1'b1;
+    end else if (selected_idx == 3) begin
+        if ($isunknown(this.vif.mon_mp.mon_cb.rollback_uncache_can_allocate)) begin
+            raw.rollback_diag_complete = 1'b0;
+            `uvm_error("ROLLBACK_XMR",
+                       "selected uncache resource state is X/Z at clocking sample")
+            return;
+        end
+        raw.rollback_uncache_known = '1;
+        raw.rollback_uncache_can_allocate =
+            this.vif.mon_mp.mon_cb.rollback_uncache_can_allocate;
+    end else begin
+        for (int idx = 0; idx < 2; idx++) begin
+            if ($isunknown(this.vif.mon_mp.mon_cb.rollback_raw_store_valid[idx])) begin
+                continue;
+            end
+            raw.rollback_raw_store_known[idx] = 1'b1;
+            raw.rollback_raw_store_valid[idx] =
+                this.vif.mon_mp.mon_cb.rollback_raw_store_valid[idx];
+            if (!raw.rollback_raw_store_valid[idx]) begin
+                continue;
+            end
+            if ($isunknown({
+                    this.vif.mon_mp.mon_cb.rollback_raw_store_rob_flag[idx],
+                    this.vif.mon_mp.mon_cb.rollback_raw_store_rob_value[idx],
+                    this.vif.mon_mp.mon_cb.rollback_raw_store_paddr[idx],
+                    this.vif.mon_mp.mon_cb.rollback_raw_store_mask[idx]})) begin
+                continue;
+            end
+            raw.rollback_raw_store_payload_known[idx] = 1'b1;
+            raw.rollback_raw_store_rob_flag[idx] =
+                this.vif.mon_mp.mon_cb.rollback_raw_store_rob_flag[idx];
+            raw.rollback_raw_store_rob_value[idx] =
+                this.vif.mon_mp.mon_cb.rollback_raw_store_rob_value[idx];
+            raw.rollback_raw_store_paddr[idx] =
+                this.vif.mon_mp.mon_cb.rollback_raw_store_paddr[idx];
+            raw.rollback_raw_store_mask[idx] =
+                this.vif.mon_mp.mon_cb.rollback_raw_store_mask[idx];
+        end
+    end
+    raw.memory_violation_valid = 1'b1;
+    raw.memory_violation_rob_valid = 1'b1;
+    raw.memory_violation_rob_flag = raw.rollback_candidate_rob_flag[selected_idx];
+    raw.memory_violation_rob_value = raw.rollback_candidate_rob_value[selected_idx];
+    raw.memory_violation_level = raw.rollback_candidate_level[selected_idx];
+endfunction:sample_rollback_diagnostics
+
+function void io_mem_to_ooo_ctrl_agent_agent_monitor::log_uncache_resource_snapshot(
+    input longint unsigned sample_seq,
+    input bit rob_flag,
+    input bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rob_value);
+    bit changed;
+    int unsigned state_count[0:3];
+    string slots;
+    logic [15:0] lq_req_valid;
+    logic [15:0][1:0] lq_state;
+    logic [15:0] lq_rob_flag;
+    logic [15:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0] lq_rob_value;
+    logic [15:0] lq_slave_valid;
+    logic [15:0][3:0] lq_slave_id;
+    logic [15:0] lq_need_flush;
+    logic [15:0] lq_need_flush_reg;
+    logic [15:0] lq_flush;
+    logic [15:0] lq_nc_out_valid;
+    logic [15:0] lq_mmio_out_valid;
+    logic [15:0] anchor_match_mask;
+    logic [15:0] top_valid;
+    logic [15:0] top_inflight;
+    logic [15:0] top_wait_same;
+    logic [15:0] top_wait_return;
+    memblock_sync_pkg::memblock_lsq_pending_diag_t pending_diag;
+    bit pending_diag_valid;
+
+    // Empty RTL entries commonly leave payload registers X.  The lifecycle
+    // snapshot is meaningful only after the corresponding valid bit is known
+    // and asserted; inactive payload X/Z is deliberately masked to zero.
+    lq_req_valid = this.vif.mon_mp.mon_cb.uncache_lq_req_valid;
+    top_valid    = this.vif.mon_mp.mon_cb.uncache_top_valid;
+    if ($isunknown(lq_req_valid) || $isunknown(top_valid)) begin
+        `uvm_error("UNCACHE_PROGRESS",
+                   "Uncache lifecycle valid mask contains X/Z")
+        return;
+    end
+
+    lq_state          = '0;
+    lq_rob_flag       = '0;
+    lq_rob_value      = '0;
+    lq_slave_valid    = '0;
+    lq_slave_id      = '0;
+    lq_need_flush     = '0;
+    lq_need_flush_reg = '0;
+    lq_flush          = '0;
+    lq_nc_out_valid   = '0;
+    lq_mmio_out_valid = '0;
+    anchor_match_mask  = '0;
+    pending_diag_valid = memblock_sync_pkg::peek_lsq_pending_diag(pending_diag);
+    for (int idx = 0; idx < 16; idx++) begin
+        if (lq_req_valid[idx] !== 1'b1) begin
+            continue;
+        end
+        if ($isunknown({
+                this.vif.mon_mp.mon_cb.uncache_lq_state[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_rob_flag[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_rob_value[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_slave_valid[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_need_flush[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_need_flush_reg[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_flush[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_nc_out_valid[idx],
+                this.vif.mon_mp.mon_cb.uncache_lq_mmio_out_valid[idx]})) begin
+            `uvm_error("UNCACHE_PROGRESS",
+                       $sformatf("active LQ slot %0d contains X/Z", idx))
+            return;
+        end
+        if (this.vif.mon_mp.mon_cb.uncache_lq_slave_valid[idx] &&
+            $isunknown(this.vif.mon_mp.mon_cb.uncache_lq_slave_id[idx])) begin
+            `uvm_error("UNCACHE_PROGRESS",
+                       $sformatf("active LQ slot %0d slaveId contains X/Z", idx))
+            return;
+        end
+        lq_state[idx]          = this.vif.mon_mp.mon_cb.uncache_lq_state[idx];
+        lq_rob_flag[idx]       = this.vif.mon_mp.mon_cb.uncache_lq_rob_flag[idx];
+        lq_rob_value[idx]      = this.vif.mon_mp.mon_cb.uncache_lq_rob_value[idx];
+        lq_slave_valid[idx]    = this.vif.mon_mp.mon_cb.uncache_lq_slave_valid[idx];
+        lq_slave_id[idx]       = this.vif.mon_mp.mon_cb.uncache_lq_slave_id[idx];
+        lq_need_flush[idx]     = this.vif.mon_mp.mon_cb.uncache_lq_need_flush[idx];
+        lq_need_flush_reg[idx] = this.vif.mon_mp.mon_cb.uncache_lq_need_flush_reg[idx];
+        lq_flush[idx]          = this.vif.mon_mp.mon_cb.uncache_lq_flush[idx];
+        lq_nc_out_valid[idx]   = this.vif.mon_mp.mon_cb.uncache_lq_nc_out_valid[idx];
+        lq_mmio_out_valid[idx] = this.vif.mon_mp.mon_cb.uncache_lq_mmio_out_valid[idx];
+        anchor_match_mask[idx] =
+            (lq_rob_flag[idx] == rob_flag) && (lq_rob_value[idx] == rob_value);
+    end
+
+    top_inflight   = '0;
+    top_wait_same  = '0;
+    top_wait_return = '0;
+    for (int idx = 0; idx < 16; idx++) begin
+        if (top_valid[idx] !== 1'b1) begin
+            continue;
+        end
+        if ($isunknown({
+                this.vif.mon_mp.mon_cb.uncache_top_inflight[idx],
+                this.vif.mon_mp.mon_cb.uncache_top_wait_same[idx],
+                this.vif.mon_mp.mon_cb.uncache_top_wait_return[idx]})) begin
+            `uvm_error("UNCACHE_PROGRESS",
+                       $sformatf("active top Uncache source %0d contains X/Z", idx))
+            return;
+        end
+        top_inflight[idx]    = this.vif.mon_mp.mon_cb.uncache_top_inflight[idx];
+        top_wait_same[idx]   = this.vif.mon_mp.mon_cb.uncache_top_wait_same[idx];
+        top_wait_return[idx] = this.vif.mon_mp.mon_cb.uncache_top_wait_return[idx];
+    end
+
+    if ($isunknown(this.vif.mon_mp.mon_cb.uncache_lq_free_mask)) begin
+        `uvm_error("UNCACHE_PROGRESS", "Uncache LQ free mask contains X/Z")
+        return;
+    end
+    if ($isunknown(this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_valid) ||
+        $isunknown(this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_valid) ||
+        $isunknown(this.vif.mon_mp.mon_cb.uncache_top_a_valid) ||
+        $isunknown(this.vif.mon_mp.mon_cb.uncache_top_d_valid)) begin
+        `uvm_error("UNCACHE_PROGRESS", "Uncache handshake valid contains X/Z")
+        return;
+    end
+    if (this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_valid &&
+        $isunknown({this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_mid,
+                   this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_sid})) begin
+        `uvm_error("UNCACHE_PROGRESS", "active idResp payload contains X/Z")
+        return;
+    end
+    if (this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_valid &&
+        $isunknown({this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_ready,
+                   this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_id})) begin
+        `uvm_error("UNCACHE_PROGRESS", "active LSQ response payload contains X/Z")
+        return;
+    end
+    if (this.vif.mon_mp.mon_cb.uncache_top_a_valid &&
+        $isunknown({this.vif.mon_mp.mon_cb.uncache_top_a_ready,
+                   this.vif.mon_mp.mon_cb.uncache_top_a_source})) begin
+        `uvm_error("UNCACHE_PROGRESS", "active TL A payload contains X/Z")
+        return;
+    end
+    if (this.vif.mon_mp.mon_cb.uncache_top_d_valid &&
+        $isunknown(this.vif.mon_mp.mon_cb.uncache_top_d_source)) begin
+        `uvm_error("UNCACHE_PROGRESS", "active TL D payload contains X/Z")
+        return;
+    end
+
+    uncache_nack_diag_count++;
+    changed = !uncache_snapshot_valid ||
+              previous_uncache_lq_req_valid != lq_req_valid ||
+              previous_uncache_lq_state != lq_state ||
+              previous_uncache_lq_need_flush_reg != lq_need_flush_reg ||
+              previous_uncache_top_valid != top_valid ||
+              previous_uncache_top_inflight != top_inflight ||
+              previous_uncache_top_wait_return != top_wait_return;
+    if (!changed && (uncache_nack_diag_count % 256) != 1) begin
+        return;
+    end
+
+    slots = "";
+    foreach (state_count[idx]) begin
+        state_count[idx] = 0;
+    end
+    for (int idx = 0; idx < 16; idx++) begin
+        if (!lq_req_valid[idx]) begin
+            continue;
+        end
+        state_count[lq_state[idx]]++;
+        slots = $sformatf(
+            "%s slot%0d=state%0d rob%0d/%0d sid=%s%0d flush=%0d/%0d nc/mmio=%0d/%0d;",
+            slots,
+            idx,
+            lq_state[idx],
+            lq_rob_flag[idx],
+            lq_rob_value[idx],
+            lq_slave_valid[idx] ? "" : "invalid/",
+            lq_slave_id[idx],
+            lq_need_flush[idx],
+            lq_need_flush_reg[idx],
+            lq_nc_out_valid[idx],
+            lq_mmio_out_valid[idx]);
+    end
+
+    `uvm_info("UNCACHE_PROGRESS",
+              $sformatf("nack=%0d sample=%0d rob=%0d/%0d anchor_match=0x%04h lq_valid=0x%04h lq_free_mask=0x%04h state_count=%0d/%0d/%0d/%0d pendingDiag=%0d/%0d ptr=%0d/%0d mmio/st=%0d/%0d commit=%0d batch/fault=%0d/%0d needFlush=0x%04h needFlushReg=0x%04h flush=0x%04h nc/mmio=0x%04h/0x%04h top_valid=0x%04h inflight=0x%04h waitSame=0x%04h waitReturn=0x%04h idResp=%0d/mid=%0d/sid=%0d lsqResp=%0d/%0d/id=%0d/fire=%0d A=%0d/%0d/fire=%0d/src=%0d D=%0d/src=%0d%s",
+                        uncache_nack_diag_count,
+                        sample_seq,
+                        rob_flag,
+                        rob_value,
+                        anchor_match_mask,
+                        lq_req_valid,
+                        this.vif.mon_mp.mon_cb.uncache_lq_free_mask,
+                        state_count[0], state_count[1],
+                        state_count[2], state_count[3],
+                        pending_diag_valid,
+                        pending_diag_valid && (pending_diag.sample_seq == sample_seq),
+                        pending_diag_valid ? pending_diag.pending_ptr_flag : 1'b0,
+                        pending_diag_valid ? pending_diag.pending_ptr_value : '0,
+                        pending_diag_valid ? pending_diag.pending_mmio_old : 1'b0,
+                        pending_diag_valid ? pending_diag.pending_st : 1'b0,
+                        pending_diag_valid ? pending_diag.commit : 1'b0,
+                        pending_diag_valid ? pending_diag.has_commit : 1'b0,
+                        pending_diag_valid ? pending_diag.has_fault_head : 1'b0,
+                        lq_need_flush,
+                        lq_need_flush_reg,
+                        lq_flush,
+                        lq_nc_out_valid,
+                        lq_mmio_out_valid,
+                        top_valid,
+                        top_inflight,
+                        top_wait_same,
+                        top_wait_return,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_valid,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_mid,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_id_resp_sid,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_valid,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_ready,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_id,
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_valid &&
+                        this.vif.mon_mp.mon_cb.uncache_top_lsq_resp_ready,
+                        this.vif.mon_mp.mon_cb.uncache_top_a_valid,
+                        this.vif.mon_mp.mon_cb.uncache_top_a_ready,
+                        this.vif.mon_mp.mon_cb.uncache_top_a_valid &&
+                        this.vif.mon_mp.mon_cb.uncache_top_a_ready,
+                        this.vif.mon_mp.mon_cb.uncache_top_a_source,
+                        this.vif.mon_mp.mon_cb.uncache_top_d_valid,
+                        this.vif.mon_mp.mon_cb.uncache_top_d_source,
+                        slots),
+              UVM_LOW)
+
+    uncache_snapshot_valid = 1'b1;
+    previous_uncache_lq_req_valid = lq_req_valid;
+    previous_uncache_lq_state = lq_state;
+    previous_uncache_lq_need_flush_reg = lq_need_flush_reg;
+    previous_uncache_top_valid = top_valid;
+    previous_uncache_top_inflight = top_inflight;
+    previous_uncache_top_wait_return = top_wait_return;
+endfunction:log_uncache_resource_snapshot
 
 task io_mem_to_ooo_ctrl_agent_agent_monitor::run_phase(uvm_phase phase);
     super.run_phase(phase);
@@ -183,12 +628,24 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
            !memblock_sync_pkg::l2tlb_reset_active()) begin
             bit any_mmio_valid;
             bit control_reset_ack_sample;
+            bit rollback_cache_conflicting;
             int unsigned control_reset_epoch;
+            longint unsigned rollback_input_sample_seq;
+            memblock_sync_pkg::dispatch_raw_ctrl_t rollback_input;
+            memblock_sync_pkg::dispatch_raw_ctrl_t rollback_cached;
 
             // This monitor is a same-edge consumer/producer only. The CSR
             // monitor owns reset re-arm and advancement; ctrl data is only
             // anchored after the shared reset boundary has closed.
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+
+            rollback_input = memblock_sync_pkg::make_empty_raw_ctrl();
+            sample_rollback_diagnostics(rollback_input);
+            if (rollback_input.rollback_diag_valid &&
+                rollback_input.rollback_diag_complete) begin
+                memblock_sync_pkg::cache_rollback_input_provenance(
+                    rollback_input, sample_seq);
+            end
 
             // 中文注释：首个 post-reset sample 只完成 ctrl monitor ack；ready 后的
             // 下一 sample 才发布 sbIsEmpty，使 sendover 不会消费 request 前的高电平。
@@ -275,6 +732,67 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 raw_ctrl.memory_violation_ftq_offset = io_mem_to_ooo_memoryViolation_bits_ftqOffset;
                 raw_ctrl.memory_violation_is_rvc = io_mem_to_ooo_memoryViolation_bits_isRVC;
                 raw_ctrl.memory_violation_level = io_mem_to_ooo_memoryViolation_bits_level;
+                if (io_mem_to_ooo_memoryViolation_valid === 1'b1) begin
+                    if (!memblock_sync_pkg::resolve_rollback_output_provenance(
+                            io_mem_to_ooo_memoryViolation_bits_robIdx_flag,
+                            io_mem_to_ooo_memoryViolation_bits_robIdx_value,
+                            io_mem_to_ooo_memoryViolation_bits_level,
+                            sample_seq,
+                            rollback_cached,
+                            rollback_input_sample_seq,
+                            rollback_cache_conflicting)) begin
+                        raw_ctrl.rollback_diag_valid = 1'b1;
+                        raw_ctrl.rollback_diag_complete = 1'b0;
+                        `uvm_error("ROLLBACK_XMR",
+                                   $sformatf("cannot correlate rollback output rob=%0d/%0d level=%0d sample=%0d conflict=%0d",
+                                             io_mem_to_ooo_memoryViolation_bits_robIdx_flag,
+                                             io_mem_to_ooo_memoryViolation_bits_robIdx_value,
+                                             io_mem_to_ooo_memoryViolation_bits_level,
+                                             sample_seq,
+                                             rollback_cache_conflicting))
+                    end else begin
+                        raw_ctrl.rollback_diag_valid = rollback_cached.rollback_diag_valid;
+                        raw_ctrl.rollback_diag_complete = rollback_cached.rollback_diag_complete;
+                        raw_ctrl.rollback_candidate_known = rollback_cached.rollback_candidate_known;
+                        raw_ctrl.rollback_candidate_valid = rollback_cached.rollback_candidate_valid;
+                        raw_ctrl.rollback_candidate_rob_flag = rollback_cached.rollback_candidate_rob_flag;
+                        raw_ctrl.rollback_candidate_rob_value = rollback_cached.rollback_candidate_rob_value;
+                        raw_ctrl.rollback_candidate_level = rollback_cached.rollback_candidate_level;
+                        raw_ctrl.rollback_winner_known = rollback_cached.rollback_winner_known;
+                        raw_ctrl.rollback_winner = rollback_cached.rollback_winner;
+                        raw_ctrl.rollback_lu_reason_known = rollback_cached.rollback_lu_reason_known;
+                        raw_ctrl.rollback_lu_vp_match_fail = rollback_cached.rollback_lu_vp_match_fail;
+                        raw_ctrl.rollback_lu_ldld_resp_valid = rollback_cached.rollback_lu_ldld_resp_valid;
+                        raw_ctrl.rollback_lu_rep_frm_fetch = rollback_cached.rollback_lu_rep_frm_fetch;
+                        raw_ctrl.rollback_lu_ldld_rep_inst = rollback_cached.rollback_lu_ldld_rep_inst;
+                        raw_ctrl.rollback_lu_frm_mis_flush = rollback_cached.rollback_lu_frm_mis_flush;
+                        raw_ctrl.rollback_uncache_can_allocate = rollback_cached.rollback_uncache_can_allocate;
+                        raw_ctrl.rollback_uncache_known = rollback_cached.rollback_uncache_known;
+                        raw_ctrl.rollback_raw_store_known = rollback_cached.rollback_raw_store_known;
+                        raw_ctrl.rollback_raw_store_valid = rollback_cached.rollback_raw_store_valid;
+                        raw_ctrl.rollback_raw_store_payload_known = rollback_cached.rollback_raw_store_payload_known;
+                        raw_ctrl.rollback_raw_store_rob_flag = rollback_cached.rollback_raw_store_rob_flag;
+                        raw_ctrl.rollback_raw_store_rob_value = rollback_cached.rollback_raw_store_rob_value;
+                        raw_ctrl.rollback_raw_store_paddr = rollback_cached.rollback_raw_store_paddr;
+                        raw_ctrl.rollback_raw_store_mask = rollback_cached.rollback_raw_store_mask;
+                        if (rollback_cached.rollback_winner_known[3] &&
+                            rollback_cached.rollback_winner[3]) begin
+                            log_uncache_resource_snapshot(
+                                sample_seq,
+                                io_mem_to_ooo_memoryViolation_bits_robIdx_flag,
+                                io_mem_to_ooo_memoryViolation_bits_robIdx_value);
+                        end
+                        `uvm_info("ROLLBACK_XMR",
+                                  $sformatf("correlate rollback input_sample=%0d output_sample=%0d age=%0d rob=%0d/%0d level=%0d",
+                                            rollback_input_sample_seq,
+                                            sample_seq,
+                                            sample_seq - rollback_input_sample_seq,
+                                            io_mem_to_ooo_memoryViolation_bits_robIdx_flag,
+                                            io_mem_to_ooo_memoryViolation_bits_robIdx_value,
+                                            io_mem_to_ooo_memoryViolation_bits_level),
+                                  UVM_LOW)
+                    end
+                end
                 raw_ctrl.sb_is_empty = io_mem_to_ooo_sbIsEmpty;
                 if (!memblock_sync_pkg::get_latest_control_sb_is_empty_observation(
                         sb_is_empty_observation)) begin
@@ -289,6 +807,10 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 raw_ctrl.cycle = $time;
                 memblock_sync_pkg::push_raw_ctrl(raw_ctrl);
             end
+        end else begin
+            memblock_sync_pkg::clear_rollback_provenance_cache();
+            uncache_snapshot_valid = 1'b0;
+            uncache_nack_diag_count = 0;
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = io_mem_to_ooo_ctrl_agent_agent_xaction::type_id::create("mon_tr");

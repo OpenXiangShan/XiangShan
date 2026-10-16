@@ -41,6 +41,7 @@ typedef struct packed {
     logic                debug_is_ncio;
     logic                debug_is_perf_cnt;
     int unsigned         sample_flush_epoch;
+    longint unsigned     sample_seq;
     longint unsigned     sample_cycle;
 } memblock_rm_dut_writeback_record_t;
 
@@ -144,6 +145,7 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         record.source_kind = source_kind;
         record.lane = lane[2:0];
         record.sample_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+        record.sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
         record.sample_cycle = $time;
         case (source_kind)
             RM_WB_SOURCE_LDA: begin

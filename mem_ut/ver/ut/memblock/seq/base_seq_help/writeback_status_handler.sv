@@ -148,6 +148,7 @@ class writeback_status_handler extends uvm_object;
         memblock_uid_t   uid;
         int unsigned     issue_epoch;
         int unsigned     replay_seq;
+        bit              tombstone_created;
 
         if (!event_is_issue_feedback(wb_event)) begin
             return 1'b0;
@@ -171,12 +172,22 @@ class writeback_status_handler extends uvm_object;
                 return 1'b0;
             end
             if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA) begin
-                if (!data.capture_sta_late_fault_tombstone(uid, issue_epoch, replay_seq, wb_event.cycle)) begin
+                if (!data.capture_sta_late_fault_tombstone(uid,
+                                                           issue_epoch,
+                                                           replay_seq,
+                                                           wb_event.cycle,
+                                                           tombstone_created)) begin
                     `uvm_info("WB_STATUS",
                               $sformatf("drop stale STA replay feedback uid=%0d issue_epoch=%0d replay_seq=%0d",
                                         uid, issue_epoch, replay_seq),
                               UVM_LOW)
                     return 1'b0;
+                end
+                if (!tombstone_created) begin
+                    `uvm_info("WB_STATUS",
+                              $sformatf("coalesced duplicate STA failed feedback uid=%0d issue_epoch=%0d replay_seq=%0d; keep existing replay/tombstone",
+                                        uid, issue_epoch, replay_seq), UVM_LOW)
+                    return 1'b1;
                 end
                 `uvm_info("WB_STATUS",
                           $sformatf("capture STA late-fault tombstone uid=%0d issue_epoch=%0d replay_seq=%0d; enqueue replay immediately",

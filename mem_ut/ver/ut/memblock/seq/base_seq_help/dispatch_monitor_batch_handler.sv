@@ -236,8 +236,33 @@ class dispatch_monitor_batch_handler extends uvm_object;
 
         if (select_oldest_redirect(normalized_events, selected_redirect_event)) begin
             bit defer_store_fault_redirect;
+            bit retry_boost_applied;
 
             selected_redirect = redirect_from_event(selected_redirect_event);
+            retry_boost_applied = 1'b0;
+            if (selected_redirect_event.source ==
+                    MEMBLOCK_WB_EVENT_SOURCE_MEMORY_VIOLATION) begin
+                status_transaction selected_status;
+                selected_status = data.get_status(selected_redirect_event.uid);
+                retry_boost_applied =
+                    data.apply_uncache_retry_boost(selected_redirect_event);
+                `uvm_info("ROLLBACK_SELECTED",
+                          $sformatf("uid=%0d dynamic_epoch=%0d subtype=%0d input=%0d diag=%0d/%0d rob=%0d/%0d level=%0d frontier_uid=%0d terminal_uid=%0d max_enqueued=%0d/%0d",
+                                    selected_redirect_event.uid,
+                                    selected_status.dynamic_epoch,
+                                    selected_redirect_event.rollback_subtype,
+                                    selected_redirect_event.rollback_selected_input,
+                                    selected_redirect_event.rollback_diag_valid,
+                                    selected_redirect_event.rollback_diag_complete,
+                                    selected_redirect.rob_key.flag,
+                                    selected_redirect.rob_key.value,
+                                    selected_redirect.level,
+                                    data.dispatch_progress.rob_commit_frontier_uid,
+                                    data.dispatch_progress.terminal_done_uid,
+                                    data.dispatch_progress.max_enqueued_uid_valid,
+                                    data.dispatch_progress.max_enqueued_uid),
+                          UVM_LOW)
+            end
             defer_store_fault_redirect =
                 store_fault_redirect_must_wait(selected_redirect_event) ||
                 batch_has_fault_for_uid(normalized_events, selected_redirect_event.uid);

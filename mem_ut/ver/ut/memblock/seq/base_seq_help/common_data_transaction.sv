@@ -15,6 +15,10 @@ class common_data_transaction extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
     localparam int unsigned MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX =
         `MEMBLOCK_DUT_SQ_SIZE;
+    // 中文注释：V2 LoadQueueUncache 的 loadMmio 相对外部 redirect monitor
+    // anchor 最迟可在 R+2 出现。该常量只定义 overlap 候选窗口；R+2 仍需
+    // redirect-deleted owner 与 status 历史共同唯一证明后才能 stale-drop。
+    localparam longint unsigned MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET = 2;
     // 中文注释：主表/公共队列已经收敛后，memory responder 仍允许接收尾请求的最短静默窗口。
     // 该值是 global stop 的固定框架时序，不是 testcase 可改的 plus 参数；DCache/SBuffer
     // 任一观察到新 activity 都会重新起算该窗口，避免在已知尾流量中途提交 global stop。
@@ -83,6 +87,16 @@ class common_data_transaction extends uvm_object;
     // 回到 canonical table 复核，不能把 payload 或 pending handle 存进 index。
     memblock_tlb_lookup_key_t
         tlb_anchor_keys_by_range_key[memblock_tlb_range_index_key_t][$];
+    // Only a real sampled L2TLB response publishes this cache.  It is kept
+    // separate from the live canonical table because live entries exist while
+    // a miss is still pending and therefore are not completion evidence.
+    memblock_tlb_entry completed_tlb_entry_by_key[memblock_tlb_lookup_key_t];
+    memblock_tlb_lookup_key_t
+        completed_tlb_anchor_keys_by_range_key[memblock_tlb_range_index_key_t][$];
+    longint unsigned
+        completed_tlb_response_token_by_key[memblock_tlb_lookup_key_t];
+    longint unsigned
+        completed_tlb_response_sample_by_key[memblock_tlb_lookup_key_t];
     // 中文注释：adapter 成功消费 raw fence 后只在此登记 C4 删除工作。
     // 该队列不拥有 L2TLB token/UID；runtime reset 或 C4 delete 后由本类清除。
     memblock_pending_sfence_invalidate_t sfence_invalidate_pending_q[$];
@@ -152,6 +166,9 @@ class common_data_transaction extends uvm_object;
     memblock_lsq_cancel_record_t cancel_record_q[$];
     memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot_history_q[$];
     memblock_sync_pkg::dispatch_raw_redirect_anchor_t redirect_anchor_history_q[$];
+    bit            rob_admission_blocked_log_valid;
+    memblock_uid_t rob_admission_blocked_candidate_uid;
+    memblock_uid_t rob_admission_blocked_frontier_uid;
     // Fault redirect has one commit-head owner.  Its terminal path is not
     // inferred from map deletion: it must be proven by cancel apply or deq.
     memblock_fault_redirect_resource_t fault_redirect_resource;
@@ -285,6 +302,9 @@ class common_data_transaction extends uvm_object;
         fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
+        rob_admission_blocked_log_valid = 1'b0;
+        rob_admission_blocked_candidate_uid = 0;
+        rob_admission_blocked_frontier_uid = 0;
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         mmu_csr_state.reset();
         csr_committed_state = null;
@@ -339,6 +359,7 @@ class common_data_transaction extends uvm_object;
         global_stop_prepare_dcache_last_sample_time = 0;
         global_stop_prepare_sbuffer_last_sample_time = 0;
         dispatch_progress.terminal_done_uid      = 0;
+        dispatch_progress.rob_commit_frontier_uid = 0;
         dispatch_progress.max_enqueued_uid       = 0;
         dispatch_progress.max_enqueued_uid_valid = 1'b0;
         flush_in_progress   = 1'b0;
@@ -400,11 +421,18 @@ class common_data_transaction extends uvm_object;
         fault_redirect_resource = '{default:'0};
         cancel_snapshot_history_q.delete();
         redirect_anchor_history_q.delete();
+        rob_admission_blocked_log_valid = 1'b0;
+        rob_admission_blocked_candidate_uid = 0;
+        rob_admission_blocked_frontier_uid = 0;
         main_table_by_uid = new[main_trans_num_i];
         status_by_uid     = new[main_trans_num_i];
         cancel_waiting_uid_tlb_records("reset_all_tables");
         tlb_entry_by_key.delete();
         tlb_anchor_keys_by_range_key.delete();
+        completed_tlb_entry_by_key.delete();
+        completed_tlb_anchor_keys_by_range_key.delete();
+        completed_tlb_response_token_by_key.delete();
+        completed_tlb_response_sample_by_key.delete();
         sfence_invalidate_pending_q.delete();
         l2tlb_ppn_history_q.delete();
         uid_tlb_record_by_uid.delete();
@@ -814,6 +842,298 @@ class common_data_transaction extends uvm_object;
         return status.is_mmio_store && !status.is_mmio_load;
     endfunction:uid_is_mmio_store
 
+    // 中文注释：只在 MMIO owner 最终无法证明的失败路径扫描主表/status。
+    // 该诊断不修改任何 map、queue、status 或 redirect 状态；全表扫描只服务 fatal debug。
+    function void dump_mmio_resolve_failure_context(
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+        input memblock_mmio_kind_e expected_kind,
+        input int unsigned raw_sample_flush_epoch,
+        input longint unsigned raw_sample_seq,
+        input longint unsigned raw_sample_cycle
+    );
+        int unsigned static_kind_match_count;
+        int unsigned lifecycle_match_count;
+        memblock_rob_key_t raw_key_flag0;
+        memblock_rob_key_t raw_key_flag1;
+
+        static_kind_match_count = 0;
+        lifecycle_match_count = 0;
+        raw_key_flag0.flag = 1'b0;
+        raw_key_flag0.value = rob_value;
+        raw_key_flag1.flag = 1'b1;
+        raw_key_flag1.value = rob_value;
+        `uvm_info("MMIO_RESOLVE_DIAG",
+                  $sformatf("raw cycle=%0d sample=%0d epoch=%0d kind=%0d rob_value=%0d current_sample=%0d current_service_cycle=%0d current_epoch=%0d active_redirect(valid/flush_itself/level/vls/rob)=%0d/%0d/%0d/%0d/%0d/%0d redirect_phase=%0d flush_in_progress=%0d cancel_records=%0d redirect_anchors=%0d",
+                            raw_sample_cycle, raw_sample_seq, raw_sample_flush_epoch,
+                            expected_kind, rob_value,
+                            memblock_sync_pkg::peek_current_dut_global_sample(),
+                            memblock_sync_pkg::get_dispatch_service_cycle(),
+                            memblock_sync_pkg::dispatch_flush_epoch,
+                            active_redirect.valid, active_redirect.flush_itself,
+                            active_redirect.level, active_redirect.is_vls_exception,
+                            active_redirect.rob_key.flag, active_redirect.rob_key.value,
+                            redirect_phase, flush_in_progress, cancel_record_q.size(),
+                            redirect_anchor_history_q.size()),
+                  UVM_NONE)
+        `uvm_info("MMIO_RESOLVE_DIAG",
+                  $sformatf("redirect drive inflight=%0d rob=%0d/%0d done_epoch=%0d done_cycle=%0d deleted_owner_window(active/epoch/record/expire_sample/lq/sq)=%0d/%0d/%0d/%0d/%0d/%0d fault_resource(valid/uid/dynamic_epoch/record/disposition)=%0d/%0d/%0d/%0d/%0d",
+                            redirect_drive_inflight,
+                            redirect_drive_inflight_payload.rob_key.flag,
+                            redirect_drive_inflight_payload.rob_key.value,
+                            redirect_drive_done_epoch, redirect_drive_done_cycle,
+                            redirect_deleted_owner_window_active,
+                            redirect_deleted_owner_epoch,
+                            redirect_deleted_owner_record_id,
+                            redirect_deleted_owner_expire_sample,
+                            redirect_deleted_lq_owner_by_key.num(),
+                            redirect_deleted_sq_owner_by_key.num(),
+                            fault_redirect_resource.valid,
+                            fault_redirect_resource.uid,
+                            fault_redirect_resource.dynamic_epoch,
+                            fault_redirect_resource.cancel_record_id,
+                            fault_redirect_resource.disposition),
+                  UVM_NONE)
+
+        foreach (cancel_record_q[record_idx]) begin
+            `uvm_info("MMIO_RESOLVE_DIAG",
+                      $sformatf("cancel record idx=%0d id=%0d valid=%0d epoch=%0d redirect(valid/flush_itself/level/vls/rob)=%0d/%0d/%0d/%0d/%0d/%0d service_cycle=%0d drive_done=%0d/%0d anchor=%0d sample=%0d lsq_sample=%0d cancel_sample=%0d compare_sample=%0d scan/final/applied/observed=%0d/%0d/%0d/%0d sw_lq/sq=%0d/%0d dut_lq/sq=%0d/%0d raw_rob_covered_flag0/flag1=%0d/%0d",
+                                record_idx,
+                                cancel_record_q[record_idx].cancel_record_id,
+                                cancel_record_q[record_idx].valid,
+                                cancel_record_q[record_idx].redirect_epoch,
+                                cancel_record_q[record_idx].redirect.valid,
+                                cancel_record_q[record_idx].redirect.flush_itself,
+                                cancel_record_q[record_idx].redirect.level,
+                                cancel_record_q[record_idx].redirect.is_vls_exception,
+                                cancel_record_q[record_idx].redirect.rob_key.flag,
+                                cancel_record_q[record_idx].redirect.rob_key.value,
+                                cancel_record_q[record_idx].redirect_service_cycle,
+                                cancel_record_q[record_idx].redirect_drive_done_valid,
+                                cancel_record_q[record_idx].redirect_drive_done_service_cycle,
+                                cancel_record_q[record_idx].redirect_anchor_valid,
+                                cancel_record_q[record_idx].redirect_sample_seq,
+                                cancel_record_q[record_idx].redirect_lsq_sample_seq,
+                                cancel_record_q[record_idx].dut_cancel_update_sample_seq,
+                                cancel_record_q[record_idx].compare_snapshot_sample_seq,
+                                cancel_record_q[record_idx].active_scan_done,
+                                cancel_record_q[record_idx].software_count_finalized,
+                                cancel_record_q[record_idx].software_applied,
+                                cancel_record_q[record_idx].observed_valid,
+                                cancel_record_q[record_idx].software_cancel_lq_count,
+                                cancel_record_q[record_idx].software_cancel_sq_count,
+                                cancel_record_q[record_idx].observed_cancel_lq_count,
+                                cancel_record_q[record_idx].observed_cancel_sq_count,
+                                rob_order_util::rob_need_flush(
+                                    raw_key_flag0,
+                                    cancel_record_q[record_idx].redirect),
+                                rob_order_util::rob_need_flush(
+                                    raw_key_flag1,
+                                    cancel_record_q[record_idx].redirect)),
+                      UVM_NONE)
+        end
+        foreach (redirect_anchor_history_q[anchor_idx]) begin
+            `uvm_info("MMIO_RESOLVE_DIAG",
+                      $sformatf("unbound redirect anchor idx=%0d valid=%0d sample=%0d cycle=%0d raw/effective/vls/rob=%0d/%0d/%0d/%0d/%0d",
+                                anchor_idx,
+                                redirect_anchor_history_q[anchor_idx].valid,
+                                redirect_anchor_history_q[anchor_idx].sample_seq,
+                                redirect_anchor_history_q[anchor_idx].cycle,
+                                redirect_anchor_history_q[anchor_idx].level,
+                                redirect_anchor_history_q[anchor_idx].effective_level,
+                                redirect_anchor_history_q[anchor_idx].is_vls_exception,
+                                redirect_anchor_history_q[anchor_idx].rob_flag,
+                                redirect_anchor_history_q[anchor_idx].rob_value),
+                      UVM_NONE)
+        end
+
+        for (memblock_uid_t candidate_uid = 0;
+             candidate_uid < main_trans_num;
+             candidate_uid++) begin
+            main_control_transaction main_tr;
+            status_transaction status;
+            memblock_op_behavior_t behavior;
+            bit kind_match;
+            bit lifecycle_observed;
+            bit active_redirect_covers;
+
+            if (main_table_by_uid[candidate_uid] == null ||
+                status_by_uid[candidate_uid] == null) begin
+                continue;
+            end
+            main_tr = main_table_by_uid[candidate_uid];
+            status = status_by_uid[candidate_uid];
+            if (main_tr.robIdx_value != rob_value) begin
+                continue;
+            end
+            behavior = memblock_op_behavior_util::derive_op_behavior(main_tr);
+            kind_match = (expected_kind == MEMBLOCK_MMIO_KIND_LOAD &&
+                          behavior.kind == MEMBLOCK_OP_BEHAVIOR_LOAD &&
+                          behavior.commit_is_load) ||
+                         (expected_kind == MEMBLOCK_MMIO_KIND_STORE &&
+                          behavior.kind == MEMBLOCK_OP_BEHAVIOR_STORE &&
+                          behavior.commit_is_store);
+            if (!kind_match) begin
+                continue;
+            end
+            static_kind_match_count++;
+            lifecycle_observed = status.last_event_cycle != 0 || status.active ||
+                                 status.enq || status.flushed || status.terminal_done ||
+                                 status.load_issue_epoch != 0 ||
+                                 status.sta_issue_epoch != 0 ||
+                                 status.std_issue_epoch != 0;
+            if (!lifecycle_observed) begin
+                continue;
+            end
+            lifecycle_match_count++;
+            active_redirect_covers = active_redirect.valid &&
+                rob_order_util::rob_need_flush(status.get_rob_key(), active_redirect);
+            `uvm_info("MMIO_RESOLVE_DIAG",
+                      $sformatf("owner candidate uid=%0d rob=%0d/%0d behavior=%0d dynamic_epoch=%0d active=%0d enq=%0d flushed=%0d terminal_done=%0d killed=%0d redirect_pending=%0d rob_commit=%0d pass=%0d fault=%0d last_event_cycle=%0d active_instance_epoch(valid/value)=%0d/%0d target_dispatched(load/sta/std)=%0d/%0d/%0d target_issue_epoch(load/sta/std)=%0d/%0d/%0d target_flush_epoch_valid(load/sta/std)=%0d/%0d/%0d target_flush_epoch(load/sta/std)=%0d/%0d/%0d mmio_tag(valid/load/store/source/epoch)=%0d/%0d/%0d/%0d/%0d active_redirect_covers=%0d",
+                                candidate_uid,
+                                status.robIdx_flag, status.robIdx_value,
+                                behavior.kind, status.dynamic_epoch,
+                                status.active, status.enq, status.flushed,
+                                status.terminal_done, status.issue_killed,
+                                status.redirect_pending, status.rob_commit,
+                                status.pass, status.fault, status.last_event_cycle,
+                                status.active_instance_flush_epoch_valid,
+                                status.active_instance_flush_epoch,
+                                status.load_dispatched, status.sta_dispatched,
+                                status.std_dispatched,
+                                status.load_issue_epoch, status.sta_issue_epoch,
+                                status.std_issue_epoch,
+                                status.load_instance_flush_epoch_valid,
+                                status.sta_instance_flush_epoch_valid,
+                                status.std_instance_flush_epoch_valid,
+                                status.load_instance_flush_epoch,
+                                status.sta_instance_flush_epoch,
+                                status.std_instance_flush_epoch,
+                                status.mmio_tag_valid, status.is_mmio_load,
+                                status.is_mmio_store, status.mmio_tag_source,
+                                status.mmio_tag_dynamic_epoch,
+                                active_redirect_covers),
+                      UVM_NONE)
+            foreach (cancel_record_q[candidate_record_idx]) begin
+                `uvm_info("MMIO_RESOLVE_DIAG",
+                          $sformatf("owner candidate uid=%0d cancel_record=%0d redirect_epoch=%0d covered=%0d",
+                                    candidate_uid,
+                                    cancel_record_q[candidate_record_idx].cancel_record_id,
+                                    cancel_record_q[candidate_record_idx].redirect_epoch,
+                                    rob_order_util::rob_need_flush(
+                                        status.get_rob_key(),
+                                        cancel_record_q[candidate_record_idx].redirect)),
+                          UVM_NONE)
+            end
+        end
+        `uvm_info("MMIO_RESOLVE_DIAG",
+                  $sformatf("owner scan summary rob_value=%0d kind=%0d static_kind_matches=%0d lifecycle_matches=%0d",
+                            rob_value, expected_kind, static_kind_match_count,
+                            lifecycle_match_count),
+                  UVM_NONE)
+    endfunction:dump_mmio_resolve_failure_context
+
+    // 抽象职责：只在 Load MMIO R+2 且 active ROB owner 已消失时，使用现有
+    // status/main table 与单代 redirect-deleted LQ owner证明旧动态实例归属。
+    // 本函数只读公共状态，不写 tag、map、queue、redirect 或 cancel 生命周期。
+    function bit find_unique_redirect_deleted_load_mmio_owner(
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+        input memblock_redirect_payload_t overlap_redirect,
+        input int unsigned overlap_redirect_epoch,
+        input int unsigned overlap_cancel_record_id,
+        output memblock_uid_t matched_uid,
+        output memblock_rob_key_t matched_rob_key,
+        output int unsigned matched_count,
+        output string proof_detail
+    );
+        int record_idx;
+
+        matched_uid = 0;
+        matched_rob_key = '{default:'0};
+        matched_count = 0;
+        proof_detail = "";
+        if (!overlap_redirect.valid || overlap_redirect_epoch == 0 ||
+            overlap_cancel_record_id == 0 ||
+            !redirect_deleted_owner_window_active ||
+            redirect_deleted_owner_epoch != overlap_redirect_epoch ||
+            redirect_deleted_owner_record_id != overlap_cancel_record_id) begin
+            proof_detail = $sformatf(
+                "redirect-deleted window mismatch active=%0d window_epoch/record=%0d/%0d overlap_epoch/record=%0d/%0d",
+                redirect_deleted_owner_window_active,
+                redirect_deleted_owner_epoch,
+                redirect_deleted_owner_record_id,
+                overlap_redirect_epoch,
+                overlap_cancel_record_id);
+            return 1'b0;
+        end
+        record_idx = find_cancel_record_index_by_id(overlap_cancel_record_id);
+        if (record_idx < 0 || !cancel_record_q[record_idx].valid ||
+            !cancel_record_q[record_idx].redirect_anchor_valid ||
+            !cancel_record_q[record_idx].active_scan_done ||
+            !redirect_payload_equal(cancel_record_q[record_idx].redirect,
+                                    overlap_redirect)) begin
+            proof_detail = $sformatf(
+                "redirect record is unavailable or incompatible record=%0d index=%0d",
+                overlap_cancel_record_id, record_idx);
+            return 1'b0;
+        end
+
+        for (memblock_uid_t candidate_uid = 0;
+             candidate_uid < main_trans_num;
+             candidate_uid++) begin
+            main_control_transaction main_tr;
+            status_transaction status;
+            memblock_op_behavior_t behavior;
+            memblock_rob_key_t candidate_rob_key;
+            memblock_lq_key_t candidate_lq_key;
+            memblock_redirect_deleted_owner_t deleted_owner;
+
+            if (main_table_by_uid[candidate_uid] == null ||
+                status_by_uid[candidate_uid] == null) begin
+                continue;
+            end
+            main_tr = main_table_by_uid[candidate_uid];
+            status = status_by_uid[candidate_uid];
+            if (main_tr.robIdx_value != rob_value ||
+                status.robIdx_value != rob_value) begin
+                continue;
+            end
+            behavior = memblock_op_behavior_util::derive_op_behavior(main_tr);
+            if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_LOAD ||
+                !behavior.commit_is_load || !behavior.uses_lq ||
+                status.active || !status.flushed || !status.issue_killed ||
+                !status.redirect_pending || status.load_dispatched ||
+                status.load_issue_epoch == 0 || status.dynamic_epoch == 0 ||
+                status.active_instance_flush_epoch_valid) begin
+                continue;
+            end
+            candidate_rob_key = status.get_rob_key();
+            if (candidate_rob_key != main_tr.get_rob_key() ||
+                !rob_order_util::rob_need_flush(candidate_rob_key,
+                                                overlap_redirect)) begin
+                continue;
+            end
+            candidate_lq_key.flag = status.lqIdx_flag;
+            candidate_lq_key.value = status.lqIdx_value;
+            if (!is_valid_lq_key(candidate_lq_key) ||
+                !lookup_redirect_deleted_lq_owner(candidate_lq_key,
+                                                  deleted_owner) ||
+                deleted_owner.uid != candidate_uid ||
+                deleted_owner.old_dynamic_epoch + 1 != status.dynamic_epoch ||
+                deleted_owner.old_activation_flush_epoch >= overlap_redirect_epoch ||
+                deleted_owner.redirect_epoch != overlap_redirect_epoch ||
+                deleted_owner.cancel_record_id != overlap_cancel_record_id) begin
+                continue;
+            end
+            matched_count++;
+            matched_uid = candidate_uid;
+            matched_rob_key = candidate_rob_key;
+        end
+        proof_detail = $sformatf(
+            "redirect-deleted scalar Load matches=%0d epoch=%0d record=%0d",
+            matched_count, overlap_redirect_epoch, overlap_cancel_record_id);
+        return matched_count == 1;
+    endfunction:find_unique_redirect_deleted_load_mmio_owner
+
     // 中文注释：只 probe 同一 ROB value 的两个完整 wrap key，不扫描主表。
     // 返回 CURRENT 时 uid 唯一且 op/dispatch/provenance 已验证；只有可证明旧 raw
     // 时返回 STALE_DROP，其余 value-only 歧义直接 fatal。LOAD 还要检查
@@ -823,6 +1143,7 @@ class common_data_transaction extends uvm_object;
         input memblock_mmio_kind_e expected_kind,
         input int unsigned raw_sample_flush_epoch,
         input longint unsigned raw_sample_seq,
+        input longint unsigned raw_sample_cycle,
         output memblock_uid_t uid,
         output string stale_reason
     );
@@ -833,12 +1154,15 @@ class common_data_transaction extends uvm_object;
         int unsigned overlap_redirect_match_count;
         memblock_redirect_payload_t overlap_redirect;
         int unsigned overlap_redirect_epoch;
+        int unsigned overlap_cancel_record_id;
         longint unsigned overlap_redirect_sample_seq;
         int unsigned overlap_old_covered_count;
         int unsigned overlap_new_candidate_count;
         int unsigned overlap_uncovered_count;
         int unsigned overlap_incompatible_count;
         memblock_rob_key_t overlap_old_key;
+        memblock_uid_t overlap_surviving_uid;
+        memblock_rob_key_t overlap_surviving_key;
 
         uid = 0;
         stale_reason = "";
@@ -849,12 +1173,15 @@ class common_data_transaction extends uvm_object;
         overlap_redirect_match_count = 0;
         overlap_redirect = '{default:'0};
         overlap_redirect_epoch = 0;
+        overlap_cancel_record_id = 0;
         overlap_redirect_sample_seq = 0;
         overlap_old_covered_count = 0;
         overlap_new_candidate_count = 0;
         overlap_uncovered_count = 0;
         overlap_incompatible_count = 0;
         overlap_old_key = '{default:'0};
+        overlap_surviving_uid = 0;
+        overlap_surviving_key = '{default:'0};
         if (expected_kind != MEMBLOCK_MMIO_KIND_LOAD &&
             expected_kind != MEMBLOCK_MMIO_KIND_STORE) begin
             `uvm_fatal("MMIO_RESOLVE",
@@ -890,13 +1217,18 @@ class common_data_transaction extends uvm_object;
             foreach (cancel_record_q[record_probe_idx]) begin
                 if (!cancel_record_q[record_probe_idx].valid ||
                     !cancel_record_q[record_probe_idx].redirect_anchor_valid ||
-                    (raw_sample_seq != cancel_record_q[record_probe_idx].redirect_sample_seq &&
-                     raw_sample_seq != cancel_record_q[record_probe_idx].redirect_sample_seq + 1)) begin
+                    raw_sample_seq < cancel_record_q[record_probe_idx].redirect_sample_seq ||
+                    raw_sample_seq > cancel_record_q[record_probe_idx].redirect_sample_seq +
+                        MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET) begin
                     continue;
                 end
                 load_overlap_observed = 1'b1;
                 overlap_redirect_match_count++;
                 if (overlap_redirect_match_count > 1) begin
+                    dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                      raw_sample_flush_epoch,
+                                                      raw_sample_seq,
+                                                      raw_sample_cycle);
                     `uvm_fatal("MMIO_RESOLVE",
                                $sformatf("LOAD MMIO sample=%0d overlaps multiple unfinished redirect records",
                                          raw_sample_seq))
@@ -904,6 +1236,8 @@ class common_data_transaction extends uvm_object;
                 end
                 overlap_redirect = cancel_record_q[record_probe_idx].redirect;
                 overlap_redirect_epoch = cancel_record_q[record_probe_idx].redirect_epoch;
+                overlap_cancel_record_id =
+                    cancel_record_q[record_probe_idx].cancel_record_id;
                 overlap_redirect_sample_seq = cancel_record_q[record_probe_idx].redirect_sample_seq;
             end
 
@@ -913,13 +1247,18 @@ class common_data_transaction extends uvm_object;
 
                 if (!redirect_anchor_history_q[anchor_idx].valid ||
                     redirect_anchor_history_q[anchor_idx].sample_seq == 0 ||
-                    (raw_sample_seq != redirect_anchor_history_q[anchor_idx].sample_seq &&
-                     raw_sample_seq != redirect_anchor_history_q[anchor_idx].sample_seq + 1)) begin
+                    raw_sample_seq < redirect_anchor_history_q[anchor_idx].sample_seq ||
+                    raw_sample_seq > redirect_anchor_history_q[anchor_idx].sample_seq +
+                        MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET) begin
                     continue;
                 end
                 load_overlap_observed = 1'b1;
                 overlap_redirect_match_count++;
                 if (overlap_redirect_match_count > 1) begin
+                    dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                      raw_sample_flush_epoch,
+                                                      raw_sample_seq,
+                                                      raw_sample_cycle);
                     `uvm_fatal("MMIO_RESOLVE",
                                $sformatf("LOAD MMIO sample=%0d overlaps multiple redirect anchors/records",
                                          raw_sample_seq))
@@ -939,6 +1278,10 @@ class common_data_transaction extends uvm_object;
                     end
                 end
                 if (record_idx_for_anchor < 0) begin
+                    dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                      raw_sample_flush_epoch,
+                                                      raw_sample_seq,
+                                                      raw_sample_cycle);
                     `uvm_fatal("MMIO_RESOLVE",
                                $sformatf("LOAD MMIO sample=%0d has anchor without unfinished redirect record",
                                          raw_sample_seq))
@@ -955,6 +1298,10 @@ class common_data_transaction extends uvm_object;
                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.flag ||
                     redirect_anchor_history_q[anchor_idx].rob_value !=
                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.value) begin
+                    dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                      raw_sample_flush_epoch,
+                                                      raw_sample_seq,
+                                                      raw_sample_cycle);
                     `uvm_fatal("MMIO_RESOLVE",
                                $sformatf("LOAD MMIO anchor FIFO mismatch sample=%0d record=%0d expected raw/effective/vls/rob=%0d/%0d/%0d/%0d/%0d observed=%0d/%0d/%0d/%0d/%0d",
                                          raw_sample_seq,
@@ -974,10 +1321,16 @@ class common_data_transaction extends uvm_object;
                 end
                 overlap_redirect = cancel_record_q[record_idx_for_anchor].redirect;
                 overlap_redirect_epoch = cancel_record_q[record_idx_for_anchor].redirect_epoch;
+                overlap_cancel_record_id =
+                    cancel_record_q[record_idx_for_anchor].cancel_record_id;
                 overlap_redirect_sample_seq = redirect_anchor_history_q[anchor_idx].sample_seq;
             end
 
             if (load_overlap_observed && overlap_redirect_epoch == 0) begin
+                dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                  raw_sample_flush_epoch,
+                                                  raw_sample_seq,
+                                                  raw_sample_cycle);
                 `uvm_fatal("MMIO_RESOLVE",
                            $sformatf("LOAD MMIO sample=%0d overlap has invalid redirect epoch",
                                      raw_sample_seq))
@@ -999,12 +1352,20 @@ class common_data_transaction extends uvm_object;
             active_candidate_count++;
             status = get_status(candidate_uid);
             if (!status.active_instance_flush_epoch_valid) begin
+                dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                  raw_sample_flush_epoch,
+                                                  raw_sample_seq,
+                                                  raw_sample_cycle);
                 `uvm_fatal("MMIO_RESOLVE",
                            $sformatf("active uid=%0d ROB=%0d/%0d lacks activation provenance",
                                      candidate_uid, key.flag, key.value))
             end
             if (status.active_instance_flush_epoch >
                 memblock_sync_pkg::dispatch_flush_epoch) begin
+                dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                  raw_sample_flush_epoch,
+                                                  raw_sample_seq,
+                                                  raw_sample_cycle);
                 `uvm_fatal("MMIO_RESOLVE",
                            $sformatf("uid=%0d activation epoch=%0d is newer than current=%0d",
                                      candidate_uid, status.active_instance_flush_epoch,
@@ -1030,6 +1391,8 @@ class common_data_transaction extends uvm_object;
                     overlap_new_candidate_count++;
                 end else begin
                     overlap_uncovered_count++;
+                    overlap_surviving_uid = candidate_uid;
+                    overlap_surviving_key = key;
                 end
                 continue;
             end
@@ -1075,12 +1438,77 @@ class common_data_transaction extends uvm_object;
                     overlap_old_key.flag, overlap_old_key.value);
                 return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
             end
+            // 在完整R..R+2 overlap窗口内，只有唯一active scalar Load明确早于
+            // redirect、完整ROB key不被覆盖，且不存在任何covered/new/incompatible
+            // 混合候选时，value-only raw才可归给survivor。ROB admission保证相同
+            // value的相反flag未提交owner不能同时active；已提交但仍active的owner
+            // 仍会被双flag probe计入active_candidate_count并阻止该分支。
+            if (raw_sample_seq >= overlap_redirect_sample_seq &&
+                raw_sample_seq <= overlap_redirect_sample_seq +
+                                  MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET &&
+                active_candidate_count == 1 &&
+                overlap_uncovered_count == 1 &&
+                overlap_old_covered_count == 0 &&
+                overlap_new_candidate_count == 0 &&
+                overlap_incompatible_count == 0) begin
+                uid = overlap_surviving_uid;
+                stale_reason = $sformatf(
+                    "loadMmio sample=%0d overlaps redirect sample=%0d and uniquely matches surviving uid=%0d ROB=%0d/%0d epoch=%0d record=%0d",
+                    raw_sample_seq, overlap_redirect_sample_seq,
+                    overlap_surviving_uid, overlap_surviving_key.flag,
+                    overlap_surviving_key.value, overlap_redirect_epoch,
+                    overlap_cancel_record_id);
+                `uvm_info("MMIO_RESOLVE", stale_reason, UVM_LOW)
+                return MEMBLOCK_MMIO_RESOLVE_CURRENT;
+            end
+            if (raw_sample_seq == overlap_redirect_sample_seq +
+                                      MEMBLOCK_LOAD_MMIO_REDIRECT_MAX_SAMPLE_OFFSET &&
+                active_candidate_count == 0) begin
+                memblock_uid_t deleted_uid;
+                memblock_rob_key_t deleted_rob_key;
+                int unsigned deleted_match_count;
+                string deleted_proof_detail;
+
+                if (find_unique_redirect_deleted_load_mmio_owner(
+                        rob_value,
+                        overlap_redirect,
+                        overlap_redirect_epoch,
+                        overlap_cancel_record_id,
+                        deleted_uid,
+                        deleted_rob_key,
+                        deleted_match_count,
+                        deleted_proof_detail)) begin
+                    uid = deleted_uid;
+                    stale_reason = $sformatf(
+                        "loadMmio sample=%0d is R+2 of redirect sample=%0d and uniquely matches deleted uid=%0d ROB=%0d/%0d epoch=%0d record=%0d",
+                        raw_sample_seq, overlap_redirect_sample_seq,
+                        deleted_uid, deleted_rob_key.flag,
+                        deleted_rob_key.value, overlap_redirect_epoch,
+                        overlap_cancel_record_id);
+                    return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
+                end
+                stale_reason = $sformatf(
+                    "cannot prove LOAD MMIO stale ownership at R+2 sample=%0d redirect_sample=%0d %s",
+                    raw_sample_seq, overlap_redirect_sample_seq,
+                    deleted_proof_detail);
+                dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                                  raw_sample_flush_epoch,
+                                                  raw_sample_seq,
+                                                  raw_sample_cycle);
+                `uvm_fatal("MMIO_RESOLVE", stale_reason)
+                return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
+            end
             stale_reason = $sformatf(
-                "cannot prove LOAD MMIO stale ownership sample=%0d redirect_sample=%0d active=%0d old_covered=%0d new=%0d uncovered=%0d incompatible=%0d",
+                "cannot prove LOAD MMIO stale ownership sample=%0d redirect_sample=%0d redirect_record=%0d active=%0d old_covered=%0d new=%0d uncovered=%0d incompatible=%0d",
                 raw_sample_seq, overlap_redirect_sample_seq,
+                overlap_cancel_record_id,
                 active_candidate_count, overlap_old_covered_count,
                 overlap_new_candidate_count, overlap_uncovered_count,
                 overlap_incompatible_count);
+            dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                              raw_sample_flush_epoch,
+                                              raw_sample_seq,
+                                              raw_sample_cycle);
             `uvm_fatal("MMIO_RESOLVE", stale_reason)
             return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
         end
@@ -1102,6 +1530,10 @@ class common_data_transaction extends uvm_object;
             return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
         end
 
+        dump_mmio_resolve_failure_context(rob_value, expected_kind,
+                                          raw_sample_flush_epoch,
+                                          raw_sample_seq,
+                                          raw_sample_cycle);
         `uvm_fatal("MMIO_RESOLVE",
                    $sformatf("cannot prove MMIO raw ownership ROB value=%0d kind=%0d raw_epoch=%0d current_epoch=%0d active=%0d newer=%0d",
                              rob_value, expected_kind, raw_sample_flush_epoch,
@@ -1109,6 +1541,178 @@ class common_data_transaction extends uvm_object;
                              active_candidate_count, newer_candidate_count))
         return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
     endfunction:resolve_mmio_uid_by_rob_value
+
+    // 抽象职责：commit handler 单点发布下一条尚未释放 ROB slot 的 UID。
+    // 发布只允许前进，并验证被跨过的 UID 已经 ROB commit 或进入 terminal。
+    function void publish_rob_commit_frontier(input memblock_uid_t new_frontier,
+                                              input string caller);
+        memblock_uid_t old_frontier;
+
+        old_frontier = dispatch_progress.rob_commit_frontier_uid;
+        if (new_frontier < old_frontier || new_frontier > main_trans_num) begin
+            `uvm_fatal("ROB_ADMISSION_FRONTIER",
+                       $sformatf("%s invalid ROB frontier old=%0d new=%0d main_trans_num=%0d",
+                                 caller, old_frontier, new_frontier, main_trans_num))
+            return;
+        end
+        for (memblock_uid_t uid = old_frontier; uid < new_frontier; uid++) begin
+            status_transaction status;
+
+            status = get_status(uid);
+            if (!status.rob_commit && !status.terminal_done) begin
+                `uvm_fatal("ROB_ADMISSION_FRONTIER",
+                           $sformatf("%s skips uncommitted uid=%0d old=%0d new=%0d",
+                                     caller, uid, old_frontier, new_frontier))
+                return;
+            end
+        end
+        dispatch_progress.rob_commit_frontier_uid = new_frontier;
+        rob_admission_blocked_log_valid = 1'b0;
+    endfunction:publish_rob_commit_frontier
+
+    // 抽象职责：normal admission gate。窗口满时返回0形成 backpressure；
+    // UID顺序或静态 ROB key 漂移属于框架损坏，直接 fatal。
+    function bit rob_admission_window_has_room(input memblock_uid_t candidate_uid,
+                                               input string caller);
+        memblock_uid_t frontier_uid;
+        longint unsigned distance;
+        memblock_rob_key_t frontier_rob_key;
+        memblock_rob_key_t candidate_rob_key;
+        memblock_rob_key_t expected_rob_key;
+
+        if (!main_table_ready || candidate_uid >= main_trans_num) begin
+            `uvm_fatal("ROB_ADMISSION_WINDOW",
+                       $sformatf("%s invalid candidate uid=%0d ready=%0d main_trans_num=%0d",
+                                 caller, candidate_uid, main_table_ready, main_trans_num))
+            return 1'b0;
+        end
+        frontier_uid = dispatch_progress.rob_commit_frontier_uid;
+        if (frontier_uid > main_trans_num || candidate_uid < frontier_uid) begin
+            `uvm_fatal("ROB_ADMISSION_WINDOW",
+                       $sformatf("%s candidate precedes ROB frontier candidate=%0d frontier=%0d main_trans_num=%0d",
+                                 caller, candidate_uid, frontier_uid, main_trans_num))
+            return 1'b0;
+        end
+        distance = longint'(candidate_uid) - longint'(frontier_uid);
+        if (frontier_uid < main_trans_num) begin
+            frontier_rob_key = get_main_transaction(frontier_uid).get_rob_key();
+            candidate_rob_key = get_main_transaction(candidate_uid).get_rob_key();
+            expected_rob_key = rob_order_util::rob_advance(frontier_rob_key,
+                                                            int'(distance));
+            if (candidate_rob_key != expected_rob_key) begin
+                `uvm_fatal("ROB_ADMISSION_WINDOW",
+                           $sformatf("%s static ROB order mismatch candidate=%0d rob=%0d/%0d frontier=%0d rob=%0d/%0d distance=%0d expected=%0d/%0d",
+                                     caller, candidate_uid,
+                                     candidate_rob_key.flag, candidate_rob_key.value,
+                                     frontier_uid,
+                                     frontier_rob_key.flag, frontier_rob_key.value,
+                                     distance,
+                                     expected_rob_key.flag, expected_rob_key.value))
+                return 1'b0;
+            end
+        end
+        if (distance >= MEMBLOCK_ROB_SIZE) begin
+            if (!rob_admission_blocked_log_valid ||
+                rob_admission_blocked_candidate_uid != candidate_uid ||
+                rob_admission_blocked_frontier_uid != frontier_uid) begin
+                candidate_rob_key = get_main_transaction(candidate_uid).get_rob_key();
+                `uvm_info("ROB_ADMISSION_WINDOW",
+                          $sformatf("ROB admission blocked caller=%s candidate=%0d rob=%0d/%0d frontier=%0d distance=%0d limit=%0d max_enqueued_valid/uid=%0d/%0d terminal_done_uid=%0d",
+                                    caller, candidate_uid,
+                                    candidate_rob_key.flag, candidate_rob_key.value,
+                                    frontier_uid, distance, MEMBLOCK_ROB_SIZE,
+                                    dispatch_progress.max_enqueued_uid_valid,
+                                    dispatch_progress.max_enqueued_uid,
+                                    dispatch_progress.terminal_done_uid),
+                          UVM_LOW)
+                rob_admission_blocked_log_valid = 1'b1;
+                rob_admission_blocked_candidate_uid = candidate_uid;
+                rob_admission_blocked_frontier_uid = frontier_uid;
+            end
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:rob_admission_window_has_room
+
+    // 返回值让 expected-fatal 定向测试在捕获 fatal 后仍能阻止 map 写入。
+    function bit assert_uid_within_rob_admission_window(input memblock_uid_t uid,
+                                                        input string caller);
+        if (rob_admission_window_has_room(uid, caller)) begin
+            return 1'b1;
+        end
+        `uvm_fatal("ROB_ADMISSION_WINDOW",
+                   $sformatf("%s attempted activation outside ROB admission window uid=%0d frontier=%0d limit=%0d",
+                             caller, uid,
+                             dispatch_progress.rob_commit_frontier_uid,
+                             MEMBLOCK_ROB_SIZE))
+        return 1'b0;
+    endfunction:assert_uid_within_rob_admission_window
+
+    // redirect 等低频事件入口使用有限 active ROB map 审计，不扫描完整主表。
+    function void audit_active_rob_window(input string caller);
+        memblock_uid_t frontier_uid;
+
+        frontier_uid = dispatch_progress.rob_commit_frontier_uid;
+        foreach (uid_by_active_rob[map_key]) begin
+            memblock_uid_t uid;
+            status_transaction status;
+            memblock_rob_key_t rob_key;
+
+            uid = uid_by_active_rob[map_key];
+            status = get_status(uid);
+            rob_key = status.get_rob_key();
+            if (!status.active || rob_order_util::rob_to_map_key(rob_key) != map_key ||
+                get_main_transaction(uid).get_rob_key() != rob_key) begin
+                `uvm_fatal("ROB_ADMISSION_WINDOW",
+                           $sformatf("%s active ROB map identity mismatch uid=%0d map_key=%0h active=%0d rob=%0d/%0d",
+                                     caller, uid, map_key, status.active,
+                                     rob_key.flag, rob_key.value))
+                return;
+            end
+            if (!status.rob_commit) begin
+                if (!assert_uid_within_rob_admission_window(uid, caller)) begin
+                    return;
+                end
+            end else if (uid > frontier_uid) begin
+                `uvm_fatal("ROB_ADMISSION_FRONTIER",
+                           $sformatf("%s committed active owner is younger than frontier uid=%0d frontier=%0d",
+                                     caller, uid, frontier_uid))
+                return;
+            end
+        end
+    endfunction:audit_active_rob_window
+
+    // redirect 完成后只验证 prefix containment；发现 prefix 外 owner 报错，不补扫。
+    function void assert_active_owners_within_admission_prefix(
+        input memblock_redirect_payload_t redirect,
+        input memblock_uid_t old_end_uid,
+        input string caller);
+        memblock_uid_t new_end_uid;
+
+        new_end_uid = get_active_scan_end_uid();
+        foreach (uid_by_active_rob[map_key]) begin
+            memblock_uid_t uid;
+            status_transaction status;
+            memblock_rob_key_t rob_key;
+
+            uid = uid_by_active_rob[map_key];
+            if (uid < new_end_uid) begin
+                continue;
+            end
+            status = get_status(uid);
+            rob_key = status.get_rob_key();
+            `uvm_fatal("ROB_ADMISSION_PREFIX",
+                       $sformatf("%s found prefix-external active owner uid=%0d rob=%0d/%0d redirect=%0d/%0d old_end=%0d new_end=%0d frontier=%0d distance=%0d lq/sq_mapped=%0d/%0d",
+                                 caller, uid, rob_key.flag, rob_key.value,
+                                 redirect.rob_key.flag, redirect.rob_key.value,
+                                 old_end_uid, new_end_uid,
+                                 dispatch_progress.rob_commit_frontier_uid,
+                                 uid - dispatch_progress.rob_commit_frontier_uid,
+                                 status.active_lq_mapped,
+                                 status.active_sq_mapped))
+            return;
+        end
+    endfunction:assert_active_owners_within_admission_prefix
 
     function void mark_uid_enqueued(input memblock_uid_t uid);
         check_uid(uid, "mark_uid_enqueued");
@@ -1359,6 +1963,9 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("CONTROL_ADMISSION",
                        $sformatf("cannot admit control uid=%0d while barrier uid=%0d is active",
                                  uid, active_control_barrier_uid))
+        end
+        if (!assert_uid_within_rob_admission_window(uid, "activate_control_uid")) begin
+            return;
         end
         main_tr = get_main_transaction(uid);
         status = get_status(uid);
@@ -1800,6 +2407,7 @@ class common_data_transaction extends uvm_object;
             MEMBLOCK_STATUS_TERMINAL_DONE: begin
                 status.terminal_done = value;
                 if (value) begin
+                    clear_uncache_retry_boost(uid, "terminal status");
                     advance_terminal_done_uid();
                 end
             end
@@ -1991,9 +2599,48 @@ class common_data_transaction extends uvm_object;
         status = get_status(uid);
         return status.active &&
                is_scalar_store_uid(uid) &&
+               !status.redirect_pending &&
+               !status.flushed &&
+               !status.issue_killed &&
                pending_store_fault_by_uid[uid].uid == uid &&
                pending_store_fault_by_uid[uid].dynamic_epoch == status.dynamic_epoch;
     endfunction:pending_store_fault_matches
+
+    // 抽象职责：判断当前动态实例是否仍处于 store-fault 的双 real-WB 终态屏障。
+    // 该判断只认与 status.dynamic_epoch 相同的 pending record；旧实例被 redirect
+    // 清理后，即使迟到 WB 仍带有同 UID，也不能重新建立终态等待。
+    function bit store_fault_real_wb_pending(input memblock_uid_t uid);
+        return pending_store_fault_matches(uid) &&
+               !store_real_writebacks_done(uid);
+    endfunction:store_fault_real_wb_pending
+
+    // 抽象职责：pendingPtr 只在缺失的另一侧已经真正 dispatch 后才回退。STA
+    // fault 可能早于 STD dispatch 到达；此时回退 pendingPtr 会阻塞 STD 自己入队，
+    // 形成 uid130 场景的自锁。terminal/commit 仍使用上面的严格屏障，不会提前提交。
+    function bit store_fault_blocks_pending_ptr(input memblock_uid_t uid);
+        status_transaction             status;
+        memblock_pending_store_fault_t pending;
+
+        if (!store_fault_real_wb_pending(uid)) begin
+            return 1'b0;
+        end
+        status = get_status(uid);
+        pending = pending_store_fault_by_uid[uid];
+        if (pending.sta_fault_seen && !status.std_dispatched) begin
+            return 1'b0;
+        end
+        if (pending.std_fault_seen && !status.sta_dispatched) begin
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:store_fault_blocks_pending_ptr
+
+    // SQ deq/release is the other half of the store-fault barrier. The
+    // missing target may still be dispatched, but the physical SQ owner
+    // remains mapped until both real-WB events arrive.
+    function bit store_fault_blocks_sq_deq(input memblock_uid_t uid);
+        return store_fault_real_wb_pending(uid);
+    endfunction:store_fault_blocks_sq_deq
 
     function bit clear_pending_store_fault(input memblock_uid_t uid);
         if (pending_store_fault_by_uid.exists(uid)) begin
@@ -2211,7 +2858,8 @@ class common_data_transaction extends uvm_object;
     function bit capture_sta_late_fault_tombstone(input memblock_uid_t uid,
                                                    input int unsigned issue_epoch,
                                                    input int unsigned replay_seq,
-                                                   input longint unsigned cycle);
+                                                   input longint unsigned cycle,
+                                                   output bit created_new);
         status_transaction                    status;
         memblock_sta_late_fault_tombstone_t  tombstone;
         memblock_rob_key_t                    rob_key;
@@ -2219,6 +2867,7 @@ class common_data_transaction extends uvm_object;
         memblock_uid_t                        mapped_uid;
         int unsigned                          target_flush_epoch;
 
+        created_new = 1'b0;
         status = get_status(uid);
         if (!status.active || status.issue_killed || status.fault ||
             status.exception_pending || status.redirect_pending || status.terminal_done ||
@@ -2300,6 +2949,7 @@ class common_data_transaction extends uvm_object;
         tombstone.target_flush_epoch = target_flush_epoch;
         tombstone.create_cycle = cycle;
         status.sta_late_fault_tombstone_q.push_back(tombstone);
+        created_new = 1'b1;
         status.last_event_cycle = cycle;
         `uvm_info("STA_LATE_TOMBSTONE",
                   $sformatf("capture uid=%0d dynamic_epoch=%0d issue_epoch=%0d replay_seq=%0d flush_epoch=%0d history=%0d",
@@ -2732,10 +3382,145 @@ class common_data_transaction extends uvm_object;
         return dropped_pending_draft;
     endfunction:clear_uid_dispatch_result
 
-    function void reset_uid_after_older_redirect(input memblock_uid_t uid);
+    function void clear_uncache_retry_boost(input memblock_uid_t uid,
+                                            input string reason);
         status_transaction status;
 
+        check_uid(uid, "clear_uncache_retry_boost");
         status = get_status(uid);
+        if (status.uncache_retry_boost || status.uncache_retry_count != 0 ||
+            status.uncache_retry_identity_valid) begin
+            `uvm_info("UNCACHE_RETRY_BOOST",
+                      $sformatf("clear uid=%0d reason=%s count=%0d dyn=%0d rob=%0d/%0d",
+                                uid, reason, status.uncache_retry_count,
+                                status.uncache_retry_dynamic_epoch,
+                                status.uncache_retry_rob_key.flag,
+                                status.uncache_retry_rob_key.value), UVM_LOW)
+        end
+        status.uncache_retry_boost = 1'b0;
+        status.uncache_retry_count = 0;
+        status.uncache_retry_identity_valid = 1'b0;
+        status.uncache_retry_rob_key = '{default:'0};
+        status.uncache_retry_has_dynamic_epoch = 1'b0;
+        status.uncache_retry_dynamic_epoch = 0;
+    endfunction:clear_uncache_retry_boost
+
+    function bit apply_uncache_retry_boost(input memblock_wb_event_t wb_event);
+        status_transaction status;
+        memblock_rob_key_t status_rob_key;
+
+        if (!wb_event.valid ||
+            wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_MEMORY_VIOLATION ||
+            wb_event.rollback_subtype != MEMBLOCK_ROLLBACK_SUBTYPE_UNCACHE_NACK ||
+            !wb_event.redirect.valid || !wb_event.redirect.flush_itself ||
+            wb_event.redirect.is_vls_exception ||
+            !wb_event.has_uid || !wb_event.has_rob || !wb_event.has_dynamic_epoch ||
+            !is_valid_uid(wb_event.uid)) begin
+            return 1'b0;
+        end
+        status = get_status(wb_event.uid);
+        status_rob_key = status.get_rob_key();
+        if (!status.active || status.terminal_done || status.flushed ||
+            status.redirect_pending || status_rob_key != wb_event.rob_key ||
+            status.dynamic_epoch != wb_event.dynamic_epoch) begin
+            `uvm_info("UNCACHE_RETRY_BOOST",
+                      $sformatf("reject stale selected uid=%0d event_dyn=%0d status_dyn=%0d event_rob=%0d/%0d status_rob=%0d/%0d active=%0d terminal=%0d flushed=%0d redirect_pending=%0d",
+                                wb_event.uid, wb_event.dynamic_epoch, status.dynamic_epoch,
+                                wb_event.rob_key.flag, wb_event.rob_key.value,
+                                status_rob_key.flag, status_rob_key.value,
+                                status.active, status.terminal_done, status.flushed,
+                                status.redirect_pending), UVM_LOW)
+            return 1'b0;
+        end
+        status.uncache_retry_boost = 1'b1;
+        status.uncache_retry_count++;
+        if (status.uncache_retry_count == 0) begin
+            `uvm_fatal("UNCACHE_RETRY_BOOST", "uncache retry count wrapped")
+        end
+        status.uncache_retry_identity_valid = 1'b1;
+        status.uncache_retry_rob_key = wb_event.rob_key;
+        status.uncache_retry_has_dynamic_epoch = 1'b1;
+        status.uncache_retry_dynamic_epoch = wb_event.dynamic_epoch;
+        `uvm_info("UNCACHE_RETRY_BOOST",
+                  $sformatf("set uid=%0d count=%0d dyn=%0d rob=%0d/%0d subtype=%0d flush_itself=%0d",
+                            wb_event.uid, status.uncache_retry_count,
+                            wb_event.dynamic_epoch, wb_event.rob_key.flag,
+                            wb_event.rob_key.value, wb_event.rollback_subtype,
+                            wb_event.redirect.flush_itself), UVM_LOW)
+        return 1'b1;
+    endfunction:apply_uncache_retry_boost
+
+    function bit consume_uncache_retry_boost_after_issue(
+        input memblock_issue_q_item_t item
+    );
+        status_transaction status;
+
+        if (!item.uncache_retry_boost || !item.uncache_retry_identity_valid ||
+            !item.uncache_retry_has_dynamic_epoch ||
+            !is_valid_uid(item.uid)) begin
+            return 1'b0;
+        end
+        status = get_status(item.uid);
+        if (!status.uncache_retry_boost ||
+            !status.uncache_retry_identity_valid ||
+            !status.uncache_retry_has_dynamic_epoch ||
+            status.uncache_retry_rob_key != item.rob_key ||
+            status.uncache_retry_dynamic_epoch != item.dynamic_epoch ||
+            item.uncache_retry_dynamic_epoch != item.dynamic_epoch) begin
+            return 1'b0;
+        end
+        `uvm_info("UNCACHE_RETRY_BOOST",
+                  $sformatf("consume after issue uid=%0d target=%0d count=%0d dyn=%0d rob=%0d/%0d",
+                            item.uid, item.target, status.uncache_retry_count,
+                            item.dynamic_epoch, item.rob_key.flag,
+                            item.rob_key.value), UVM_LOW)
+        // Keep retry_count as a cumulative diagnostic until terminal/reset.
+        // A subsequent selected subtype5 event explicitly re-arms the token.
+        status.uncache_retry_boost = 1'b0;
+        status.uncache_retry_identity_valid = 1'b0;
+        status.uncache_retry_rob_key = '{default:'0};
+        status.uncache_retry_has_dynamic_epoch = 1'b0;
+        status.uncache_retry_dynamic_epoch = 0;
+        return 1'b1;
+    endfunction:consume_uncache_retry_boost_after_issue
+
+    function void inherit_uncache_retry_boost_for_reissue(
+        input memblock_uid_t uid,
+        input memblock_rob_key_t old_rob_key,
+        input int unsigned old_dynamic_epoch,
+        input int unsigned new_dynamic_epoch
+    );
+        status_transaction status;
+
+        check_uid(uid, "inherit_uncache_retry_boost_for_reissue");
+        status = get_status(uid);
+        if (!status.uncache_retry_boost ||
+            !status.uncache_retry_identity_valid ||
+            status.uncache_retry_rob_key != old_rob_key ||
+            status.uncache_retry_dynamic_epoch != old_dynamic_epoch ||
+            status.get_rob_key() != old_rob_key ||
+            new_dynamic_epoch != old_dynamic_epoch + 1) begin
+            if (status.uncache_retry_boost || status.uncache_retry_identity_valid) begin
+                clear_uncache_retry_boost(uid, "stale redirect reissue identity");
+            end
+            return;
+        end
+        status.uncache_retry_dynamic_epoch = new_dynamic_epoch;
+        status.uncache_retry_has_dynamic_epoch = 1'b1;
+        `uvm_info("UNCACHE_RETRY_BOOST",
+                  $sformatf("inherit uid=%0d count=%0d E=%0d->E+1=%0d rob=%0d/%0d",
+                            uid, status.uncache_retry_count, old_dynamic_epoch,
+                            new_dynamic_epoch, old_rob_key.flag, old_rob_key.value), UVM_LOW)
+    endfunction:inherit_uncache_retry_boost_for_reissue
+
+    function void reset_uid_after_older_redirect(input memblock_uid_t uid);
+        status_transaction status;
+        memblock_rob_key_t old_rob_key;
+        int unsigned old_dynamic_epoch;
+
+        status = get_status(uid);
+        old_rob_key = status.get_rob_key();
+        old_dynamic_epoch = status.dynamic_epoch;
         if (status.rob_commit || status.terminal_done) begin
             `uvm_fatal("REDIRECT_REISSUE",
                        $sformatf("reset pending-fault uid=%0d with rob_commit=%0d terminal_done=%0d",
@@ -2756,6 +3541,9 @@ class common_data_transaction extends uvm_object;
         status.active           = 1'b0;
         status.success         = 1'b0;
         status.terminal_done   = 1'b0;
+        inherit_uncache_retry_boost_for_reissue(uid, old_rob_key,
+                                                old_dynamic_epoch,
+                                                status.dynamic_epoch);
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
         `uvm_info("REDIRECT_REISSUE",
                   $sformatf("reset older-redirect pending-fault uid=%0d new_dynamic_epoch=%0d; next admission remains uid=%0d",
@@ -3423,10 +4211,18 @@ class common_data_transaction extends uvm_object;
                                  uid, redirect_epoch))
         end
         status = get_status(uid);
+        if (!status.active || !status.active_instance_flush_epoch_valid ||
+            status.active_instance_flush_epoch >= redirect_epoch) begin
+            `uvm_fatal("REDIRECT_DELETED_OWNER",
+                       $sformatf("uid=%0d activation epoch valid/value=%0d/%0d is not older than redirect epoch=%0d",
+                                 uid, status.active_instance_flush_epoch_valid,
+                                 status.active_instance_flush_epoch, redirect_epoch))
+        end
         owner = '{default:'0};
         owner.valid = 1'b1;
         owner.uid = uid;
         owner.old_dynamic_epoch = status.dynamic_epoch;
+        owner.old_activation_flush_epoch = status.active_instance_flush_epoch;
         owner.redirect_epoch = redirect_epoch;
         owner.cancel_record_id = cancel_record_q[record_idx].cancel_record_id;
         if (status.active_lq_mapped) begin
@@ -3705,6 +4501,8 @@ class common_data_transaction extends uvm_object;
     function void prepare_uid_for_redirect_reissue(input memblock_uid_t uid,
                                                    input memblock_redirect_payload_t redirect);
         status_transaction status;
+        memblock_rob_key_t old_rob_key;
+        int unsigned old_dynamic_epoch;
 
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "prepare_uid_for_redirect_reissue requires valid redirect")
@@ -3714,6 +4512,8 @@ class common_data_transaction extends uvm_object;
                        $sformatf("control uid=%0d must use static preserve or fatal redirect handling", uid))
         end
         status = get_status(uid);
+        old_rob_key = status.get_rob_key();
+        old_dynamic_epoch = status.dynamic_epoch;
         if (status.terminal_done) begin
             `uvm_fatal("COMMON_DATA",
                        $sformatf("redirect tries to flush already terminal_done uid=%0d", uid))
@@ -3731,7 +4531,7 @@ class common_data_transaction extends uvm_object;
             if (status.active) begin
                 // owner 已在本函数入口冻结，这里只释放活映射。
                 release_uid_lq_mapping(uid);
-                release_uid_sq_mapping(uid);
+                release_uid_sq_mapping(uid, 1'b1);
                 uid_by_active_rob.delete(rob_order_util::rob_to_map_key(status.get_rob_key()));
                 status.active = 1'b0;
             end
@@ -3763,6 +4563,9 @@ class common_data_transaction extends uvm_object;
         status.active           = 1'b0;
         status.success          = 1'b0;
         status.terminal_done    = 1'b0;
+        inherit_uncache_retry_boost_for_reissue(uid, old_rob_key,
+                                                old_dynamic_epoch,
+                                                status.dynamic_epoch);
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:prepare_uid_for_redirect_reissue
 
@@ -3931,6 +4734,7 @@ class common_data_transaction extends uvm_object;
                 cancel_record_q[record_idx].redirect_lsq_sample_seq) begin
             `uvm_fatal("LSQ_CANCEL", "redirect flush scan started before its anchored LSQ sample boundary")
         end
+        audit_active_rob_window("apply_redirect_flush_range:before_scan");
         advance_terminal_done_uid();
         begin_uid = get_active_scan_begin_uid();
         end_uid   = get_active_scan_end_uid();
@@ -3982,6 +4786,8 @@ class common_data_transaction extends uvm_object;
         if (found_flushed) begin
             rollback_max_enqueued_uid(oldest_flushed_uid);
         end
+        assert_active_owners_within_admission_prefix(
+            redirect, end_uid, "apply_redirect_flush_range:after_scan");
         if (cancel_record_q[record_idx].software_cancel_lq_count > MEMBLOCK_LQ_SIZE ||
             cancel_record_q[record_idx].software_cancel_sq_count > MEMBLOCK_SQ_SIZE) begin
             `uvm_fatal("LSQ_CANCEL", "finalized software cancel count exceeds LSQ capacity")
@@ -4044,6 +4850,12 @@ class common_data_transaction extends uvm_object;
         wb_event.replay_valid      = 1'b0;
         wb_event.redirect_valid    = 1'b0;
         wb_event.redirect          = '{default:'0};
+        wb_event.rollback_diag_valid = 1'b0;
+        wb_event.rollback_diag_complete = 1'b0;
+        wb_event.rollback_selected_input = 0;
+        wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_NONE;
+        wb_event.has_dynamic_epoch = 1'b0;
+        wb_event.dynamic_epoch = 0;
         wb_event.ptw_back_replay   = 1'b0;
         wb_event.vector_ls         = 1'b0;
         wb_event.uop_index         = 0;
@@ -4263,6 +5075,9 @@ class common_data_transaction extends uvm_object;
 
         main_tr = get_main_transaction(uid);
         ensure_status_exists(uid, "activate_uid");
+        if (!assert_uid_within_rob_admission_window(uid, "activate_uid")) begin
+            return;
+        end
         status = status_by_uid[uid];
         if (status.terminal_done) begin
             `uvm_fatal("COMMON_DATA", $sformatf("activate_uid got terminal_done uid=%0d", uid))
@@ -4473,6 +5288,9 @@ class common_data_transaction extends uvm_object;
         memblock_sq_map_key_t  sq_map_key;
 
         status = get_status(uid);
+        if (status.terminal_done) begin
+            clear_uncache_retry_boost(uid, "terminal retire");
+        end
         if (!status.active) begin
             `uvm_fatal("COMMON_DATA", $sformatf("retire_active_uid got inactive uid=%0d", uid))
         end
@@ -4589,13 +5407,21 @@ class common_data_transaction extends uvm_object;
                   UVM_LOW)
     endfunction:release_uid_lq_mapping
 
-    function void release_uid_sq_mapping(input memblock_uid_t uid);
+    function void release_uid_sq_mapping(input memblock_uid_t uid,
+                                         input bit allow_fault_redirect_cleanup = 1'b0);
         status_transaction     status;
         memblock_sq_key_t      sq_key;
         memblock_sq_map_key_t  sq_map_key;
 
         status = get_status(uid);
         if (!status.active_sq_mapped) begin
+            return;
+        end
+        if (store_fault_blocks_sq_deq(uid) && !allow_fault_redirect_cleanup) begin
+            `uvm_fatal("STORE_FAULT_BARRIER",
+                       $sformatf("SQ mapping release bypassed deq preflight uid=%0d epoch=%0d sta_wb=%0d std_wb=%0d",
+                                 uid, status.dynamic_epoch,
+                                 status.sta_writeback, status.std_writeback))
             return;
         end
         sq_key.flag  = status.sqIdx_flag;
@@ -4663,7 +5489,7 @@ class common_data_transaction extends uvm_object;
         end
         if (status.fault || status.exception_pending ||
             status.load_fault || status.sta_fault || status.std_fault) begin
-            if (is_scalar_store_uid(uid) && !store_real_writebacks_done(uid)) begin
+            if (store_fault_real_wb_pending(uid)) begin
                 return;
             end
             if (fault_redirect_resource_blocks_retire(uid)) begin
@@ -5282,6 +6108,250 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:find_tlb_range_hit_by_req
 
+    function void unregister_completed_tlb_range_index(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        int idx;
+        int bucket_idx;
+        int unsigned removed_count;
+        memblock_tlb_range_index_key_t range_key;
+
+        if (entry == null || entry.lookup_key != anchor_key ||
+            entry.range_index_keys.size() == 0) begin
+            `uvm_fatal("COMMON_DATA", "completed TLB range unregistration got invalid entry")
+        end
+        foreach (entry.range_index_keys[idx]) begin
+            range_key = entry.range_index_keys[idx];
+            if (!completed_tlb_anchor_keys_by_range_key.exists(range_key)) begin
+                `uvm_fatal("COMMON_DATA", "completed TLB range index lost bucket")
+            end
+            removed_count = 0;
+            for (bucket_idx = int'(completed_tlb_anchor_keys_by_range_key[range_key].size()) - 1;
+                 bucket_idx >= 0; bucket_idx--) begin
+                if (tlb_lookup_key_equal(
+                        completed_tlb_anchor_keys_by_range_key[range_key][bucket_idx],
+                        anchor_key)) begin
+                    completed_tlb_anchor_keys_by_range_key[range_key].delete(bucket_idx);
+                    removed_count++;
+                end
+            end
+            if (removed_count != 1) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("completed TLB range removal expected one anchor got=%0d",
+                                     removed_count))
+            end
+            if (completed_tlb_anchor_keys_by_range_key[range_key].size() == 0) begin
+                completed_tlb_anchor_keys_by_range_key.delete(range_key);
+            end
+        end
+        entry.range_index_keys.delete();
+    endfunction:unregister_completed_tlb_range_index
+
+    function void delete_completed_tlb_entry_by_anchor_key(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input string reason);
+        memblock_tlb_entry entry;
+
+        if (!completed_tlb_entry_by_key.exists(anchor_key)) begin
+            return;
+        end
+        entry = completed_tlb_entry_by_key[anchor_key];
+        if (entry == null ||
+            !completed_tlb_response_token_by_key.exists(anchor_key) ||
+            !completed_tlb_response_sample_by_key.exists(anchor_key)) begin
+            `uvm_fatal("COMMON_DATA", "completed TLB cache provenance is incomplete")
+        end
+        unregister_completed_tlb_range_index(anchor_key, entry);
+        completed_tlb_entry_by_key.delete(anchor_key);
+        completed_tlb_response_token_by_key.delete(anchor_key);
+        completed_tlb_response_sample_by_key.delete(anchor_key);
+        `uvm_info("COMMON_DATA",
+                  $sformatf("delete completed TLB response reason=%s vpn=0x%0h generation=%0d",
+                            reason, anchor_key.vpn, entry.entry_generation),
+                  UVM_LOW)
+    endfunction:delete_completed_tlb_entry_by_anchor_key
+
+    function void record_completed_tlb_response(
+        input memblock_tlb_entry entry,
+        input longint unsigned response_token,
+        input longint unsigned response_sample_seq);
+        memblock_tlb_entry snapshot;
+        memblock_tlb_lookup_key_t anchor_key;
+        memblock_tlb_range_index_key_t keys[$];
+        int idx;
+        int bucket_idx;
+
+        // request_token is zero-based; cache/table presence is its validity.
+        if (entry == null || entry.entry_generation == 0 ||
+            response_sample_seq == 0) begin
+            `uvm_fatal("COMMON_DATA", "completed TLB response cache requires valid provenance")
+        end
+        anchor_key = entry.lookup_key;
+        delete_completed_tlb_entry_by_anchor_key(anchor_key,
+                                                  "newer sampled response");
+        snapshot = memblock_tlb_entry::type_id::create(
+            $sformatf("completed_tlb_response_%0d", response_token));
+        if (snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "failed to allocate completed TLB response snapshot")
+        end
+        snapshot.copy_from(entry);
+        build_entry_range_index_keys(snapshot, keys);
+        foreach (keys[idx]) begin
+            if (completed_tlb_anchor_keys_by_range_key.exists(keys[idx]) &&
+                completed_tlb_anchor_keys_by_range_key[keys[idx]].size() >=
+                    MEMBLOCK_TLB_RANGE_CANDIDATE_MAX) begin
+                `uvm_fatal("COMMON_DATA", "completed TLB range index bucket overflow")
+            end
+            foreach (completed_tlb_anchor_keys_by_range_key[keys[idx]][bucket_idx]) begin
+                if (tlb_lookup_key_equal(
+                        completed_tlb_anchor_keys_by_range_key[keys[idx]][bucket_idx],
+                        anchor_key)) begin
+                    `uvm_fatal("COMMON_DATA", "completed TLB range index duplicate anchor")
+                end
+            end
+        end
+        foreach (keys[idx]) begin
+            completed_tlb_anchor_keys_by_range_key[keys[idx]].push_back(anchor_key);
+            snapshot.range_index_keys.push_back(keys[idx]);
+        end
+        completed_tlb_entry_by_key[anchor_key] = snapshot;
+        completed_tlb_response_token_by_key[anchor_key] = response_token;
+        completed_tlb_response_sample_by_key[anchor_key] = response_sample_seq;
+    endfunction:record_completed_tlb_response
+
+    function bit find_completed_tlb_response_for_issue(
+        input memblock_tlb_lookup_key_t request_key,
+        input mmu_csr_runtime_state request_csr_snapshot,
+        output memblock_tlb_entry entry,
+        output longint unsigned response_token,
+        output longint unsigned response_sample_seq);
+        memblock_tlb_range_index_key_t query_keys[$];
+        memblock_tlb_lookup_key_t seen_keys[$];
+        memblock_tlb_lookup_key_t candidate_keys[$];
+        memblock_tlb_entry candidate_entries[$];
+        memblock_tlb_range_coverage_rank_e candidate_ranks[$];
+        memblock_tlb_lookup_key_t anchor_key;
+        memblock_tlb_range_coverage_rank_e max_rank;
+        bit seen;
+        int qidx;
+        int bidx;
+        int sidx;
+        int cidx;
+        int selected_idx;
+        int unsigned max_rank_count;
+
+        entry = null;
+        response_token = 0;
+        response_sample_seq = 0;
+        if (request_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "completed TLB issue lookup got null CSR snapshot")
+        end
+        if (completed_tlb_entry_by_key.exists(request_key)) begin
+            entry = completed_tlb_entry_by_key[request_key];
+            if (entry == null ||
+                !completed_tlb_response_token_by_key.exists(request_key) ||
+                !completed_tlb_response_sample_by_key.exists(request_key) ||
+                !entry_matches_request_raw(entry, request_key.vpn,
+                                           request_key.s2xlate,
+                                           request_csr_snapshot)) begin
+                `uvm_fatal("COMMON_DATA", "completed exact TLB entry failed raw match")
+            end
+            response_token = completed_tlb_response_token_by_key[request_key];
+            response_sample_seq = completed_tlb_response_sample_by_key[request_key];
+            return 1'b1;
+        end
+
+        build_tlb_range_query_keys(request_key, query_keys);
+        foreach (query_keys[qidx]) begin
+            if (!completed_tlb_anchor_keys_by_range_key.exists(query_keys[qidx])) begin
+                continue;
+            end
+            foreach (completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx]) begin
+                anchor_key = completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx];
+                seen = 1'b0;
+                foreach (seen_keys[sidx]) begin
+                    if (tlb_lookup_key_equal(seen_keys[sidx], anchor_key)) seen = 1'b1;
+                end
+                if (seen) continue;
+                seen_keys.push_back(anchor_key);
+                if (!completed_tlb_entry_by_key.exists(anchor_key) ||
+                    completed_tlb_entry_by_key[anchor_key] == null) begin
+                    `uvm_fatal("COMMON_DATA", "completed TLB range index points to missing entry")
+                end
+                if (!entry_matches_request_raw(completed_tlb_entry_by_key[anchor_key],
+                                               request_key.vpn,
+                                               request_key.s2xlate,
+                                               request_csr_snapshot)) begin
+                    `uvm_fatal("COMMON_DATA", "completed TLB range index/raw mismatch")
+                end
+                candidate_keys.push_back(anchor_key);
+                candidate_entries.push_back(completed_tlb_entry_by_key[anchor_key]);
+                candidate_ranks.push_back(get_tlb_range_match_coverage_rank(
+                    completed_tlb_entry_by_key[anchor_key]));
+            end
+        end
+        if (candidate_entries.size() == 0) return 1'b0;
+        max_rank = MEMBLOCK_TLB_COVERAGE_4K;
+        foreach (candidate_ranks[cidx]) begin
+            if (candidate_ranks[cidx] > max_rank) max_rank = candidate_ranks[cidx];
+        end
+        selected_idx = -1;
+        max_rank_count = 0;
+        foreach (candidate_ranks[cidx]) begin
+            if (candidate_ranks[cidx] == max_rank) begin
+                selected_idx = cidx;
+                max_rank_count++;
+            end
+        end
+        if (max_rank_count != 1 || selected_idx < 0) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("ambiguous completed TLB issue hit vpn=0x%0h candidates=%0d rank=%0d",
+                                 request_key.vpn, candidate_entries.size(), max_rank))
+        end
+        anchor_key = candidate_keys[selected_idx];
+        entry = candidate_entries[selected_idx];
+        response_token = completed_tlb_response_token_by_key[anchor_key];
+        response_sample_seq = completed_tlb_response_sample_by_key[anchor_key];
+        return 1'b1;
+    endfunction:find_completed_tlb_response_for_issue
+
+    function bit capture_uid_issue_hit_snapshot(input memblock_uid_tlb_record record);
+        memblock_tlb_entry entry;
+        longint unsigned response_token;
+        longint unsigned response_sample_seq;
+        bit derived_valid;
+        bit [43:0] derived_s1_ppn;
+        bit [43:0] derived_s2_ppn;
+        bit [51:0] derived_gvpn;
+
+        if (record == null || !record.is_waiting() || record.csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "issue-hit capture requires a WAITING UID record")
+        end
+        if (!find_completed_tlb_response_for_issue(record.lookup_key,
+                                                   record.csr_snapshot,
+                                                   entry,
+                                                   response_token,
+                                                   response_sample_seq)) begin
+            return 1'b0;
+        end
+        record.set_issue_hit_snapshot(entry, response_token,
+                                      response_sample_seq);
+        derive_tlb_request_fields(entry, record.vpn, record.s2xlate,
+                                  record.csr_snapshot, derived_valid,
+                                  derived_s1_ppn, derived_s2_ppn,
+                                  derived_gvpn);
+        record.request_derived_valid = derived_valid;
+        record.request_s1_resolved_ppn = derived_s1_ppn;
+        record.request_s2_resolved_ppn = derived_s2_ppn;
+        record.request_gvpn = derived_gvpn;
+        `uvm_info("COMMON_DATA",
+                  $sformatf("freeze UID issue-hit snapshot uid=%0d vpn=0x%0h token=%0d response_sample=%0d generation=%0d",
+                            record.uid, record.vpn, response_token,
+                            response_sample_seq, entry.entry_generation),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:capture_uid_issue_hit_snapshot
+
     function bit get_or_create_tlb_entry_by_req(input bit [37:0] vpn,
                                                 input bit [1:0] s2xlate,
                                                 output memblock_tlb_lookup_key_t key,
@@ -5761,6 +6831,7 @@ class common_data_transaction extends uvm_object;
                             key.vmid, key.s2xlate), UVM_LOW)
         unregister_tlb_range_index(key, entry);
         tlb_entry_by_key.delete(key);
+        delete_completed_tlb_entry_by_anchor_key(key, reason);
     endfunction:delete_live_tlb_entry_by_anchor_key
 
     // Abstract responsibility: perform only C4-or-later live-entry deletion
@@ -5771,6 +6842,7 @@ class common_data_transaction extends uvm_object;
         input longint unsigned current_reset_epoch);
         memblock_pending_sfence_invalidate_t pending;
         memblock_tlb_lookup_key_t delete_keys[$];
+        memblock_tlb_lookup_key_t completed_delete_keys[$];
         int unsigned deleted_count;
 
         deleted_count = 0;
@@ -5800,6 +6872,17 @@ class common_data_transaction extends uvm_object;
                 delete_live_tlb_entry_by_anchor_key(delete_keys[idx],
                                                     "SFENCE/HFENCE C4");
             end
+            completed_delete_keys.delete();
+            foreach (completed_tlb_entry_by_key[key]) begin
+                if (sfence_match_entry(pending.payload, key,
+                                       completed_tlb_entry_by_key[key])) begin
+                    completed_delete_keys.push_back(key);
+                end
+            end
+            foreach (completed_delete_keys[idx]) begin
+                delete_completed_tlb_entry_by_anchor_key(
+                    completed_delete_keys[idx], "SFENCE/HFENCE C4");
+            end
             record_control_sfence_effective_observation(pending);
             deleted_count += delete_keys.size();
             `uvm_info("COMMON_DATA",
@@ -5824,6 +6907,10 @@ class common_data_transaction extends uvm_object;
         sfence_invalidate_pending_q.delete();
         tlb_anchor_keys_by_range_key.delete();
         tlb_entry_by_key.delete();
+        completed_tlb_anchor_keys_by_range_key.delete();
+        completed_tlb_entry_by_key.delete();
+        completed_tlb_response_token_by_key.delete();
+        completed_tlb_response_sample_by_key.delete();
     endfunction:clear_dispatch_l2tlb_live_entries
 
     // 中文注释：清除 completed-response PPN FIFO，不触碰 live entry、range index、UID 或 token。
@@ -6334,6 +7421,7 @@ class common_data_transaction extends uvm_object;
         record.init_context(uid, vpn, s2xlate, is_hypervisor_inst, csr_snapshot,
                             current_sample);
         add_waiting_uid_to_index(uid, record);
+        void'(capture_uid_issue_hit_snapshot(record));
     endfunction:update_uid_tlb_record_context
 
     // 抽象职责：回放严格早于 request-fire 的 CSR write，使该 request 使用与
@@ -7816,9 +8904,30 @@ class common_data_transaction extends uvm_object;
                  status_by_uid[uid].issue_killed)) begin
                 `uvm_error("COMMON_DATA", $sformatf("uid=%0d has terminal_done with stale intermediate state", uid))
             end
+            if (status_by_uid[uid].uncache_retry_boost ||
+                status_by_uid[uid].uncache_retry_count != 0 ||
+                status_by_uid[uid].uncache_retry_identity_valid ||
+                status_by_uid[uid].uncache_retry_has_dynamic_epoch) begin
+                `uvm_error("UNCACHE_RETRY_BOOST",
+                           $sformatf("uid=%0d leaked retry boost at end_test_check boost=%0d count=%0d identity=%0d has_dyn=%0d dyn=%0d rob=%0d/%0d",
+                                     uid,
+                                     status_by_uid[uid].uncache_retry_boost,
+                                     status_by_uid[uid].uncache_retry_count,
+                                     status_by_uid[uid].uncache_retry_identity_valid,
+                                     status_by_uid[uid].uncache_retry_has_dynamic_epoch,
+                                     status_by_uid[uid].uncache_retry_dynamic_epoch,
+                                     status_by_uid[uid].uncache_retry_rob_key.flag,
+                                     status_by_uid[uid].uncache_retry_rob_key.value))
+            end
         end
         if (uid_by_active_rob.num() != 0 || uid_by_lq.num() != 0 || uid_by_sq.num() != 0) begin
             `uvm_error("COMMON_DATA", "active ROB/LQ/SQ mapping is not empty at end_test_check")
+        end
+        if (dispatch_progress.rob_commit_frontier_uid != main_trans_num) begin
+            `uvm_error("COMMON_DATA",
+                       $sformatf("ROB admission frontier did not reach main_trans_num: frontier=%0d main_trans_num=%0d",
+                                 dispatch_progress.rob_commit_frontier_uid,
+                                 main_trans_num))
         end
         if (redirect_deleted_owner_window_active ||
             redirect_deleted_lq_owner_by_key.num() != 0 ||

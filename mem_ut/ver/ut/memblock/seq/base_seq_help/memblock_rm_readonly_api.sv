@@ -10,6 +10,41 @@
 
 `include "memblock_rm_observer_api.sv"
 
+// Pure expected-data formatter shared by the RM core and RM directed tests.
+// The caller supplies main-table fpWen provenance; DUT writeback metadata is
+// deliberately not an input to the expected result.
+function automatic bit [63:0] memblock_rm_format_load_data(
+    input bit [63:0] raw_data,
+    input bit [8:0] op,
+    input bit fp_wen,
+    input bit is_signed,
+    input int unsigned size_bytes
+);
+    bit [63:0] formatted;
+
+    formatted = '0;
+    case (size_bytes)
+        1: formatted[7:0] = raw_data[7:0];
+        2: formatted[15:0] = raw_data[15:0];
+        4: formatted[31:0] = raw_data[31:0];
+        8: formatted = raw_data;
+        default: formatted = raw_data;
+    endcase
+    if (fp_wen && op == MEMBLOCK_LSUOP_LH) begin
+        formatted = {48'hffffffffffff, formatted[15:0]};
+    end else if (fp_wen && op == MEMBLOCK_LSUOP_LW) begin
+        formatted = {32'hffffffff, formatted[31:0]};
+    end else if (is_signed) begin
+        case (size_bytes)
+            1: formatted = {{56{formatted[7]}}, formatted[7:0]};
+            2: formatted = {{48{formatted[15]}}, formatted[15:0]};
+            4: formatted = {{32{formatted[31]}}, formatted[31:0]};
+            default: ;
+        endcase
+    end
+    return formatted;
+endfunction:memblock_rm_format_load_data
+
 // 抽象职责：该 class 是测试框架状态到后续 RM 的唯一只读 façade。
 // 它只探测已经存在的 owner、表项和 memory map，并把结果复制成值型 view；
 // 不创建 singleton/table entry，不触发懒分配，也不返回任何内部 object/queue handle。
@@ -272,6 +307,24 @@ class memblock_rm_readonly_api extends uvm_object;
         bit [9:0]            source;
     } l2_d_error_view_t;
 
+    // 中文注释：RM按动态Load owner读取的Uncache D-error值型视图。found只在
+    // D.fire历史已对查询sample生效时置位；pending/missing不会被解释为clean。
+    typedef struct packed {
+        bit                  valid;
+        bit                  found;
+        bit                  not_ready;
+        bit                  identity_mismatch;
+        bit                  address_mismatch;
+        bit                  denied;
+        bit                  corrupt;
+        bit [3:0]            source;
+        longint unsigned     generation;
+        mem_addr_t           address;
+        bit [2:0]            size;
+        longint unsigned     a_sample;
+        longint unsigned     d_sample;
+    } uncache_d_error_view_t;
+
     // 中文注释：dispatch 上下文是 RM 关联 UID 表项、当前采样和 flush/replay
     // 生命周期的只读标量快照。它不暴露或消费任一内部 queue；其中 pending 计数
     // 只表示调用瞬间已有 PTW-wait replay 项数，不能用于驱动或推进 replay。
@@ -382,6 +435,19 @@ class memblock_rm_readonly_api extends uvm_object;
         input  bit [51:0] request_vpn,
         output tlb_request_context_view_t view
     );
+    extern function bit resolve_tlb_entry_for_rm(
+        input  memblock_uid_t uid,
+        input  bit [51:0] request_vpn,
+        output tlb_request_context_view_t context_view,
+        output tlb_entry_view_t entry_view
+    );
+    extern function bit resolve_uid_issue_hit_entry_for_rm(
+        input  common_data_transaction data,
+        input  memblock_uid_tlb_record record,
+        input  bit [51:0] request_vpn,
+        inout  tlb_request_context_view_t context_view,
+        output tlb_entry_view_t entry_view
+    );
     // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
     // 只消费 readonly view，不访问 common_data owner，也不修改任何 entry。
     extern static function bit eval_pbmt_fault_overlay(
@@ -423,6 +489,18 @@ class memblock_rm_readonly_api extends uvm_object;
         input  mem_addr_t          line_addr,
         input  longint unsigned    sample,
         output l2_d_error_view_t   view
+    );
+    extern function bit read_uncache_d_error_for_rm(
+        input memblock_uid_t       uid,
+        input int unsigned         dynamic_epoch,
+        input bit                  rob_flag,
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+        input bit                  lq_flag,
+        input bit [MEMBLOCK_LQ_VALUE_W-1:0] lq_value,
+        input mem_addr_t           paddr,
+        input int unsigned         size_bytes,
+        input longint unsigned     sample,
+        output uncache_d_error_view_t view
     );
     extern function bit read_pma_pmp_af_for_rm(
         input memblock_uid_t            uid,
@@ -1078,6 +1156,262 @@ function bit memblock_rm_readonly_api::resolve_tlb_entry_key_for_rm(
     return 1'b1;
 endfunction:resolve_tlb_entry_key_for_rm
 
+// A no-request-fire issue proves that the DUT L1 TLB hit, but more than one
+// previously sampled response can raw-hit the same VPN.  In particular, a
+// 4KB entry and a later superpage entry can coexist in the DUT and participate
+// in its multi-hit read.  Resolve all responses visible before this issue with
+// the same widest-coverage policy used by the framework range matcher.  Do not
+// consult responses sampled after the issue boundary.
+function bit memblock_rm_readonly_api::resolve_uid_issue_hit_entry_for_rm(
+    input  common_data_transaction data,
+    input  memblock_uid_tlb_record record,
+    input  bit [51:0] request_vpn,
+    inout  tlb_request_context_view_t context_view,
+    output tlb_entry_view_t entry_view
+);
+    memblock_tlb_range_index_key_t query_keys[$];
+    memblock_tlb_lookup_key_t seen_keys[$];
+    memblock_tlb_lookup_key_t candidate_keys[$];
+    memblock_tlb_entry candidate_entries[$];
+    longint unsigned candidate_tokens[$];
+    longint unsigned candidate_samples[$];
+    int unsigned candidate_ranks[$];
+    memblock_tlb_lookup_key_t anchor_key;
+    memblock_tlb_entry selected_entry;
+    bit seen;
+    int selected_idx;
+    int unsigned max_rank;
+    int unsigned max_rank_count;
+    int unsigned candidate_count;
+    bit derived_valid;
+    bit [43:0] derived_s1_ppn;
+    bit [43:0] derived_s2_ppn;
+    bit [51:0] derived_gvpn;
+
+    entry_view = '{default:'0};
+    if (data == null || record == null || record.csr_snapshot == null ||
+        !record.record_valid || !record.is_waiting() ||
+        record.uid_tlb_first_request_fire_sample_seq != 0 ||
+        !record.issue_hit_snapshot_valid ||
+        record.issue_hit_payload == null ||
+        record.issue_hit_response_sample_seq == 0 ||
+        record.uid_wait_start_sample_seq == 0) begin
+        return report_query_miss(
+            "uid_tlb_issue_hit",
+            "issue-hit overlap resolver requires a frozen no-request-fire attempt");
+    end
+
+    data.build_tlb_range_query_keys(context_view.request_key, query_keys);
+    foreach (query_keys[qidx]) begin
+        if (!data.completed_tlb_anchor_keys_by_range_key.exists(query_keys[qidx])) begin
+            continue;
+        end
+        foreach (data.completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx]) begin
+            anchor_key =
+                data.completed_tlb_anchor_keys_by_range_key[query_keys[qidx]][bidx];
+            seen = 1'b0;
+            foreach (seen_keys[sidx]) begin
+                if (data.tlb_lookup_key_equal(seen_keys[sidx], anchor_key)) begin
+                    seen = 1'b1;
+                end
+            end
+            if (seen) begin
+                continue;
+            end
+            seen_keys.push_back(anchor_key);
+            if (!data.completed_tlb_entry_by_key.exists(anchor_key) ||
+                data.completed_tlb_entry_by_key[anchor_key] == null ||
+                !data.completed_tlb_response_token_by_key.exists(anchor_key) ||
+                !data.completed_tlb_response_sample_by_key.exists(anchor_key)) begin
+                return report_query_miss(
+                    "uid_tlb_issue_hit",
+                    "completed-response range index has incomplete provenance");
+            end
+            if (data.completed_tlb_response_sample_by_key[anchor_key] >
+                record.uid_wait_start_sample_seq) begin
+                continue;
+            end
+            if (!data.entry_matches_request_raw(
+                    data.completed_tlb_entry_by_key[anchor_key], request_vpn,
+                    record.s2xlate, record.csr_snapshot)) begin
+                return report_query_miss(
+                    "uid_tlb_issue_hit",
+                    "completed-response range index disagrees with raw matcher");
+            end
+            candidate_keys.push_back(anchor_key);
+            candidate_entries.push_back(data.completed_tlb_entry_by_key[anchor_key]);
+            candidate_tokens.push_back(
+                data.completed_tlb_response_token_by_key[anchor_key]);
+            candidate_samples.push_back(
+                data.completed_tlb_response_sample_by_key[anchor_key]);
+            candidate_ranks.push_back(int'(
+                data.get_tlb_range_match_coverage_rank(
+                    data.completed_tlb_entry_by_key[anchor_key])));
+        end
+    end
+
+    // A same-anchor response may have been replaced in the completed cache
+    // after this issue.  Preserve the actual issue-time snapshot as a bounded
+    // candidate even when the current cache no longer contains its generation.
+    seen = 1'b0;
+    foreach (candidate_entries[cidx]) begin
+        if (candidate_entries[cidx].entry_generation ==
+                record.issue_hit_payload.entry_generation &&
+            data.tlb_lookup_key_equal(candidate_keys[cidx],
+                                      record.issue_hit_payload.lookup_key)) begin
+            seen = 1'b1;
+        end
+    end
+    if (!seen &&
+        record.issue_hit_response_sample_seq <= record.uid_wait_start_sample_seq &&
+        data.entry_matches_request_raw(record.issue_hit_payload, request_vpn,
+                                       record.s2xlate, record.csr_snapshot)) begin
+        candidate_keys.push_back(record.issue_hit_payload.lookup_key);
+        candidate_entries.push_back(record.issue_hit_payload);
+        candidate_tokens.push_back(record.issue_hit_response_token);
+        candidate_samples.push_back(record.issue_hit_response_sample_seq);
+        candidate_ranks.push_back(int'(
+            data.get_tlb_range_match_coverage_rank(record.issue_hit_payload)));
+    end
+
+    candidate_count = candidate_entries.size();
+    if (candidate_count == 0) begin
+        return report_query_miss(
+            "uid_tlb_issue_hit",
+            $sformatf("uid=%0d has no issue-visible completed response", record.uid));
+    end
+    max_rank = candidate_ranks[0];
+    foreach (candidate_ranks[cidx]) begin
+        if (candidate_ranks[cidx] > max_rank) begin
+            max_rank = candidate_ranks[cidx];
+        end
+    end
+    selected_idx = -1;
+    max_rank_count = 0;
+    foreach (candidate_ranks[cidx]) begin
+        if (candidate_ranks[cidx] == max_rank) begin
+            selected_idx = cidx;
+            max_rank_count++;
+        end
+    end
+    if (selected_idx < 0 || max_rank_count != 1) begin
+        return report_query_miss(
+            "uid_tlb_issue_hit",
+            $sformatf("uid=%0d issue-hit overlap is ambiguous candidates=%0d rank=%0d",
+                      record.uid, candidate_count, max_rank));
+    end
+
+    selected_entry = candidate_entries[selected_idx];
+    copy_tlb_entry(selected_entry, entry_view);
+    context_view.entry_key = candidate_keys[selected_idx];
+    context_view.range_hit = context_view.entry_key != context_view.request_key;
+    data.derive_tlb_request_fields(
+        selected_entry, request_vpn, record.s2xlate, record.csr_snapshot,
+        derived_valid, derived_s1_ppn, derived_s2_ppn, derived_gvpn);
+    context_view.request_translation_valid = derived_valid;
+    context_view.request_s1_resolved_ppn = derived_s1_ppn;
+    context_view.request_s2_resolved_ppn = derived_s2_ppn;
+    context_view.request_gvpn = derived_gvpn;
+    `uvm_info("RM_TLB_ISSUE_HIT",
+              $sformatf("uid=%0d vpn=0x%0h candidates=%0d selected_token=%0d selected_sample=%0d selected_generation=%0d selected_rank=%0d frozen_token=%0d frozen_generation=%0d frozen_fault=%0d",
+                        record.uid, request_vpn, candidate_count,
+                        candidate_tokens[selected_idx],
+                        candidate_samples[selected_idx],
+                        selected_entry.entry_generation, max_rank,
+                        record.issue_hit_response_token,
+                        record.issue_hit_payload.entry_generation,
+                        record.issue_hit_payload.has_effective_fault()),
+              UVM_LOW)
+    return 1'b1;
+endfunction:resolve_uid_issue_hit_entry_for_rm
+
+// Resolve one RM byte translation and return the entry by value.  The first
+// request VPN belongs to the UID's completed dynamic attempt, so its payload
+// must not be replaced by a later response in the live canonical table.
+function bit memblock_rm_readonly_api::resolve_tlb_entry_for_rm(
+    input  memblock_uid_t uid,
+    input  bit [51:0] request_vpn,
+    output tlb_request_context_view_t context_view,
+    output tlb_entry_view_t entry_view
+);
+    common_data_transaction data;
+    memblock_uid_tlb_record record;
+
+    context_view = '{default:'0};
+    entry_view = '{default:'0};
+    if (!read_tlb_request_context_for_rm(uid, request_vpn, context_view)) begin
+        return 1'b0;
+    end
+    if (!try_get_common_data(data) ||
+        !data.uid_tlb_record_by_uid.exists(uid) ||
+        data.uid_tlb_record_by_uid[uid] == null) begin
+        return report_query_miss("uid_tlb_entry",
+                                 $sformatf("uid=%0d record disappeared during query", uid));
+    end
+    record = data.uid_tlb_record_by_uid[uid];
+    if (request_vpn == record.vpn) begin
+        if (record.record_valid && record.pte_valid &&
+            record.uid_tlb_wait_state ==
+                memblock_uid_tlb_record::MEMBLOCK_UID_TLB_COMPLETED &&
+            record.payload != null) begin
+            if (record.payload.s2xlate != record.s2xlate) begin
+                return report_query_miss(
+                    "uid_tlb_entry",
+                    $sformatf("uid=%0d completed payload s2xlate=%0d does not match record=%0d",
+                              uid, record.payload.s2xlate, record.s2xlate));
+            end
+            copy_tlb_entry(record.payload, entry_view);
+            context_view.entry_key = record.payload.lookup_key;
+        end
+        else if (record.record_valid && !record.pte_valid &&
+                 record.uid_tlb_wait_state ==
+                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING &&
+                 record.uid_tlb_first_request_fire_sample_seq == 0 &&
+                 record.issue_hit_snapshot_valid &&
+                 record.issue_hit_payload != null &&
+                 record.issue_hit_response_sample_seq != 0 &&
+                 record.issue_hit_entry_generation ==
+                    record.issue_hit_payload.entry_generation) begin
+            if (record.issue_hit_payload.s2xlate != record.s2xlate) begin
+                return report_query_miss(
+                    "uid_tlb_entry",
+                    $sformatf("uid=%0d issue-hit payload s2xlate=%0d does not match record=%0d",
+                              uid, record.issue_hit_payload.s2xlate,
+                              record.s2xlate));
+            end
+            if (!resolve_uid_issue_hit_entry_for_rm(
+                    data, record, request_vpn, context_view, entry_view)) begin
+                return 1'b0;
+            end
+        end
+        else begin
+            return report_query_miss(
+                "uid_tlb_entry",
+                $sformatf("uid=%0d request VPN=0x%0h has no completed/issue-hit payload record_valid=%0d pte_valid=%0d wait_state=%0d request_fire=%0d issue_hit=%0d",
+                          uid, request_vpn, record.record_valid,
+                          record.pte_valid, record.uid_tlb_wait_state,
+                          record.uid_tlb_first_request_fire_sample_seq,
+                          record.issue_hit_snapshot_valid));
+        end
+        if (record.pte_valid) begin
+            context_view.range_hit = context_view.entry_key != context_view.request_key;
+            context_view.request_translation_valid = record.request_derived_valid;
+            context_view.request_s1_resolved_ppn = record.request_s1_resolved_ppn;
+            context_view.request_s2_resolved_ppn = record.request_s2_resolved_ppn;
+            context_view.request_gvpn = record.request_gvpn;
+        end
+        return 1'b1;
+    end
+
+    // A scalar access can cross a page.  The current UID record stores only
+    // its first request payload, so a different VPN keeps the existing
+    // exact/range canonical fallback.
+    if (!resolve_tlb_entry_key_for_rm(uid, request_vpn, context_view)) begin
+        return 1'b0;
+    end
+    return read_tlb_entry_for_rm(context_view.entry_key, entry_view);
+endfunction:resolve_tlb_entry_for_rm
+
 function bit memblock_rm_readonly_api::read_uid_tlb_for_rm(
     input  memblock_uid_t uid,
     output uid_tlb_view_t view
@@ -1264,6 +1598,58 @@ function bit memblock_rm_readonly_api::read_l2_d_error_for_rm(
     view.source                     = record.source;
     return 1'b1;
 endfunction:read_l2_d_error_for_rm
+
+function bit memblock_rm_readonly_api::read_uncache_d_error_for_rm(
+    input memblock_uid_t       uid,
+    input int unsigned         dynamic_epoch,
+    input bit                  rob_flag,
+    input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+    input bit                  lq_flag,
+    input bit [MEMBLOCK_LQ_VALUE_W-1:0] lq_value,
+    input mem_addr_t           paddr,
+    input int unsigned         size_bytes,
+    input longint unsigned     sample,
+    output uncache_d_error_view_t view
+);
+    mem_access_base_sequence::uncache_d_error_owner_t owner;
+    mem_access_base_sequence::uncache_d_error_record_t record;
+    mem_access_base_sequence::uncache_d_error_query_state_e query_state;
+    bit identity_mismatch;
+    bit address_mismatch;
+
+    view = '{default:'0};
+    owner = '{
+        valid: 1'b1,
+        uid: uid,
+        dynamic_epoch: dynamic_epoch,
+        rob_flag: rob_flag,
+        rob_value: rob_value,
+        lq_flag: lq_flag,
+        lq_value: lq_value,
+        uncache_lq_slot: '0
+    };
+    if (!mem_access_base_sequence::query_uncache_d_error_for_owner(
+            owner, paddr, size_bytes, sample, query_state, record,
+            identity_mismatch, address_mismatch)) begin
+        return 1'b0;
+    end
+    view.valid             = 1'b1;
+    view.found             = query_state == mem_access_base_sequence::UNCACHE_D_ERROR_QUERY_READY;
+    view.not_ready         = query_state == mem_access_base_sequence::UNCACHE_D_ERROR_QUERY_NOT_READY;
+    view.identity_mismatch = identity_mismatch;
+    view.address_mismatch  = address_mismatch;
+    if (view.found) begin
+        view.denied    = record.denied;
+        view.corrupt   = record.corrupt;
+        view.source    = record.source;
+        view.generation = record.generation;
+        view.address   = record.address;
+        view.size      = record.size;
+        view.a_sample  = record.a_sample;
+        view.d_sample  = record.d_sample;
+    end
+    return 1'b1;
+endfunction:read_uncache_d_error_for_rm
 
 function bit memblock_rm_readonly_api::read_pma_pmp_af_for_rm(
     input memblock_uid_t            uid,

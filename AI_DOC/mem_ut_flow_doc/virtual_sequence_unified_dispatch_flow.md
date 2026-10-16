@@ -23,7 +23,7 @@
 | `write overlay` | memory-facing 写按 byte valid 覆盖 backing 的共享数据层 | `mem_access_base_sequence::write_overlay_mem` | 不用 DUT 写污染 `main_mem` |
 | `testcase objection` | `basicTest`在顶层`start()`前raise、返回后drop的phase objection | `basicTest::main_phase()` | 覆盖目标vseq完整`start()`，不依赖派生`pre_body/post_body`保活 |
 | `automatic phase objection` | sequence自身可选的自动raise/drop机制，不是顶层phase保活唯一来源 | cancel vseq `set_automatic_phase_objection(1'b1)` | 可覆盖局部sequence生命周期，但外层testcase objection仍在整个`start()`期间保持 |
-| `software-only directed` | 只在virtual sequencer上运行公共owner API检查、不启动业务agent sequence的专项入口 | `memblock_pending_mmio_directed_vseq` | 覆盖normal raw、LOAD `R/R+1` stale和精确expected-fatal |
+| `software-only directed` | 只在virtual sequencer上运行公共owner API检查、不启动业务agent sequence的专项入口 | `memblock_pending_mmio_directed_vseq` | 覆盖normal raw、LOAD `R/R+1`旧行为、`R+2`严格历史证明和精确expected-fatal |
 
 ### 1.2 核心对象
 
@@ -58,7 +58,7 @@ flowchart TD
     M -->|pending MMIO directed| PM[memblock_pending_mmio_directed_vseq::body]
     PM --> PM1[require_virtual_sqr]
     PM1 --> PM2[uvm_do_on pending MMIO soft sequence]
-    PM2 --> PM3[normal raw R R+1 stale exact expected fatal]
+    PM2 --> PM3[normal raw R R+1 stale R+2 historical proof exact expected fatal]
 
     RS --> RS1[require_real_smoke_sqr]
     RS1 --> RS2[dispatch_real_smoke_active=1]
@@ -124,7 +124,8 @@ flowchart TD
 5. pending-MMIO software-only专项：
    复用既有VSEQ_MAIN显式启动入口进入pending-MMIO vseq，不新增basicTest场景分支；
    vseq只检查virtual sequencer并用uvm_do_on启动soft sequence；
-   soft sequence覆盖normal raw、LOAD redirect sample R/R+1 stale和精确expected-fatal后自然返回，
+   soft sequence覆盖normal raw、LOAD redirect sample R/R+1 stale、R+2唯一旧Load历史证明，以及
+   R+3/无历史owner/新active owner/wrap歧义/非Load的精确expected-fatal后自然返回，
    不启动real smoke agent拓扑。
 ```
 
@@ -456,7 +457,8 @@ basicTest::build_phase通过find_wrapper_by_name解析+VSEQ_MAIN，main_phase通
 该vseq并在env.vsqr上显式start；
 先检查p_sequencer是有效memblock virtual sequencer；
 在该sequencer上用uvm_do_on启动software-only pending-MMIO sequence并同步等待其返回；
-soft sequence内部覆盖normal raw、redirect sample R与R+1 stale、精确expected-fatal和既有owner合同；
+soft sequence内部覆盖normal raw、redirect sample R与R+1 stale、R+2唯一redirect-deleted旧Load stale、
+R+3/无历史owner/新active owner/wrap歧义/非Load的精确expected-fatal和既有owner合同；
 本入口不启动业务agent default sequence，不新增basicTest分支，也不承担最终仿真结果判断。
 ```
 
@@ -507,11 +509,10 @@ pending-MMIO software-only专项复用同一个选择入口：
 ts=memblock_pending_mmio_directed_vseq
 ```
 
-2026-07-22 batch验证已确认该入口实际执行：移除损坏的专项生成库并设置`partcmp_op=off`后，VCS/KDB
-compile为0 error/0 warning；日志中出现`VSEQ_BODY` start/complete、`R`/`R+1` stale、directed completion、
-caught fatal=1、`UVM_ERROR=0`、`UVM_FATAL=0`和`TEST_PASS`。日志路径为
-`mem_ut/ver/ut/memblock/sim/pending_mmio_v2_fun/log/tc=basicTest_ts=memblock_pending_mmio_directed_vseq_cfg=default_seed=666666_rtl_.log`。
-该批次不包含本轮新增的`stale_reason`日志赋值，修复后的专项重跑仍待主agent复验。
+2026-10-12问题2专项使用`mode=fault2_mmio_r2_fix_v2_20261012`、`seed=666666`完成VCS编译和仿真。
+日志确认R+2唯一旧Load命中同一redirect record后stale-drop；5个负向场景的`MMIO_RESOLVE` fatal均由
+精确catcher捕获，最终`TEST_PASS`、`UVM_ERROR=0`、未捕获`UVM_FATAL=0`。日志路径为
+`mem_ut/ver/ut/memblock/sim/fault2_mmio_r2_fix_v2_20261012/log/tc=basicTest_ts=memblock_pending_mmio_directed_vseq_cfg=default_seed=666666_rtl.log`。
 
 ## 10. 端到端行为总结
 
@@ -547,7 +548,7 @@ pending-MMIO software-only directed：
   -> memblock_pending_mmio_directed_vseq
   -> require_virtual_sqr
   -> uvm_do_on pending-MMIO soft sequence
-  -> normal raw + R/R+1 stale + 精确expected-fatal
+  -> normal raw + R/R+1 stale + R+2严格历史证明 + 精确expected-fatal
   -> soft sequence自然返回
 ```
 
@@ -562,5 +563,6 @@ cancel专项不直接修改reservation、cancel count或terminal。它只等待�
 sequence生命周期/drain语义，也避免用disable fork截断尚未完成的response。
 
 pending-MMIO入口不复用real smoke并发拓扑，只通过basicTest的显式wrapper创建/start入口启动software-only
-sequence。它不启动agent phase default sequence；stale_reason修复后的重跑尚未完成，不能把该项写成最终复验通过。
+sequence。它不启动agent phase default sequence；R+2成功路径与全部负向边界已完成专项复验。真实失败seed和正常
+real-smoke结果由对应implementation review记录，不改变本flow的入口与调度关系。
 ```

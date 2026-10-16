@@ -148,6 +148,15 @@ class status_transaction extends uvm_object;
     int unsigned        std_instance_flush_epoch;
     // 同一uid被redirect reissue后产生新动态实例；递增后可区分旧实例事件。
     int unsigned        dynamic_epoch;
+    // 中文注释：UNCACHE_NACK 最终 selected 后的独立重试优先级；不改 main_tr.send_pri。
+    // 设置：dispatch_monitor_batch_handler 在最终 selected 且身份匹配时置位；
+    // 清除：terminal/retire/reset。redirect reissue 只在同 UID/ROB 的紧邻 E+1 保留。
+    bit                 uncache_retry_boost;
+    int unsigned        uncache_retry_count;
+    bit                 uncache_retry_identity_valid;
+    memblock_rob_key_t  uncache_retry_rob_key;
+    bit                 uncache_retry_has_dynamic_epoch;
+    int unsigned        uncache_retry_dynamic_epoch;
     int unsigned        replay_seq;
     bit                 issue_killed;
     bit [23:0]          exception_vec;
@@ -266,6 +275,12 @@ class status_transaction extends uvm_object;
         sta_instance_flush_epoch          = 0;
         std_instance_flush_epoch          = 0;
         dynamic_epoch     = 0;
+        uncache_retry_boost = 1'b0;
+        uncache_retry_count = 0;
+        uncache_retry_identity_valid = 1'b0;
+        uncache_retry_rob_key = '{default:'0};
+        uncache_retry_has_dynamic_epoch = 1'b0;
+        uncache_retry_dynamic_epoch = 0;
         replay_seq        = 0;
         issue_killed      = 1'b0;
         exception_vec     = '0;

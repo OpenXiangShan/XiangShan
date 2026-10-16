@@ -111,6 +111,7 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     bit                           has_control_head;
     memblock_uid_t                control_uid;
     bit                           has_flushsb_progress;
+    bit                           commit_batch_applied;
 
     has_commit = 1'b0;
     has_fault_head = 1'b0;
@@ -118,6 +119,7 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     has_control_head = 1'b0;
     control_uid = 0;
     has_flushsb_progress = 1'b0;
+    commit_batch_applied = 1'b0;
     has_progress = 1'b0;
     terminal_idle_published = 1'b0;
     data.warn_flushsb_timeout_if_needed(seq_csr_common::get_flushsb_timeout());
@@ -151,13 +153,19 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     end
 
     if (has_commit) begin
-        commit_handler.mark_rob_commit_batch(commit_uids);
+        commit_batch_applied = commit_handler.mark_rob_commit_batch(commit_uids);
+        if (!commit_batch_applied) begin
+            `uvm_info(get_type_name(),
+                      $sformatf("post-drive normal commit batch uid=%0d..%0d canceled atomically after redirect preflight",
+                                commit_uids[0], commit_uids[commit_uids.size() - 1]),
+                      UVM_LOW)
+        end
     end else if (has_fault_head) begin
         commit_handler.mark_fault_rob_commit_uid(fault_uid);
     end else if (has_control_head) begin
         void'(commit_handler.mark_control_rob_commit_uid(control_uid));
     end
-    has_progress = has_commit ||
+    has_progress = commit_batch_applied ||
                    has_fault_head ||
                    has_control_head ||
                    has_flushsb_progress ||

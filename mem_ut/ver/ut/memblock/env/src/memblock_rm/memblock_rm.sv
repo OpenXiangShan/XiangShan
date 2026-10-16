@@ -105,6 +105,10 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         rm_ls_program_item_t item,
         output bit missing_dut_load_writeback
     );
+    extern function bit observer_apply_load_d_error_expectation(
+        rm_ls_program_item_t item,
+        longint unsigned access_sample
+    );
     extern function bit observer_capture_load_backing(rm_ls_program_item_t item);
     extern function string observer_kind_name(rm_ls_kind_e kind);
     extern function string observer_store_size_name(int unsigned size_bytes);
@@ -374,6 +378,7 @@ function bit memblock_rm::observer_build_commit_item(
     bit [1:0] effective_pbmt;
     bit misaligned;
     bit all_bytes_pma_pbmt;
+    bit all_bytes_pma_mmio;
     bit all_bytes_normal_cacheable;
     memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t byte_pma_pmp_view;
     bit store_access;
@@ -396,12 +401,15 @@ function bit memblock_rm::observer_build_commit_item(
     item.computed_vaddr = observer_compute_vaddr(main_view.src_0, main_view.imm);
     item.rob.flag = main_view.rob_idx_flag;
     item.rob.value = main_view.rob_idx_value;
+    item.lq_flag = main_view.lq_idx_flag;
+    item.lq_value = main_view.lq_idx_value;
     item.dynamic_epoch = status_view.dynamic_epoch;
     item.size_bytes = observer_scalar_size(main_view.fu_op_type);
     item.is_signed = main_view.fu_op_type == MEMBLOCK_LSUOP_LB ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LH ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LW ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LD;
+    item.fp_wen = main_view.op_class == MEMBLOCK_OP_CLASS_FP_LOAD;
     if (main_view.fu_type == MEMBLOCK_FUTYPE_LDU &&
         memblock_op_behavior_util::is_load_fuoptype(main_view.fu_op_type)) begin
         item.kind = RM_LS_KIND_LOAD;
@@ -472,10 +480,10 @@ function bit memblock_rm::observer_build_commit_item(
               UVM_LOW)
     item.translation_key = tlb_context.request_key;
     if (!bare_identity) begin
-        if (!ro.resolve_tlb_entry_key_for_rm(item.uid, item.computed_vaddr[63:12],
-                                             tlb_context)) begin
+        if (!ro.resolve_tlb_entry_for_rm(item.uid, item.computed_vaddr[63:12],
+                                         tlb_context, entry)) begin
             ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
-                               $sformatf("uid %0d first VPN active translation exact/range entry unavailable",
+                               $sformatf("uid %0d first VPN completed UID translation unavailable",
                                          item.uid));
             return 1'b0;
         end
@@ -484,6 +492,7 @@ function bit memblock_rm::observer_build_commit_item(
     store_access = item.kind == RM_LS_KIND_STORE;
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
     all_bytes_pma_pbmt = 1'b1;
+    all_bytes_pma_mmio = 1'b0;
     all_bytes_normal_cacheable = 1'b0;
     // 中文注释：以下三类异常只来自冻结 TLB context/entry；main_view 的
     // tlb_af/tlb_pf/tlb_gpf/pma_af/denied/corrupt 均禁止作为 RM 真源。
@@ -503,15 +512,10 @@ function bit memblock_rm::observer_build_commit_item(
                            tlb_context.satp_mode : tlb_context.vsatp_mode;
         for (int unsigned byte_index = 0; byte_index < item.size_bytes; byte_index++) begin
             byte_va = item.computed_vaddr + byte_index;
-            if (!ro.resolve_tlb_entry_key_for_rm(item.uid, byte_va[63:12], tlb_context)) begin
+            if (!ro.resolve_tlb_entry_for_rm(item.uid, byte_va[63:12],
+                                             tlb_context, entry)) begin
                 ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
-                                   $sformatf("uid %0d byte %0d active translation exact/range entry unavailable",
-                                             item.uid, byte_index));
-                return 1'b0;
-            end
-            if (!ro.read_tlb_entry_for_rm(tlb_context.entry_key, entry)) begin
-                ls_model.set_error(RM_LS_ERR_TLB_ENTRY_NOT_READY,
-                                   $sformatf("uid %0d byte %0d canonical TLB entry unavailable",
+                                   $sformatf("uid %0d byte %0d UID/cross-page translation unavailable",
                                              item.uid, byte_index));
                 return 1'b0;
             end
@@ -626,6 +630,16 @@ function bit memblock_rm::observer_build_commit_item(
         item.expected_pma_cache_path_fault = pma_pmp_view.pma_cache_path_fault;
         access_fault = store_access ? pma_pmp_view.st_access_fault :
                                        pma_pmp_view.ld_access_fault;
+        // 只有 model 开启、完整尺寸 view 已决且当前 command 无基础 AF 时，
+        // 才允许逐 byte 证明整笔 PMA MMIO。READ command 下 st_access_fault
+        // 固定为 0，不代表额外要求 Load 具备写权限。
+        all_bytes_pma_mmio = all_bytes_pma_pbmt &&
+                             pma_pmp_view.valid &&
+                             pma_pmp_view.translation_eligible &&
+                             pma_pmp_view.af_decided &&
+                             !(store_access ? pma_pmp_view.st_access_fault :
+                                              pma_pmp_view.ld_access_fault) &&
+                             !pma_pmp_view.st_access_fault;
         // PMA/PMP 的完整尺寸查询继续服务既有 Access-Fault 期望；非对齐放宽
         // 还必须证明每一个实际 PA byte 都属于普通可缓存区域。单字节查询
         // 避免只看首地址而跨过 PMA/PMP 边界。
@@ -655,6 +669,15 @@ function bit memblock_rm::observer_build_commit_item(
                                 byte_pma_pmp_view.ld_access_fault)) begin
                 all_bytes_normal_cacheable = 1'b0;
             end
+            if (!byte_pma_pmp_view.valid ||
+                !byte_pma_pmp_view.translation_eligible ||
+                !byte_pma_pmp_view.af_decided ||
+                byte_pma_pmp_view.normal_cacheable ||
+                (store_access ? byte_pma_pmp_view.st_access_fault :
+                                byte_pma_pmp_view.ld_access_fault) ||
+                byte_pma_pmp_view.st_access_fault) begin
+                all_bytes_pma_mmio = 1'b0;
+            end
         end
         // 当前 V2 smoke 的 U 态默认 PMP 会在基础权限阶段结束；若未来 profile
         // 允许访问且 PMA C=0，需要独立 cache observer 提供 fact 后再补 cache-path AF。
@@ -666,6 +689,10 @@ function bit memblock_rm::observer_build_commit_item(
     if (access_fault) item.expected_exception[store_access ? 7 : 5] = 1'b1;
     if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
     if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
+    if (item.expected_exception == '0 &&
+        seq_csr_common::get_pma_pmp_model_en() &&
+        misaligned && all_bytes_pma_pbmt && all_bytes_pma_mmio)
+        item.expected_exception[store_access ? 7 : 5] = 1'b1;
     if (item.expected_exception == '0 &&
         observer_should_expect_addr_misaligned(
             misaligned, store_access, tlb_context,
@@ -679,9 +706,18 @@ function bit memblock_rm::observer_build_commit_item(
         return 1'b0;
     end
     item.translation_valid = 1'b1;
+    item.all_pma_mmio = all_bytes_pma_mmio;
+    // PMA normal-cacheable只描述底层物理区域；PBMT-NC/IO会覆盖该属性并把
+    // 实际访问路由到Uncache。这里冻结最终有效路径，避免合法NC Load同时
+    // 被标成Uncache和normal-cacheable。
+    item.all_normal_cacheable = all_bytes_pma_pbmt &&
+                                all_bytes_normal_cacheable;
+    // effective PBMT非零的合法Load由Uncache处理；PBMT=PMA时则依据逐byte
+    // PMA分类在PMA-MMIO与normal cacheable之间选择。
+    item.uncache_path = all_bytes_pma_mmio || !all_bytes_pma_pbmt;
     if (!observer_trace_translation_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRACE_TRANSLATION",
-                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d hdMisalign=%0d allPbmtPma=%0d allNormalCacheable=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
+                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d hdMisalign=%0d allPbmtPma=%0d allPmaMmio=%0d allNormalCacheable=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
                             item.uid, item.rob.flag, item.rob.value,
                             observer_kind_name(item.kind),
                             bare_identity ? "BARE_IDENTITY" : "PAGED_ENTRY",
@@ -692,6 +728,7 @@ function bit memblock_rm::observer_build_commit_item(
                             store_access ? tlb_context.hd_misalign_st_enable :
                                            tlb_context.hd_misalign_ld_enable,
                             all_bytes_pma_pbmt,
+                            all_bytes_pma_mmio,
                             all_bytes_normal_cacheable,
                             item.expected_pbmt_forced_s1_pf,
                             item.expected_pbmt_forced_s2_gpf,
@@ -701,6 +738,145 @@ function bit memblock_rm::observer_build_commit_item(
     end
     return 1'b1;
 endfunction:observer_build_commit_item
+
+function bit memblock_rm::observer_apply_load_d_error_expectation(
+    rm_ls_program_item_t item,
+    longint unsigned access_sample
+);
+    memblock_rm_readonly_api ro;
+    memblock_rm_readonly_api::l2_d_error_view_t error_view;
+    memblock_rm_readonly_api::uncache_d_error_view_t uncache_error_view;
+    memblock_rm_readonly_api::mem_addr_t line_addr;
+    bit first_byte_on_line;
+
+    if (item == null || item.kind != RM_LS_KIND_LOAD) begin
+        return 1'b1;
+    end
+    item.access_sample = access_sample;
+    if (access_sample == 0) begin
+        ls_model.set_error(RM_LS_ERR_D_ERROR_NOT_READY,
+                           $sformatf("uid %0d DUT Load writeback has no global sample provenance",
+                                     item.uid));
+        return 1'b0;
+    end
+    // A translation/PMA exception prevents a normal cache-line data access.
+    // Do not attach a sticky error from an unrelated resident line.
+    if (item.expected_exception != '0) begin
+        return 1'b1;
+    end
+    ro = memblock_rm_readonly_api::get();
+    uncache_error_view = '{default:'0};
+    if (item.uncache_path) begin
+        if (item.all_normal_cacheable) begin
+            ls_model.set_error(
+                RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid %0d has contradictory Uncache/cacheable classification",
+                          item.uid));
+            return 1'b0;
+        end
+        if (item.pa_valid_mask == '0 ||
+            !ro.read_uncache_d_error_for_rm(
+                item.uid, item.dynamic_epoch,
+                item.rob.flag, item.rob.value,
+                item.lq_flag, item.lq_value,
+                memblock_rm_readonly_api::mem_addr_t'(item.pa_by_byte[0][47:0]),
+                item.size_bytes, access_sample, uncache_error_view) ||
+            !uncache_error_view.valid || !uncache_error_view.found) begin
+            ls_model.set_error(
+                RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid %0d Uncache D-error ledger unavailable epoch=%0d rob=%0d/%0d lq=%0d/%0d pa=0x%0h sample=%0d not_ready=%0d identity_mismatch=%0d address_mismatch=%0d",
+                          item.uid, item.dynamic_epoch,
+                          item.rob.flag, item.rob.value,
+                          item.lq_flag, item.lq_value,
+                          item.pa_by_byte[0], access_sample,
+                          uncache_error_view.not_ready,
+                          uncache_error_view.identity_mismatch,
+                          uncache_error_view.address_mismatch));
+            return 1'b0;
+        end
+        item.expected_uncache_denied = uncache_error_view.denied;
+        item.expected_uncache_corrupt = uncache_error_view.corrupt &&
+                                          !uncache_error_view.denied;
+        if (item.expected_uncache_denied) item.expected_exception[5] = 1'b1;
+        if (item.expected_uncache_corrupt) item.expected_exception[19] = 1'b1;
+        `uvm_info("RM_LS_D_ERROR",
+                  $sformatf("uid=%0d path=UNCACHE epoch=%0d rob=%0d/%0d lq=%0d/%0d pa=0x%0h sample=%0d source=%0d generation=%0d A/D=%0d/%0d denied=%0d corrupt=%0d expected_exception=0x%0h",
+                            item.uid, item.dynamic_epoch,
+                            item.rob.flag, item.rob.value,
+                            item.lq_flag, item.lq_value,
+                            item.pa_by_byte[0], access_sample,
+                            uncache_error_view.source,
+                            uncache_error_view.generation,
+                            uncache_error_view.a_sample,
+                            uncache_error_view.d_sample,
+                            uncache_error_view.denied,
+                            uncache_error_view.corrupt,
+                            item.expected_exception),
+                  UVM_LOW)
+        return 1'b1;
+    end
+    if (!item.all_normal_cacheable) begin
+        ls_model.set_error(
+            RM_LS_ERR_D_ERROR_NOT_READY,
+            $sformatf("uid %0d Load path classification incomplete allPmaMmio=%0d normalCacheable=%0d uncache=%0d",
+                      item.uid, item.all_pma_mmio,
+                      item.all_normal_cacheable, item.uncache_path));
+        return 1'b0;
+    end
+    for (int unsigned byte_index = 0;
+         byte_index < item.size_bytes;
+         byte_index++) begin
+        if (!item.pa_valid_mask[byte_index]) begin
+            ls_model.set_error(
+                RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid %0d byte %0d has no PA for D-error lookup",
+                          item.uid, byte_index));
+            return 1'b0;
+        end
+        first_byte_on_line = 1'b1;
+        for (int unsigned previous_index = 0;
+             previous_index < byte_index;
+             previous_index++) begin
+            if (item.pa_by_byte[previous_index][47:6] ==
+                item.pa_by_byte[byte_index][47:6]) begin
+                first_byte_on_line = 1'b0;
+            end
+        end
+        if (!first_byte_on_line) begin
+            continue;
+        end
+        line_addr = memblock_rm_readonly_api::mem_addr_t'(
+            {item.pa_by_byte[byte_index][47:6], 6'b0});
+        if (!ro.read_l2_d_error_for_rm(line_addr, access_sample,
+                                       error_view) ||
+            !error_view.valid) begin
+            ls_model.set_error(
+                RM_LS_ERR_D_ERROR_NOT_READY,
+                $sformatf("uid %0d L2 D-error ledger unavailable line=0x%0h sample=%0d",
+                          item.uid, line_addr, access_sample));
+            return 1'b0;
+        end
+        item.expected_dcache_denied |= error_view.denied;
+        item.expected_dcache_corrupt |= error_view.corrupt &&
+                                         !error_view.denied;
+        `uvm_info("RM_LS_D_ERROR",
+                  $sformatf("uid=%0d line=0x%0h sample=%0d sticky=%0d denied=%0d corrupt=%0d generation=%0d activation(corrupt/denied)=%0d/%0d",
+                            item.uid, line_addr, access_sample,
+                            error_view.sticky_enabled,
+                            error_view.denied, error_view.corrupt,
+                            error_view.generation,
+                            error_view.corrupt_activation_sample,
+                            error_view.denied_activation_sample),
+                  UVM_LOW)
+    end
+    if (item.expected_dcache_denied) begin
+        item.expected_exception[5] = 1'b1;
+    end
+    if (item.expected_dcache_corrupt) begin
+        item.expected_exception[19] = 1'b1;
+    end
+    return 1'b1;
+endfunction:observer_apply_load_d_error_expectation
 
 function bit memblock_rm::observer_capture_commit_actual(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
@@ -750,11 +926,16 @@ function bit memblock_rm::observer_capture_commit_actual(
         load_actual.data = load_view.data;
         load_actual.exception_vec = load_view.exception_vec;
         load_actual.cycle = load_view.sample_cycle;
+        if (!observer_apply_load_d_error_expectation(item,
+                                                     load_view.sample_seq)) begin
+            return 1'b0;
+        end
         if (!observer_trace_dut_load_emitted.exists(item.uid)) begin
             `uvm_info("RM_LS_TRACE_DUT_LOAD",
-                      $sformatf("node=DUT_LOAD_WB uid=%0d rob=%0d/%0d source=LDA lane=%0d sample_cycle=%0d DUT(raw_data_valid=%0d comparable_data_valid=%0d data=0x%016h exception=0x%06h replay=%0d flush=%0d)",
+                      $sformatf("node=DUT_LOAD_WB uid=%0d rob=%0d/%0d source=LDA lane=%0d sample_seq=%0d sample_cycle=%0d DUT(raw_data_valid=%0d comparable_data_valid=%0d data=0x%016h exception=0x%06h replay=%0d flush=%0d)",
                                 item.uid, load_actual.rob.flag, load_actual.rob.value,
-                                load_view.lane, load_view.sample_cycle,
+                                load_view.lane, load_view.sample_seq,
+                                load_view.sample_cycle,
                                 load_view.data_valid, load_actual.data_valid,
                                 load_actual.data, load_actual.exception_vec,
                                 load_view.replay_inst, load_view.flush_pipe),
@@ -872,6 +1053,9 @@ function bit memblock_rm::observer_process_current_commit();
     bit check_complete;
     bit check_result;
     bit missing_dut_load_writeback;
+    bit exception_precheck_ready;
+    bit exception_match;
+    bit any_exception;
 
     ro = memblock_rm_readonly_api::get();
     if (!ro.framework_ready_for_rm()) return 1'b0;
@@ -935,9 +1119,10 @@ function bit memblock_rm::observer_process_current_commit();
     end
     if (!observer_trace_main_emitted.exists(main_view.uid)) begin
         `uvm_info("RM_LS_TRACE_MAIN",
-                  $sformatf("node=MAIN_TABLE uid=%0d rob=%0d/%0d op_class=%0d check_store=%0d fu_type=0x%0h fu_op=0x%0h src_0=0x%016h imm=0x%016h main_va=0x%016h status(rob_commit=%0d terminal=%0d exception=0x%06h)",
+                  $sformatf("node=MAIN_TABLE uid=%0d rob=%0d/%0d op_class=%0d fp_wen=%0d check_store=%0d fu_type=0x%0h fu_op=0x%0h src_0=0x%016h imm=0x%016h main_va=0x%016h status(rob_commit=%0d terminal=%0d exception=0x%06h)",
                             main_view.uid, main_view.rob_idx_flag,
                             main_view.rob_idx_value, main_view.op_class,
+                            main_view.op_class == MEMBLOCK_OP_CLASS_FP_LOAD,
                             main_view.check_store, main_view.fu_type,
                             main_view.fu_op_type, main_view.src_0, main_view.imm,
                             main_view.vaddr, status_view.rob_commit,
@@ -1000,12 +1185,20 @@ function bit memblock_rm::observer_process_current_commit();
         return 1'b0;
     end
 
-    if (!observer_capture_load_backing(item)) begin
-        if (!observer_mismatch_reported) begin
-            `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
-            observer_mismatch_reported = 1'b1;
+    // 先只读比较 RM/LDA/status exception。只有三方匹配且全零时才读取
+    // backing；mismatch 的 error/history/current_uid 仍统一由 commit 处理。
+    if (item.kind == RM_LS_KIND_LOAD) begin
+        exception_precheck_ready = ls_model.precheck_load_exception(
+            item, status_view.exception_vec, exception_match, any_exception);
+        if (exception_precheck_ready && exception_match && !any_exception) begin
+            if (!observer_capture_load_backing(item)) begin
+                if (!observer_mismatch_reported) begin
+                    `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+                    observer_mismatch_reported = 1'b1;
+                end
+                return 1'b0;
+            end
         end
-        return 1'b0;
     end
 
     commit_rob.flag = status_view.rob_idx_flag;

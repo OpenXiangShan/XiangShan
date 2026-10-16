@@ -497,6 +497,34 @@ package memblock_sync_pkg;
         bit               memory_violation_is_rvc;
         bit [49:0]        memory_violation_target;
         bit               memory_violation_level;
+        // Same-sample provenance for the six-input memoryViolation arbiter:
+        // LoadUnit[0:2], uncache nack, RAW nuke[0:1].
+        bit               rollback_diag_valid;
+        bit               rollback_diag_complete;
+        bit [5:0]         rollback_candidate_known;
+        bit [5:0]         rollback_candidate_valid;
+        bit [5:0]         rollback_candidate_rob_flag;
+        bit [5:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0]
+                          rollback_candidate_rob_value;
+        bit [5:0]         rollback_candidate_level;
+        bit [5:0]         rollback_winner_known;
+        bit [5:0]         rollback_winner;
+        bit [2:0]         rollback_lu_reason_known;
+        bit [2:0]         rollback_lu_vp_match_fail;
+        bit [2:0]         rollback_lu_ldld_resp_valid;
+        bit [2:0]         rollback_lu_rep_frm_fetch;
+        bit [2:0]         rollback_lu_ldld_rep_inst;
+        bit [2:0]         rollback_lu_frm_mis_flush;
+        bit [2:0]         rollback_uncache_can_allocate;
+        bit [2:0]         rollback_uncache_known;
+        bit [1:0]         rollback_raw_store_known;
+        bit [1:0]         rollback_raw_store_valid;
+        bit [1:0]         rollback_raw_store_payload_known;
+        bit [1:0]         rollback_raw_store_rob_flag;
+        bit [1:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0]
+                          rollback_raw_store_rob_value;
+        bit [1:0][47:0]   rollback_raw_store_paddr;
+        bit [1:0][15:0]   rollback_raw_store_mask;
         bit               sb_is_empty;
         // 中文注释：ctrl monitor 为 sbIsEmpty 采样分配的不可变 observation 序号。
         // 设置：monitor 每个有效 sample 发布 latest 后写入 raw；读取：flushSb
@@ -504,6 +532,35 @@ package memblock_sync_pkg;
         longint unsigned  sb_is_empty_observation_seq;
         longint unsigned  cycle;
     } dispatch_raw_ctrl_t;
+
+    // Diagnostic-only snapshot of the framework sideband that controls the
+    // DUT LoadQueueUncache s_idle -> s_req transition.  The sample sequence
+    // is captured when the LSQ commit transaction is built and is compared by
+    // the Uncache monitor against the DUT sample token; no behavior is driven
+    // from this record.
+    typedef struct {
+        bit                                      valid;
+        longint unsigned                         sample_seq;
+        longint unsigned                         service_cycle;
+        bit                                      pending_ptr_flag;
+        bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0]      pending_ptr_value;
+        bit                                      pending_mmio_old;
+        bit                                      pending_st;
+        bit [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0]       commit;
+        bit                                      has_commit;
+        bit                                      has_fault_head;
+    } memblock_lsq_pending_diag_t;
+
+    memblock_lsq_pending_diag_t lsq_pending_diag;
+
+    typedef struct {
+        bit                 valid;
+        longint unsigned    sample_seq;
+        dispatch_raw_ctrl_t snapshot;
+    } memblock_rollback_provenance_cache_entry_t;
+
+    localparam int unsigned MEMBLOCK_ROLLBACK_PROVENANCE_MAX_AGE = 4;
+    memblock_rollback_provenance_cache_entry_t rollback_provenance_cache[$];
 
     // 中文伪代码：ctrl monitor 每个 post-reset sample 都记录一次 held cancel level，
     // 即使两个 count 都为 0 也入队；该队列不属于 semantic ctrl raw batch。
@@ -776,11 +833,137 @@ package memblock_sync_pkg;
         item.memory_violation_is_rvc    = 1'b0;
         item.memory_violation_target    = '0;
         item.memory_violation_level     = 1'b0;
+        item.rollback_diag_valid        = 1'b0;
+        item.rollback_diag_complete     = 1'b0;
+        item.rollback_candidate_known   = '0;
+        item.rollback_candidate_valid   = '0;
+        item.rollback_candidate_rob_flag = '0;
+        item.rollback_candidate_rob_value = '0;
+        item.rollback_candidate_level  = '0;
+        item.rollback_winner_known     = '0;
+        item.rollback_winner           = '0;
+        item.rollback_lu_reason_known  = '0;
+        item.rollback_lu_vp_match_fail = '0;
+        item.rollback_lu_ldld_resp_valid = '0;
+        item.rollback_lu_rep_frm_fetch = '0;
+        item.rollback_lu_ldld_rep_inst = '0;
+        item.rollback_lu_frm_mis_flush = '0;
+        item.rollback_uncache_can_allocate = '0;
+        item.rollback_uncache_known    = '0;
+        item.rollback_raw_store_known  = '0;
+        item.rollback_raw_store_valid  = '0;
+        item.rollback_raw_store_payload_known = '0;
+        item.rollback_raw_store_rob_flag = '0;
+        item.rollback_raw_store_rob_value = '0;
+        item.rollback_raw_store_paddr  = '0;
+        item.rollback_raw_store_mask   = '0;
         item.sb_is_empty                 = 1'b0;
         item.sb_is_empty_observation_seq = 0;
         item.cycle                      = 0;
         return item;
     endfunction:make_empty_raw_ctrl
+
+    function void clear_rollback_provenance_cache();
+        rollback_provenance_cache.delete();
+    endfunction:clear_rollback_provenance_cache
+
+    function bit rollback_provenance_payload_equal(
+        input dispatch_raw_ctrl_t lhs,
+        input dispatch_raw_ctrl_t rhs
+    );
+        return lhs.rollback_diag_valid == rhs.rollback_diag_valid &&
+               lhs.rollback_diag_complete == rhs.rollback_diag_complete &&
+               lhs.rollback_candidate_known == rhs.rollback_candidate_known &&
+               lhs.rollback_candidate_valid == rhs.rollback_candidate_valid &&
+               lhs.rollback_candidate_rob_flag == rhs.rollback_candidate_rob_flag &&
+               lhs.rollback_candidate_rob_value == rhs.rollback_candidate_rob_value &&
+               lhs.rollback_candidate_level == rhs.rollback_candidate_level &&
+               lhs.rollback_winner_known == rhs.rollback_winner_known &&
+               lhs.rollback_winner == rhs.rollback_winner &&
+               lhs.rollback_lu_reason_known == rhs.rollback_lu_reason_known &&
+               lhs.rollback_lu_vp_match_fail == rhs.rollback_lu_vp_match_fail &&
+               lhs.rollback_lu_ldld_resp_valid == rhs.rollback_lu_ldld_resp_valid &&
+               lhs.rollback_lu_rep_frm_fetch == rhs.rollback_lu_rep_frm_fetch &&
+               lhs.rollback_lu_ldld_rep_inst == rhs.rollback_lu_ldld_rep_inst &&
+               lhs.rollback_lu_frm_mis_flush == rhs.rollback_lu_frm_mis_flush &&
+               lhs.rollback_uncache_known == rhs.rollback_uncache_known &&
+               lhs.rollback_uncache_can_allocate == rhs.rollback_uncache_can_allocate &&
+               lhs.rollback_raw_store_known == rhs.rollback_raw_store_known &&
+               lhs.rollback_raw_store_valid == rhs.rollback_raw_store_valid &&
+               lhs.rollback_raw_store_payload_known == rhs.rollback_raw_store_payload_known &&
+               lhs.rollback_raw_store_rob_flag == rhs.rollback_raw_store_rob_flag &&
+               lhs.rollback_raw_store_rob_value == rhs.rollback_raw_store_rob_value &&
+               lhs.rollback_raw_store_paddr == rhs.rollback_raw_store_paddr &&
+               lhs.rollback_raw_store_mask == rhs.rollback_raw_store_mask;
+    endfunction:rollback_provenance_payload_equal
+
+    function void cache_rollback_input_provenance(
+        input dispatch_raw_ctrl_t snapshot,
+        input longint unsigned sample_seq
+    );
+        memblock_rollback_provenance_cache_entry_t entry;
+
+        if (!snapshot.rollback_diag_valid || !snapshot.rollback_diag_complete ||
+            !snapshot.memory_violation_valid ||
+            !snapshot.memory_violation_rob_valid || sample_seq == 0) begin
+            `uvm_fatal("ROLLBACK_PROVENANCE",
+                       "attempted to cache incomplete rollback input provenance")
+        end
+        while (rollback_provenance_cache.size() != 0 &&
+               sample_seq > rollback_provenance_cache[0].sample_seq +
+                            MEMBLOCK_ROLLBACK_PROVENANCE_MAX_AGE) begin
+            rollback_provenance_cache.pop_front();
+        end
+        entry.valid = 1'b1;
+        entry.sample_seq = sample_seq;
+        entry.snapshot = snapshot;
+        rollback_provenance_cache.push_back(entry);
+    endfunction:cache_rollback_input_provenance
+
+    function bit resolve_rollback_output_provenance(
+        input bit rob_flag,
+        input bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rob_value,
+        input bit level,
+        input longint unsigned output_sample_seq,
+        output dispatch_raw_ctrl_t snapshot,
+        output longint unsigned input_sample_seq,
+        output bit conflicting
+    );
+        int selected_idx;
+
+        snapshot = make_empty_raw_ctrl();
+        input_sample_seq = 0;
+        conflicting = 1'b0;
+        selected_idx = -1;
+        while (rollback_provenance_cache.size() != 0 &&
+               output_sample_seq > rollback_provenance_cache[0].sample_seq +
+                                   MEMBLOCK_ROLLBACK_PROVENANCE_MAX_AGE) begin
+            rollback_provenance_cache.pop_front();
+        end
+        foreach (rollback_provenance_cache[idx]) begin
+            if (!rollback_provenance_cache[idx].valid ||
+                rollback_provenance_cache[idx].sample_seq > output_sample_seq ||
+                rollback_provenance_cache[idx].snapshot.memory_violation_rob_flag != rob_flag ||
+                rollback_provenance_cache[idx].snapshot.memory_violation_rob_value != rob_value ||
+                rollback_provenance_cache[idx].snapshot.memory_violation_level != level) begin
+                continue;
+            end
+            if (selected_idx >= 0 &&
+                !rollback_provenance_payload_equal(
+                    rollback_provenance_cache[selected_idx].snapshot,
+                    rollback_provenance_cache[idx].snapshot)) begin
+                conflicting = 1'b1;
+                return 1'b0;
+            end
+            selected_idx = idx;
+        end
+        if (selected_idx < 0) begin
+            return 1'b0;
+        end
+        snapshot = rollback_provenance_cache[selected_idx].snapshot;
+        input_sample_seq = rollback_provenance_cache[selected_idx].sample_seq;
+        return 1'b1;
+    endfunction:resolve_rollback_output_provenance
 
     function dispatch_raw_cancel_snapshot_t make_empty_raw_cancel_snapshot();
         dispatch_raw_cancel_snapshot_t item;
@@ -2366,6 +2549,32 @@ package memblock_sync_pkg;
         return dut_sample_seq;
     endfunction:peek_current_dut_global_sample
 
+    function void publish_lsq_pending_diag(
+        input bit pending_ptr_flag,
+        input bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] pending_ptr_value,
+        input bit pending_mmio_old,
+        input bit pending_st,
+        input bit [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0] commit,
+        input bit has_commit,
+        input bit has_fault_head);
+        lsq_pending_diag.valid = 1'b1;
+        lsq_pending_diag.sample_seq = dut_sample_seq;
+        lsq_pending_diag.service_cycle = dispatch_service_cycle;
+        lsq_pending_diag.pending_ptr_flag = pending_ptr_flag;
+        lsq_pending_diag.pending_ptr_value = pending_ptr_value;
+        lsq_pending_diag.pending_mmio_old = pending_mmio_old;
+        lsq_pending_diag.pending_st = pending_st;
+        lsq_pending_diag.commit = commit;
+        lsq_pending_diag.has_commit = has_commit;
+        lsq_pending_diag.has_fault_head = has_fault_head;
+    endfunction:publish_lsq_pending_diag
+
+    function bit peek_lsq_pending_diag(
+        output memblock_lsq_pending_diag_t item);
+        item = lsq_pending_diag;
+        return lsq_pending_diag.valid;
+    endfunction:peek_lsq_pending_diag
+
     task automatic wait_for_l2tlb_sample_anchor(input longint unsigned sample_time,
                                                  output longint unsigned sample_seq);
         sample_seq = 0;
@@ -2734,6 +2943,7 @@ package memblock_sync_pkg;
         dut_sample_seq = 0;
         dut_sample_time = 0;
         dut_sample_time_valid = 1'b0;
+        lsq_pending_diag = '{default:'0};
         csr_full_snapshot = make_empty_csr_full_snapshot();
         l2tlb_sample_anchor_valid = 1'b0;
         l2tlb_owner_claimed_once = 1'b0;
@@ -2837,6 +3047,7 @@ package memblock_sync_pkg;
         // initializer; runtime reset has its own direct-writer contract.
         raw_csr_rearm_epoch++;
         dispatch_service_cycle = 0;
+        lsq_pending_diag = '{default:'0};
     endfunction:clear_raw_monitor_queues
 
     function void tick_dispatch_service_cycle();

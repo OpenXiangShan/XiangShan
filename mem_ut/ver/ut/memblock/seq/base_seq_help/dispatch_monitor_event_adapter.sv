@@ -1068,6 +1068,13 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function bit convert_raw_memory_violation(input memblock_sync_pkg::dispatch_raw_ctrl_t raw,
                                              output memblock_wb_event_t wb_event);
+        int selected_idx;
+        int selected_count;
+        bit lu_fetch_reason;
+        int lu_reason_count;
+        memblock_uid_t owner_uid;
+        status_transaction owner_status;
+
         wb_event = make_wb_event_base();
         if (!raw.memory_violation_valid) begin
             return 1'b0;
@@ -1085,6 +1092,134 @@ class dispatch_monitor_event_adapter extends uvm_object;
                                                          raw.memory_violation_rob_value,
                                                          wb_event.rob_key);
         wb_event.redirect.rob_key       = wb_event.rob_key;
+        // 中文注释：raw ctrl 只提供 ROB；在转换边界冻结当前 active owner 的
+        // dynamic identity，selected 阶段还会再次复核，避免直接读取新实例状态。
+        if (wb_event.has_rob &&
+            data.lookup_active_uid_by_rob(wb_event.rob_key, owner_uid)) begin
+            owner_status = data.get_status(owner_uid);
+            wb_event.uid = owner_uid;
+            wb_event.has_uid = 1'b1;
+            wb_event.dynamic_epoch = owner_status.dynamic_epoch;
+            wb_event.has_dynamic_epoch = 1'b1;
+        end
+        wb_event.rollback_diag_valid    = raw.rollback_diag_valid;
+        wb_event.rollback_diag_complete = raw.rollback_diag_complete;
+        if (!raw.rollback_diag_valid || !raw.rollback_diag_complete) begin
+            wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_INCOMPLETE;
+        end else begin
+            selected_idx = -1;
+            selected_count = 0;
+            for (int idx = 0; idx < 6; idx++) begin
+                if (raw.rollback_winner_known[idx] &&
+                    raw.rollback_winner[idx]) begin
+                    selected_idx = idx;
+                    selected_count++;
+                end
+            end
+            if (selected_count != 1 || selected_idx < 0) begin
+                `uvm_fatal("ROLLBACK_XMR",
+                           $sformatf("memoryViolation winner is not unique candidate_known=0x%0h candidates=0x%0h winner_known=0x%0h winners=0x%0h",
+                                     raw.rollback_candidate_known,
+                                     raw.rollback_candidate_valid,
+                                     raw.rollback_winner_known,
+                                     raw.rollback_winner))
+            end
+            if (!raw.rollback_candidate_known[selected_idx] ||
+                !raw.rollback_candidate_valid[selected_idx]) begin
+                `uvm_fatal("ROLLBACK_XMR",
+                           $sformatf("selected rollback input lacks valid provenance input=%0d candidate_known=0x%0h candidates=0x%0h",
+                                     selected_idx,
+                                     raw.rollback_candidate_known,
+                                     raw.rollback_candidate_valid))
+            end
+            if (raw.rollback_candidate_rob_flag[selected_idx] !=
+                    raw.memory_violation_rob_flag ||
+                raw.rollback_candidate_rob_value[selected_idx] !=
+                    raw.memory_violation_rob_value ||
+                raw.rollback_candidate_level[selected_idx] !=
+                    raw.memory_violation_level) begin
+                `uvm_fatal("ROLLBACK_XMR",
+                           $sformatf("selected rollback input/output mismatch input=%0d rob=%0d/%0d level=%0d output=%0d/%0d level=%0d",
+                                     selected_idx,
+                                     raw.rollback_candidate_rob_flag[selected_idx],
+                                     raw.rollback_candidate_rob_value[selected_idx],
+                                     raw.rollback_candidate_level[selected_idx],
+                                     raw.memory_violation_rob_flag,
+                                     raw.memory_violation_rob_value,
+                                     raw.memory_violation_level))
+            end
+            wb_event.rollback_selected_input = selected_idx;
+            case (selected_idx)
+                0, 1, 2: begin
+                    if (!raw.rollback_lu_reason_known[selected_idx]) begin
+                        `uvm_fatal("ROLLBACK_XMR",
+                                   $sformatf("selected LoadUnit rollback reason is not observable lane=%0d",
+                                             selected_idx))
+                    end
+                    lu_fetch_reason = raw.rollback_lu_ldld_resp_valid[selected_idx] &&
+                                      raw.rollback_lu_rep_frm_fetch[selected_idx] &&
+                                      raw.rollback_lu_ldld_rep_inst[selected_idx];
+                    lu_reason_count = raw.rollback_lu_vp_match_fail[selected_idx] +
+                                      raw.rollback_lu_frm_mis_flush[selected_idx] +
+                                      lu_fetch_reason;
+                    if (lu_reason_count == 0) begin
+                        `uvm_fatal("ROLLBACK_XMR",
+                                   $sformatf("selected LoadUnit rollback has no sampled reason lane=%0d",
+                                             selected_idx))
+                    end
+                    if (lu_reason_count > 1) begin
+                        wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_MIXED;
+                    end else if (raw.rollback_lu_vp_match_fail[selected_idx]) begin
+                        wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_VP_MATCH;
+                    end else if (raw.rollback_lu_frm_mis_flush[selected_idx]) begin
+                        wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_FRM_MISALIGN;
+                    end else begin
+                        wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_LDLD_FETCH;
+                    end
+                end
+                3: begin
+                    if (raw.rollback_uncache_known != 3'b111) begin
+                        `uvm_fatal("ROLLBACK_XMR",
+                                   $sformatf("selected uncache rollback resource state is incomplete known=0x%0h",
+                                             raw.rollback_uncache_known))
+                    end
+                    wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_UNCACHE_NACK;
+                end
+                4: wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_RAW_NUKE_0;
+                5: wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_RAW_NUKE_1;
+                default: wb_event.rollback_subtype = MEMBLOCK_ROLLBACK_SUBTYPE_INCOMPLETE;
+            endcase
+            `uvm_info("ROLLBACK_PROVENANCE",
+                      $sformatf("selected input=%0d subtype=%0d rob=%0d/%0d level=%0d candidate_known=0x%0h candidates=0x%0h winner_known=0x%0h winner=0x%0h lu_reason_known=0x%0h lu_vp=0x%0h lu_frm=0x%0h lu_ldld=%0h/%0h/%0h uncache_known=0x%0h uncache_free=0x%0h raw_store_known=0x%0h raw_store_payload_known=0x%0h raw_store_valid=0x%0h raw0_rob=%0d/%0d paddr=0x%0h mask=0x%0h raw1_rob=%0d/%0d paddr=0x%0h mask=0x%0h",
+                                selected_idx, wb_event.rollback_subtype,
+                                raw.memory_violation_rob_flag,
+                                raw.memory_violation_rob_value,
+                                raw.memory_violation_level,
+                                raw.rollback_candidate_known,
+                                raw.rollback_candidate_valid,
+                                raw.rollback_winner_known,
+                                raw.rollback_winner,
+                                raw.rollback_lu_reason_known,
+                                raw.rollback_lu_vp_match_fail,
+                                raw.rollback_lu_frm_mis_flush,
+                                raw.rollback_lu_ldld_resp_valid,
+                                raw.rollback_lu_rep_frm_fetch,
+                                raw.rollback_lu_ldld_rep_inst,
+                                raw.rollback_uncache_known,
+                                raw.rollback_uncache_can_allocate,
+                                raw.rollback_raw_store_known,
+                                raw.rollback_raw_store_payload_known,
+                                raw.rollback_raw_store_valid,
+                                raw.rollback_raw_store_rob_flag[0],
+                                raw.rollback_raw_store_rob_value[0],
+                                raw.rollback_raw_store_paddr[0],
+                                raw.rollback_raw_store_mask[0],
+                                raw.rollback_raw_store_rob_flag[1],
+                                raw.rollback_raw_store_rob_value[1],
+                                raw.rollback_raw_store_paddr[1],
+                                raw.rollback_raw_store_mask[1]),
+                      UVM_LOW)
+        end
         wb_event.cycle                  = raw.cycle;
         return 1'b1;
     endfunction:convert_raw_memory_violation
@@ -1123,6 +1258,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
                     MEMBLOCK_MMIO_KIND_LOAD,
                     raw.mmio_flush_epoch,
                     raw.mmio_sample_seq,
+                    raw.cycle,
                     uid,
                     stale_reason);
                 if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin
@@ -1170,6 +1306,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 MEMBLOCK_MMIO_KIND_STORE,
                 raw.mmio_flush_epoch,
                 raw.mmio_sample_seq,
+                raw.cycle,
                 uid,
                 stale_reason);
             if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin

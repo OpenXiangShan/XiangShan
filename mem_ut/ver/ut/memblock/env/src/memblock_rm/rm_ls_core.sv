@@ -23,6 +23,7 @@ typedef enum int unsigned {
     RM_LS_ERR_BARE_PA_OUT_OF_RANGE,
     RM_LS_ERR_TLB_ENTRY_INCONSISTENT,
     RM_LS_ERR_ORIGINAL_L2_NOT_READY,
+    RM_LS_ERR_D_ERROR_NOT_READY,
     RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
     RM_LS_ERR_STORE_MASK_MISMATCH,
     RM_LS_ERR_EXCEPTION_MISMATCH,
@@ -134,6 +135,9 @@ class rm_ls_program_item_t;
     bit [85:0]      translation_key;
     int unsigned    size_bytes;
     bit             is_signed;
+    // Main-table FP_LOAD is the independent expected source for uop.fpWen.
+    // Do not derive expected NaN boxing from the DUT writeback metadata.
+    bit             fp_wen;
     rm_ls_rob_key_t rob;
     bit             translation_valid;
     bit [23:0]      expected_exception;
@@ -146,6 +150,15 @@ class rm_ls_program_item_t;
     bit             expected_pma_cache_path_fault;
     bit             expected_dcache_denied;
     bit             expected_dcache_corrupt;
+    // 中文注释：Uncache异常来源与L2/DCache分开保存，避免日志把TL D错误
+    // 误称为DCache错误。路径分类在commit item构建时冻结，写回比较时只读。
+    bit             expected_uncache_denied;
+    bit             expected_uncache_corrupt;
+    bit             all_pma_mmio;
+    bit             all_normal_cacheable;
+    bit             uncache_path;
+    bit             lq_flag;
+    bit [MEMBLOCK_LQ_VALUE_W-1:0] lq_value;
     // 中文注释：当前 Load/Store 的任一翻译 byte 是否因 PBMT 非零且对应
     // PBMTE 关闭而额外产生 S1 PF/S2 GPF。由 RM 在 commit 构建期设置，
     // 仅用于异常期望诊断，不参与 live TLB entry 生命周期。
@@ -159,12 +172,15 @@ class rm_ls_program_item_t;
     function new(int unsigned uid_i = 0);
         valid = 0; uid = uid_i; kind = RM_LS_KIND_OTHER; op = '0;
         computed_vaddr = '0; main_vaddr = '0; pa_valid_mask = '0;
-        translation_key = '0; size_bytes = 0; is_signed = 0;
+        translation_key = '0; size_bytes = 0; is_signed = 0; fp_wen = 0;
         rob = '{default:'0}; translation_valid = 0; expected_exception = '0;
         expected_pmp_fault = 1'b0; expected_pma_fault = 1'b0;
         expected_keyid_fault = 1'b0; expected_pma_atomic_fault = 1'b0;
         expected_pma_cache_path_fault = 1'b0;
         expected_dcache_denied = 1'b0; expected_dcache_corrupt = 1'b0;
+        expected_uncache_denied = 1'b0; expected_uncache_corrupt = 1'b0;
+        all_pma_mmio = 1'b0; all_normal_cacheable = 1'b0;
+        uncache_path = 1'b0; lq_flag = 1'b0; lq_value = '0;
         expected_pbmt_forced_s1_pf = 1'b0;
         expected_pbmt_forced_s2_gpf = 1'b0;
         dynamic_epoch = 0; access_sample = 0;
@@ -452,14 +468,8 @@ class rm_ls_model_t;
                 return 0;
             end
         end
-        if (item.is_signed) begin
-            case (item.size_bytes)
-                1: expected = {{56{expected[7]}}, expected[7:0]};
-                2: expected = {{48{expected[15]}}, expected[15:0]};
-                4: expected = {{32{expected[31]}}, expected[31:0]};
-                default: ;
-            endcase
-        end
+        expected = memblock_rm_format_load_data(
+            expected, item.op, item.fp_wen, item.is_signed, item.size_bytes);
         return 1;
     endfunction
 
@@ -511,6 +521,41 @@ class rm_ls_model_t;
         return raw_match;
     endfunction
 
+    // 只读预检 Load 的 RM/LDA/status 异常，不记录错误、history 或推进 uid。
+    // any_exception 仅控制是否需要构造正常数据期望，不能反写 RM expectation。
+    function bit precheck_load_exception(
+        input rm_ls_program_item_t item,
+        input logic [23:0] terminal_exception,
+        output bit exception_match,
+        output bit any_exception
+    );
+        rm_ls_load_actual_t actual;
+        bit raw_exception_match_actual;
+        bit cause_exception_match_actual;
+        bit raw_exception_match_terminal;
+        bit cause_exception_match_terminal;
+        bit actual_exception_ok;
+        bit terminal_exception_ok;
+
+        exception_match = 1'b0;
+        any_exception = 1'b1;
+        if (item == null || item.kind != RM_LS_KIND_LOAD ||
+            !pending_load_actual.exists(item.uid)) return 1'b0;
+
+        actual = pending_load_actual[item.uid];
+        actual_exception_ok = compare_arch_exception(
+            item.expected_exception, actual.exception_vec, 1'b0,
+            raw_exception_match_actual, cause_exception_match_actual);
+        terminal_exception_ok = compare_arch_exception(
+            item.expected_exception, terminal_exception, 1'b0,
+            raw_exception_match_terminal, cause_exception_match_terminal);
+        exception_match = actual_exception_ok && terminal_exception_ok;
+        any_exception = item.expected_exception != '0 ||
+                        actual.exception_vec !== '0 ||
+                        terminal_exception !== '0;
+        return 1'b1;
+    endfunction
+
     function bit compare_load(rm_ls_program_item_t item,
                               logic [23:0] terminal_exception);
         rm_ls_history_record_t rec;
@@ -521,8 +566,8 @@ class rm_ls_model_t;
         bit cause_exception_match_actual;
         bit raw_exception_match_terminal;
         bit cause_exception_match_terminal;
-        bit actual_exception_ok;
-        bit terminal_exception_ok;
+        bit exception_match;
+        bit any_exception;
 
         rec = new();
         rec.uid = item.uid; rec.kind = item.kind; rec.rob = item.rob;
@@ -541,16 +586,17 @@ class rm_ls_model_t;
                                 actual.rob.flag, actual.rob.value));
             return 0;
         end
-        if (!build_load_expected(item, expected, expected_exception)) return 0;
-        rec.expected_data = expected; rec.actual_data = actual.data;
-        rec.expected_exception = expected_exception; rec.actual_exception = actual.exception_vec;
-        actual_exception_ok = compare_arch_exception(
-            expected_exception, actual.exception_vec, 1'b0,
-            raw_exception_match_actual, cause_exception_match_actual);
-        terminal_exception_ok = compare_arch_exception(
-            expected_exception, terminal_exception, 1'b0,
-            raw_exception_match_terminal, cause_exception_match_terminal);
-        if (!actual_exception_ok || !terminal_exception_ok) begin
+        expected_exception = item.expected_exception;
+        rec.actual_data = actual.data;
+        rec.expected_exception = expected_exception;
+        rec.actual_exception = actual.exception_vec;
+        if (!precheck_load_exception(item, terminal_exception,
+                                     exception_match, any_exception)) begin
+            set_error(RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
+                      $sformatf("uid %0d Load exception precheck unavailable", item.uid));
+            return 0;
+        end
+        if (!exception_match) begin
             rec.error_code = RM_LS_ERR_EXCEPTION_MISMATCH;
             rec.detail = $sformatf("uid %0d Load exception expected=0x%0h status=0x%0h actual=0x%0h",
                                    item.uid, expected_exception, terminal_exception,
@@ -559,6 +605,14 @@ class rm_ls_model_t;
             history.push_back(rec);
             return 0;
         end
+
+        // 仅用于保留 raw-vector 诊断；通过/失败结论统一来自上面的只读 precheck。
+        void'(compare_arch_exception(
+            expected_exception, actual.exception_vec, 1'b0,
+            raw_exception_match_actual, cause_exception_match_actual));
+        void'(compare_arch_exception(
+            expected_exception, terminal_exception, 1'b0,
+            raw_exception_match_terminal, cause_exception_match_terminal));
         if ((!raw_exception_match_actual || !raw_exception_match_terminal) &&
             cause_exception_match_actual && cause_exception_match_terminal) begin
             `uvm_info("RM_LS_EXCEPTION_DIAG",
@@ -568,10 +622,13 @@ class rm_ls_model_t;
                                 select_arch_exception_cause(actual.exception_vec, 1'b0)),
                       UVM_LOW)
         end
-        if (expected_exception != '0)
+        if (any_exception) begin
             rec.compare_pass = !actual.data_valid;
-        else
+        end else begin
+            if (!build_load_expected(item, expected, expected_exception)) return 0;
+            rec.expected_data = expected;
             rec.compare_pass = actual.data_valid && (actual.data === expected);
+        end
         rec.error_code = rec.compare_pass ? RM_LS_ERR_NONE : RM_LS_ERR_LOAD_MISMATCH;
         rec.detail = rec.compare_pass ? "Load match" : "Load data/data_valid mismatch";
         if (!rec.compare_pass) set_error(rec.error_code, rec.detail);

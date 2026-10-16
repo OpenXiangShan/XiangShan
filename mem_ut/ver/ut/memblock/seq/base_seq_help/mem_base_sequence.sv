@@ -58,6 +58,59 @@ class mem_access_base_sequence extends uvm_sequence;
         bit [9:0]            source;
     } l2_d_error_pending_record_t;
 
+    localparam int unsigned UNCACHE_D_ERROR_MAX_OWNERS = 16;
+
+    typedef enum bit [1:0] {
+        UNCACHE_D_ERROR_QUERY_MISSING   = 2'd0,
+        UNCACHE_D_ERROR_QUERY_NOT_READY = 2'd1,
+        UNCACHE_D_ERROR_QUERY_READY     = 2'd2
+    } uncache_d_error_query_state_e;
+
+    // 中文注释：Uncache Load owner 在真实 TL A.fire 时冻结。UID+dynamic_epoch
+    // 是主身份，ROB/LQ 是一致性交叉检查，uncache_lq_slot 仅用于诊断物理 entry。
+    // redirect 后该快照保持旧实例，不再查询当前 active map。
+    typedef struct packed {
+        bit                  valid;
+        memblock_uid_t       uid;
+        int unsigned         dynamic_epoch;
+        bit                  rob_flag;
+        bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value;
+        bit                  lq_flag;
+        bit [MEMBLOCK_LQ_VALUE_W-1:0] lq_value;
+        bit [3:0]            uncache_lq_slot;
+    } uncache_d_error_owner_t;
+
+    // 中文注释：每条记录对应一个不可变的 source generation。A.fire 建立
+    // pending，D.fire 填 d_sample 后追加到每个 owner 的完成历史；clean 也必须记录。
+    typedef struct {
+        bit                         valid;
+        bit                         is_load;
+        bit [3:0]                   source;
+        longint unsigned            generation;
+        mem_addr_t                  address;
+        bit [2:0]                   size;
+        longint unsigned            a_sample;
+        longint unsigned            d_sample;
+        bit                         denied;
+        bit                         corrupt;
+        int unsigned                owner_count;
+        uncache_d_error_owner_t     owners[UNCACHE_D_ERROR_MAX_OWNERS];
+    } uncache_d_error_record_t;
+
+    typedef struct packed {
+        bit                         valid;
+        bit [3:0]                   source;
+        longint unsigned            generation;
+        mem_addr_t                  address;
+        bit [2:0]                   size;
+        longint unsigned            a_sample;
+        uncache_d_error_owner_t     owner;
+    } uncache_d_error_pending_ref_t;
+
+    typedef bit [63:0] uncache_d_error_owner_key_t;
+    typedef uncache_d_error_record_t uncache_d_error_record_q_t[$];
+    typedef uncache_d_error_pending_ref_t uncache_d_error_pending_q_t[$];
+
     typedef struct {
         mem_addr_t                addr;
         mem_line_mask_t           byte_mask;
@@ -129,6 +182,15 @@ class mem_access_base_sequence extends uvm_sequence;
     static longint unsigned             l2_d_error_next_generation = 1;
     static bit                          l2_d_error_ledger_ready = 1'b0;
     static bit                          l2_d_error_sticky_enabled = 1'b0;
+    // 中文注释：Uncache ledger 只由 testcase shared-memory lifecycle 全量清空。
+    // source_active/pending 可在 DUT reset 时中止，source generation 仍单调递增；
+    // 完成历史按 UID+dynamic_epoch 索引，RM 查询不会扫描完整历史。
+    static bit                          uncache_d_error_ledger_ready = 1'b0;
+    static longint unsigned             uncache_d_error_next_generation[16];
+    static bit [15:0]                   uncache_d_error_source_active;
+    static longint unsigned             uncache_d_error_active_generation[16];
+    static uncache_d_error_record_q_t   uncache_d_error_history_by_owner[uncache_d_error_owner_key_t];
+    static uncache_d_error_pending_q_t  uncache_d_error_pending_by_owner[uncache_d_error_owner_key_t];
 
     `uvm_object_utils(mem_access_base_sequence)
 
@@ -173,11 +235,51 @@ class mem_access_base_sequence extends uvm_sequence;
         input bit [9:0]         source,
         input longint unsigned  reservation_generation
     );
+    extern static function longint unsigned current_l2_d_error_sample(
+        input string caller
+    );
+    extern static function void commit_l2_d_error_on_current_grant_d_fire(
+        input mem_addr_t        line_addr,
+        input bit               denied,
+        input bit               corrupt,
+        input bit [9:0]         source,
+        input longint unsigned  reservation_generation
+    );
     extern static function bit query_l2_d_error_at_sample(
         input  mem_addr_t            line_addr,
         input  longint unsigned      sample,
         output bit                   sticky_enabled,
         output l2_d_error_line_record_t record
+    );
+    extern static function uncache_d_error_owner_key_t make_uncache_d_error_owner_key(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch
+    );
+    extern static function void reset_uncache_d_error_ledger();
+    extern static function void abort_uncache_d_error_pending(input string reason);
+    extern static function bit begin_uncache_d_error_record(
+        input bit                     is_load,
+        input bit [3:0]               source,
+        input mem_addr_t              address,
+        input bit [2:0]               size,
+        input longint unsigned        a_sample,
+        input int unsigned            owner_count,
+        input uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS],
+        output longint unsigned       generation
+    );
+    extern static function void commit_uncache_d_error_record(
+        input uncache_d_error_record_t record,
+        input longint unsigned         d_sample
+    );
+    extern static function bit query_uncache_d_error_for_owner(
+        input uncache_d_error_owner_t owner,
+        input mem_addr_t              paddr,
+        input int unsigned            size_bytes,
+        input longint unsigned        sample,
+        output uncache_d_error_query_state_e query_state,
+        output uncache_d_error_record_t      record,
+        output bit                           identity_mismatch,
+        output bit                           address_mismatch
     );
     extern static function void clear_dcache_observer_state();
     extern static function bit claim_dcache_observer_owner();
@@ -361,6 +463,14 @@ function void mem_access_base_sequence::clear_shared_memory_state();
     l2_d_error_next_generation  = 1;
     l2_d_error_ledger_ready     = 1'b0;
     l2_d_error_sticky_enabled   = 1'b0;
+    uncache_d_error_history_by_owner.delete();
+    uncache_d_error_pending_by_owner.delete();
+    uncache_d_error_source_active = '0;
+    uncache_d_error_ledger_ready = 1'b0;
+    foreach (uncache_d_error_next_generation[source]) begin
+        uncache_d_error_next_generation[source] = 1;
+        uncache_d_error_active_generation[source] = 0;
+    end
     dcache_write_batch.delete();
     uncache_write_batch.delete();
     shared_mem_sample_valid          = 1'b0;
@@ -380,6 +490,7 @@ function void mem_access_base_sequence::initialize_shared_memory_state(
         init_main_mem_range(base, capacity);
     end
     reset_l2_d_error_ledger(seq_csr_common::get_l2_d_error_sticky_en());
+    reset_uncache_d_error_ledger();
     shared_mem_lifecycle_initialized = 1'b1;
 endfunction:initialize_shared_memory_state
 
@@ -445,6 +556,11 @@ function bit mem_access_base_sequence::prepare_l2_d_error_for_grant(
         denied                 = live_record.state == L2_D_ERROR_DENIED;
         corrupt                = 1'b1;
         reservation_generation = live_record.generation;
+        uvm_pkg::uvm_report_info(
+            "L2_D_ERROR_RESERVE",
+            $sformatf("reuse live line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d",
+                      line_addr, source, accept_sample, live_record.state,
+                      live_record.generation), UVM_LOW);
         return 1'b1;
     end
     if (l2_d_error_pending_by_line.exists(line_key)) begin
@@ -462,6 +578,14 @@ function bit mem_access_base_sequence::prepare_l2_d_error_for_grant(
         denied                 = pending_record.proposed_state == L2_D_ERROR_DENIED;
         corrupt                = 1'b1;
         reservation_generation = pending_record.generation;
+        uvm_pkg::uvm_report_info(
+            "L2_D_ERROR_RESERVE",
+            $sformatf("reuse pending line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d owner_source=%0d owner_sample=%0d",
+                      line_addr, source, accept_sample,
+                      pending_record.proposed_state,
+                      pending_record.generation,
+                      pending_record.source,
+                      pending_record.accept_sample), UVM_LOW);
         return 1'b1;
     end
     if (!candidate_valid) begin
@@ -492,6 +616,12 @@ function bit mem_access_base_sequence::prepare_l2_d_error_for_grant(
     l2_d_error_next_generation++;
     l2_d_error_pending_by_line[line_key] = pending_record;
     reservation_generation = pending_record.generation;
+    uvm_pkg::uvm_report_info(
+        "L2_D_ERROR_RESERVE",
+        $sformatf("create pending line=0x%0h source=%0d accept_sample=%0d state=%0d generation=%0d",
+                  line_addr, source, accept_sample,
+                  pending_record.proposed_state,
+                  pending_record.generation), UVM_LOW);
     return 1'b1;
 endfunction:prepare_l2_d_error_for_grant
 
@@ -545,6 +675,12 @@ function void mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
                           pending_record.proposed_state));
         end
     end
+    uvm_pkg::uvm_report_info(
+        "L2_D_ERROR_COMMIT",
+        $sformatf("begin line=0x%0h source=%0d sample=%0d state=%0d response_generation=%0d pending=%0d pending_generation=%0d",
+                  line_addr, source, sample, proposed_state,
+                  reservation_generation, pending_valid,
+                  pending_record.generation), UVM_LOW);
     if (!l2_d_error_live_by_line.exists(line_key)) begin
         if (pending_valid) begin
             activation_generation = pending_record.generation;
@@ -597,7 +733,48 @@ function void mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
     if (pending_valid) begin
         l2_d_error_pending_by_line.delete(line_key);
     end
+    live_record = l2_d_error_live_by_line[line_key];
+    uvm_pkg::uvm_report_info(
+        "L2_D_ERROR_COMMIT",
+        $sformatf("complete line=0x%0h source=%0d sample=%0d state=%0d generation=%0d activation=%0d/%0d",
+                  line_addr, source, sample, live_record.state,
+                  live_record.generation,
+                  live_record.corrupt_activation_sample,
+                  live_record.denied_activation_sample), UVM_LOW);
 endfunction:commit_l2_d_error_on_grant_d_fire
+
+// DCache response generation and RM writeback observation must use the same
+// monotonic DUT-sample domain.  Simulation time is deliberately not accepted
+// here because it is not comparable with the RM's sample_seq provenance.
+function longint unsigned mem_access_base_sequence::current_l2_d_error_sample(
+    input string caller
+);
+    longint unsigned sample;
+
+    sample = memblock_sync_pkg::peek_current_dut_global_sample();
+    if (sample == 0) begin
+        report_l2_d_error_fatal(
+            $sformatf("%s observed before DUT global sample initialization", caller));
+    end
+    return sample;
+endfunction:current_l2_d_error_sample
+
+function void mem_access_base_sequence::commit_l2_d_error_on_current_grant_d_fire(
+    input mem_addr_t        line_addr,
+    input bit               denied,
+    input bit               corrupt,
+    input bit [9:0]         source,
+    input longint unsigned  reservation_generation
+);
+    commit_l2_d_error_on_grant_d_fire(
+        line_addr,
+        denied,
+        corrupt,
+        current_l2_d_error_sample("GrantData D.fire"),
+        source,
+        reservation_generation
+    );
+endfunction:commit_l2_d_error_on_current_grant_d_fire
 
 // 抽象职责：为 RM 提供一条 physical line 在指定 sample 的不可变值型错误视图。
 // 查询不创建 backing line、不消费 pending，也不会因后续 CBO/Probe 改变历史结果。
@@ -641,6 +818,287 @@ function bit mem_access_base_sequence::query_l2_d_error_at_sample(
     end
     return 1'b1;
 endfunction:query_l2_d_error_at_sample
+
+function mem_access_base_sequence::uncache_d_error_owner_key_t
+mem_access_base_sequence::make_uncache_d_error_owner_key(
+    input memblock_uid_t uid,
+    input int unsigned dynamic_epoch
+);
+    return {dynamic_epoch[31:0], uid[31:0]};
+endfunction:make_uncache_d_error_owner_key
+
+// 抽象职责：在 testcase lifecycle 边界清空 Uncache pending/history，并把每个
+// 4-bit source 的下一代次恢复为1。runtime reset不得调用该全量清空入口。
+function void mem_access_base_sequence::reset_uncache_d_error_ledger();
+    uncache_d_error_history_by_owner.delete();
+    uncache_d_error_pending_by_owner.delete();
+    uncache_d_error_source_active = '0;
+    foreach (uncache_d_error_next_generation[source]) begin
+        uncache_d_error_next_generation[source] = 1;
+        uncache_d_error_active_generation[source] = 0;
+    end
+    uncache_d_error_ledger_ready = 1'b1;
+endfunction:reset_uncache_d_error_ledger
+
+// 抽象职责：DUT reset 会丢弃尚未完成的协议事务，因此只中止 source/pending，
+// 保留已经D.fire的稳定历史和单调generation，避免把旧代次重新解释为新事务。
+function void mem_access_base_sequence::abort_uncache_d_error_pending(input string reason);
+    if (!uncache_d_error_ledger_ready) begin
+        return;
+    end
+    if (uncache_d_error_source_active != '0 ||
+        uncache_d_error_pending_by_owner.num() != 0) begin
+        uvm_pkg::uvm_report_info(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("abort pending on %s source_mask=0x%04h owner_keys=%0d",
+                      reason, uncache_d_error_source_active,
+                      uncache_d_error_pending_by_owner.num()),
+            UVM_LOW);
+    end
+    uncache_d_error_source_active = '0;
+    foreach (uncache_d_error_active_generation[source]) begin
+        uncache_d_error_active_generation[source] = 0;
+    end
+    uncache_d_error_pending_by_owner.delete();
+endfunction:abort_uncache_d_error_pending
+
+// 抽象职责：在真实TL A.fire时为source分配新generation，并为冻结owner发布
+// pending reference。该函数不读取active状态，也不接受地址推导owner。
+function bit mem_access_base_sequence::begin_uncache_d_error_record(
+    input bit                     is_load,
+    input bit [3:0]               source,
+    input mem_addr_t              address,
+    input bit [2:0]               size,
+    input longint unsigned        a_sample,
+    input int unsigned            owner_count,
+    input uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS],
+    output longint unsigned       generation
+);
+    uncache_d_error_pending_ref_t pending_ref;
+    uncache_d_error_owner_key_t owner_key;
+
+    generation = 0;
+    if (!uncache_d_error_ledger_ready || a_sample == 0) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("A.fire before ledger/sample initialization source=%0d sample=%0d",
+                      source, a_sample), UVM_NONE);
+        return 1'b0;
+    end
+    if (uncache_d_error_source_active[source]) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("source reused before D.fire source=%0d active_generation=%0d",
+                      source, uncache_d_error_active_generation[source]), UVM_NONE);
+        return 1'b0;
+    end
+    if (is_load && (owner_count == 0 || owner_count > UNCACHE_D_ERROR_MAX_OWNERS)) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("Load A.fire source=%0d has invalid owner_count=%0d",
+                      source, owner_count), UVM_NONE);
+        return 1'b0;
+    end
+    generation = uncache_d_error_next_generation[source];
+    if (generation == 0) begin
+        uvm_pkg::uvm_report_fatal("UNCACHE_D_ERROR_LEDGER",
+                                  "source generation wrapped to zero", UVM_NONE);
+        return 1'b0;
+    end
+    uncache_d_error_next_generation[source]++;
+    uncache_d_error_source_active[source] = 1'b1;
+    uncache_d_error_active_generation[source] = generation;
+
+    for (int unsigned idx = 0; idx < owner_count; idx++) begin
+        if (!owners[idx].valid) begin
+            uvm_pkg::uvm_report_fatal(
+                "UNCACHE_D_ERROR_LEDGER",
+                $sformatf("source=%0d generation=%0d owner[%0d] invalid",
+                          source, generation, idx), UVM_NONE);
+            return 1'b0;
+        end
+        owner_key = make_uncache_d_error_owner_key(
+            owners[idx].uid, owners[idx].dynamic_epoch);
+        pending_ref = '{default:'0};
+        pending_ref.valid      = 1'b1;
+        pending_ref.source     = source;
+        pending_ref.generation = generation;
+        pending_ref.address    = address;
+        pending_ref.size       = size;
+        pending_ref.a_sample   = a_sample;
+        pending_ref.owner      = owners[idx];
+        uncache_d_error_pending_by_owner[owner_key].push_back(pending_ref);
+    end
+    return 1'b1;
+endfunction:begin_uncache_d_error_record
+
+// 抽象职责：在D.fire时按source+generation精确消费pending，并把包括clean在内
+// 的固定payload追加到每个A.fire owner的历史。redirect之后不重新解析owner。
+function void mem_access_base_sequence::commit_uncache_d_error_record(
+    input uncache_d_error_record_t record,
+    input longint unsigned         d_sample
+);
+    uncache_d_error_record_t completed_record;
+    uncache_d_error_owner_key_t owner_key;
+    bit pending_found;
+
+    if (!uncache_d_error_ledger_ready || !record.valid || d_sample == 0) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("invalid D.fire record valid=%0d sample=%0d", record.valid, d_sample),
+            UVM_NONE);
+        return;
+    end
+    if (!uncache_d_error_source_active[record.source] ||
+        uncache_d_error_active_generation[record.source] != record.generation) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("D.fire source/generation mismatch source=%0d record_gen=%0d active=%0d/%0d",
+                      record.source, record.generation,
+                      uncache_d_error_source_active[record.source],
+                      uncache_d_error_active_generation[record.source]), UVM_NONE);
+        return;
+    end
+    if (d_sample < record.a_sample) begin
+        uvm_pkg::uvm_report_fatal(
+            "UNCACHE_D_ERROR_LEDGER",
+            $sformatf("D.fire precedes A.fire source=%0d generation=%0d A/D=%0d/%0d",
+                      record.source, record.generation, record.a_sample, d_sample), UVM_NONE);
+        return;
+    end
+
+    completed_record = record;
+    completed_record.d_sample = d_sample;
+    for (int unsigned owner_idx = 0; owner_idx < record.owner_count; owner_idx++) begin
+        owner_key = make_uncache_d_error_owner_key(
+            record.owners[owner_idx].uid,
+            record.owners[owner_idx].dynamic_epoch);
+        pending_found = 1'b0;
+        if (uncache_d_error_pending_by_owner.exists(owner_key)) begin
+            for (int pending_idx = 0;
+                 pending_idx < uncache_d_error_pending_by_owner[owner_key].size();
+                 pending_idx++) begin
+                if (uncache_d_error_pending_by_owner[owner_key][pending_idx].source == record.source &&
+                    uncache_d_error_pending_by_owner[owner_key][pending_idx].generation == record.generation) begin
+                    uncache_d_error_pending_by_owner[owner_key].delete(pending_idx);
+                    pending_found = 1'b1;
+                    break;
+                end
+            end
+            if (uncache_d_error_pending_by_owner[owner_key].size() == 0) begin
+                uncache_d_error_pending_by_owner.delete(owner_key);
+            end
+        end
+        if (!pending_found) begin
+            uvm_pkg::uvm_report_fatal(
+                "UNCACHE_D_ERROR_LEDGER",
+                $sformatf("D.fire missing pending owner uid=%0d epoch=%0d source=%0d generation=%0d",
+                          record.owners[owner_idx].uid,
+                          record.owners[owner_idx].dynamic_epoch,
+                          record.source, record.generation), UVM_NONE);
+            return;
+        end
+        uncache_d_error_history_by_owner[owner_key].push_back(completed_record);
+    end
+    uncache_d_error_source_active[record.source] = 1'b0;
+    uncache_d_error_active_generation[record.source] = 0;
+endfunction:commit_uncache_d_error_record
+
+// 抽象职责：按冻结的动态owner读取指定sample已经完成的Uncache响应。查询只扫描
+// 一个UID+epoch的小队列；pending/future completion返回NOT_READY，缺记录返回MISSING。
+function bit mem_access_base_sequence::query_uncache_d_error_for_owner(
+    input uncache_d_error_owner_t owner,
+    input mem_addr_t              paddr,
+    input int unsigned            size_bytes,
+    input longint unsigned        sample,
+    output uncache_d_error_query_state_e query_state,
+    output uncache_d_error_record_t      record,
+    output bit                           identity_mismatch,
+    output bit                           address_mismatch
+);
+    uncache_d_error_owner_key_t owner_key;
+    longint unsigned record_bytes;
+    longint unsigned request_last;
+    longint unsigned record_last;
+    bit ready_found;
+    bit not_ready_found;
+    bit record_owner_found;
+
+    query_state = UNCACHE_D_ERROR_QUERY_MISSING;
+    record = '{default:'0};
+    identity_mismatch = 1'b0;
+    address_mismatch = 1'b0;
+    if (!uncache_d_error_ledger_ready || !owner.valid || sample == 0 ||
+        size_bytes == 0) begin
+        return 1'b0;
+    end
+    owner_key = make_uncache_d_error_owner_key(owner.uid, owner.dynamic_epoch);
+    ready_found = 1'b0;
+    not_ready_found = 1'b0;
+    request_last = paddr + size_bytes - 1;
+
+    if (uncache_d_error_history_by_owner.exists(owner_key)) begin
+        foreach (uncache_d_error_history_by_owner[owner_key][record_idx]) begin
+            uncache_d_error_record_t candidate;
+            candidate = uncache_d_error_history_by_owner[owner_key][record_idx];
+            record_owner_found = 1'b0;
+            for (int unsigned idx = 0; idx < candidate.owner_count; idx++) begin
+                if (candidate.owners[idx].uid == owner.uid &&
+                    candidate.owners[idx].dynamic_epoch == owner.dynamic_epoch) begin
+                    record_owner_found = 1'b1;
+                    if (candidate.owners[idx].rob_flag != owner.rob_flag ||
+                        candidate.owners[idx].rob_value != owner.rob_value ||
+                        candidate.owners[idx].lq_flag != owner.lq_flag ||
+                        candidate.owners[idx].lq_value != owner.lq_value) begin
+                        identity_mismatch = 1'b1;
+                        record_owner_found = 1'b0;
+                    end
+                    break;
+                end
+            end
+            if (!record_owner_found) begin
+                continue;
+            end
+            record_bytes = 64'd1 << candidate.size;
+            record_last = candidate.address + record_bytes - 1;
+            if (paddr < candidate.address || request_last > record_last) begin
+                address_mismatch = 1'b1;
+                continue;
+            end
+            if (candidate.d_sample > sample) begin
+                if (candidate.a_sample <= sample) not_ready_found = 1'b1;
+                continue;
+            end
+            if (!ready_found) begin
+                record = candidate;
+                ready_found = 1'b1;
+            end else begin
+                record.denied |= candidate.denied;
+                record.corrupt |= candidate.corrupt;
+                if (candidate.d_sample > record.d_sample) begin
+                    record.source = candidate.source;
+                    record.generation = candidate.generation;
+                    record.a_sample = candidate.a_sample;
+                    record.d_sample = candidate.d_sample;
+                end
+            end
+        end
+    end
+    if (ready_found) begin
+        query_state = UNCACHE_D_ERROR_QUERY_READY;
+        return 1'b1;
+    end
+    if (uncache_d_error_pending_by_owner.exists(owner_key)) begin
+        foreach (uncache_d_error_pending_by_owner[owner_key][pending_idx]) begin
+            if (uncache_d_error_pending_by_owner[owner_key][pending_idx].a_sample <= sample) begin
+                not_ready_found = 1'b1;
+            end
+        end
+    end
+    query_state = not_ready_found ? UNCACHE_D_ERROR_QUERY_NOT_READY :
+                                    UNCACHE_D_ERROR_QUERY_MISSING;
+    return 1'b1;
+endfunction:query_uncache_d_error_for_owner
 
 function void mem_access_base_sequence::clear_dcache_observer_state();
     // 中文注释：生命周期初始化清除旧 owner 的旁路快照；不触碰 DCache sequence 私有 map。
@@ -3143,7 +3601,7 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             if (seq_csr_common::get_l2_d_error_sticky_en()) begin
                 if (!prepare_l2_d_error_for_grant(
                         line_addr,
-                        $time,
+                        current_l2_d_error_sample("AcquireBlock reservation"),
                         {4'b0, response_record.source},
                         1'b0,
                         1'b0,
@@ -3168,7 +3626,7 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                         );
                     if (!prepare_l2_d_error_for_grant(
                             line_addr,
-                            $time,
+                            current_l2_d_error_sample("AcquireBlock reservation candidate"),
                             {4'b0, response_record.source},
                             1'b1,
                             l2_d_error_candidate_denied,
@@ -3363,11 +3821,10 @@ function void dcache_mem__access_base_sequence::process_d_fire();
     completed_record = current_d_record;
     case (completed_record.kind)
         DCACHE_PENDING_D_GRANT_DATA: begin
-            commit_l2_d_error_on_grant_d_fire(
+            commit_l2_d_error_on_current_grant_d_fire(
                 completed_record.line_addr,
                 completed_record.denied,
                 completed_record.corrupt,
-                $time,
                 {4'b0, completed_record.source},
                 completed_record.l2_d_error_reservation_generation
             );
@@ -4343,6 +4800,7 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     int unsigned default_pre_pkt_gap;
     int unsigned default_post_pkt_gap;
     virtual sbuffer_agent_agent_interface sbuffer_vif;
+    virtual io_mem_to_ooo_ctrl_agent_agent_interface uncache_owner_vif;
 
     localparam bit [3:0] UNCACHE_A_OPCODE_PUT_FULL      = 4'd0;
     localparam bit [3:0] UNCACHE_A_OPCODE_PUT_PARTIAL   = 4'd1;
@@ -4367,6 +4825,10 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         bit                     denied;
         bit                     corrupt;
         bit [63:0]              data;
+        longint unsigned        a_sample;
+        longint unsigned        generation;
+        int unsigned            owner_count;
+        uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS];
     } uncache_response_record_t;
 
     // 中文注释：Uncache A request 的 pending handshake owner。
@@ -4391,6 +4853,13 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     bit                       d_hold_timeout_reported;
     int unsigned              stop_wait_cycles;
     bit                       stop_drain_timeout_reported;
+    bit [15:0]                uncache_source_outstanding;
+    longint unsigned          uncache_source_accept_cycle[16];
+    bit [47:0]                uncache_source_address[16];
+    longint unsigned          uncache_source_a_fire_count[16];
+    longint unsigned          uncache_source_d_fire_count[16];
+    int unsigned              uncache_full_stall_cycles;
+    int unsigned              uncache_source_diag_cycles;
     sbuffer_agent_agent_xaction last_cycle_xact;
     bit last_cycle_valid;
 
@@ -4466,10 +4935,25 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         input sbuffer_agent_agent_xaction req_xact,
         input longint unsigned            accept_cycle
     );
+    extern virtual function void capture_uncache_load_owners(
+        input bit [3:0] source,
+        output int unsigned owner_count,
+        output uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS]
+    );
     extern virtual function void build_current_uncache_d_xaction(
         inout sbuffer_agent_agent_xaction rsp_xact
     );
     extern virtual function void process_uncache_d_fire();
+    extern virtual function void note_uncache_source_accept(
+        input bit [3:0] source,
+        input bit [47:0] address,
+        input longint unsigned accept_cycle
+    );
+    extern virtual function void note_uncache_source_complete(
+        input bit [3:0] source,
+        input longint unsigned complete_cycle
+    );
+    extern virtual function void service_uncache_source_full_watchdog();
     extern virtual function void service_uncache_d_hold_watchdog(input bit d_fire);
     extern virtual task body();
 
@@ -4484,6 +4968,7 @@ function sbuffer_mem_access_base_sequence::new(string name = "sbuffer_mem_access
 endfunction:new
 
 function void sbuffer_mem_access_base_sequence::clear_runtime_state();
+    abort_uncache_d_error_pending("SBuffer responder reset");
     a_accept_armed = 1'b0;
     armed_a_req_xact = null;
     pre_stop_a_snapshot_valid = 1'b0;
@@ -4495,11 +4980,113 @@ function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     uncache_rsp_timer_due_cycle = 0;
     d_hold_cycles              = 0;
     d_hold_timeout_reported    = 1'b0;
+    uncache_source_outstanding = '0;
+    uncache_full_stall_cycles = 0;
+    uncache_source_diag_cycles = 0;
+    foreach (uncache_source_accept_cycle[idx]) begin
+        uncache_source_accept_cycle[idx] = 0;
+        uncache_source_address[idx] = '0;
+        uncache_source_a_fire_count[idx] = 0;
+        uncache_source_d_fire_count[idx] = 0;
+    end
     last_cycle_xact = null;
     last_cycle_valid = 1'b0;
     sbuffer_stop_prepare_state_valid = 1'b0;
     sbuffer_stop_prepare_state       = '0;
 endfunction:clear_runtime_state
+
+// 抽象职责：在外部TL A.fire边界按DUT保存的slaveId找到所有消费该source的
+// LoadQueueUncache entry，并把active ROB owner冻结为UID/epoch/ROB/LQ快照。
+function void sbuffer_mem_access_base_sequence::capture_uncache_load_owners(
+    input bit [3:0] source,
+    output int unsigned owner_count,
+    output uncache_d_error_owner_t owners[UNCACHE_D_ERROR_MAX_OWNERS]
+);
+    common_data_transaction data;
+    status_transaction status;
+    main_control_transaction main_tr;
+    memblock_rob_key_t rob_key;
+    memblock_uid_t uid;
+
+    owner_count = 0;
+    foreach (owners[idx]) owners[idx] = '{default:'0};
+    if (uncache_owner_vif == null) begin
+        `uvm_fatal(get_type_name(), "Uncache owner VIF is not configured")
+    end
+    data = common_data_transaction::get();
+    if (data == null) begin
+        `uvm_fatal(get_type_name(), "common_data owner unavailable for Uncache A.fire")
+    end
+    if ($isunknown({uncache_owner_vif.mon_cb.uncache_lq_req_valid,
+                    uncache_owner_vif.mon_cb.uncache_lq_slave_valid})) begin
+        `uvm_fatal(get_type_name(), "Uncache owner valid masks contain X/Z at A.fire")
+    end
+    for (int unsigned slot = 0; slot < UNCACHE_D_ERROR_MAX_OWNERS; slot++) begin
+        if (uncache_owner_vif.mon_cb.uncache_lq_req_valid[slot] !== 1'b1 ||
+            uncache_owner_vif.mon_cb.uncache_lq_slave_valid[slot] !== 1'b1) begin
+            continue;
+        end
+        if ($isunknown({uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot],
+                        uncache_owner_vif.mon_cb.uncache_lq_rob_flag[slot],
+                        uncache_owner_vif.mon_cb.uncache_lq_rob_value[slot]})) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("active Uncache owner slot=%0d contains X/Z", slot))
+        end
+        if (uncache_owner_vif.mon_cb.uncache_lq_slave_id[slot] != source) begin
+            continue;
+        end
+        rob_key.flag = uncache_owner_vif.mon_cb.uncache_lq_rob_flag[slot];
+        rob_key.value = uncache_owner_vif.mon_cb.uncache_lq_rob_value[slot];
+        if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("A.fire source=%0d slot=%0d ROB=%0d/%0d has no active UID owner",
+                                 source, slot, rob_key.flag, rob_key.value))
+        end
+        status = data.get_status(uid);
+        main_tr = data.get_main_transaction(uid);
+        // A.fire可能晚于框架LQ active-map的释放，但只要完整ROB仍唯一映射到
+        // active UID，且main/status保存的ROB/LQ身份一致，就仍是同一动态owner。
+        // active_lq_mapped只描述当前反查map生命周期，不能否定DUT中尚未完成的
+        // LoadQueueUncache slot；redirect/source复用仍由UID+epoch+ROB/LQ冻结值隔离。
+        if (!status.active ||
+            main_tr.robIdx_flag != rob_key.flag ||
+            main_tr.robIdx_value != rob_key.value ||
+            status.lqIdx_flag != main_tr.lqIdx_flag ||
+            status.lqIdx_value != main_tr.lqIdx_value) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("A.fire owner inconsistent source=%0d slot=%0d uid=%0d epoch=%0d active/lq=%0d/%0d ROB(dut/main)=%0d/%0d:%0d/%0d LQ(status/main)=%0d/%0d:%0d/%0d",
+                                 source, slot, uid, status.dynamic_epoch,
+                                 status.active, status.active_lq_mapped,
+                                 rob_key.flag, rob_key.value,
+                                 main_tr.robIdx_flag, main_tr.robIdx_value,
+                                 status.lqIdx_flag, status.lqIdx_value,
+                                 main_tr.lqIdx_flag, main_tr.lqIdx_value))
+        end
+        if (!status.active_lq_mapped) begin
+            `uvm_info("UNCACHE_D_ERROR_LEDGER",
+                      $sformatf("A.fire freezes post-LQ-map owner source=%0d slot=%0d uid=%0d epoch=%0d ROB=%0d/%0d LQ=%0d/%0d",
+                                source, slot, uid, status.dynamic_epoch,
+                                rob_key.flag, rob_key.value,
+                                status.lqIdx_flag, status.lqIdx_value),
+                      UVM_LOW)
+        end
+        owners[owner_count] = '{
+            valid: 1'b1,
+            uid: uid,
+            dynamic_epoch: status.dynamic_epoch,
+            rob_flag: rob_key.flag,
+            rob_value: rob_key.value,
+            lq_flag: status.lqIdx_flag,
+            lq_value: status.lqIdx_value,
+            uncache_lq_slot: slot[3:0]
+        };
+        owner_count++;
+    end
+    if (owner_count == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Load A.fire source=%0d has no LoadQueueUncache slave owner", source))
+    end
+endfunction:capture_uncache_load_owners
 
 // 抽象职责：采样 Uncache responder 的有限 lifecycle 摘要，供 stop-prepare 用前后拍
 // 比较识别真实进展。它不读取 shared backing memory，也不把稳定 pending state 当作 progress。
@@ -4893,6 +5480,12 @@ task sbuffer_mem_access_base_sequence::create_uncache_response_record(
     response_record.source         = req_xact.auto_inner_buffers_out_a_bits_source;
     response_record.address        = req_xact.auto_inner_buffers_out_a_bits_address;
     response_record.data           = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? '0 : load_data;
+    response_record.a_sample       = memblock_sync_pkg::peek_current_dut_global_sample();
+    if (response_kind == UNCACHE_RESPONSE_LOAD_DATA) begin
+        capture_uncache_load_owners(response_record.source,
+                                    response_record.owner_count,
+                                    response_record.owners);
+    end
     apply_uncache_d_error_injection(
         response_kind,
         denied,
@@ -4900,8 +5493,145 @@ task sbuffer_mem_access_base_sequence::create_uncache_response_record(
         response_record.denied,
         response_record.corrupt
     );
+    if (!begin_uncache_d_error_record(
+            response_kind == UNCACHE_RESPONSE_LOAD_DATA,
+            response_record.source,
+            response_record.address,
+            response_record.size,
+            response_record.a_sample,
+            response_record.owner_count,
+            response_record.owners,
+            response_record.generation)) begin
+        `uvm_fatal(get_type_name(), "failed to begin Uncache D-error provenance record")
+    end
+    note_uncache_source_accept(response_record.source,
+                               response_record.address,
+                               accept_cycle);
     uncache_rsp_q.push_back(response_record);
 endtask:create_uncache_response_record
+
+function void sbuffer_mem_access_base_sequence::note_uncache_source_accept(
+    input bit [3:0] source,
+    input bit [47:0] address,
+    input longint unsigned accept_cycle
+);
+    int unsigned outstanding_count;
+
+    if (uncache_source_outstanding[source]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Uncache source reused before D completion source=%0d old_addr=0x%0h old_cycle=%0d new_addr=0x%0h new_cycle=%0d",
+                             source,
+                             uncache_source_address[source],
+                             uncache_source_accept_cycle[source],
+                             address,
+                             accept_cycle))
+    end
+    uncache_source_outstanding[source] = 1'b1;
+    uncache_source_accept_cycle[source] = accept_cycle;
+    uncache_source_address[source] = address;
+    uncache_source_a_fire_count[source]++;
+    outstanding_count = $countones(uncache_source_outstanding);
+    `uvm_info("UNCACHE_RESPONDER",
+              $sformatf("A.fire source=%0d addr=0x%0h cycle=%0d outstanding=%0d mask=0x%04h",
+                        source, address, accept_cycle, outstanding_count,
+                        uncache_source_outstanding),
+              UVM_HIGH)
+    if (outstanding_count == MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING) begin
+        `uvm_info("UNCACHE_RESPONDER",
+                  $sformatf("all response owners occupied after A.fire source=%0d cycle=%0d mask=0x%04h",
+                            source, accept_cycle, uncache_source_outstanding),
+                  UVM_LOW)
+    end
+endfunction:note_uncache_source_accept
+
+function void sbuffer_mem_access_base_sequence::note_uncache_source_complete(
+    input bit [3:0] source,
+    input longint unsigned complete_cycle
+);
+    int unsigned outstanding_before;
+
+    if (!uncache_source_outstanding[source]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Uncache D.fire has no accepted source owner source=%0d cycle=%0d",
+                             source, complete_cycle))
+    end
+    outstanding_before = $countones(uncache_source_outstanding);
+    if (complete_cycle < uncache_source_accept_cycle[source]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Uncache D.fire precedes A.fire source=%0d accept=%0d complete=%0d",
+                             source,
+                             uncache_source_accept_cycle[source],
+                             complete_cycle))
+    end
+    `uvm_info("UNCACHE_RESPONDER",
+              $sformatf("D.fire source=%0d addr=0x%0h accept=%0d complete=%0d age=%0d outstanding_before=%0d",
+                        source,
+                        uncache_source_address[source],
+                        uncache_source_accept_cycle[source],
+                        complete_cycle,
+                        complete_cycle - uncache_source_accept_cycle[source],
+                        outstanding_before),
+              UVM_HIGH)
+    uncache_source_outstanding[source] = 1'b0;
+    uncache_source_accept_cycle[source] = 0;
+    uncache_source_address[source] = '0;
+    uncache_source_d_fire_count[source]++;
+    if (outstanding_before == MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING) begin
+        `uvm_info("UNCACHE_RESPONDER",
+                  $sformatf("response owner released by D.fire source=%0d cycle=%0d remaining=0x%04h",
+                            source, complete_cycle,
+                            uncache_source_outstanding),
+                  UVM_LOW)
+    end
+endfunction:note_uncache_source_complete
+
+function void sbuffer_mem_access_base_sequence::service_uncache_source_full_watchdog();
+    string owners;
+    int unsigned outstanding_count;
+
+    outstanding_count = $countones(uncache_source_outstanding);
+    if (outstanding_count == 0) begin
+        uncache_full_stall_cycles = 0;
+        uncache_source_diag_cycles = 0;
+        return;
+    end
+
+    uncache_source_diag_cycles++;
+    if (outstanding_count == MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING) begin
+        uncache_full_stall_cycles++;
+    end
+    if (uncache_source_diag_cycles != 1 &&
+        (uncache_source_diag_cycles % 256) != 0 &&
+        outstanding_count != MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING) begin
+        return;
+    end
+
+    owners = "";
+    for (int unsigned source = 0; source < 16; source++) begin
+        if (!uncache_source_outstanding[source]) begin
+            continue;
+        end
+        owners = $sformatf("%s src%0d=addr0x%0h accept%0d age%0d;",
+                           owners,
+                           source,
+                           uncache_source_address[source],
+                           uncache_source_accept_cycle[source],
+                           service_cycle - uncache_source_accept_cycle[source]);
+    end
+    `uvm_info("UNCACHE_RESPONDER",
+              $sformatf("source owners snapshot count=%0d full_stall=%0d diag_cycle=%0d cycle=%0d queue=%0d current_d=%0d timer=%0d due=%0d mask=0x%04h%s",
+                        outstanding_count,
+                        uncache_full_stall_cycles,
+                        uncache_source_diag_cycles,
+                        service_cycle,
+                        uncache_rsp_q.size(),
+                        current_d_valid,
+                        uncache_rsp_timer_active,
+                        uncache_rsp_timer_due_cycle,
+                        uncache_source_outstanding,
+                        owners),
+              UVM_LOW)
+endfunction:service_uncache_source_full_watchdog
 
 function void sbuffer_mem_access_base_sequence::build_current_uncache_d_xaction(
     inout sbuffer_agent_agent_xaction rsp_xact
@@ -4925,9 +5655,29 @@ function void sbuffer_mem_access_base_sequence::build_current_uncache_d_xaction(
 endfunction:build_current_uncache_d_xaction
 
 function void sbuffer_mem_access_base_sequence::process_uncache_d_fire();
+    uncache_d_error_record_t completed_record;
+
     if (!current_d_valid) begin
         `uvm_fatal(get_type_name(), "Uncache D.fire observed without a current response record")
     end
+    completed_record = '{default:'0};
+    completed_record.valid       = 1'b1;
+    completed_record.is_load     = current_d_record.kind == UNCACHE_RESPONSE_LOAD_DATA;
+    completed_record.source      = current_d_record.source;
+    completed_record.generation  = current_d_record.generation;
+    completed_record.address     = current_d_record.address;
+    completed_record.size        = current_d_record.size;
+    completed_record.a_sample    = current_d_record.a_sample;
+    completed_record.denied      = current_d_record.denied;
+    completed_record.corrupt     = current_d_record.corrupt;
+    completed_record.owner_count = current_d_record.owner_count;
+    foreach (completed_record.owners[idx]) begin
+        completed_record.owners[idx] = current_d_record.owners[idx];
+    end
+    commit_uncache_d_error_record(
+        completed_record,
+        memblock_sync_pkg::peek_current_dut_global_sample());
+    note_uncache_source_complete(current_d_record.source, service_cycle);
     current_d_valid  = 1'b0;
     current_d_record = '{default:'0};
     d_hold_cycles = 0;
@@ -4978,6 +5728,11 @@ task sbuffer_mem_access_base_sequence::body();
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
         !uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, "uvm_test_top.env.u_sbuffer_agent_agent*", "vif", sbuffer_vif)) begin
         `uvm_fatal(get_type_name(), "sbuffer virtual interface is not set for memory access sequence")
+    end
+    if (!uvm_config_db#(virtual io_mem_to_ooo_ctrl_agent_agent_interface)::get(
+            null, "uvm_test_top.env.u_io_mem_to_ooo_ctrl_agent_agent*", "vif",
+            uncache_owner_vif)) begin
+        `uvm_fatal(get_type_name(), "io_mem_to_ooo_ctrl VIF is not set for Uncache owner capture")
     end
     data = common_data_transaction::get();
     if (data == null) begin
@@ -5055,6 +5810,7 @@ task sbuffer_mem_access_base_sequence::body();
                 process_uncache_d_fire();
             end
             service_uncache_d_hold_watchdog(d_fire);
+            service_uncache_source_full_watchdog();
         end
 
         // 中文注释：stop 前若 A.valid 已经可见但本拍没有 fire，冻结完整 payload；

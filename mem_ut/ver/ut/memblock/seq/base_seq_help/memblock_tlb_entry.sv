@@ -357,6 +357,14 @@ class memblock_uid_tlb_record extends uvm_object;
     longint unsigned uid_tlb_first_request_fire_sample_seq;
     longint unsigned pte_update_cycle;
     memblock_tlb_entry payload;
+    // A UID can hit an entry already installed in the DUT L1 TLB and therefore
+    // produce no new L2TLB request/response.  Keep that issue-time evidence
+    // separate from the normal response-completed payload.
+    bit issue_hit_snapshot_valid;
+    memblock_tlb_entry issue_hit_payload;
+    longint unsigned issue_hit_response_token;
+    longint unsigned issue_hit_response_sample_seq;
+    longint unsigned issue_hit_entry_generation;
     bit request_derived_valid;
     bit [43:0] request_s1_resolved_ppn;
     bit [43:0] request_s2_resolved_ppn;
@@ -368,6 +376,8 @@ class memblock_uid_tlb_record extends uvm_object;
         super.new(name);
         csr_snapshot = mmu_csr_runtime_state::type_id::create({name, "_csr_snapshot"});
         payload = memblock_tlb_entry::type_id::create({name, "_payload"});
+        issue_hit_payload = memblock_tlb_entry::type_id::create(
+            {name, "_issue_hit_payload"});
         reset();
     endfunction:new
 
@@ -376,7 +386,12 @@ class memblock_uid_tlb_record extends uvm_object;
         is_hypervisor_inst = 0; lookup_key = '{default:'0};
         if (csr_snapshot == null) csr_snapshot = mmu_csr_runtime_state::type_id::create("csr_snapshot");
         if (payload == null) payload = memblock_tlb_entry::type_id::create("payload");
+        if (issue_hit_payload == null)
+            issue_hit_payload = memblock_tlb_entry::type_id::create("issue_hit_payload");
         csr_snapshot.reset(); payload.reset(); uid_tlb_wait_epoch = 0;
+        issue_hit_payload.reset(); issue_hit_snapshot_valid = 1'b0;
+        issue_hit_response_token = 0; issue_hit_response_sample_seq = 0;
+        issue_hit_entry_generation = 0;
         uid_tlb_wait_state = MEMBLOCK_UID_TLB_CANCELED;
         uid_wait_start_sample_seq = 0; uid_tlb_first_request_fire_sample_seq = 0;
         pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
@@ -402,12 +417,40 @@ class memblock_uid_tlb_record extends uvm_object;
         uid_wait_start_sample_seq = sample_seq_i; uid_tlb_first_request_fire_sample_seq = 0;
         pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
         request_s2_resolved_ppn = '0; request_gvpn = '0;
+        clear_issue_hit_snapshot();
     endfunction:init_context
+
+    function void clear_issue_hit_snapshot();
+        issue_hit_snapshot_valid = 1'b0;
+        issue_hit_response_token = 0;
+        issue_hit_response_sample_seq = 0;
+        issue_hit_entry_generation = 0;
+        if (issue_hit_payload != null) issue_hit_payload.reset();
+    endfunction:clear_issue_hit_snapshot
+
+    function void set_issue_hit_snapshot(
+        input memblock_tlb_entry entry,
+        input longint unsigned response_token_i,
+        input longint unsigned response_sample_seq_i);
+        // response tokens are zero-based.  The snapshot valid bit and sampled
+        // response metadata distinguish token 0 from cleared state.
+        if (entry == null || !is_waiting() ||
+            response_sample_seq_i == 0 || entry.entry_generation == 0) begin
+            `uvm_fatal("UID_TLB_RECORD",
+                       "set_issue_hit_snapshot requires WAITING record and completed response provenance")
+        end
+        issue_hit_payload.copy_from(entry);
+        issue_hit_snapshot_valid = 1'b1;
+        issue_hit_response_token = response_token_i;
+        issue_hit_response_sample_seq = response_sample_seq_i;
+        issue_hit_entry_generation = entry.entry_generation;
+    endfunction:set_issue_hit_snapshot
 
     function void copy_entry_fields(input memblock_tlb_entry entry);
         if (entry == null || !is_waiting()) begin
             `uvm_fatal("UID_TLB_RECORD", "copy_entry_fields requires a WAITING record and entry")
         end
+        clear_issue_hit_snapshot();
         payload.copy_from(entry);
         pte_update_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:copy_entry_fields
@@ -419,6 +462,11 @@ class memblock_uid_tlb_record extends uvm_object;
         if (uid_tlb_first_request_fire_sample_seq == 0) begin
             uid_tlb_first_request_fire_sample_seq = sample_seq_i;
         end
+        clear_issue_hit_snapshot();
+        request_derived_valid = 1'b0;
+        request_s1_resolved_ppn = '0;
+        request_s2_resolved_ppn = '0;
+        request_gvpn = '0;
     endfunction:mark_request_fire
 
     function void mark_completed();
@@ -431,6 +479,11 @@ class memblock_uid_tlb_record extends uvm_object;
         if (is_waiting()) begin
             uid_tlb_wait_state = MEMBLOCK_UID_TLB_CANCELED;
             pte_valid = 1'b0;
+            clear_issue_hit_snapshot();
+            request_derived_valid = 1'b0;
+            request_s1_resolved_ppn = '0;
+            request_s2_resolved_ppn = '0;
+            request_gvpn = '0;
         end
     endfunction:mark_canceled
 

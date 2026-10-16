@@ -302,6 +302,8 @@ typedef bit [MEMBLOCK_DUT_NUM_LS_ELEM_W-1:0] memblock_num_ls_elem_t;
 typedef struct {
     // 从0开始连续terminal_done后的第一个uid；route/redirect/reissue都从这里开始扫描。
     memblock_uid_t terminal_done_uid;
+    // 下一条尚未释放 ROB slot 的 UID。只有 commit handler 推进；redirect 不回退。
+    memblock_uid_t rob_commit_frontier_uid;
     // 当前连续有效LSQ admission高水位；redirect后会回退到最老flush uid的前一个uid。
     memblock_uid_t max_enqueued_uid;
     // max_enqueued_uid是否有效；还没有任何uid成功admission时为0。
@@ -348,6 +350,7 @@ typedef struct {
     bit            valid;
     memblock_uid_t uid;
     int unsigned   old_dynamic_epoch;
+    int unsigned   old_activation_flush_epoch;
     int unsigned   redirect_epoch;
     int unsigned   cancel_record_id;
 } memblock_redirect_deleted_owner_t;
@@ -710,6 +713,18 @@ typedef enum int unsigned {
     MEMBLOCK_WB_EVENT_SOURCE_REDIRECT         = 10
 } memblock_wb_event_source_e;
 
+typedef enum int unsigned {
+    MEMBLOCK_ROLLBACK_SUBTYPE_NONE = 0,
+    MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_VP_MATCH = 1,
+    MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_FRM_MISALIGN = 2,
+    MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_LDLD_FETCH = 3,
+    MEMBLOCK_ROLLBACK_SUBTYPE_LOAD_MIXED = 4,
+    MEMBLOCK_ROLLBACK_SUBTYPE_UNCACHE_NACK = 5,
+    MEMBLOCK_ROLLBACK_SUBTYPE_RAW_NUKE_0 = 6,
+    MEMBLOCK_ROLLBACK_SUBTYPE_RAW_NUKE_1 = 7,
+    MEMBLOCK_ROLLBACK_SUBTYPE_INCOMPLETE = 8
+} memblock_rollback_subtype_e;
+
 typedef enum bit [2:0] {
     MEMBLOCK_OP_BEHAVIOR_UNKNOWN  = 3'd0,
     MEMBLOCK_OP_BEHAVIOR_LOAD     = 3'd1,
@@ -778,6 +793,13 @@ typedef struct {
     // 中文注释：candidate 创建时所属的 UID 动态实例编号。
     // redirect/reissue 后 status.dynamic_epoch 会递增，旧 candidate 不能给新实例记账。
     int unsigned              dynamic_epoch;
+    // 中文注释：issue item 创建时冻结的独立 Uncache retry boost；比较器只能读取
+    // 这份 snapshot，不能在选择过程中动态访问 status。
+    bit                       uncache_retry_boost;
+    int unsigned              uncache_retry_count;
+    bit                       uncache_retry_identity_valid;
+    bit                       uncache_retry_has_dynamic_epoch;
+    int unsigned              uncache_retry_dynamic_epoch;
     bit                       has_lqIdx;
     memblock_lq_key_t         lq_key;
     bit                       has_sqIdx;
@@ -921,6 +943,14 @@ typedef struct {
     bit                         replay_valid;
     bit                         redirect_valid;
     memblock_redirect_payload_t redirect;
+    bit                         rollback_diag_valid;
+    bit                         rollback_diag_complete;
+    int unsigned                rollback_selected_input;
+    memblock_rollback_subtype_e rollback_subtype;
+    // 中文注释：memory violation raw 转换时冻结当前 active owner 的 dynamic identity；
+    // selected 阶段必须再次与 UID/ROB/status 比对，迟到旧事件不能更新新实例。
+    bit                         has_dynamic_epoch;
+    int unsigned                dynamic_epoch;
     bit                         ptw_back_replay;
     bit                         vector_ls;
     int unsigned                uop_index;

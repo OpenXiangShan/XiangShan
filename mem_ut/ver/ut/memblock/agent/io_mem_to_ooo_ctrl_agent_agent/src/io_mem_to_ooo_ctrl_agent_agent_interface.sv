@@ -77,6 +77,56 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic io_mem_to_ooo_lsqio_storeMmio;
     logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
 
+    // Same-edge mirrors for the six-input memoryViolation arbiter.  These are
+    // statically connected in the TB and sampled through mon_cb together with
+    // the top-level output; procedural HDL reads would observe a later region.
+    logic [5:0][5:0] rollback_winner_vec;
+    logic [5:0] rollback_candidate_valid;
+    logic [5:0] rollback_candidate_rob_flag;
+    logic [5:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rollback_candidate_rob_value;
+    logic [5:0] rollback_candidate_level;
+    logic [2:0] rollback_lu_vp_match_fail;
+    logic [2:0] rollback_lu_ldld_resp_valid;
+    logic [2:0] rollback_lu_rep_frm_fetch;
+    logic [2:0] rollback_lu_ldld_rep_inst;
+    logic [2:0] rollback_lu_frm_mis_flush;
+    logic [2:0] rollback_uncache_can_allocate;
+    logic [1:0] rollback_raw_store_valid;
+    logic [1:0] rollback_raw_store_rob_flag;
+    logic [1:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rollback_raw_store_rob_value;
+    logic [1:0][47:0] rollback_raw_store_paddr;
+    logic [1:0][15:0] rollback_raw_store_mask;
+
+    // Read-only lifecycle mirrors for diagnosing LoadQueueUncache exhaustion.
+    // Slot identity is stable: packed index N maps to uncacheBuffer.entries_N.
+    logic [15:0] uncache_lq_req_valid;
+    logic [15:0][1:0] uncache_lq_state;
+    logic [15:0] uncache_lq_rob_flag;
+    logic [15:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0] uncache_lq_rob_value;
+    logic [15:0] uncache_lq_slave_valid;
+    logic [15:0][3:0] uncache_lq_slave_id;
+    logic [15:0] uncache_lq_need_flush;
+    logic [15:0] uncache_lq_need_flush_reg;
+    logic [15:0] uncache_lq_flush;
+    logic [15:0] uncache_lq_nc_out_valid;
+    logic [15:0] uncache_lq_mmio_out_valid;
+    logic [15:0] uncache_lq_free_mask;
+    logic [15:0] uncache_top_valid;
+    logic [15:0] uncache_top_inflight;
+    logic [15:0] uncache_top_wait_same;
+    logic [15:0] uncache_top_wait_return;
+    logic uncache_top_lsq_id_resp_valid;
+    logic [6:0] uncache_top_lsq_id_resp_mid;
+    logic [3:0] uncache_top_lsq_id_resp_sid;
+    logic uncache_top_lsq_resp_valid;
+    logic uncache_top_lsq_resp_ready;
+    logic [3:0] uncache_top_lsq_resp_id;
+    logic uncache_top_a_valid;
+    logic uncache_top_a_ready;
+    logic [3:0] uncache_top_a_source;
+    logic uncache_top_d_valid;
+    logic [3:0] uncache_top_d_source;
+
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
@@ -173,6 +223,49 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
         input  io_mem_to_ooo_lsqio_loadMmio_2;
         input  io_mem_to_ooo_lsqio_storeMmio;
         input  io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
+        input  rollback_winner_vec;
+        input  rollback_candidate_valid;
+        input  rollback_candidate_rob_flag;
+        input  rollback_candidate_rob_value;
+        input  rollback_candidate_level;
+        input  rollback_lu_vp_match_fail;
+        input  rollback_lu_ldld_resp_valid;
+        input  rollback_lu_rep_frm_fetch;
+        input  rollback_lu_ldld_rep_inst;
+        input  rollback_lu_frm_mis_flush;
+        input  rollback_uncache_can_allocate;
+        input  rollback_raw_store_valid;
+        input  rollback_raw_store_rob_flag;
+        input  rollback_raw_store_rob_value;
+        input  rollback_raw_store_paddr;
+        input  rollback_raw_store_mask;
+        input  uncache_lq_req_valid;
+        input  uncache_lq_state;
+        input  uncache_lq_rob_flag;
+        input  uncache_lq_rob_value;
+        input  uncache_lq_slave_valid;
+        input  uncache_lq_slave_id;
+        input  uncache_lq_need_flush;
+        input  uncache_lq_need_flush_reg;
+        input  uncache_lq_flush;
+        input  uncache_lq_nc_out_valid;
+        input  uncache_lq_mmio_out_valid;
+        input  uncache_lq_free_mask;
+        input  uncache_top_valid;
+        input  uncache_top_inflight;
+        input  uncache_top_wait_same;
+        input  uncache_top_wait_return;
+        input  uncache_top_lsq_id_resp_valid;
+        input  uncache_top_lsq_id_resp_mid;
+        input  uncache_top_lsq_id_resp_sid;
+        input  uncache_top_lsq_resp_valid;
+        input  uncache_top_lsq_resp_ready;
+        input  uncache_top_lsq_resp_id;
+        input  uncache_top_a_valid;
+        input  uncache_top_a_ready;
+        input  uncache_top_a_source;
+        input  uncache_top_d_valid;
+        input  uncache_top_d_source;
     endclocking:mon_cb
 
     // 中文注释：只把当前 V2 扁平 MMIO output 映射成参数化 packed mirror。

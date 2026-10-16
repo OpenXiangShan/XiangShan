@@ -21,12 +21,12 @@ STD 继续受限于 ROB value-only 双 probe，不建立 backend replay。
 | `semantic batch` | 同一service sample中先统一做redirect-first仲裁的writeback/IQ/memoryViolation事件集合 | `events[$]`、`process_monitor_event_batch()` | 被同批older redirect覆盖的WB不得落status |
 | `deferred ctrl` | semantic batch完成后才应用的完整ctrl raw；本拍先进入临时列表，再转入持久FIFO | `deferred_ctrl[$]`、`deferred_raw_ctrl_q` | resync mismatch保留队首，MMIO、deq和`sbIsEmpty`不会静默丢失 |
 | `observation epoch` | monitor观察MMIO output时保存的环境flush epoch，不是producer身份 | `raw.mmio_flush_epoch` | 旧脉冲可能带redirect后的observation epoch |
-| `producer provenance` | MMIO valid所在DUT sample的单调序号 | `raw.mmio_sample_seq` | LOAD与redirect sample `R/R+1`做overlap判定 |
+| `producer provenance` | MMIO valid所在DUT sample的单调序号 | `raw.mmio_sample_seq` | LOAD与redirect sample `R..R+2`做overlap判定 |
 | `redirect sample anchor` | redirect输入被DUT采样的sample序号和完整payload | cancel record、redirect anchor FIFO | anchor sample记为`R` |
 | `active owner` | 完整ROB key当前唯一映射的动态uid实例 | `uid_by_active_rob` | value-only raw需要probe flag 0/1两个key |
 | `staging` | 同一个ctrl raw在写status前的MMIO uid/kind去重列表 | `staged_tags[$]` | 所有tag先preflight再统一commit |
 | `STALE_DROP` | 有充分证据证明某个MMIO port属于旧实例，仅丢该port | `MEMBLOCK_MMIO_RESOLVE_STALE_DROP` | 唯一旧load owner被redirect覆盖 |
-| `overlap` | LOAD MMIO sample等于未完成redirect的`R`或`R+1` | `resolve_mmio_uid_by_rob_value()` | 新/无/多/不兼容owner均fatal |
+| `overlap` | LOAD MMIO sample落在未完成redirect的`R..R+2` | `resolve_mmio_uid_by_rob_value()` | R+2还需唯一历史证明，新/无历史/多候选均fatal |
 
 > 本文早期总体图包含 token/claim 设计节点，属于历史方案记录。当前 V2 IQ raw 的
 > SQ-only 反查、IQ 先于 int-WB 的同拍顺序和 deferred ctrl 以
@@ -207,8 +207,11 @@ Writeback 函数调用主流程：
    `mmio_sample_seq` producer provenance；
    collect_ctrl_redirect_events_batch pop raw ctrl并保存完整对象到deferred_ctrl，把memoryViolation转成
    redirect event；semantic batch完成后，adapter先原子归一化同一raw的MMIO tag；
-   LOAD sample若与未完成redirect的R/R+1重叠，只有唯一旧scalar load owner、已dispatch且完整key被覆盖
-   才STALE_DROP；新owner、无owner、多record、不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal；
+   LOAD sample若与未完成redirect的R..R+2重叠，先处理唯一covered旧owner并STALE_DROP；R/R+1若恰有
+   一个redirect前已激活、已dispatch、完整ROB key不被覆盖的scalar Load，且没有covered/new/
+   incompatible混合候选，则把它作为唯一surviving current owner正常写tag；精确R+2且active owner已删除时，
+   还必须从status/main table与同一record的单代deleted LQ owner中唯一证明旧scalar Load，才能STALE_DROP；
+   R+2 active survivor、新owner、无历史owner、多候选、多record、不兼容owner或其它歧义均MMIO_RESOLVE fatal；
    STORE不套用该LOAD overlap规则；tag处理返回后，再把完整raw交给singleton lsq_commit_handler处理
    LQ/SQ deq与sbIsEmpty。
 
@@ -703,7 +706,7 @@ MMIO全invalid时两个字段保持empty raw默认值，adapter不得在消费�
 源码位置：`common_data_transaction.sv`。
 
 抽象功能描述：resolver把value-only ROB fact分类为唯一当前owner、可证明旧fact或fatal。LOAD额外读取
-未完成redirect timing provenance；STORE不使用LOAD的`R/R+1`规则。函数不写status。
+未完成redirect timing provenance；STORE不使用LOAD的`R..R+2`规则。函数不写status。
 
 ```systemverilog
 if (load_overlap_observed) begin
@@ -718,6 +721,23 @@ if (load_overlap_observed) begin
             overlap_old_key.flag, overlap_old_key.value);
         return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
     end
+    if ((raw_sample_seq == overlap_redirect_sample_seq ||
+         raw_sample_seq == overlap_redirect_sample_seq + 1) &&
+        active_candidate_count == 1 &&
+        overlap_uncovered_count == 1 &&
+        overlap_old_covered_count == 0 &&
+        overlap_new_candidate_count == 0 &&
+        overlap_incompatible_count == 0) begin
+        return MEMBLOCK_MMIO_RESOLVE_CURRENT;
+    end
+    if (raw_sample_seq == overlap_redirect_sample_seq + 2 &&
+        active_candidate_count == 0) begin
+        if (find_unique_redirect_deleted_load_mmio_owner(...)) begin
+            return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
+        end
+        `uvm_fatal("MMIO_RESOLVE",
+                   "cannot prove LOAD MMIO stale ownership at R+2")
+    end
     `uvm_fatal("MMIO_RESOLVE",
                $sformatf("cannot prove LOAD MMIO stale ownership sample=%0d redirect_sample=%0d active=%0d old_covered=%0d new=%0d uncovered=%0d incompatible=%0d",
                          raw_sample_seq, overlap_redirect_sample_seq,
@@ -731,10 +751,12 @@ end
 文字伪代码：
 
 ```text
-LOAD先扫描有深度上限的全部未完成anchored record和未绑定anchor FIFO，只匹配sample R或R+1；
+LOAD先扫描有深度上限的全部未完成anchored record和未绑定anchor FIFO，只匹配sample R到R+2；
 再probe同一ROB value的flag 0/1两个完整active key，并按行为、dispatch、activation epoch和redirect覆盖分类；
-只有active候选恰好一个、且它是已dispatch scalar load、旧于redirect并被完整key覆盖时STALE_DROP；
-新owner、无owner、多owner、不兼容owner、多个record/anchor或无法证明覆盖均MMIO_RESOLVE fatal；
+唯一covered旧Load优先STALE_DROP；R/R+1只有唯一active、唯一uncovered survivor且无covered/new/incompatible
+混合候选时才CURRENT；精确R+2且active owner为零时，调用只读历史helper，要求status/main table和同一record的
+redirect-deleted LQ owner唯一匹配，且旧activation epoch早于redirect epoch，才STALE_DROP；
+R+2 active survivor、R+3、新owner、无历史owner、多owner、不兼容owner、多个record/anchor或其它歧义均fatal；
 STORE跳过overlap扫描，继续按observation epoch与active provenance执行普通CURRENT/STALE/fatal分类。
 ```
 
@@ -1911,8 +1933,10 @@ pending-MMIO deferred ctrl：
   -> 把完整raw追加到持久deferred_raw_ctrl_q并从队首处理
   -> apply_raw_ctrl_mmio_tags在active map释放前逐port解析
   -> 普通current owner进入staging并全量preflight/commit
-  -> LOAD R/R+1只有唯一旧scalar load owner被redirect覆盖才STALE_DROP
-  -> 新/无/多/不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal
+  -> LOAD唯一covered旧scalar owner优先STALE_DROP
+  -> R/R+1唯一redirect前active且不被覆盖的surviving scalar Load正常CURRENT写tag
+  -> 精确R+2且无active owner时，必须由status/main table和同一redirect record的deleted LQ owner唯一证明
+  -> R+2 active survivor、R+3、新/无历史/多候选/不兼容owner或其它歧义均MMIO_RESOLVE fatal
   -> STORE不套用LOAD overlap规则
   -> tag处理返回后才由singleton LSQ owner应用同raw deq与sbIsEmpty
   -> owner成功才pop；resync mismatch保留队首，strict mismatch fatal
@@ -1977,8 +2001,9 @@ pending-MMIO deferred ctrl：
   monitor只在MMIO valid时冻结observation epoch和同拍sample provenance；
   collector把完整raw延迟到semantic redirect-first之后，再追加到持久deferred FIFO；
   adapter在deq释放active map前解析每个value-only ROB fact；
-  LOAD sample命中未完成redirect的R/R+1时，只有唯一旧scalar load、已dispatch且完整key被覆盖才drop；
-  新owner、无owner、多个timing record、不兼容owner或无法证明覆盖都fatal，不能写到新实例；
+  LOAD sample命中未完成redirect的R..R+2时，唯一covered旧Load优先drop；R/R+1唯一uncovered surviving
+  active Load在无混合候选时写CURRENT tag；精确R+2且active owner消失时，还要唯一匹配同一redirect删除的旧Load历史；
+  R+2 active survivor、R+3、新owner、无历史owner、多个候选/timing record、不兼容owner或其它歧义都fatal；
   STORE不进入该overlap规则；全部current tag先preflight再commit，最后才应用同raw deq；
   full-raw owner成功才pop FIFO，resync失败保留队首且runtime drain继续为未完成。
 

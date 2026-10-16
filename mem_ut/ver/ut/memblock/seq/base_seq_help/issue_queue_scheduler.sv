@@ -54,6 +54,11 @@ class issue_queue_scheduler extends uvm_object;
         item.ready_cycle = 0;
         item.replay_seq  = 0;
         item.dynamic_epoch = 0;
+        item.uncache_retry_boost = 1'b0;
+        item.uncache_retry_count = 0;
+        item.uncache_retry_identity_valid = 1'b0;
+        item.uncache_retry_has_dynamic_epoch = 1'b0;
+        item.uncache_retry_dynamic_epoch = 0;
         item.has_lqIdx   = 1'b0;
         item.lq_key      = '{default:'0};
         item.has_sqIdx   = 1'b0;
@@ -82,6 +87,22 @@ class issue_queue_scheduler extends uvm_object;
         item.ready_cycle = main_tr.delay;
         item.replay_seq  = status.replay_seq;
         item.dynamic_epoch = status.dynamic_epoch;
+        item.uncache_retry_count = status.uncache_retry_count;
+        item.uncache_retry_identity_valid = status.uncache_retry_identity_valid &&
+                                            status.uncache_retry_has_dynamic_epoch &&
+                                            status.uncache_retry_rob_key == item.rob_key &&
+                                            status.uncache_retry_dynamic_epoch == status.dynamic_epoch;
+        item.uncache_retry_boost = status.uncache_retry_boost &&
+                                   item.uncache_retry_identity_valid;
+        item.uncache_retry_has_dynamic_epoch = status.uncache_retry_has_dynamic_epoch;
+        item.uncache_retry_dynamic_epoch = status.uncache_retry_dynamic_epoch;
+        if (item.uncache_retry_boost) begin
+            // The original randomized dispatch delay belongs to the first
+            // issue attempt.  Reloading it after every Uncache-full redirect
+            // leaves the boosted owner ineligible while younger requests can
+            // refill all entries, recreating the starvation loop.
+            item.ready_cycle = 0;
+        end
         item.has_lqIdx   = status.active_lq_mapped;
         item.lq_key.flag = status.lqIdx_flag;
         item.lq_key.value = status.lqIdx_value;
@@ -95,6 +116,13 @@ class issue_queue_scheduler extends uvm_object;
             item.uop_count = behavior.atomic_sta_uop_count;
         end else if (behavior.is_atomic && target == MEMBLOCK_ISSUE_TARGET_STD) begin
             item.uop_count = behavior.atomic_data_uop_count;
+        end
+        if (item.uncache_retry_boost) begin
+            `uvm_info("UNCACHE_RETRY_BOOST",
+                      $sformatf("issue item snapshot uid=%0d target=%0d boost=%0d count=%0d dyn=%0d rob=%0d/%0d",
+                                uid, target, item.uncache_retry_boost,
+                                item.uncache_retry_count, item.dynamic_epoch,
+                                item.rob_key.flag, item.rob_key.value), UVM_HIGH)
         end
         return item;
     endfunction:make_issue_item
@@ -294,6 +322,9 @@ class issue_queue_scheduler extends uvm_object;
         if (!status.active || !status.enq || !status.issue_ready) begin
             return 1'b0;
         end
+        if (status.dynamic_epoch != item.dynamic_epoch) begin
+            return 1'b0;
+        end
         if (status.flushed || status.redirect_pending || status.issue_killed) begin
             return 1'b0;
         end
@@ -355,6 +386,74 @@ class issue_queue_scheduler extends uvm_object;
         end
         return item_is_older(candidate, best);
     endfunction:item_is_better
+
+    function bit item_has_live_uncache_retry_boost(
+        input memblock_issue_q_item_t item
+    );
+        status_transaction status;
+
+        ensure_data();
+        if (!item.uncache_retry_boost || !item.uncache_retry_identity_valid ||
+            !item.uncache_retry_has_dynamic_epoch ||
+            !data.is_valid_uid(item.uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(item.uid);
+        return status.uncache_retry_boost &&
+               status.uncache_retry_identity_valid &&
+               status.uncache_retry_has_dynamic_epoch &&
+               status.uncache_retry_rob_key == item.rob_key &&
+               status.uncache_retry_dynamic_epoch == item.dynamic_epoch &&
+               item.uncache_retry_dynamic_epoch == item.dynamic_epoch;
+    endfunction:item_has_live_uncache_retry_boost
+
+    function bit same_issue_item_identity(input memblock_issue_q_item_t left,
+                                          input memblock_issue_q_item_t right);
+        return left.uid == right.uid &&
+               left.target == right.target &&
+               left.rob_key == right.rob_key &&
+               left.replay_seq == right.replay_seq &&
+               left.dynamic_epoch == right.dynamic_epoch;
+    endfunction:same_issue_item_identity
+
+    function bit find_oldest_uncache_retry_boost(
+        output memblock_issue_q_item_t winner
+    );
+        memblock_issue_q_item_t item;
+        bit found;
+
+        ensure_data();
+        winner = make_empty_item();
+        found = 1'b0;
+        foreach (data.load_issue_q[idx]) begin
+            item = data.load_issue_q[idx];
+            if (is_issue_item_eligible(item) &&
+                item_has_live_uncache_retry_boost(item) &&
+                (!found || item_is_older(item, winner))) begin
+                winner = item;
+                found = 1'b1;
+            end
+        end
+        foreach (data.sta_issue_q[idx]) begin
+            item = data.sta_issue_q[idx];
+            if (is_issue_item_eligible(item) &&
+                item_has_live_uncache_retry_boost(item) &&
+                (!found || item_is_older(item, winner))) begin
+                winner = item;
+                found = 1'b1;
+            end
+        end
+        foreach (data.std_issue_q[idx]) begin
+            item = data.std_issue_q[idx];
+            if (is_issue_item_eligible(item) &&
+                item_has_live_uncache_retry_boost(item) &&
+                (!found || item_is_older(item, winner))) begin
+                winner = item;
+                found = 1'b1;
+            end
+        end
+        return found;
+    endfunction:find_oldest_uncache_retry_boost
 
     function bit index_already_selected(input int idx, input int selected_indices[$]);
         foreach (selected_indices[i]) begin
@@ -428,6 +527,8 @@ class issue_queue_scheduler extends uvm_object;
                                            input bit compare_pri,
                                            input bit use_global_pri,
                                            input int unsigned global_pri,
+                                           input bit boost_winner_valid,
+                                           input memblock_issue_q_item_t boost_winner,
                                            output memblock_issue_q_item_t selected[$]);
         int selected_indices[$];
 
@@ -454,6 +555,10 @@ class issue_queue_scheduler extends uvm_object;
                 if (!is_issue_item_eligible(item)) begin
                     continue;
                 end
+                if (boost_winner_valid &&
+                    !same_issue_item_identity(item, boost_winner)) begin
+                    continue;
+                end
                 if (use_global_pri && item.send_pri != global_pri) begin
                     continue;
                 end
@@ -476,8 +581,13 @@ class issue_queue_scheduler extends uvm_object;
                                           output memblock_issue_q_item_t sta_items[$],
                                           output memblock_issue_q_item_t std_items[$]);
         int unsigned global_pri;
+        int unsigned load_max_count;
+        int unsigned sta_max_count;
+        int unsigned std_max_count;
         bit          compare_pri;
         bit          use_global_pri;
+        bit          boost_winner_valid;
+        memblock_issue_q_item_t boost_winner;
 
         ensure_data();
         load_items.delete();
@@ -490,27 +600,66 @@ class issue_queue_scheduler extends uvm_object;
 
         compare_pri = seq_csr_common::get_send_pri_mode_en();
         use_global_pri = compare_pri && seq_csr_common::sample_global_send_pri_en();
-        if (use_global_pri && !find_global_max_send_pri(global_pri)) begin
+        load_max_count = seq_csr_common::sample_load_pip_num();
+        sta_max_count = seq_csr_common::sample_sta_pip_num();
+        std_max_count = seq_csr_common::sample_std_pip_num();
+        boost_winner_valid = find_oldest_uncache_retry_boost(boost_winner);
+        global_pri = 0;
+        if (boost_winner_valid) begin
+            // One live retry token owns this cycle across LOAD/STA/STD.  The
+            // ordinary global-priority filter must not discard that owner.
+            use_global_pri = 1'b0;
+            load_max_count = (boost_winner.target == MEMBLOCK_ISSUE_TARGET_LOAD) ? 1 : 0;
+            sta_max_count = (boost_winner.target == MEMBLOCK_ISSUE_TARGET_STA) ? 1 : 0;
+            std_max_count = (boost_winner.target == MEMBLOCK_ISSUE_TARGET_STD) ? 1 : 0;
+            `uvm_info("UNCACHE_RETRY_BOOST",
+                      $sformatf("global winner uid=%0d target=%0d count=%0d dyn=%0d rob=%0d/%0d send_pri=%0d ready=%0d replay=%0d",
+                                boost_winner.uid, boost_winner.target,
+                                boost_winner.uncache_retry_count,
+                                boost_winner.dynamic_epoch,
+                                boost_winner.rob_key.flag,
+                                boost_winner.rob_key.value,
+                                boost_winner.send_pri,
+                                boost_winner.ready_cycle,
+                                boost_winner.replay_seq), UVM_HIGH)
+        end else if (use_global_pri && !find_global_max_send_pri(global_pri)) begin
             use_global_pri = 1'b0;
         end
         select_target_candidates(MEMBLOCK_ISSUE_TARGET_LOAD,
-                                 seq_csr_common::sample_load_pip_num(),
+                                 load_max_count,
                                  compare_pri,
                                  use_global_pri,
                                  global_pri,
+                                 boost_winner_valid,
+                                 boost_winner,
                                  load_items);
         select_target_candidates(MEMBLOCK_ISSUE_TARGET_STA,
-                                 seq_csr_common::sample_sta_pip_num(),
+                                 sta_max_count,
                                  compare_pri,
                                  use_global_pri,
                                  global_pri,
+                                 boost_winner_valid,
+                                 boost_winner,
                                  sta_items);
         select_target_candidates(MEMBLOCK_ISSUE_TARGET_STD,
-                                 seq_csr_common::sample_std_pip_num(),
+                                 std_max_count,
                                  compare_pri,
                                  use_global_pri,
                                  global_pri,
+                                 boost_winner_valid,
+                                 boost_winner,
                                  std_items);
+        if (boost_winner_valid) begin
+            `uvm_info("UNCACHE_RETRY_BOOST",
+                      $sformatf("local winners load=%0d sta=%0d std=%0d selected_uid=%0d target=%0d",
+                                load_items.size(), sta_items.size(), std_items.size(),
+                                boost_winner.uid, boost_winner.target), UVM_HIGH)
+            if (load_items.size() + sta_items.size() + std_items.size() != 1) begin
+                `uvm_fatal("UNCACHE_RETRY_BOOST",
+                           $sformatf("single winner token selected %0d candidates",
+                                     load_items.size() + sta_items.size() + std_items.size()))
+            end
+        end
     endfunction:select_issue_candidates
 
     function bit mark_issue_fire(input memblock_issue_q_item_t item);
@@ -529,6 +678,7 @@ class issue_queue_scheduler extends uvm_object;
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
         data.clear_replay_target_after_fire(item.uid, item.target);
+        void'(data.consume_uncache_retry_boost_after_issue(item));
         return 1'b1;
     endfunction:mark_issue_fire
 
@@ -545,6 +695,7 @@ class issue_queue_scheduler extends uvm_object;
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
         data.clear_replay_target_after_fire(item.uid, item.target);
+        void'(data.consume_uncache_retry_boost_after_issue(item));
         return 1'b1;
     endfunction:mark_issue_fire_already_accepted
 
@@ -624,6 +775,7 @@ class issue_queue_scheduler extends uvm_object;
         set_target_queued(item.uid, item.target, 1'b0);
         set_target_dispatched(item.uid, item.target, 1'b1);
         data.clear_replay_target_after_fire(item.uid, item.target);
+        void'(data.consume_uncache_retry_boost_after_issue(item));
         `uvm_info("ISSUE_Q",
                   $sformatf("accepted fault-inflight issue uid=%0d target=%0d dynamic_epoch=%0d issue_epoch=%0d",
                             item.uid, item.target, item.dynamic_epoch, issue_epoch),

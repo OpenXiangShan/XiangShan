@@ -44,9 +44,9 @@
 | `count-only sqDeq` | V2只提供SQ出队数量，不提供SQ出队pointer | `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR=0`、`raw.sq_deq` | 从软件`sq_deq_ptr`连续释放count个owner |
 | `terminal idle` | global stop后仍发布一次稳定level sideband、脉冲全0的最后transaction | `terminal_idle_published` | 发布后commit sequence才退出 |
 | `observation epoch` | monitor观察MMIO output时的环境flush epoch，不代表脉冲由哪个request产生 | `raw.mmio_flush_epoch` | 迟到旧load脉冲可能在redirect后的epoch被观察 |
-| `producer provenance` | MMIO valid所在DUT sample的单调序号 | `raw.mmio_sample_seq` | 与redirect sample `R/R+1`对齐 |
-| `redirect sample anchor` | redirect输入被DUT采到的sample序号与完整payload | cancel record、`redirect_anchor_history_q` | `R`是anchor拍，`R+1`是下一sample |
-| `overlap` | LOAD MMIO sample等于某个未完成redirect的`R`或`R+1` | `resolve_mmio_uid_by_rob_value()` | 只有唯一旧load owner被覆盖时stale drop |
+| `producer provenance` | MMIO valid所在DUT sample的单调序号 | `raw.mmio_sample_seq` | 与redirect sample `R..R+2`对齐 |
+| `redirect sample anchor` | redirect输入被DUT采到的sample序号与完整payload | cancel record、`redirect_anchor_history_q` | `R`是anchor拍，`R+2`是Load残留允许上界 |
+| `overlap` | LOAD MMIO sample落在某个未完成redirect的`R..R+2` | `resolve_mmio_uid_by_rob_value()` | R+2需唯一匹配同一redirect删除的旧Load历史 |
 | `deferred FIFO` | 已完成semantic转换、等待full-raw LSQ owner成功应用的持久队列 | `memblock_sync_pkg::deferred_raw_ctrl_q` | resync mismatch保留队首到下一service tick |
 | `pending fault draft` | 双 real-WB 前的 store 异常证据；SQ deq 不再为它保留 STD | `pending_store_fault_by_uid` | 更老 redirect 的普通 reissue 会删除该草稿 |
 
@@ -160,8 +160,9 @@ flowchart TD
    ctrl monitor把lqDeq、sqDeq、LQ pointer和其它ctrl event写入raw_ctrl_q；任一MMIO valid时同时冻结
    observation epoch和同拍producer sample seq；
    semantic batch完成redirect-first后，把完整raw追加到持久deferred FIFO，再从队首尝试应用；
-   adapter先解析MMIO：普通事实按两个完整ROB key匹配active uid；LOAD sample落在redirect的R/R+1时，
-   只有唯一旧scalar load owner、已dispatch且完整key被覆盖才stale drop，其余歧义fatal；STORE不套用该特例；
+   adapter先解析MMIO：普通事实按两个完整ROB key匹配active uid；LOAD sample落在redirect的R..R+2时，
+   R/R+1或仍有active旧owner沿用唯一旧scalar Load完整key覆盖证明；精确R+2且active owner消失时还需
+   唯一匹配同一redirect删除的旧Load历史，其余歧义fatal；STORE不套用该特例；
    handler先联合预检LQ/SQ owner，再原子推进软件deq pointer/free count并释放mapping；成功后才pop队首，
    resync mismatch保留队首到下一service tick，strict mismatch按原策略fatal；
    V2 sqDeq没有pointer，使用软件sq_deq_ptr作为连续owner起点；
@@ -273,10 +274,12 @@ ctrl monitor 通过 V2 profile accessor 把`loadMmio/loadMmioUop`和
 
 `resolve_mmio_uid_by_rob_value()`对每个valid port使用ROB value的两个完整flag key probe active map。普通
 路径要求op kind与dispatch状态一致，并用observation epoch区分current/newer实例。LOAD还扫描有深度上限的
-全部未完成anchored cancel record和未绑定anchor FIFO：只有sample等于唯一redirect的`R/R+1`、唯一active
-owner为已dispatch scalar load、activation epoch早于redirect epoch且完整ROB key被覆盖时，才返回
-`STALE_DROP`。新owner、无owner、多个record/anchor、不兼容owner、anchor不匹配或无法证明覆盖均以
-`MMIO_RESOLVE` fatal。STORE不执行LOAD的s1/s2 overlap规则。
+全部未完成anchored cancel record和未绑定anchor FIFO，Load overlap上界为唯一redirect的`R..R+2`。
+R/R+1或旧active owner仍存在时，要求唯一已dispatch scalar Load、activation epoch早于redirect且完整ROB key
+被覆盖；精确R+2且active owner已删除时，还必须由status/main table与同一redirect record的单代deleted LQ
+owner唯一证明旧dynamic实例，才返回`STALE_DROP`。R+3、新owner、无历史owner、多个历史候选、多个
+record/anchor、不兼容owner、anchor不匹配或无法证明覆盖均以`MMIO_RESOLVE` fatal。STORE不执行LOAD的
+R..R+2 overlap规则。
 
 `apply_raw_ctrl_mmio_tags()`按UID去重并全量preflight，再原子提交monitor tag；stale只丢对应port。
 deferred ctrl中的MMIO normalize在完整raw deq前完成，避免deq删除active map后再反查。
@@ -285,8 +288,9 @@ deferred ctrl中的MMIO normalize在完整raw deq前完成，避免deq删除acti
 
 ```text
 monitor看到任一MMIO valid时，保存observation epoch和同拍sample seq；全invalid时sample seq保持0。
-adapter消费完整raw时先调用resolver；LOAD若和未完成redirect的R/R+1重叠，则必须证明唯一旧load owner。
-证据完整时只drop该load port；证据不完整时fatal，不能把迟到脉冲写到新实例。
+adapter消费完整raw时先调用resolver；LOAD若和未完成redirect的R..R+2重叠，则必须证明唯一旧load owner。
+精确R+2且active owner消失时，还要核对同一redirect删除的短时历史记录。证据完整时只drop该load port；
+证据不完整时fatal，不能把迟到脉冲写到新实例。
 STORE不使用该overlap特例，只按普通active provenance解析。
 全部current tag先dry-run；都通过后才commit，然后LSQ owner才允许应用同raw的LQ/SQ deq。
 ```
@@ -554,8 +558,9 @@ MMIO load raw：
   -> 冻结observation epoch + mmio_sample_seq
   -> deferred ctrl在semantic redirect-first后消费
   -> 普通raw唯一命中current load则提交canonical tag
-  -> R/R+1 overlap只有唯一旧load owner被覆盖才STALE_DROP
-  -> 新/无/多/不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal
+  -> R/R+1或仍有active旧owner时，只有唯一旧load owner被覆盖才STALE_DROP
+  -> 精确R+2且无active owner时，必须唯一匹配同一redirect删除的旧Load历史
+  -> R+3、新/无历史/多候选/不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal
   -> tag归一化完成后才应用同raw的LQ/SQ deq
 
 normal load：

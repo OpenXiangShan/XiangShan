@@ -353,6 +353,9 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
             status.exception_pending || status.replay_pending) begin
             return 1'b0;
         end
+        if (!data.rob_admission_window_has_room(uid, "next_uid_needs_lsq_admission")) begin
+            return 1'b0;
+        end
         // redirect_pending/flushed表示旧动态实例已被kill；同uid现在允许按公共高水位重新admission。
         return 1'b1;
     end
@@ -408,6 +411,9 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
             break;
         end
         if (data.control_barrier_blocks_admission(uid)) begin
+            break;
+        end
+        if (!data.rob_admission_window_has_room(uid, "collect_lsq_candidates")) begin
             break;
         end
         main_tr = data.get_main_transaction(uid);
@@ -721,6 +727,12 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
         memblock_sq_key_t expected_sq_key;
         memblock_lsq_reservation_token_t token;
 
+        if (!data.rob_admission_window_has_room(uids[idx], "confirm_lsq_candidates")) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("LSQ candidate uid=%0d left ROB admission window before activation",
+                                 uids[idx]))
+        end
+
         lsq_ctrl.preview_allocate(behaviors[idx], expected_lq_key, expected_sq_key);
         if (behaviors[idx].uses_lq && expected_lq_key != lq_keys[idx]) begin
             `uvm_fatal(get_type_name(),
@@ -817,6 +829,9 @@ function bit memblock_lsqenq_dispatch_base_sequence::admit_control_marker_if_rea
         return 1'b0;
     end
     status = data.get_status(uid);
+    if (!data.rob_admission_window_has_room(uid, "admit_control_marker_if_ready")) begin
+        return 1'b0;
+    end
     if (status.active || status.enq) begin
         data.restore_control_admission_prefix(uid);
     end else begin

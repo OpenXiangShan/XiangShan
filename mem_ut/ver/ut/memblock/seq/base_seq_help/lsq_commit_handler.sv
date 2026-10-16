@@ -103,6 +103,35 @@ class lsq_commit_handler extends uvm_object;
         fault_head_redirect_covered = 1'b0;
     endfunction:clear_fault_head_token
 
+    // 抽象职责：commit cursor 的唯一推进入口，同时发布公共 ROB admission frontier。
+    // runtime reset 不调用该接口；reset_all_tables 已将公共 frontier 清零。
+    function void set_commit_cursor_uid(input memblock_uid_t new_cursor,
+                                        input string caller);
+        ensure_handles();
+        if (new_cursor < commit_cursor_uid || new_cursor > data.main_trans_num) begin
+            `uvm_fatal("LSQ_COMMIT",
+                       $sformatf("%s invalid commit cursor old=%0d new=%0d main_trans_num=%0d",
+                                 caller, commit_cursor_uid, new_cursor, data.main_trans_num))
+            return;
+        end
+        commit_cursor_uid = new_cursor;
+        if (data.main_table_ready) begin
+            data.publish_rob_commit_frontier(new_cursor, caller);
+        end
+    endfunction:set_commit_cursor_uid
+
+    function void assert_commit_frontier_consistent(input string caller);
+        ensure_handles();
+        if (data.main_table_ready &&
+            data.dispatch_progress.rob_commit_frontier_uid != commit_cursor_uid) begin
+            `uvm_fatal("ROB_ADMISSION_FRONTIER",
+                       $sformatf("%s frontier/cursor mismatch frontier=%0d cursor=%0d",
+                                 caller,
+                                 data.dispatch_progress.rob_commit_frontier_uid,
+                                 commit_cursor_uid))
+        end
+    endfunction:assert_commit_frontier_consistent
+
     // 仅在 fault token terminal 等待期间扫描 recovery queue，保证未激活的真实 redirect
     // 先由 exception handler 按 oldest 规则仲裁，避免与 fault redirect 竞争 cancel record。
     function bit has_pending_monitor_redirect();
@@ -160,7 +189,7 @@ class lsq_commit_handler extends uvm_object;
                                                  fault_head_dynamic_epoch)) begin
             data.complete_fault_redirect_resource(fault_head_uid);
         end
-        commit_cursor_uid = fault_head_uid + 1;
+        set_commit_cursor_uid(fault_head_uid + 1, "finish_fault_head_terminal");
         clear_fault_head_token();
         modeled_head_valid = 1'b0;
         rebase_framework_head_from_commit_cursor();
@@ -260,7 +289,7 @@ class lsq_commit_handler extends uvm_object;
             !status.load_fault && !status.sta_fault && !status.std_fault) begin
             return 1'b0;
         end
-        if (data.is_scalar_store_uid(uid) && !data.store_real_writebacks_done(uid)) begin
+        if (data.store_fault_real_wb_pending(uid)) begin
             return 1'b0;
         end
         return status.fault ||
@@ -304,7 +333,8 @@ class lsq_commit_handler extends uvm_object;
             status = data.get_status(commit_cursor_uid);
             // flushed不是终态，不能被commit cursor当作完成项跳过；它必须先redirect reissue并最终terminal_done。
             if (status.terminal_done) begin
-                commit_cursor_uid++;
+                set_commit_cursor_uid(commit_cursor_uid + 1,
+                                      "advance_commit_cursor_past_done");
             end else begin
                 break;
             end
@@ -318,6 +348,7 @@ class lsq_commit_handler extends uvm_object;
         if (fault_head_waiting) begin
             `uvm_fatal("LSQ_COMMIT", "head rebase is not allowed while fault token is waiting")
         end
+        assert_commit_frontier_consistent("rebase_framework_head_from_commit_cursor:entry");
         advance_commit_cursor_past_done();
         if (commit_cursor_uid > data.main_trans_num) begin
             `uvm_fatal("LSQ_COMMIT", "commit cursor moved beyond main table")
@@ -330,6 +361,7 @@ class lsq_commit_handler extends uvm_object;
         status = data.get_status(commit_cursor_uid);
         modeled_rob_deq_ptr = status.get_rob_key();
         modeled_head_valid = 1'b1;
+        assert_commit_frontier_consistent("rebase_framework_head_from_commit_cursor:exit");
     endfunction:rebase_framework_head_from_commit_cursor
 
     function bit resolve_sideband_head_uid(output memblock_uid_t uid);
@@ -518,15 +550,13 @@ class lsq_commit_handler extends uvm_object;
     endfunction:fault_uid_is_store_exception
 
     function bit head_pending_ptr_blocked(input memblock_uid_t uid);
-        status_transaction status;
-
         ensure_handles();
-        status = data.get_status(uid);
-        // 中文注释：StoreQueue 会依据 pendingPtr 推进 committed/deq，因此所有 scalar
-        // store 在 STA/STD 两个 real-WB 完成前都不能发布当前 ROB head；不能等 STA fault
-        // raw 到达后才开始门控，否则前一拍已发送的 level pointer 仍可能触发 SQ deq。
-        return data.is_scalar_store_uid(uid) &&
-               !data.store_real_writebacks_done(uid);
+        // 中文注释：普通 scalar store 必须先发布 pendingPtr，DUT 才能沿正常
+        // STA/STD 路径推进。只有某个 target fault 已经被捕获为 pending store-fault
+        // record 时，才需要把 pointer 暂时退回，等待另一个 real-WB 到达后再进入
+        // fault terminal。仅按 fuType/STU 判断会把普通 store 变成永久等待，尤其在
+        // issue worker 尚未启动或被 redirect 删除的早期阶段会形成自锁。
+        return data.store_fault_blocks_pending_ptr(uid);
     endfunction:head_pending_ptr_blocked
 
     function void clear_lsqcommit_xaction(input lsqcommit_agent_agent_xaction tr);
@@ -624,6 +654,17 @@ class lsq_commit_handler extends uvm_object;
                 tr.io_ooo_to_mem_lsqio_scommit++;
             end
         end
+        // Diagnostic-only publication.  The uncache monitor consumes this
+        // snapshot with the DUT sample token to distinguish a head allocation
+        // failure from an already-owned younger entry.
+        memblock_sync_pkg::publish_lsq_pending_diag(
+            tr.io_ooo_to_mem_lsqio_pendingPtr_flag,
+            tr.io_ooo_to_mem_lsqio_pendingPtr_value,
+            tr.io_ooo_to_mem_lsqio_pendingMMIOld,
+            tr.io_ooo_to_mem_lsqio_pendingst,
+            tr.io_ooo_to_mem_lsqio_scommit,
+            has_commit,
+            has_fault_head);
     endfunction:build_lsqcommit_xaction
 
     function bit mark_rob_commit_uid(input memblock_uid_t uid);
@@ -631,10 +672,9 @@ class lsq_commit_handler extends uvm_object;
 
         ensure_handles();
         status = data.get_status(uid);
-        if (data.issue_blocked_by_global_flush()) begin
-            `uvm_info("LSQ_COMMIT", $sformatf("skip ROB commit uid=%0d because redirect/flush is in progress", uid), UVM_LOW)
-            return 1'b0;
-        end
+        // Only mark_rob_commit_batch() calls this helper.  The batch owner has
+        // already completed one atomic post-drive preflight, including active
+        // redirect coverage, before the first UID is modified.
         if (!uid_is_normal_commit_candidate(uid)) begin
             `uvm_info("LSQ_COMMIT",
                       $sformatf("skip non-eligible ROB commit uid=%0d active=%0d wb=%0d pass=%0d fault=%0d exc=%0d load/sta/std_fault=%0d/%0d/%0d replay=%0d redirect=%0d flushed=%0d killed=%0d terminal_done=%0d",
@@ -672,17 +712,53 @@ class lsq_commit_handler extends uvm_object;
         return 1'b1;
     endfunction:mark_rob_commit_uid
 
-    function void mark_rob_commit_batch(input memblock_uid_t uids[$]);
+    function bit mark_rob_commit_batch(input memblock_uid_t uids[$]);
         memblock_rob_key_t batch_tail_rob_key;
         memblock_rob_key_t previous_rob_key;
+        bit                flush_active;
 
         if (uids.size() == 0) begin
-            return;
+            return 1'b1;
         end
         ensure_modeled_rob_deq_ptr_initialized();
+        flush_active = data.issue_blocked_by_global_flush();
         if (fault_head_waiting || uids[0] != commit_cursor_uid ||
             data.get_status(uids[0]).get_rob_key() != modeled_rob_deq_ptr) begin
             `uvm_fatal("LSQ_COMMIT", "normal commit batch does not start at the modeled ROB head")
+        end
+        // The transaction has already reached the LSQ-commit driver.  A
+        // redirect may have started while finish_item() was waiting.  Check
+        // coverage before candidate state because a completed redirect scan
+        // can legitimately clear a covered UID's active/pass state.
+        if (flush_active) begin
+            if (!data.active_redirect.valid) begin
+                `uvm_info("LSQ_COMMIT",
+                          $sformatf("cancel normal commit batch uid=%0d..%0d because flush has no active redirect provenance",
+                                    uids[0], uids[uids.size() - 1]),
+                          UVM_LOW)
+                return 1'b0;
+            end
+            foreach (uids[idx]) begin
+                memblock_rob_key_t current_rob_key;
+
+                current_rob_key = data.get_status(uids[idx]).get_rob_key();
+                rob_order_util::check_rob_key(current_rob_key,
+                                              "mark_rob_commit_batch.redirect_preflight");
+                if (rob_order_util::rob_need_flush(current_rob_key,
+                                                   data.active_redirect)) begin
+                    `uvm_info("LSQ_COMMIT",
+                              $sformatf("cancel normal commit batch uid=%0d..%0d because active redirect rob=%0d/%0d flush_itself=%0d covers idx=%0d uid=%0d rob=%0d/%0d",
+                                        uids[0], uids[uids.size() - 1],
+                                        data.active_redirect.rob_key.flag,
+                                        data.active_redirect.rob_key.value,
+                                        data.active_redirect.flush_itself,
+                                        idx, uids[idx],
+                                        current_rob_key.flag,
+                                        current_rob_key.value),
+                              UVM_LOW)
+                    return 1'b0;
+                end
+            end
         end
         foreach (uids[idx]) begin
             memblock_rob_key_t current_rob_key;
@@ -707,6 +783,15 @@ class lsq_commit_handler extends uvm_object;
             end
             previous_rob_key = current_rob_key;
         end
+        if (flush_active) begin
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("apply normal commit survivor batch uid=%0d..%0d during younger redirect rob=%0d/%0d flush_itself=%0d",
+                                uids[0], uids[uids.size() - 1],
+                                data.active_redirect.rob_key.flag,
+                                data.active_redirect.rob_key.value,
+                                data.active_redirect.flush_itself),
+                      UVM_LOW)
+        end
         foreach (uids[idx]) begin
             if (!mark_rob_commit_uid(uids[idx])) begin
                 `uvm_fatal("LSQ_COMMIT", $sformatf("normal commit uid=%0d was not applied", uids[idx]))
@@ -718,8 +803,10 @@ class lsq_commit_handler extends uvm_object;
         batch_tail_rob_key = data.get_status(uids[uids.size() - 1]).get_rob_key();
         committed_rob_watermark = batch_tail_rob_key;
         committed_rob_watermark_valid = 1'b1;
-        commit_cursor_uid = uids[uids.size() - 1] + 1;
+        set_commit_cursor_uid(uids[uids.size() - 1] + 1,
+                              "mark_rob_commit_batch");
         rebase_framework_head_from_commit_cursor();
+        return 1'b1;
     endfunction:mark_rob_commit_batch
 
     // 抽象职责：记录一个 control ROB head 的提交并推进公共 commit cursor。它不生成
@@ -757,7 +844,7 @@ class lsq_commit_handler extends uvm_object;
         end
         committed_rob_watermark = control_rob_key;
         committed_rob_watermark_valid = 1'b1;
-        commit_cursor_uid = uid + 1;
+        set_commit_cursor_uid(uid + 1, "mark_control_rob_commit_uid");
         rebase_framework_head_from_commit_cursor();
         return 1'b1;
     endfunction:mark_control_rob_commit_uid
@@ -782,7 +869,7 @@ class lsq_commit_handler extends uvm_object;
             data.get_status(uid).get_rob_key() != modeled_rob_deq_ptr) begin
             `uvm_fatal("LSQ_COMMIT", "fault token uid does not match modeled ROB head")
         end
-        if (data.is_scalar_store_uid(uid) && !data.store_real_writebacks_done(uid)) begin
+        if (data.store_fault_real_wb_pending(uid)) begin
             `uvm_info("LSQ_COMMIT",
                       $sformatf("defer fault commit uid=%0d until STA/STD real writeback sta=%0d std=%0d",
                                 uid, data.get_status(uid).sta_writeback,
@@ -820,13 +907,6 @@ class lsq_commit_handler extends uvm_object;
             return 1'b0;
         end
         status = data.get_status(fault_head_uid);
-        if (data.is_scalar_store_uid(fault_head_uid) &&
-            !data.store_real_writebacks_done(fault_head_uid)) begin
-            `uvm_info("LSQ_COMMIT",
-                      $sformatf("defer fault terminal/redirect uid=%0d until STA/STD real writeback sta=%0d std=%0d",
-                                fault_head_uid, status.sta_writeback, status.std_writeback), UVM_LOW)
-            return 1'b0;
-        end
         if (status.dynamic_epoch != fault_head_dynamic_epoch ||
             status.flushed || status.issue_killed ||
             !status.rob_commit) begin
@@ -834,6 +914,13 @@ class lsq_commit_handler extends uvm_object;
             clear_fault_head_token();
             modeled_head_valid = 1'b0;
             rebase_framework_head_from_commit_cursor();
+            return 1'b0;
+        end
+        if (data.store_fault_real_wb_pending(fault_head_uid)) begin
+            `uvm_info("LSQ_COMMIT",
+                      $sformatf("defer fault terminal/redirect uid=%0d until current dynamic instance STA/STD real writeback sta=%0d std=%0d epoch=%0d",
+                                fault_head_uid, status.sta_writeback, status.std_writeback,
+                                status.dynamic_epoch), UVM_LOW)
             return 1'b0;
         end
         // Fault entry的LQ/SQ deq可能与active redirect重叠。deq handler会先释放
@@ -1120,6 +1207,18 @@ class lsq_commit_handler extends uvm_object;
                                                   status.active, status.active_sq_mapped,
                                                   status.sqIdx_flag, status.sqIdx_value,
                                                   uid_seen));
+                    items.delete();
+                    return 1'b0;
+                end
+                if (data.store_fault_blocks_sq_deq(uid)) begin
+                    `uvm_info("STORE_FAULT_BARRIER",
+                              $sformatf("defer SQ deq until STD real-WB idx=%0d/%0d uid=%0d epoch=%0d sta_wb=%0d std_dispatch=%0d std_wb=%0d pending_fault=%0d",
+                                        idx + 1, count, uid, status.dynamic_epoch,
+                                        status.sta_writeback, status.std_dispatched,
+                                        status.std_writeback,
+                                        data.pending_store_fault_matches(uid)), UVM_LOW)
+                    // Deq batches are atomic. Do not advance release state for
+                    // an earlier item when a later live owner is blocked.
                     items.delete();
                     return 1'b0;
                 end
