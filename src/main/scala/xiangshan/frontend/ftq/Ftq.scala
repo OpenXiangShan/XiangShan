@@ -595,6 +595,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     backendRedirect.valid && backendRedirect.bits.isMisPred && redirectPerfMeta.bpSource.s3Override,
     perf_mispredS3SourceVec
   )
+  XSPerfAccumulate(
+    "resolve_branch_mispredicts_s2_override",
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      redirectPerfMeta.bpSource.s2Override && !redirectPerfMeta.bpSource.s3Override
+  )
   XSPerfAccumulate("resolve_redirects", backendRedirect.valid)
   XSPerfAccumulate("resolve_branch_mispredicts", backendRedirect.valid && backendRedirect.bits.isMisPred)
   XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
@@ -651,6 +656,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "commit_branch_mispredicts_s3_source",
     perf_commitHasMispredict,
     BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
+  )
+  XSPerfAccumulate(
+    "commit_branch_mispredicts_s2_override",
+    perf_commitHasMispredict &&
+      commitPerfMeta.bpuPerf.bpSource.s2Override && !commitPerfMeta.bpuPerf.bpSource.s3Override
   )
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_reason",

@@ -245,11 +245,18 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   io.specOut.isCanUse  := isCanUse
   io.specOut.retTarget := topRetAddr
 
-  private val s3_overrideHasRasAction     = s3_override && (s3_realPush || s3_realPop)
-  private val s3_overrideHasRasActionNext = RegNext(s3_overrideHasRasAction, false.B)
+  private val s2_overrideHasRasAction = s2_override && (s2_realPush || s2_realPop)
+  private val s3_overrideHasRasAction = s3_override && (s3_realPush || s3_realPop)
+  // Either stage can repair the speculative RAS state.  Keep the stage-specific
+  // counters, but use the combined event for the follow-up S1 check.
+  private val overrideHasRasActionNext = RegNext(
+    s2_overrideHasRasAction || s3_overrideHasRasAction,
+    false.B
+  )
+  XSPerfAccumulate("s2_override_has_rasAction", s2_overrideHasRasAction)
   XSPerfAccumulate("s3_override_has_rasAction", s3_overrideHasRasAction)
   XSPerfAccumulate(
     "s1_has_return_after_override_has_action",
-    s3_overrideHasRasActionNext && io.stageCtrl.s1_fire && specPop
+    overrideHasRasActionNext && io.stageCtrl.s1_fire && specPop
   )
 }

@@ -371,12 +371,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     VecInit(mbtb.io.result.map(_.bits.cfiPosition =/= s2_s1Prediction.cfiPosition))
   private val s2_mbtbAttributeDiffVec = VecInit(mbtb.io.result.map(_.bits.attribute =/= s2_s1Prediction.attribute))
 
-  s2_override := {
-    val takenDiff       = s2_taken =/= s2_s1Prediction.taken
-    val cfiPositionDiff = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbCfiPositionDiffVec)
-    val attributeDiff   = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbAttributeDiffVec)
+  // S2 does not compare targets.
+  // The target comes from the selected MBTB entry and is checked by S3 when needed.
+  private val s2_takenDiff       = s2_taken =/= s2_s1Prediction.taken
+  private val s2_cfiPositionDiff = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbCfiPositionDiffVec)
+  private val s2_attributeDiff   = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbAttributeDiffVec)
 
-    s2_valid && (takenDiff || cfiPositionDiff || attributeDiff)
+  s2_override := {
+    s2_valid && (s2_takenDiff || s2_cfiPositionDiff || s2_attributeDiff)
   }
 
   /* *** s3 prediction selection *** */
@@ -712,9 +714,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** perf pred *** */
 
-  XSPerfAccumulate("toFtqFire", io.toFtq.prediction.fire)
-  XSPerfAccumulate("s2Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s2Override)
-  XSPerfAccumulate("s3Override", io.toFtq.prediction.fire && io.toFtq.prediction.bits.s3Override)
+  private val toFtqFire = io.toFtq.prediction.fire
+  private val perf_s2Override =
+    toFtqFire && io.toFtq.prediction.bits.s2Override && !io.toFtq.prediction.bits.s3Override
+  private val perf_s3Override = toFtqFire && io.toFtq.prediction.bits.s3Override
+  private val s1PredictionFire =
+    toFtqFire && !io.toFtq.prediction.bits.s2Override && !io.toFtq.prediction.bits.s3Override
+
+  XSPerfAccumulate("toFtqFire", toFtqFire)
+  XSPerfAccumulate("s2Override", perf_s2Override)
+  XSPerfAccumulate("s3Override", perf_s3Override)
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
@@ -722,13 +731,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       getFtqOffset(io.toFtq.prediction.bits.startPc, io.toFtq.prediction.bits.endPosition),
       FetchBlockInstNum.U
     ),
-    io.toFtq.prediction.fire,
+    toFtqFire,
     0,
     FetchBlockInstNum + 1
   )
   XSPerfSeqAccumulate(
     "s1_use",
-    io.toFtq.prediction.fire && !s2_override && !s3_override,
+    s1PredictionFire,
     Seq(
       ("ubtb", debug_s1UseUbtb),
       ("abtb", debug_s1UseAbtb),
@@ -752,6 +761,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     BpuPredictionSource.Stage3.getValidSeq(s3_perfMeta.bpSource.s3Source)
   )
 
+  // S2 uses the raw MBTB/TAGE fast result.  There is no S2 source field in the
+  // architectural performance metadata, so keep the two possible sources local
+  // to this cycle and expose them as a separate final-prediction breakdown.
+  private val s2_tageUsed = s2_taken && s2_firstTakenBranch.bits.attribute.isConditional &&
+    Mux1H(s2_firstTakenBranchOH, tage.io.prediction.fastTakenVec.map(_.valid))
+  private val s2_mbtbUsed = s2_taken && !s2_tageUsed
+  XSPerfSeqAccumulate(
+    "finalPred_s2",
+    perf_s2Override,
+    Seq(
+      ("tage", s2_tageUsed),
+      ("mbtb", s2_mbtbUsed),
+      ("fallThrough", !s2_taken)
+    )
+  )
+
   XSPerfAccumulate("s1Invalid", !s1_valid)
 
   // taken mismatch
@@ -766,22 +791,68 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     thisPrefix = "s3"
   )
 
+  private val perf_s2TakenSourceVec = Seq(
+    "s2Tage" -> s2_tageUsed,
+    "s2Mbtb" -> s2_mbtbUsed
+  )
+
+  // S2 override mismatch counters.  The S1 source is retained for the cases in
+  // which S1 supplied a taken prediction; when S1 fell through, classify the
+  // replacement by the S2 fast source.
+  XSPerfSeqAccumulate(
+    "s2Override_takenMismatch_s1fall",
+    perf_s2Override && s2_taken && !s2_s1Prediction.taken,
+    perf_s2TakenSourceVec
+  )
+
+  XSPerfSeqAccumulate(
+    "s2Override_takenMismatch_s2fall",
+    perf_s2Override && !s2_taken && s2_s1Prediction.taken,
+    BpuPredictionSource.Stage1.getValidSeq(
+      s1_predictionSource,
+      exclude = Set("Fallthrough"),
+      thisPrefix = "s1"
+    )
+  )
+
+  XSPerfSeqAccumulate(
+    "s2Override_positionMismatch",
+    perf_s2Override && s2_taken && s2_s1Prediction.taken &&
+      s2_prediction.cfiPosition =/= s2_s1Prediction.cfiPosition,
+    BpuPredictionSource.Stage1.getValidSeq(
+      s1_predictionSource,
+      exclude = Set("Fallthrough"),
+      thisPrefix = "s1"
+    )
+  )
+
+  XSPerfSeqAccumulate(
+    "s2Override_attributeMismatch",
+    perf_s2Override && s2_taken && s2_s1Prediction.taken &&
+      !(s2_prediction.attribute === s2_s1Prediction.attribute),
+    BpuPredictionSource.Stage1.getValidSeq(
+      s1_predictionSource,
+      exclude = Set("Fallthrough"),
+      thisPrefix = "s1"
+    )
+  )
+
   XSPerfSeqAccumulate(
     s"s3Override_takenMismatch_s1fall",
-    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s1Fallthrough,
+    perf_s3Override && s3_perfMeta.bpSource.s1Fallthrough,
     perf_s3TakenSourceVec
   )
 
   XSPerfSeqAccumulate(
     s"s3Override_takenMismatch_s3fall",
-    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough,
+    perf_s3Override && s3_perfMeta.bpSource.s3Fallthrough,
     perf_s1TakenSourceVec
   )
 
   // position mismatch
   XSPerfSeqAccumulate(
     s"s3Override_positionMismatch",
-    io.toFtq.prediction.fire && s3_override &&
+    perf_s3Override &&
       s3_prediction.taken && s3_s2Prediction.taken &&
       s3_prediction.cfiPosition =/= s3_s2Prediction.cfiPosition,
     perf_s1TakenSourceVec
@@ -790,7 +861,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // attribute mismatch
   XSPerfSeqAccumulate(
     s"s3Override_attributeMismatch",
-    io.toFtq.prediction.fire && s3_override &&
+    perf_s3Override &&
       s3_prediction.taken && s3_s2Prediction.taken &&
 //      s3_prediction.cfiPosition === s3_s2Prediction.cfiPosition &&
       !(s3_prediction.attribute === s3_s2Prediction.attribute),
@@ -808,7 +879,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   XSPerfSeqAccumulate(
     s"s3Override_targetMismatch",
-    io.toFtq.prediction.fire && s3_override &&
+    perf_s3Override &&
       s3_prediction.taken && s3_s2Prediction.taken &&
       s3_prediction.cfiPosition === s3_s2Prediction.cfiPosition &&
       s3_targetDiff,
