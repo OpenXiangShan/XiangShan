@@ -37,11 +37,12 @@ from .api import (
     api_Frontend_set_log_level,
 )
 from .agents import ICacheAgent, PTWAgent, UncacheAgent
+from .checkers import BranchChecker
 from .core.backend_model import BackendModel
 from .core.frontend_env import FrontendEnv
 from .monitors import FrontendMonitor
 from .support.logging_utils import configure_env_logging
-from .model import BranchChecker, GoldenTrace, MemoryModel, PageTableModel, TraceEntry
+from .model import GoldenTrace, MemoryModel, PageTableModel, TraceEntry
 
 __all__ = [
     "FrontendEnv",

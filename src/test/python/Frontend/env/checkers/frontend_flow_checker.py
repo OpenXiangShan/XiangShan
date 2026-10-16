@@ -4,7 +4,7 @@ import logging
 from typing import Callable, Dict, List, Optional
 
 from ..model.backend_runtime import CfVecCycleSnapshot
-from ..model.branch_checker import BranchChecker
+from .branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
 from ..monitors.frontend_monitor import FrontendCycleSnapshot, Observation

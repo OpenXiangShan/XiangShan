@@ -44,7 +44,7 @@ from ..runtime.pylib import frontend_itlb_ptw_req_get_gpa_path
 from ..support.bpu_ftq_scheduler import BpuFtqScheduler
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.backend_runtime import CfVecCycleSnapshot
-from ..model.branch_checker import BranchChecker
+from ..checkers.branch_checker import BranchChecker
 from ..monitors.frontend_monitor import FrontendMonitor
 
 
