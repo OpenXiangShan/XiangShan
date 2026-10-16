@@ -90,6 +90,18 @@ def load_all_gcpt(gcpt_paths):
         all_gcpt.extend(find_files_with_suffix(gcpt_path, ['.zstd', '.gz']))
     return all_gcpt
 
+def pgo_thread_shortfall(emulator, pgo, threads, available=None):
+    '''return the number of CPUs this process can use if a Verilator PGO build with `threads` emu threads
+    cannot train on them, otherwise None'''
+    if emulator != "verilator" or not pgo or not threads or threads <= 1:
+        return None
+    if available is None:
+        if hasattr(os, "sched_getaffinity"):
+            available = len(os.sched_getaffinity(0))
+        else:
+            available = os.cpu_count() or threads
+    return available if available < threads else None
+
 class XSArgs(object):
     script_path = os.path.realpath(__file__)
     # default path to the repositories
@@ -302,6 +314,13 @@ class XiangShan(object):
     def build_emu(self):
         print("Building XiangShan emu with the following configurations:")
         self.show()
+        shortfall = pgo_thread_shortfall(self.args.emulator, self.args.pgo, self.args.threads)
+        if shortfall is not None:
+            print(f"Error: PGO training would abort: only {shortfall} CPUs are available but the emu is built with "
+                  f"--threads {self.args.threads} (Verilator refuses to run a model built with more threads "
+                  f"than CPUs, and the build would continue with an almost empty profile).", file=sys.stderr)
+            print(f"Run on at least {self.args.threads} CPUs, lower --threads, or drop --pgo.", file=sys.stderr)
+            return 1
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         threads = self.args.make_threads
