@@ -53,8 +53,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
 
-  io.trainReady := true.B
-
   alignBanks.foreach { b =>
     b.io.stageCtrl := io.stageCtrl
     b.io.enable    := io.enable
@@ -114,8 +112,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    * receive training data
    * send startPc to alignBank for replacer state reading
    */
-  private val t0_fire  = io.stageCtrl.t0_fire && io.enable
-  private val t0_train = io.train
+  private val t0_fire  = io.train.valid && io.enable
+  private val t0_train = io.train.bits
 
   private val t0_startPc          = t0_train.startPc
   private val t0_rotator          = VecRotate(getAlignBankIndex(t0_startPc))
@@ -123,6 +121,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t0_posBitsHigherVec = t0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.t0_fire    := io.train.valid
     b.io.t0_startPc := t0_startPcVec(i)
   }
 

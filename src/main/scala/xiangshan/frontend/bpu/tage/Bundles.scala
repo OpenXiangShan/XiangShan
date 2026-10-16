@@ -27,6 +27,7 @@ import xiangshan.frontend.bpu.SaturateCounterInit
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.WriteReqBundle
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+import xiangshan.frontend.bpu.mbtb.{TakenCounter => MainBtbTakenCounter}
 
 object TakenCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -125,6 +126,12 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
   val entries: Vec[TageMetaEntry] = Vec(NumBtbResultEntries, new TageMetaEntry)
+}
+
+class TrainBranchMeta(implicit p: Parameters) extends TageBundle {
+  val mbtbHit: Bool            = Bool()
+  val baseCtr: SaturateCounter = MainBtbTakenCounter()
+  val meta:    TageMetaEntry   = new TageMetaEntry
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {

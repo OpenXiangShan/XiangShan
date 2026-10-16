@@ -42,6 +42,7 @@ case class TageParameters(
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 5,
+    TrainingBufferSize:    Int = 4,
     EnableTageTrace:       Boolean = false
 ) {}
 
@@ -71,6 +72,10 @@ trait HasTageParameters extends HasBpuParameters {
 
   def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
+
+  def NumTableReadPorts: Int = 2 // for prediction and training
+
+  def TrainingBufferSize: Int = tageParameters.TrainingBufferSize
 
   // per table parameters
   def NumSets(implicit info:     TageTableInfo): Int = info.getNumSets(NumBanks)
