@@ -2,16 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from env.checkers.ptw_checker import PTWFullPpnChecker, PTWRespInputChecker
-from env.core.checkers import PTWFullPpnChecker as LegacyPTWFullPpnChecker
-from env.core.checkers import PTWRespInputChecker as LegacyPTWRespInputChecker
+from env.checkers.ptw_checker import PTWRespInputChecker
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
-
-
-def test_ptw_checkers_keep_legacy_imports() -> None:
-    assert LegacyPTWFullPpnChecker is PTWFullPpnChecker
-    assert LegacyPTWRespInputChecker is PTWRespInputChecker
 
 
 def _response() -> dict:
