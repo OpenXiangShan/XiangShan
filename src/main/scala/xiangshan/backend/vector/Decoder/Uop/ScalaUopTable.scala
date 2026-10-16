@@ -365,6 +365,22 @@ object ScalaUopTable {
     )
   }
 
+  val tableSdext = {
+    import xiangshan.backend.decode.isa.Instructions.SDEXTType
+
+    SDEXTType.mapUopcode(
+      _.DRET -> jmp, // system i-type
+    )
+  }
+
+  val tableSmrnmi = {
+    import xiangshan.backend.decode.isa.Instructions.SMRNMIType
+
+    SMRNMIType.mapUopcode(
+      _.MNRET -> jmp, // system i-type
+    )
+  }
+
   val tableS = {
     import xiangshan.backend.decode.isa.Instructions.SType
 
