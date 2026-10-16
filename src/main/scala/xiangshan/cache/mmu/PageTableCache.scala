@@ -123,7 +123,7 @@ class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
   val isFirst = Bool()
   val bypassed = if (EnableSv48) Vec(4, Bool()) else Vec(3, Bool())
   val isHptwReq = Bool()
-  val hptwId = UInt(log2Up(l2tlbParams.llptwsize).W)
+  val hptwId = UInt(HptwIdWidth.W)
 }
 
 class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
@@ -157,7 +157,7 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       val l2Hit = Bool()
       val l1Hit = Bool()
       val ppn = UInt(ppnLen.W)
-      val id = UInt(log2Up(l2tlbParams.llptwsize).W)
+      val id = UInt(HptwIdWidth.W)
       val resp = new HptwResp() // used if hit
       val bypassed = Bool()
       val bitmapCheck = Option.when(HasBitmapCheck)(new Bundle {
