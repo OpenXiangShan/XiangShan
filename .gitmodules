@@ -32,3 +32,7 @@
 [submodule "ChiselIOPMP"]
 	path = ChiselIOPMP
 	url = https://github.com/OpenXiangShan/ChiselIOPMP.git
+[submodule "MCSim"]
+	path = MCSim
+	url = https://github.com/OpenXiangShan/MCSim.git
+	branch = MCSim-v1.1
