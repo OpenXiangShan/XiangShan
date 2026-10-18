@@ -28,7 +28,7 @@ case class PABDepthParameters(
 case object PABDepthKey extends Field[PABDepthParameters](PABDepthParameters())
 
 object PABDepthPolicy {
-  val levels = Seq(4, 8, 16, 24, 32, 48, 64)
+  val levels = Seq(4, 8, 16, 24, 32, 48, 64, 128)
 }
 
 class PABDepthEvents extends Bundle {

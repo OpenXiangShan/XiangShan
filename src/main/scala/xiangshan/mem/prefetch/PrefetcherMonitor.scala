@@ -183,7 +183,8 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
+  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",
+    initValue = if (param.name == "Stream") 16 else 32)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
   val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
@@ -247,7 +248,8 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     enable := false.B
   }
 
-  val enableDynamicPrefetcher_const = Constantin.createRecord(s"${param.name}_enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 1)
+  // Match the lx comparison: automatic shutoff is opt-in; PAB depth control stays enabled.
+  val enableDynamicPrefetcher_const = Constantin.createRecord(s"${param.name}_enableDynamicPrefetcher${p(XSCoreParamsKey).HartId}", initValue = 0)
   val enableDynamicPrefetcher = (enableDynamicPrefetcher_const === 1.U)
 
   when(!enableDynamicPrefetcher) {

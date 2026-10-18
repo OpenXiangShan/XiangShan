@@ -5,9 +5,10 @@ DefaultConfig enables a metadata-only 64-entry prefetch address buffer (PAB),
 a persistent 256-entry victim FIFO, and competitive L1 Stream distance control.
 There is no PDB data array, cache-line ownership, virtual data response, or
 PDB-to-DCache move. The original DCache geometry, replacement, miss admission,
-merge/refill/coherence paths, prefetch-source flags and prefetcher enables remain
-those of the base. In particular the original automatic prefetcher shutdown
-mechanism and its initialization defaults are preserved independently of depth.
+merge/refill/coherence paths, prefetch-source flags and manual prefetcher enables
+remain those of the base. Automatic prefetcher shutdown is opt-in, matching the
+lx comparison; its default is off for Stream, Stride and Berti. PAB dynamic depth
+control remains enabled independently of that shutdown setting.
 
 ## Observation contract
 
@@ -59,9 +60,10 @@ replaces the passive origin/consumed state; it never changes real MSHR fields.
 
 ## Depth policy
 
-The release-only competitive policy is the same as feat-pdb-all's H3 policy:
+The release-only competitive policy follows feat-pdb-all's H3 principle, with an
+additional128-block level for comparison with lx:
 
-- Initial depth16; levels4,8,16,24,32,48,64, measured in cache blocks.
+- Initial depth16; levels4,8,16,24,32,48,64,128, measured in cache blocks.
 - A window closes at500 successful Stream PAB insertions. All closing-edge events
   belong to that window. Events accumulate during refill gaps; counters saturate
   at65535. Partial windows and FIFO history survive performance dump/reset.
@@ -84,17 +86,18 @@ Matching parameters do not establish equivalent performance or a tuned optimum.
 ## Comparison with feat-pdbbase-lx
 
 The reference is `feat-pdbbase-lx` at
-`8410ac15f492df1d4a1ddb4226e473ca4a677644`. Relative to the same base it changes
+`d1faf1ae82d86dc6b3c2e3ae8595480a4c15a7bd`. Its production changes relative to the same base affect
 only `PrefetcherMonitor.scala` and `L1StreamPrefetcher.scala`; it has no PDB.
 It enables the existing monitor's doubling/halving updates, selects the monitor
 distance in Stream, and disables automatic prefetcher shutdown by default.
-The final lx commit changes only two assignments, fixing L2/L3 distances to
-640/960 while L1 remains dynamic, as requested for the comparison.
+lx fixes L2/L3 distances to640/960, starts Stream at16, and saturates Stream's
+doubling/halving updates at4 and128. Stride/Berti keep their existing initial
+monitor distance32 and control behavior.
 
 | Property | lx reference | PAB candidate defaults |
 | --- | --- | --- |
-| Initial L1 distance, in blocks | 32 | 16 |
-| Distance choices | powers of two from 1 through 2048 | 4, 8, 16, 24, 32, 48, 64 |
+| Initial L1 distance, in blocks | 16 | 16 |
+| Distance choices | 4, 8, 16, 32, 64, 128 | 4, 8, 16, 24, 32, 48, 64, 128 |
 | Upward evidence | Stream PF request matches any existing MSHR, including another unconsumed PF | first accepted demand into a Stream PF lifetime, plus Stream PF matching demand/consumed PF |
 | Downward evidence | unused Stream line overwritten in the real DCache | demand reuses an unused Stream virtual capacity victim |
 | Windows | independent: 1000 PF observations for timeliness, 1000 cache-use/useless observations for validity | one window of 500 successful Stream PAB insertions |
@@ -103,27 +106,24 @@ The final lx commit changes only two assignments, fixing L2/L3 distances to
 | Simultaneous decisions | upward assignment wins | compare pressures; ties clear credit |
 | Stabilization | no explicit settling window | one complete settling window after a change |
 | L2/L3 distances | fixed 640/960 | fixed 640/960 |
-| Automatic shutdown default | off | base behavior retained: on |
+| Automatic shutdown default | off | off |
 
 lx's timeliness window also closes if cache-hit PF observations reach1000.
 Its PF-to-MSHR matches are not the same event as demand waiting for a prefetch.
 Its validity window uses equality with1000, so multiple observations on one edge
 can skip the intended boundary. These remaining reference implementation details
-are preserved by the two-assignment lx change.
+are preserved by the bounds and initialization changes.
 
-For a comparison of the two full policies, use the same no-PDB cache/data path,
-retain the common outer distances640/960, use initial L1 distance32 in both candidates,
-and explicitly give both candidates the same Stream/Stride/Berti automatic
-shutdown settings. For this candidate `WithPABDepth` can select initialDepth32;
-the existing Constantin records `Stream_enableDynamicPrefetcher0`,
-`Stride_enableDynamicPrefetcher0` and `Berti_enableDynamicPrefetcher0` can each
-be initialized to0 for an experiment without automatic shutdown. This branch
-deliberately preserves the base's defaults. No performance run is supplied here.
+The default comparison now has common outer distances640/960, initial Stream
+distance16, bounds4..128, and Stream/Stride/Berti automatic shutdown disabled.
+The existing Constantin records `Stream_enableDynamicPrefetcher0`,
+`Stride_enableDynamicPrefetcher0` and `Berti_enableDynamicPrefetcher0` default to0
+in both branches and permit explicit opt-in. No performance run is supplied here.
 
 Keep each full policy's observation definitions, window, thresholds and step rule
-for the primary policy comparison. Then separately test common bounds4..64 and,
-if needed, common depth choices/windows to identify the contribution of the
-range, steps and observation cadence. Those are modified policies and must be
+for the primary policy comparison. If needed, separately test common depth
+choices/windows to identify the contribution of the steps and observation
+cadence. Those are modified policies and must be
 labeled separately. Do not transfer the numerical thresholds between windows:
 PF attempts, successful insertions and later victim reuse are different event
 populations, and reuse can refer to insertions from an earlier window.
@@ -167,7 +167,7 @@ in the implementation plan; no SPEC performance claim follows from these checks.
 Reproduce directed checks from this worktree:
 
 ```sh
-mill -i xiangshan.test.testOnly cache.PrefetchAddrBufferTest cache.PABVictimTableTest cache.PABDepthControllerTest cache.PABMissQueueTest cache.PABMissTrackerTest cache.PABConfigurationTest cache.PABDepthIntegrationTest cache.PABMainPipeTest
+mill -i xiangshan.test.testOnly cache.PrefetchAddrBufferTest cache.PABVictimTableTest cache.PABDepthControllerTest cache.PABMissQueueTest cache.PABMissTrackerTest cache.PABConfigurationTest cache.PABDepthIntegrationTest cache.PABMainPipeTest cache.PrefetchShutdownDefaultsTest
 mill -i xiangshan.checkFormat
 NOOP_HOME="$PWD" make verilog CONFIG=DefaultConfig BUILD_DIR=build/pab-depth JVM_XMX=40G
 ```

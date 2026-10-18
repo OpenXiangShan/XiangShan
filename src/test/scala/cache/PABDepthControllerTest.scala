@@ -51,12 +51,12 @@ class PABDepthControllerTest extends AnyFlatSpec with ChiselSim {
     it should s"walk every level, settle for $settle windows and saturate both limits" in {
       simulate(new PABDepthController(PABDepthParameters(settleWindows = settle))) { c =>
         init(c)
-        for (next <- Seq(24, 32, 48, 64)) {
+        for (next <- Seq(24, 32, 48, 64, 128)) {
           window(c, late = 40); c.io.depth.expect(next.U)
           for (_ <- 0 until settle) { window(c, unused = 80); c.io.depth.expect(next.U) }
         }
-        window(c, late = 40); c.io.depth.expect(64.U)
-        for (next <- Seq(48, 32, 24, 16, 8, 4)) {
+        window(c, late = 40); c.io.depth.expect(128.U)
+        for (next <- Seq(64, 48, 32, 24, 16, 8, 4)) {
           window(c, unused = 80); c.io.depth.expect(next.U)
           for (_ <- 0 until settle) { window(c, late = 40); c.io.depth.expect(next.U) }
         }
