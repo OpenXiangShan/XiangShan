@@ -51,6 +51,7 @@ class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 }
 
 class PrefetcherMonitorBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
+  val pabinfo = Input(new PABDepthEvents)
   val loadinfo = Input(Vec(LoadPipelineWidth, new PipePrefetchStatBundle))
   val maininfo = Input(new PipePrefetchStatBundle)
   val missinfo = Input(new MissPrefetchStatBundle)
@@ -67,6 +68,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val io = IO(new PrefetcherMonitorBundle)
 
   val prefetch_info = Wire(new L1PrefetchStatisticBundle)
+  prefetch_info.pabinfo := io.pabinfo
   prefetch_info.loadinfo := io.loadinfo 
   prefetch_info.missinfo := io.missinfo
   prefetch_info.maininfo := io.maininfo
@@ -149,6 +151,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 }
 
 class L1PrefetchStatisticBundle()(implicit p: Parameters) extends XSBundle {
+  val pabinfo = new PABDepthEvents
   val loadinfo = Vec(LoadPipelineWidth, new PipePrefetchStatBundle)
   val maininfo = new PipePrefetchStatBundle
   val missinfo = new MissPrefetchStatBundle
@@ -164,7 +167,8 @@ class L1PrefetchMonitorBundle()(implicit p: Parameters) extends XSBundle {
 class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
   val io = IO(new L1PrefetchMonitorBundle)
 
-  val depth = Reg(UInt(DEPTH_BITS.W))
+  val depth = Wire(UInt(DEPTH_BITS.W))
+  val legacyDepth = Reg(UInt(DEPTH_BITS.W))
   val flush = RegInit(false.B)
   val enable = RegInit(true.B)
   val confidence = RegInit(param.confidence.U(1.W))
@@ -227,7 +231,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   confidence := Mux(conf_reset, 1.U(1.W), confidence)
 
   when(trigger_pf_useless) {
-    depth := Mux(depth === 1.U, depth, depth >> 1)
+    legacyDepth := Mux(legacyDepth === 1.U, legacyDepth, legacyDepth >> 1)
   }
   when(trigger_disable) {
     confidence := 0.U(1.W)
@@ -236,7 +240,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   }
 
   when(trigger_late_miss) {
-    depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
+    legacyDepth := Mux(legacyDepth === (1 << (DEPTH_BITS - 1)).U, legacyDepth, legacyDepth << 1)
   }.elsewhen(trigger_late_hit) {
     // for now, late hit will disable the prefether
     confidence := 0.U(1.W)
@@ -247,18 +251,46 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val enableDynamicPrefetcher = (enableDynamicPrefetcher_const === 1.U)
 
   when(!enableDynamicPrefetcher) {
-    depth := depth_const
+    legacyDepth := depth_const
     flush := false.B
     enable := true.B
     confidence := 1.U
   }.otherwise {
     // for now, only dynamically disable prefetcher, without depth and flush
-    depth := depth_const
+    legacyDepth := depth_const
     flush := false.B
   }
 
   when(reset.asBool) {
-    depth := depth_const
+    legacyDepth := depth_const
+  }
+
+  depth := legacyDepth
+  if (param.name == "Stream" && p(PABDepthKey).enabled) {
+    val params = p(PABDepthKey)
+    val hart = p(XSCoreParamsKey).HartId
+    val control = Module(new PABDepthController(params))
+    control.io.enabled := Constantin.createRecord(s"enablePABAutoDepth$hart", initValue = params.autoDepth)
+    control.io.fixedDepth := Constantin.createRecord(s"pabFixedDepth$hart", initValue = params.fixedDepth)
+    control.io.events := io.prefetch_info.pabinfo
+    control.io.events.insert := ShiftRegister(io.prefetch_info.pabinfo.insert, 2, false.B, true.B)
+    control.io.events.late := ShiftRegister(io.prefetch_info.pabinfo.late, 2, 0.U(4.W), true.B)
+    depth := control.io.depth
+    val window = control.io.window
+    XSPerfAccumulate("pab_refills", control.io.events.insert)
+    XSPerfAccumulate("pab_late", control.io.events.late)
+    XSPerfAccumulate("pab_unused_victim_hits", control.io.events.unused)
+    XSPerfAccumulate("pab_windows", window.valid)
+    XSPerfAccumulate("pab_depth_increases", window.valid && window.bits.depthAfter > window.bits.depthBefore)
+    XSPerfAccumulate("pab_depth_decreases", window.valid && window.bits.depthAfter < window.bits.depthBefore)
+    for (level <- PABDepthPolicy.levels) {
+      XSPerfAccumulate(s"pab_cycles_at_depth_$level", depth === level.U)
+    }
+    val trace = Constantin.createRecord(s"tracePABDepth$hart", initValue = true)
+    val table = ChiselDB.createTable(s"PABDepthWindow$hart", new PABDepthWindow, basicDB = true)
+    table.log(window.bits, window.valid && trace, s"StreamMonitor$hart", clock, reset)
+    println(s"PAB depth policy: initial=${params.initialDepth}, window=${params.windowInserts}, " +
+      s"levels=${PABDepthPolicy.levels.mkString(",")}, parameters=$params")
   }
 
   val pfTypes: Seq[(String, UInt => Bool)] = Seq(

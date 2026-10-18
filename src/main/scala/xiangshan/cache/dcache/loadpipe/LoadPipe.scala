@@ -32,6 +32,8 @@ class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
 
 class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasL1PrefetchSourceParameter {
   val io = IO(new DCacheBundle {
+    // Passive physical-demand observation; it never changes hit/miss or replay.
+    val pabDemand = Output(Valid(UInt((PAddrBits - blockOffBits).W)))
     // incoming requests
     val lsu = Flipped(new DCacheLoadIO)
     val dwpu = Flipped(new DwpuBaseIO(nWays = nWays, nPorts = 1))
@@ -408,6 +410,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
+  io.pabDemand.valid := s2_valid && !io.lsu.s2_kill && s2_req.instrtype === LOAD_SOURCE.U
+  io.pabDemand.bits := s2_paddr(PAddrBits - 1, blockOffBits)
+
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)

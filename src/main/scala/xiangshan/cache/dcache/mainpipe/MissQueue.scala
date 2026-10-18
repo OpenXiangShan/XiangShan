@@ -1171,6 +1171,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   with HasMissReqFunction
   {
   val io = IO(new Bundle {
+    val pabOrigin = Output(Vec(cfg.nMissEntries, new PABMissOrigin(PAddrBits - blockOffBits)))
+    val pabLate = Output(UInt(4.W))
     val hartId = Input(UInt(hartIdLen.W))
     val resp = Vec(reqNum, Output(new MissResp))
     val refill_to_ldq = ValidIO(new Refill)
@@ -1920,6 +1922,36 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       zip
       Seq(parallel_pipe_regs(i).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
     )
+  }
+
+  // Separate accepted-request accounting for PAB. Preserve the baseline MQ
+  // statistics, prefetch flags, allocation, merging and TileLink behavior.
+  io.pabOrigin := 0.U.asTypeOf(io.pabOrigin)
+  io.pabLate := 0.U
+  if (p(PABDepthKey).enabled) {
+    val tracker = Module(new PABMissTracker(cfg.nMissEntries, PAddrBits - blockOffBits))
+    val accepted = (0 until reqNum).map(i => query_fire(i) && !io.queryMQ(i).req.bits.cancel)
+    for (entry <- 0 until cfg.nMissEntries) {
+      tracker.io.active(entry) := entries(entry).io.req_addr.valid || parallel_pipe_regs.map(r =>
+        r.alloc && !r.cancel && r.mshr_id === entry.U).reduce(_ || _)
+      val allocations = (0 until reqNum).map(i => accepted(i) && analysis.strategy(i)(0) &&
+        analysis.compress_group(i) === i.U && analysis.target_mshr(i) === entry.U)
+      tracker.io.allocation(entry).valid := allocations.reduce(_ || _)
+      tracker.io.allocation(entry).bits.blockAddr := Mux1H(allocations,
+        io.queryMQ.map(_.req.bits.addr(PAddrBits - 1, blockOffBits)))
+      tracker.io.allocation(entry).bits.source := Mux1H(allocations, io.queryMQ.map(_.req.bits.pf_source))
+      tracker.io.allocationPrefetch(entry) := Mux1H(allocations, io.queryMQ.map(_.req.bits.isFromPrefetch))
+      tracker.io.allocation(entry).bits.eligible := Mux1H(allocations,
+        io.queryMQ.zipWithIndex.map { case (q, lane) => q.req.bits.isPrefetchRead && (lane == 0).B })
+      tracker.io.demand(entry) := (0 until reqNum).map(i => accepted(i) &&
+        !io.queryMQ(i).req.bits.isFromPrefetch && io.resp(i).id === entry.U).reduce(_ || _)
+      assert(PopCount(allocations) <= 1.U)
+    }
+    tracker.io.streamAttempt.valid := io.queryMQ(0).req.valid && !io.queryMQ(0).req.bits.cancel &&
+      io.queryMQ(0).req.bits.isFromPrefetch && isFromStream(io.queryMQ(0).req.bits.pf_source)
+    tracker.io.streamAttempt.bits := io.queryMQ(0).req.bits.addr(PAddrBits - 1, blockOffBits)
+    io.pabOrigin := tracker.io.origin
+    io.pabLate := tracker.io.late
   }
 
   // L1MissTrace Chisel DB - support multiple enqueue ports

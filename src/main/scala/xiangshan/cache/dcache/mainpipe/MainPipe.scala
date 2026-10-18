@@ -168,6 +168,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
     // pass to Prefetch Monitor for statistic
     val prefetch_stat = Output(new PipePrefetchStatBundle)
+    val pabOrigins = Input(Vec(cfg.nMissEntries, new PABMissOrigin(PAddrBits - blockOffBits)))
+    val pabRefill = Output(Valid(new PABRefillObservation))
+    val pabRetire = Output(Valid(UInt((PAddrBits - blockOffBits).W)))
+
 
     // data sram
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
@@ -1046,6 +1050,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.access_flag_write.bits.way_en := s3_way_en
   // io.access_flag_write.bits.flag := true.B
   io.access_flag_write.bits.flag :=Mux(s3_req.miss, s3_req.access, true.B)
+
+  // The MQ can retire after the S2 refill acknowledgement while S3 stalls.
+  // Snapshot observation origin at that handoff, before slot reuse is possible.
+  val s3_pabOrigin = if (p(xiangshan.mem.prefetch.PABDepthKey).enabled) {
+    RegEnable(io.pabOrigins(s2_req.miss_id), s2_fire_to_s3)
+  } else {
+    0.U.asTypeOf(new PABMissOrigin(PAddrBits - blockOffBits))
+  }
+  // Completed observations only; no PAB state participates in this pipeline.
+  io.pabRefill.valid := s3_fire && s3_req.miss && miss_new_coh.isValid() && !s3_l2_error_wb.asUInt.orR &&
+    s3_pabOrigin.eligible && s3_pabOrigin.blockAddr === s3_req.addr(PAddrBits - 1, blockOffBits)
+  io.pabRefill.bits.blockAddr := s3_req.addr(PAddrBits - 1, blockOffBits)
+  io.pabRefill.bits.missId := s3_req.miss_id
+  io.pabRefill.bits.source := s3_pabOrigin.source
+  io.pabRetire.valid := s3_fire && !s3_req.replace &&
+    (s3_req.probe || s3_req.isStore || s3_req.isAMO)
+  io.pabRetire.bits := s3_req.addr(PAddrBits - 1, blockOffBits)
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx

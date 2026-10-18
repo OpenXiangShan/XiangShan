@@ -1073,6 +1073,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
+  prefetcherMonitor.io.pabinfo := 0.U.asTypeOf(new PABDepthEvents)
   val bloomFilter =  Module(new BloomFilter(BLOOM_FILTER_ENTRY_NUM, true))
   val counterFilter = Module(new CounterFilter)
   bankedDataArray.dump()
@@ -1094,6 +1095,38 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
+  mainPipe.io.pabOrigins := missQueue.io.pabOrigin
+  if (p(PABDepthKey).enabled) {
+    val params = p(PABDepthKey)
+    val pab = Module(new PrefetchAddrBuffer(params.entries, PAddrBits - blockOffBits, LoadPipelineWidth))
+    val victims = Module(new PABVictimTable(params.victimEntries, PAddrBits - blockOffBits, LoadPipelineWidth))
+    val refill = mainPipe.io.pabRefill
+    pab.io.refill.valid := refill.valid
+    pab.io.refill.bits.blockAddr := refill.bits.blockAddr
+    pab.io.refill.bits.source := refill.bits.source
+    pab.io.refill.bits.used := false.B
+    pab.io.retire := mainPipe.io.pabRetire
+    pab.io.demand.zip(ldu).foreach { case (event, pipe) => event := pipe.io.pabDemand }
+    victims.io.victim := pab.io.victim
+    victims.io.demand := pab.io.observedDemand
+    prefetcherMonitor.io.pabinfo.insert := pab.io.inserted.valid && isFromStream(pab.io.inserted.bits.source)
+    // PAB registers an event batch once; the victim table adds two more edges.
+    prefetcherMonitor.io.pabinfo.late := RegNext(missQueue.io.pabLate, 0.U)
+    prefetcherMonitor.io.pabinfo.unused := victims.io.streamUnusedHits
+    XSPerfAccumulate("pab_inserts", pab.io.inserted.valid)
+    XSPerfAccumulate("pab_victims", pab.io.victim.valid)
+    XSPerfAccumulate("pab_used_victims", pab.io.victim.valid && pab.io.victim.bits.used)
+    XSPerfAccumulate("pab_unused_victims", pab.io.victim.valid && !pab.io.victim.bits.used)
+    XSPerfAccumulate("pab_demand_hits", pab.io.demandHits)
+    XSPerfAccumulate("pab_entry_cycles", pab.io.occupancy)
+    XSPerfAccumulate("pab_stream_used_victim_hits", victims.io.streamUsedHits)
+    XSPerfAccumulate("pab_stream_unused_victim_hits", victims.io.streamUnusedHits)
+    XSPerfAccumulate("pab_victim_entry_cycles", victims.io.occupancy)
+    XSPerfAccumulate("pab_victim_duplicates", victims.io.duplicate)
+    XSPerfAccumulate("pab_victim_fifo_evictions", victims.io.fullEviction)
+    println(s"PAB depth observation: entries=${params.entries}, replacement=lru, victims=${params.victimEntries}")
+  }
+
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId

@@ -43,7 +43,7 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
 
   val ENABLE_DECR_MODE = true
   val ENABLE_STRICT_ACTIVE_DETECTION = true
-  val USE_STREAM_FIXED_DEPTH = true
+  val USE_STREAM_FIXED_DEPTH = !p(PABDepthKey).enabled
 
   // constraints
   require((DEPTH_BYTES >= REGION_SIZE) && ((DEPTH_BYTES % REGION_SIZE) == 0) && ((DEPTH_BYTES / REGION_SIZE) > 0))
@@ -261,28 +261,21 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfAccumulate("s0_req_valid", io.train_req.valid)
   XSPerfAccumulate("s0_req_cannot_accept", io.train_req.valid && !io.train_req.ready)
 
-  val ratio_const = Constantin.createRecord(s"l2DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L2_DEPTH_RATIO)
-  val ratio = ratio_const(3, 0)
-
-  val l3_ratio_const = Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
-  val l3_ratio = l3_ratio_const(3, 0)
+  // Keep the base's initialization records; outer distances remain fixed.
+  Constantin.createRecord(s"l2DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L2_DEPTH_RATIO)
+  Constantin.createRecord(s"l3DepthRatio${p(XSCoreParamsKey).HartId}", initValue = L3_DEPTH_RATIO)
 
   val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
-  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) 
+  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960)
 
   val l1_depth = Wire(UInt(DEPTH_BITS.W))
   val l2_depth = Wire(UInt(DEPTH_BITS.W))
   val l3_depth = Wire(UInt(DEPTH_BITS.W))
-  if (USE_STREAM_FIXED_DEPTH) {
-    l1_depth := l1_depth_const
-    l2_depth := l2_depth_const
-    l3_depth := l3_depth_const
-  } else {
-    l1_depth := io.dynamic_depth
-    l2_depth := io.dynamic_depth << ratio
-    l3_depth := io.dynamic_depth << l3_ratio
-  }
+  l1_depth := (if (USE_STREAM_FIXED_DEPTH) l1_depth_const else io.dynamic_depth)
+  // Preserve the base's outer-level distances when only L1 becomes dynamic.
+  l2_depth := l2_depth_const
+  l3_depth := l3_depth_const
 
   // s1: alloc or update
   val s1_valid = GatedValidRegNext(s0_valid)

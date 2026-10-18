@@ -1,0 +1,175 @@
+package cache
+
+import chisel3._
+import chisel3.util._
+import chisel3.experimental.UnlocatableSourceInfo
+import chisel3.simulator.scalatest.ChiselSim
+import freechips.rocketchip.diplomacy.{AddressSet, IdRange, RegionType, TransferSizes}
+import freechips.rocketchip.tilelink._
+import org.chipsalliance.cde.config.Parameters
+import org.scalatest.flatspec.AnyFlatSpec
+import top.DefaultConfig
+import utility._
+import xiangshan.{XSCoreParamsKey, XSTileKey}
+import xiangshan.cache._
+
+class PABMissQueueTop(implicit p: Parameters) extends DCacheModule {
+  Constantin.init(false); ChiselDB.init(false)
+  val io = IO(new Bundle {
+    val valid, cancel, blocked = Input(Vec(4, Bool()))
+    // 0: Load, 1: Stream PF, 2: Stride PF, 3: Store.
+    val kind = Input(Vec(4, UInt(3.W)))
+    val address = Input(Vec(4, UInt(PAddrBits.W)))
+    val ready, handled = Output(Vec(4, Bool()))
+    val late = Output(UInt(4.W))
+    val hitMask = Output(UInt(4.W))
+    val hitSource = Output(Vec(4, UInt(L1PfSourceBits.W)))
+    val matchedSource = Output(UInt(L1PfSourceBits.W))
+    val eligible = Output(Bool())
+  })
+  val edge = new TLEdgeOut(
+    TLMasterPortParameters.v1(Seq(TLMasterParameters.v1(
+      "pab-late-test", sourceId = IdRange(0, cfg.nMissEntries), supportsProbe = TransferSizes(64, 64)))),
+    TLSlavePortParameters.v1(Seq(TLSlaveParameters.v1(
+      address = Seq(AddressSet(0, (BigInt(1) << PAddrBits) - 1)), regionType = RegionType.TRACKED,
+      supportsAcquireB = TransferSizes(64, 64), supportsAcquireT = TransferSizes(64, 64))),
+      beatBytes = beatBytes, endSinkId = 1), p, UnlocatableSourceInfo)
+  val mq = Module(new MissQueue(edge, 4))
+  for (i <- 0 until 4) {
+    val req = mq.io.queryMQ(i).req
+    val pf = io.kind(i) === 1.U || io.kind(i) === 2.U || io.kind(i) === 4.U
+    req.valid := io.valid(i)
+    req.bits := 0.U.asTypeOf(req.bits)
+    req.bits.source := Mux(pf, DCACHE_PREFETCH_SOURCE.U,
+      Mux(io.kind(i) === 3.U, STORE_SOURCE.U, LOAD_SOURCE.U))
+    req.bits.cmd := Mux(pf, MemoryOpConstants.M_PFR,
+      Mux(io.kind(i) === 3.U, MemoryOpConstants.M_XWR, MemoryOpConstants.M_XRD))
+    req.bits.pf_source := Mux(io.kind(i) === 1.U, 3.U, Mux(io.kind(i) === 2.U, 2.U, 0.U))
+    req.bits.addr := io.address(i)
+    req.bits.vaddr := io.address(i)
+    req.bits.cancel := io.cancel(i)
+    mq.io.wbq_block_miss_req(i) := io.blocked(i)
+    io.ready(i) := mq.io.queryMQ(i).ready
+    io.handled(i) := mq.io.resp(i).handled
+  }
+  mq.io.hartId := 0.U
+  mq.io.cmo_req.valid := false.B; mq.io.cmo_req.bits := 0.U.asTypeOf(mq.io.cmo_req.bits)
+  mq.io.cmo_resp.ready := true.B
+  mq.io.mem_acquire.foreach(_.ready := true.B)
+  mq.io.mem_grant.foreach { g => g.valid := false.B; g.bits := 0.U.asTypeOf(g.bits) }
+  mq.io.mem_finish.foreach(_.ready := true.B)
+  mq.io.l2_hint := 0.U.asTypeOf(mq.io.l2_hint)
+  mq.io.main_pipe_req.ready := false.B
+  mq.io.main_pipe_resp := 0.U.asTypeOf(mq.io.main_pipe_resp)
+  mq.io.mainpipe_info := 0.U.asTypeOf(mq.io.mainpipe_info)
+  mq.io.probe.req := 0.U.asTypeOf(mq.io.probe.req)
+  mq.io.replace.req := 0.U.asTypeOf(mq.io.replace.req)
+  mq.io.evict_set := 0.U
+  mq.io.occupy_set.foreach(_ := 0.U)
+  mq.io.forward.foreach { f =>
+    f.s0Req := 0.U.asTypeOf(f.s0Req); f.s1Req := 0.U.asTypeOf(f.s1Req); f.s1Kill := false.B
+  }
+  mq.io.forward_stData := 0.U.asTypeOf(mq.io.forward_stData)
+  mq.io.l2_pf_store_only := false.B; mq.io.lqEmpty := true.B
+  mq.io.wfi.wfiReq := false.B
+  mq.io.debugTopDown.robHeadVaddr := 0.U.asTypeOf(mq.io.debugTopDown.robHeadVaddr)
+  mq.io.debugTopDown.robHeadOtherReplay := false.B
+  val stat = mq.io.prefetch_stat
+  io.hitMask := stat.hit_pf_in_mshr
+  io.hitSource := stat.hit_pf_in_mshr_source
+  io.matchedSource := stat.pf_late_in_mshr_source
+  io.late := mq.io.pabLate
+  io.eligible := mq.io.pabOrigin.map(o => o.eligible &&
+    o.blockAddr === io.address(0)(PAddrBits - 1, blockOffBits)).reduce(_ || _)
+}
+
+class PABMissQueueTest extends AnyFlatSpec with ChiselSim {
+  private val base = new DefaultConfig
+  implicit private val p: Parameters = base.alterPartial {
+    case XSCoreParamsKey => base(XSTileKey).head
+    case PerfCounterOptionsKey => PerfCounterOptions(false, false, XSPerfLevel.VERBOSE, 0)
+    case LogUtilsOptionsKey => LogUtilsOptions(false, false, false, false)
+  }
+  private val address = BigInt("80001000", 16)
+  private def clear(c: PABMissQueueTop): Unit = {
+    for (i <- 0 until 4) {
+      c.io.valid(i).poke(false.B); c.io.cancel(i).poke(false.B); c.io.blocked(i).poke(false.B)
+      c.io.kind(i).poke(0.U); c.io.address(i).poke(address.U)
+    }
+  }
+  private def reset(c: PABMissQueueTop): Unit = {
+    clear(c); c.reset.poke(true.B); c.clock.step(3); c.reset.poke(false.B); c.clock.step(2)
+  }
+  private def request(c: PABMissQueueTop, lane: Int, addr: BigInt, kind: Int): Unit = {
+    c.io.valid(lane).poke(true.B); c.io.address(lane).poke(addr.U); c.io.kind(lane).poke(kind.U)
+  }
+  behavior of "Passive PAB accounting on the unchanged MissQueue"
+  it should "deduplicate pending and resident MSHR merges and observe terminal Stream attempts" in {
+    simulate(new PABMissQueueTop) { c =>
+      reset(c); request(c, 0, address, 1); c.io.ready(0).expect(true.B)
+      c.clock.step(); clear(c); c.io.eligible.expect(true.B)
+      request(c, 1, address, 0); request(c, 2, address, 0)
+      c.io.ready(1).expect(true.B); c.io.ready(2).expect(true.B); c.io.late.expect(1.U)
+      c.io.eligible.expect(false.B); c.clock.step(); clear(c); c.clock.step(2)
+      request(c, 1, address, 0); c.io.late.expect(0.U)
+      clear(c); request(c, 0, address, 1); c.io.ready(0).expect(false.B); c.io.late.expect(1.U)
+      c.io.cancel(0).poke(true.B); c.io.late.expect(0.U)
+      c.io.cancel(0).poke(false.B); c.io.kind(0).poke(2.U); c.io.late.expect(0.U)
+    }
+  }
+  it should "preserve observation origin across canceled and blocked requests despite legacy flags" in {
+    simulate(new PABMissQueueTop) { c =>
+      reset(c); request(c, 0, address, 1); c.clock.step(); clear(c); c.clock.step(2)
+      c.io.eligible.expect(true.B)
+      request(c, 1, address, 0); c.io.cancel(1).poke(true.B)
+      c.io.late.expect(0.U); c.clock.step(); c.io.eligible.expect(true.B)
+      c.io.cancel(1).poke(false.B); c.io.blocked(1).poke(true.B)
+      c.io.ready(1).expect(false.B); c.io.late.expect(0.U); c.clock.step()
+      c.io.eligible.expect(true.B); c.io.blocked(1).poke(false.B)
+      c.io.ready(1).expect(true.B); c.io.late.expect(1.U)
+      c.clock.step(); c.io.late.expect(0.U); c.io.eligible.expect(false.B)
+    }
+  }
+  it should "count simultaneous compression once and distinguish three independent lifetimes" in {
+    simulate(new PABMissQueueTop) { c =>
+      reset(c); request(c, 0, address, 1); request(c, 1, address, 0); request(c, 2, address, 0)
+      c.io.late.expect(1.U); c.clock.step(); clear(c); c.clock.step(2)
+      c.io.eligible.expect(false.B); request(c, 1, address, 0); c.io.late.expect(0.U)
+      reset(c)
+      for (i <- 0 until 3) {
+        request(c, 0, address + i * 64, 1); c.clock.step(); clear(c); c.clock.step(2)
+      }
+      for (i <- 0 until 3) request(c, i + 1, address + i * 64, 0)
+      c.io.late.expect(3.U); c.clock.step(); c.io.late.expect(0.U)
+    }
+  }
+  it should "filter other sources, demand-first misses and unmatched full-queue drops" in {
+    simulate(new PABMissQueueTop) { c =>
+      reset(c); request(c, 0, address, 2); c.clock.step(); clear(c); c.clock.step(2)
+      request(c, 1, address, 0); c.io.late.expect(0.U)
+      reset(c); request(c, 1, address, 0); c.clock.step(); clear(c)
+      request(c, 0, address, 1); c.io.ready(0).expect(false.B); c.io.late.expect(1.U)
+      c.clock.step(); clear(c); request(c, 0, address, 1); c.io.late.expect(1.U)
+      reset(c)
+      for (i <- 0 until 16) {
+        request(c, 1, address + i * 64, 0); c.io.ready(1).expect(true.B)
+        c.clock.step(); clear(c); c.clock.step(2)
+      }
+      request(c, 0, address + 32 * 64, 1); c.io.ready(0).expect(false.B); c.io.late.expect(0.U)
+    }
+  }
+  it should "exclude unconsumed NULL-tagged hardware and software PF lifetimes from demand-first late evidence" in {
+    simulate(new PABMissQueueTop) { c =>
+      for (lane <- Seq(0, 1)) {
+        reset(c); request(c, lane, address, 4); c.io.ready(lane).expect(true.B)
+        c.clock.step(); clear(c); c.clock.step(2)
+        c.io.eligible.expect((lane == 0).B)
+        request(c, 0, address, 1); c.io.late.expect(0.U)
+        clear(c); request(c, 2, address, 0); c.io.ready(2).expect(true.B)
+        c.io.late.expect(0.U); c.clock.step(); clear(c)
+        request(c, 0, address, 1); c.io.late.expect(1.U)
+      }
+    }
+  }
+
+}
