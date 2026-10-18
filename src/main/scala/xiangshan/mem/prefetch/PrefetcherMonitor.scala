@@ -179,7 +179,8 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   io.pf_ctrl.confidence := confidence
 
   val depth_const = Wire(UInt(DEPTH_BITS.W))
-  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}", initValue = 32)
+  depth_const := Constantin.createRecord(s"${param.name}_depth${p(XSCoreParamsKey).HartId}",
+    initValue = if (param.name == "Stream") 16 else 32)
 
   val total_prefetch_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
   val pf_late_in_cache_cnt = RegInit(0.U((log2Up(param.TIMELY_CHECK_INTERVAL) + 1).W))
@@ -227,7 +228,12 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   confidence := Mux(conf_reset, 1.U(1.W), confidence)
 
   when(trigger_pf_useless) {
-    depth := Mux(depth === 1.U, depth, depth >> 1)
+    if (param.name == "Stream") {
+      val nextDepth = depth >> 1
+      depth := Mux(nextDepth < 4.U, 4.U, nextDepth)
+    } else {
+      depth := Mux(depth === 1.U, depth, depth >> 1)
+    }
   }
   when(trigger_disable) {
     confidence := 0.U(1.W)
@@ -236,7 +242,12 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   }
 
   when(trigger_late_miss) {
-    depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
+    if (param.name == "Stream") {
+      val nextDepth = depth << 1
+      depth := Mux(nextDepth > 128.U, 128.U, nextDepth)
+    } else {
+      depth := Mux(depth === (1 << (DEPTH_BITS - 1)).U, depth, depth << 1)
+    }
   }.elsewhen(trigger_late_hit) {
     // for now, late hit will disable the prefether
     confidence := 0.U(1.W)
@@ -254,7 +265,11 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   }
 
   when(reset.asBool) {
-    depth := depth_const
+    if (param.name == "Stream") {
+      depth := Mux(depth_const < 4.U, 4.U, Mux(depth_const > 128.U, 128.U, depth_const))
+    } else {
+      depth := depth_const
+    }
   }
 
   val pfTypes: Seq[(String, UInt => Bool)] = Seq(
