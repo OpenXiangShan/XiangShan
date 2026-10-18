@@ -280,8 +280,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     l3_depth := l3_depth_const
   } else {
     l1_depth := io.dynamic_depth
-    l2_depth := io.dynamic_depth << ratio
-    l3_depth := io.dynamic_depth << l3_ratio
+    l2_depth := l2_depth_const
+    l3_depth := l3_depth_const
   }
 
   // s1: alloc or update
