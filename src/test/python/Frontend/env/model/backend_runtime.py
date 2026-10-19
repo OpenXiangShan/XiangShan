@@ -21,6 +21,16 @@ class CfVecSlotSnapshot:
     is_last: bool = False
     exception_bits: int = 0
     cross_page_ipf_fix: bool = False
+    vtype_illegal: bool = True
+    vtype_vma: bool = False
+    vtype_vta: bool = False
+    vtype_vsew: int = 0
+    vtype_vlmul: int = 0
+    specvtype_illegal: bool = True
+    specvtype_vma: bool = False
+    specvtype_vta: bool = False
+    specvtype_vsew: int = 0
+    specvtype_vlmul: int = 0
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,16 @@ def capture_cfvec_snapshot(cycle: int, read_slot: Callable[[str, int], int]) -> 
             is_last=bool(read_slot("cfvec_is_last_in_ftq_entry", slot)),
             exception_bits=exception_bits,
             cross_page_ipf_fix=bool(read_slot("cfvec_cross_page_ipf_fix", slot)),
+            vtype_illegal=bool(read_slot("cfvec_vtype_illegal", slot)),
+            vtype_vma=bool(read_slot("cfvec_vtype_vma", slot)),
+            vtype_vta=bool(read_slot("cfvec_vtype_vta", slot)),
+            vtype_vsew=read_slot("cfvec_vtype_vsew", slot),
+            vtype_vlmul=read_slot("cfvec_vtype_vlmul", slot),
+            specvtype_illegal=bool(read_slot("cfvec_specvtype_illegal", slot)),
+            specvtype_vma=bool(read_slot("cfvec_specvtype_vma", slot)),
+            specvtype_vta=bool(read_slot("cfvec_specvtype_vta", slot)),
+            specvtype_vsew=read_slot("cfvec_specvtype_vsew", slot),
+            specvtype_vlmul=read_slot("cfvec_specvtype_vlmul", slot),
         ))
     return CfVecCycleSnapshot(cycle=int(cycle), slots=tuple(slots))
 

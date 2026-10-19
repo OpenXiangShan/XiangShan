@@ -20,6 +20,7 @@ Environment variables:
   RISCV_OBJCOPY   RISC-V objcopy command. If unset, auto-detects common toolchain names.
   LINK_ADDR       Link/load address for the assembly text
                   default: 0x10001000
+  RISCV_MARCH     RISC-V ISA string (default: rv64gc_zicsr_zifencei)
   NEMU_MEM_BASE   Base address of the NEMU binary memory image
                   default: 0x10000000
   NEMU_MAX_INSTR  Pass -I to NEMU when > 0
@@ -66,6 +67,7 @@ LINK_ADDR="${LINK_ADDR:-0x10001000}"
 NEMU_MEM_BASE="${NEMU_MEM_BASE:-0x10000000}"
 NEMU_MAX_INSTR="${NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TRACE_LIMIT:-0}"
+RISCV_MARCH="${RISCV_MARCH:-rv64gc_zicsr_zifencei}"
 KEEP_ELF="${KEEP_ELF:-0}"
 RUN_ID_DEFAULT="frontend_trace_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
@@ -178,9 +180,10 @@ echo "[asm-to-jsonl] nemu_exec: ${NEMU_EXEC}"
 echo "[asm-to-jsonl] nemu_log: ${NEMU_LOG_PATH}"
 echo "[asm-to-jsonl] trace_jsonl: ${TRACE_JSONL_PATH}"
 echo "[asm-to-jsonl] python: ${PYTHON_BIN}"
+echo "[asm-to-jsonl] riscv_march: ${RISCV_MARCH}"
 
 "${RISCV_GCC}" \
-  -march=rv64gc_zicsr_zifencei \
+  "-march=${RISCV_MARCH}" \
   -mabi=lp64 \
   -static \
   -no-pie \

@@ -21,6 +21,16 @@ def test_frontend_monitor_snapshot_is_shared_before_backend_drive(monkeypatch) -
     dut.io_backend_cfVec_0_bits_ftqOffset.value = 1
     dut.io_backend_cfVec_0_bits_crossPageIPFFix.value = 1
     dut.io_backend_cfVec_0_bits_exceptionVec_1.value = 1
+    dut.io_backend_cfVec_0_bits_vtype_illegal.value = 0
+    dut.io_backend_cfVec_0_bits_vtype_vma.value = 1
+    dut.io_backend_cfVec_0_bits_vtype_vta.value = 0
+    dut.io_backend_cfVec_0_bits_vtype_vsew.value = 2
+    dut.io_backend_cfVec_0_bits_vtype_vlmul.value = 3
+    dut.io_backend_cfVec_0_bits_specvtype_illegal.value = 1
+    dut.io_backend_cfVec_0_bits_specvtype_vma.value = 0
+    dut.io_backend_cfVec_0_bits_specvtype_vta.value = 1
+    dut.io_backend_cfVec_0_bits_specvtype_vsew.value = 1
+    dut.io_backend_cfVec_0_bits_specvtype_vlmul.value = 0
     dut.io_ptw_req_0_valid.value = 1
     dut.io_ptw_req_0_ready.value = 1
     dut.io_ptw_req_0_bits_vpn.value = 0x80001
@@ -60,6 +70,11 @@ def test_frontend_monitor_snapshot_is_shared_before_backend_drive(monkeypatch) -
     assert observed[2][1]["pc"] == pc
     assert observed[2][1]["cross_page"] is True
     assert observed[2][1]["exception_bits"][1] == 1
+    slot = snapshot.cfvec.slots[0]
+    assert (slot.vtype_illegal, slot.vtype_vma, slot.vtype_vta) == (False, True, False)
+    assert (slot.vtype_vsew, slot.vtype_vlmul) == (2, 3)
+    assert (slot.specvtype_illegal, slot.specvtype_vma, slot.specvtype_vta) == (True, False, True)
+    assert (slot.specvtype_vsew, slot.specvtype_vlmul) == (1, 0)
 
     env.flow_checker.on_clock_edge(7)
     assert env.monitor.observations[0].pc == pc

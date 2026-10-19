@@ -42,6 +42,7 @@ Environment:
   TB_LOG_LEVEL, TB_TRACE_TARGET_CURSOR, TB_TRACE_MAX_CYCLES,
   TB_PYTEST_TIMEOUT_SECS, TB_COVERAGE_DIR, TB_WAVEFORM_DIR
                Passed through to the existing bin-trace pipeline/fixtures.
+  RISCV_MARCH   ISA string passed to the assembler; default rv64gc_zicsr_zifencei.
 
 After a successful run, this script prints the exact run artifact directory
 and matching raw/HTML code-coverage commands.
@@ -68,6 +69,7 @@ LINK_ADDR="${LINK_ADDR:-0x80000000}"
 NEMU_MEM_BASE="${NEMU_MEM_BASE:-0x80000000}"
 TB_BASE_ADDR="${TB_BASE_ADDR:-${NEMU_MEM_BASE}}"
 TB_RESET_VECTOR="${TB_RESET_VECTOR:-${LINK_ADDR}}"
+RISCV_MARCH="${RISCV_MARCH:-rv64gc_zicsr_zifencei}"
 TB_RUN_DUT="${TB_RUN_DUT:-1}"
 RUN_ID_DEFAULT="frontend_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 TB_RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
@@ -146,6 +148,7 @@ echo "[frontend] link_addr: ${LINK_ADDR}"
 echo "[frontend] nemu_mem_base: ${NEMU_MEM_BASE}"
 echo "[frontend] tb_base_addr: ${TB_BASE_ADDR}"
 echo "[frontend] tb_reset_vector: ${TB_RESET_VECTOR}"
+echo "[frontend] riscv_march: ${RISCV_MARCH}"
 echo "[frontend] tb_run_dut: ${TB_RUN_DUT}"
 echo "[frontend] run_id: ${TB_RUN_ID}"
 echo "[frontend] artifact_root: ${TB_ARTIFACT_DIR}"
@@ -154,6 +157,7 @@ cd "${REPO_DIR}"
 
 LINK_ADDR="${LINK_ADDR}" \
 NEMU_MEM_BASE="${NEMU_MEM_BASE}" \
+RISCV_MARCH="${RISCV_MARCH}" \
 NEMU_EXEC="${NEMU_EXEC}" \
 NEMU_LOG_PATH="${NEMU_LOG_PATH}" \
 TB_RUN_ID="${TB_RUN_ID}" \

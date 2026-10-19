@@ -4,6 +4,7 @@ from .memory_model import MemoryModel
 from .page_table_model import PageTableModel
 from .pmp_pma_model import PmpPmaCheckResult, PmpPmaPermissionModel
 from .ptw_response_source import NemuPtwResponseSource, PTWRequestSnapshot
+from .vtype import VTypeModel, VTypeState, VTypeTransition
 
 __all__ = [
     "BackendCycleActions",
@@ -16,4 +17,7 @@ __all__ = [
     "PmpPmaPermissionModel",
     "PTWRequestSnapshot",
     "TraceEntry",
+    "VTypeModel",
+    "VTypeState",
+    "VTypeTransition",
 ]

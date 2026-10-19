@@ -35,6 +35,7 @@ Environment:
   TB_PYTEST_TIMEOUT_SECS
                Default 1200 unless already set.
   TB_RUN_ID    Optional suite ID prefix. Each case appends its assembly stem.
+  RISCV_MARCH  ISA string passed to the assembler; default rv64gc_zicsr_zifencei.
   TB_SUITE_ARTIFACT_DIR
                Root for dated suite directories; defaults to
                the selected simulator's artifacts root.
@@ -132,6 +133,7 @@ for case_path in "${CASES[@]}"; do
     TB_CASE_LOG_DIR="${case_artifact_dir}/logs" \
     TB_RUN_COMMAND="${case_run_command}" \
     TB_RUN_DUT="${TB_RUN_DUT}" \
+    RISCV_MARCH="${RISCV_MARCH:-rv64gc_zicsr_zifencei}" \
     TB_LOG_LEVEL="${TB_LOG_LEVEL}" \
     TB_PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS}" \
     "${SCRIPT_DIR}/run_baremode_asm_bin_trace.sh" "${case_path}"; then
