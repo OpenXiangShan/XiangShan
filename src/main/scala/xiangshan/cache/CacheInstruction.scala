@@ -273,7 +273,7 @@ class CSRCacheOpDecoder(decoder_name: String, id: Int)(implicit p: Parameters) e
   }
 
   val error = DelayNWithValid(io.error, 1)
-  when(error.bits.report_to_beu && error.valid) {
+  when(error.valid && (error.bits.source.tag || error.bits.source.data)) {
     io.csr.update.w.bits.addr := (CacheInstrucion.CacheInsRegisterList("CACHE_ERROR")("offset").toInt + Scachebase).U
     io.csr.update.w.bits.data := error.asUInt
     io.csr.update.w.valid := true.B
@@ -294,7 +294,9 @@ class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
   when(decoded_cache_error.valid && !RegNext(decoded_cache_error.valid)){
     printf("CACHE_ERROR CSR reported an error:\n")
     printf("  paddr 0x%x\n", decoded_cache_error.bits.paddr)
-    print_cache_error_flag(decoded_cache_error.bits.report_to_beu, "report to bus error unit")
+    print_cache_error_flag(decoded_cache_error.bits.errorType.ce, "correctable error")
+    print_cache_error_flag(decoded_cache_error.bits.errorType.ued, "uncorrectable deferred error")
+    print_cache_error_flag(decoded_cache_error.bits.errorType.uec, "uncorrectable error")
     print_cache_error_flag(decoded_cache_error.bits.source.tag, "tag")
     print_cache_error_flag(decoded_cache_error.bits.source.data, "data")
     print_cache_error_flag(decoded_cache_error.bits.source.l2, "l2")

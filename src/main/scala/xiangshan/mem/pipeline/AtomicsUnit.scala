@@ -364,6 +364,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val dcache_resp_data  = Reg(UInt())
   val dcache_resp_id    = Reg(UInt())
   val dcache_resp_tl_error = Reg(new TLError())
+  val dcache_resp_error = Reg(Bool())
 
   when (state === s_cache_resp) {
     // when not miss
@@ -384,6 +385,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
         dcache_resp_data := io.dcache.resp.bits.data
         dcache_resp_id := io.dcache.resp.bits.id
         dcache_resp_tl_error := io.dcache.resp.bits.tl_error
+        dcache_resp_error := io.dcache.resp.bits.error
         state := s_cache_resp_latch
       }
     }
@@ -405,10 +407,10 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       ))
     )
 
-    when (dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable) {
+    when ((dcache_resp_error || dcache_resp_tl_error.asUInt.orR) && io.csrCtrl.cache_error_enable) {
       exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tl_denied
       exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(hardwareError)    := dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
+      exceptionVec(hardwareError)    := (dcache_resp_error || dcache_resp_tl_error.tl_corrupt) && !dcache_resp_tl_error.tl_denied
     }
 
     resp_data := resp_data_wire
@@ -579,7 +581,14 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   ))
 
   pipe_req.miss := false.B
+  pipe_req.replace := false.B
   pipe_req.probe := false.B
+  pipe_req.local_evict := false.B
+  pipe_req.local_evict_probe := false.B
+  pipe_req.local_evict_tag := false.B
+  pipe_req.local_evict_clean_only := false.B
+  pipe_req.local_evict_way_en := 0.U
+  pipe_req.local_evict_enc_tag := 0.U
   pipe_req.probe_need_data := false.B
   pipe_req.source := AMO_SOURCE.U
   pipe_req.addr   := get_block_addr(paddr)
