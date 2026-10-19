@@ -136,12 +136,15 @@ object DCacheCCHI {
       rsp.Resp := 0.U(3.W)
     }
 
-    // TL shrink param (toN/toB/toT) + dirty → CHI SnpResp/SnpRespData Resp
+    // TL shrink/report param from onProbe + dirty → CHI SnpResp/SnpRespData Resp
     def probeResp(tlParam: UInt, dirty: Bool): UInt = {
       val base = MuxLookup(tlParam, CCHIResp.I.U)(Seq(
-        TLPermissions.toN -> CCHIResp.I.U,
-        TLPermissions.toB -> CCHIResp.SC.U,
-        TLPermissions.toT -> CCHIResp.UC.U
+        TLPermissions.TtoN -> CCHIResp.I.U,
+        TLPermissions.BtoN -> CCHIResp.I.U,
+        TLPermissions.NtoN -> CCHIResp.I.U,
+        TLPermissions.TtoB -> CCHIResp.SC.U,
+        TLPermissions.BtoB -> CCHIResp.SC.U,
+        TLPermissions.TtoT -> CCHIResp.UC.U
       ))
       Mux(dirty, base | 0b100.U(3.W), base)
     }
