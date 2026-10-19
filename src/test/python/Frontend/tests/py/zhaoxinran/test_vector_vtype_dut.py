@@ -5,7 +5,10 @@ import os
 import pytest
 
 from env.checkers.vtype_checker import VTypeChecker
+from env.core.transactions import ProgramImage
 from env.model.golden_trace import GoldenTrace
+from env.model.vtype import VTypeState
+from env.sequences import LoadProgramSequence
 from tests.py.zhaoxinran.test_bin_trace_dut import test_bin_trace as run_bin_trace
 
 
@@ -100,3 +103,115 @@ def test_vector_vtype_bin_trace(env) -> None:
     assert stalled_pcs, "no in-trace cfVec lane observed during backend backpressure"
     assert held_slot_checks > 0, "no cfVec lane held across backpressured cycles"
     assert held_config_checks > 0, "no vset instruction held across backpressured cycles"
+
+
+def _slot_vtype(slot, prefix: str) -> VTypeState:
+    return VTypeState(
+        illegal=bool(getattr(slot, f"{prefix}_illegal")),
+        vma=bool(getattr(slot, f"{prefix}_vma")),
+        vta=bool(getattr(slot, f"{prefix}_vta")),
+        vsew=int(getattr(slot, f"{prefix}_vsew")),
+        vlmul=int(getattr(slot, f"{prefix}_vlmul")),
+    )
+
+
+@pytest.mark.skipif(os.getenv("TB_ENABLE_DUT_TESTS") != "1", reason="requires a real DUT")
+@pytest.mark.parametrize(
+    ("walk_to_arch", "restored"),
+    [
+        (False, VTypeState(False, False, True, 1, 1)),
+        (True, VTypeState.initial()),
+    ],
+    ids=("walk_vtype", "walk_to_arch_vtype"),
+)
+def test_vector_vtype_redirect_recovery(env, walk_to_arch: bool, restored: VTypeState) -> None:
+    base = 0x80000000
+    target = base + 0x400
+    vset = 0x0D0072D7  # vsetvli t0, zero, e32, m1, ta, ma
+    old_instr = 0x00128293  # addi t0, t0, 1
+    target_instr = 0x00230313  # addi t1, t1, 2
+    old_state = VTypeState(False, True, True, 2, 0)
+    instructions = [vset] + [old_instr] * 255 + [target_instr] * 256
+    LoadProgramSequence(
+        image=ProgramImage(
+            payload=b"".join(instr.to_bytes(4, "little") for instr in instructions),
+            base_addr=base,
+        ),
+        step_cycles=0,
+    ).run(env)
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+
+    for _ in range(1200):
+        env.step(1)
+        slots = env.monitor.cycle_snapshot.cfvec.slots
+        configured = [
+            slot for slot in slots
+            if slot.valid and slot.instr == vset and env.observed_cfvec_pc(slot.slot) == base
+        ]
+        if configured:
+            assert _slot_vtype(configured[0], "specvtype") == VTypeState.initial()
+            assert _slot_vtype(configured[0], "vtype") == old_state
+            break
+    else:
+        raise AssertionError("old-path vsetvli was not observed")
+
+    env.backend_model.set_can_accept(0)
+    for _ in range(16):
+        env.step(1)
+        if any(slot.valid and slot.instr == old_instr for slot in env.monitor.cycle_snapshot.cfvec.slots):
+            break
+    else:
+        raise AssertionError("old-path instruction was not held before redirect")
+
+    env.backend_model.inject_redirect(target, "vtype-recovery", delay_cycles=0)
+    for _ in range(8):
+        env.step(1)
+        if int(env.backend_to_ftq_if.redirect_valid.value) == 1:
+            break
+    else:
+        raise AssertionError("backend redirect was not driven")
+
+    frozen = env.monitor.cycle_snapshot.cfvec.slots
+    assert any(slot.valid and slot.instr == old_instr for slot in frozen)
+    to_ibuf = env.backend_to_ibuf_if
+    to_ibuf.resuming_vtype.value = 1
+    if walk_to_arch:
+        to_ibuf.walk_to_arch_vtype.value = 1
+    else:
+        to_ibuf.walk_vtype_valid.value = 1
+        for name in ("illegal", "vma", "vta", "vsew", "vlmul"):
+            getattr(to_ibuf, f"walk_vtype_bits_{name}").value = int(getattr(restored, name))
+
+    env.step(1)
+    assert env.monitor.cycle_snapshot.cfvec.slots == frozen, "resumingVType changed cfVec output"
+    to_ibuf.walk_to_arch_vtype.value = 0
+    to_ibuf.walk_vtype_valid.value = 0
+    env.step(1)
+    flush = env.dut.GetInternalSignal("Frontend_top.Frontend.inner_needFlush")
+    assert flush is not None and int(flush.value) == 1, "redirect did not reach IBuffer flush"
+    env.step(1)
+    assert not any(slot.valid for slot in env.monitor.cycle_snapshot.cfvec.slots), (
+        "redirect flush did not clear old-path cfVec"
+    )
+    to_ibuf.resuming_vtype.value = 0
+    env.backend_model.set_can_accept(1)
+
+    seen_target: set[int] = set()
+    for _ in range(1200):
+        env.step(1)
+        for slot in env.monitor.cycle_snapshot.cfvec.slots:
+            if not slot.valid:
+                continue
+            assert slot.instr == target_instr, "non-target instruction appeared after flush"
+            pc = env.observed_cfvec_pc(slot.slot)
+            assert target <= pc < target + 0x400, f"non-target PC after flush: 0x{pc:x}"
+            assert _slot_vtype(slot, "specvtype") == restored
+            assert _slot_vtype(slot, "vtype") == restored
+            if pc in (target, target + 4):
+                seen_target.add(pc)
+        if seen_target == {target, target + 4}:
+            break
+    assert seen_target == {target, target + 4}, "redirect target was not delivered"
+    assert not env.get_errors()
