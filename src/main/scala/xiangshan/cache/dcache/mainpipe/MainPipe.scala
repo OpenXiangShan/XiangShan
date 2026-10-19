@@ -26,7 +26,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.XSCoreParamsKey
+import device.RERI.{ErrorSource, RERIErrorInfo, SeverityLevel}
 import xiangshan.mem.{L1PrefetchReq, skidBuffer}
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
@@ -253,7 +254,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val block_lr = Output(Bool())
 
     // ecc error
-    val error = Output(ValidIO(new L1CacheErrorInfo))
+    val error = Output(new RERIErrorInfo)
     // force write
     val force_write = Input(Bool())
 
@@ -376,11 +377,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
+  val s1_repl_poison = Wire(Bool())
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_need_data = if (dcacheParameters.alwaysReleaseData) {
     RegEnable(banked_need_data, s0_fire)
   } else {
-    Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire), s1_repl_coh.state === ClientStates.Dirty)
+    Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire),
+      s1_repl_coh.state === ClientStates.Dirty || s1_repl_poison)
   }
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
@@ -462,6 +465,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
                                 (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, s1_extra_meta_resp.map(_.prefetch))
   val s1_repl_flag_error = ParallelMux(s1_repl_way_en.asBools, s1_extra_meta_resp).error
+  s1_repl_poison := s1_repl_flag_error.asUInt.orR
 
   val s1_need_replacement = s1_req.miss && !s1_tag_match
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
@@ -557,8 +561,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_may_report_data_error = s2_need_data && s2_coh.state =/= ClientStates.Nothing
   val s2_data_ce = (io.data_correctable.asUInt & s2_banked_rmask).orR
   val s2_data_uec = (io.data_uncorrectable.asUInt & s2_banked_rmask).orR
-  val s2_data_ce_recovery = !s2_req.probe &&
-    s2_may_report_data_error && s2_data_ce && !s2_data_uec &&
+  // A snoop waits for local repair, then retries through its original entry.
+  // The local eviction itself must reach s3 to perform correction.
+  val s2_data_ce_recovery = !s2_req.local_evict && s2_may_report_data_error && s2_data_ce && !s2_data_uec &&
     !s2_selected_tag_uec && !s2_flag_error.asUInt.orR && !s2_tag_ce_recovery
   val s2_ecc_recovery = s2_tag_ce_recovery || s2_data_ce_recovery
 
@@ -597,7 +602,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
   val s2_can_go_to_mq_evict_fail = s2_replace_block // refill eviction conflicts with in-flight MSHR (BtoT); replay to MQ for another evict way
-  val s2_can_go_to_mq_replay = (s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail || s2_refill_tag_uec) &&
+  val s2_can_go_to_mq_replay = (s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail) &&
     !s2_ecc_recovery
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire) && !(s2_req.isAMO && s2_tag_error) &&
     !s2_ecc_recovery
@@ -607,7 +612,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_can_go_to_s3 = (s2_sc || s2_req.replace || s2_req.probe ||
     Mux(
       s2_req.miss,
-      io.refill_info.valid && !s2_replace_block && !s2_refill_tag_uec,
+      io.refill_info.valid && !s2_replace_block,
       (s2_req.isStore || s2_req.isAMO || s2_req.isPrefetch) && s2_hit
     ) || (s2_req.isAMO && s2_tag_error)
   ) && s3_ready && !s2_ecc_recovery
@@ -643,11 +648,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_evict.bits.probe_need_data := s2_req.probe_need_data
   io.tag_evict.bits.probe_id := s2_req.id
 
-  // Keep the original ProbeQueue entry until the delegated lookup completes.
+  // If allocation fails, retry the snoop; otherwise the recovery entry wakes
+  // its original ProbeQueue entry only after local eviction completes.
+  val s2_probe_ecc_blocked = !s2_req.local_evict &&
+    (s2_tag_ce_recovery && !io.tag_evict.ready || s2_data_ce_recovery && !io.data_evict.ready)
   io.probe_resp.valid := s2_fire && s2_req.probe &&
-    (!s2_req.local_evict && (!s2_probe_tag_ce_recovery || !io.tag_evict.ready) || s2_req.local_evict_probe)
+    (!s2_req.local_evict && (!s2_ecc_recovery || s2_probe_ecc_blocked) || s2_req.local_evict_probe)
   io.probe_resp.bits.id := s2_req.id
-  io.probe_resp.bits.replay := s2_local_probe_retry || s2_probe_tag_ce_recovery && !io.tag_evict.ready
+  io.probe_resp.bits.replay := s2_local_probe_retry || s2_probe_ecc_blocked
 
   io.data_evict.valid := s2_ecc_replay && s2_data_ce_recovery
   io.data_evict.bits.addr := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))
@@ -655,10 +663,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_evict.bits.way_en := s2_way_en
   io.data_evict.bits.enc_tag := s2_selected_enc_tag
   io.data_evict.bits.clean_only := false.B
-  io.data_evict.bits.probe := false.B
+  // This bit is a retry marker for the original snoop.  The repair request
+  // itself is always issued as a local eviction (see EccEvictEntry).
+  io.data_evict.bits.probe := s2_req.probe
   io.data_evict.bits.probe_param := 0.U
   io.data_evict.bits.probe_need_data := false.B
-  io.data_evict.bits.probe_id := 0.U
+  io.data_evict.bits.probe_id := s2_req.id
 
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
@@ -940,12 +950,17 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // clean-only is used for a clean data UEC, where L2 owns the authoritative
   // copy.  A dirty line still has to carry its data even if the request was
   // marked clean-only by an upstream recovery path.
-  val writeback_data = (!s3_req.local_evict_clean_only || s3_coh === ClientStates.Dirty) && (if (dcacheParameters.alwaysReleaseData) {
+  val writeback_poison = Mux(s3_need_replacement,
+    s3_repl_flag_error_wb.asUInt.orR, s3_flag_error_wb.asUInt.orR)
+  val discard_clean_data = s3_req.local_evict_clean_only && s3_coh.state =/= ClientStates.Dirty
+  // TileLink corrupt belongs to data messages. Preserve persistent poison with
+  // ReleaseData, while clean-only recovery discards its local bad copy.
+  val writeback_data = !discard_clean_data && ((if (dcacheParameters.alwaysReleaseData) {
     s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
       s3_coh === ClientStates.Dirty || (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
   } else {
     s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
-  })
+  }) || writeback_poison && s3_coh.state =/= ClientStates.Nothing)
 
   val s3_probe_can_go = s3_req.probe &&
     (io.wb.ready || s3_req.local_evict && !probe_wb) && (io.meta_write.ready || !probe_update_meta)
@@ -1249,13 +1264,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.param := writeback_param
   io.wb.bits.voluntary := s3_req.miss || s3_req.replace || s3_req.local_evict && !s3_local_probe_reply
   io.wb.bits.hasData := writeback_data && !s3_tag_error_wb
-  io.wb.bits.dirty := s3_coh === ClientStates.Dirty
+  // Tag UEC invalidates the victim address; a denied no-data Release must not
+  // advertise a dirty payload that WBQ would require to carry data.
+  io.wb.bits.dirty := s3_coh === ClientStates.Dirty && !s3_tag_error_wb
   io.wb.bits.local_evict := s3_req.local_evict && !s3_local_probe_reply
   io.wb.bits.local_evict_tag := s3_req.local_evict_tag
   io.wb.bits.local_evict_addr := get_block_addr(s3_req.addr)
   io.wb.bits.data := s3_data_line
-  io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb ||
-    Mux(s3_need_replacement, s3_repl_flag_error_wb.asUInt.orR, s3_flag_error_wb.asUInt.orR)
+  io.wb.bits.corrupt := s3_tag_error_wb ||
+    io.wb.bits.hasData && (s3_data_error_wb || writeback_poison)
   io.wb.bits.delay_release := s3_req.replace
   io.wb.bits.miss_id := s3_req.miss_id
 
@@ -1310,30 +1327,26 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipe_info.s3_refill_resp := s3_fire && s3_req.miss
   XSError(s2_valid && s2_way_en.andR, "s2_way_en should not be all 1")
 
-  // Report the error to BEU and the cache-error CSR one cycle after the data response.
-  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
-  val s2_probe_tag_ce = s2_req.probe && s2_need_tag && !s2_probe_tag_uec &&
-    Mux(s2_req.local_evict, (s2_tag_correctable & s2_way_en).orR,
-      !s2_tag_match && s2_tag_correctable.orR)
-  val s3_tag_ce_event = GatedValidRegNext(s2_ecc_replay && s2_tag_ce_recovery || s2_fire_to_s3 && s2_probe_tag_ce)
-  val s3_probe_data_ce_event = GatedValidRegNext(s2_fire_to_s3) && s3_req.probe &&
-    s3_data_ce && !s3_tag_error_wb
-  val s3_data_ce_event = s3_probe_data_ce_event || GatedValidRegNext(s2_ecc_replay && s2_data_ce_recovery)
-  val s3_uec_event = s3_error_beu && GatedValidRegNext(s2_fire && !s2_should_not_report_ecc_error)
-  val s3_ce_event = (s3_tag_ce_event || s3_data_ce_event) && !s3_uec_event
-  io.error.valid := s3_ce_event || s3_uec_event
-  io.error.bits.report_to_beu := io.error.valid && (io.error.bits.source.tag || io.error.bits.source.data)
-  io.error.bits.errorType.ce := s3_ce_event
-  io.error.bits.errorType.ued := false.B
-  io.error.bits.errorType.uec := !s3_ce_event && s3_error_beu
-  io.error.bits.paddr := Mux(s3_probe_data_ce_event, get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr))), s3_error_paddr_beu)
-  io.error.bits.source.tag := Mux(s3_ce_event, s3_tag_ce_event, s3_tag_uec_event)
-  io.error.bits.source.data := Mux(s3_ce_event, s3_data_ce_event, s3_data_uec_event)
-  io.error.bits.source.l2 := s3_flag_error_beu.asUInt.orR || s3_l2_error_beu.asUInt.orR
-  io.error.bits.opType.store := RegEnable(s2_req.isStore && !s2_req.probe, s2_fire)
-  io.error.bits.opType.probe := RegEnable(s2_req.probe, s2_fire)
-  io.error.bits.opType.release := RegEnable(s2_req.replace, s2_fire)
-  io.error.bits.opType.atom := RegEnable(s2_req.isAMO && !s2_req.probe, s2_fire)
+  // Report the error to RERI and the cache-error CSR one cycle after the data response.
+  io.error := 0.U.asTypeOf(new RERIErrorInfo)
+  // CE is reported when a repaired local eviction enters writeback. MainPipe is
+  // the sole DCache source of RERI events; loads report failures architecturally.
+  val s3_local_tag_ce = RegEnable((s2_tag_correctable & s2_way_en).orR, s2_fire_to_s3)
+  val s3_local_ce_event = s3_fire && io.wb.fire && s3_req.local_evict && s3_tag_match &&
+    (s3_local_tag_ce || s3_data_ce) && !s3_selected_tag_uec && !s3_data_uncorrectable.orR
+
+  // LoadPipe handles clean-data UEC recovery locally and does not report it to RERI.
+  val s3_uec_event = s3_error_beu && GatedValidRegNext(s2_fire &&
+    !s2_should_not_report_ecc_error && !(s2_req.local_evict && s2_req.local_evict_clean_only))
+  assert(!(s3_uec_event && s3_local_ce_event))
+  io.error.errorPaddr.valid := s3_uec_event || s3_local_ce_event
+  io.error.errorPaddr.bits := Mux(s3_local_ce_event,
+    get_block_addr(Cat(s3_tag, get_untag(s3_req.vaddr))), s3_error_paddr_beu)
+  io.error.severity := Mux(s3_uec_event, SeverityLevel.UEC,
+    Mux(s3_local_ce_event, SeverityLevel.CE, SeverityLevel.NONE))
+  val s3_address_error = Mux(s3_local_ce_event, s3_local_tag_ce, s3_tag_uec_event)
+  io.error.errorSource := Mux(s3_address_error,
+    ErrorSource.addressError, ErrorSource.dataError)
 
   val perfEvents = Seq(
     ("l1D_write_dcache_access", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd)))), // store_req (cacheline evited from Sbuffer to L1D) & amo write

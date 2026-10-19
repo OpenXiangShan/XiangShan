@@ -2,6 +2,7 @@ package xiangshan.cache
 
 import chisel3._
 import chisel3.util._
+import device.RERI.SeverityLevel
 import xiangshan._
 import xiangshan.frontend.icache._
 import utility._
@@ -294,9 +295,9 @@ class CSRCacheErrorDecoder(implicit p: Parameters) extends CacheCtrlModule {
   when(decoded_cache_error.valid && !RegNext(decoded_cache_error.valid)){
     printf("CACHE_ERROR CSR reported an error:\n")
     printf("  paddr 0x%x\n", decoded_cache_error.bits.paddr)
-    print_cache_error_flag(decoded_cache_error.bits.errorType.ce, "correctable error")
-    print_cache_error_flag(decoded_cache_error.bits.errorType.ued, "uncorrectable deferred error")
-    print_cache_error_flag(decoded_cache_error.bits.errorType.uec, "uncorrectable error")
+    print_cache_error_flag(decoded_cache_error.bits.severity === SeverityLevel.CE, "correctable error")
+    print_cache_error_flag(decoded_cache_error.bits.severity === SeverityLevel.UED, "uncorrectable deferred error")
+    print_cache_error_flag(decoded_cache_error.bits.severity === SeverityLevel.UEC, "uncorrectable error")
     print_cache_error_flag(decoded_cache_error.bits.source.tag, "tag")
     print_cache_error_flag(decoded_cache_error.bits.source.data, "data")
     print_cache_error_flag(decoded_cache_error.bits.source.l2, "l2")

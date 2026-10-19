@@ -151,11 +151,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
     val block_addr  = Output(Valid(UInt()))
     val evict_complete = Output(Valid(new EccEvictComplete))
-    // The queue may defer one local ReleaseAck when multiple channels return
-    // acknowledgements in the same cycle.  This keeps the completion pulse
-    // lossless without changing the external WBQ interface.
-    val evict_complete_allow = Input(Bool())
-    val evict_complete_candidate = Output(Bool())
   })
 
   val s_invalid :: s_release_req :: s_release_resp ::Nil = Enum(3)
@@ -205,7 +200,6 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.mem_grant.ready   := false.B
   io.block_addr.valid := state =/= s_invalid
   io.block_addr.bits := req.addr
-  io.evict_complete_candidate := state === s_release_resp && req.local_evict && io.mem_grant.valid
   io.evict_complete.valid := state === s_release_resp && io.mem_grant.fire && req.local_evict
   io.evict_complete.bits.addr := req.local_evict_addr
   io.evict_complete.bits.tag := req.local_evict_tag
@@ -309,7 +303,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // --------------------------------------------------------------------------------
   // receive ReleaseAck for Releases
   when (state === s_release_resp) {
-    io.mem_grant.ready := !req.local_evict || io.evict_complete_allow
+    io.mem_grant.ready := true.B
     when (io.mem_grant.fire) {
       state := s_invalid
       state_dup_for_mp.foreach(_ := s_invalid)
@@ -348,7 +342,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     // main pipe * 1 + load pipe * LduCnt + store pipe * StaCnt (optional) + hybrid * HyuCnt
     val miss_req_conflict_check = Vec(MissReqPortCount, Flipped(Valid(UInt())))
     val block_miss_req = Vec(MissReqPortCount, Output(Bool()))
-    val evict_complete = Output(Valid(new EccEvictComplete))
+    val evict_complete_tag = Output(Valid(new EccEvictComplete))
+    val evict_complete_data = Output(Valid(new EccEvictComplete))
   })
 
   require(cfg.nReleaseEntries > cfg.nMissEntries)
@@ -373,10 +368,14 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   require(isPow2(cfg.nMissEntries))
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
-  val evict_complete_candidate = VecInit(entries.map(_.io.evict_complete_candidate))
-  val evict_complete_winner = PriorityEncoderOH(evict_complete_candidate)
-  io.evict_complete.valid := VecInit(entries.map(_.io.evict_complete.valid)).asUInt.orR
-  io.evict_complete.bits := PriorityMux(entries.map(e => e.io.evict_complete.valid -> e.io.evict_complete.bits))
+  val tagComplete = entries.map(e => e.io.evict_complete.valid && e.io.evict_complete.bits.tag)
+  val dataComplete = entries.map(e => e.io.evict_complete.valid && !e.io.evict_complete.bits.tag)
+  assert(PopCount(tagComplete) <= 1.U)
+  assert(PopCount(dataComplete) <= 1.U)
+  io.evict_complete_tag.valid := tagComplete.reduce(_ || _)
+  io.evict_complete_tag.bits := Mux1H(tagComplete, entries.map(_.io.evict_complete.bits))
+  io.evict_complete_data.valid := dataComplete.reduce(_ || _)
+  io.evict_complete_data.bits := Mux1H(dataComplete, entries.map(_.io.evict_complete.bits))
   entries.zipWithIndex.foreach {
     case (entry, i) =>
       val former_primary_ready = if(i == 0)
@@ -396,9 +395,6 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
       entry.io.primary_valid := alloc &&
         !former_primary_ready &&
         entry.io.primary_ready
-      entry.io.evict_complete_allow := !entry.io.evict_complete_candidate ||
-        evict_complete_winner(i)
-
       entry.io.mem_grant.valid := false.B
       entry.io.mem_grant.bits  := DontCare
       for (ch <- 0 until numMemChannels) {

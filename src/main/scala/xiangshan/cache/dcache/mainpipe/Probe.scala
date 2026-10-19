@@ -54,6 +54,7 @@ class EccEvictReq(implicit p: Parameters) extends DCacheBundle {
   // Revalidate the observed line before correcting or releasing it.
   val enc_tag = UInt(encTagBits.W)
   val clean_only = Bool()
+  // Original snoop retry marker. The local repair itself is never a snoop.
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
   val probe_need_data = Bool()
@@ -66,30 +67,38 @@ class EccEvictEntry(isTag: Boolean)(implicit p: Parameters) extends DCacheModule
     val pipe_req = DecoupledIO(new MainPipeReq)
     val pipe_done = Input(Bool())
     val evict_complete = Input(Valid(new EccEvictComplete))
+    // A snoop that triggered this repair must be retried after the local evict.
+    val done_resp = Decoupled(new ProbeResp)
   })
 
   object State extends ChiselEnum {
     val empty = Value
     val issue = Value
     val waitResp = Value
+    val waitRetry = Value
   }
 
   val state = RegInit(State.empty)
   val req = Reg(new EccEvictReq)
   val evict_complete = io.evict_complete.valid && get_block_addr(io.evict_complete.bits.addr) === get_block_addr(req.addr) && io.evict_complete.bits.tag === isTag.B
   io.req.ready := state === State.empty
+  io.done_resp.valid := state === State.waitRetry
+  io.done_resp.bits.id := req.probe_id
+  io.done_resp.bits.replay := true.B
   io.pipe_req.valid := state === State.issue
   io.pipe_req.bits := DontCare
   io.pipe_req.bits.miss := false.B
   io.pipe_req.bits.probe := true.B
   io.pipe_req.bits.local_evict := true.B
-  io.pipe_req.bits.local_evict_probe := req.probe
+  // The local repair is never the snoop itself.  The original snoop is
+  // retried after this entry completes.
+  io.pipe_req.bits.local_evict_probe := false.B
   io.pipe_req.bits.local_evict_tag := isTag.B
   io.pipe_req.bits.local_evict_way_en := req.way_en
   io.pipe_req.bits.local_evict_enc_tag := req.enc_tag
   io.pipe_req.bits.local_evict_clean_only := req.clean_only
-  io.pipe_req.bits.probe_param := Mux(req.probe, req.probe_param, TLPermissions.toN)
-  io.pipe_req.bits.probe_need_data := !req.probe || req.probe_need_data
+  io.pipe_req.bits.probe_param := TLPermissions.toN
+  io.pipe_req.bits.probe_need_data := true.B
   io.pipe_req.bits.replace := false.B
   io.pipe_req.bits.source := LOAD_SOURCE.U
   io.pipe_req.bits.cmd := M_FLUSH
@@ -104,7 +113,10 @@ class EccEvictEntry(isTag: Boolean)(implicit p: Parameters) extends DCacheModule
     state := State.issue
   }
   when(io.pipe_req.fire) { state := State.waitResp }
-  when(state === State.waitResp && (io.pipe_done || evict_complete)) { state := State.empty }
+  when(state === State.waitResp && (io.pipe_done || evict_complete)) {
+    state := Mux(req.probe, State.waitRetry, State.empty)
+  }
+  when(state === State.waitRetry && io.done_resp.fire) { state := State.empty }
 }
 
 class ProbeEntry(implicit p: Parameters) extends DCacheModule {
@@ -207,10 +219,13 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     val lrsc_locked_block = Input(Valid(UInt()))
     val update_resv_set = Input(Bool())
     val evict_done = Input(Valid(Bool()))
-    val evict_complete = Input(Valid(new EccEvictComplete))
+    val evict_complete_tag = Input(Valid(new EccEvictComplete))
+    val evict_complete_data = Input(Valid(new EccEvictComplete))
   })
 
   val pipe_req_arb = Module(new Arbiter(new MainPipeReq, cfg.nProbeEntries + 2))
+  val evict_pipe_resp = Wire(Valid(new ProbeResp))
+  evict_pipe_resp := io.pipe_resp
 
   // allocate a free entry for incoming request
   val primary_ready  = Wire(Vec(cfg.nProbeEntries, Bool()))
@@ -252,8 +267,8 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
     pipe_req_arb.io.in(i) <> entry.io.pipe_req
 
     // pipe_resp
-    entry.io.pipe_resp := io.pipe_resp
-    entry.io.retry_ready := io.tag_evict.ready
+    entry.io.pipe_resp := evict_pipe_resp
+    entry.io.retry_ready := io.tag_evict.ready && io.data_evict.ready
 
     entry.io.lrsc_locked_block := io.lrsc_locked_block
 
@@ -262,14 +277,22 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
 
   val tagEvict = Module(new EccEvictEntry(true))
   val dataEvict = Module(new EccEvictEntry(false))
+  val evictRespArb = Module(new Arbiter(new ProbeResp, 2))
   tagEvict.io.req <> io.tag_evict
   dataEvict.io.req <> io.data_evict
-  tagEvict.io.evict_complete := io.evict_complete
-  dataEvict.io.evict_complete := io.evict_complete
+  tagEvict.io.evict_complete := io.evict_complete_tag
+  dataEvict.io.evict_complete := io.evict_complete_data
   pipe_req_arb.io.in(cfg.nProbeEntries) <> tagEvict.io.pipe_req
   pipe_req_arb.io.in(cfg.nProbeEntries + 1) <> dataEvict.io.pipe_req
   tagEvict.io.pipe_done := io.evict_done.valid && io.evict_done.bits
   dataEvict.io.pipe_done := io.evict_done.valid && !io.evict_done.bits
+  evictRespArb.io.in(0) <> tagEvict.io.done_resp
+  evictRespArb.io.in(1) <> dataEvict.io.done_resp
+  evictRespArb.io.out.ready := !io.pipe_resp.valid
+  when (evictRespArb.io.out.fire) {
+    evict_pipe_resp.valid := true.B
+    evict_pipe_resp.bits := evictRespArb.io.out.bits
+  }
 
   // delay probe req for 1 cycle
   val selected_req_valid = RegInit(false.B)

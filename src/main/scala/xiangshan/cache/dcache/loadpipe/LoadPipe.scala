@@ -25,7 +25,7 @@ import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.XSCoreParamsKey
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -87,8 +87,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // load fast wakeup should be disabled when data read is not ready
     val disable_ld_fast_wakeup = Input(Bool())
 
-    // ecc error
-    val error = Output(ValidIO(new L1CacheErrorInfo))
+    // ECC UECs are returned to the load unit through the delayed response;
+    // LoadPipe does not report them to RERI.
     val tag_evict = DecoupledIO(new EccEvictReq)
     val data_evict = DecoupledIO(new EccEvictReq)
     val prefetch_stat = Output(new PipePrefetchStatBundle)
@@ -655,20 +655,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.tl_error_delayed.tl_corrupt := s3_tl_error.tl_corrupt & s3_valid
   resp.bits.data_delayed := s3_banked_data_resp_word
   resp.bits.replacementUpdated := io.replace_access.valid
-
-  // Report tag, data, and L2 errors with their physical address.
-  io.error := 0.U.asTypeOf(ValidIO(new L1CacheErrorInfo))
-  io.error.bits.paddr := s3_paddr
-  io.error.bits.report_to_beu := io.error.valid && (io.error.bits.source.tag || io.error.bits.source.data)
-  io.error.bits.errorType.ce := s3_ce
-  io.error.bits.errorType.ued := false.B
-  io.error.bits.errorType.uec := s3_uec || s3_flag_error
-  io.error.bits.source.tag := s3_tag_correctable || s3_tag_uncorrectable
-  io.error.bits.source.data := s3_data_correctable || s3_data_uncorrectable
-  io.error.bits.source.l2 := s3_flag_error
-  io.error.bits.opType.load := true.B
-  // CE is consumed by RERI while the load itself follows the existing replay path.
-  io.error.valid := (s3_ce || s3_uec || s3_flag_error) && s3_valid
 
   io.replace_access.valid := s3_valid && s3_hit && !s3_kill
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))

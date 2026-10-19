@@ -18,6 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
+import device.RERI.{ErrorRecordInfoParam, ErrorRecordInterfaceParam, ErrorRecordType}
 import xscache.coupledL2._
 import xscache.chi._
 import freechips.rocketchip.diplomacy.AddressSet
@@ -603,6 +604,25 @@ case class XSCoreParameters
     PrivWidth      = 3,
     ItypeWidth     = 4,
     IlastsizeWidth = 1,
+  )
+
+  val ErrorRecordInterfaceParam = new ErrorRecordInterfaceParam(
+    errorSource = Seq(
+      "dcache",
+      "icache",
+      "l2",
+      "uncache"
+    ),
+    recordParams = Seq(
+      ErrorRecordInfoParam("dcache-data", ErrorRecordType.CacheBlockDataError),
+      ErrorRecordInfoParam("dcache-tag", ErrorRecordType.CacheAddressOrStateError),
+      ErrorRecordInfoParam("icache-data", ErrorRecordType.CacheBlockDataError),
+      ErrorRecordInfoParam("icache-tag", ErrorRecordType.CacheAddressOrStateError),
+      ErrorRecordInfoParam("l2cache-data", ErrorRecordType.CacheBlockDataError),
+      ErrorRecordInfoParam("l2cache-tag", ErrorRecordType.CacheAddressOrStateError),
+      ErrorRecordInfoParam("uncache-denied", ErrorRecordType.InterconnectDataError),
+      ErrorRecordInfoParam("uncache-corrupt", ErrorRecordType.InterconnectOther)
+    )
   )
 }
 

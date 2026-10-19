@@ -19,6 +19,7 @@ package xiangshan
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
+import device.RERI.{ErrorSource, RERIErrorInfo, SeverityLevel}
 import utility._
 import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
@@ -730,12 +731,6 @@ object AddrTransType {
   }
 }
 
-class CacheErrorType extends Bundle {
-  val ce = Bool()
-  val ued = Bool()
-  val uec = Bool()
-}
-
 class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   // L1CacheErrorInfo is also used to encode customized CACHE_ERROR CSR
   val source = Output(new Bundle() {
@@ -753,17 +748,15 @@ class L1CacheErrorInfo(implicit p: Parameters) extends XSBundle {
   })
   val paddr = Output(UInt(PAddrBits.W))
 
-  val errorType = Output(new CacheErrorType)
+  val severity = Output(SeverityLevel())
 
-  // report error and paddr to beu
-  // bus error unit will receive error info iff ecc_error.valid
-  val report_to_beu = Output(Bool())
-
-  def toL1BusErrorUnitInfo(valid: Bool): L1BusErrorUnitInfo = {
-    val beu_info = Wire(new L1BusErrorUnitInfo)
-    beu_info.ecc_error.valid := valid && report_to_beu
-    beu_info.ecc_error.bits := paddr
-    beu_info
+  def toRERIErrorInfo(valid: Bool): RERIErrorInfo = {
+    val reriInfo = Wire(new RERIErrorInfo)
+    reriInfo.errorPaddr.valid := valid
+    reriInfo.errorPaddr.bits := paddr
+    reriInfo.severity := severity
+    reriInfo.errorSource := Mux(source.tag, ErrorSource.addressError, ErrorSource.dataError)
+    reriInfo
   }
 }
 

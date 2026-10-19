@@ -35,6 +35,7 @@ import xiangshan.mem.Bundles.SbufferForwardReq
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
 import freechips.rocketchip.tilelink.TLMessages.GrantData
 import xiangshan.mem.L1PrefetchReq
+import device.RERI.RERIErrorInfo
 
 // DCache specific parameters
 case class DCacheParameters
@@ -849,7 +850,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
   val lsu = new DCacheToLsuIO
-  val error = ValidIO(new L1CacheErrorInfo)
+  val error = Output(new RERIErrorInfo)
   val mshrFull = Output(Bool())
   val mshr_store_empty = Output(Bool())
   val memSetPattenDetected = Output(Bool())
@@ -1120,15 +1121,20 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val tagEvictArb = Module(new Arbiter(new EccEvictReq, LoadPipelineWidth + 1))
   val dataEvictArb = Module(new Arbiter(new EccEvictReq, LoadPipelineWidth + 1))
   tagEvictArb.io.in(0) <> mainPipe.io.tag_evict
-  dataEvictArb.io.in(0) <> mainPipe.io.data_evict
+  dataEvictArb.io.in(0).valid := mainPipe.io.data_evict.valid
+  dataEvictArb.io.in(0).bits := mainPipe.io.data_evict.bits
+  mainPipe.io.data_evict.ready := dataEvictArb.io.in(0).ready
   for (i <- 0 until LoadPipelineWidth) {
     tagEvictArb.io.in(i + 1) <> ldu(i).io.tag_evict
-    dataEvictArb.io.in(i + 1) <> ldu(i).io.data_evict
+    dataEvictArb.io.in(i + 1).valid := ldu(i).io.data_evict.valid
+    dataEvictArb.io.in(i + 1).bits := ldu(i).io.data_evict.bits
+    ldu(i).io.data_evict.ready := dataEvictArb.io.in(i + 1).ready
   }
   probeQueue.io.tag_evict <> tagEvictArb.io.out
   probeQueue.io.data_evict <> dataEvictArb.io.out
   probeQueue.io.evict_done <> mainPipe.io.evict_done
-  probeQueue.io.evict_complete := wb.io.evict_complete
+  probeQueue.io.evict_complete_tag := wb.io.evict_complete_tag
+  probeQueue.io.evict_complete_data := wb.io.evict_complete_data
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
@@ -1147,13 +1153,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
 
-  val errors = Seq(mainPipe.io.error) ++ // store / misc error
-        ldu.map(_.io.error)// load error
-  val error_valid = errors.map(e => e.valid).reduce(_|_)
-  io.error.bits <> RegEnable(
-    ParallelPriorityMux(errors.map(e => RegNext(e.valid) -> RegEnable(e.bits, e.valid))),
-    RegNext(error_valid))
-  io.error.valid := RegNext(RegNext(error_valid, init = false.B), init = false.B)
+  io.error := mainPipe.io.error
 
   //----------------------------------------
   // meta array
@@ -1442,7 +1442,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       0.U.asTypeOf(Valid(new MissTrackResident))
     )
     val delayedClear = RegNext(
-      mainPipe.io.error.valid || ldu.map(_.io.error.valid).reduce(_ || _),
+      mainPipe.io.error.errorPaddr.valid || ldu.map(_.io.lsu.resp.bits.error_delayed).reduce(_ || _),
       false.B
     )
     for (w <- 0 until LoadPipelineWidth) {

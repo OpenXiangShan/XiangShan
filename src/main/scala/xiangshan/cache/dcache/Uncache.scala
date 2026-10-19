@@ -19,6 +19,7 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import device.RERI.{ErrorSource, RERIErrorInfo, SeverityLevel}
 import utils._
 import utility._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp, TransferSizes}
@@ -178,7 +179,7 @@ class UncacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsq = Flipped(new UncacheWordIO)
   val forward = Vec(LoadPipelineWidth, Flipped(new UncacheForward))
   val wfi = Flipped(new WfiReqBundle)
-  val busError = Output(new L1BusErrorUnitInfo())
+  val reriError = Output(new RERIErrorInfo())
 }
 
 // convert DCacheIO to TileLink
@@ -481,9 +482,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
       }
     )
   }
-  io.busError.ecc_error.valid := mem_grant.fire && isStore(entries(mem_grant.bits.source)) &&
-    (mem_grant.bits.denied || mem_grant.bits.corrupt)
-  io.busError.ecc_error.bits := entries(mem_grant.bits.source).addr >> blockOffBits << blockOffBits
+  val uncacheDenied = mem_grant.fire && isStore(entries(mem_grant.bits.source)) &&
+    mem_grant.bits.denied
+  val uncacheCorrupt = mem_grant.fire && isStore(entries(mem_grant.bits.source)) &&
+    mem_grant.bits.corrupt && !mem_grant.bits.denied
+  io.reriError.errorPaddr.valid := uncacheDenied || uncacheCorrupt
+  io.reriError.errorPaddr.bits := entries(mem_grant.bits.source).addr >> blockOffBits << blockOffBits
+  io.reriError.severity := Mux(io.reriError.errorPaddr.valid,
+    SeverityLevel.UEC, SeverityLevel.NONE)
+  io.reriError.errorSource := Mux(uncacheDenied,
+    ErrorSource.addressError, ErrorSource.dataError)
 
   io.wfi.wfiSafe := GatedValidRegNext(noPending.asUInt.andR && io.wfi.wfiReq)
   /******************************************************************
