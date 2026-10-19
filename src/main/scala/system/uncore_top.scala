@@ -1298,6 +1298,9 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm_tcrs_sNode.in.head._1 <> m_dm2noc.viewAs[AXI4Bundle]
     m_sba2noc.foreach(_ <> dm.axi4masternode.get)
     dm.module.io.debugIO <> dmio.debugIO
+    dm.module.io.debugIO.systemjtag.foreach { sj =>
+      sj.reset := (!dmio.debugIO.systemjtag.get.reset.asBool).asAsyncReset
+    }
     dm.module.io.clock := dmio.clock
     dm.module.io.reset := dmio.reset
 
