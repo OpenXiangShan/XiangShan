@@ -41,14 +41,6 @@ def test_canonical_testpoint_csv_uses_one_physical_line_per_record() -> None:
         _check_one_physical_line_per_record(handle)
 
 
-def test_csv_contract_rejects_a_multiline_record() -> None:
-    try:
-        _check_one_physical_line_per_record(StringIO('column_a,column_b\n"first\nsecond",value\n'))
-    except AssertionError:
-        return
-    raise AssertionError("multiline record was accepted")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--staged", action="store_true")

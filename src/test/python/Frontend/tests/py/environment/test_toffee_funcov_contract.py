@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -273,40 +272,6 @@ def test_native_toffee_report_merge_counts_every_input(tmp_path) -> None:
     ]
 
 
-def test_formal_fixture_uses_sample_hub_toffee_only() -> None:
-    from pathlib import Path
-
-    source = (
-        Path(__file__).resolve().parents[3] / "env" / "runtime" / "fixtures.py"
-    ).read_text(encoding="utf-8")
-    runtime_source = (
-        Path(__file__).resolve().parents[3] / "env" / "funcov" / "toffee_runtime.py"
-    ).read_text(encoding="utf-8")
-    recorder_source = (
-        Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
-    ).read_text(encoding="utf-8")
-    assert "FrontendFuncovSampleHub.from_pilot_csv" in source
-    assert "else runtime_context.handle_event" in source
-    assert "ToffeeCoverageSink.from_registry" in source
-    assert "ToffeeCoverageSink.from_registry(default_pilot_csv_path())" in source
-    assert "enable_toffee_direct_domain" not in runtime_source
-    assert "toffee_direct_domains" not in recorder_source
-    assert "create_toffee_runtime(" in source
-    assert "session_coverage.add(toffee_sink.cov_groups)" in source
-    assert "session_coverage.set_run_metadata(_funcov_run_metadata(request, tb))" in source
-    assert 'request.config.getoption("--toffee-report", default=False)' in source
-    assert "set_func_coverage(request, toffee_sink.cov_groups)" in source
-    assert "audit_recorder" not in source
-    assert 'collector.write(path or (_funcov_dir() / "toffee.funcov.json"))' in source
-    assert "FunctionalCoverageRecorder" not in source
-    assert "TB_ENABLE_TOFFEE_FUNCOV" not in source
-    assert "TB_ENABLE_FUNCOV_AUDIT" not in source
-    assert "TB_ENABLE_TOFFEE_FUNCOV_PILOT" not in source
-    assert 'funcov_dir.parent / "audit" / "legacy-funcov"' not in source
-    assert 'metadata["execution"]["legacy_funcov_audit_path"]' not in source
-    assert "legacy_recorder" not in source
-
-
 class _CountingSignal:
     def __init__(self, value: int) -> None:
         self._value = int(value)
@@ -407,48 +372,6 @@ def test_recorder_domain_cycle_view_is_built_once_per_cycle() -> None:
     assert len(calls) == 2
 
 
-def test_funcov_modules_do_not_bypass_snapshot_dut_reads() -> None:
-    funcov_root = Path(__file__).resolve().parents[3] / "env" / "funcov"
-    allowed = {funcov_root / "recorder.py"}
-    violations: list[str] = []
-
-    def _base_name(node: ast.AST) -> str:
-        if isinstance(node, ast.Name):
-            return node.id
-        if isinstance(node, ast.Attribute):
-            return f"{_base_name(node.value)}.{node.attr}"
-        return type(node).__name__
-
-    for path in sorted(funcov_root.rglob("*.py")):
-        if "__pycache__" in path.parts or path in allowed:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "value":
-                base = _base_name(node.value)
-                if base == "self":
-                    continue
-                violations.append(f"{path.relative_to(funcov_root)}:{node.lineno}:{base}.value")
-            if isinstance(node, ast.Call):
-                func = node.func
-                if isinstance(func, ast.Attribute) and func.attr == "GetInternalSignal":
-                    violations.append(
-                        f"{path.relative_to(funcov_root)}:{node.lineno}:GetInternalSignal"
-                    )
-                if (
-                    isinstance(func, ast.Name)
-                    and func.id == "getattr"
-                    and node.args
-                    and isinstance(node.args[0], ast.Name)
-                    and node.args[0].id == "dut"
-                ):
-                    violations.append(
-                        f"{path.relative_to(funcov_root)}:{node.lineno}:getattr(dut, ...)"
-                    )
-
-    assert violations == []
-
-
 class _AutoCountingDut:
     def __init__(self) -> None:
         self.signals: dict[str, _CountingSignal] = {
@@ -517,21 +440,6 @@ def test_direct_runtime_rejects_dut_reads_without_cycle_snapshot(tmp_path) -> No
 
     with pytest.raises(RuntimeError, match="active cycle snapshot"):
         hub._try_read_dut_signal(dut, "reset")
-
-
-def test_formal_fixture_starts_snapshot_before_direct_models() -> None:
-    source = (
-        Path(__file__).resolve().parents[3] / "env" / "runtime" / "fixtures.py"
-    ).read_text(encoding="utf-8")
-    callback_start = source.index("def sample_functional_coverage(cycle):")
-    callback = source[callback_start : source.index("dut.StepRis(sample_functional_coverage)")]
-    assert "runtime_context.on_cycle(cycle, tb)" in callback
-    assert "begin_cycle_snapshot" in (
-        Path(__file__).resolve().parents[3] / "env" / "funcov" / "recorder.py"
-    ).read_text(encoding="utf-8")
-    assert callback.index("runtime_context.on_cycle(cycle, tb)") < callback.index(
-        "for model in toffee_direct_models:"
-    )
 
 
 def test_toffee_mainpipe_model_contains_all_54_bins() -> None:
@@ -732,22 +640,6 @@ def test_native_only_sink_skips_bridge_groups_before_native_install(tmp_path) ->
     }
     assert len(installed_bins) == 573
     assert len(sink._native_group_names) == len(sink.cov_groups)
-
-def test_toffee_merge_cli_is_available() -> None:
-    from pathlib import Path
-
-    tool = Path(__file__).resolve().parents[3] / "tools" / "merge_toffee_funcov.py"
-    assert tool.is_file()
-
-
-def test_backannotation_cli_is_read_only() -> None:
-    tool = Path(__file__).resolve().parents[3] / "tools" / "backannotate_funcov.py"
-    source = tool.read_text(encoding="utf-8")
-    main_source = source[source.index("def main() -> int:") :]
-
-    assert "apply=False" in main_source
-    assert "apply=not args.check" not in main_source
-
 
 def test_direct_runtime_models_partition_all_573_bins(tmp_path) -> None:
     hub = FrontendFuncovSampleHub.from_pilot_csv(

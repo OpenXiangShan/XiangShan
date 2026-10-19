@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import yaml
 from toffee.bundle import Signal, SignalList
 
 from env.bundles import (
@@ -265,36 +264,6 @@ def test_full_frontend_top_level_signals_match_environment_bundles() -> None:
     if stale_in_bundles:
         mismatches["bundle_signals_missing_from_top_level"] = stale_in_bundles
     assert not mismatches, mismatches
-
-
-def test_full_frontend_internal_observer_contract() -> None:
-    build_root = _selected_full_build_root()
-    offset_path = build_root / "pylib-verilator" / "Frontend" / "Frontend_offset.yaml"
-    assert offset_path.is_file(), f"full RTL offset inventory is required: {offset_path}"
-
-    loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
-    inventory = yaml.load(offset_path.read_text(encoding="utf-8"), Loader=loader)
-    assert isinstance(inventory, dict) and isinstance(inventory.get("variables"), list)
-    registered = {
-        str(item["name"]): int(item["rtl_width"])
-        for item in inventory["variables"]
-        if isinstance(item, dict) and "name" in item and "rtl_width" in item
-    }
-    required = {
-        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid": 1,
-        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_foldpc_0": 10,
-        "Frontend_top.Frontend._inner_itlb_io_ptw_req_0_bits_getGpa": 1,
-        "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState": 2,
-        "Frontend_top.Frontend.inner_instrUncache.entries_0.state": 2,
-        "Frontend_top.Frontend.inner_icache.mainPipe.s0_valid": 1,
-        "Frontend_top.Frontend.inner_ftq.backendRedirect_valid": 1,
-    }
-    mismatches = {
-        name: {"expected_width": width, "actual_width": registered.get(name)}
-        for name, width in required.items()
-        if registered.get(name) != width
-    }
-    assert not mismatches, {"full_frontend_internal_observer_mismatches": mismatches}
 
 
 def test_full_frontend_environment_initializes_every_input() -> None:

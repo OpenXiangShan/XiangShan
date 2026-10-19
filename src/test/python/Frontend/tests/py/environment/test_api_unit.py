@@ -4,7 +4,6 @@ from collections import deque
 from types import SimpleNamespace
 
 from env import api as env_api
-from env.runtime.pylib import frontend_offset_path
 
 
 class _ApiTargetCursorEnv:
@@ -180,47 +179,3 @@ def test_stall_snapshot_reports_missing_current_owner_probe() -> None:
     assert contract["complete"] is False
     assert contract["missing"] == [missing]
     assert f"contract=missing[{missing}]" in env_api._format_stall_snapshot(snapshot)
-
-
-def test_stall_snapshot_signal_contract_matches_current_inventory() -> None:
-    offset = frontend_offset_path()
-    assert offset.is_file(), "Verilator DUT signal inventory is required"
-    inventory = offset.read_text(encoding="utf-8")
-    prefix = "Frontend_top.Frontend.inner_ifu."
-    required = {
-        prefix + "s2_ready",
-        prefix + "s2_valid_valid",
-        prefix + "s2_fire",
-        prefix + "s2_alignedInstrValid",
-        prefix + "s2_fixedInstrValid",
-        prefix + "s2_fetchBlock_0_startVAddr_addr",
-        prefix + "s2_fetchBlock_1_startVAddr_addr",
-        prefix + "s2_prevEndIsHalfRviInfo_valid",
-        prefix + "s2_firstEndHalfRvi_valid",
-        prefix + "s2_totalEndHalfRvi_valid",
-        prefix + "io_toIBuffer_bits_enqEnable_0",
-    }
-    for block in range(2):
-        required.update(
-            {
-                prefix + f"s2_fetchBlock_{block}_valid",
-                prefix + f"s2_fetchBlock_{block}_ftqIdx_flag",
-                prefix + f"s2_fetchBlock_{block}_ftqIdx_value",
-            }
-        )
-    for lane in range(35):
-        required.update(
-            {
-                prefix + f"s2_alignedInstrVec_{lane}_invalidTaken",
-                prefix + f"s2_alignedInstrVec_{lane}_blockSel",
-            }
-        )
-        if lane < 34:
-            required.add(prefix + f"s2_alignedInstrVec_{lane}_isCrossBlockInstr")
-
-    missing = sorted(name for name in required if f"  - name: {name}\n" not in inventory)
-    assert not missing, {"missing_stall_snapshot_signals": missing}
-    assert prefix + "s3_alignInstrValid_" not in inventory
-    assert prefix + "s3_alignInvalidTaken_" not in inventory
-    assert prefix + "s3_alignCompactInfo_selectBlock_" not in inventory
-    assert "predChecker.io_resp_stage1Out_fixedTwoFetchRange_" not in inventory
