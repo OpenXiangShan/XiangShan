@@ -241,8 +241,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     }
   }
 
-  val rxrsp_match = io.rxrsp.valid && io.rxrsp.bits.TxnID === io.id
-  when (phase === phase_wait && rxrsp_match) {
+  when (phase === phase_wait && io.rxrsp.valid) {
     io.rxrsp.ready := true.B
     when (io.rxrsp.fire) {
       when (CCHIOpcode.Comp.is(io.rxrsp.bits.Opcode)) {
@@ -330,6 +329,7 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
 
   require(isPow2(cfg.nMissEntries))
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry()))
+  val rxrspMatches = Wire(Vec(cfg.nReleaseEntries, Vec(nCCHIChannels, Bool())))
   entries.zipWithIndex.foreach {
     case (entry, i) =>
       val former_primary_ready = if(i == 0)
@@ -352,14 +352,19 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
       entry.io.rxrsp.valid := false.B
       entry.io.rxrsp.bits := DontCare
       for (ch <- 0 until nCCHIChannels) {
-        when (io.rxrsp(ch).valid && io.rxrsp(ch).bits.TxnID === entry_id) {
-          entry.io.rxrsp <> io.rxrsp(ch)
+        rxrspMatches(i)(ch) := io.rxrsp(ch).valid && io.rxrsp(ch).bits.TxnID === entry_id
+        when (rxrspMatches(i)(ch)) {
+          entry.io.rxrsp.valid := io.rxrsp(ch).valid
+          entry.io.rxrsp.bits := io.rxrsp(ch).bits
         }
       }
   }
 
   for (ch <- 0 until nCCHIChannels) {
-    io.rxrsp(ch).ready := VecInit(entries.map(_.io.rxrsp.ready)).asUInt.orR
+    // Only the entry addressed by this channel may acknowledge its response.
+    io.rxrsp(ch).ready := VecInit(entries.zipWithIndex.map { case (entry, i) =>
+      rxrspMatches(i)(ch) && entry.io.rxrsp.ready
+    }).asUInt.orR
   }
 
   if (nCCHIChannels > 1) {
