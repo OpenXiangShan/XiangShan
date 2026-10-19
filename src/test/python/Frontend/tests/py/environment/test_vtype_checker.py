@@ -48,14 +48,18 @@ def test_vtype_checker_accepts_lane_ordered_snapshot() -> None:
     assert checker.observed_pcs == {0x80001000, 0x80001004}
 
 
-def test_vtype_checker_reports_instruction_context_on_mismatch() -> None:
+@pytest.mark.parametrize(
+    ("corrupted_field", "expected_field"),
+    [("vtype_illegal", "vtype"), ("specvtype_illegal", "specvtype")],
+)
+def test_vtype_checker_reports_instruction_context_on_mismatch(corrupted_field, expected_field) -> None:
     checker = VTypeChecker([TraceEntry(0, 0x80001000, 0x00000013, 4)])
     snapshot = _snapshot(0x00000013)
     slot = snapshot.slots[0]
     bad_slot = slot.__class__(
         **{
             **slot.__dict__,
-            "vtype_illegal": False,
+            corrupted_field: False,
         }
     )
     bad_snapshot = CfVecCycleSnapshot(cycle=9, slots=(bad_slot,))
@@ -64,7 +68,7 @@ def test_vtype_checker_reports_instruction_context_on_mismatch() -> None:
         checker.check_snapshot(bad_snapshot, lambda slot: bad_snapshot.slots[slot].foldpc)
 
     assert checker.error_count == 1
-    assert checker.last_error["field"] == "vtype"
+    assert checker.last_error["field"] == expected_field
 
 
 def test_vtype_checker_rejects_wrong_instruction_at_expected_pc() -> None:
