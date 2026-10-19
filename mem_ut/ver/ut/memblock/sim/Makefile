@@ -22,7 +22,7 @@ REMOTE_BOOTSTRAP ?= source /usr/share/Modules/init/bash >/dev/null 2>&1 || true;
 REMOTE_WRAPPER := $(CURR_DIR)/remote_eda_make.sh
 REMOTE_SIM_TOOLS ?= vcs
 
-.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill ensure_user_cfg_local
+.PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill eda_print_bootstrap ensure_user_cfg_local
 
 compile batch_run rtl: ensure_user_cfg_local
 
@@ -31,6 +31,9 @@ ensure_user_cfg_local:
 		cp "$(USER_CFG_LOCAL_TEMPLATE)" "$(USER_CFG_LOCAL)"; \
 		echo "Created $(USER_CFG_LOCAL) from $(USER_CFG_LOCAL_TEMPLATE)"; \
 	fi
+
+eda_print_bootstrap:
+	@printf '%s\n' '$(REMOTE_BOOTSTRAP)'
 
 eda_compile:
 	@mkdir -p $(REMOTE_STATE_DIR)
