@@ -1102,11 +1102,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.param := writeback_param
   io.wb.bits.voluntary := s3_req.miss || s3_req.replace
   io.wb.bits.hasData := writeback_data && !s3_tag_error_wb
-  io.wb.bits.dirty := s3_coh === ClientStates.Dirty
+  io.wb.bits.dirty := s3_coh === ClientStates.Dirty && !(s3_req.probe && s3_req.probe_snp_make_invalid)
   io.wb.bits.data := s3_data_line
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
-  io.wb.bits.chi_txn_id := Mux(s3_req.probe, s3_req.probe_snp_txn_id, 0.U)
-  io.wb.bits.chi_tgt_id := Mux(s3_req.probe, s3_req.probe_snp_src_id, 0.U)
+  io.wb.bits.snp_txn_id := Mux(s3_req.probe, s3_req.probe_snp_txn_id, 0.U)
+  io.wb.bits.snp_tgt_id := Mux(s3_req.probe, s3_req.probe_snp_src_id, 0.U)
   io.wb.bits.trace_tag := Mux(s3_req.probe, s3_req.probe_snp_trace_tag, 0.U)
   io.wb.bits.chi_channel := Mux(s3_req.probe, s3_req.probe_snp_channel, 0.U)
 

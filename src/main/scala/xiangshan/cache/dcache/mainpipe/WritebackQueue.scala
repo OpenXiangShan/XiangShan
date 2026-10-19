@@ -31,8 +31,8 @@ class WritebackReqCtrl(implicit p: Parameters) extends DCacheBundle {
   val corrupt = Bool()
   val dirty = Bool()
 
-  val chi_txn_id = UInt(DCacheCCHI.dnTxnIdWidth.W) // SNP TxnID for probe response; unused for voluntary EVT
-  val chi_tgt_id = UInt(DCacheCCHI.dnNodeIdWidth.W) // SNP SrcID, echoed as SnpResp/SnpRespData TgtID
+  val snp_txn_id = UInt(DCacheCCHI.dnTxnIdWidth.W) // SNP TxnID for probe response; unused for voluntary EVT
+  val snp_tgt_id = UInt(DCacheCCHI.dnNodeIdWidth.W) // SNP SrcID, echoed as SnpResp/SnpRespData TgtID
   val trace_tag = UInt(1.W)
   val chi_channel = UInt(CCHIChannelBits.W) // snoop resp only
 }
@@ -147,8 +147,8 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   when (alloc) {
     assert(remain === 0.U)
     req := io.req.bits
-    snp_txn_id := io.req.bits.chi_txn_id
-    snp_tgt_id := io.req.bits.chi_tgt_id
+    snp_txn_id := io.req.bits.snp_txn_id
+    snp_tgt_id := io.req.bits.snp_tgt_id
     trace_tag := io.req.bits.trace_tag
     resp_channel := Mux(io.req.bits.voluntary,
       selectCCHIChannel(io.req.bits.addr),
