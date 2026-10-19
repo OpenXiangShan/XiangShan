@@ -370,13 +370,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_mbtbCfiPositionDiffVec =
     VecInit(mbtb.io.result.map(_.bits.cfiPosition =/= s2_s1Prediction.cfiPosition))
   private val s2_mbtbAttributeDiffVec = VecInit(mbtb.io.result.map(_.bits.attribute =/= s2_s1Prediction.attribute))
+  private val s2_mbtbTargetDiffVec    = VecInit(mbtb.io.result.map(_.bits.targetLower =/= s2_s1Prediction.targetLower))
 
   s2_override := {
     val takenDiff       = s2_taken =/= s2_s1Prediction.taken
     val cfiPositionDiff = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbCfiPositionDiffVec)
     val attributeDiff   = s2_taken && Mux1H(s2_firstTakenBranchOH, s2_mbtbAttributeDiffVec)
+    // S2 does not check the indirect target, because the MBTB target may incorrectly
+    // override the uRAS target. Also, since the S1 predictor is trained by the S3
+    // predictor, the indirect address of the S1 predictor comes from ITTAGE, so MBTB
+    // should not override the indirect target.
+    val targetDiff = s2_taken && !s2_firstTakenBranch.bits.attribute.isIndirect &&
+      Mux1H(s2_firstTakenBranchOH, s2_mbtbTargetDiffVec)
 
-    s2_valid && (takenDiff || cfiPositionDiff || attributeDiff)
+    s2_valid && (takenDiff || cfiPositionDiff || attributeDiff || targetDiff)
   }
 
   /* *** s3 prediction selection *** */
@@ -393,16 +400,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s3_s2FirstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
 
-  // S2 does not compare targets. An S2 override already uses the selected MBTB target, so a later MBTB target
-  // comparison is redundant; a changed MBTB branch is caught by firstTakenBranchDiff. Only RAS/ITTAGE need target
-  // comparison after an S2 override.
-  private val s3_mbtbTargetDiffVec = VecInit(s3_mbtbResult.map { entry =>
-    Mux(
-      s3_s2Override,
-      false.B,
-      entry.bits.targetLower =/= s3_s1Prediction.targetLower
-    )
-  })
   private val s3_ittageTargetDiff = Mux(
     s3_s2Override,
     ittage.io.prediction.target =/= s3_s2Prediction.target,
@@ -439,6 +436,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable
   private val s3_useIttage = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
+  private val s3_mbtbTargetDiffVec = RegEnable(s2_mbtbTargetDiffVec, s2_fire)
+  // The comparison is against the original S1 target. If S2 already overrode the
+  // prediction for another reason, checking it again would cause a spurious S3 override.
+  private val s3_mbtbTargetDiff = !s3_s2Override && Mux1H(s3_firstTakenBranchOH, s3_mbtbTargetDiffVec)
+
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
   // used for mainBTB replacer
@@ -456,13 +458,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
 
+  // S2 validates targets that remain sourced from MBTB; S3 validates targets supplied by ITTAGE or RAS.
   private val s3_targetDiff =
     MuxCase(
       false.B,
       Seq(
-        (s3_taken && s3_useRas)    -> s3_rasTargetDiff,
-        (s3_taken && s3_useIttage) -> s3_ittageTargetDiff,
-        s3_taken                   -> Mux1H(s3_firstTakenBranchOH, s3_mbtbTargetDiffVec)
+        (s3_taken && s3_useRas)                                     -> s3_rasTargetDiff,
+        (s3_taken && s3_useIttage)                                  -> s3_ittageTargetDiff,
+        (s3_taken && s3_firstTakenBranch.bits.attribute.isIndirect) -> s3_mbtbTargetDiff
       )
     )
 
