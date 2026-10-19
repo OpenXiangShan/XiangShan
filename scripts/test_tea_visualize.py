@@ -3,12 +3,13 @@
 from argparse import Namespace
 from pathlib import Path
 import sqlite3
+import json
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from tea_visualize import annotate_elf, load_data
+from tea_visualize import annotate_elf, load_data, export_context, export_cycle_stats
 
 
 class TeaAnalysisTest(unittest.TestCase):
@@ -78,6 +79,43 @@ class TeaAnalysisTest(unittest.TestCase):
         self.assertAlmostEqual(run["summary"]["sample_weight"], 8)
         self.assertEqual(run["summary"]["excluded_lanes"], 2)
         self.assertEqual(run["weights"][0xFFFFFFFF80001000][0], 0.5)
+
+    def test_context_is_entry_scoped_and_does_not_change_weights(self):
+        with sqlite3.connect(self.database) as con:
+            for field in ("COMMITBLOCKMASK", "HEADREASONVALID", "HEADREASON", "HEADREADY"):
+                con.execute(f"ALTER TABLE Tea_0 ADD COLUMN CONTEXT_{field} INTEGER DEFAULT 0")
+            con.execute("UPDATE Tea_0 SET CONTEXT_HEADREASONVALID=1, CONTEXT_HEADREASON=58 WHERE CYCLE=1")
+            con.execute("UPDATE Tea_0 SET CONTEXT_COMMITBLOCKMASK=12 WHERE CYCLE=2")
+        run = self.load()
+        self.assertAlmostEqual(sum(run["contexts"].values()), 9)
+        export_context(run, Path(self.directory.name))
+        import csv
+        with (Path(self.directory.name) / "head_context.csv").open() as source:
+            rows = list(csv.DictReader(source))
+        self.assertTrue(any(row["scope"] == "Entry" and row["pc"] == "0x90000004" for row in rows))
+        self.assertTrue(any(row["scope"] == "Global" and row["commit_blocks"] == "WFI|redirect" for row in rows))
+
+    def test_exact_summary_and_censored_interval_export(self):
+        with sqlite3.connect(self.database) as con:
+            fields = ["ID", "CYCLE", "RETIRED", "CENSOREDGAPS", "PENDING", "CLOSED"]
+            fields += [f"STATES_{i}" for i in range(4)] + [f"GAPS_{i}" for i in range(5)]
+            con.execute("CREATE TABLE TeaCycleSummary_0 (" + ",".join(f"{f} INTEGER" for f in fields) + ")")
+            row = dict.fromkeys(fields, 0)
+            row.update(ID=1, CYCLE=10, RETIRED=4, CENSOREDGAPS=1, CLOSED=1, STATES_0=2, STATES_1=5, STATES_2=3)
+            con.execute("INSERT INTO TeaCycleSummary_0 VALUES (" + ",".join("?" for _ in fields) + ")", list(row.values()))
+            con.execute("CREATE TABLE TeaNoCommit_0 (START INTEGER, END INTEGER, STATES_0 INTEGER, "
+                        "STATES_1 INTEGER, STATES_2 INTEGER, LEFTCENSORED INTEGER, RIGHTCENSORED INTEGER)")
+            con.execute("INSERT INTO TeaNoCommit_0 VALUES (2,10,5,3,0,0,1)")
+        export_cycle_stats(self.database, Path(self.directory.name))
+        result = json.loads((Path(self.directory.name) / "cycle_summary.json").read_text())
+        self.assertEqual(result["cycles"], 10)
+        self.assertEqual(result["cycles_per_kinst"]["Stalled"], 1250)
+        self.assertEqual(result["ipc"], 0.4)
+        self.assertTrue(result["collection_closed"])
+        with sqlite3.connect(self.database) as con:
+            con.execute("UPDATE TeaNoCommit_0 SET END=11")
+        with self.assertRaisesRegex(ValueError, "inconsistent no-commit"):
+            export_cycle_stats(self.database, Path(self.directory.name))
 
     def test_full_width_kernel_pc_matches_elf(self):
         pc = 0xFFFFFFFF80001000

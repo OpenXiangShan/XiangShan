@@ -102,6 +102,17 @@ class TeaFlushCause(implicit p: Parameters) extends XSBundle {
   val psv = UInt(TeaEvent.width.W)
 }
 
+// Contemporaneous context; the existing Top-down reason describes an Entry, not a rank.
+class TeaContext(implicit p: Parameters) extends XSBundle {
+  val retired = UInt(log2Ceil(CommitWidth * RenameWidth + 1).W)
+  val commitBlockMask = UInt(9.W)
+  val headValid = Bool()
+  val headReady = Bool()
+  val head = new RobPtr
+  val headReasonValid = Bool()
+  val headReason = UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)
+}
+
 // Every sampling boundary is logged immediately. Deferred PSV is joined by target.
 class TeaEntry(implicit p: Parameters) extends XSBundle {
   val cycle = UInt(64.W)
@@ -112,6 +123,7 @@ class TeaEntry(implicit p: Parameters) extends XSBundle {
   val psvVec = Vec(CommitWidth * RenameWidth, UInt(TeaEvent.width.W))
   val targetValid = Bool()
   val target = new TeaTarget
+  val context = new TeaContext
 }
 
 class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSParameter {

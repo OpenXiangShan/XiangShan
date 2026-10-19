@@ -23,6 +23,14 @@ INCOMPLETE = {-1: "Cancelled", -2: "Unresolved", -3: "Unknown target/cause"}
 STATES = ("Computing", "Stalled", "Flushed", "Drained")
 SPEC_EXCLUSIONS = ((0x10000000, 0x10100000), (0x80000000, 0x80000C00))
 XLEN_MASK = (1 << 64) - 1
+COMMIT_BLOCKS = ("misPredBlock", "lastCycleFlush", "WFI", "redirect", "deqNeedFlush",
+                 "deqFlushBlock", "criticalError", "traceBlock", "walk")
+# Decode numeric Top-down IDs using the matching checkout, not a second enum copy.
+_reason_source = Path(__file__).resolve().parents[1] / "src/main/scala/xiangshan/package.scala"
+_reason_enum = (_reason_source.read_text().partition("object TopDownCounters extends Enumeration {")[2]
+                if _reason_source.exists() else "")
+HEAD_REASONS = re.findall(r'^\s*val \w+ = Value\("([^"\n]+)"\)', _reason_enum, re.MULTILINE)
+
 
 
 def signature(psv):
@@ -41,6 +49,7 @@ def normalize_pc(pc):
 
 def load_data(path, label, args):
     counts, weights = defaultdict(Counter), defaultdict(Counter)
+    contexts = Counter()
     summary = dict(label=label, database=str(path), rows=0,
                    selected_rows=0, valid_lanes=0,
                    selected_lanes=0, excluded_lanes=0, sample_weight=0.0,
@@ -119,6 +128,10 @@ def load_data(path, label, args):
                     raise ValueError(f"{path}: invalid PSV in row {row['ID']}")
                 counts[pc][psv] += 1
                 weights[pc][psv] += weight
+                if "CONTEXT_COMMITBLOCKMASK" in columns:
+                    mask = row["CONTEXT_COMMITBLOCKMASK"]
+                    reason = row["CONTEXT_HEADREASON"] if row["CONTEXT_HEADREASONVALID"] else -1
+                    contexts[(pc, state, mask, reason, row["CONTEXT_HEADREADY"])] += weight
                 summary["selected_lanes"] += 1
                 summary["sample_weight"] += weight
                 if psv < 0:
@@ -149,7 +162,7 @@ def load_data(path, label, args):
                 for _, psv in lanes:
                     for bit, event in enumerate(EVENTS):
                         bucket[event] += psv >= 0 and bool(psv & (1 << bit))
-    return dict(summary=summary, counts=counts, weights=weights, timeline=timeline)
+    return dict(summary=summary, counts=counts, weights=weights, timeline=timeline, contexts=contexts)
 
 
 def write_csv(path, rows, fields):
@@ -157,6 +170,62 @@ def write_csv(path, rows, fields):
         writer = csv.DictWriter(out, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def export_cycle_stats(path, directory):
+    """Export exact cumulative counters separately from PC/cycle-filtered samples."""
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "TeaCycleSummary_0" not in tables:
+            return
+        row = con.execute("SELECT * FROM TeaCycleSummary_0 ORDER BY CYCLE DESC, ID DESC LIMIT 1").fetchone()
+        if row is None:
+            (directory / "cycle_summary.json").write_text(json.dumps(dict(
+                available=False, reason="No snapshot: collection was disabled or the table was not captured"),
+                indent=2) + "\n")
+        else:
+            states = {state: row[f"STATES_{i}"] for i, state in enumerate(STATES)}
+            cycles, retired = sum(states.values()), row["RETIRED"]
+            result = dict(available=True, scope="All enabled cycles through observed_end; not PC/cycle filtered",
+                          observed_end=row["CYCLE"], collection_closed=bool(row["CLOSED"]),
+                          cycles=cycles, retired=retired, states=states,
+                          ipc=retired / cycles if cycles else None,
+                          cycles_per_kinst={state: count * 1000 / retired if retired else None
+                                            for state, count in states.items()},
+                          complete_gap_histogram={name: row[f"GAPS_{i}"] for i, name in
+                                                  enumerate(("1-7", "8-31", "32-127", "128-511", "512+"))},
+                          censored_gaps=row["CENSOREDGAPS"], pending_gap_cycles=row["PENDING"])
+            (directory / "cycle_summary.json").write_text(json.dumps(result, indent=2) + "\n")
+        if "TeaNoCommit_0" in tables:
+            def intervals():
+                for row in con.execute("SELECT * FROM TeaNoCommit_0 ORDER BY START"):
+                    length = row["END"] - row["START"]
+                    states = {state: row[f"STATES_{i}"] for i, state in enumerate(STATES[1:])}
+                    if length <= 0 or sum(states.values()) != length:
+                        raise ValueError(f"{path}: inconsistent no-commit interval at {row['START']}")
+                    yield dict(start=row["START"], end=row["END"], cycles=length,
+                               left_censored=row["LEFTCENSORED"], right_censored=row["RIGHTCENSORED"], **states)
+            write_csv(directory / "no_commit_intervals.csv", intervals(),
+                      ("start", "end", "cycles", "left_censored", "right_censored", *STATES[1:]))
+
+
+def export_context(run, directory):
+    rows = []
+    for (pc, state, mask, reason, ready), weight in run["contexts"].most_common():
+        blocks = [name for bit, name in enumerate(COMMIT_BLOCKS) if mask & (1 << bit)]
+        head_reason = (HEAD_REASONS[reason] if 0 <= reason < len(HEAD_REASONS)
+                       else f"reason_{reason}" if reason >= 0 else "Unknown")
+        # Context on Computing samples is not charged as a stall.
+        primary = "Computing" if state == 0 else blocks[0] if blocks else head_reason
+        scope = "None" if state == 0 else "Global" if blocks else "Entry" if reason >= 0 else "Unknown"
+        rows.append(dict(pc=hex(pc) if pc is not None else "unknown", state=STATES[state],
+                         primary=primary, scope=scope, commit_block_mask=mask,
+                         commit_blocks="|".join(blocks), head_reason_id=reason,
+                         head_reason=head_reason, head_ready=ready, sample_weight=weight))
+    write_csv(directory / "head_context.csv", rows,
+              ("pc", "state", "primary", "scope", "commit_block_mask", "commit_blocks",
+               "head_reason_id", "head_reason", "head_ready", "sample_weight"))
 
 
 def save_figure(fig, path):
@@ -352,6 +421,8 @@ def main():
         directory.mkdir(exist_ok=True)
         plot_pics(run, directory, categories, category_labels, colors, args, elf)
         plot_timeline(run, directory)
+        export_context(run, directory)
+        export_cycle_stats(paths[i - 1], directory)
         print(f"{run['summary']['label']}: {run['summary']['selected_rows']} rows, "
               f"{run['summary']['selected_lanes']} lanes -> {directory}")
     print(f"Comparison and summaries: {output}")

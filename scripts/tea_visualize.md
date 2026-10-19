@@ -49,3 +49,8 @@ lane 计数包含取消、未解析和未知目标各自的一份占位归因；
 图形形式参考 *TEA: Time-Proportional Event Analysis*（ISCA 2023）的 PICS。
 每个输入生成 `pics`、`hotspots.csv`、`timeline` 和 `timeline.csv`；输出根目录
 生成 `comparison`、`summary.csv` 和 `summary.json`。
+
+新增的低开销模式与四表导出见[实现文档第 10 节](../docs/tea-implementation.md#10-低开销周期统计与队首上下文)。
+`head_context.csv` 随样本的 ROI/PC 过滤；`cycle_summary.json` 与 `no_commit_intervals.csv`
+独立报告全部采集窗口，不随这些过滤变化。精确计数只覆盖 JSON 中 observed_end 之前的启用周期，
+collection_closed=false 时不得声称覆盖完整运行。旧数据库仍支持原来的图表分析。
