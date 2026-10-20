@@ -51,6 +51,7 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
 
   val clock = IO(Input(Clock()))
   val reset = IO(Input(AsyncReset()))
+  val cold_reset = Option.when(socParams.EnableColdReset)(IO(Input(AsyncReset())))
 
   private val hasMbist = p(DFTOptionsKey).EnableMbist
   private val hasSramCtl = p(DFTOptionsKey).EnableSramCtl
@@ -72,7 +73,7 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    1. normal reset from SoC
    2. SoC initialize reset during Power on/off flow
    */
-  val cpuReset = reset.asBool || !soc_rst_n
+  val cpuReset = reset.asBool || !soc_rst_n || cold_reset.map(_.asBool).getOrElse(false.B)
   private val cpuResetGen = withClockAndReset(clock, cpuReset.asAsyncReset)(Module(new ResetGen))
   cpuResetGen.dft := io.dft_reset.getOrElse(0.U.asTypeOf(new DFTResetSignals))
   val cpuReset_sync = cpuResetGen.o_reset
@@ -84,7 +85,6 @@ trait HasAsyncClockImp { this: BaseXSSocImp =>
   val noc_reset = socParams.EnableCHIAsyncBridge.map(_ => IO(Input(AsyncReset())))
   val soc_clock = IO(Input(Clock()))
   val soc_reset = IO(Input(AsyncReset()))
-  val cold_reset = Option.when(socParams.EnableColdReset)(IO(Input(AsyncReset())))
   val clint_clock = IO(Input(Clock()))
   val clint_reset = IO(Input(AsyncReset()))
 
