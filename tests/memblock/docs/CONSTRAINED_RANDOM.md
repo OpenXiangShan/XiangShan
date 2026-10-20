@@ -8,6 +8,11 @@ drivers, scoreboards, architectural reference memory, translation machinery,
 and completion checks are used for realistic traffic, balanced coverage, and
 corner-heavy traffic.
 
+The complete top-level interface mapping, semantic status, and known gaps are
+maintained in `IO_COVERAGE.md`. This document defines the configurable
+behavioral dimensions; it does not claim that every flattened pin is a
+standalone random variable.
+
 Select a starting preset with `--constraints`, then override individual fields
 with repeatable `--constraint key=value` arguments. Presets are conveniences,
 not separate tests. An override is applied after the preset.
@@ -33,7 +38,6 @@ The regression controller exposes the same interface:
 ```sh
 python3 scripts/run_regression.py \
   --binary build/memblock/picker/UT_MemBlock/build/UTMemBlock_example \
-  --rtl-metadata build/memblock/rtl.json \
   --output build/memblock/spec-mixed.json \
   --scenarios random-mixed --seeds 32 --mixed-transactions 65536 \
   --constraints spec --constraint concurrent=250
@@ -460,7 +464,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=46`, the resolved target weights,
+Every terminal line prints `constraint_schema=47`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load

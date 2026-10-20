@@ -175,7 +175,8 @@ The reusable environment components provide:
 - byte-accurate vector masking, old-destination, and SQ-forwarding models;
 - deterministic transaction and functional coverage reporting.
 
-The correctness contracts are cataloged separately in
+The top-level interface-to-driver mapping and exact coverage status are in
+`docs/IO_COVERAGE.md`. The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference, wider multi-class CMO and full-core fence ordering,
@@ -256,6 +257,10 @@ make -C tests/memblock bootstrap-picker JOBS=8
 make -C tests/memblock prepare-rtl check-ports check-rtl unit
 make -C tests/memblock smoke JOBS=8
 ```
+
+`check-rtl` also runs `check-docs`, which verifies that the generated interface
+inventory in `docs/IO_COVERAGE.md` matches the checked port manifest and that
+the documented constrained-random schema matches `cpp/random/constraints.inc`.
 
 The first `smoke` invocation performs the expensive Picker export and Verilator
 compile. Later test targets reuse

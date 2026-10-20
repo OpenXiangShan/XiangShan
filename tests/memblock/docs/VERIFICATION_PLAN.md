@@ -457,79 +457,20 @@ provenance, and no unclassified failure. Planned rows remain visible in the
 artifact and in reports until their independent model and observation path are
 implemented.
 
-## Top-Level IO Gap Audit (2026-09-06)
+## Top-Level IO Coverage
 
-The checked manifest contains 1,335 flattened ports. Structural pin coverage is
-not equivalent to semantic verification, so the review grouped the ports by
-transaction owner and compared each group with a driver, monitor, oracle, and
-coverage gate. The current group sizes are: 532 OOO-to-Mem, 260 Mem-to-OOO,
-351 miscellaneous/control, 88 frontend TileLink, 53 DCache TileLink, 21 PTW
-TileLink, 20 Uncache TileLink, eight performance, and two infrastructure ports.
+The authoritative interface-to-driver mapping, exact port counts, legal-value
+dimensions, implementation status, and remaining coverage gaps are maintained
+in [`IO_COVERAGE.md`](IO_COVERAGE.md). The generated inventory currently covers
+1,335 ports: 749 inputs and 586 outputs. `make check-docs` verifies that the
+inventory and `constraint_schema` match the checked RTL manifest and C++
+constraint implementation.
 
-| Boundary found in TOP IO | Semantic status | Closure action |
-| --- | --- | --- |
-| Frontend ICache, ICache-control, and instruction-Uncache TileLink (88 ports) | Implemented | `frontend-bridge` keeps independent request/response scoreboards and source credits for all three paths; `frontend-reset-recovery` checks reset cancellation and distinct post-reset requests for all three A paths plus the only observably backpressured D path |
-| DCache A/B/C/D/E TileLink (53 ports) | Implemented | A/C/D refill, error, eviction, ReleaseData, and CMO paths plus deterministic B Probe and E GrantAck are checked. `dcache-coherence` accepts two distinct B source IDs before an unrelated cold miss writes back, requires accepted Probe depth >= 2, and address-matches both C responses; C-source remains an independent WritebackQueue ID. `cmo-contracts` observes CLEAN/FLUSH/INVAL and CBOAck at this boundary, including every clean/dirty permission transition, a simultaneous younger MSHR, flush cancellation, and all error cases. Schema 33 `random-mixed` constrains dirty toB/toN Probes, requested/mandatory data, and all one-through-eight-source bursts with exact active-source, response-address, delayed-refill, accepted-depth, and 32-bin cross checks. Schema 34 derives all 64 B-source IDs from the generated port and checks accepted uniqueness, reuse only after completion, and every namespace wrap. Schema 36 repeats one-through-eight-source bursts during every successful CMO operation/state class. Schema 37 closes zero-through-eight Probe depth for every successful atomic family/width; nonzero depth includes a held cold D response and exact result. Schemas 17/18 add scalar-load and atomic denied/corrupt refill conservation. Schema 35 drives 9/10 fresh clean or dirty tags through one, two, three, or four selected eight-way sets, attributes clean Release and dirty ReleaseData by target address, checks every data-bearing C transaction, can hold four address-qualified refills while later D sources and target releases progress, and stalls one target C transaction per action for 16 valid cycles with a full-payload stability oracle. GrantAck is matched by sink rather than arrival order |
-| PTW and Uncache manager boundaries (41 ports) | Partial | Legal traffic, long latency, and backpressure are implemented. PTW denied/corrupt responses cover every translation regime, both data beats, fault cutoff, cache suppression, and post-fence recovery. Denied/corrupt Uncache stores require exact exception metadata plus one external error report at the aligned physical line address. Add malformed/duplicate/early/late responses as explicit negative protocol modes rather than normal workload traffic |
-| IFU-to-Mem PTW request/response (`io_fetch_to_mem_itlb_*`, 64 ports) | Implemented | `ifetch-ptw-bridge` drives raw IFU PTW requests for valid/faulting Sv39/Sv48, all four nested pairs, both VS-only/G-only mode variants, PBMT=NC/IO, stage-1 and G-stage leaf/non-leaf `G` inputs, and all four nested pairs crossed with VS-leaf, final-G-leaf, and implicit page-table G-stage faults while forcing response backpressure and requiring cold page-table traffic. `G=0` cannot be promoted; stage-1 global mappings may be conservatively demoted, and G-stage `G` cannot change the functional result. A 256-cycle IFU root-PTE delay overlaps a cold scalar DTLB walk and requires both translations, exact load writeback, and PTW outstanding depth >= 2. Two same-VPN IFU requests are accepted before the first response and must return twice while issuing only one three-level Sv39 memory walk. Delayed requests are invalidated by context switches and global/selective stage-appropriate fences; no stale response may escape, and the subsequent walk must return the independently computed replacement mapping |
-| Backend `memoryViolation` (8), `ldCancel` (3), and wakeup (12) outputs | Partial, high priority | `load-feedback` checks lane/destination metadata and records wakeup/cancel behavior for cold, resident, same-bank, page-fault, PMP-denied, MMIO, NC, and forwarding-data-wait loads. Page/PMP faults still require exact architectural exception, no forbidden data-manager request, and queue cleanup; MMIO/NC require their independent Uncache contract. DCache denied/corrupt, G-stage guest faults, and guarded fixed-PMA denial apply their own terminal oracles. `random-mixed` records feedback per lane but does not require a count relation or a prefetch-free window. `memory-violation` and `rar-violation` check all eight exposed output fields. `pmp-contracts` additionally checks terminal load/store/AMO access faults |
-| ROB/LSQ pending boundary (`pendingMMIOld`, `pendingst`, `pendingPtr`) | Implemented for elaborated fields | MMIO retirement holds `pendingMMIOld` with the matching ROB pointer until Uncache completion; replaying misaligned stores hold `pendingst` and the same pointer across retries. `pendingld`, `pendingVst`, and `pendingPtrNext` are source-level bundle members but are pruned from this generated MemBlock top, so no functional claim is made for nonexistent pins |
-| WFI request/safe boundary (2 ports) | Implemented | `wfi-safety` requires `wfiSafe=0` while independently delayed DCache, PTW, or Uncache manager work is outstanding, then requires assertion only after each manager drains; deasserting `wfiReq` clears the safe indication |
-| Top-down miss/pressure boundary (8 ports) | Implemented | `topdown-contracts` checks exact one-cycle L2/L3 input propagation, L1 miss and replay allocation during a delayed cold load, StoreQueue full after 56 accepted unissued stores, and SBuffer full after 16 distinct committed lines are held behind a delayed refill. The monitor remains active in every functional scenario |
-| Direct maintenance/configuration controls | Partial | Focused tests cover direct SBuffer flush, timeout-driven eviction, Uncache outstanding enable/disable behavior, MBMC BME/CMODE/BCLEAR/BMA bitmap policy, architectural prefetch-control defaults, guarded DebugModule PMA access, all outer-L2 flush enable/completion combinations, and the simple top-level control/metadata bridges. L2 enable, hart ID, power-down, MSI ack, and frontend reset are checked combinationally; L2 completion, reset vector, halt, critical error, all seven external-interrupt outputs, MSI-info, CLINT, I-cache BEU, and 67 shared perf-event lanes are checked at exact one-cycle latency; all six L2-prefetch-control fields are checked at two cycles. These oracles run on every monitored functional-test cycle. Dynamic reprogramming during arbitrary overlapping traffic and the remaining CSR cross-product remain |
-| IFU software instruction-prefetch outputs (`io_ifetchPrefetch_*`, 6 ports) | Implemented | `ifetch-prefetch` checks lane and virtual address for all three LoadUnit outputs, rejects data-prefetch false positives, and issues three unmapped requests together under active Sv39 while requiring exact per-lane VAs and zero PTW/DCache traffic. A separate same-cycle `prefetch.i/r/w` cross proves only the instruction operation emits this output while cold data hints drop on DTLB miss and warmed cacheable data hints reach DCache. Resident-TLB PBMT=NC data hints intentionally use DCache rather than Uncache, while PBMT=IO hints reach neither manager; neither class emits an IFU pulse. This matches LoadUnit's explicit `s0_tlb_no_query`; frontend owns subsequent instruction-prefetch translation/faults. `random-mixed` requires an observed `prefetch.i` output in every seed |
-| L2/L3 prefetch sender outputs (5 ports) | Partial | `hardware-prefetch` is an implementation-characterization scenario: it records current source/address/count behavior and checks CSR suppression, but trigger depth, source selection, and exact algorithmic counts are not part of the reusable architectural oracle. `random-mixed` adds weighted fixed-PC stride-shaped traffic and reports sender observations without a per-seed source-12 PASS gate. Exact random-stream attribution and a positive L3-enabled configuration remain performance/integration work |
-| Store/vector IQ slow feedback | Implemented | `iq-slow-feedback` records every valid pulse and all exposed fields; checks both STA lanes returning same-cycle cold misses and warm hits with exact SQ identities, both VSTU lanes returning same-cycle hits with exact LQ/SQ and inactive replay metadata, and a strided misaligned vector-store partial replay with exact queue identity, nonzero replay mask, and merge-buffer index |
-| Trace interface bypass (45 ports) | Implemented for transport | `trace-bridge-contracts` checks one-cycle encoder feedback, group valid/type/retire-count and `mstatus`; valid-gated address/last-size/privilege holds; exact 50-bit address-plus-FTQ-offset arithmetic; and trap cause/tval updates only for group-0 Exception/Interrupt. All group-valid combinations, itypes, FTQ offsets, privileges, and encoder states execute. Architectural trace-content generation remains owned by backend/trace integration |
-| DFT bridge transport (24 ports) | Implemented for routing and observable backend reset | `dft-bridge-contracts` holds external functional reset and exhausts all 1,024 combinations of seven SRAM-broadcast plus three DFT-reset inputs. Ten frontend and four backend outputs match combinationally before idle restoration and a fresh reset. `reset-tree-contracts` additionally checks DFT functional/scan effects at `io_reset_backend`; MBIST and physical SRAM behavior remain integration-owned |
-| Performance-event meaning | Integration-owned | `top-control-contracts` proves interrupt and 67-lane performance-event transport but not event meaning. Test performance semantics at the owning integration boundary instead of claiming them from MemBlock data-path tests |
-
-The development-phase ordering is breadth first: close executable `planned`
-and `partial` rows with short directed and modest constrained-random runs,
-then restore million-action endurance only after the major semantic gaps have
-oracles and registered scenarios. Physical-error wakeup/cancel, bank/mask,
-and same-cycle isolation crosses are now executable, as are the complete legal
-whole-register NF/EEW matrix and ordinary unit-stride/strided/indexed
-EEW/SEW/LMUL/EMUL matrices. Schema-11 `random-mixed` now carries those ordinary
-vector shapes through the common constraint interface with per-seed coverage
-and uop conservation. Schema 42 now uses complete legal 1..8-uop vector load
-and store instructions in every heterogeneous overlap window and closes all 16
-reachable direction x addressing x single/multi-uop composition bins. The
-focused `vector-issue-order` scenario independently checks a two-uop indexed-
-unordered instruction in both forward and reverse issue order, plus an
-eight-uop masked indexed-ordered instruction, using the same identity-matched
-per-element data oracle. All six LSQ dispatch lanes now have passive
-pre-edge acceptance and flow-count observation, including width histograms
-used by the common random coverage gate. Redirect cancellation is likewise
-sampled from the elaborated top after its defined latency and checked by the
-Schema-2 queue-conservation gate. Schema 38 now crosses real same-set clean/dirty
-replacement with one through eight independent held refills and address-qualified
-C-channel backpressure, proves each target set releases while all selected
-refills remain pending, and checks every target payload transition during a
-forced stall. Schemas 43/45 separately reach two through sixteen outstanding
-ordinary cold-line misses and the capacity-plus-one depth-17 case, with one-
-through three-lane initial scalar issue, scalar-only/scalar+vector-load
-composition, and exact external manager/architectural/queue conservation.
-Depth 17 records that 16 responses were held, one fair response release was
-scheduled, and the overflow target was externally requested for every selected
-action. Internal reject/replay state remains diagnostic only. The next DCache
-breadth closure is replacement composition with Probe/CMO/atomic traffic.
-Schema 47 extends the common-generator Segment FOF subclass across all 338
-decoder-legal unit-stride EEW/SEW/LMUL/derived-EMUL/NF shapes. Its independent
-page-table setup and identified writeback contract cover all 1,352 later/first
-fault x stage-1 mode x shape bins; arbitrary field selection and
-faulting/remainder destination elements are intentionally not treated as
-architectural mismatches. The decoder has no indexed/strided Segment FOF
-encoding. Active-segment redirect remains a full-core serialization assumption.
-Malformed manager responses
-remain an explicit agent/SVA negative-protocol qualification task rather than
-normal CPU workload traffic. Translation mode depth itself is no
-longer
-the dominant gap: deterministic tests already execute Sv48 and all four
-Sv39/Sv48 x Sv39x4/Sv48x4 nested combinations. The separate IFU top-level
-transaction now covers the same mode depth plus PBMT, stage-1/nested faults,
-same-VPN duplicate coalescing, IFU/DTLB cross-source concurrency, context
-changes, and global/selective stage-appropriate fences.
+No port is promoted to semantic coverage because it appears in `pin-space`.
+The behavior inventory below defines the legal stimulus and oracle classes;
+`IO_COVERAGE.md` maps those classes to physical interface groups and states
+whether the implementation is complete, partial, integration-owned, or only
+structurally exercised.
 
 ## Interface Assumptions
 
@@ -554,18 +495,16 @@ evidence; it is secondary to architectural store/readback and progress checks.
 
 ## Complete Pin Audit
 
-`config/expected_ports.json` is the checked inventory of every top-level pin.
-With primary reset asserted, `pin-space` drives every other input bit to both
-values and applies 254 additional deterministic per-pin mixed patterns. It
-reads back every driven input and samples every output into a digest. Normal
-reset and clock operation cover the excluded clock/reset inputs.
+The exact flattened inventory is `config/expected_ports.json`; its generated
+summary is `PORTS.md`, and the semantic mapping is `IO_COVERAGE.md`. With
+primary reset asserted, `pin-space` drives every other input bit to both values
+and applies 254 additional deterministic per-pin mixed patterns. It reads back
+every driven input and samples every output into a digest. Normal reset and
+clock operation cover the excluded clock/reset inputs.
 
 This proves manifest completeness, wrapper connectivity, and broad raw value
 space. It does not claim semantic coverage for protocol-invalid combinations.
-Semantic coverage comes only from the legal typed agents and the oracles above.
-The `frontend-bridge` scenario now adds semantic coverage for all 88 ports in
-that manifest group; it does not promote unrelated pin-sweep-only groups to
-functional coverage.
+Semantic coverage comes only from the legal typed agents and oracles above.
 
 ## Known Boundary Gaps
 
