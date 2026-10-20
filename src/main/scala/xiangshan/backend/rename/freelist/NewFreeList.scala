@@ -53,8 +53,8 @@ class NewFreeList(
   val io                = IO(FreeListBundle(numPhyRegs, RenameWidth, commitWidth))
   // Performance events are intentionally disabled for this implementation.
   val perfEvents: Seq[(String, UInt)] = Seq.empty
-  // Encode free bits relative to the architectural reset bitmap.
-  // Storage resets to zero; XOR restores exactly the original visible bits.
+  // Initialize storage to the visible architectural free bitmap. This keeps
+  // the logical bitmap on the register output and removes the reset-mask XOR.
   def InitFreeList(reg_t: RegType) = {
     val initialFree = reg_t match {
       case Reg_I => Seq.tabulate(numPhyRegs)(i => i != 0)
@@ -62,17 +62,16 @@ class NewFreeList(
       case Reg_V => Seq.tabulate(numPhyRegs)(i => i % (numPhyRegs / numLogicRegs) != 0)
       case _ => Seq.tabulate(numPhyRegs)(i => i >= numLogicRegs)
     }
-    val resetMask = VecInit(initialFree.map(_.B)).asUInt
-    // Keep the flops behind one word enable instead of a hold condition per bit.
-    val state = Module(new NewFreeListBitmapRegister(numPhyRegs))
+    val initValue = initialFree.zipWithIndex.foldLeft(BigInt(0)) { case (value, (bit, index)) => if (bit) value | (BigInt(1) << index) else value }
+    val state = Module(new NewFreeListBitmapRegister(numPhyRegs, initValue))
     val storage = Wire(UInt(numPhyRegs.W))
     state.io.data := storage
     state.io.enable := true.B
-    val logical = (state.io.value ^ resetMask).asTypeOf(Vec(numPhyRegs, Bool()))
-    (storage, logical, resetMask, state)
+    (storage, state.io.value, state)
   }
-  val (specStorage, specfreeListReg, specResetMask, specState) = InitFreeList(regType)
-  val (archStorage, archfreeListReg, archResetMask, archState) = InitFreeList(regType)
+  val (specStorage, specfreeListReg, specState) = InitFreeList(regType)
+  val (archStorage, archfreeListReg, archState) = InitFreeList(regType)
+
   val freePhyRegOH = VecInit((0 until commitWidth).map { i =>
     Mux(io.freeReq(i), UIntToOH(io.freePhyReg(i), numPhyRegs), 0.U(numPhyRegs.W))
   })
@@ -140,8 +139,8 @@ class NewFreeList(
   // Reuse that mask for speculative state instead of qualifying it again.
   val specBase = Mux(doRestore, redirectedFreeList,
     specfreeListReg.asUInt & ~flManager.out.dequeuedBitmap)
-  specStorage := ((specBase & ~walkPhyRegOHOR) | freePhyRegOHOR) ^ specResetMask
-  archStorage := ((archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR) ^ archResetMask
+  specStorage := (specBase & ~walkPhyRegOHOR) | freePhyRegOHOR
+  archStorage := (archfreeListReg.asUInt & ~commitPhyRegOHOR) | freePhyRegOHOR
 
   // Without any of these events, both logical bitmaps keep their values.
   val bitmapUpdate = doRestore || doWalkClear || isNormalAlloc || io.freeReq.asUInt.orR || io.commit.doCommit
@@ -199,13 +198,13 @@ class NewFreeListSnapshotStore(numPhyRegs: Int)(implicit p: Parameters)
 class NewFreeListSnapshotMetadata(implicit p: Parameters)
   extends xiangshan.backend.rename.SnapshotGenerator[UInt](0.U(1.W))
 
-class NewFreeListBitmapRegister(width: Int)(implicit p: Parameters) extends XSModule {
+class NewFreeListBitmapRegister(width: Int, initValue: BigInt = BigInt(0))(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val data = Input(UInt(width.W))
     val enable = Input(Bool())
     val value = Output(UInt(width.W))
   })
-  val bits = RegInit(0.U(width.W))
+  val bits = RegInit(initValue.U(width.W))
   when(io.enable) { bits := io.data }
   io.value := bits
 }
