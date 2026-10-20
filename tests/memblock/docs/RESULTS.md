@@ -4338,6 +4338,11 @@ vector-store actions; scalar DCache outcomes exclude both fault subclasses.
 diff/provenance, logs and parsed summaries are in
 `build/memblock/gstage-mixed-focused/`, using the frozen
 `build/memblock/gstage-mixed-runtime/runtime.json`.
+The clean committed runtime at `f91e1655d`, frozen separately in
+`build/memblock/gstage-mixed-final-runtime/`, also passes the all-bin seed 242
+with the same 85 scalar faults, 58 vector faults, and 274 vector flows.
+Three 6,144-action standard integrations (SPEC 261, coverage 262, corner 263)
+are running from that immutable snapshot.
 
 These focused runs disable heterogeneous windows and remain capability
 checks. No schema-50 closure campaign has completed. Multi-active-element
@@ -4354,3 +4359,14 @@ DCache-request attribution check; it remains a triage candidate, not a CPU bug
 claim or a passing result. Its frozen runtime and complete output remain in
 `build/memblock/canonical-regression/`. Schema-49 SPEC/corner are still running
 at this checkpoint. No six-hour closure claim is made from these integrations.
+
+
+Corner 213 is being replayed with the unchanged schema-48 frozen binary in
+`build/memblock/schema48-corner-triage/`. A separate passive diagnostic harness
+uses all 25 C++ files from the recorded clean commit `0fab0cb88`, the same
+clean model, and unchanged RNG, input timing and failure guard. It records
+accepted top-level DCache A `reqSource`/`vaddr` plus input lineage near the
+failure; artifacts are in `build/memblock/schema48-corner-diagnostic/`.
+The extra address equals a prior stride-stream address, but that coincidence
+alone does not establish request provenance. Neither replay has finished at
+this checkpoint, and the oracle has not been relaxed.
