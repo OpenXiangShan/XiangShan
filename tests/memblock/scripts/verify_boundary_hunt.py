@@ -13,32 +13,16 @@ class BoundaryHuntError(RuntimeError):
     pass
 
 
-def _valid_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
 def verify_boundary_hunt(
     path: Path,
     *,
     min_seeds: int,
     transactions: int,
-    rtl_sha256: str | None = None,
-    rtl_metadata: Path | None = None,
     expect: str = "historical-failure",
 ) -> dict[str, int | str]:
     if expect not in ("historical-failure", "repaired-all-pass"):
         raise BoundaryHuntError(f"unsupported boundary-hunt expectation: {expect}")
     document = json.loads(path.read_text(encoding="utf-8"))
-    if rtl_metadata is not None:
-        metadata = json.loads(rtl_metadata.read_text(encoding="utf-8"))
-        metadata_hash = metadata.get("complete_rtl_sha256")
-        if not _valid_sha256(metadata_hash):
-            raise BoundaryHuntError("RTL metadata has no complete hash")
-        rtl_sha256 = metadata_hash
     results = document.get("results")
     if not isinstance(results, list) or len(results) < min_seeds:
         raise BoundaryHuntError("boundary hunt has too few seed results")
@@ -64,9 +48,6 @@ def verify_boundary_hunt(
             raise BoundaryHuntError("boundary hunt has no integer return code")
         if (failures == 0 and returncode != 0) or (failures != 0 and returncode == 0):
             raise BoundaryHuntError("boundary hunt return code does not match status")
-        reported_hash = result.get("rtl_sha256")
-        if rtl_sha256 is not None and reported_hash != rtl_sha256:
-            raise BoundaryHuntError("boundary hunt RTL hash mismatch")
         if failures:
             output = result.get("output", "")
             if "MEMBLOCK_RANDOM_BOUNDARY_HUNT_SAMPLE_FAIL" not in output:
@@ -89,8 +70,6 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--min-seeds", type=int, default=1)
     parser.add_argument("--transactions", type=int, required=True)
-    parser.add_argument("--rtl-sha256")
-    parser.add_argument("--rtl-metadata", type=Path)
     parser.add_argument(
         "--expect",
         choices=("historical-failure", "repaired-all-pass"),
@@ -102,8 +81,6 @@ def main() -> int:
             args.input,
             min_seeds=args.min_seeds,
             transactions=args.transactions,
-            rtl_sha256=args.rtl_sha256,
-            rtl_metadata=args.rtl_metadata,
             expect=args.expect,
         )
     except (OSError, json.JSONDecodeError, BoundaryHuntError, TypeError, ValueError) as error:

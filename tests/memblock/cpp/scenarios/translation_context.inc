@@ -1461,7 +1461,7 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1545,7 +1545,7 @@ int run_two_stage_translation(int argc, char **argv)
               << " writebacks=" << environment.writebacks()
               << " ptw_requests=" << environment.ptw_requests()
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1709,7 +1709,7 @@ int run_translation_matrix(int argc, char **argv)
               << " ptw_requests=" << total_ptw_requests
               << " tilelink_requests=" << total_tilelink_requests
               << " cycles=" << total_cycles
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2844,7 +2844,7 @@ int run_translation_fence(
               << " concurrent_walk_cases=" << concurrent_walk_cases
               << " concurrent_ptw_max_outstanding="
               << concurrent_ptw_max_outstanding
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3221,7 +3221,7 @@ int run_translation_inflight_context(
               << " inflight_context_cases=" << inflight_context_cases
               << " inflight_mode_cases=" << inflight_mode_cases
               << " inflight_v_cases=" << inflight_v_cases
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3499,7 +3499,7 @@ int run_translation_context(int argc, char **argv)
               << " accesses=" << accesses
               << " ptw_requests=" << total_ptw_requests
               << " writebacks=" << total_writebacks
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3641,6 +3641,6 @@ int run_translation_bare(int argc, char **argv)
               << " g_only_ptw=" << ptw_requests[1]
               << " vs_only_ptw=" << ptw_requests[2]
               << " both_bare_ptw=" << ptw_requests[3]
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

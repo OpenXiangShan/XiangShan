@@ -24,8 +24,7 @@ class KnownBugSentinelTest(unittest.TestCase):
     def test_classifies_repaired_pass(self) -> None:
         output = (
             "MEMBLOCK_VECTOR_GUEST_FAULT_PASS cycle=174 writebacks=1 "
-            "vaddr=0x60000188 gpaddr=0x94001800 "
-            "rtl_sha256=" + "0" * 64 + "\n"
+            "vaddr=0x60000188 gpaddr=0x94001800\n"
         )
         self.assertEqual(check_known_bug.classify_output(0, output), "repaired-pass")
 
@@ -36,15 +35,12 @@ class KnownBugSentinelTest(unittest.TestCase):
         )
         self.assertIsNone(check_known_bug.classify_output(1, output))
 
-    def test_rejects_repaired_pass_from_different_rtl(self) -> None:
+    def test_rejects_pass_with_nonzero_returncode(self) -> None:
         output = (
             "MEMBLOCK_VECTOR_GUEST_FAULT_PASS cycle=174 writebacks=1 "
-            "vaddr=0x60000188 gpaddr=0x94001800 "
-            "rtl_sha256=" + "0" * 64 + "\n"
+            "vaddr=0x60000188 gpaddr=0x94001800\n"
         )
-        self.assertIsNone(
-            check_known_bug.classify_output(0, output, expected_rtl_sha256="1" * 64)
-        )
+        self.assertIsNone(check_known_bug.classify_output(1, output))
 
 
 if __name__ == "__main__":

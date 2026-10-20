@@ -1345,7 +1345,7 @@ int run_mmio_contracts(int argc, char **argv)
               << " mixed_device_cycles=" << mixed_device_cycles
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1452,7 +1452,7 @@ int run_cbo_zero_contracts(int argc, char **argv)
               << " uncache_requests=" << environment.uncache_requests()
               << " dcache_request_stalls=" << environment.dcache_request_stalls()
               << " dcache_response_delays=" << environment.dcache_response_delays()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1959,7 +1959,7 @@ int run_cmo_contracts(int argc, char **argv)
               << " positive_cycles=" << positive_cycles
               << " error_cycles=" << error_cycles
               << " cmo_ack_delay=1024"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2107,7 +2107,7 @@ int run_wfi_safety(int argc, char **argv)
               << " dcache_requests=" << dcache.tilelink_requests()
               << " ptw_requests=" << ptw.ptw_requests()
               << " uncache_requests=" << uncache.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2318,7 +2318,7 @@ int run_reset_recovery(int argc, char **argv)
               << " survivor_writebacks=3"
               << " dcache=1 ptw=1 uncache=1"
               << " response_delay=" << response_delay
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2354,6 +2354,6 @@ int run_reset_tree_contracts(int argc, char **argv)
               << environment.reset_scan_transitions()
               << " async_assertions="
               << environment.reset_async_assertions()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

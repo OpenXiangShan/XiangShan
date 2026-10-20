@@ -1,6 +1,16 @@
 # MemBlock Verification Results
 
-## Current Repaired RTL
+## Current Baseline
+
+- Kunminghu-v2 baseline: `fe2288cb09361b65afa26be3f403520c4b496dbf`
+  (2026-10-15), merged into the UT branch as `4bd72b3a0`.
+- Picker: latest `master` (`add7b522`, v2.0.1) at verification time.
+- xcomm: latest `master` (`3e4bccb`, v0.2.0) at verification time.
+- The UT no longer pins tool commits or gates runs on RTL, binary, controller,
+  artifact, or metadata hashes. SHA-256 values below are historical provenance
+  from older campaigns and are not current acceptance criteria.
+
+## Historical Repaired RTL Snapshot
 
 - Branch: `codex/memblock-ut-closure-20260905`
 - CPU baseline commit: `0fa7bb8259a7922481289d8d5932797afce84030`

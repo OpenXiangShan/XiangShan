@@ -907,7 +907,7 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests
               << " dcache_a=" << total_dcache_requests
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1609,7 +1609,7 @@ int run_pointer_masking_contracts(int argc, char **argv)
               << " cycles=" << total_cycles
               << " dcache_a=" << total_dcache_requests
               << " ptw_requests=" << total_ptw_requests
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1993,7 +1993,7 @@ int run_pmp_contracts(int argc, char **argv)
               << " dcache_a=" << total_dcache_requests
               << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
               << " machine_bypass=1 atomic_denied=1"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2369,6 +2369,6 @@ int run_l2_tlb_contracts(int argc, char **argv)
               << " ptw_a_requests=" << environment.ptw_requests() +
                     pbmt_and_pf.ptw_requests() + nested_gpf.ptw_requests() +
                     ptw_af.ptw_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

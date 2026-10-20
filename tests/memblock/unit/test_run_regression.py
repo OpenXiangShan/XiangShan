@@ -179,21 +179,10 @@ class RunRegressionTest(unittest.TestCase):
         self.assertEqual(run_regression.DEFAULT_MIXED_TRANSACTIONS, 16384)
         self.assertEqual(run_regression.DEFAULT_TIMEOUT_SECONDS, 1800)
 
-    def test_reads_complete_rtl_hash_from_metadata(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "rtl.json"
-            value = "a" * 64
-            path.write_text(json.dumps({"complete_rtl_sha256": value}))
-            self.assertEqual(value, run_regression.read_complete_rtl_sha256(path))
-
-            path.write_text(json.dumps({"complete_rtl_sha256": "short"}))
-            with self.assertRaises(run_regression.RegressionError):
-                run_regression.read_complete_rtl_sha256(path)
-
     def test_parses_passing_summary(self) -> None:
         parsed = run_regression.parse_summary(
             "noise\nMEMBLOCK_RANDOM_PASS seed=7 transactions=20 cycle=99 "
-            "ops=1,2 rtl_sha256=abc\n"
+            "ops=1,2\n"
         )
         self.assertEqual(parsed["status"], "pass")
         self.assertEqual(parsed["seed"], 7)
@@ -203,7 +192,7 @@ class RunRegressionTest(unittest.TestCase):
     def test_parses_vector_load_summary(self) -> None:
         parsed = run_regression.parse_summary(
             "MEMBLOCK_RANDOM_VECTOR_PASS seed=11 transactions=200 cycle=2342 "
-            "eews=1,2,3,4 rtl_sha256=abc\n"
+            "eews=1,2,3,4\n"
         )
         self.assertEqual(parsed["status"], "pass")
         self.assertEqual(parsed["seed"], 11)
@@ -263,7 +252,7 @@ class RunRegressionTest(unittest.TestCase):
     def test_parses_mixed_summary(self) -> None:
         parsed = run_regression.parse_summary(
             "MEMBLOCK_RANDOM_MIXED_PASS seed=9 transactions=64 cycle=1200 "
-            "lq=55+1/56 sq=30+0/30 rtl_sha256=abc\n"
+            "lq=55+1/56 sq=30+0/30\n"
         )
         self.assertEqual(parsed["status"], "pass")
         self.assertEqual(parsed["transactions"], 64)
@@ -273,7 +262,7 @@ class RunRegressionTest(unittest.TestCase):
         parsed = run_regression.parse_summary(
             "MEMBLOCK_FRONTEND_BRIDGE_PASS seed=13 transactions=32 cycle=441 "
             "requests=96 responses=128 request_stalls=161 response_stalls=106 "
-            "source_credit_stalls=379 field_checks=3599 rtl_sha256=abc\n",
+            "source_credit_stalls=379 field_checks=3599\n",
             expected_scenario=run_regression.FRONTEND_BRIDGE_SCENARIO,
             expected_seed=13,
             expected_transactions=32,
@@ -282,15 +271,14 @@ class RunRegressionTest(unittest.TestCase):
         self.assertEqual(parsed["requests"], 96)
         self.assertEqual(parsed["source_credit_stalls"], 379)
 
-    def test_parses_boundary_hunt_hash_and_failures(self) -> None:
+    def test_parses_boundary_hunt_failures(self) -> None:
         parsed = run_regression.parse_summary(
             "MEMBLOCK_RANDOM_BOUNDARY_HUNT_FAIL seed=9 transactions=37 "
-            "failures=4 rtl_sha256=abc\n"
+            "failures=4\n"
         )
         self.assertEqual(parsed["status"], "fail")
         self.assertEqual(parsed["transactions"], 37)
         self.assertEqual(parsed["failures"], 4)
-        self.assertEqual(parsed["rtl_sha256"], "abc")
 
     def test_parses_stress_summary(self) -> None:
         parsed = run_regression.parse_summary(
@@ -335,7 +323,7 @@ class RunRegressionTest(unittest.TestCase):
                 expected_transactions=20,
             )
 
-    def test_verifies_complete_frozen_runtime(self) -> None:
+    def test_verifies_frozen_runtime_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             artifacts = []
@@ -353,7 +341,6 @@ class RunRegressionTest(unittest.TestCase):
                     {
                         "role": role,
                         "path": name,
-                        "sha256": run_regression.sha256(artifact),
                     }
                 )
             dependency = root / "system-lib.so"
@@ -367,7 +354,6 @@ class RunRegressionTest(unittest.TestCase):
                         "external_dependencies": [
                             {
                                 "path": str(dependency.resolve()),
-                                "sha256": run_regression.sha256(dependency),
                             }
                         ],
                     }
@@ -376,13 +362,11 @@ class RunRegressionTest(unittest.TestCase):
 
             verified = run_regression.verify_runtime_metadata(metadata)
             self.assertEqual(verified["binary"], root / "memblock_sim")
-            self.assertEqual(set(verified["artifact_hashes"]), run_regression.RUNTIME_ROLES)
+            self.assertEqual(set(verified["artifacts"]), run_regression.RUNTIME_ROLES)
 
             (root / "libUTMemBlock.so").write_bytes(b"changed")
-            with self.assertRaisesRegex(
-                run_regression.RegressionError, "artifact hash mismatch"
-            ):
-                run_regression.verify_runtime_metadata(metadata)
+            verified = run_regression.verify_runtime_metadata(metadata)
+            self.assertEqual(verified["binary"], root / "memblock_sim")
 
     def test_runtime_rejects_artifact_path_escape(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -399,7 +383,6 @@ class RunRegressionTest(unittest.TestCase):
                                 {
                                     "role": "binary",
                                     "path": "../" + outside.name,
-                                    "sha256": run_regression.sha256(outside),
                                 }
                             ],
                             "external_dependencies": [],
@@ -412,22 +395,6 @@ class RunRegressionTest(unittest.TestCase):
                     run_regression.verify_runtime_metadata(metadata)
             finally:
                 os.unlink(outside)
-
-    def test_hashes_controller_inputs(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "controller"
-            path.write_bytes(b"before")
-            before = run_regression.sha256(path)
-            path.write_bytes(b"after")
-            self.assertNotEqual(before, run_regression.sha256(path))
-
-    def test_controller_file_arguments_are_recordable(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "source.cpp"
-            path.write_text("source", encoding="utf-8")
-            self.assertEqual(path.resolve(), path.resolve())
-            self.assertEqual(len(run_regression.sha256(path)), 64)
-
 
 if __name__ == "__main__":
     unittest.main()

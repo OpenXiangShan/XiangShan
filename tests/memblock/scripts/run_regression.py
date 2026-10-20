@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import datetime as dt
-import hashlib
 import json
 import math
 import os
@@ -136,38 +135,13 @@ def parse_summary(
     return fields
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def read_complete_rtl_sha256(path: Path) -> str:
-    metadata = json.loads(path.read_text(encoding="utf-8"))
-    value = metadata.get("complete_rtl_sha256")
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise RegressionError(
-            f"RTL metadata has no valid complete_rtl_sha256: {path}"
-        )
-    return value
-
-
-def _checked_hash_entry(entry: Any, description: str) -> tuple[Path, str]:
+def _metadata_path(entry: Any, description: str) -> Path:
     if not isinstance(entry, dict):
         raise RegressionError(f"{description} is not an object")
-    value = entry.get("sha256")
-    if not isinstance(value, str) or len(value) != 64 or any(
-        character not in "0123456789abcdef" for character in value
-    ):
-        raise RegressionError(f"{description} has no valid sha256")
     raw_path = entry.get("path")
     if not isinstance(raw_path, str) or not raw_path:
         raise RegressionError(f"{description} has no valid path")
-    return Path(raw_path), value
+    return Path(raw_path)
 
 
 def verify_runtime_metadata(path: Path) -> dict[str, Any]:
@@ -181,9 +155,8 @@ def verify_runtime_metadata(path: Path) -> dict[str, Any]:
 
     root = metadata.parent.resolve()
     roles: dict[str, Path] = {}
-    hashes: dict[str, str] = {}
     for index, entry in enumerate(entries):
-        relative, expected_hash = _checked_hash_entry(entry, f"artifact {index}")
+        relative = _metadata_path(entry, f"artifact {index}")
         role = entry.get("role")
         if not isinstance(role, str) or role in roles:
             raise RegressionError(f"invalid or duplicate runtime role: {role!r}")
@@ -197,14 +170,7 @@ def verify_runtime_metadata(path: Path) -> dict[str, Any]:
             or not artifact.is_file()
         ):
             raise RegressionError(f"invalid runtime artifact: {artifact}")
-        actual_hash = sha256(artifact)
-        if actual_hash != expected_hash:
-            raise RegressionError(
-                f"runtime artifact hash mismatch for {role}: "
-                f"expected {expected_hash}, got {actual_hash}"
-            )
         roles[role] = artifact
-        hashes[role] = actual_hash
     if set(roles) != RUNTIME_ROLES:
         raise RegressionError(
             f"runtime roles are {sorted(roles)}, expected {sorted(RUNTIME_ROLES)}"
@@ -212,34 +178,25 @@ def verify_runtime_metadata(path: Path) -> dict[str, Any]:
     if not os.access(roles["binary"], os.X_OK):
         raise RegressionError(f"frozen binary is not executable: {roles['binary']}")
 
-    external_hashes: dict[str, str] = {}
+    external_dependencies: list[str] = []
     external = document.get("external_dependencies")
     if not isinstance(external, list):
         raise RegressionError("runtime metadata has no external dependency list")
     for index, entry in enumerate(external):
-        dependency, expected_hash = _checked_hash_entry(
-            entry, f"external dependency {index}"
-        )
+        dependency = _metadata_path(entry, f"external dependency {index}")
         if not dependency.is_absolute():
             raise RegressionError(f"external dependency is not absolute: {dependency}")
         dependency = dependency.resolve()
         if not dependency.is_file():
             raise RegressionError(f"external dependency is not a file: {dependency}")
-        actual_hash = sha256(dependency)
-        if actual_hash != expected_hash:
-            raise RegressionError(
-                f"external dependency hash mismatch for {dependency}: "
-                f"expected {expected_hash}, got {actual_hash}"
-            )
-        external_hashes[str(dependency)] = actual_hash
+        external_dependencies.append(str(dependency))
 
     return {
         "metadata": metadata,
-        "metadata_sha256": sha256(metadata),
         "root": root,
         "binary": roles["binary"],
-        "artifact_hashes": hashes,
-        "external_dependency_hashes": external_hashes,
+        "artifacts": roles,
+        "external_dependencies": external_dependencies,
     }
 
 
@@ -398,15 +355,7 @@ def main() -> int:
     parser.add_argument(
         "--runtime-metadata",
         type=Path,
-        help="frozen runtime.json; its binary and all dependency hashes are verified",
-    )
-    parser.add_argument("--rtl-metadata", type=Path)
-    parser.add_argument(
-        "--controller-file",
-        type=Path,
-        action="append",
-        default=[],
-        help="additional harness/config source to hash before and after the run",
+        help="frozen runtime.json; its artifact paths are verified",
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS)
@@ -525,43 +474,6 @@ def main() -> int:
     ):
         print("run_regression.py: error: durations must be finite and positive", file=sys.stderr)
         return 2
-    try:
-        complete_rtl_hash = (
-            read_complete_rtl_sha256(args.rtl_metadata)
-            if args.rtl_metadata is not None else None
-        )
-    except (OSError, json.JSONDecodeError, RegressionError) as error:
-        print(f"run_regression.py: error: {error}", file=sys.stderr)
-        return 2
-
-    controller_paths = {"runner": Path(__file__).resolve()}
-    if args.rtl_metadata is not None:
-        controller_paths["rtl_metadata"] = args.rtl_metadata.resolve()
-    seen_controller_paths = {path.resolve() for path in controller_paths.values()}
-    for index, path in enumerate(args.controller_file):
-        resolved = path.resolve()
-        if not resolved.is_file():
-            print(
-                f"run_regression.py: error: controller file is not a file: {resolved}",
-                file=sys.stderr,
-            )
-            return 2
-        if resolved in seen_controller_paths:
-            print(
-                f"run_regression.py: error: duplicate controller file: {resolved}",
-                file=sys.stderr,
-            )
-            return 2
-        seen_controller_paths.add(resolved)
-        controller_paths[f"controller_file_{index}"] = resolved
-    try:
-        controller_hashes_before = {
-            role: sha256(path) for role, path in controller_paths.items()
-        }
-    except OSError as error:
-        print(f"run_regression.py: error: {error}", file=sys.stderr)
-        return 2
-
     started_wall = invoked_at
     started = time.monotonic()
     deadline = None if args.duration_seconds is None else started + args.duration_seconds
@@ -640,45 +552,10 @@ def main() -> int:
                 submit()
 
     finished_wall = dt.datetime.now(dt.timezone.utc)
-    runtime_after: dict[str, Any] | None = None
-    runtime_unchanged = True
-    runtime_error: str | None = None
-    if runtime_before is not None:
-        try:
-            runtime_after = verify_runtime_metadata(runtime_before["metadata"])
-            runtime_unchanged = all(
-                runtime_before[key] == runtime_after[key]
-                for key in (
-                    "metadata_sha256",
-                    "artifact_hashes",
-                    "external_dependency_hashes",
-                )
-            )
-            if not runtime_unchanged:
-                runtime_error = "runtime hashes changed during the campaign"
-        except (OSError, json.JSONDecodeError, RegressionError) as error:
-            runtime_unchanged = False
-            runtime_error = str(error)
-    try:
-        controller_hashes_after = {
-            role: sha256(path) for role, path in controller_paths.items()
-        }
-        controller_unchanged = controller_hashes_before == controller_hashes_after
-        controller_error = (
-            None if controller_unchanged else "controller inputs changed during campaign"
-        )
-    except OSError as error:
-        controller_hashes_after = None
-        controller_unchanged = False
-        controller_error = str(error)
     results.sort(key=lambda result: (result["seed"], result["scenario"]))
     statuses: dict[str, int] = {}
     for result in results:
         statuses[result["status"]] = statuses.get(result["status"], 0) + 1
-    rtl_hashes = sorted(
-        {str(result["rtl_sha256"]) for result in results if "rtl_sha256" in result}
-    )
-    rtl_hash_consistent = complete_rtl_hash is None or rtl_hashes == [complete_rtl_hash]
     document = {
         "schema_version": 2,
         "campaign_status": "complete",
@@ -689,36 +566,15 @@ def main() -> int:
         "host": platform.node(),
         "platform": platform.platform(),
         "binary": str(binary),
-        "binary_sha256": sha256(binary),
         "runtime": None if runtime_before is None else {
             "metadata": str(runtime_before["metadata"]),
-            "metadata_sha256_before": runtime_before["metadata_sha256"],
-            "metadata_sha256_after": (
-                None if runtime_after is None else runtime_after["metadata_sha256"]
-            ),
-            "artifact_hashes_before": runtime_before["artifact_hashes"],
-            "artifact_hashes_after": (
-                None if runtime_after is None else runtime_after["artifact_hashes"]
-            ),
-            "external_dependency_hashes_before": runtime_before[
-                "external_dependency_hashes"
-            ],
-            "external_dependency_hashes_after": (
-                None
-                if runtime_after is None
-                else runtime_after["external_dependency_hashes"]
-            ),
-            "unchanged": runtime_unchanged,
-            "error": runtime_error,
+            "root": str(runtime_before["root"]),
+            "artifacts": {
+                role: str(path)
+                for role, path in runtime_before["artifacts"].items()
+            },
+            "external_dependencies": runtime_before["external_dependencies"],
         },
-        "controller": {
-            "paths": {role: str(path) for role, path in controller_paths.items()},
-            "hashes_before": controller_hashes_before,
-            "hashes_after": controller_hashes_after,
-            "unchanged": controller_unchanged,
-            "error": controller_error,
-        },
-        "complete_rtl_sha256": complete_rtl_hash,
         "configuration": {
             "jobs": args.jobs,
             "start_seed": args.start_seed,
@@ -743,10 +599,6 @@ def main() -> int:
                 for result in results
                 if result["status"] == "pass"
             ),
-            "rtl_sha256": rtl_hashes,
-            "rtl_hash_consistent": rtl_hash_consistent,
-            "runtime_unchanged": runtime_unchanged,
-            "controller_unchanged": controller_unchanged,
         },
         "results": results,
     }
@@ -754,25 +606,14 @@ def main() -> int:
     print(
         "MEMBLOCK_REGRESSION_{} seeds={} transactions={} elapsed_seconds={:.3f} output={}".format(
             "PASS"
-            if set(statuses) <= {"pass"}
-            and rtl_hash_consistent
-            and runtime_unchanged
-            and controller_unchanged
-            else "FAIL",
+            if set(statuses) <= {"pass"} else "FAIL",
             len(results),
             document["summary"]["transactions_completed"],
             document["elapsed_seconds"],
             args.output,
         )
     )
-    return (
-        0
-        if set(statuses) <= {"pass"}
-        and rtl_hash_consistent
-        and runtime_unchanged
-        and controller_unchanged
-        else 1
-    )
+    return 0 if set(statuses) <= {"pass"} else 1
 
 
 if __name__ == "__main__":

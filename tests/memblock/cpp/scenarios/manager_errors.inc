@@ -1127,7 +1127,7 @@ int run_dcache_errors(int argc, char **argv)
               << " ecc_lq_canceled=" << ecc_environment.lq_canceled()
               << " ecc_sq_allocated=" << ecc_environment.sq_allocated()
               << " ecc_cycles=" << ecc_environment.cycle()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1802,7 +1802,7 @@ int run_atomic_contracts(int argc, char **argv)
               << " pma_atomic_cycles=" << pma_atomic.cycle()
               << " final=0x" << std::hex << model_value << std::dec
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2006,7 +2006,7 @@ int run_uncache_errors(int argc, char **argv)
               << " store_denied=1 store_corrupt=0"
               << " uncache_error_reports=" << store_error_reports
               << " uncache_requests=" << environment.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2371,8 +2371,7 @@ int run_atomic_dchannel_errors(int argc, char **argv)
               << " sc_corrupt_hit_checks=" << sc_corrupt_hit_checks
               << " clean_recoveries=" << clean_recoveries
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256="
-              << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2466,7 +2465,7 @@ int run_uncache_widths(int argc, char **argv)
               << " uncache_requests=" << environment.uncache_requests()
               << " request_stalls=" << environment.uncache_request_stalls()
               << " response_delays=" << environment.uncache_response_delays()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2698,7 +2697,7 @@ int run_uncache_outstanding(int argc, char **argv)
               << " disabled_store_max=" << disabled_store_max
               << " enabled_store_max=" << enabled_store_max
               << " delayed_first_response=4096"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2882,7 +2881,7 @@ int run_sbuffer_flush(int argc, char **argv)
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " combined_empty=1 cacheable_readback=1 nc_readback=1"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3025,7 +3024,7 @@ int run_sbuffer_timeout(int argc, char **argv)
               << " low_timeout=" << low_timeout
               << " low_evict_cycles=" << low_evict_cycles
               << " high_readback=1 low_readback=1"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3206,6 +3205,6 @@ int run_mbmc_contracts(int argc, char **argv)
               << " load_access_fault=1 store_access_fault=1"
               << " policy_word=0x" << std::hex << policy_word_address
               << std::dec
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

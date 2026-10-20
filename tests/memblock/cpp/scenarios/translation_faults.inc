@@ -726,7 +726,7 @@ int run_ptw_errors(int argc, char **argv)
               << " levels=" << root << ',' << intermediate << ',' << leaf
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2188,6 +2188,6 @@ int run_translation_faults(int argc, char **argv)
               << pte_encoding_cases.size()
               << " gstage_store_pte_encoding_cases="
               << pte_encoding_cases.size()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

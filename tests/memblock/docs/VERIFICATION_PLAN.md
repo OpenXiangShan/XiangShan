@@ -9,10 +9,10 @@ ready-valid protocols. Internal implementation signals may be used to localize
 a historical mutation, but they are not substitutes for an architectural
 oracle.
 
-The current repaired RTL under test is tied to the complete ordered RTL
-file-list SHA-256, not only `MemBlock.sv`. Historical clean-baseline and
-mutant hashes are recorded separately. A failure is reported as an RTL
-candidate only after a
+The current generated RTL under test is validated from its complete ordered
+file list and external interface manifest. Historical clean-baseline and
+mutant hashes in old reports are provenance only, not current build gates. A
+failure is reported as an RTL candidate only after a
 deterministic replay excludes driver, manager, reference-model, and scoreboard
 errors.
 
@@ -316,9 +316,9 @@ modeled explicitly. A stress result with a passing terminal marker but missing
 one of these combinations is rejected by `verify-stress-results`.
 
 Before a duration campaign starts, the executable, Verilated model, xspcomm,
-and prepared RTL metadata are copied into one read-only runtime directory and
-hashed. The runner and verifier both use that frozen RTL metadata rather than
-the mutable preparation path. `STRESS_TRANSACTIONS` is also passed to both the
+and prepared RTL metadata are copied into one read-only runtime directory. The
+runner and verifier resolve artifacts from that directory rather than the
+mutable preparation path. `STRESS_TRANSACTIONS` is also passed to both the
 stress command and the verifier's generic transaction-count check. These are
 acceptance invariants: an all-pass simulator result is evidence, but is not an
 accepted campaign when its frozen provenance cannot be verified.
@@ -405,7 +405,7 @@ cacheable tests pass.
 | Fairness/progress | Every accepted non-canceled request eventually terminates under bounded fair delays | Partial; fair delays are supplied, but all accepted events are not independently observed |
 | Four-state robustness | Unknown/reset values, uninitialized arrays, X-sensitive assertions | Planned; requires four-state simulator/formal check |
 | Malformed external responses | denied/corrupt/early/late/duplicate response handling | Planned |
-| Long-run reproducibility | Frozen binary/model/libraries, deterministic seed replay, artifact and controller hashes | Implemented |
+| Long-run reproducibility | Frozen binary/model/libraries, deterministic seed replay, recorded artifact paths | Implemented |
 
 ## Constrained-Random Distribution
 
@@ -655,17 +655,16 @@ Before a duration run:
 
 1. `check-ports`, `check-rtl`, and all Python unit tests pass.
 2. `benchmark-tests` passes every leaf scenario registered by the C++ dispatch
-   on the current frozen binary and complete RTL hash. A unit check requires its
+   on the current frozen binary. A unit check requires its
    inventory to remain exactly equal to the executable dispatch inventory.
 3. A multi-seed, six-scenario matrix passes with backpressure enabled. The
    sixth scenario is `frontend-bridge`; its offline verifier independently
    requires three A requests and four D beats per requested transaction,
    request/response/source-credit stalls, and at least 39 field checks per
    transaction.
-4. The executable, Verilated model, xspcomm, resolved system libraries, runner,
-   streaming verifier, runtime-freeze script, controller sources, and RTL metadata are frozen and
-   hashed. The verifier script is passed as a controller input so its acceptance
-   logic is part of the recorded provenance.
+4. The executable, Verilated model, xspcomm, resolved system libraries, and RTL
+   metadata are frozen and their resolved paths are checked. Source and binary
+   hashes are intentionally not acceptance inputs.
 
 The time-based breadth campaign runs at least 28,800 monotonic seconds (eight
 hours) with eight workers and the `random-mixed --constraints spec` scenario.
@@ -684,8 +683,8 @@ acceptance.
 Final acceptance additionally runs a finite within-seed endurance campaign:
 eight independent `spec` seeds, each with exactly 1,000,000 actions and an
 eight-hour per-seed timeout. Its verifier requires all 8,000,000 requested
-actions, every seed's functional/backpressure gates, and unchanged frozen RTL,
-runtime, runner, and controller hashes. The two campaigns are complementary:
+actions, every seed's functional/backpressure gates, and a valid frozen runtime
+layout. The two campaigns are complementary:
 the duration campaign explores more initial seeds, while the endurance
 campaign stresses long-lived queue, pointer-wrap, cache, translation, and
 manager state without process restarts.
@@ -697,17 +696,16 @@ the exact VS-non-leaf GPA and first-active-element VA against the software
 oracle. On the historical clean RTL it must produce at least one mismatch;
 after the fix it must produce an all-pass campaign with the same oracle.
 
-An independent streaming verifier (whose own SHA-256 and runtime-freeze script
-are recorded in the controller inputs) checks the result artifact, duration,
+An independent streaming verifier checks the result artifact, duration,
 scenario set, transaction counts, per-seed coverage, aggregate counts,
-continuous seeds, eight-worker configuration, complete RTL identity, and
-before/after frozen-runtime hashes. It also requires schema-2 completion state,
+continuous seeds, eight-worker configuration, and frozen-runtime layout. It
+does not use source, binary, or RTL hashes as acceptance gates. It also requires schema-2 completion state,
 a unique run id, finite timing values, strict scenario/seed/count terminal
 summaries, and per-seed submit/complete offsets spanning the requested duration.
 
 ## Failure Triage
 
-1. Replay the exact scenario, seed, transaction count, and frozen hashes.
+1. Replay the exact scenario, seed, transaction count, and frozen runtime.
 2. Reduce the transaction prefix while preserving memory and backpressure RNG
    streams.
 3. Check the external request/response transcript against the reference model.

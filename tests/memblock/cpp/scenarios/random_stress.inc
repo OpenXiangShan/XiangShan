@@ -678,7 +678,7 @@ int run_random_stress(int argc, char **argv, const Options &options)
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/' << environment.sq_allocated()
               << ' ' << coverage.summary()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -814,6 +814,6 @@ int run_random_boundary_hunt(int argc, char **argv, const Options &options)
               << (failures == 0 ? "PASS" : "FAIL")
               << " seed=" << options.seed << " transactions=" << samples
               << " failures=" << failures
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return failures == 0 ? 0 : 1;
 }

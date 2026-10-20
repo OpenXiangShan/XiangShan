@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -18,26 +17,6 @@ MODULE_RE = re.compile(r"(?m)^\s*module\s+([A-Za-z_$][A-Za-z0-9_$]*)\b")
 
 class FilelistError(RuntimeError):
     pass
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def sha256_files(paths: list[Path], base: Path) -> str:
-    digest = hashlib.sha256()
-    for path in paths:
-        digest.update(str(path.resolve().relative_to(base.resolve())).encode("utf-8"))
-        digest.update(b"\0")
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        digest.update(b"\0")
-    return digest.hexdigest()
 
 
 def strip_comments(text: str) -> str:
@@ -140,15 +119,12 @@ def prepare(
         "top_module": config.get("module", "MemBlock"),
         "top_file": str(top_path),
         "source_filelist": str(source_filelist.resolve()),
-        "source_filelist_sha256": sha256_file(source_filelist),
         "source_file_count": len(source_files),
         "selected_file_count": len(selected),
         "declared_module_count": len(module_to_files),
         "excluded_files": [str(path) for path in excluded],
         "supplemental_files": [str(path) for path in supplemental],
         "bind_file": str(bind_path),
-        "bind_file_sha256": sha256_file(bind_path),
-        "complete_rtl_sha256": sha256_files(selected, source_directory),
     }
     return output_files, metadata
 

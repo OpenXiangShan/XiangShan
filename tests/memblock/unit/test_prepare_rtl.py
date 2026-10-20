@@ -47,14 +47,11 @@ class PrepareRtlTest(unittest.TestCase):
             self.assertEqual(3, metadata["selected_file_count"])
             self.assertEqual(1, len(metadata["excluded_files"]))
             self.assertEqual(1, len(metadata["supplemental_files"]))
-            self.assertRegex(metadata["complete_rtl_sha256"], r"^[0-9a-f]{64}$")
+            self.assertNotIn("complete_rtl_sha256", metadata)
 
-            original_hash = metadata["complete_rtl_sha256"]
             (root / "Dep.sv").write_text("module Dep; wire x; endmodule\n")
             _, changed_metadata = prepare_rtl.prepare(filelist, bind, config)
-            self.assertNotEqual(
-                original_hash, changed_metadata["complete_rtl_sha256"]
-            )
+            self.assertEqual(metadata, changed_metadata)
 
     def test_rejects_duplicate_module_declarations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

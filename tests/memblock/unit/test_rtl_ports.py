@@ -113,7 +113,7 @@ class PortParserTest(unittest.TestCase):
         with self.assertRaisesRegex(rtl_ports.ManifestError, "positive integer"):
             rtl_ports.derive_dimensions(ports, config)
 
-    def test_complete_hash_changes_when_dependency_changes(self) -> None:
+    def test_manifest_does_not_hash_dependency_contents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             top = root / "MemBlock.sv"
@@ -128,10 +128,9 @@ class PortParserTest(unittest.TestCase):
             dependency.write_text("module Dependency; wire changed; endmodule\n")
             after = rtl_ports.build_manifest(top, config)
 
-            self.assertEqual(before["rtl_sha256"], after["rtl_sha256"])
-            self.assertNotEqual(
-                before["complete_rtl_sha256"], after["complete_rtl_sha256"]
-            )
+            self.assertEqual(before, after)
+            self.assertNotIn("rtl_sha256", before)
+            self.assertNotIn("complete_rtl_sha256", before)
 
 
 class CurrentRtlContractTest(unittest.TestCase):

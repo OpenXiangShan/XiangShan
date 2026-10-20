@@ -95,7 +95,7 @@ int run_dcache_release(int argc, char **argv)
               << " releases=" << environment.tilelink_releases()
               << " release_data=" << environment.tilelink_release_data()
               << " preserved_stores=" << preserved_stores
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -340,7 +340,7 @@ int run_dcache_coherence(int argc, char **argv)
               << " overlap_probe_sources=" << overlap.dcache_probe_sources()
               << " overlap_probe_depth="
               << overlap.dcache_max_probe_outstanding()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -440,7 +440,7 @@ int run_store_rdata_order(int argc, char **argv)
               << " tilelink_requests=" << environment.tilelink_requests()
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -511,7 +511,7 @@ int run_store_tlb_miss_preserve(int argc, char **argv)
               << " feedbacks=" << environment.store_tlb_feedbacks()
               << " misses=" << environment.store_tlb_misses()
               << " ptw_requests=" << environment.ptw_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -753,7 +753,7 @@ int run_iq_slow_feedback(int argc, char **argv)
               << " replay_mask=0x" << std::hex << replay_sample->replay_mask
               << std::dec << " replay_mb="
               << static_cast<unsigned>(replay_sample->replay_mb_index)
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -826,7 +826,7 @@ int run_redirect(int argc, char **argv)
               << environment.redirect_cancellation_events_observed() << ','
               << environment.lq_redirect_canceled_observed() << ','
               << environment.sq_redirect_canceled_observed()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -899,7 +899,7 @@ int run_queue_pressure(int argc, char **argv)
               << " allocated=" << transaction_count
               << " writebacks=" << environment.writebacks()
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1149,7 +1149,7 @@ int run_scalar_misaligned(int argc, char **argv)
               << " pressure_violations="
               << pressure.memory_violation_stats().count
               << " pressure_cycle=" << pressure.cycle()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1573,7 +1573,7 @@ int run_misaligned_stores(int argc, char **argv)
                      translated_scalar.ptw_requests()
               << " cross_page_progress_stores=" << progress_stores.size()
               << " translated_scalar_cross_page=1"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1741,7 +1741,7 @@ int run_vector_issue_order(int argc, char **argv)
 
     std::cout << "MEMBLOCK_VECTOR_ISSUE_ORDER_PASS cases=3 uops=12"
               << " addressing=indexed-unordered,indexed-ordered"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3067,7 +3067,7 @@ int run_vector_addressing(int argc, char **argv)
                     indexed_matrix.tilelink_requests() +
                     indexed_lmul_matrix.tilelink_requests() +
                     whole.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3845,6 +3845,6 @@ int run_exception_contracts(int argc, char **argv)
                     vector_over_scalar.uncache_requests() +
                     scalar_over_vector.uncache_requests() +
                     store_priority.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

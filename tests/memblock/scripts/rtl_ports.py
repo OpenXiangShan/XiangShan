@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import hashlib
 import json
 import re
 import sys
@@ -45,44 +44,6 @@ class Port:
     channel: str | None
     role: str
     input_policy: str | None
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def complete_rtl_sha256(rtl_path: Path) -> str:
-    """Hash the ordered generated RTL sources, including split memory helpers."""
-    source_dir = rtl_path.resolve().parent
-    filelist = source_dir / "filelist.f"
-    files: list[Path] = []
-    if filelist.is_file():
-        for raw_line in filelist.read_text(encoding="utf-8").splitlines():
-            line = raw_line.split("#", 1)[0].strip()
-            if not line or line.startswith(("+", "-")):
-                continue
-            candidate = Path(line)
-            path = (candidate if candidate.is_absolute() else source_dir / candidate).resolve()
-            if path.name == "XSTop.sv" or path.suffix not in (".sv", ".v"):
-                continue
-            if path.is_file() and path not in files:
-                files.append(path)
-        for path in sorted(source_dir.glob("*_ext.v")):
-            path = path.resolve()
-            if path not in files:
-                files.append(path)
-    else:
-        files = [rtl_path.resolve()]
-
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(str(path.relative_to(source_dir)).encode("utf-8"))
-        digest.update(b"\0")
-        with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        digest.update(b"\0")
-    return digest.hexdigest()
 
 
 def strip_comments(text: str) -> str:
@@ -340,11 +301,9 @@ def validate_contract(
 
 
 def build_manifest(rtl_path: Path, config_path: Path) -> dict[str, Any]:
-    rtl_bytes = rtl_path.read_bytes()
-    config_bytes = config_path.read_bytes()
-    config = json.loads(config_bytes)
+    config = json.loads(config_path.read_bytes())
     module = config.get("module", "MemBlock")
-    ports = parse_ports(rtl_bytes.decode("utf-8"), module, config)
+    ports = parse_ports(rtl_path.read_text(encoding="utf-8"), module, config)
     stats = stats_for(ports)
     dimensions = derive_dimensions(ports, config)
     validate_contract(stats, dimensions, config)
@@ -352,9 +311,6 @@ def build_manifest(rtl_path: Path, config_path: Path) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "module": module,
         "source": config.get("rtl", str(rtl_path)),
-        "rtl_sha256": sha256_bytes(rtl_bytes),
-        "complete_rtl_sha256": complete_rtl_sha256(rtl_path),
-        "config_sha256": sha256_bytes(config_bytes),
         "stats": stats,
         "dimensions": dimensions,
         "ports": [dataclasses.asdict(port) for port in ports],
@@ -386,7 +342,6 @@ def markdown_text(manifest: dict[str, Any]) -> str:
         "",
         f"- Module: `{manifest['module']}`",
         f"- RTL: `{manifest['source']}`",
-        f"- RTL SHA-256: `{manifest['rtl_sha256']}`",
         f"- Total ports: {stats['port_count']}",
         "",
         "## Port Groups",

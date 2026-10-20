@@ -3935,7 +3935,7 @@ def _check_result(
     requested_transactions: dict[str, int],
     completed_transactions: dict[str, int],
     require_backpressure: bool = False,
-) -> tuple[int, str, str, int, str, float, tuple[str, ...]]:
+) -> tuple[int, str, str, int, float, tuple[str, ...]]:
     prefix = f"result {index}"
     _require(isinstance(result, dict), f"{prefix} is not an object")
     _require(result.get("status") == "pass", f"{prefix} status is {result.get('status')!r}")
@@ -3984,14 +3984,6 @@ def _check_result(
         transactions == completed_count,
         f"{prefix} transactions are {transactions!r}, expected {completed_count}",
     )
-    rtl_hash = result.get("rtl_sha256")
-    _require(
-        isinstance(rtl_hash, str)
-        and len(rtl_hash) == 64
-        and set(rtl_hash) <= set("0123456789abcdef"),
-        f"{prefix} has invalid RTL hash {rtl_hash!r}",
-    )
-
     command = result.get("command")
     expected_tail = [
         "--test",
@@ -4054,7 +4046,6 @@ def _check_result(
         scenario,
         str(command[0]),
         int(transactions),
-        rtl_hash,
         float(completed_offset),
         command_options,
     )
@@ -4071,7 +4062,6 @@ def _read_document(
     cases: set[tuple[int, str]] = set()
     scenario_counts: Counter[str] = Counter()
     binaries: set[str] = set()
-    rtl_hashes: set[str] = set()
     statuses: Counter[str] = Counter()
     transaction_sum = 0
     result_count = 0
@@ -4105,7 +4095,6 @@ def _read_document(
                             scenario,
                             binary,
                             transactions,
-                            rtl_hash,
                             completed_offset,
                             options,
                         ) = _check_result(
@@ -4122,7 +4111,6 @@ def _read_document(
                     cases.add(case)
                     scenario_counts[scenario] += 1
                     binaries.add(binary)
-                    rtl_hashes.add(rtl_hash)
                     statuses["pass"] += 1
                     transaction_sum += transactions
                     completion_offsets.append(completed_offset)
@@ -4137,25 +4125,11 @@ def _read_document(
         "cases": cases,
         "scenario_counts": dict(scenario_counts),
         "binaries": binaries,
-        "rtl_hashes": rtl_hashes,
         "statuses": dict(statuses),
         "transactions": transaction_sum,
         "completion_offsets": completion_offsets,
         "command_options": command_options,
     }
-
-
-def _same_before_after(document: Any, name: str, fields: tuple[str, ...]) -> None:
-    _require(isinstance(document, dict), f"{name} metadata is absent")
-    _require(document.get("unchanged") is True, f"{name} is not marked unchanged")
-    _require(document.get("error") is None, f"{name} records an error: {document.get('error')!r}")
-    for field in fields:
-        before = document.get(field + "_before")
-        after = document.get(field + "_after")
-        _require(before is not None, f"{name} has no {field}_before")
-        _require(before == after, f"{name} {field} changed during the run")
-
-
 def _parse_time(value: Any, name: str) -> dt.datetime:
     _require(isinstance(value, str), f"{name} is not a timestamp")
     try:
@@ -4177,14 +4151,9 @@ def verify_regression(
     expected_forwarding_transactions: int | None = None,
     expected_mixed_transactions: int | None = None,
     expected_jobs: int | None = None,
-    expected_rtl_sha256: str | None = None,
-    expected_file_sha256: str | None = None,
     require_backpressure: bool = False,
     require_frozen_runtime: bool = False,
     runtime_metadata: Path | None = None,
-    rtl_metadata: Path | None = None,
-    runner: Path | None = None,
-    controller_files: tuple[Path, ...] = (),
     chunk_size: int = 1024 * 1024,
     allow_finite: bool = False,
 ) -> dict[str, Any]:
@@ -4239,22 +4208,6 @@ def verify_regression(
     path = path.resolve()
     _require(path.is_file(), f"result artifact is not a file: {path}")
     stat_before = path.stat()
-    artifact_hash = run_regression.sha256(path)
-    if expected_file_sha256 is not None:
-        _require(
-            artifact_hash == expected_file_sha256,
-            f"artifact SHA-256 is {artifact_hash}, expected {expected_file_sha256}",
-        )
-
-    if rtl_metadata is not None:
-        current_rtl_hash = run_regression.read_complete_rtl_sha256(rtl_metadata)
-        if expected_rtl_sha256 is not None:
-            _require(
-                expected_rtl_sha256 == current_rtl_hash,
-                "expected RTL hash disagrees with current RTL metadata",
-            )
-        expected_rtl_sha256 = current_rtl_hash
-
     metadata, observed = _read_document(
         path,
         requested_transaction_counts,
@@ -4402,19 +4355,6 @@ def verify_regression(
         "recorded cases are not a continuous round-robin prefix",
     )
 
-    complete_rtl_hash = metadata.get("complete_rtl_sha256")
-    _require(
-        isinstance(complete_rtl_hash, str), "complete RTL hash is absent from artifact"
-    )
-    if expected_rtl_sha256 is not None:
-        _require(
-            complete_rtl_hash == expected_rtl_sha256,
-            "artifact complete RTL hash differs from expected RTL",
-        )
-    _require(
-        observed["rtl_hashes"] == {complete_rtl_hash},
-        "per-result RTL hashes are inconsistent with complete RTL metadata",
-    )
     _require(
         observed["binaries"] == {metadata.get("binary")},
         "per-result commands do not all use the recorded binary",
@@ -4426,80 +4366,24 @@ def verify_regression(
         "seeds_completed": result_count,
         "statuses": observed["statuses"],
         "transactions_completed": observed["transactions"],
-        "rtl_sha256": [complete_rtl_hash],
-        "rtl_hash_consistent": True,
-        "runtime_unchanged": True,
-        "controller_unchanged": True,
     }
     for name, value in expected_summary.items():
         _require(summary.get(name) == value, f"aggregate summary disagrees on {name}")
 
-    controller = metadata.get("controller")
-    _same_before_after(controller, "controller", ("hashes",))
-    controller_hashes = controller["hashes_before"]
-    if runner is not None:
-        _require(
-            controller_hashes.get("runner") == run_regression.sha256(runner),
-            "current regression runner differs from the recorded controller",
-        )
-    if rtl_metadata is not None:
-        _require(
-            controller_hashes.get("rtl_metadata") == run_regression.sha256(rtl_metadata),
-            "current RTL metadata differs from the recorded controller input",
-        )
-    if controller_files:
-        recorded_paths = controller.get("paths")
-        _require(isinstance(recorded_paths, dict), "controller paths are absent")
-        recorded_by_path = {
-            str(Path(value).resolve()): role
-            for role, value in recorded_paths.items()
-            if isinstance(value, str)
-        }
-        for controller_file in controller_files:
-            resolved = str(controller_file.resolve())
-            role = recorded_by_path.get(resolved)
-            _require(role is not None, f"controller file is not recorded: {resolved}")
-            _require(
-                controller_hashes.get(role) == run_regression.sha256(Path(resolved)),
-                f"current controller file differs from the recorded input: {resolved}",
-            )
-
     runtime = metadata.get("runtime")
     if require_frozen_runtime or runtime_metadata is not None:
-        _same_before_after(
-            runtime,
-            "runtime",
-            ("metadata_sha256", "artifact_hashes", "external_dependency_hashes"),
-        )
-        _require(
-            metadata.get("binary_sha256") == runtime["artifact_hashes_before"].get("binary"),
-            "recorded binary hash differs from frozen runtime",
-        )
+        _require(isinstance(runtime, dict), "frozen runtime metadata is absent")
+        _require(isinstance(runtime.get("artifacts"), dict), "runtime artifacts are absent")
     if runtime_metadata is not None:
-        current_runtime = run_regression.verify_runtime_metadata(runtime_metadata)
-        _require(
-            runtime["metadata_sha256_before"] == current_runtime["metadata_sha256"],
-            "current runtime manifest differs from the recorded manifest",
-        )
-        _require(
-            runtime["artifact_hashes_before"] == current_runtime["artifact_hashes"],
-            "current frozen artifacts differ from the recorded runtime",
-        )
-        _require(
-            runtime["external_dependency_hashes_before"]
-            == current_runtime["external_dependency_hashes"],
-            "current system libraries differ from the recorded runtime",
-        )
+        run_regression.verify_runtime_metadata(runtime_metadata)
 
     return {
-        "artifact_sha256": artifact_hash,
         "elapsed_seconds": float(elapsed),
         "result_count": result_count,
         "transactions": observed["transactions"],
         "first_seed": min(seed for seed, _ in observed["cases"]),
         "last_seed": max(seed for seed, _ in observed["cases"]),
         "scenario_counts": observed["scenario_counts"],
-        "rtl_sha256": complete_rtl_hash,
     }
 
 
@@ -4514,17 +4398,9 @@ def main() -> int:
     parser.add_argument("--forwarding-transactions", type=int)
     parser.add_argument("--mixed-transactions", type=int)
     parser.add_argument("--expected-jobs", type=int)
-    parser.add_argument("--rtl-sha256")
-    parser.add_argument("--expected-file-sha256")
     parser.add_argument("--require-backpressure", action="store_true")
     parser.add_argument("--require-frozen-runtime", action="store_true")
     parser.add_argument("--runtime-metadata", type=Path)
-    parser.add_argument("--rtl-metadata", type=Path)
-    parser.add_argument("--runner", type=Path)
-    parser.add_argument(
-        "--controller-file", type=Path, action="append", default=[],
-        help="source file that must be present and hash-matched in controller metadata",
-    )
     parser.add_argument(
         "--allow-finite",
         action="store_true",
@@ -4552,14 +4428,9 @@ def main() -> int:
             expected_forwarding_transactions=args.forwarding_transactions,
             expected_mixed_transactions=args.mixed_transactions,
             expected_jobs=args.expected_jobs,
-            expected_rtl_sha256=args.rtl_sha256,
-            expected_file_sha256=args.expected_file_sha256,
             require_backpressure=args.require_backpressure,
             require_frozen_runtime=args.require_frozen_runtime,
             runtime_metadata=args.runtime_metadata,
-            rtl_metadata=args.rtl_metadata,
-            runner=args.runner,
-            controller_files=tuple(args.controller_file),
             allow_finite=args.allow_finite,
         )
     except (OSError, json.JSONDecodeError, run_regression.RegressionError, VerificationError) as error:
@@ -4570,9 +4441,7 @@ def main() -> int:
         "MEMBLOCK_REGRESSION_ARTIFACT_PASS "
         f"seeds={result['first_seed']}..{result['last_seed']} "
         f"results={result['result_count']} transactions={result['transactions']} "
-        f"elapsed_seconds={result['elapsed_seconds']:.6f} "
-        f"rtl_sha256={result['rtl_sha256']} "
-        f"artifact_sha256={result['artifact_sha256']}"
+        f"elapsed_seconds={result['elapsed_seconds']:.6f}"
     )
     return 0
 

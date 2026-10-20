@@ -13,7 +13,7 @@ int run_smoke(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " driven_inputs=" << memblock::generated::kDrivenInputCount
               << " checked_outputs=" << memblock::generated::kQuiescentOutputCount
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -85,7 +85,7 @@ int run_l2_flush_contracts(int argc, char **argv)
               << " enable_transitions=" << enable_transitions
               << " done_transitions=" << done_transitions
               << " delay_checks=" << environment.l2_flush_checks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -264,7 +264,7 @@ int run_top_control_contracts(int argc, char **argv)
               << " perf_event_values=64"
               << " control_checks=" << environment.top_control_checks()
               << " bridge_checks=" << environment.top_bridge_checks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -372,7 +372,7 @@ int run_trace_bridge_contracts(int argc, char **argv)
               << " itypes=16 ftq_offsets=16 privileges=8"
               << " encoder_combinations=4 trap_updates=" << trap_updates
               << " checks=" << environment.trace_bridge_checks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -395,7 +395,7 @@ int run_dft_bridge_contracts(int argc, char **argv)
               << " frontend_outputs=10 backend_outputs=4"
               << " digest=0x" << std::hex << environment.dft_bridge_digest()
               << std::dec
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -417,7 +417,7 @@ int run_pin_space(int argc, char **argv)
               << " output_bits=" << memblock::generated::kSampledOutputBitCount
               << " patterns=" << memblock::generated::kPinSpacePatternCount
               << " digest=0x" << std::hex << environment.pin_space_digest() << std::dec
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -445,7 +445,7 @@ int run_frontend_bridge(int argc, char **argv, const Options &options)
               << " response_stalls=" << stats.response_stalls
               << " source_credit_stalls=" << stats.source_credit_stalls
               << " field_checks=" << stats.field_checks
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -480,6 +480,6 @@ int run_frontend_reset_recovery(int argc, char **argv)
               << environment.frontend_reset_survivor_requests()
               << " stall_checks="
               << environment.frontend_reset_stall_checks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

@@ -77,7 +77,7 @@ int run_random_loads(int argc, char **argv, const Options &options)
               << " tilelink_requests=" << environment.tilelink_requests()
               << " writebacks=" << environment.writebacks()
               << ' ' << coverage.summary()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -192,7 +192,7 @@ int run_random_vector_loads(int argc, char **argv, const Options &options)
               << " lq_dequeued=" << environment.lq_dequeued()
               << " writebacks=" << environment.vector_load_writebacks()
               << ' ' << coverage.summary()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -321,7 +321,7 @@ int run_random_vector_forwarding(int argc, char **argv, const Options &options)
               << " stores=" << environment.vector_store_writebacks()
               << " loads=" << environment.vector_load_writebacks()
               << ' ' << coverage.summary()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -447,6 +447,6 @@ int run_random_forwarding(int argc, char **argv, const Options &options)
               << operations[2] << ',' << operations[3]
               << " signed=" << signed_loads
               << " unsigned=" << unsigned_loads
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

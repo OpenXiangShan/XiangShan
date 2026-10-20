@@ -1556,7 +1556,7 @@ int run_translation_permissions(int argc, char **argv)
         << implicit_g_store_permission_faults
         << " implicit_g_readonly_store_cases="
         << implicit_g_readonly_store_cases
-        << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+        << '\n';
     return 0;
 }
 
@@ -1854,7 +1854,7 @@ int run_translation_pbmt(int argc, char **argv)
               << " final_pma=" << final_pbmt_counts[0]
               << " final_nc=" << final_pbmt_counts[1]
               << " final_io=" << final_pbmt_counts[2]
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2402,6 +2402,6 @@ int run_translation_superpages(int argc, char **argv)
               << " napot_readbacks=" << napot_readbacks
               << " napot_ptw_requests=" << napot_ptw_requests
               << " napot_cycles=" << napot_cycles
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

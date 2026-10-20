@@ -1,6 +1,4 @@
 {
-  "complete_rtl_sha256": "356025f4a7472e978800120eee3f0b78832939b9c3b6b6ad07fc2f2b32fb60d3",
-  "config_sha256": "8d3698a60b53844566a4b1dc5ca03b3d6b0eb0a55bca2323a6c72bb72ba61df4",
   "dimensions": {
     "identity": {
       "lq_value_bits": 7,
@@ -17390,7 +17388,6 @@
       "width": 6
     }
   ],
-  "rtl_sha256": "3d3887e75a1ba121b8fd2e3f525d117d31a0b1bba86f50a690c898c3e4bb7aba",
   "schema_version": 1,
   "source": "build/rtl/MemBlock.sv",
   "stats": {

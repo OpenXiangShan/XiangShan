@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import os
 import re
@@ -26,25 +25,31 @@ ARTIFACT_NAMES = {
     "binary": "memblock_sim",
     "model": "libUTMemBlock.so",
     "rtl_metadata": "rtl.json",
-    "xspcomm": "libxspcomm.so.0.0.1",
 }
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def artifact_entry(role: str, path: Path, relative_path: str) -> dict[str, Any]:
     return {
         "role": role,
         "path": relative_path,
-        "sha256": sha256(path),
         "size": path.stat().st_size,
     }
+
+
+def shared_library_soname(path: Path) -> str:
+    completed = subprocess.run(
+        ["readelf", "-d", str(path)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if completed.returncode != 0:
+        raise FreezeError(f"readelf failed for {path}: {completed.stdout.strip()}")
+    match = re.search(r"\(SONAME\).*\[(.+)\]", completed.stdout)
+    if match is None:
+        raise FreezeError(f"shared library has no SONAME: {path}")
+    return match.group(1)
 
 
 def resolved_dependencies(binary: Path, library_directory: Path) -> list[dict[str, Any]]:
@@ -89,7 +94,6 @@ def resolved_dependencies(binary: Path, library_directory: Path) -> list[dict[st
             {
                 "soname": soname,
                 "path": str(path),
-                "sha256": sha256(path),
                 "size": path.stat().st_size,
             }
         )
@@ -132,8 +136,11 @@ def freeze(
         sources[role] = source
 
     output.mkdir(parents=True, exist_ok=True)
+    artifact_names = ARTIFACT_NAMES | {
+        "xspcomm": shared_library_soname(sources["xspcomm"])
+    }
     artifacts: list[dict[str, Any]] = []
-    for role, filename in ARTIFACT_NAMES.items():
+    for role, filename in artifact_names.items():
         destination = output / filename
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=filename + ".", suffix=".tmp", dir=output
@@ -156,8 +163,8 @@ def freeze(
         entry["soname"]: Path(entry["path"]).resolve() for entry in dependencies
     }
     expected_resolution = {
-        "libUTMemBlock.so": (output / ARTIFACT_NAMES["model"]).resolve(),
-        "libxspcomm.so.0.0.1": (output / ARTIFACT_NAMES["xspcomm"]).resolve(),
+        "libUTMemBlock.so": (output / artifact_names["model"]).resolve(),
+        artifact_names["xspcomm"]: (output / artifact_names["xspcomm"]).resolve(),
     }
     for soname, expected in expected_resolution.items():
         if resolved_by_soname.get(soname) != expected:

@@ -28,7 +28,6 @@ def port(name, direction, protocol, interface, role, width=1, channel=None):
 class GenerateSvaTest(unittest.TestCase):
     def test_emits_only_dut_producers_with_backpressure(self) -> None:
         manifest = {
-            "rtl_sha256": "abc",
             "dimensions": {"queue": {"store_entries": 4}},
             "ports": [
                 port("out_valid", "output", "decoupled", "out", "valid"),
@@ -61,7 +60,7 @@ class GenerateSvaTest(unittest.TestCase):
         with self.assertRaisesRegex(
             generate_sva.SvaGenerationError, "queue.store_entries"
         ):
-            generate_sva.render({"rtl_sha256": "abc", "ports": []})
+            generate_sva.render({"ports": []})
 
     def test_rejects_unknown_payload_width(self) -> None:
         manifest = {

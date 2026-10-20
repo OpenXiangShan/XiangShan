@@ -52,7 +52,7 @@ int run_vector_load(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " writebacks=" << environment.vector_load_writebacks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -130,7 +130,7 @@ int run_vector_split_load(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " writebacks=" << environment.vector_load_writebacks()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -407,7 +407,7 @@ int run_vector_fault_only_first(int argc, char **argv)
               << " first_fault_vls_redirects=1"
               << " subsequent_scalar_faults=1"
               << " first_fault_ptw=" << first_fault.ptw_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1256,7 +1256,7 @@ int run_vector_segment(int argc, char **argv)
               << " readback_lq_allocated=" << environment.lq_allocated()
               << " readback_lq_dequeued=" << environment.lq_dequeued()
               << " dcache_requests=" << aggregate_dcache_requests
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1470,7 +1470,7 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
               << " first_fault_fix_vl=2"
               << " first_fault_vls_redirects=1"
               << " first_fault_ptw=" << first_fault.ptw_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1550,7 +1550,7 @@ int run_vector_store_forwarding(int argc, char **argv)
               << " loads=" << environment.vector_load_writebacks()
               << " sq_dequeued=" << environment.sq_dequeued()
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1641,6 +1641,6 @@ int run_store_forwarding(int argc, char **argv)
               << " loads=" << environment.writebacks()
               << " immediate_stores=" << immediates.size()
               << " immediate_min=-2048 immediate_max=2047"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

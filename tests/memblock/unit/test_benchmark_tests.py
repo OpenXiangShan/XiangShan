@@ -20,8 +20,6 @@ import benchmark_tests  # noqa: E402
 
 
 class BenchmarkTestsTest(unittest.TestCase):
-    RTL_SHA256 = "a" * 64
-
     def test_make_target_defaults_to_eight_leaf_workers(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertEqual(benchmark_tests.MAX_PARALLEL_LEAVES, 8)
@@ -39,25 +37,13 @@ class BenchmarkTestsTest(unittest.TestCase):
     def make_runtime(
         self,
         root: Path,
-        *,
-        metadata_sha256: str = "metadata-hash",
-        binary_sha256: str = "binary-hash",
     ) -> tuple[Path, dict[str, object]]:
-        rtl_metadata = root / "rtl.json"
-        rtl_metadata.write_text(
-            json.dumps({"complete_rtl_sha256": self.RTL_SHA256}),
-            encoding="utf-8",
-        )
-        return rtl_metadata, {
+        return root / "runtime.json", {
             "root": root,
             "binary": root / "memblock_sim",
             "metadata": root / "runtime.json",
-            "metadata_sha256": metadata_sha256,
-            "artifact_hashes": {
-                "binary": binary_sha256,
-                "rtl_metadata": benchmark_tests.run_regression.sha256(rtl_metadata),
-            },
-            "external_dependency_hashes": {"libc": "libc-hash"},
+            "artifacts": {"binary": root / "memblock_sim"},
+            "external_dependencies": ["/lib/libc.so.6"],
         }
 
     def test_scenario_inventory_matches_cpp_dispatch(self) -> None:
@@ -68,8 +54,7 @@ class BenchmarkTestsTest(unittest.TestCase):
 
     def test_parses_generic_terminal_summary(self) -> None:
         result = benchmark_tests.parse_terminal(
-            "diagnostic\nMEMBLOCK_DCACHE_COHERENCE_PASS cycle=91 probes=3 "
-            "rtl_sha256=abc\n"
+            "diagnostic\nMEMBLOCK_DCACHE_COHERENCE_PASS cycle=91 probes=3\n"
         )
         self.assertEqual(result["status"], "pass")
         self.assertEqual(result["cycle"], 91)
@@ -84,37 +69,18 @@ class BenchmarkTestsTest(unittest.TestCase):
     def test_rejects_terminal_for_wrong_scenario(self) -> None:
         with self.assertRaisesRegex(benchmark_tests.BenchmarkError, "does not match"):
             benchmark_tests.parse_terminal(
-                "MEMBLOCK_SINGLE_LOAD_PASS cycle=22 rtl_sha256="
-                + self.RTL_SHA256
-                + "\n",
+                "MEMBLOCK_SINGLE_LOAD_PASS cycle=22\n",
                 expected_scenario="smoke",
-                expected_rtl_sha256=self.RTL_SHA256,
             )
 
     def test_rejects_wrong_optional_identity_fields(self) -> None:
         with self.assertRaisesRegex(benchmark_tests.BenchmarkError, "seed is 2"):
             benchmark_tests.parse_terminal(
-                "MEMBLOCK_RANDOM_MIXED_PASS seed=2 transactions=256 "
-                "rtl_sha256="
-                + self.RTL_SHA256
-                + "\n",
+                "MEMBLOCK_RANDOM_MIXED_PASS seed=2 transactions=256\n",
                 expected_scenario="random-mixed",
                 expected_seed=1,
                 expected_transactions=256,
-                expected_rtl_sha256=self.RTL_SHA256,
             )
-
-    def test_rejects_missing_or_wrong_rtl_identity_on_pass(self) -> None:
-        for rtl_field in ("", " rtl_sha256=" + "b" * 64):
-            with self.subTest(rtl_field=rtl_field):
-                with self.assertRaisesRegex(
-                    benchmark_tests.BenchmarkError, "rtl_sha256"
-                ):
-                    benchmark_tests.parse_terminal(
-                        "MEMBLOCK_SMOKE_PASS cycle=38" + rtl_field + "\n",
-                        expected_scenario="smoke",
-                        expected_rtl_sha256=self.RTL_SHA256,
-                    )
 
     def test_normalizes_mixed_request_metrics(self) -> None:
         metrics = benchmark_tests.normalized_metrics(
@@ -155,9 +121,7 @@ class BenchmarkTestsTest(unittest.TestCase):
             "status": "pass",
             "created_at": "2026-09-10T00:00:00+00:00",
             "configuration": {"jobs": 8},
-            "runtime": {"unchanged": True},
-            "controller": {"unchanged": True},
-            "rtl_identity": {"consistent": True},
+            "runtime_metadata": "/tmp/runtime.json",
             "results": [
                 {
                     "scenario": "smoke",
@@ -186,7 +150,6 @@ class BenchmarkTestsTest(unittest.TestCase):
             environment: dict[str, str],
             constraint_profile: str,
             constraint_overrides: tuple[str, ...],
-            expected_rtl_sha256: str | None,
             cancellation_event: threading.Event | None,
         ) -> dict[str, object]:
             nonlocal active, maximum_active
@@ -201,7 +164,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                     "scenario": scenario,
                     "status": "pass",
                     "elapsed_seconds": 0.01,
-                    "rtl_sha256": expected_rtl_sha256,
                     "metrics": {},
                 }
             finally:
@@ -217,8 +179,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(metadata),
-                "--rtl-metadata",
-                str(rtl_metadata),
                 "--output",
                 str(output),
                 "--scenarios",
@@ -253,9 +213,6 @@ class BenchmarkTestsTest(unittest.TestCase):
             document["configuration"]["effective_jobs"], len(requested)
         )
         self.assertEqual(document["status"], "pass")
-        self.assertTrue(document["runtime"]["unchanged"])
-        self.assertTrue(document["controller"]["unchanged"])
-        self.assertTrue(document["rtl_identity"]["consistent"])
 
     def test_main_rejects_more_than_eight_leaf_workers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -264,8 +221,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(root / "runtime.json"),
-                "--rtl-metadata",
-                str(root / "rtl.json"),
                 "--output",
                 str(root / "benchmark.json"),
                 "--transactions",
@@ -299,7 +254,6 @@ class BenchmarkTestsTest(unittest.TestCase):
             environment: dict[str, str],
             constraint_profile: str,
             constraint_overrides: tuple[str, ...],
-            expected_rtl_sha256: str | None,
             cancellation_event: threading.Event | None,
         ) -> dict[str, object]:
             with completed_lock:
@@ -310,7 +264,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "scenario": scenario,
                 "status": "pass",
                 "elapsed_seconds": 0.01,
-                "rtl_sha256": expected_rtl_sha256,
                 "metrics": {},
             }
 
@@ -322,8 +275,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(root / "runtime.json"),
-                "--rtl-metadata",
-                str(rtl_metadata),
                 "--output",
                 str(output),
                 "--scenarios",
@@ -380,161 +331,6 @@ class BenchmarkTestsTest(unittest.TestCase):
         self.assertIn("RuntimeError: worker exploded", failed["traceback"])
         self.assertGreaterEqual(failed["elapsed_seconds"], 0.0)
 
-    def test_main_rejects_runtime_change_during_benchmark(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            metadata = root / "runtime.json"
-            output = root / "benchmark.json"
-            rtl_metadata, runtime_before = self.make_runtime(
-                root, metadata_sha256="before", binary_sha256="binary-before"
-            )
-            runtime_after = {
-                **runtime_before,
-                "metadata_sha256": "after",
-                "artifact_hashes": {
-                    **runtime_before["artifact_hashes"],
-                    "binary": "binary-after",
-                },
-            }
-            argv = [
-                "benchmark_tests.py",
-                "--runtime-metadata",
-                str(metadata),
-                "--rtl-metadata",
-                str(rtl_metadata),
-                "--output",
-                str(output),
-                "--scenarios",
-                "smoke",
-                "--transactions",
-                "256",
-                "--jobs",
-                "8",
-            ]
-            passing_result = {
-                "scenario": "smoke",
-                "status": "pass",
-                "elapsed_seconds": 0.01,
-                "rtl_sha256": self.RTL_SHA256,
-                "metrics": {},
-            }
-            with (
-                mock.patch.object(sys, "argv", argv),
-                mock.patch.object(
-                    benchmark_tests.run_regression,
-                    "verify_runtime_metadata",
-                    side_effect=(runtime_before, runtime_after),
-                ),
-                mock.patch.object(
-                    benchmark_tests,
-                    "run_scenario",
-                    return_value=passing_result,
-                ),
-            ):
-                self.assertEqual(benchmark_tests.main(), 1)
-
-            document = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(document["status"], "fail")
-        self.assertEqual(document["configuration"]["jobs"], 8)
-        self.assertEqual(document["configuration"]["effective_jobs"], 1)
-        self.assertFalse(document["runtime"]["unchanged"])
-        self.assertEqual(
-            document["runtime"]["error"],
-            "runtime hashes changed during the benchmark",
-        )
-
-    def test_main_rejects_controller_change_during_benchmark(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            metadata = root / "runtime.json"
-            output = root / "benchmark.json"
-            markdown = root / "benchmark.md"
-            controller = root / "controller.cpp"
-            controller.write_text("before\n", encoding="utf-8")
-            rtl_metadata, runtime = self.make_runtime(root)
-            argv = [
-                "benchmark_tests.py",
-                "--runtime-metadata",
-                str(metadata),
-                "--rtl-metadata",
-                str(rtl_metadata),
-                "--controller-file",
-                str(controller),
-                "--output",
-                str(output),
-                "--markdown",
-                str(markdown),
-                "--scenarios",
-                "smoke",
-                "--transactions",
-                "256",
-            ]
-
-            def mutate_controller(*args: object, **kwargs: object) -> dict[str, object]:
-                controller.write_text("after\n", encoding="utf-8")
-                return {
-                    "scenario": "smoke",
-                    "status": "pass",
-                    "elapsed_seconds": 0.01,
-                    "rtl_sha256": self.RTL_SHA256,
-                    "metrics": {},
-                }
-
-            with (
-                mock.patch.object(sys, "argv", argv),
-                mock.patch.object(
-                    benchmark_tests.run_regression,
-                    "verify_runtime_metadata",
-                    return_value=runtime,
-                ),
-                mock.patch.object(
-                    benchmark_tests,
-                    "run_scenario",
-                    side_effect=mutate_controller,
-                ),
-            ):
-                self.assertEqual(benchmark_tests.main(), 1)
-
-            document = json.loads(output.read_text(encoding="utf-8"))
-            markdown_text = markdown.read_text(encoding="utf-8")
-        self.assertEqual(document["status"], "fail")
-        self.assertFalse(document["controller"]["unchanged"])
-        self.assertEqual(
-            document["controller"]["error"],
-            "controller inputs changed during the benchmark",
-        )
-        self.assertIn("Overall status: **FAIL**", markdown_text)
-        self.assertIn("controller inputs: **FAIL**", markdown_text)
-
-    def test_main_rejects_rtl_metadata_outside_frozen_runtime(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            rtl_metadata, runtime = self.make_runtime(root)
-            runtime["artifact_hashes"]["rtl_metadata"] = "b" * 64
-            argv = [
-                "benchmark_tests.py",
-                "--runtime-metadata",
-                str(root / "runtime.json"),
-                "--rtl-metadata",
-                str(rtl_metadata),
-                "--output",
-                str(root / "benchmark.json"),
-                "--scenarios",
-                "smoke",
-                "--transactions",
-                "256",
-            ]
-            with (
-                mock.patch.object(sys, "argv", argv),
-                mock.patch.object(
-                    benchmark_tests.run_regression,
-                    "verify_runtime_metadata",
-                    return_value=runtime,
-                ),
-                mock.patch.object(benchmark_tests, "run_scenario") as run_scenario,
-            ):
-                self.assertEqual(benchmark_tests.main(), 2)
-        run_scenario.assert_not_called()
 
     def test_main_rejects_shared_mem_direct_trace_for_parallel_leaves(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -544,8 +340,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(root / "runtime.json"),
-                "--rtl-metadata",
-                str(rtl_metadata),
                 "--output",
                 str(root / "benchmark.json"),
                 "--scenarios",
@@ -584,7 +378,6 @@ class BenchmarkTestsTest(unittest.TestCase):
             environment: dict[str, str],
             constraint_profile: str,
             constraint_overrides: tuple[str, ...],
-            expected_rtl_sha256: str | None,
             cancellation_event: threading.Event | None,
         ) -> dict[str, object]:
             self.assertIsNotNone(cancellation_event)
@@ -608,8 +401,6 @@ class BenchmarkTestsTest(unittest.TestCase):
                 "benchmark_tests.py",
                 "--runtime-metadata",
                 str(root / "runtime.json"),
-                "--rtl-metadata",
-                str(rtl_metadata),
                 "--output",
                 str(output),
                 "--scenarios",

@@ -30,10 +30,7 @@ class FreezeRuntimeTest(unittest.TestCase):
             binary.write_bytes(b"binary")
             model.write_bytes(b"model")
             xspcomm.write_bytes(b"xspcomm")
-            rtl_metadata.write_text(
-                json.dumps({"complete_rtl_sha256": "a" * 64}),
-                encoding="utf-8",
-            )
+            rtl_metadata.write_text("{}\n", encoding="utf-8")
             output = root / "runtime"
 
             def dependencies(frozen_binary: Path, directory: Path):
@@ -41,21 +38,21 @@ class FreezeRuntimeTest(unittest.TestCase):
                     {
                         "soname": "libUTMemBlock.so",
                         "path": str((directory / "libUTMemBlock.so").resolve()),
-                        "sha256": freeze_runtime.sha256(directory / "libUTMemBlock.so"),
                         "size": (directory / "libUTMemBlock.so").stat().st_size,
                     },
                     {
-                        "soname": "libxspcomm.so.0.0.1",
-                        "path": str((directory / "libxspcomm.so.0.0.1").resolve()),
-                        "sha256": freeze_runtime.sha256(
-                            directory / "libxspcomm.so.0.0.1"
-                        ),
-                        "size": (directory / "libxspcomm.so.0.0.1").stat().st_size,
+                        "soname": "libxspcomm.so.test",
+                        "path": str((directory / "libxspcomm.so.test").resolve()),
+                        "size": (directory / "libxspcomm.so.test").stat().st_size,
                     },
                 ]
 
             with mock.patch.object(
                 freeze_runtime, "resolved_dependencies", side_effect=dependencies
+            ), mock.patch.object(
+                freeze_runtime,
+                "shared_library_soname",
+                return_value="libxspcomm.so.test",
             ):
                 metadata = freeze_runtime.freeze(
                     binary, model, xspcomm, rtl_metadata, output

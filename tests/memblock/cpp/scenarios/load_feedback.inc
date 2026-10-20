@@ -228,7 +228,7 @@ int run_single_load(int argc, char **argv)
               << " partial_cycles=" << partial.cycle()
               << " immediate_loads=" << immediates.size()
               << " immediate_min=-2048 immediate_max=2047"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -809,7 +809,7 @@ int run_load_feedback(int argc, char **argv)
               << " ld2_cancels=" << cancels
               << " writebacks=" << environment.writebacks()
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -986,7 +986,7 @@ int run_topdown_contracts(int argc, char **argv)
               << " sq_full_cycles=" << sq.top_down_stats().sq_full_cycles
               << " sb_full_cycles=" << sb.top_down_stats().sb_full_cycles
               << " buffered_stores=" << buffered_stores
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1352,7 +1352,7 @@ int run_memory_violation(int argc, char **argv)
               << static_cast<unsigned>(violation.ftq_offset)
               << " is_rvc=" << violation.is_rvc
               << " level=" << violation.level
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -1674,7 +1674,7 @@ int run_rar_violation(int argc, char **argv)
               << static_cast<unsigned>(violation.ftq_offset)
               << " is_rvc=" << violation.is_rvc
               << " level=" << violation.level
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2254,7 +2254,7 @@ int run_ifetch_prefetch(int argc, char **argv)
               << " io_prefetch_dcache=0 io_prefetch_uncache=0"
               << " immediate_cases=5 immediate_min=-2048 immediate_max=2047"
               << " tilelink_requests=" << environment.tilelink_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -2551,7 +2551,7 @@ int run_hardware_prefetch(int argc, char **argv)
               << sms_stats.last_l2_addr_by_source[sms_source]
               << " sms_bitmap=0x" << sms_offset_bitmap << std::dec
               << " implementation_characterization=1 disable_controls=1"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3003,7 +3003,7 @@ int run_fp_loads(int argc, char **argv)
               << " misaligned_cacheable=3 misaligned_nc_faults=1"
               << " mmio_dcache_requests=" << mmio.tilelink_requests()
               << " mmio_uncache_requests=" << mmio.uncache_requests()
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3809,7 +3809,7 @@ int run_trigger_contracts(int argc, char **argv)
               << " vector_debug_actions=" << vector_debug_actions
               << " vector_segments=" << vector_segment_cases
               << " vector_widths=4 vector_addressing_modes=4 chain_cases=2"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -3862,6 +3862,6 @@ int run_metadata_contracts(int argc, char **argv)
     std::cout << "MEMBLOCK_METADATA_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " issue_metadata=rvc-ftq-store-set-wait"
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

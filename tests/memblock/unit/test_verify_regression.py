@@ -16,9 +16,6 @@ sys.path.insert(0, str(MEMBLOCK_ROOT / "scripts"))
 import verify_regression  # noqa: E402
 
 
-RTL_HASH = "a" * 64
-
-
 def mixed_result(seed: int) -> dict[str, object]:
     fields: dict[str, object] = {
         "seed": seed,
@@ -71,7 +68,6 @@ def mixed_result(seed: int) -> dict[str, object]:
         "concurrent_ops": "1,1,1,1,1",
         "concurrent": "4,20,4,5,3",
         "backpressure": "1,1,1,1,1,1",
-        "rtl_sha256": RTL_HASH,
     }
     summary = "MEMBLOCK_RANDOM_MIXED_PASS " + " ".join(
         f"{name}={value}" for name, value in fields.items()
@@ -99,14 +95,6 @@ def mixed_result(seed: int) -> dict[str, object]:
 
 
 def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
-    runtime_hashes = {
-        "binary": "b" * 64,
-        "model": "c" * 64,
-        "rtl_metadata": "2" * 64,
-        "xspcomm": "d" * 64,
-    }
-    external_hashes = {"/lib/system.so": "e" * 64}
-    controller_hashes = {"runner": "f" * 64, "rtl_metadata": "1" * 64}
     return {
         "schema_version": 2,
         "campaign_status": "complete",
@@ -115,8 +103,6 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
         "finished_at": "2026-01-01T00:00:05+00:00",
         "elapsed_seconds": 5.0,
         "binary": "/frozen/memblock_sim",
-        "binary_sha256": runtime_hashes["binary"],
-        "complete_rtl_sha256": RTL_HASH,
         "configuration": {
             "backpressure": True,
             "duration_seconds": 4.0,
@@ -125,30 +111,21 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
             "scenarios": ["random-mixed"],
             "start_seed": 7,
         },
-        "controller": {
-            "hashes_before": controller_hashes,
-            "hashes_after": controller_hashes,
-            "unchanged": True,
-            "error": None,
-        },
         "runtime": {
-            "metadata_sha256_before": "2" * 64,
-            "metadata_sha256_after": "2" * 64,
-            "artifact_hashes_before": runtime_hashes,
-            "artifact_hashes_after": runtime_hashes,
-            "external_dependency_hashes_before": external_hashes,
-            "external_dependency_hashes_after": external_hashes,
-            "unchanged": True,
-            "error": None,
+            "metadata": "/frozen/runtime.json",
+            "root": "/frozen",
+            "artifacts": {
+                "binary": "/frozen/memblock_sim",
+                "model": "/frozen/libUTMemBlock.so",
+                "rtl_metadata": "/frozen/rtl.json",
+                "xspcomm": "/frozen/libxspcomm.so.0.0.1",
+            },
+            "external_dependencies": ["/lib/system.so"],
         },
         "summary": {
             "seeds_completed": len(results),
             "statuses": {"pass": len(results)},
             "transactions_completed": 64 * len(results),
-            "rtl_sha256": [RTL_HASH],
-            "rtl_hash_consistent": True,
-            "runtime_unchanged": True,
-            "controller_unchanged": True,
         },
         "results": results,
     }
@@ -2865,7 +2842,6 @@ class VerifyRegressionTest(unittest.TestCase):
                 min_results=2,
                 expected_scenario="random-mixed",
                 expected_transactions=64,
-                expected_rtl_sha256=RTL_HASH,
                 require_backpressure=True,
                 require_frozen_runtime=True,
                 expected_jobs=8,
@@ -2907,7 +2883,6 @@ class VerifyRegressionTest(unittest.TestCase):
                 min_results=2,
                 expected_scenario="random-mixed",
                 expected_transactions=64,
-                expected_rtl_sha256=RTL_HASH,
                 require_backpressure=True,
                 require_frozen_runtime=True,
                 expected_jobs=8,
@@ -2915,33 +2890,6 @@ class VerifyRegressionTest(unittest.TestCase):
             )
             self.assertEqual(verified["result_count"], 2)
 
-    def test_controller_file_hash_is_checked_when_requested(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            source = Path(temporary) / "source.cpp"
-            source.write_text("source", encoding="utf-8")
-            document = regression_document([mixed_result(7), mixed_result(8)])
-            document["controller"]["paths"] = {"source": str(source)}
-            document["controller"]["hashes_before"] = {
-                **document["controller"]["hashes_before"],
-                "source": verify_regression.run_regression.sha256(source),
-            }
-            document["controller"]["hashes_after"] = document["controller"]["hashes_before"]
-            with tempfile.NamedTemporaryFile(suffix=".json") as artifact:
-                artifact_path = Path(artifact.name)
-                artifact_path.write_text(json.dumps(document), encoding="utf-8")
-                verified = verify_regression.verify_regression(
-                    artifact_path,
-                    min_duration_seconds=4,
-                    min_results=2,
-                    expected_scenario="random-mixed",
-                    expected_transactions=64,
-                    expected_rtl_sha256=RTL_HASH,
-                    require_backpressure=True,
-                    require_frozen_runtime=True,
-                    runner=None,
-                    controller_files=(source,),
-                )
-                self.assertEqual(verified["result_count"], 2)
 
     def test_rejects_wrong_worker_count(self) -> None:
         document = regression_document([mixed_result(7), mixed_result(8)])
@@ -2956,7 +2904,6 @@ class VerifyRegressionTest(unittest.TestCase):
                     min_results=2,
                     expected_scenario="random-mixed",
                     expected_transactions=64,
-                    expected_rtl_sha256=RTL_HASH,
                     expected_jobs=8,
                     require_backpressure=True,
                     require_frozen_runtime=True,
@@ -3170,11 +3117,6 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_mixed_coverage(result)
 
-    def test_rejects_runtime_hash_change(self) -> None:
-        document = regression_document([mixed_result(7), mixed_result(8)])
-        document["runtime"]["artifact_hashes_after"] = {"binary": "9" * 64}
-        with self.assertRaisesRegex(verify_regression.VerificationError, "changed"):
-            self.verify(document)
 
     def test_rejects_aggregate_count_mismatch(self) -> None:
         document = regression_document([mixed_result(7), mixed_result(8)])
@@ -3187,7 +3129,6 @@ class VerifyRegressionTest(unittest.TestCase):
             "seed": 7,
             "scenario": "random-forwarding",
             "transactions": 48,
-            "rtl_sha256": RTL_HASH,
             "status": "pass",
             "returncode": 0,
             "output": "",
@@ -3204,8 +3145,7 @@ class VerifyRegressionTest(unittest.TestCase):
                 "64",
             ],
             "summary": (
-                "MEMBLOCK_RANDOM_FORWARD_PASS seed=7 transactions=48 "
-                f"rtl_sha256={RTL_HASH}"
+                "MEMBLOCK_RANDOM_FORWARD_PASS seed=7 transactions=48"
             ),
         }
         checked = verify_regression._check_result(

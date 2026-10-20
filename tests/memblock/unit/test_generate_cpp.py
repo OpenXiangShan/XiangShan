@@ -123,7 +123,6 @@ class GenerateCppTest(unittest.TestCase):
 
     def test_renders_idle_drives_and_only_terminal_quiescence_checks(self) -> None:
         manifest = {
-            "rtl_sha256": "abc",
             "ports": [
                 {
                     "name": "clock",
@@ -171,7 +170,6 @@ class GenerateCppTest(unittest.TestCase):
 
     def test_rejects_missing_input_policy(self) -> None:
         manifest = {
-            "rtl_sha256": "abc",
             "ports": [
                 {
                     "name": "bad",

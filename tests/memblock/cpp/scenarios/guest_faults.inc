@@ -83,7 +83,7 @@ int run_vector_guest_fault(int argc, char **argv, bool split = false)
               << " ptw_requests=" << environment.ptw_requests()
               << " vaddr=0x" << std::hex << environment.exception_vaddr()
               << " gpaddr=0x" << environment.exception_gpaddr() << std::dec
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }
 
@@ -175,6 +175,6 @@ int run_scalar_guest_fault(int argc, char **argv)
               << " gpaddr=0x" << environment.exception_gpaddr() << std::dec
               << " wakeups=" << feedback_wakeups
               << " cancels=" << feedback_cancels
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

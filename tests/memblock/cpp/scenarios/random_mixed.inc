@@ -9847,6 +9847,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                      constraints, environment.dcache_response_latency_stats(),
                      environment.ptw_response_latency_stats(),
                      environment.uncache_response_latency_stats())
-              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+              << '\n';
     return 0;
 }

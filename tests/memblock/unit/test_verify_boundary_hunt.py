@@ -21,7 +21,6 @@ def result(seed: int, transactions: int = 4) -> dict[str, object]:
         "returncode": 1,
         "transactions": transactions,
         "failures": 2,
-        "rtl_sha256": "a" * 64,
         "output": "MEMBLOCK_RANDOM_BOUNDARY_HUNT_SAMPLE_FAIL seed=1",
     }
 
@@ -32,7 +31,7 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
             path = Path(temporary) / "hunt.json"
             path.write_text(json.dumps({"results": [result(8), result(7)]}))
             summary = verify_boundary_hunt.verify_boundary_hunt(
-                path, min_seeds=2, transactions=4, rtl_sha256="a" * 64
+                path, min_seeds=2, transactions=4
             )
             self.assertEqual(summary["seeds"], 2)
             self.assertEqual(summary["samples"], 8)
@@ -105,7 +104,7 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
                 verify_boundary_hunt.BoundaryHuntError, "return code"
             ):
                 verify_boundary_hunt.verify_boundary_hunt(
-                    path, min_seeds=1, transactions=4, rtl_sha256="a" * 64
+                    path, min_seeds=1, transactions=4
                 )
 
     def test_rejects_boolean_returncode(self) -> None:
@@ -118,24 +117,7 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
                 verify_boundary_hunt.BoundaryHuntError, "integer return code"
             ):
                 verify_boundary_hunt.verify_boundary_hunt(
-                    path, min_seeds=1, transactions=4, rtl_sha256="a" * 64
-                )
-
-    def test_rejects_malformed_metadata_hash(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            metadata = root / "rtl.json"
-            metadata.write_text(json.dumps({"complete_rtl_sha256": "bad"}))
-            path = root / "hunt.json"
-            path.write_text(json.dumps({"results": [result(7)]}))
-            with self.assertRaisesRegex(
-                verify_boundary_hunt.BoundaryHuntError, "complete hash"
-            ):
-                verify_boundary_hunt.verify_boundary_hunt(
-                    path,
-                    min_seeds=1,
-                    transactions=4,
-                    rtl_metadata=metadata,
+                    path, min_seeds=1, transactions=4
                 )
 
 
