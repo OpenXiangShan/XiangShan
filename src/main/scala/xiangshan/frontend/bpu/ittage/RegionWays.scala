@@ -28,6 +28,11 @@ class RegionWays(implicit p: Parameters) extends IttageModule {
     val respHit:    Vec[Bool] = Output(Vec(NumTables, Bool()))
     val respRegion: Vec[UInt] = Output(Vec(NumTables, UInt(RegionBits.W)))
 
+    // Provider and alternate target reconstruction for the training read.
+    val trainReqPointer: Vec[UInt] = Input(Vec(2, UInt(log2Ceil(RegionNums).W)))
+    val trainRespHit:    Vec[Bool] = Output(Vec(2, Bool()))
+    val trainRespRegion: Vec[UInt] = Output(Vec(2, UInt(RegionBits.W)))
+
     val updateRegion:  Vec[UInt] = Input(Vec(RegionPorts, UInt(RegionBits.W)))
     val updateHit:     Vec[Bool] = Output(Vec(RegionPorts, Bool()))
     val updatePointer: Vec[UInt] = Output(Vec(RegionPorts, UInt(log2Ceil(RegionNums).W)))
@@ -65,6 +70,11 @@ class RegionWays(implicit p: Parameters) extends IttageModule {
     // read region use pointer
     io.respHit(i)    := regions(io.reqPointer(i)).valid
     io.respRegion(i) := regions(io.reqPointer(i)).region
+  }
+
+  for (i <- 0 until 2) {
+    io.trainRespHit(i)    := regions(io.trainReqPointer(i)).valid
+    io.trainRespRegion(i) := regions(io.trainReqPointer(i)).region
   }
 
   for (i <- 0 until RegionPorts) {
