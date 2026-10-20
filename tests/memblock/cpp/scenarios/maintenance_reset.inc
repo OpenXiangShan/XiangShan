@@ -334,8 +334,9 @@ int run_mmio_contracts(int argc, char **argv)
         .op = memblock::StoreOp::sd,
         .rob = 3,
         .sq = 0,
-        .address_lane = 0,
-        .data_lane = 1,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
         // The PBMT=IO page is backed by the configured DDR PMA region.  The
         // StoreQueue writeback therefore reports memBackTypeMM=1 and
         // debug.isMMIO=0; PMA-IO would be a separate device-map test.
@@ -470,6 +471,7 @@ int run_mmio_contracts(int argc, char **argv)
             .sq = 0,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_address_writeback_lane = 0,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
@@ -616,6 +618,7 @@ int run_mmio_contracts(int argc, char **argv)
             .sq = 1,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_address_writeback_lane = 0,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
@@ -878,6 +881,7 @@ int run_mmio_contracts(int argc, char **argv)
             .sq = 0,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_address_writeback_lane = 0,
             .expected_exception_mask = memblock::kExceptionStoreAccessFault,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
@@ -891,6 +895,7 @@ int run_mmio_contracts(int argc, char **argv)
             .sq = 1,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_address_writeback_lane = 0,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
@@ -1173,6 +1178,7 @@ int run_mmio_contracts(int argc, char **argv)
             .sq = 0,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_address_writeback_lane = 0,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
@@ -1378,8 +1384,9 @@ int run_cbo_zero_contracts(int argc, char **argv)
         .op = memblock::StoreOp::cbo_zero,
         .rob = 0,
         .sq = 0,
-        .address_lane = 0,
-        .data_lane = 1,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_address_writeback_lane = 0,
         .expected_debug_is_mmio = false,
         .expected_debug_is_ncio = false,
     };
@@ -1579,6 +1586,7 @@ int run_cmo_contracts(int argc, char **argv)
             .sq = static_cast<std::uint8_t>(test.dirty ? 1 : 0),
             .address_lane = (index + 1) % memblock::kScalarStoreLanes,
             .data_lane = index % memblock::kScalarStoreLanes,
+            .expected_address_writeback_lane = 0,
             .expected_output_flush_pipe = true,
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
@@ -1751,6 +1759,7 @@ int run_cmo_contracts(int argc, char **argv)
             .sq = 0,
             .address_lane = 1,
             .data_lane = 0,
+            .expected_address_writeback_lane = 0,
             .expected_output_flush_pipe = true,
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,
@@ -1871,6 +1880,7 @@ int run_cmo_contracts(int argc, char **argv)
                 .sq = 0,
                 .address_lane = error_kind,
                 .data_lane = 1 - error_kind,
+                .expected_address_writeback_lane = 0,
                 .expected_exception_mask = denied
                     ? memblock::kExceptionStoreAccessFault
                     : memblock::kExceptionHardwareError,

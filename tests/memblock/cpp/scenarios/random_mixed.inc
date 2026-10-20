@@ -2681,6 +2681,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     window_base,
                     1U << static_cast<unsigned>(scalar_store_op)),
                 random(), scalar_store_op, random() % 2, random() % 2);
+            // This window uses legal cacheable stores with hardware
+            // misalignment enabled.  A crossing of the 16-byte beat is
+            // completed by the shared store misalignment output.
+            const unsigned scalar_store_width =
+                memblock::scalar_store_bytes(scalar_store.op);
+            if ((scalar_store.address & 15U) + scalar_store_width > 16U) {
+                scalar_store.expected_address_writeback_lane = 0;
+            }
             auto vector_store_uops = make_concurrent_vector_uops(
                 true, window_base + 0x100, vector_store_shape, vector_corner);
             auto prefetch = make_prefetch(
@@ -4091,6 +4099,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 line + random() % 64, random(), cmo_ops[operation],
                 random() % memblock::kScalarStoreLanes,
                 random() % memblock::kScalarStoreLanes);
+            cmo_transaction.expected_address_writeback_lane = 0;
             cmo_transaction.oracle_address = line;
             cmo_transaction.expected_output_flush_pipe = true;
             cmo_transaction.expected_debug_is_mmio = false;
@@ -8718,6 +8727,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     transaction.expected_debug_is_ncio = false;
                     transaction.expected_exception_mask = physical_pmp_denied
                         ? memblock::kExceptionStoreAccessFault : 0U;
+                    if (!physical_pmp_denied && final_io) {
+                        transaction.expected_address_writeback_lane = 0;
+                    }
                     const bool data_first = (random() & 1U) != 0;
                     const std::uint64_t dcache_before =
                         environment.tilelink_requests();
@@ -9331,6 +9343,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         mmio_access_address() + offset, random(),
                         memblock::StoreOp::sd,
                         random() % 2, random() % 2);
+                    transaction.expected_address_writeback_lane = 0;
                     transaction.oracle_address = mmio_physical + offset;
                     transaction.expected_debug_is_mmio = false;
                     transaction.expected_debug_is_ncio = false;

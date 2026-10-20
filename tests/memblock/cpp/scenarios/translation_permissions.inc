@@ -1730,6 +1730,8 @@ int run_translation_pbmt(int argc, char **argv)
                         .sq = 0,
                         .address_lane = index % memblock::kScalarStoreLanes,
                         .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+                        .expected_address_writeback_lane = final_io
+                            ? std::optional<unsigned>{0U} : std::nullopt,
                         .expected_debug_is_mmio = false,
                         .expected_debug_is_ncio = false,
                     };

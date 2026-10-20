@@ -4114,3 +4114,23 @@ The same focused validation exposed a separate pre-existing UT false positive:
 `dcache-errors` and `cmo-contracts` rejected legal StoreQueue terminal writes
 on STA lane 0 after issue on lane 1. That caller-side lane expectation requires
 its own correction; the vector index check did not cause those failures.
+
+## Shared Store Completion Lanes
+
+The StoreQueue MMIO/CMO/CBO.ZERO producers and cacheable cross-16-byte mixed
+window stores now explicitly expect address completion on STA lane 0. This
+corrects the false positives exposed by the preceding oracle review while
+preserving strict input lane checking and ordinary/NC/early-exception lane
+identity. PBMT translation and successful hypervisor IO stores use their
+independently predicted final memory class to select the mapping; observed
+writeback metadata never selects an allowed lane. The focused MMIO and
+CBO.ZERO checks now deliberately issue STA on lane 1 and require output0.
+
+On the rebuilt harness, all eight focused checks pass:
+`dcache-errors` (including 19 physical ECC reports), `cmo-contracts` (six
+line-state cases plus three denied and three corrupt responses),
+`mmio-contracts`, `cbo-zero-contracts`, `translation-pbmt` (36 combinations,
+72 loads, 36 stores), `uncache-errors`, `misaligned-stores`, and
+`queue-pressure`. Independent producer review identified the PBMT mapping as
+well as the initial ECC-control/CMO failures. `check-rtl` and all 232 Python
+unit checks pass. These are UT expectation corrections, not CPU RTL defects.

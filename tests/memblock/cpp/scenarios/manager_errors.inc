@@ -790,6 +790,7 @@ int run_dcache_errors(int argc, char **argv)
             .sq = sq,
             .address_lane = static_cast<unsigned>(sq & 1U),
             .data_lane = static_cast<unsigned>((sq + 1U) & 1U),
+            .expected_address_writeback_lane = 0,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
@@ -2084,6 +2085,7 @@ int run_uncache_errors(int argc, char **argv)
             .sq = 0,
             .address_lane = store_error_reports & 1U,
             .data_lane = (store_error_reports + 1U) & 1U,
+            .expected_address_writeback_lane = 0,
             .expected_exception_mask = expected_exception,
             .expected_debug_is_mmio = false,
             .expected_debug_is_ncio = false,

@@ -323,8 +323,9 @@ struct StoreTransaction {
     bool sq_flag = false;
     unsigned address_lane = 0;
     unsigned data_lane = 0;
-    // MisalignBuffer may legally complete an address uop on a fixed output
-    // lane. Callers opt into that mapping without weakening issue-lane checks.
+    // Shared MMIO/CMO/CBO.ZERO and split-store completion paths may use a
+    // fixed output lane. Callers declare that mapping independently of the
+    // observed writeback, while issue-lane checks remain strict.
     std::optional<unsigned> expected_address_writeback_lane;
     std::optional<unsigned> expected_data_writeback_lane;
     std::uint32_t expected_exception_mask = 0;

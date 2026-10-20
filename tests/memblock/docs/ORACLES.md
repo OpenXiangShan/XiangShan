@@ -125,8 +125,12 @@ signedness. The expected value is assembled from bytes and extended to XLEN
 without consulting the DUT's internal decoder. The current response key
 primarily uses ROB value/flag plus destination and operation fields available at
 the boundary. Store scoreboards separately record address/data issue lanes and
-the permitted writeback lanes; ordinary stores require the same lane, while a
-misaligned store may explicitly expect the legal lane-0 address completion.
+the permitted writeback lanes. Ordinary stores, including PBMT=NC, and early
+translation/PMP/trigger exceptions retain their address issue lane. Producers
+explicitly select lane 0 for StoreQueue MMIO/CMO/CBO.ZERO completions and
+MisalignBuffer split-store completions, including applicable late manager
+errors. This mapping comes from the modeled completion class, never from the
+observed DUT lane.
 Queue/source/address identity is not always observable. A duplicate or unknown
 identity is rejected where the monitor can distinguish it, while unmatched
 output-only store-data pulses remain a documented residual risk.
