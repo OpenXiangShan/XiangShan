@@ -1024,10 +1024,340 @@ bool check_canonical_access_ranges(
         coverage.readbacks == 440 && coverage.recoveries == 220;
 }
 
+bool check_gstage_access_ranges(
+    int argc, char **argv, CanonicalRangeCoverage &coverage)
+{
+    for (const auto mode : {memblock::ReferencePageMode::sv39,
+                            memblock::ReferencePageMode::sv48}) {
+        const unsigned address_bits = mode == memblock::ReferencePageMode::sv48
+            ? 50U : 41U;
+        const std::uint64_t limit = std::uint64_t{1} << address_bits;
+        for (unsigned kind = 0; kind < 5; ++kind) {
+            for (unsigned eew = 1; eew <= 3; ++eew) {
+                const unsigned width = 1U << eew;
+                for (unsigned distance = 1; distance < width; ++distance) {
+                    memblock::Environment environment(argc, argv);
+                    constexpr std::uint64_t physical = 0xcd000000ULL;
+                    constexpr std::uint64_t root = 0x9f000000ULL;
+                    const std::uint64_t address = limit - distance;
+                    const auto fail = [&](const char *phase) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL"
+                                  << " phase=gstage-range-" << phase
+                                  << " mode=" << address_bits
+                                  << " kind=" << kind << " width=" << width
+                                  << " distance=" << distance
+                                  << " address=0x" << std::hex << address
+                                  << " expected_vaddr=0x" << limit
+                                  << " actual_vaddr=0x"
+                                  << environment.exception_vaddr()
+                                  << " expected_gpaddr=0x" << limit
+                                  << " actual_gpaddr=0x"
+                                  << environment.exception_gpaddr() << std::dec
+                                  << " actual_vs_nonleaf="
+                                  << environment.exception_is_for_vs_nonleaf_pte()
+                                  << " reason=" << environment.error() << '\n';
+                        return false;
+                    };
+                    environment.memory().fill_incrementing(
+                        physical, 0x1000, 0x51 + kind);
+                    environment.memory().fill_incrementing(
+                        physical + 0x1000, 0x1000, 0xa7 + kind);
+                    if (!environment.reset() ||
+                        !environment.enable_misaligned_accesses() ||
+                        !environment.set_pointer_masking(
+                            memblock::PointerMaskingConfig{})) {
+                        return fail("reset");
+                    }
+                    // The final valid GPA page and the truncation alias are
+                    // both permissive. Losing a high address bit must not be
+                    // hidden by an unrelated missing-PTE guest-page fault.
+                    for (unsigned side = 0; side < 2; ++side) {
+                        const std::uint64_t guest = side == 0
+                            ? limit - 0x1000 : 0;
+                        const std::uint64_t host = physical + side * 0x1000;
+                        const bool mapped = mode ==
+                                memblock::ReferencePageMode::sv48
+                            ? environment.map_sv48x4_4k(guest, host, root)
+                            : environment.map_sv39x4_4k(guest, host, root);
+                        if (!mapped) {
+                            return fail("map");
+                        }
+                    }
+                    if (!environment.activate_two_stage_modes(
+                            memblock::ReferencePageMode::bare, mode,
+                            0, root, 42, 43)) {
+                        return fail("activate");
+                    }
+                    std::optional<std::uint64_t> first_invalid;
+                    unsigned valid_bytes = 0;
+                    for (unsigned byte = 0; byte < width; ++byte) {
+                        const auto walk = memblock::reference_two_stage_access(
+                            environment.memory(), 0, root, address + byte,
+                            kind == 0 ? memblock::ReferenceMemoryAccess::load
+                                      : memblock::ReferenceMemoryAccess::store,
+                            memblock::ReferencePageMode::bare, mode);
+                        if (walk.translated) {
+                            if (walk.physical_address !=
+                                physical + 0x1000 - distance + byte) {
+                                return fail("reference-prefix");
+                            }
+                            ++valid_bytes;
+                        } else {
+                            if (!walk.guest_page_fault ||
+                                walk.stage1_page_fault || walk.access_fault ||
+                                walk.is_for_vs_nonleaf_pte ||
+                                walk.faulting_guest_physical_address !=
+                                    address + byte) {
+                                return fail("reference-fault");
+                            }
+                            if (!first_invalid) {
+                                first_invalid = address + byte;
+                            }
+                        }
+                    }
+                    if (first_invalid != limit || valid_bytes != distance) {
+                        return fail("reference-range");
+                    }
+                    const std::array<std::uint64_t, 2> edge_guest{{limit - 8, 0}};
+                    const std::array<std::uint64_t, 2> edge_host{{
+                        physical + 0xff8, physical + 0x1000}};
+                    std::array<std::uint64_t, 2> edge_data{};
+                    for (unsigned side = 0; side < 2; ++side) {
+                        const auto walk = memblock::reference_two_stage_access(
+                            environment.memory(), 0, root, edge_guest[side],
+                            memblock::ReferenceMemoryAccess::load,
+                            memblock::ReferencePageMode::bare, mode);
+                        if (!walk.translated ||
+                            walk.physical_address != edge_host[side]) {
+                            return fail("control-reference");
+                        }
+                        edge_data[side] = environment.bus_expected_load(
+                            edge_host[side], memblock::LoadOp::ld);
+                        const memblock::LoadTransaction control{
+                            .address = edge_guest[side],
+                            .oracle_address = edge_host[side],
+                            .op = memblock::LoadOp::ld,
+                            .rob = static_cast<std::uint8_t>(side),
+                            .lq = static_cast<std::uint8_t>(side),
+                            .pdest = static_cast<std::uint8_t>(30 + side),
+                            .lane = side,
+                        };
+                        environment.expect_load_data(control, edge_data[side]);
+                        if (!environment.set_rob_head(control.rob) ||
+                            !environment.enqueue_load(control) ||
+                            !environment.issue_load(control, 1024) ||
+                            !environment.run_until_complete(16384) ||
+                            !environment.run_until_lq_retired(4096)) {
+                            return fail("control");
+                        }
+                        ++coverage.controls;
+                    }
+                    const auto lq_before = environment.lq_dequeued();
+                    const auto sq_before = environment.sq_dequeued();
+                    const auto lq_cancels =
+                        environment.lq_redirect_canceled_observed();
+                    const auto sq_cancels =
+                        environment.sq_redirect_canceled_observed();
+                    const auto uncache_before = environment.uncache_requests();
+                    environment.select_store_exception_address(kind != 0);
+                    if (!environment.set_rob_head(2)) {
+                        return fail("head");
+                    }
+                    bool completed = false;
+                    const unsigned fault_flows = kind >= 2 ? 16U / width : 1U;
+                    if (kind == 0) {
+                        const memblock::LoadTransaction fault{
+                            .address = address,
+                            .op = static_cast<memblock::LoadOp>(eew),
+                            .rob = 2,
+                            .lq = 2,
+                            .pdest = 32,
+                            .lane = eew % memblock::kScalarLoadLanes,
+                            .expected_exception_mask =
+                                memblock::kExceptionLoadGuestPageFault,
+                        };
+                        environment.expect_load(fault);
+                        completed = environment.enqueue_load(fault) &&
+                            environment.issue_load(fault, 1024) &&
+                            environment.run_until_complete(16384);
+                        ++coverage.scalar_loads;
+                    } else if (kind == 1) {
+                        const memblock::StoreTransaction fault{
+                            .address = address,
+                            .data = 0x13579bdf2468ace0ULL ^ distance,
+                            .op = static_cast<memblock::StoreOp>(eew),
+                            .rob = 2,
+                            .sq = 0,
+                            .address_lane = eew % memblock::kScalarStoreLanes,
+                            .data_lane = (eew + 1) % memblock::kScalarStoreLanes,
+                            .expected_exception_mask =
+                                memblock::kExceptionStoreGuestPageFault,
+                        };
+                        environment.expect_store(fault);
+                        completed = environment.enqueue_store(fault, 2) &&
+                            environment.issue_store_address(fault, 2048) &&
+                            environment.issue_store_data(fault, 2048) &&
+                            environment.run_until_store_complete_with_replay(
+                                fault, 16384);
+                        ++coverage.scalar_stores;
+                    } else {
+                        const memblock::VectorMemoryTransaction fault{
+                            .store = true,
+                            .address = address,
+                            .stride = static_cast<std::int64_t>(width),
+                            .addressing = kind == 2
+                                ? memblock::VectorAddressingMode::strided
+                                : kind == 3
+                                    ? memblock::VectorAddressingMode::indexed_unordered
+                                    : memblock::VectorAddressingMode::indexed_ordered,
+                            .eew = static_cast<std::uint8_t>(eew),
+                            .vsew = static_cast<std::uint8_t>(eew),
+                            .vl = 1,
+                            .rob = 2,
+                            .lq = 2,
+                            .sq = 0,
+                            .lane = eew % memblock::kVectorMemoryLanes,
+                            .flow_num = static_cast<std::uint8_t>(fault_flows),
+                            .expected_exception_mask =
+                                memblock::kExceptionStoreGuestPageFault,
+                            .expected_writeback_vstart = 0,
+                        };
+                        if (memblock::active_vector_elements(fault) != 1U ||
+                            memblock::vector_element_address(fault, 0) != address) {
+                            return fail("vector-shape");
+                        }
+                        environment.expect_vector(fault);
+                        completed = environment.enqueue_vector(fault) &&
+                            environment.issue_vector(fault, 2048) &&
+                            environment.run_until_vector_complete_with_replays(
+                                fault, 16384);
+                        ++coverage.vector_stores;
+                    }
+                    // Speculative accesses to the legal prefix are allowed.
+                    // The identified completion and full VA/GPA decide the
+                    // result independently of internal split/replay timing.
+                    if (!completed || !environment.run_cycles(8) ||
+                        environment.exception_vaddr() != limit ||
+                        environment.exception_gpaddr() != limit ||
+                        environment.exception_is_for_vs_nonleaf_pte() ||
+                        environment.uncache_requests() != uncache_before) {
+                        return fail("fault");
+                    }
+                    if (!environment.redirect_after(2, false, true, kind >= 2) ||
+                        !environment.run_cycles(32) ||
+                        !environment.run_until_queues_retired(4096)) {
+                        return fail("redirect-retire");
+                    }
+                    const auto lq_dequeued = environment.lq_dequeued() - lq_before;
+                    const auto sq_dequeued = environment.sq_dequeued() - sq_before;
+                    const auto lq_canceled =
+                        environment.lq_redirect_canceled_observed() - lq_cancels;
+                    const auto sq_canceled =
+                        environment.sq_redirect_canceled_observed() - sq_cancels;
+                    if (lq_dequeued + lq_canceled != (kind == 0 ? 1U : 0U) ||
+                        sq_dequeued + sq_canceled != (kind == 0 ? 0U : fault_flows)) {
+                        return fail("queue-conservation");
+                    }
+                    for (unsigned side = 0; side < 2; ++side) {
+                        const auto lq_offset = environment.lq_allocated() -
+                            environment.lq_redirect_canceled_observed();
+                        const memblock::LoadTransaction readback{
+                            .address = edge_guest[side],
+                            .oracle_address = edge_host[side],
+                            .op = memblock::LoadOp::ld,
+                            .rob = static_cast<std::uint8_t>(3 + side),
+                            .lq = memblock::lq_pointer_value(lq_offset),
+                            .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                            .pdest = static_cast<std::uint8_t>(33 + side),
+                            .lane = (eew + side) % memblock::kScalarLoadLanes,
+                        };
+                        environment.expect_load_data(readback, edge_data[side]);
+                        if (environment.bus_expected_load(
+                                edge_host[side], memblock::LoadOp::ld) !=
+                                edge_data[side] ||
+                            !environment.set_rob_head(readback.rob) ||
+                            !environment.enqueue_load(readback) ||
+                            !environment.issue_load(readback, 1024) ||
+                            !environment.run_until_complete(16384) ||
+                            !environment.run_until_lq_retired(4096)) {
+                            return fail("readback");
+                        }
+                        ++coverage.readbacks;
+                    }
+                    environment.select_store_exception_address(false);
+                    const auto sq_offset = environment.sq_allocated() -
+                        environment.sq_redirect_canceled_observed();
+                    const memblock::StoreTransaction survivor{
+                        .address = 0x100,
+                        .oracle_address = physical + 0x1100,
+                        .data = 0xfedcba9876543210ULL ^ distance,
+                        .op = memblock::StoreOp::sd,
+                        .rob = 5,
+                        .sq = memblock::sq_pointer_value(sq_offset),
+                        .sq_flag = memblock::sq_pointer_flag(sq_offset),
+                        .address_lane = eew % memblock::kScalarStoreLanes,
+                        .data_lane = (eew + 1) % memblock::kScalarStoreLanes,
+                    };
+                    const auto survivor_walk = memblock::reference_two_stage_access(
+                        environment.memory(), 0, root, survivor.address,
+                        memblock::ReferenceMemoryAccess::store,
+                        memblock::ReferencePageMode::bare, mode);
+                    environment.expect_store(survivor);
+                    if (!survivor_walk.translated ||
+                        survivor_walk.physical_address != *survivor.oracle_address ||
+                        !environment.set_rob_head(survivor.rob) ||
+                        !environment.enqueue_store(
+                            survivor, memblock::lq_pointer_value(
+                                environment.lq_allocated() -
+                                environment.lq_redirect_canceled_observed())) ||
+                        !environment.issue_store_data(survivor, 2048) ||
+                        !environment.issue_store_address(survivor, 2048) ||
+                        !environment.run_until_store_complete_with_replay(
+                            survivor, 16384) ||
+                        !environment.commit_store(survivor, 4096)) {
+                        return fail("survivor-store");
+                    }
+                    const auto lq_offset = environment.lq_allocated() -
+                        environment.lq_redirect_canceled_observed();
+                    const memblock::LoadTransaction survivor_load{
+                        .address = survivor.address,
+                        .oracle_address = survivor.oracle_address,
+                        .op = memblock::LoadOp::ld,
+                        .rob = 6,
+                        .lq = memblock::lq_pointer_value(lq_offset),
+                        .lq_flag = memblock::lq_pointer_flag(lq_offset),
+                        .pdest = 35,
+                        .lane = eew % memblock::kScalarLoadLanes,
+                    };
+                    environment.expect_load_data(survivor_load, survivor.data);
+                    if (!environment.set_rob_head(survivor_load.rob) ||
+                        !environment.enqueue_load(survivor_load) ||
+                        !environment.issue_load(survivor_load, 1024) ||
+                        !environment.run_until_complete(16384) ||
+                        !environment.run_until_queues_retired(4096)) {
+                        return fail("survivor-load");
+                    }
+                    ++coverage.recoveries;
+                    ++coverage.faults;
+                }
+            }
+        }
+    }
+    return coverage.faults == 110 && coverage.controls == 220 &&
+        coverage.readbacks == 220 && coverage.recoveries == 110 &&
+        coverage.scalar_loads == 22 && coverage.scalar_stores == 22 &&
+        coverage.vector_stores == 66;
+}
+
 int run_translation_faults(int argc, char **argv)
 {
     CanonicalRangeCoverage range_coverage;
     if (!check_canonical_access_ranges(argc, argv, range_coverage)) {
+        return 1;
+    }
+
+    CanonicalRangeCoverage gstage_range_coverage;
+    if (!check_gstage_access_ranges(argc, argv, gstage_range_coverage)) {
         return 1;
     }
 
@@ -2450,7 +2780,9 @@ int run_translation_faults(int argc, char **argv)
                     vs_gpa_width_cases +
                     pte_encoding_cases.size() * 4 + range_coverage.faults +
                     range_coverage.controls + range_coverage.readbacks +
-                    range_coverage.recoveries * 2
+                    range_coverage.recoveries * 2 +
+                    gstage_range_coverage.faults + gstage_range_coverage.controls +
+                    gstage_range_coverage.readbacks + gstage_range_coverage.recoveries * 2
               << " canonical_range_faults=" << range_coverage.faults
               << " canonical_range_controls=" << range_coverage.controls
               << " canonical_range_readbacks=" << range_coverage.readbacks
@@ -2458,6 +2790,13 @@ int run_translation_faults(int argc, char **argv)
               << " canonical_range_scalar_loads=" << range_coverage.scalar_loads
               << " canonical_range_scalar_stores=" << range_coverage.scalar_stores
               << " canonical_range_vector_stores=" << range_coverage.vector_stores
+              << " gstage_range_faults=" << gstage_range_coverage.faults
+              << " gstage_range_controls=" << gstage_range_coverage.controls
+              << " gstage_range_readbacks=" << gstage_range_coverage.readbacks
+              << " gstage_range_recoveries=" << gstage_range_coverage.recoveries
+              << " gstage_range_scalar_loads=" << gstage_range_coverage.scalar_loads
+              << " gstage_range_scalar_stores=" << gstage_range_coverage.scalar_stores
+              << " gstage_range_vector_stores=" << gstage_range_coverage.vector_stores
               << " canonical_boundary_cases=" << canonical_boundary_cases
               << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " ppn_access_fault_cases=" << ppn_access_fault_cases

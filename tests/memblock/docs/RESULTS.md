@@ -4271,3 +4271,22 @@ with enabled concurrent/Probe traffic, not the newer schema-49 vector subclass.
 Its artifact is `build/memblock/canonical-regression/coverage.json`; SPEC 211
 and corner 213 are still running at this checkpoint. No six-hour closure
 claim is made from these finite capability regressions.
+
+
+## Directed G-only Access-Range Faults
+
+The rebuilt frozen `translation-faults` scenario passes 2,568 transactions.
+The added matrix reports 110 G-only guest-page faults, 220 positive controls,
+220 real edge readbacks, and 110 committed store/load recovery pairs: 22
+scalar loads, 22 scalar stores, and 66 singleton strided/indexed vector
+stores across Sv39x4/Sv48x4 and every 2/4/8-byte upper-limit crossing distance.
+All 110 faults preserve exact first-invalid VA/GPA and the non-leaf marker;
+all queue retirement/cancellation is externally observed. The earlier
+220-fault canonical matrix and its counters remain unchanged.
+
+Independent-context review found no material issue in the oracle, queue
+reservation, permissive zero alias, side-effect readback, or survivor checks.
+The source diff, build provenance, frozen runtime, and execution log are in
+`build/memblock/gstage-range-runtime/`. This closes directed upper-limit
+coverage only; G-stage mixed traffic, vector loads/unit-stride, and broader
+vector progress/shape crosses remain gaps. No CPU RTL bug is claimed.

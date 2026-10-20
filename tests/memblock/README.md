@@ -461,7 +461,13 @@ bit outside the selected 41/50-bit GPA plus PPN[43], bringing that matrix to
 boundaries, every 2/4/8-byte crossing distance, scalar loads/stores, and
 strided/indexed-unordered/indexed-ordered vector stores. Its 440 permissive
 alias controls, 440 unchanged-edge readbacks, and 220 same-instance committed
-store/load recovery pairs bring the scenario total to 1,798 transactions.
+store/load recovery pairs bring that subtotal to 1,798 transactions. A separate
+G-only matrix crosses the 41/50-bit GPA upper limits with the same five
+scalar/vector access kinds and every 2/4/8-byte crossing distance. Its 110
+guest-page faults, 220 permissive last-page/zero-alias controls, 220 unchanged
+edge readbacks, and 110 committed store/load survivor pairs bring the total
+to 2,568 transactions. Exact first-invalid VA/GPA and the non-leaf marker are
+checked independently, while legal speculative prefix traffic is allowed.
 Queue retirement/cancellation must be externally observed; no manual
 cancellation closes this matrix. Schema 48 also adds `canonical-boundary` to
 `random-mixed`, closing the 24 enabled scalar mode/direction/boundary/width
@@ -470,7 +476,7 @@ and indexed vector-store bins, with externally conserved SQ flows, unchanged
 edge readbacks, and a committed survivor store/load pair. Eligibility honors
 all shape weights and the compatible VL/vstart/mask policy endpoints; see
 `CONSTRAINED_RANDOM.md`. Broader vector shapes, multi-element fault progress,
-vector loads, and G-stage address limits remain explicit gaps.
+vector loads, and mixed G-stage address-limit traffic remain explicit gaps.
 The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an
