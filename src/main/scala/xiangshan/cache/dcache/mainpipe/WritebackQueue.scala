@@ -80,22 +80,21 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
     val primary_valid = Input(Bool())
     val primary_ready = Output(Bool())
-    val primary_ready_dup = Vec(nDupWbReady, Output(Bool()))
 
     val block_addr  = Output(Valid(UInt()))
     val resp_channel = Output(UInt(CCHIChannelBits.W))
   })
 
-  // Entry lifecycle: invalid (free) / out (driving TX) / wait (for DnRSP).
-  val s_invalid :: s_out :: s_wait :: Nil = Enum(3)
-
-  // CHI step within one writeback; paired with state but not 1:1 (s_out covers several phases).
-  val phase_idle :: phase_probe_rsp :: phase_probe_dat :: phase_evt :: phase_copyback :: phase_wait :: Nil = Enum(6)
+  // Entry lifecycle = CHI step of one writeback:
+  //   s_invalid: free
+  //   s_probe_rsp / s_probe_dat: SnpResp / SnpRespData beats (non-voluntary)
+  //   s_evt: Evict / WriteBackFull EVT (voluntary)
+  //   s_copyback: CopyBackWrData beats after DBIDResp
+  //   s_wait: DnRSP pending (Comp / DBIDResp)
+  val s_invalid :: s_probe_rsp :: s_probe_dat :: s_evt :: s_copyback :: s_wait :: Nil = Enum(6)
 
   val state = RegInit(s_invalid)
-  val state_dup_for_mp = RegInit(VecInit(Seq.fill(nDupWbReady)(s_invalid)))
 
-  val phase = RegInit(phase_idle)
   // One-hot mask of TX beats still to send (probe data, EVT, or CopyBackWrData).
   val remain = RegInit(0.U(refillCycles.W))
   val remain_dup_0 = RegInit(0.U(refillCycles.W))
@@ -139,8 +138,8 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   s_data_override := true.B // default; alloc clears for one cycle to load req_data
 
-  XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d phase: %d block_addr: %x\n",
-    io.id, state, phase, io.block_addr.bits)
+  XSDebug(state =/= s_invalid, "WritebackEntry: %d state: %d block_addr: %x\n",
+    io.id, state, io.block_addr.bits)
 
   io.req.ready := state === s_invalid
   val alloc = io.req.valid && io.primary_valid && io.primary_ready
@@ -158,15 +157,12 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     s_data_override := false.B
 
     when (!io.req.bits.voluntary) {
-      phase := Mux(io.req.bits.hasData, phase_probe_dat, phase_probe_rsp)
+      state := Mux(io.req.bits.hasData, s_probe_dat, s_probe_rsp)
       remain_set := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-      state := s_out
     } .otherwise {
-      phase := phase_evt
+      state := s_evt
       remain_set := 1.U(refillCycles.W)
-      state := s_out
     }
-    state_dup_for_mp.foreach(_ := Mux(io.req.bits.voluntary, s_wait, s_invalid)) // MP backpressure: voluntary holds addr early
   }
 
   val beat = PriorityEncoder(remain_dup_0)
@@ -181,33 +177,29 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 
   val tx_fire = io.txevt.fire || io.txrsp.fire || io.txdat.fire
 
-  when (phase === phase_probe_rsp) {
+  when (state === s_probe_rsp) {
     io.txrsp.valid := busy
     DCacheCCHI.Tx.snpResp(io.txrsp.bits, snp_txn_id, snp_tgt_id, req.param, req.dirty, trace_tag,
       cchiDcacheSrcId(resp_channel))
     when (io.txrsp.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
-      phase := phase_idle
       state := s_invalid
-      state_dup_for_mp.foreach(_ := s_invalid)
     }
   }
 
-  when (phase === phase_probe_dat) {
+  when (state === s_probe_dat) {
     io.txdat.valid := busy
     DCacheCCHI.Tx.snpRespData(io.txdat.bits, snp_txn_id, snp_tgt_id, req.param, req.dirty, beat, beat_data(beat),
       req.corrupt, trace_tag, cchiDcacheSrcId(resp_channel))
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       when (PopCount(remain) === 1.U) {
-        phase := phase_idle
         state := s_invalid
-        state_dup_for_mp.foreach(_ := s_invalid)
       }
     }
   }
 
-  when (phase === phase_evt) {
+  when (state === s_evt) {
     io.txevt.valid := busy
     when (req.hasData) {
       DCacheCCHI.Tx.evtWriteBackFull(io.txevt.bits, io.id, req.addr, cchiDcacheSrcId(resp_channel))
@@ -216,45 +208,32 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     }
     when (io.txevt.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
-      phase := phase_wait
       state := s_wait
-      state_dup_for_mp.foreach(_ := s_wait)
     }
   }
 
-  when (phase === phase_copyback) {
+  when (state === s_copyback) {
     io.txdat.valid := busy
     DCacheCCHI.Tx.copyBackWrData(io.txdat.bits, copyback_dbid, copyback_tgt_id, beat, beat_data(beat), req.corrupt,
       cchiDcacheSrcId(resp_channel), trace_tag)
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       when (PopCount(remain) === 1.U) {
-        when (got_comp) {
-          phase := phase_idle
-          state := s_invalid
-          state_dup_for_mp.foreach(_ := s_invalid)
-        } .otherwise {
-          phase := phase_wait
-          state := s_wait
-        }
+        state := Mux(got_comp, s_invalid, s_wait)
       }
     }
   }
 
-  when (phase === phase_wait && io.rxrsp.valid) {
+  when (state === s_wait && io.rxrsp.valid) {
     io.rxrsp.ready := true.B
     when (io.rxrsp.fire) {
       when (CCHIOpcode.Comp.is(io.rxrsp.bits.Opcode)) {
         got_comp := true.B
         when (!req.hasData) {
-          phase := phase_idle
           state := s_invalid
-          state_dup_for_mp.foreach(_ := s_invalid)
         } .elsewhen (got_dbid && remain === 0.U) {
           // WriteBackFull: Comp may arrive after CopyBackWrData (no fixed order with DBID).
-          phase := phase_idle
           state := s_invalid
-          state_dup_for_mp.foreach(_ := s_invalid)
         }
       }
       when (CCHIOpcode.DBIDResp.is(io.rxrsp.bits.Opcode) ||
@@ -263,18 +242,16 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
         got_dbid := true.B
         copyback_dbid := io.rxrsp.bits.DBID
         copyback_tgt_id := io.rxrsp.bits.SrcID
-        when (CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode)) {
-          got_comp := true.B
-        }
-        phase := phase_copyback
-        state := s_out
+        state := s_copyback
         remain_set := ~0.U(refillCycles.W)
+      }
+      when (CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode)) {
+        got_comp := true.B
       }
     }
   }
 
   io.primary_ready := state === s_invalid
-  io.primary_ready_dup.zip(state_dup_for_mp).foreach { case (rdy, st) => rdy := st === s_invalid }
 
   // Wide data from MainPipe arrives one cycle after ctrl/addr (see WritebackQueue.req_data).
   when (!s_data_override && (req.hasData || RegNext(alloc))) {
@@ -282,7 +259,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   }
 
   XSPerfAccumulate("wb_req", io.req.fire)
-  XSPerfAccumulate("wb_release", tx_fire && req.voluntary && phase === phase_evt)
+  XSPerfAccumulate("wb_release", tx_fire && req.voluntary && state === s_evt)
   XSPerfAccumulate("wb_probe_resp", tx_fire && !req.voluntary)
   XSPerfAccumulate("penalty_blocked_by_txevt", io.txevt.valid && !io.txevt.ready)
   XSPerfAccumulate("penalty_blocked_by_txrsp", io.txrsp.valid && !io.txrsp.ready)
@@ -294,7 +271,6 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
 {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
-    val req_ready_dup = Vec(nDupWbReady, Output(Bool()))
     val txevt = Vec(nCCHIChannels, DecoupledIO(new FlitEVT))
     val txrsp = Vec(nCCHIChannels, DecoupledIO(new FlitUpRSP))
     val txdat = Vec(nCCHIChannels, DecoupledIO(new FlitUpDAT))
@@ -380,10 +356,6 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
     lowestArb(io.txevt(0), entries.map(_.io.txevt))
     lowestArb(io.txrsp(0), entries.map(_.io.txrsp))
     lowestArb(io.txdat(0), entries.map(_.io.txdat))
-  }
-
-  io.req_ready_dup.zipWithIndex.foreach { case (rdy, i) =>
-    rdy := Cat(entries.map(_.io.primary_ready_dup(i))).orR && !block_conflict
   }
 
   block_conflict := VecInit(entries.map(e => e.io.block_addr.valid && e.io.block_addr.bits === io.req.bits.addr)).asUInt.orR

@@ -226,7 +226,6 @@ trait HasDCacheParameters
     // data_write.ready -> err_write.valid
     // data_write.ready -> wb.valid
   val nDupDataWriteReady = DCacheBanks + 4
-  val nDupWbReady = DCacheBanks + 4
   val nDupStatus = nDupTagWriteReady + nDupDataWriteReady
   val dataWritePort = 0
   val metaWritePort = DCacheBanks
@@ -1630,7 +1629,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
   mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
-  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
 
   //----------------------------------------
   // wb
