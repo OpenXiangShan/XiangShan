@@ -87,7 +87,8 @@ class TageTable(
 
   private val readDuringUsefulReset = io.readReq.map { readReq =>
     (0 until NumBanks).map { bankIdx =>
-      readReq.valid && readReq.bits.bankMask(bankIdx) && usefulResetInFlightMask(bankIdx)
+      readReq.valid && readReq.bits.bankMask(bankIdx) &&
+      (usefulResetInFlightMask(bankIdx) || io.usefulResetStart)
     }.reduce(_ || _)
   }
 
@@ -99,7 +100,7 @@ class TageTable(
         WriteBufferSize,
         hasCnt = true,
         hasLookup = true,
-        numLookupPorts = 2,
+        numLookupPorts = 1,
         nameSuffix = s"tageTable${tableIdx}_${bankIdx}_way${wayIdx}"
       )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
@@ -116,8 +117,6 @@ class TageTable(
       )).suggestName(s"tage_useful_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
-  private val predictReadGrants = Wire(Vec(NumBanks, Vec(NumWays, Bool())))
-
   (0 until NumBanks).foreach { case bankIdx =>
     val predictRead = io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
     val trainRead   = io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
@@ -125,24 +124,19 @@ class TageTable(
       !(predictRead && trainRead),
       s"tage_table_${tableIdx} bank_${bankIdx}: prediction read and training read use the same bank"
     )
+    val readValid  = trainRead || predictRead
     val readSetIdx = Mux(trainRead, io.readReq(1).bits.setIdx, io.readReq(0).bits.setIdx)
 
     (0 until NumWays).foreach { case wayIdx =>
-      val full             = entryWriteBuffers(bankIdx)(wayIdx).io.full.head
-      val predictReadGrant = predictRead && !full
-      val readValid        = trainRead || predictReadGrant
-      predictReadGrants(bankIdx)(wayIdx) := predictReadGrant
-
       entrySram(bankIdx)(wayIdx).io.r.req.valid       := readValid
       entrySram(bankIdx)(wayIdx).io.r.req.bits.setIdx := readSetIdx
 
-      usefulCtrSram(bankIdx)(wayIdx).io.r.req.valid       := readValid && !usefulResetInFlightMask(bankIdx)
+      usefulCtrSram(bankIdx)(wayIdx).io.r.req.valid :=
+        readValid && !(usefulResetInFlightMask(bankIdx) || io.usefulResetStart)
       usefulCtrSram(bankIdx)(wayIdx).io.r.req.bits.setIdx := readSetIdx
 
       entryWriteBuffers(bankIdx)(wayIdx).io.lookupEn.get(0)     := predictRead
-      entryWriteBuffers(bankIdx)(wayIdx).io.lookupEn.get(1)     := trainRead
       entryWriteBuffers(bankIdx)(wayIdx).io.lookupSetIdx.get(0) := io.readReq(0).bits.setIdx
-      entryWriteBuffers(bankIdx)(wayIdx).io.lookupSetIdx.get(1) := io.readReq(1).bits.setIdx
     }
   }
 
@@ -182,7 +176,7 @@ class TageTable(
       val bufferOut   = buffer.io.read.head
       val predictRead = io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx)
       val trainRead   = io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
-      val writeGrant  = !trainRead && (!predictRead || buffer.io.full.head)
+      val writeGrant  = !trainRead && !predictRead
 
       way.io.w.apply(
         bufferOut.valid && writeGrant,
@@ -199,19 +193,18 @@ class TageTable(
     }
   }
 
-  private val bypass    = Seq.fill(NumTableReadPorts)(Wire(Vec(NumWays, Valid(new TageEntry))))
-  private val bypassReg = Seq.fill(NumTableReadPorts)(RegInit(0.U.asTypeOf(Vec(NumWays, Valid(new TageEntry)))))
+  // Only prediction reads bypass pending writes; training reads use SRAM directly.
+  private val predictReadBypass    = Wire(Vec(NumWays, Valid(new TageEntry)))
+  private val predictReadBypassReg = RegInit(0.U.asTypeOf(Vec(NumWays, Valid(new TageEntry))))
 
-  for (i <- 0 until NumTableReadPorts) {
-    bypass(i).indices.foreach { wayIdx =>
-      val lookup = entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get(i).head)
-      bypass(i)(wayIdx).valid := Mux1H(io.readReq(i).bits.bankMask, lookup.map(_.valid))
-      bypass(i)(wayIdx).bits  := Mux1H(io.readReq(i).bits.bankMask, lookup.map(_.bits.entry))
-    }
+  predictReadBypass.indices.foreach { wayIdx =>
+    val lookup = entryWriteBuffers.map(_.apply(wayIdx).io.lookup.get(0).head)
+    predictReadBypass(wayIdx).valid := Mux1H(io.readReq(0).bits.bankMask, lookup.map(_.valid))
+    predictReadBypass(wayIdx).bits  := Mux1H(io.readReq(0).bits.bankMask, lookup.map(_.bits.entry))
+  }
 
-    when(io.readReq(i).valid) {
-      bypassReg(i) := bypass(i)
-    }
+  when(io.readReq(0).valid) {
+    predictReadBypassReg := predictReadBypass
   }
 
   usefulCtrSram.zip(usefulCtrWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffer), bankIdx) =>
@@ -241,14 +234,6 @@ class TageTable(
   }
 
   io.readResp.zipWithIndex.foreach { case (resp, i) =>
-    val sramGrant = VecInit((0 until NumWays).map { wayIdx =>
-      val grantByBank = VecInit((0 until NumBanks).map { bankIdx =>
-        if (i == 1) io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
-        else predictReadGrants(bankIdx)(wayIdx)
-      })
-      Mux1H(io.readReq(i).bits.bankMask, grantByBank)
-    })
-    val sramGrantNext             = RegEnable(sramGrant, io.readReq(i).valid)
     val readDuringUsefulResetNext = RegEnable(readDuringUsefulReset(i), io.readReq(i).valid)
     val readBankMaskNext          = RegEnable(io.readReq(i).bits.bankMask, io.readReq(i).valid)
     val readValidNext             = RegNext(io.readReq(i).valid, init = false.B)
@@ -263,19 +248,22 @@ class TageTable(
     )
 
     (0 until NumWays).foreach { wayIdx =>
-      val sramEntry   = sramEntries(wayIdx)
-      val bypassEntry = bypassReg(i)(wayIdx)
-      val mergedEntry = Mux(bypassEntry.valid, bypassEntry.bits, sramEntry)
+      val readEntry = if (i == 0) {
+        val bypassEntry = predictReadBypassReg(wayIdx)
+        Mux(bypassEntry.valid, bypassEntry.bits, sramEntries(wayIdx))
+      } else {
+        sramEntries(wayIdx)
+      }
 
-      resp.entries(wayIdx)       := mergedEntry
-      resp.entries(wayIdx).valid := mergedEntry.valid && readValidNext && (bypassEntry.valid || sramGrantNext(wayIdx))
+      resp.entries(wayIdx)       := readEntry
+      resp.entries(wayIdx).valid := readEntry.valid && readValidNext
     }
 
     resp.usefulCtrs := Mux(
       readDuringUsefulResetNext,
       VecInit.fill(NumWays)(UsefulCounter.Zero),
       if (i == 0) {
-        VecInit(sramUsefulCtrs.zip(bypassReg(i)).map { case (sramUsefulCtr, bypassEntry) =>
+        VecInit(sramUsefulCtrs.zip(predictReadBypassReg).map { case (sramUsefulCtr, bypassEntry) =>
           Mux(bypassEntry.valid, UsefulCounter.Zero, sramUsefulCtr)
         })
       } else {
@@ -304,6 +292,5 @@ class TageTable(
     "overwrite",
     PopCount(entryWriteBuffers.flatMap(_.flatMap(_.io.overwrite)))
   )
-  XSPerfAccumulate("predict_read_bypass", PopCount(bypass(0).map(_.valid)))
-  XSPerfAccumulate("train_read_bypass", PopCount(bypass(1).map(_.valid)))
+  XSPerfAccumulate("predict_read_bypass", PopCount(predictReadBypass.map(_.valid)))
 }

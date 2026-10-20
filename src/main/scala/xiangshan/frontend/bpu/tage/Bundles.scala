@@ -120,8 +120,9 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
-  val altOrBasePred:     Bool            = Bool()
-  val altConf:           Bool            = Bool()
+  val altTableIdx:       UInt            = UInt(TableIdxWidth.W)
+  val altWayIdx:         UInt            = UInt(MaxNumWays.W)
+  val altTakenCtr:       SaturateCounter = TakenCounter()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
@@ -139,21 +140,14 @@ class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBu
   val forTag: Vec[UInt] = Vec(2, UInt(TagWidth.W))
 }
 
-class PredictTagMatchResult(implicit p: Parameters) extends TageBundle {
-  val hit:          Bool            = Bool()
-  val hitWayMaskOH: UInt            = UInt(MaxNumWays.W)
-  val takenCtr:     SaturateCounter = TakenCounter()
-  val usefulCtr:    SaturateCounter = UsefulCounter()
-  // perf analysis only
-  val hitWayMask: UInt = UInt(MaxNumWays.W)
-}
-
-class TrainTagMatchResult(implicit p: Parameters) extends TageBundle {
+class TagMatchResult(implicit p: Parameters) extends TageBundle {
   val hit:          Bool            = Bool()
   val hitWayMaskOH: UInt            = UInt(MaxNumWays.W)
   val tag:          UInt            = UInt(TagWidth.W)
   val takenCtr:     SaturateCounter = TakenCounter()
   val usefulCtr:    SaturateCounter = UsefulCounter()
+  // perf analysis only
+  val hitWayMask: UInt = UInt(MaxNumWays.W)
 }
 
 class TrainInfo(implicit p: Parameters) extends TageBundle {
@@ -183,7 +177,7 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val decUseAltOnNa: Bool = Bool()
   val useAltOnNaIdx: UInt = UInt(UseAltOnNaIdxWidth.W)
 
-  val finalPred:   Bool = Bool()
+  val tageTaken:   Bool = Bool()
   val actualTaken: Bool = Bool() // used for writeBuffer
 
   // perf analysis only
@@ -216,7 +210,7 @@ class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
   val altTakenCtr:  SaturateCounter = TakenCounter()
   val altUsefulCtr: SaturateCounter = UsefulCounter()
 
-  val finalPred:   Bool = Bool()
+  val tageTaken:   Bool = Bool()
   val actualTaken: Bool = Bool()
   val mispredict:  Bool = Bool()
 
