@@ -53,8 +53,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   val io: IttageIO = IO(new IttageIO)
 
-  io.trainReady := true.B
-
   private val s0_startPc = io.startPc
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
   private val s1_fire    = io.stageCtrl.s1_fire && io.enable
@@ -112,79 +110,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
   io.meta := ittageMeta
-
-  private val t0_fire = io.enable && io.stageCtrl.t0_fire
-
-  private val t1_train = Wire(new Train)
-  t1_train := RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
-
-  private val t1_meta = Wire(new IttageMeta)
-  t1_train.meta.ittage := t1_meta
-
-  private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, t0_fire)
-
-  private val updateStartPc   = t1_train.startPc
-  private val updateFoldedPhr = t1_trainFoldedPhr
-
-  // To improve Clock Gating Efficiency
-  private val t0_meta = io.train.meta.ittage
-  t1_meta := RegEnable(t0_meta, t0_fire)
-  t1_meta.provider.bits := RegEnable(
-    t0_meta.provider.bits,
-    t0_fire && t0_meta.provider.valid
-  )
-  t1_meta.providerTarget := RegEnable(
-    t0_meta.providerTarget,
-    0.U.asTypeOf(t0_meta.providerTarget),
-    t0_fire && t0_meta.provider.valid
-  )
-  t1_meta.allocate.bits := RegEnable(
-    t0_meta.allocate.bits,
-    t0_fire && t0_meta.allocate.valid
-  )
-  t1_meta.altProvider.bits := RegEnable(
-    t0_meta.altProvider.bits,
-    t0_fire && t0_meta.altProvider.valid
-  )
-  t1_meta.altProviderTarget := RegEnable(
-    t0_meta.altProviderTarget,
-    0.U.asTypeOf(t0_meta.altProviderTarget),
-    t0_fire && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
-  )
-
-  // Select the branch needed for training
-  val trainBranchIdxVec: Vec[Bool] = VecInit(t1_train.branches.map(b =>
-    b.valid && b.bits.attribute.needIttage && b.bits.taken
-  ))
-  assert(
-    PopCount(trainBranchIdxVec) <= 1.U,
-    "At most one branch in branches should be valid and isOtherIndirect for ITTAGE update"
-  )
-  val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
-  val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
-
-  // Update condition for ittage
-  private val updateValid = hasTrainBranch && RegNext(t0_fire, init = false.B)
-
-  private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
-  private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
-  private val updateResetUsefulCnt  = WireInit(false.B)
-  private val updateCorrect         = Wire(Vec(NumTables, Bool()))
-  private val updateAlloc           = Wire(Vec(NumTables, Bool()))
-  private val updateOldCnt          = Wire(Vec(NumTables, ConfidenceCounter()))
-  private val updateUsefulCnt       = Wire(Vec(NumTables, UsefulCounter()))
-  private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
-  private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
-  updateCorrect         := DontCare
-  updateAlloc           := DontCare
-  updateOldCnt          := DontCare
-  updateUsefulCnt       := DontCare
-  updateTargetOffset    := DontCare
-  updateOldTargetOffset := DontCare
-
-  // Use the misprediction bits from the training bundle so allocation and
-  // certain updates (e.g. alt-provider penalty) only happen on actual mispreds.
-  private val updateMisPred = hasTrainBranch && t1_train.branches(trainBranchIdx).bits.mispredict
 
   // Predict
   tables.foreach { t =>
@@ -305,6 +230,110 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val s2_allocEntry  = Mux(s2_allocatableSlots(s2_maskedEntry), s2_maskedEntry, s2_firstEntry)
   ittageMeta.allocate.valid := RegEnable(s2_allocatableSlots =/= 0.U, s2_fire)
   ittageMeta.allocate.bits  := RegEnable(s2_allocEntry, s2_fire)
+
+  /* *** train/update pipeline *** */
+  // Select the indirect branch used by ITTAGE training before issuing a
+  // training read.  FTQ guarantees that this vector is at most one-hot.
+  private val t0_startPc = io.train.startPc
+  private val t0_trainBranchMask = VecInit(io.train.branches.map(b =>
+    b.valid && b.bits.attribute.needIttage && b.bits.taken
+  ))
+  private val t0_hasTrainBranch = t0_trainBranchMask.asUInt.orR
+  private val t0_trainBranchIdx = PriorityEncoder(t0_trainBranchMask)
+  private val t0_meta           = io.train.meta.ittage
+  private val t0_updateMisPred = t0_hasTrainBranch &&
+    io.train.branches(t0_trainBranchIdx).bits.mispredict
+
+  // Re-read only when the saved prediction metadata is insufficient for the
+  // update.  This follows TAGE's update-time read policy: a misprediction
+  // needs a fresh provider/allocation view, and an alternate prediction needs
+  // a fresh alternate entry.
+  private val t0_needRead = t0_hasTrainBranch && (t0_updateMisPred || t0_meta.provider.valid)
+
+  // ITTAGE prediction reads occur in s1, rather than TAGE's s0.  A bank
+  // conflict blocks the FTQ training handshake; prediction keeps priority.
+  private val s1_bankIdx = tables.head.getBankIndex(s1_startPc.unGuard)
+  private val t0_bankIdx = tables.head.getBankIndex(t0_startPc)
+  private val t0_readBankConflict =
+    t0_needRead && s1_fire && s1_isIndirect && t0_bankIdx === s1_bankIdx
+  io.trainReady := !t0_readBankConflict
+
+  private val t0_fire = io.enable && io.stageCtrl.t0_fire && t0_hasTrainBranch
+
+  tables.foreach { table =>
+    table.io.trainReq.valid           := t0_fire && t0_needRead
+    table.io.trainReq.bits.startPc    := t0_startPc
+    table.io.trainReq.bits.foldedHist := io.trainFoldedPhr
+  }
+
+  private val t1_train = Wire(new Train)
+  t1_train := RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
+
+  private val t1_meta = Wire(new IttageMeta)
+  t1_train.meta.ittage := t1_meta
+
+  private val t1_trainFoldedPhr = RegEnable(io.trainFoldedPhr, t0_fire)
+
+  private val updateStartPc   = t1_train.startPc
+  private val updateFoldedPhr = t1_trainFoldedPhr
+
+  // To improve Clock Gating Efficiency
+  t1_meta := RegEnable(t0_meta, t0_fire)
+  t1_meta.provider.bits := RegEnable(
+    t0_meta.provider.bits,
+    t0_fire && t0_meta.provider.valid
+  )
+  t1_meta.providerTarget := RegEnable(
+    t0_meta.providerTarget,
+    0.U.asTypeOf(t0_meta.providerTarget),
+    t0_fire && t0_meta.provider.valid
+  )
+  t1_meta.allocate.bits := RegEnable(
+    t0_meta.allocate.bits,
+    t0_fire && t0_meta.allocate.valid
+  )
+  t1_meta.altProvider.bits := RegEnable(
+    t0_meta.altProvider.bits,
+    t0_fire && t0_meta.altProvider.valid
+  )
+  t1_meta.altProviderTarget := RegEnable(
+    t0_meta.altProviderTarget,
+    0.U.asTypeOf(t0_meta.altProviderTarget),
+    t0_fire && t0_meta.provider.valid && t0_meta.altProvider.valid && t0_meta.providerCnt.isSaturateNegative
+  )
+
+  // Select the branch needed for training.
+  private val trainBranchIdxVec: Vec[Bool] = VecInit(t1_train.branches.map(b =>
+    b.valid && b.bits.attribute.needIttage && b.bits.taken
+  ))
+  assert(
+    PopCount(trainBranchIdxVec) <= 1.U,
+    "At most one branch in branches should be valid and isOtherIndirect for ITTAGE update"
+  )
+  private val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
+  private val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
+
+  private val updateValid = hasTrainBranch && RegNext(t0_fire, init = false.B)
+
+  private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
+  private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
+  private val updateResetUsefulCnt  = WireInit(false.B)
+  private val updateCorrect         = Wire(Vec(NumTables, Bool()))
+  private val updateAlloc           = Wire(Vec(NumTables, Bool()))
+  private val updateOldCnt          = Wire(Vec(NumTables, ConfidenceCounter()))
+  private val updateUsefulCnt       = Wire(Vec(NumTables, UsefulCounter()))
+  private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
+  private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
+  updateCorrect         := DontCare
+  updateAlloc           := DontCare
+  updateOldCnt          := DontCare
+  updateUsefulCnt       := DontCare
+  updateTargetOffset    := DontCare
+  updateOldTargetOffset := DontCare
+
+  // Use the misprediction bits from the training bundle so allocation and
+  // certain updates (e.g. alt-provider penalty) only happen on actual mispreds.
+  private val updateMisPred = hasTrainBranch && t1_train.branches(trainBranchIdx).bits.mispredict
 
   // Update in loop
   private val updateRealTarget       = t1_train.branches(trainBranchIdx).bits.target
