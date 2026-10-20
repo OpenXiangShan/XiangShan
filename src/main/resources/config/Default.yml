@@ -77,6 +77,8 @@ WFIClockGate: false
 
 EnablePowerDown: false
 
+EnableColdReset: false
+
 XSTopPrefix: ""
 
 EnableDFX: true

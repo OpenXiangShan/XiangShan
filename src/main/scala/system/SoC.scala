@@ -141,7 +141,17 @@ case class SoCParameters
   // when UsePrivateClint is false, mtip is from soc.
   UsePrivateClint: Boolean = false,
   WFIClockGate: Boolean = false,
-  EnablePowerDown: Boolean = false
+  EnablePowerDown: Boolean = false,
+  // Supported only by XSNoCTop/XSNoCDiffTop, not XSTop/XSTileDiffTop or the default
+  // make sim-verilog flow. The integration/harness must drive the additional active-high
+  // asynchronous cold_reset input (also exposed by the NoC emulator) and assert it at power-on.
+  // Cold reset is synchronized in XSTileWrap and resets the BEU and both its global
+  // and local/NMI interrupt buffers; functional/warm reset preserves their state.
+  // Before warm reset, quiesce the error source, clear every set BEU accrued bit, and ensure
+  // the writes complete; otherwise interrupts remain asserted or reassert after reset.
+  // To retain diagnostics, clear only accrued, leaving cause/value intact. New cause/value
+  // are recorded only when cause == 0.
+  EnableColdReset: Boolean = false
 ){
   require(
     !IMSICParams.HasTEEIMSIC || (IMSICParams.HasTEEIMSIC && IMSICBusType == device.IMSICBusType.AXI),
@@ -216,6 +226,7 @@ trait HasSoCParameter {
 
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
+  val EnableColdReset = soc.EnableColdReset
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
