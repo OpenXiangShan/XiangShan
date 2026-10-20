@@ -2,16 +2,16 @@
 
 ## Scope and intent
 
-These instructions apply to work under `tests/memblock`. The purpose of this environment is **defensive functional verification** of XiangShan's generated Kunminghu-v2 `MemBlock`, especially LSU, DCache, translation, memory-side protocols, and related top-level contracts.
+These instructions govern MemBlock verification work in this repository, primarily under `tests/memblock`. The purpose of this environment is **defensive functional verification** of XiangShan's generated Kunminghu-v2 `MemBlock`, especially LSU, DCache, translation, memory-side protocols, and related top-level contracts.
 
 Direct user instructions always take precedence. For detailed project state, use these documents as the source of truth:
 
-* `README.md`: build, setup, and execution workflow.
-* `docs/IO_COVERAGE.md`: authoritative top-level IO, constrained-random mapping, implementation status, and remaining coverage gaps.
-* `docs/VERIFICATION_PLAN.md`: verification scope, implemented points, and explicit gaps.
-* `docs/ORACLES.md`: correctness contracts and independent reference-model rules.
-* `docs/CONSTRAINED_RANDOM.md`: canonical constrained-random interface and constraint profiles.
-* `docs/USER_PROMPTS.md`: historical provenance. It explains how these principles were derived, but should not replace the normalized rules in this file.
+* `tests/memblock/README.md`: build, setup, and execution workflow.
+* `tests/memblock/docs/IO_COVERAGE.md`: authoritative top-level IO, constrained-random mapping, implementation status, and remaining coverage gaps.
+* `tests/memblock/docs/VERIFICATION_PLAN.md`: verification scope, implemented points, and explicit gaps.
+* `tests/memblock/docs/ORACLES.md`: correctness contracts and independent reference-model rules.
+* `tests/memblock/docs/CONSTRAINED_RANDOM.md`: canonical constrained-random interface and constraint profiles.
+* `tests/memblock/docs/USER_PROMPTS.md`: historical provenance. It explains how these principles were derived, but should not replace the normalized rules in this file.
 
 ## 1. Verification priorities
 
@@ -66,13 +66,13 @@ If a supposedly useful long-running random campaign cannot reproduce a known rea
 
 ## 4. Coverage closure is continuous work
 
-`docs/VERIFICATION_PLAN.md` must remain a comprehensive inventory of all testable MemBlock behavior and all known gaps.
-`docs/IO_COVERAGE.md` must remain the matching top-level IO inventory and semantic-status matrix.
+`tests/memblock/docs/VERIFICATION_PLAN.md` must remain a comprehensive inventory of all testable MemBlock behavior and all known gaps.
+`tests/memblock/docs/IO_COVERAGE.md` must remain the matching top-level IO inventory and semantic-status matrix.
 
 While working:
 
 * review the generated MemBlock top-level IO and relevant specification/code regularly;
-* update `docs/IO_COVERAGE.md` whenever an IO group, driver, legal-value class, or implementation status changes, and run `make check-docs`;
+* update `tests/memblock/docs/IO_COVERAGE.md` whenever an IO group, driver, legal-value class, or implementation status changes, and run `make -C tests/memblock check-docs`;
 * add missing legal modes, instruction classes, protocol paths, boundary cases, and interactions to the plan;
 * keep unsupported or integration-only behavior explicit rather than silently claiming coverage;
 * when a gap is identified, prefer implementing the missing verification capability before launching another very long regression.
@@ -96,7 +96,7 @@ Follow these rules:
 5. Reject forbidden side effects, duplicate completions, lost work, protocol instability, and incorrect architectural state.
 6. Do not turn a historical failing value, a specific seed result, or an RTL implementation detail into the expected answer.
 
-Use `docs/ORACLES.md` for the detailed contract catalog.
+Use `tests/memblock/docs/ORACLES.md` for the detailed contract catalog.
 
 If behavior is ambiguous, inspect the RISC-V specification, XiangShan design intent, and externally visible propagation before calling it a CPU bug. A suspicious internal event is not sufficient by itself if it cannot affect architectural or defined interface behavior.
 
@@ -129,9 +129,41 @@ Before declaring an RTL bug:
 
 Only confirmed CPU RTL bugs receive standalone documents named:
 
-`docs/CPU_BUG_<SHORT_NAME>.md`
+`tests/memblock/docs/CPU_BUG_<SHORT_NAME>.md`
 
 A CPU bug document should contain the symptom, reproducer, oracle/contract, root cause, architectural or protocol impact, fix, and post-fix verification.
+
+After confirming a CPU RTL bug, create the CPU bug document and also send a
+concise notification to the DingTalk **debug** endpoint. Use the helper in the
+fresh `OpenXiangShan/env-scripts` clone at
+`/home/xuyinan/paseo-workspace/env-scripts`, and read only
+`xiangshan_monitor.dingtalk.debug` from the existing local config at
+`/home/xuyinan/tools/xsrobot/env-scripts/dingtalk_robot/config.json`.
+Never read, call, or fall back to `xiangshan_monitor.dingtalk.release`; do not
+use scheduled delivery, `--workday-delivery`, or
+`--dingtalk-layer release` from this workflow.
+
+```sh
+PYTHONPATH=/home/xuyinan/paseo-workspace/env-scripts python3 - <<'PY'
+import json
+from pathlib import Path
+from dingtalk_robot import robot
+
+config = json.loads(Path(
+    '/home/xuyinan/tools/xsrobot/env-scripts/dingtalk_robot/config.json'
+).read_text())
+debug = config['xiangshan_monitor']['dingtalk']['debug']
+robot.send_text(
+    debug['webhook'],
+    debug['secret'],
+    '[MemBlock CPU bug] <short symptom>; see tests/memblock/docs/CPU_BUG_<SHORT_NAME>.md',
+)
+PY
+```
+
+The debug endpoint was verified reachable on 2026-10-20 with
+`errcode=0, errmsg=ok`. Do not include a webhook token or signing secret in logs,
+documents, commit messages, or agent output.
 
 Do **not** create standalone `*_BUG_*.md` reports for UT harness bugs, oracle mistakes, regression-controller issues, documentation mistakes, or normal testbench iteration. Record those in normal commits and consolidated documentation.
 
@@ -141,19 +173,19 @@ Keep CPU RTL fixes in logically separate commits from UT-framework changes whene
 
 Keep the environment reproducible from a clean checkout.
 
-* Follow the build/provenance rules in `README.md`.
+* Follow the build/provenance rules in `tests/memblock/README.md`.
 * Do not hide interface mismatches by blindly regenerating tracked port manifests.
 * Do not reuse stale generated RTL after configuration, generation-option, or RTL-commit changes.
 * Keep tool and RTL revisions recorded for traceability. Do not reintroduce fixed Picker/xcomm commit pins or cryptographic file-hash acceptance gates unless the user explicitly requests them.
 * Use current upstream defaults for Kunminghu-v2, Picker, and xcomm; record the resolved revisions after bootstrap rather than constraining them in source.
 * New Picker/XS-MLVP debug capabilities may be used to diagnose failures, but do not introduce unnecessary runtime dependencies merely because a debug feature exists.
 * Keep documentation sufficient for another developer or agent to reproduce the environment.
-* Keep `docs/IO_COVERAGE.md`, `docs/VERIFICATION_PLAN.md`, and `docs/CONSTRAINED_RANDOM.md` consistent with the implementation; `make check-rtl` verifies the generated IO inventory and constraint schema.
+* Keep `tests/memblock/docs/IO_COVERAGE.md`, `tests/memblock/docs/VERIFICATION_PLAN.md`, and `tests/memblock/docs/CONSTRAINED_RANDOM.md` consistent with the implementation; `make -C tests/memblock check-rtl` verifies the generated IO inventory and constraint schema.
 * Commit and push meaningful progress in logical, reviewable units when repository access permits.
 
 Avoid documentation noise. Update the existing verification plan, oracle catalog, constrained-random guide, README, results, or a confirmed CPU bug report instead of creating a new Markdown file for every intermediate observation.
 
-Maintain `docs/USER_PROMPTS.md` as historical provenance when complete prompt history is available; do not invent missing prompts or timestamps.
+Maintain `tests/memblock/docs/USER_PROMPTS.md` as historical provenance when complete prompt history is available; do not invent missing prompts or timestamps.
 
 ## 9. Independent review and self-correction
 

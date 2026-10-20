@@ -371,15 +371,6 @@ PERF dumps and 23 contain no PERF record. The copy was still growing when this
 snapshot was taken, so future analyses must record their own
 discovered/accepted counts rather than treating 7,804 as a frozen corpus size.
 
-The original `4f29a0951` campaign completed 1,092 of 1,092 checkpoints with no
-failed checkpoints and reported `SPEC2006/GHz=16.607` and
-`SPEC2006@3.0GHz=49.820`. Its 7.6-GiB simulator-log tree is intentionally not
-checked in. Large remote result trees can be retrieved selectively with:
-
-```sh
-scripts/copy_simulator_logs.sh host:/path/to/report ./spec-logs
-```
-
 Only the latest timestamp that reaches the stable generated terminator
 `ctrlBlock.rob.rab: util_218_219` is counted. This avoids double counting
 periodic cumulative dumps and rejects a partially copied final dump even when
