@@ -124,6 +124,21 @@ residual vector-store drain behavior protected by `222f993ed`; a legal
 store-progress/memory-effect mutation that distinguishes a revert remains a
 verification gap.
 
+## Post-Baseline RTL Audit
+
+The September 1 baseline did not include the fixes merged later in September
+and October. The following additions were reviewed against the same
+black-box acceptance rule.
+
+| Date | Commit | Fix | Status | Evidence or missing contract |
+| --- | --- | --- | --- | --- |
+| 2026-10-08 | `c098f996b` | Preserve self-flushing replay information when RAW and RAR redirects share a ROB index | Boundary gap | `memory-violation` and `rar-violation` exercise RAW and RAR separately, but no legal load currently raises both at the same ROB index. The missing acceptance is one selected self-flushing redirect followed by a replay with the final store-to-load value. |
+| 2026-09-24 | `49b6a414f` | Preserve a late vector-load DCache exception in the final vector writeback | **Reproduced** | `dcache-errors` primes one line with scalar denied and last-beat-corrupt responses, then requires vector loads to hit the poisoned line with the corresponding terminal exception. An independent mutation restoring `vecldout.hasException := s3_exception` passes the old cold-miss stimulus but fails the poisoned-line case with `exception=0x0`; clean RTL passes both cases. |
+| 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | Boundary gap | Current vector-store translation cases are naturally aligned and remain within one page. No multibyte strided/indexed tail crosses an Sv39/Sv48 or stage-2 limit. |
+| 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | Boundary gap | Scalar noncanonical cases cover addresses wholly outside the legal range, but not a legal first byte followed by an invalid multibyte tail; trigger address-masking crosses are also absent. |
+| 2026-09-15 | `db2a9c26b` | Avoid vector-state dirtiness for vector-store helper uops | Integration-owned | Rename/commit `mstatus.VS` is not observable at the MemBlock boundary. Memory-effect and writeback checks cannot establish CSR dirtiness. |
+| 2026-09-17 | `f86f50b83` | Initialize SBuffer forward tag state | Four-state gap | The affected X-only state is not observable in the current two-state Verilator configuration; functional first-forward traffic passes. |
+
 ## Audit
 
 | Date | Commit | Fix | Status | Evidence or missing contract |
@@ -195,6 +210,7 @@ verification gap.
 | `e12436c7` | NC stores consume committed SQ data in program order | Wrong store data at cycle 309 | `757dfc00827ed605d63db23a2d9bc995732628abf18b4b6cc203ef8190c49a30` |
 | `45318c5d` | Exceptional scalar loads never request an RF write | Reverted RTL asserts RF write enable | See `RESULTS.md` for the independently generated runtime record. |
 | `856b821f` | A G-stage fault while walking a VS non-leaf PTE reports the marker and exact VA/GPA | Marker is 0 at cycle 152; VA/GPA remain correct | `3abf90d701fdb3252ec68d1426707affe4d0606bb002a1b02d710be577baa5a7` |
+| `49b6a414f` (`vecldout.hasException` mutation) | A cached poisoned-line vector load preserves its late denied/corrupt terminal exception | Vector writeback reports `exception=0x0` for both denied and corrupt cases | Regenerated mutation; clean generated `MemBlock.sv` SHA-256 `cf601789176bb996b9dfc423b21f1531f45d5118d75e4ee07558d457d42cb57b` |
 | `9ee7b335` | Misaligned vector stores eventually complete, dequeue, and read back exactly | Mutant passed the available legal sequence | `9000f90adc416d1de6c7b4e8ce2b0129cf98564431ae835bcfc6d857f89e4df2` |
 | `fbb1e349` | A translated cross-page vector store eventually completes, dequeues, and reads back exactly | Rebuilt pre-fix mutant passed the expanded progress sequence | `5bfe14db09a494c64415ee9a4d330ddbae9e704fbd18970d3b127ccde7d7b19` |
 

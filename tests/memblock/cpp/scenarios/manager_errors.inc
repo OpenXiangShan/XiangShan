@@ -500,6 +500,161 @@ int run_dcache_errors(int argc, char **argv)
         return 1;
     }
 
+    struct VectorLateErrorCase {
+        const char *name;
+        bool denied;
+        std::uint32_t expected_exception;
+        memblock::DcacheCorruptBeat corrupt_beat;
+    };
+    const std::array<VectorLateErrorCase, 2> vector_late_error_cases{{
+        {
+            "denied",
+            true,
+            memblock::kExceptionLoadAccessFault,
+            memblock::DcacheCorruptBeat::all,
+        },
+        {
+            "corrupt-last",
+            false,
+            memblock::kExceptionHardwareError,
+            memblock::DcacheCorruptBeat::last,
+        },
+    }};
+    unsigned vector_late_error_cases_completed = 0;
+    unsigned vector_late_denied_cases = 0;
+    unsigned vector_late_corrupt_last_cases = 0;
+    for (unsigned case_index = 0;
+         case_index < vector_late_error_cases.size(); ++case_index) {
+        const auto &test_case = vector_late_error_cases[case_index];
+        memblock::Environment vector_error(argc, argv);
+        const std::uint64_t line =
+            memblock::kDefaultMemoryBase + 0x2e000 + case_index * 0x100;
+        vector_error.memory().fill_incrementing(line, 64, 0x6b);
+        if (!vector_error.reset()) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << vector_error.cycle()
+                      << " phase=vector-late-error-reset case="
+                      << test_case.name << " reason=" << vector_error.error()
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t address = line + 8;
+        const memblock::LoadTransaction primer{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = 72,
+            .lq = 0,
+            .pdest = 122,
+            .lane = 0,
+            .expected_exception_mask = test_case.expected_exception,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        vector_error.expect_load(primer);
+        vector_error.inject_dcache_response_error_at(
+            line, test_case.denied, !test_case.denied,
+            test_case.corrupt_beat);
+        if (!vector_error.set_rob_head(primer.rob, primer.rob_flag) ||
+            !vector_error.enqueue_load(primer) ||
+            !vector_error.issue_load(primer, 512) ||
+            !vector_error.run_until_complete(4096) ||
+            !vector_error.run_cycles(32) ||
+            !vector_error.redirect_after(
+                primer.rob, primer.rob_flag, true) ||
+            !vector_error.run_cycles(32)) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << vector_error.cycle()
+                      << " phase=vector-late-error-primer case="
+                      << test_case.name << " reason=" << vector_error.error()
+                      << '\n';
+            return 1;
+        }
+        const std::uint64_t requests_before_vector =
+            vector_error.tilelink_requests();
+
+        memblock::VectorMemoryTransaction transaction{
+            .address = address,
+            .eew = 3,
+            .vl = 2,
+            .rob = 73,
+            .lq = 1,
+            .pdest = 124,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask = test_case.expected_exception,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+            transaction.data[byte] =
+                static_cast<unsigned char>(0xc0 + byte);
+        }
+        vector_error.expect_vector_data(transaction, transaction.data);
+        if (!vector_error.set_rob_head(
+                transaction.rob, transaction.rob_flag) ||
+            !vector_error.enqueue_vector(transaction) ||
+            !vector_error.issue_vector(transaction, 512) ||
+            !vector_error.run_until_vector_complete_with_replays(
+                transaction, 16384) ||
+            !vector_error.run_until_lq_retired(4096) ||
+            !vector_error.run_cycles(64)) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << vector_error.cycle()
+                      << " phase=vector-late-error-complete case="
+                      << test_case.name
+                      << " replay_feedbacks="
+                      << vector_error.vector_replay_feedbacks()
+                      << " violations="
+                      << vector_error.memory_violation_stats().count
+                      << " lq=" << vector_error.lq_allocated() << '/'
+                      << vector_error.lq_dequeued() << '+'
+                      << vector_error.lq_canceled()
+                      << " reason=" << vector_error.error() << '\n';
+            return 1;
+        }
+        if (vector_error.vector_load_writebacks() != 1 ||
+            vector_error.tilelink_requests() != requests_before_vector ||
+            vector_error.lq_allocated() !=
+                vector_error.lq_dequeued() +
+                    vector_error.lq_canceled() ||
+            vector_error.memory_violation_stats().count != 0) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << vector_error.cycle()
+                      << " phase=vector-late-error-conservation case="
+                      << test_case.name
+                      << " writebacks="
+                      << vector_error.vector_load_writebacks()
+                      << " dcache_requests_before="
+                      << requests_before_vector
+                      << " dcache_requests_after="
+                      << vector_error.tilelink_requests()
+                      << " violations="
+                      << vector_error.memory_violation_stats().count
+                      << " lq=" << vector_error.lq_allocated() << '/'
+                      << vector_error.lq_dequeued() << '+'
+                      << vector_error.lq_canceled() << '\n';
+            return 1;
+        }
+        ++vector_late_error_cases_completed;
+        vector_late_denied_cases += test_case.denied;
+        vector_late_corrupt_last_cases +=
+            test_case.corrupt_beat == memblock::DcacheCorruptBeat::last;
+    }
+    if (vector_late_error_cases_completed != 2 ||
+        vector_late_denied_cases != 1 ||
+        vector_late_corrupt_last_cases != 1) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL"
+                  << " phase=vector-late-error-cardinality"
+                  << " completed=" << vector_late_error_cases_completed
+                  << " denied=" << vector_late_denied_cases
+                  << " corrupt_last=" << vector_late_corrupt_last_cases
+                  << '\n';
+        return 1;
+    }
+
     memblock::Environment ecc_environment(argc, argv);
     constexpr std::uint64_t ecc_base =
         memblock::kDefaultMemoryBase + 0x2d000;
@@ -1116,6 +1271,11 @@ int run_dcache_errors(int argc, char **argv)
               << " multibeat_healthy_hits="
               << multibeat_healthy_hit_cases
               << " multibeat_cycles=" << multibeat_cycles
+              << " vector_late_errors="
+              << vector_late_error_cases_completed
+              << " vector_late_denied=" << vector_late_denied_cases
+              << " vector_late_corrupt_last="
+              << vector_late_corrupt_last_cases
               << " tag_ecc=" << tag_ecc_cases
               << " data_ecc=" << data_ecc_cases
               << " concurrent_ecc=" << concurrent_ecc_cases

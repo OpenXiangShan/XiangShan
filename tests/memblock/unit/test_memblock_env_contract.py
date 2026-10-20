@@ -1214,6 +1214,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "multibeat_concurrent_mshr_cases != 6",
             "multibeat_poisoned_hit_cases != 6",
             "multibeat_healthy_hit_cases != 6",
+            "VectorLateErrorCase",
+            "phase=vector-late-error-primer",
+            "requests_before_vector",
+            "vector_late_errors=",
+            "vector_late_denied=",
+            "vector_late_corrupt_last=",
         ):
             self.assertIn(contract, environment + main)
 

@@ -3327,7 +3327,7 @@ Schema 36 composes successful CLEAN, FLUSH, and INVAL requests with the full
 one-through-eight-entry ProbeQueue depth while CBOAck remains pending. Each
 action warms zero through seven fresh clean auxiliary lines, holds C unready
 until every selected B request is accepted, and then adds the operation-specific
-target Probe. The online oracle matches every response by source and address,
+target Probe. The online oracle matches every Probe response by address,
 checks exact dirty target data, and closes all 48 operation x clean/dirty x
 depth bins. Opcode-qualified denied/corrupt CMO errors remain zero-Probe paths.
 
@@ -3384,7 +3384,7 @@ the ordinary atomic path. For nonzero depth the action selects a fresh cold
 target, warms distinct clean auxiliary lines, holds the target D response, and
 forbids early atomic writeback. The DCache may legally backpressure B while D
 is held. After D is released, C remains unready until the complete selected B
-burst is accepted; every no-data ProbeAck is matched by source and address
+burst is accepted; every no-data ProbeAck is matched by address
 before exact atomic result and memory checks complete. Atomic error actions
 remain separate zero-Probe paths.
 
@@ -4026,3 +4026,46 @@ destination elements remain unconstrained where the vector specification
 leaves them unspecified. Internal FOF-buffer state, replay count, bank
 selection, prefetch behavior, and cycle timing do not participate in PASS or
 FAIL.
+
+## Late Vector DCache Error Regression
+
+On 2026-10-20, `dcache-errors` added two cached-poisoned-line cases for the
+2026-09-24 `LoadUnit` fix `49b6a414f`. A scalar load first installs either a
+denied line or a line corrupt only on its final refill beat. A following
+two-element EEW64 vector load then hits that line without a new DCache request
+and must issue one terminal vector writeback with the corresponding
+`LoadAccessFault` or `HardwareError`. The oracle requires one dequeue/cancel
+for every allocated LQ entry, no rollback, and no second DCache request; the
+vector writeback identity and exception are checked by the normal vector
+scoreboard.
+
+The clean generated `MemBlock.sv` SHA-256 is
+`cf601789176bb996b9dfc423b21f1531f45d5118d75e4ee07558d457d42cb57b`.
+An isolated mutation changing `vecldout.hasException` back from
+`s3_final_exception` to `s3_exception` passed the former cold-miss-only
+stimulus but failed the new cached-poisoned-line stimulus with
+`exception=0x0` for both cases. Restoring the fix made the complete
+`dcache-errors` target pass at cycle 290 with
+`vector_late_errors=2 vector_late_denied=1 vector_late_corrupt_last=1`.
+
+The frozen runtime also passed `dcache-errors`, `dcache-coherence` at cycle
+481, and `cmo-contracts` at cycle 8,169/2,455 for the positive/error phases.
+The binary SHA-256 is
+`cb350daa5720dc13afb4fde22a7552cff2d75abc7b4c6bc7fb799d5a9f2faf2d`,
+the Verilated model is
+`9b53707a64186c85fc11e5b3fc6a81b1ac262881c7261ac33f50b9cf77456058`,
+the frozen RTL metadata is
+`c989eca1f5848e6c062047c7fcc9af0e65dff3e7f839f06fd5c1b81bc7be55af`,
+the xspcomm library is
+`4eb8bd0ad0d0ad4bf52c61f6ed8f6ab42994e1a71e1612b0542bcbc7e76b79e9`,
+and the runtime manifest is
+`f858f3b279a4332f921a386b4871dcde42a0bb8ee02ad8b9f1b85b5e46665b36`.
+Picker resolved to `add7b522fd58ac82599f22b9fa280003728f41ea` and xcomm
+to `3e4bccb73f08310c08382d3987ba2d98b83df4d6`.
+
+The current source revision also passed `check-rtl` and all 226 Python unit
+tests. A separate audit investigation tested whether C-channel `source` must
+echo the B Probe source. Local TileLink semantics and TLMonitor show that C
+source is the client's own source namespace; the observed value 17 is legal.
+The equality assumption was withdrawn and the documentation now states
+address matching without claiming B/C source equality.
