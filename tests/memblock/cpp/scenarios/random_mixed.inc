@@ -8730,6 +8730,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!physical_pmp_denied && final_io) {
                         transaction.expected_address_writeback_lane = 0;
                     }
+                    if (hypervisor_pmp_relation ==
+                        RandomConstraints::hypervisor_pmp_cross_upper) {
+                        // The first half is permitted; the second half faults
+                        // after this cross-page store enters the shared split
+                        // path, whose exceptional completion uses output 0.
+                        transaction.expected_address_writeback_lane = 0;
+                    }
                     const bool data_first = (random() & 1U) != 0;
                     const std::uint64_t dcache_before =
                         environment.tilelink_requests();

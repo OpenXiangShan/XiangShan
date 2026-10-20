@@ -4134,3 +4134,15 @@ line-state cases plus three denied and three corrupt responses),
 `queue-pressure`. Independent producer review identified the PBMT mapping as
 well as the initial ECC-control/CMO failures. `check-rtl` and all 232 Python
 unit checks pass. These are UT expectation corrections, not CPU RTL defects.
+
+The follow-up mixed replay exposed the same legal lane-0 completion for HSV
+whose first half is allowed and whose second page crosses the upper physical
+PMP boundary. The input relation selects this expectation before issue;
+first-half PMP denial still requires the original issue lane. The previously
+failing coverage seed 102 now passes all 6,144 actions (1,491.458 seconds),
+including all 42 family x SPVP x PMP-relation bins and nine upper-boundary
+crossings. A 256-action focused common-generator seed 205 also passes every
+PMP-relation cross with strict lane checks. Artifacts are in
+`build/memblock/continuation-lanes/coverage.json` and
+`build/memblock/canonical-focused/hypervisor-pmp.json`. These results correct a
+UT false positive; they do not constitute a new RTL defect or closure campaign.
