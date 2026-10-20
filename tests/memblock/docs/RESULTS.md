@@ -4084,3 +4084,33 @@ the legal lane remap as an RTL failure.
 stricter monitor. The remaining limitation is unchanged: unmatched
 output-only data pulses and the absence of a complete store payload monitor are
 retained as explicit risk rather than counted as semantic coverage.
+
+## Vector Destination Chunk Oracle
+
+The vector scoreboard now checks the externally visible `vdIdxInField` on
+successful data-producing load completions. Its expectation comes from the
+issued register-group/field shape, including indexed shared-destination uops,
+fractional LMUL, segment field boundaries, and whole-register transfers.
+The backend consumes this field when applying tail and mask policy; checking
+raw bytes without it left an architectural false-negative path. Stores,
+exceptions, non-writing uops, and FOF fix-VL completions leave it unconstrained.
+Suppressed later-fault FOF data completions retain the normal check.
+
+Six compiled C++ unit checks exercise the production model and scoreboard
+without requiring a Picker build. They preserve valid data/mask/identity and
+corrupt only the destination index. Ordinary, indexed, segment, and
+whole-register negative cases reproduce silent acceptance with the previous
+scoreboard and are rejected by the repaired one. The tests also cover
+suppressed FOF data and the cases where the field is irrelevant.
+
+The current generated RTL passes `vector-addressing` at cycle 99,634 and the
+complete `vector-segment` matrix at cycle 905,375, including 676 unit/strided
+and 676 indexed segment configurations. `vector-fof`, `vector-segment-fof`,
+and `trigger-contracts` also pass. Independent-context review confirmed the
+mapping and check eligibility. `check-rtl` and all Python unit checks pass.
+This is oracle-hardening evidence, not a new CPU RTL bug or closure campaign.
+
+The same focused validation exposed a separate pre-existing UT false positive:
+`dcache-errors` and `cmo-contracts` rejected legal StoreQueue terminal writes
+on STA lane 0 after issue on lane 1. That caller-side lane expectation requires
+its own correction; the vector index check did not cause those failures.

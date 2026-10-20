@@ -580,6 +580,7 @@ public:
         std::uint8_t vl;
         std::uint8_t vstart;
         std::uint8_t vuop_idx;
+        unsigned vd_index_in_field;
         bool last_uop;
         std::uint8_t nf;
         std::uint8_t pdest;
@@ -673,6 +674,9 @@ public:
                 output_transaction.vl,
                 transaction.vstart,
                 transaction.vuop_idx,
+                transaction.segment
+                    ? vector_segment_vd_index(transaction)
+                    : vector_indexed_vd_index(transaction),
                 transaction.last_uop,
                 transaction.nf,
                 transaction.pdest,
@@ -786,6 +790,15 @@ public:
             ++fof_fix_observed_;
         } else if (!expected.store && !exception_progress &&
                    expected.vec_wen) {
+            // The backend merge uses this register index to apply vl/vstart
+            // and tail/mask policy.  Correct raw bytes alone do not establish
+            // the final architectural destination.  Stores, exceptions, and
+            // the FOF fix-VL response do not consume this field.
+            if (writeback.vd_index_in_field != expected.vd_index_in_field) {
+                fail("mismatched vector destination index", lane, writeback,
+                     &expected);
+                return;
+            }
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
                 (expected.check_data &&
                  !matches_load_data(writeback.data, expected)) ||
@@ -942,6 +955,8 @@ private:
                 << " vec_wen=" << actual.vec_wen
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
                 << " uop=" << static_cast<unsigned>(actual.vuop_idx)
+                << " vd_index_in_field="
+                << static_cast<unsigned>(actual.vd_index_in_field)
                 << " vl=" << static_cast<unsigned>(actual.vl)
                 << " vstart=" << static_cast<unsigned>(actual.vstart)
                 << " sew/eew/lmul=" << static_cast<unsigned>(actual.vsew)
@@ -974,6 +989,8 @@ private:
                     << static_cast<unsigned>(expected->vlmul)
                     << " expected_uop="
                     << static_cast<unsigned>(expected->vuop_idx)
+                    << " expected_vd_index_in_field="
+                    << expected->vd_index_in_field
                     << " last=" << expected->last_uop
                     << " lq=" << static_cast<unsigned>(expected->lq)
                     << '/' << expected->lq_flag
