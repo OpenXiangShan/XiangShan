@@ -131,7 +131,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   io.txrsp.bits := DontCare
   io.txdat.valid := false.B
   io.txdat.bits := DontCare
-  io.rxrsp.ready := false.B
+  io.rxrsp.ready := true.B
   io.block_addr.valid := state =/= s_invalid
   io.block_addr.bits := req.addr
   io.resp_channel := resp_channel
@@ -176,6 +176,22 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
   }
 
   val tx_fire = io.txevt.fire || io.txrsp.fire || io.txdat.fire
+  val rxrsp_is_comp = CCHIOpcode.Comp.is(io.rxrsp.bits.Opcode, io.rxrsp.valid)
+  val rxrsp_is_dbid = CCHIOpcode.DBIDResp.is(io.rxrsp.bits.Opcode, io.rxrsp.valid)
+  val rxrsp_is_comp_dbid = CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode, io.rxrsp.valid)
+  val comp_fire = io.rxrsp.fire && rxrsp_is_comp
+
+  // Every legal response has reserved storage in its outstanding entry.
+  when (io.rxrsp.valid) {
+    assert((state === s_wait || state === s_copyback) && req.voluntary, "WBQ response must target an outstanding EVT")
+    when (rxrsp_is_dbid || rxrsp_is_comp_dbid) {
+      assert(state === s_wait && req.hasData && !got_dbid, "WBQ DBID response must target a WriteBackFull waiting for its first DBID")
+    }
+  }
+
+  when (comp_fire) {
+    got_comp := true.B
+  }
 
   when (state === s_probe_rsp) {
     io.txrsp.valid := busy
@@ -219,35 +235,28 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     when (io.txdat.fire) {
       remain_clr := PriorityEncoderOH(remain_dup_1)
       when (PopCount(remain) === 1.U) {
-        state := Mux(got_comp, s_invalid, s_wait)
+        state := Mux(got_comp || comp_fire, s_invalid, s_wait)
       }
     }
   }
 
-  when (state === s_wait && io.rxrsp.valid) {
-    io.rxrsp.ready := true.B
-    when (io.rxrsp.fire) {
-      when (CCHIOpcode.Comp.is(io.rxrsp.bits.Opcode)) {
-        got_comp := true.B
-        when (!req.hasData) {
-          state := s_invalid
-        } .elsewhen (got_dbid && remain === 0.U) {
-          // WriteBackFull: Comp may arrive after CopyBackWrData (no fixed order with DBID).
-          state := s_invalid
-        }
+  when (state === s_wait && io.rxrsp.fire) {
+    when (rxrsp_is_comp) {
+      when (!req.hasData) {
+        state := s_invalid
+      } .elsewhen (got_dbid && remain === 0.U) {
+        state := s_invalid
       }
-      when (CCHIOpcode.DBIDResp.is(io.rxrsp.bits.Opcode) ||
-        CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode)) {
-        assert(req.hasData)
-        got_dbid := true.B
-        copyback_dbid := io.rxrsp.bits.DBID
-        copyback_tgt_id := io.rxrsp.bits.SrcID
-        state := s_copyback
-        remain_set := ~0.U(refillCycles.W)
-      }
-      when (CCHIOpcode.CompDBIDResp.is(io.rxrsp.bits.Opcode)) {
-        got_comp := true.B
-      }
+    }
+    when (rxrsp_is_dbid || rxrsp_is_comp_dbid) {
+      got_dbid := true.B
+      copyback_dbid := io.rxrsp.bits.DBID
+      copyback_tgt_id := io.rxrsp.bits.SrcID
+      state := s_copyback
+      remain_set := ~0.U(refillCycles.W)
+    }
+    when (rxrsp_is_comp_dbid) {
+      got_comp := true.B
     }
   }
 
@@ -297,7 +306,7 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
     io.txrsp(ch).bits := DontCare
     io.txdat(ch).valid := false.B
     io.txdat(ch).bits := DontCare
-    io.rxrsp(ch).ready := false.B
+    io.rxrsp(ch).ready := true.B
   }
 
   // Register full line data one cycle after io.req to ease MainPipe -> WBQ timing.
@@ -334,13 +343,6 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
           entry.io.rxrsp.bits := io.rxrsp(ch).bits
         }
       }
-  }
-
-  for (ch <- 0 until nCCHIChannels) {
-    // Only the entry addressed by this channel may acknowledge its response.
-    io.rxrsp(ch).ready := VecInit(entries.zipWithIndex.map { case (entry, i) =>
-      rxrspMatches(i)(ch) && entry.io.rxrsp.ready
-    }).asUInt.orR
   }
 
   if (nCCHIChannels > 1) {
