@@ -372,3 +372,7 @@ simulator_err.txt
 simulator_out.txt
 *.log
 *.err
+
+# Full-core simulator result trees copied from remote CI
+/cr*-*Config/
+/spec-logs/

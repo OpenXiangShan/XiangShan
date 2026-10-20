@@ -262,6 +262,10 @@ make -C tests/memblock smoke JOBS=8
 inventory in `docs/IO_COVERAGE.md` matches the checked port manifest and that
 the documented constrained-random schema matches `cpp/random/constraints.inc`.
 
+Remote simulator result directories can be copied selectively with
+`scripts/copy_simulator_logs.sh host:/path/to/report [destination]`; the script
+preserves the checkpoint directory layout while omitting unrelated files.
+
 The first `smoke` invocation performs the expensive Picker export and Verilator
 compile. Later test targets reuse
 `build/memblock/picker/UT_MemBlock/build/UTMemBlock_example` and normally only
