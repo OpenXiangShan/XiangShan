@@ -4215,3 +4215,50 @@ suppression cases still pass. The execution is retained in
 `build/memblock/canonical-regression/schema49-fp-loads.log`. This closes a
 stimulus false-negative risk; it is not yet independent RTL-mutation evidence
 for historical `756bbf59`.
+
+
+## Singleton Vector Canonical Faults in Common Mixed Traffic
+
+Schema 49 extends the existing `canonical-boundary` constraint with 36
+singleton vector-store bins: Sv39/Sv48, both boundary directions, strided and
+both indexed modes, and 2/4/8-byte widths. Eligibility intersects the existing
+shape weights and compatible VL/vstart/mask endpoints; it never overrides an
+excluded class. Each identified page fault checks its exact VA, all externally
+retired/canceled SQ flows, four real edge controls, and a committed scalar
+store/load recovery pair. Multi-active-element fault progress, other shapes,
+vector loads, and G-stage limits remain gaps.
+
+The final frozen schema-49 harness passes eight 256-action focused runs
+(seeds 221–228) with the complete external constraint verifier:
+
+| Case | Vector bins | Vector faults | Reserved flows |
+| --- | ---: | ---: | ---: |
+| All enabled modes/addressing/widths, rate 1000 | 36 | 60 | 272 |
+| Canonical constraint disabled | 0 | 0 | 0 |
+| Sv48 indexed-ordered 8-byte only | 2 | 46 | 92 |
+| Partial VL disabled | 0 | 0 | 0 |
+| Nonzero vstart required | 0 | 0 | 0 |
+| Masked operations required | 0 | 0 | 0 |
+| Vector-store-only eligible traffic | 36 | 146 | 682 |
+| Byte-only vector widths | 0 | 0 | 0 |
+
+Every enabled vector fault has four controls, one store side-effect check,
+and one committed survivor pair. The scalar 24-bin coverage and counters stay
+separate. Independent-context review found a missing action-budget equality;
+C++ final closure and Python now both require ordinary vector stores plus
+canonical vector faults to equal vector-store actions. Negative unit tests
+and actual focused summaries verify that equality. `check-rtl`, `check-docs`,
+and all 240 Python tests pass. The focused runs disable concurrent windows
+and are capability checks, not closure-campaign acceptance. Runtime metadata,
+exact commands, harness diff/provenance, logs, and parsed summaries are in
+`build/memblock/canonical-vector-focused/`, using
+`build/memblock/canonical-vector-final-runtime/runtime.json`.
+
+The preceding schema-48 standard coverage-profile integration run, seed 212,
+passes 6,144 actions in 1,503.848 seconds and the full mixed coverage verifier.
+It records 32 scalar canonical faults, 32 Probe sequences (4 isolated and 28
+with overlap), and 235 concurrent windows. This validates the scalar addition
+with enabled concurrent/Probe traffic, not the newer schema-49 vector subclass.
+Its artifact is `build/memblock/canonical-regression/coverage.json`; SPEC 211
+and corner 213 are still running at this checkpoint. No six-hour closure
+claim is made from these finite capability regressions.

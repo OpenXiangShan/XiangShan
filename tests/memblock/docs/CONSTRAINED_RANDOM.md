@@ -106,7 +106,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `special-concurrent` | Per-mille chance that a legal overlap window also contains an NC or MMIO load |
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
-| `canonical-boundary` | Per-mille share of eligible scalar actions replaced by a Sv39/Sv48 access crossing either canonical boundary; requires scalar load/store and host stage-1 traffic. Zero disables all such actions. Nonzero closes enabled mode x load/store x boundary direction x 2/4/8-byte width bins before weighted sampling; distances, lanes, data, and issue order remain randomized. Presets: SPEC 1, coverage 100, corner 250 |
+| `canonical-boundary` | Per-mille share of eligible scalar or singleton vector-store actions replaced by a Sv39/Sv48 canonical crossing; requires stage-1 traffic and a reachable scalar/vector subclass. Zero disables all such actions. Nonzero closes enabled 24 scalar and 36 vector bins before weighted sampling; vector eligibility intersects addressing, EEW=SEW, LMUL=EMUL=1 and policy gates below. Distances, lanes, data, index offsets, stride signs, and scalar issue order remain randomized. Presets: SPEC 1, coverage 100, corner 250 |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
 | `vector-fof` | Low-rate per-mille share of ordinary vector-load actions replaced by unit-stride VLEFF. A nonzero value requires vector loads and stage-1 translation; 1000 is rejected because the same profile must retain ordinary vector-shape closure |
 | `vector-fof-first-fault` | Conditional per-mille share of VLEFF actions whose first element faults. The other class places element zero on a mapped page and element one on the next unmapped page |
@@ -465,7 +465,7 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=48`, the resolved target weights,
+Every terminal line prints `constraint_schema=49`, the resolved target weights,
 and actual operation, atomic family/width/error/Probe-depth/cross, hypervisor family/SPVP/alignment/PBMT/
 DDR-versus-fixed-PMA-device/PMP-relation crosses, CMO operation/
 line-state/younger-overlap/error presence/error kind, DCache scalar-load
@@ -772,8 +772,8 @@ operations because that output has no transaction identity. Legal speculative
 first-page traffic is allowed. These scalar fault actions are excluded from
 ordinary DCache clean/error-refill outcome counters. Every terminal summary
 reports the 24-bin cross, fault total, controls, recovery, and store-check
-counts, and the regression verifier checks their conservation. Vector
-canonical crossings remain directed coverage, and G-stage address-limit
+counts, and the regression verifier checks their conservation. Schema 49
+adds the eligible singleton vector-store subclass below. G-stage address-limit
 crossings remain a gap.
 
 The cross order is
@@ -783,5 +783,35 @@ means Sv39/Sv48, store 0/1 means load/store, and EEW 1/2/3 means 2/4/8 bytes.
 must equal that total, controls must equal twice the total plus twice the
 store-fault count, and store checks must equal the store-fault count. At rate
 1000 the generator still closes every ordinary coverage requirement first;
-only then does it replace every eligible scalar action. The nonzero
+only then does it replace eligible scalar/vector-store actions. The nonzero
 canonical closure prefix precedes that probability policy.
+
+
+Schema 49 adds 36 vector-store canonical bins with order
+`((invalid_first * 2 + mode) * 3 + addressing - 1) * 3 + eew - 1`.
+Addressing 1/2/3 denotes strided/indexed-unordered/indexed-ordered, mode 0/1
+Sv39/Sv48, and EEW 1/2/3 2/4/8 bytes. This subclass uses one active element,
+`vl=1`, `vstart=0`, unmasked, EEW=SEW, and LMUL=EMUL=1, while reserving
+`16 >> eew` SQ flows as required by the backend contract. Enabled bins require
+nonzero vector-store, stage-1, mode, addressing, matching EEW/SEW, LMUL=1,
+and EMUL=1 weights. They also require `vector-partial-vl>0`,
+`vector-nonzero-vstart<1000`, and `vector-masked<1000`; incompatible endpoints
+produce zero vector canonical bins. VMA/VTA honor their configured endpoints.
+If no scalar or eligible vector subclass exists, nonzero `canonical-boundary`
+is rejected. These special fault actions do not populate ordinary successful
+vector shape/policy counters.
+
+Each vector crossing requires an identified terminal store-page fault and
+exact first-invalid VA, four edge controls (two before and two after), unchanged
+manager memory, and externally observed SQ dequeue/cancellation of every
+reserved flow. A raw VLS exception redirect handles cancellation. A real
+committed scalar store/load pair then proves recovery in the same DUT instance.
+`actual_vector_canonical_boundary` is the sum of all 36 bins; controls equal
+four times that total, recoveries and store checks each equal the total, and
+`actual_vector_canonical_boundary_flows` equals the sum of each bin times
+`16 >> eew`. The external verifier checks enabled and disabled bins and all
+these conservation relations independently, and requires ordinary vector-store
+instructions plus canonical vector faults to equal the vector-store action
+count. Multi-active-element faults,
+other LMUL/EMUL/SEW shapes, unit-stride and vector-load canonical crossings,
+and G-stage limits remain explicit gaps.

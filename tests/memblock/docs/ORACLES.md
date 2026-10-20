@@ -404,3 +404,13 @@ DUT instance prove recovery. No internal split-buffer state or assumed zero
 speculative traffic determines correctness. Common scalar mixed traffic uses
 the same byte-based contract and isolates fault-address sampling from other
 live exceptions.
+
+Schema 49 extends the canonical-range contract to eligible singleton
+strided/indexed vector stores in the common generator. The independent walker
+checks the actual active element's bytes after index/stride calculation.
+All reserved SQ flows must retire or be canceled on observed top-level IO
+after the raw VLS exception redirect. Four real edge controls prove permissive
+aliases and unchanged data, and a committed scalar store/load pair proves
+recovery. Ordinary successful vector shape/policy counters exclude this
+fault subclass. The exact singleton eligibility and remaining multi-element,
+other-shape, vector-load, and G-stage gaps are in `CONSTRAINED_RANDOM.md`.

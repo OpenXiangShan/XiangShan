@@ -205,7 +205,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 49
+        result["constraint_schema"] = 50
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -414,6 +414,177 @@ class VerifyRegressionTest(unittest.TestCase):
                     verify_regression._check_canonical_boundary_coverage_schema48(
                         fields, operations, [1, 1], translation, modes
                     )
+
+    @staticmethod
+    def vector_canonical_fields(counts: list[int]) -> dict[str, object]:
+        total = sum(counts)
+        return {
+            "target_canonical_boundary": 100,
+            "target_vector_addressing": "0,1,1,1",
+            "target_vector_eew": "0,1,1,1",
+            "target_vector_sew": "0,1,1,1",
+            "target_vector_lmul": "0,0,0,1,0,0,0",
+            "target_vector_emul": "0,0,0,1,0,0,0",
+            "target_vector_partial_vl": 500,
+            "target_vector_nonzero_vstart": 500,
+            "target_vector_masked": 500,
+            "actual_vector_canonical_boundary_cross": ",".join(map(str, counts)),
+            "actual_vector_canonical_boundary": total,
+            "actual_vector_canonical_boundary_controls": 4 * total,
+            "actual_vector_canonical_boundary_recoveries": total,
+            "actual_vector_canonical_boundary_store_checks": total,
+            "actual_vector_canonical_boundary_flows": sum(
+                count * flows for count, flows in zip(counts, [8, 4, 2] * 12)
+            ),
+        }
+
+    def test_schema_49_conserves_vector_canonical_faults_and_flows(self) -> None:
+        counts = list(range(1, 37))
+        fields = self.vector_canonical_fields(counts)
+        args = (fields, [0, 0, 0, 1], [0, 0, 0, 667], [0, 1, 0], [1, 1])
+        check = verify_regression._check_vector_canonical_boundary_coverage_schema49
+        self.assertEqual(check(*args), 666)
+        for name in (
+            "actual_vector_canonical_boundary",
+            "actual_vector_canonical_boundary_controls",
+            "actual_vector_canonical_boundary_recoveries",
+            "actual_vector_canonical_boundary_store_checks",
+            "actual_vector_canonical_boundary_flows",
+        ):
+            with self.subTest(counter=name):
+                malformed = dict(fields)
+                malformed[name] = int(malformed[name]) - 1
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError, "accounting is not conserved"
+                ):
+                    check(malformed, *args[1:])
+                for value in (None, False, -1, "666"):
+                    malformed[name] = value
+                    with self.assertRaisesRegex(
+                        verify_regression.VerificationError, "nonnegative integer"
+                    ):
+                        check(malformed, *args[1:])
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "exceed vector-store operation counts"
+        ):
+            check(fields, args[1], [0, 0, 0, 665], *args[3:])
+        # This is a dedicated subclass, separate from the 24 scalar bins.
+        fields.update({
+            "actual_canonical_boundary_cross": ",".join(["0"] * 24),
+            "actual_canonical_boundary": 0,
+            "actual_canonical_boundary_controls": 0,
+            "actual_canonical_boundary_recoveries": 0,
+            "actual_canonical_boundary_store_checks": 0,
+        })
+        self.assertEqual(
+            verify_regression._check_canonical_boundary_coverage_schema48(
+                *args, vector_faults=666
+            ), (0, 0)
+        )
+
+    def test_schema_49_rejects_reused_vector_store_operation_counts(self) -> None:
+        check = verify_regression._check_vector_store_subclass_accounting
+        check([0, 0, 7, 8], [7, 3], 5)
+        check([0, 0, 0, 0], [0, 0], 0)
+        for actual_store_ops in (3, 5, 7, 9):
+            with self.subTest(store_ops=actual_store_ops), self.assertRaisesRegex(
+                verify_regression.VerificationError,
+                "ordinary/canonical operation accounting is not conserved",
+            ):
+                check([0, 0, 7, actual_store_ops], [7, 3], 5)
+
+    def test_schema_49_enforces_vector_canonical_enabled_subsets(self) -> None:
+        # Sv48 indexed-ordered, 8-byte stores: bin 17 and bin 35.
+        counts = [0] * 36
+        counts[17], counts[35] = 3, 5
+        fields = self.vector_canonical_fields(counts)
+        fields.update({
+            "target_vector_addressing": "0,0,0,1",
+            "target_vector_eew": "0,0,0,1",
+            "target_vector_sew": "0,0,0,1",
+        })
+        args = (fields, [0, 0, 0, 1], [0, 0, 0, 8], [0, 1, 0], [0, 1])
+        check = verify_regression._check_vector_canonical_boundary_coverage_schema49
+        self.assertEqual(check(*args), 8)
+        for index in (0, 8, 14, 16, 34):
+            with self.subTest(disabled=index):
+                bad_counts = counts[:]
+                bad_counts[index] = 1
+                malformed = dict(fields)
+                malformed["actual_vector_canonical_boundary_cross"] = ",".join(
+                    map(str, bad_counts)
+                )
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError, "does not match enabled classes"
+                ):
+                    check(malformed, *args[1:])
+        for index in (17, 35):
+            with self.subTest(missing=index):
+                bad_counts = counts[:]
+                bad_counts[index] = 0
+                malformed = dict(fields)
+                malformed["actual_vector_canonical_boundary_cross"] = ",".join(
+                    map(str, bad_counts)
+                )
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError, "does not match enabled classes"
+                ):
+                    check(malformed, *args[1:])
+
+    def test_schema_49_disables_ineligible_vector_canonical_subclasses(self) -> None:
+        check = verify_regression._check_vector_canonical_boundary_coverage_schema49
+        disabling_overrides = (
+            {"target_canonical_boundary": 0},
+            {"target_vector_partial_vl": 0},
+            {"target_vector_nonzero_vstart": 1000},
+            {"target_vector_masked": 1000},
+            {"target_vector_lmul": "1,0,0,0,0,0,0"},
+            {"target_vector_emul": "1,0,0,0,0,0,0"},
+            {"target_vector_addressing": "1,0,0,0"},
+            {"target_vector_eew": "1,0,0,0"},
+            {"target_vector_sew": "1,0,0,0"},
+        )
+        for override in disabling_overrides:
+            with self.subTest(override=override):
+                fields = self.vector_canonical_fields([0] * 36)
+                fields.update(override)
+                args = (fields, [1, 1, 1, 1], [10] * 4, [0, 1, 0], [1, 1])
+                self.assertEqual(check(*args), 0)
+                fields["actual_vector_canonical_boundary_cross"] = ",".join(
+                    map(str, [1] + [0] * 35)
+                )
+                with self.assertRaisesRegex(
+                    verify_regression.VerificationError, "does not match enabled classes"
+                ):
+                    check(*args)
+        for operations, translation, modes in (
+            ([1, 1, 1, 0], [0, 1, 0], [1, 1]),
+            ([1, 1, 1, 1], [1, 0, 0], [1, 1]),
+            ([1, 1, 1, 1], [0, 1, 0], [0, 0]),
+        ):
+            fields = self.vector_canonical_fields([0] * 36)
+            self.assertEqual(check(fields, operations, [10] * 4, translation, modes), 0)
+
+    def test_schema_49_rejects_invalid_vector_canonical_summary(self) -> None:
+        check = verify_regression._check_vector_canonical_boundary_coverage_schema49
+        fields = self.vector_canonical_fields([1] * 36)
+        for name in ("target_canonical_boundary", "target_vector_partial_vl",
+                     "target_vector_nonzero_vstart", "target_vector_masked"):
+            for value in (None, False, -1, 1001, "100"):
+                malformed = dict(fields)
+                malformed[name] = value
+                with self.subTest(field=name, value=value), self.assertRaises(
+                    verify_regression.VerificationError
+                ):
+                    check(malformed, [1] * 4, [100] * 4, [0, 1, 0], [1, 1])
+        for value in (None, "1,2", ",".join(["-1"] + ["1"] * 35),
+                      ",".join(["1"] * 35 + ["oops"])):
+            malformed = dict(fields)
+            malformed["actual_vector_canonical_boundary_cross"] = value
+            with self.subTest(counts=value), self.assertRaises(
+                verify_regression.VerificationError
+            ):
+                check(malformed, [1] * 4, [100] * 4, [0, 1, 0], [1, 1])
 
     def test_schema_44_checks_vector_fof_accounting(self) -> None:
         fields: dict[str, object] = {

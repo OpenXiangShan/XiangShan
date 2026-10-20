@@ -23,6 +23,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     std::uint64_t canonical_boundary_controls = 0;
     std::uint64_t canonical_boundary_recoveries = 0;
     std::uint64_t canonical_boundary_store_checks = 0;
+    std::array<std::uint64_t, 36> vector_canonical_boundary_crosses{};
+    std::uint64_t vector_canonical_boundary_controls = 0;
+    std::uint64_t vector_canonical_boundary_recoveries = 0;
+    std::uint64_t vector_canonical_boundary_store_checks = 0;
+    std::uint64_t vector_canonical_boundary_flows = 0;
     const auto canonical_boundary_complete = [&]() {
         for (unsigned cross = 0; cross < canonical_boundary_crosses.size(); ++cross) {
             if (constraints.canonical_boundary_cross_enabled(cross) &&
@@ -30,7 +35,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
         }
-        return true;
+        for (unsigned cross = 0; cross < vector_canonical_boundary_crosses.size();
+             ++cross) {
+            if (constraints.vector_canonical_boundary_cross_enabled(cross) &&
+                vector_canonical_boundary_crosses[cross] == 0) {
+                return false;
+            }
+        }
+        return constraint_coverage.operations[RandomConstraints::vector_store] ==
+            constraint_coverage.vector_directions[1] + std::accumulate(
+                vector_canonical_boundary_crosses.begin(),
+                vector_canonical_boundary_crosses.end(), std::uint64_t{0});
     };
     const auto canonical_boundary_loads = [&]() {
         std::uint64_t count = 0;
@@ -53,6 +68,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         stream << " actual_canonical_boundary_controls=" << canonical_boundary_controls
                << " actual_canonical_boundary_recoveries=" << canonical_boundary_recoveries
                << " actual_canonical_boundary_store_checks=" << canonical_boundary_store_checks;
+        stream << " actual_vector_canonical_boundary=" << std::accumulate(
+            vector_canonical_boundary_crosses.begin(),
+            vector_canonical_boundary_crosses.end(), std::uint64_t{0});
+        stream << " actual_vector_canonical_boundary_cross=";
+        for (unsigned cross = 0; cross < vector_canonical_boundary_crosses.size();
+             ++cross) {
+            stream << (cross == 0 ? "" : ",")
+                   << vector_canonical_boundary_crosses[cross];
+        }
+        stream << " actual_vector_canonical_boundary_controls="
+               << vector_canonical_boundary_controls
+               << " actual_vector_canonical_boundary_recoveries="
+               << vector_canonical_boundary_recoveries
+               << " actual_vector_canonical_boundary_store_checks="
+               << vector_canonical_boundary_store_checks
+               << " actual_vector_canonical_boundary_flows="
+               << vector_canonical_boundary_flows;
         return stream.str();
     };
     std::string phase = "reset";
@@ -4593,6 +4625,229 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             return true;
         };
 
+        const auto issue_vector_canonical_boundary = [&](unsigned cross) {
+            const unsigned eew = cross % 3U + 1U;
+            const unsigned width = 1U << eew;
+            const unsigned addressing = (cross / 3U) % 3U + 1U;
+            const unsigned mode = (cross / 9U) % 2U;
+            const bool invalid_first = cross / 18U != 0;
+            const unsigned bits = mode == 0 ? 39U : 48U;
+            const std::uint64_t low_limit = std::uint64_t{1} << (bits - 1);
+            const std::uint64_t high_base = 0U - low_limit;
+            const unsigned distance = 1U + random() % (width - 1U);
+            const std::uint64_t element_address =
+                (invalid_first ? high_base : low_limit) - distance;
+            const std::uint64_t expected_fault =
+                invalid_first ? element_address : low_limit;
+            {
+                std::ostringstream detail;
+                detail << "random-vector-canonical-boundary:cross=" << cross
+                       << ":mode=" << bits << ":addressing=" << addressing
+                       << ":invalid_first=" << invalid_first
+                       << ":width=" << width << ":distance=" << distance
+                       << ":address=0x" << std::hex << element_address;
+                phase = detail.str();
+            }
+            const std::string canonical_phase = phase;
+            TranslationContext context;
+            context.regime = RandomConstraints::translation_stage1;
+            context.stage1_mode = mode;
+            if (!constraints.vector_canonical_boundary_cross_enabled(cross) ||
+                !environment.run_until_all_complete(constrained_completion_timeout) ||
+                !environment.run_until_queues_retired(constrained_completion_timeout) ||
+                !enter_translation_context(context) ||
+                !environment.set_pointer_masking(memblock::PointerMaskingConfig{}) ||
+                !issue_constrained_fence(RandomConstraints::vector_store)) {
+                return false;
+            }
+            std::array<std::uint64_t, 2> control_virtual{{low_limit - 8U, high_base}};
+            std::array<std::uint64_t, 2> control_physical{{
+                canonical_boundary_physical + mode * 0x2000U + 0xff8U,
+                canonical_boundary_physical + mode * 0x2000U + 0x1000U}};
+            std::array<std::uint64_t, 2> control_data{};
+            for (unsigned side = 0; side < 2; ++side) {
+                control_data[side] = environment.bus_expected_load(
+                    control_physical[side], memblock::LoadOp::ld);
+            }
+            const auto check_controls = [&]() {
+                for (unsigned side = 0; side < 2; ++side) {
+                    auto control = make_load(
+                        control_virtual[side], memblock::LoadOp::ld,
+                        random() % memblock::kScalarLoadLanes);
+                    control.oracle_address = control_physical[side];
+                    const auto walk = memblock::reference_page_walk(
+                        environment.memory(), random_stage1_roots[mode],
+                        control.address, page_mode(mode));
+                    if (!walk.translated ||
+                        walk.physical_address != control_physical[side] ||
+                        environment.bus_expected_load(
+                            control_physical[side], memblock::LoadOp::ld) !=
+                            control_data[side] ||
+                        !environment.set_rob_head(control.rob, control.rob_flag) ||
+                        !issue_load(control, control_data[side], false) ||
+                        !environment.run_until_lq_retired(constrained_completion_timeout)) {
+                        return false;
+                    }
+                    ++vector_canonical_boundary_controls;
+                }
+                return true;
+            };
+            if (!check_controls()) {
+                phase += ":positive-control";
+                return false;
+            }
+            const auto ptw_before = environment.ptw_requests();
+            const auto uncache_before = environment.uncache_requests();
+            const auto lq_before = environment.lq_dequeued();
+            const auto sq_before = environment.sq_dequeued();
+            const auto lq_cancels = environment.lq_redirect_canceled_observed();
+            const auto sq_cancels = environment.sq_redirect_canceled_observed();
+            auto fault = make_vector(
+                true, element_address, eew,
+                random() % memblock::kVectorMemoryLanes,
+                static_cast<memblock::VectorAddressingMode>(addressing));
+            fault.vsew = static_cast<std::uint8_t>(eew);
+            fault.vl = 1;
+            fault.vstart = 0;
+            fault.vm = true;
+            fault.vma = random() % 1000 < constraints.vector_vma_per_mille;
+            fault.vta = random() % 1000 < constraints.vector_vta_per_mille;
+            fault.expected_exception_mask = memblock::kExceptionStorePageFault;
+            fault.expected_writeback_vstart = 0;
+            if (addressing == 1) {
+                const std::int64_t stride = width * (1U + random() % 16U);
+                fault.stride = (random() & 1U) != 0 ? stride : -stride;
+            } else {
+                const std::uint64_t index_offset = (random() % 256U) * width;
+                fault.address = element_address - index_offset;
+                for (unsigned byte = 0; byte < width; ++byte) {
+                    fault.index[byte] = static_cast<unsigned char>(
+                        index_offset >> (byte * 8U));
+                }
+            }
+            // Walk actual effective bytes independently of the faulting
+            // transaction's expected exception and without a PA override.
+            if (memblock::active_vector_elements(fault) != 1U ||
+                memblock::vector_element_address(fault, 0) != element_address) {
+                phase += ":active-element";
+                return false;
+            }
+            std::optional<std::uint64_t> first_invalid;
+            unsigned valid_bytes = 0;
+            for (unsigned byte = 0; byte < width; ++byte) {
+                const auto walk = memblock::reference_page_walk(
+                    environment.memory(), random_stage1_roots[mode],
+                    memblock::vector_element_address(fault, 0) + byte,
+                    page_mode(mode));
+                if (walk.translated) {
+                    ++valid_bytes;
+                } else if (!first_invalid) {
+                    first_invalid = element_address + byte;
+                }
+            }
+            if (first_invalid != expected_fault || valid_bytes == 0 ||
+                valid_bytes == width) {
+                phase += ":reference-range";
+                return false;
+            }
+            environment.select_store_exception_address(true);
+            environment.expect_vector(fault);
+            if (!environment.set_rob_head(fault.rob, fault.rob_flag) ||
+                !environment.enqueue_vector(fault) ||
+                !environment.issue_vector(fault, 2048) ||
+                !environment.run_until_vector_complete_with_replays(
+                    fault, constrained_completion_timeout) ||
+                !environment.run_cycles(8) ||
+                environment.exception_vaddr() != expected_fault ||
+                environment.exception_is_for_vs_nonleaf_pte() ||
+                environment.uncache_requests() != uncache_before) {
+                std::ostringstream detail;
+                detail << canonical_phase << ":terminal-fault:expected_vaddr=0x"
+                       << std::hex << expected_fault << ":actual_vaddr=0x"
+                       << environment.exception_vaddr();
+                phase = detail.str();
+                return false;
+            }
+            // VLS exceptions require the backend's vector redirect qualifier.
+            // All reserved flows must retire or be canceled on observed IO.
+            if (!environment.redirect_after(fault.rob, fault.rob_flag, true, true) ||
+                !environment.run_cycles(96) ||
+                !environment.run_until_queues_retired(constrained_completion_timeout)) {
+                phase += ":redirect-retire";
+                return false;
+            }
+            const auto lq_dequeued = environment.lq_dequeued() - lq_before;
+            const auto sq_dequeued = environment.sq_dequeued() - sq_before;
+            const auto lq_canceled =
+                environment.lq_redirect_canceled_observed() - lq_cancels;
+            const auto sq_canceled =
+                environment.sq_redirect_canceled_observed() - sq_cancels;
+            if (lq_dequeued + lq_canceled != 0 ||
+                sq_dequeued + sq_canceled != fault.flow_num) {
+                std::ostringstream detail;
+                detail << canonical_phase << ":queue-accounting:lq="
+                       << lq_dequeued << '+' << lq_canceled << ":sq="
+                       << sq_dequeued << '+' << sq_canceled
+                       << ":flows=" << unsigned(fault.flow_num);
+                phase = detail.str();
+                return false;
+            }
+            --rob_offset;
+            sq_offset -= sq_canceled;
+            ++coverage.exceptions;
+            phase = canonical_phase;
+            if (!check_controls()) {
+                phase += ":store-side-effect";
+                return false;
+            }
+            ++vector_canonical_boundary_store_checks;
+            environment.select_store_exception_address(false);
+            // A real scalar commit/readback pair proves the SQ can accept and
+            // retire useful work after the fault, using the observed cursor.
+            auto survivor = make_store(
+                high_base + 0x100U, random(), memblock::StoreOp::sd,
+                random() % memblock::kScalarStoreLanes,
+                random() % memblock::kScalarStoreLanes);
+            survivor.oracle_address =
+                canonical_boundary_physical + mode * 0x2000U + 0x1100U;
+            const auto survivor_walk = memblock::reference_page_walk(
+                environment.memory(), random_stage1_roots[mode],
+                survivor.address, page_mode(mode));
+            environment.expect_store(survivor);
+            if (!survivor_walk.translated ||
+                survivor_walk.physical_address != *survivor.oracle_address ||
+                !environment.set_rob_head(survivor.rob, survivor.rob_flag) ||
+                !environment.enqueue_store(
+                    survivor, memblock::lq_pointer_value(lq_offset)) ||
+                !environment.issue_store_data(survivor, 2048) ||
+                !environment.issue_store_address(survivor, 2048) ||
+                !environment.run_until_store_complete_with_replay(
+                    survivor, constrained_completion_timeout) ||
+                !environment.commit_store(survivor, constrained_completion_timeout)) {
+                phase += ":survivor-store";
+                return false;
+            }
+            auto survivor_load = make_load(
+                survivor.address, memblock::LoadOp::ld,
+                random() % memblock::kScalarLoadLanes);
+            survivor_load.oracle_address = survivor.oracle_address;
+            if (!environment.set_rob_head(survivor_load.rob, survivor_load.rob_flag) ||
+                !issue_load(survivor_load, survivor.data, false) ||
+                !environment.run_until_queues_retired(constrained_completion_timeout)) {
+                phase += ":survivor-load";
+                return false;
+            }
+            ++vector_canonical_boundary_crosses[cross];
+            ++vector_canonical_boundary_recoveries;
+            vector_canonical_boundary_flows += fault.flow_num;
+            constraint_coverage.sample_operation(RandomConstraints::vector_store);
+            constraint_coverage.sample_translation(
+                context, TranslationLeafTopology{}, ptw_before,
+                environment.ptw_requests(), 1, 0);
+            ++actions;
+            return true;
+        };
+
         const auto retire_random_nc_store_error = [&] (
             std::uint64_t lq_dequeued_before,
             std::uint64_t sq_dequeued_before,
@@ -4711,6 +4966,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 }
             }
             std::optional<unsigned> canonical_cross;
+            std::optional<unsigned> vector_canonical_cross;
             if (!closing_stride_stream && constraints.canonical_boundary_per_mille != 0) {
                 // Rotate the coverage search by seed state so the closure
                 // prefix still randomizes boundary, mode, direction, and size.
@@ -4723,7 +4979,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         break;
                     }
                 }
-                if (!canonical_cross &&
+                if (!canonical_cross) {
+                    const unsigned vector_first =
+                        random() % vector_canonical_boundary_crosses.size();
+                    for (unsigned offset = 0;
+                         offset < vector_canonical_boundary_crosses.size(); ++offset) {
+                        const unsigned cross = (vector_first + offset) %
+                            vector_canonical_boundary_crosses.size();
+                        if (constraints.vector_canonical_boundary_cross_enabled(cross) &&
+                            vector_canonical_boundary_crosses[cross] == 0) {
+                            vector_canonical_cross = cross;
+                            break;
+                        }
+                    }
+                }
+                if (!canonical_cross && !vector_canonical_cross &&
                     (kind == RandomConstraints::scalar_load ||
                      kind == RandomConstraints::scalar_store) &&
                     !probe_coverage_incomplete()) {
@@ -4751,6 +5021,31 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             if (canonical_cross) {
                 if (!issue_canonical_boundary(*canonical_cross)) {
+                    return false;
+                }
+                continue;
+            }
+            if (!vector_canonical_cross && !closing_stride_stream &&
+                kind == RandomConstraints::vector_store &&
+                constraints.enabled_vector_canonical_boundary_crosses() != 0 &&
+                !probe_coverage_incomplete()) {
+                if (!ordinary_constraint_coverage_closed) {
+                    ordinary_constraint_coverage_closed = constraint_coverage.complete(
+                        constraints, options.backpressure,
+                        environment.dcache_response_latency_stats(),
+                        environment.ptw_response_latency_stats(),
+                        environment.uncache_response_latency_stats(),
+                        canonical_boundary_loads());
+                }
+                if (ordinary_constraint_coverage_closed &&
+                    random() % 1000 < constraints.canonical_boundary_per_mille) {
+                    vector_canonical_cross =
+                        constraints.choose_vector_canonical_boundary_cross(
+                            random(), random(), random(), random());
+                }
+            }
+            if (vector_canonical_cross) {
+                if (!issue_vector_canonical_boundary(*vector_canonical_cross)) {
                     return false;
                 }
                 continue;

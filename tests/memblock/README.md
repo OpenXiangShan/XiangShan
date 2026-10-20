@@ -465,8 +465,12 @@ store/load recovery pairs bring the scenario total to 1,798 transactions.
 Queue retirement/cancellation must be externally observed; no manual
 cancellation closes this matrix. Schema 48 also adds `canonical-boundary` to
 `random-mixed`, closing the 24 enabled scalar mode/direction/boundary/width
-bins before weighted sampling. Vector mixed crossings and G-stage address
-limits remain explicit gaps.
+bins before weighted sampling. Schema 49 adds 36 eligible singleton strided
+and indexed vector-store bins, with externally conserved SQ flows, unchanged
+edge readbacks, and a committed survivor store/load pair. Eligibility honors
+all shape weights and the compatible VL/vstart/mask policy endpoints; see
+`CONSTRAINED_RANDOM.md`. Broader vector shapes, multi-element fault progress,
+vector loads, and G-stage address limits remain explicit gaps.
 The shared
 encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
 disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an
