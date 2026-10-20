@@ -359,11 +359,7 @@ case class L2CacheConfig
         enableDataECC = true,
         dataCheck = Some("oddparity"),
         enablePoison = true,
-        prefetch = Seq(BOPParameters()) ++
-          (if (tp) Seq(TPParameters()) else Nil) ++
-          (if (nl) Seq(NLParameters()) else Nil) ++
-          (if (cdp) Seq(CDPParameters()) else Nil) ++
-          (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
+        prefetch = Nil, // no L2 prefetchers (BOP/TP/NL/CDP/PrefetchReceiver)
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
