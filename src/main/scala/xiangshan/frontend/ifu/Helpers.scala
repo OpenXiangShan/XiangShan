@@ -18,6 +18,8 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import utility.SignExt
+import utility.XORFold
+import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
@@ -207,4 +209,81 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
 
     Mux1H(UIntToOH(shamt), Seq(s0, s1, s2, s3))
   }
+
+  def genFastInfo(req: MainPipeToIfuReq): FastFetchInfo = {
+    val maybeRvcMap = req.maybeRvcMap
+    val firstRange  = req.firstRange
+    val startVAddr  = req.info(0).startVAddr
+    val predTakenMask = UIntToOH(req.info(0).takenCfiOffset.bits, FetchBlockInstNum)
+    val predTaken     = req.info(0).takenCfiOffset.valid
+
+    val info = Wire(new FastFetchInfo)
+    val instrValid = Wire(Vec(5, Bool()))
+    val isRvc      = Wire(Vec(5, Bool()))
+    val isRvI      = Wire(Vec(5, Bool()))
+    val endMask    = Wire(Vec(5, Bool()))
+    val pc         = Wire(Vec(5, new GuardedPc))
+    val fixedRange = Wire(Vec(5, Bool()))
+    fixedRange    := ~(isRvI & predTakenMask) & firstRange
+    instrValid(0) := true.B
+    isRvc(0)      := maybeRvcMap(0)
+    isRvI(0)      := !maybeRvcMap(0)
+    endMask(0)    := instrValid(0) && maybeRvcMap(0)
+    for (i <- 1 until 5) {
+      instrValid(i) := (instrValid(i - 1) && maybeRvcMap(i - 1)) || !instrValid(i - 1)
+      isRvc(i)      := instrValid(i) && maybeRvcMap(i)
+      isRvI(i)      := instrValid(i) && !maybeRvcMap(i)
+      endMask(i)    := (instrValid(i) && maybeRvcMap(i)) || (isRvI(i - 1))
+    }
+    for(i <- 0 until 4) {
+      pc(i) := GuardedPcInit(startVAddr + i.U)
+    }
+    endMaskOH(0) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0001".U -> "b0010".U,
+      "bxxx0".U -> "b0001".U
+    ))
+    endMaskOH(1) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0001".U -> "b0100".U,
+      "b0101".U -> "b1000".U,
+      "b0010".U -> "b0100".U,
+      "bxx00".U -> "b0010".U
+    ))
+    endMaskOH(2) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0001".U -> "b1000".U,
+      "b0010".U -> "b1000".U,
+      "b0100".U -> "b1000".U,
+      "bx000".U -> "b0100".U
+    ))
+    endMaskOH(3) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0000".U -> "b1000".U
+    ))
+
+    validMaskOH(0) := "b0001".U
+    validMaskOH(1) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0001".U -> "b0100".U,
+      "bxxx0".U -> "b0010".U
+    ))
+    validMaskOH(2) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0001".U -> "b1000".U,
+      "b0010".U -> "b1000".U,
+      "bxx00".U -> "b0100".U,
+    ))
+    validMaskOH(3) := MuxLookup(isRvI, "b0000".U, Seq(
+      "b0000".U -> "b1000".U
+    ))
+
+    // 最多允许3条指令
+    info.realInstrValid := UIntToMask(PopCount(instrValid & fixedRange)).toUInt & "b0111".U
+    info.rawIsRvc    := isRvc
+    info.rawIsRvI    := isRvI
+    info.rawPc       := pc
+    info.rawFoldedPC := pc.map{pc => XORFold(pc(VAddrBits - 1, 1), MemPredPCWidth)}
+    info.endMaskOH   := endMaskOH
+    info.validMaskOH := validMaskOH
+    info.rawIsLastInFtqEntry := (0 until 4).map { i =>
+      fixedRange(i) ^ fixedRange(i + 1)
+    }
+    info.ftqPtr      := req.info(0).ftqIdx
+  }
 }
+

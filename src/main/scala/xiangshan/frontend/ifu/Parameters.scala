@@ -29,6 +29,8 @@ trait HasIfuParameters extends HasFrontendParameters {
   // equal lower_result overflow bit
   def PcCutPoint:    Int = ifuParameters.PcCutPoint.getOrElse((VAddrBits / 4) - 1)
   def IfuAlignWidth: Int = frontendParameters.ibufferParameters.NumWriteBank
+  def FastFetchWidth: Int = 4 // 表示参与快速取指的范围
+  def FastFetchMaxNum: Int = IfuAlignWidth - 1 // 表示快速取指的最大数量
 
   require(PcCutPoint > 0 && PcCutPoint < VAddrBits, s"PcCutPoint($PcCutPoint) must be in range (0, $VAddrBits)")
 }
