@@ -4367,6 +4367,11 @@ uses all 25 C++ files from the recorded clean commit `0fab0cb88`, the same
 clean model, and unchanged RNG, input timing and failure guard. It records
 accepted top-level DCache A `reqSource`/`vaddr` plus input lineage near the
 failure; artifacts are in `build/memblock/schema48-corner-diagnostic/`.
+The A user-vaddr field is interpreted by source: for ordinary Acquire traffic
+it carries the truncated VA slice and has defined alias/line relationships;
+for L1 prefetch it is only an index fragment, and CMO user fields are
+undefined. These fields are therefore diagnostic provenance, not an oracle
+that licenses filtering the extra request.
 The extra address equals a prior stride-stream address, but that coincidence
 alone does not establish request provenance. Neither replay has finished at
 this checkpoint, and the oracle has not been relaxed.
