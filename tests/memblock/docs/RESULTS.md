@@ -4146,6 +4146,10 @@ PMP-relation cross with strict lane checks. Artifacts are in
 `build/memblock/continuation-lanes/coverage.json` and
 `build/memblock/canonical-focused/hypervisor-pmp.json`. These results correct a
 UT false positive; they do not constitute a new RTL defect or closure campaign.
+The matching SPEC replay, seed 101, also passes all 6,144 actions in
+3,443.121 seconds, with every family x SPVP x PMP-relation bin closed.
+Its frozen schema-47 evidence is retained in
+`build/memblock/continuation-lanes/spec.json`.
 
 ## Canonical Access Ranges and Mixed Faults
 
@@ -4163,8 +4167,15 @@ scalar two-byte range case with an ordinary RF-writing completion instead of
 the expected page fault; deterministic replay repeats the mismatch. The
 clean frozen control passes the complete matrix. Exact expressions, snapshot,
 logs, and reproduction are recorded in `HISTORICAL_BUG_AUDIT.md` and
-`build/memblock/canonical-mutation/`. The vector-store-size mutation is still
-running; its status is not claimed from the scalar result.
+`build/memblock/canonical-mutation/`. The vector-store-size mutation now has
+independent clean/mutant evidence: the clean control passes all 1,798
+transactions, while the exact generated `StoreUnit.sv` mux revert
+leaves the first two-byte strided vector store pending after one replay
+feedback (`vector_pending=1`, `pending_replays=0`) instead of producing the
+identified store page fault. A frozen mutant replay repeats the same external
+completion failure. The exception-address payload is not interpreted without
+a terminal fault. This is historical-mutation sensitivity evidence, not a
+new CPU RTL defect.
 
 Schema 48 adds the same scalar boundary class to `random-mixed`, with presets
 SPEC=1, coverage=100, corner=250 per mille and 24 enabled cross bins. Directed

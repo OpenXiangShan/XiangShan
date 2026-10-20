@@ -134,7 +134,7 @@ black-box acceptance rule.
 | --- | --- | --- | --- | --- |
 | 2026-10-08 | `c098f996b` | Preserve self-flushing replay information when RAW and RAR redirects share a ROB index | Boundary gap | `memory-violation` and `rar-violation` exercise RAW and RAR separately, but no legal load currently raises both at the same ROB index. The missing acceptance is one selected self-flushing redirect followed by a replay with the final store-to-load value. |
 | 2026-09-24 | `49b6a414f` | Preserve a late vector-load DCache exception in the final vector writeback | **Reproduced** | `dcache-errors` primes one line with scalar denied and last-beat-corrupt responses, then requires vector loads to hit the poisoned line with the corresponding terminal exception. An independent mutation restoring `vecldout.hasException := s3_exception` passes the old cold-miss stimulus but fails the poisoned-line case with `exception=0x0`; clean RTL passes both cases. |
-| 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | Covered, not mutated | `translation-faults` now crosses both Sv39/Sv48 canonical boundaries with every 2/4/8-byte distance in strided and both indexed store modes (132 faults), proves permissive aliases, checks exact exception/VA, unchanged edge readbacks, and same-instance recovery. Stage-2 limit crossings remain a gap. |
+| 2026-09-15 | `872fa9be3` | Pass vector store access size to the TLB | **Reproduced** | The clean 1,798-transaction `translation-faults` control passes. An isolated exact revert of the generated `StoreUnit.sv` TLB-size mux (`alignedType` removed) deterministically fails the first Sv39 strided vector-store crossing: a 2-byte store at `0x3fffffffff` must produce identified `StorePageFault` at `0x4000000000`, but after one replay feedback it remains pending past the 16,384-cycle bounded wait with no terminal vector writeback (`vector_pending=1`, `pending_replays=0`). The frozen mutant replay repeats the same externally visible failure. Stage-2 limit crossings remain a gap. |
 | 2026-09-15 | `39ad0d589` | Validate the full access range against pointer masking and canonical limits | **Reproduced** | `translation-faults` covers both canonical crossings, every 2/4/8-byte distance, scalar loads/stores and strided/indexed vector stores. An isolated final-byte-check mutation deterministically returns normal scalar data instead of a page fault; clean RTL passes all 1,798 transactions. Schema 48 adds scalar mixed bins. Stage-2 and pointer-masking/trigger combinations remain gaps. |
 | 2026-09-15 | `db2a9c26b` | Avoid vector-state dirtiness for vector-store helper uops | Integration-owned | Rename/commit `mstatus.VS` is not observable at the MemBlock boundary. Memory-effect and writeback checks cannot establish CSR dirtiness. |
 | 2026-09-17 | `f86f50b83` | Initialize SBuffer forward tag state | Four-state gap | The affected X-only state is not observable in the current two-state Verilator configuration; functional first-forward traffic passes. |
@@ -177,8 +177,43 @@ For a fresh experiment, follow the README build workflow, make the generated
 expression substitutions described above in isolated copies, replace only
 those three filelist entries, and export/build that separate model with the
 same current harness. This is historical-mutation sensitivity evidence, not
-a new CPU RTL finding. The separate `872fa9be3` vector-store-size mutation
-has not yet supplied a terminal result and remains **Covered, not mutated**.
+a new CPU RTL finding.
+
+The separate `872fa9be3` vector-store-size mutation is also **Reproduced**.
+Only the generated `StoreUnit.sv` TLB-size expression is changed:
+
+```text
+before: s0_out_isvec ? io_vecstin_bits_alignedType
+                    : s0_use_non_prf_flow ? s0_uop_fuOpType[2:0] : 3'h0;
+after:  s0_use_non_prf_flow ? s0_uop_fuOpType[2:0] : 3'h0;
+```
+
+The scalar cases pass before the first strided vector-store case fails. The
+identified two-byte store at `0x3fffffffff` must complete with
+`StorePageFault` (`0x8000`), reporting `0x4000000000`. Instead, it remains
+pending after the 16,384-cycle replay-aware wait: one replay feedback has
+been handled, no replay is pending, and the identified vector scoreboard
+entry is still outstanding. Replaying the frozen mutant repeats the same
+external completion failure. No terminal fault was observed, so the printed
+exception-address payload is undefined and is not evidence of a wrong VA.
+The clean control passes the same full 1,798-transaction snapshot. The
+normal TLB modules remain unchanged in this experiment.
+
+The exact patch, isolated filelist, dependency-resolution logs, command logs,
+manifest, and both results are in
+`build/memblock/canonical-mutation/vector_store_size/`. Replay it with:
+
+```sh
+LD_LIBRARY_PATH=build/memblock/canonical-mutation/vector_store_size/runtime \
+  build/memblock/canonical-mutation/vector_store_size/runtime/memblock_sim --test translation-faults
+```
+
+For a fresh model, substitute only the isolated `StoreUnit.sv` copy with the
+expression change above, then follow the same separate Picker export/build
+workflow as the full-range mutation. Picker `add7b522fd58` and xcomm
+`3e4bccb73f08` are recorded resolved revisions, not bootstrap pins. This
+experiment establishes sensitivity to the historical mux revert; it is not
+a newly discovered CPU RTL bug.
 
 ## Audit
 
@@ -194,20 +229,20 @@ has not yet supplied a terminal result and remains **Covered, not mutated**.
 | 2026-07-30 | `7754c3a8` | Memory-stall top-down attribution | Non-functional/outside MemBlock UT | Performance-counter attribution, not an architectural memory result. |
 | 2026-07-28 | `222f993e` | VLS exception redirect must not flush itself | Producer implemented; mutation gap | `vector-fof`, `vector-segment-fof`, and `trigger-contracts` now drive a `flush` redirect with `isVlsException=1` for the identified vector uop. They reproduce the distinct stale-address regression from [upstream PR #6548](#upstream-pr-6548-vls-exception-buffer-redirect), caused by applying `flushAfter` globally. They do not yet prove that reverting `222f993e` loses required residual vector-store side effects; that original SQ-drain behavior still needs a distinguishing legal mutation experiment. |
 | 2026-07-21 | `a4047e5a` | Misaligned vector store progress | Covered, not mutated | `misaligned-stores` and mandatory `random-mixed` vector-store replay/readback phases. |
-| 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Boundary gap | HLV, HLVX, HSV and SPVP-specific PMP reference checks are not modeled. |
+| 2026-07-21 | `04c0d157` | SPVP mode for HLV/HLVX/HSV PMP checks | Covered, not mutated | `hypervisor-contracts` implements 18 M-mode HLV/HLVX/HSV cases crossing SPVP=U/S with R/X/RW/RX and locked R/RWX PMP regions, using independent R, R+X, and W permission rules. The 82-case directed run passes; schema-26-and-later mixed traffic also closes all 42 family x SPVP x PMP-relation bins. An independent SPVP-mode revert and broader PMP size/TOR/permission/edge crosses remain. |
 | 2026-07-21 | `fbb1e349` | Cross-page vector misaligned store `s_block` progress | **Covered, mutation did not fail** | Rebuilt pre-fix mutant hash `5bfe14db...`; the expanded translated cross-page vector-store progress sequence still passed with exact writeback, dequeue, and readback. |
 | 2026-07-10 | `52262f30` | Blocking issue logic for misaligned vector stores | Boundary gap | Needs controlled overlap of scalar-store issue, vector-store dequeue, and misalign-buffer occupancy. |
 | 2026-07-10 | `9b926b6b` | Vector misaligned store must block in SMB | Covered, not mutated | Translated cross-page vector store checks writeback, commit, SQ drain, and exact readback. |
 | 2026-07-10 | `50bd7957` | Vector exception GPA width | Covered, not mutated | Scalar/vector guest-page-fault tests compare the complete reported GPA with an independent walk. |
-| 2026-06-24 | `2acbf327` | VSegment ready connection | Boundary gap | Segment issue/response agent is absent. |
+| 2026-06-24 | `2acbf327` | VSegment ready connection | Covered, not mutated | `vector-segment` drives lane-0 segment issue with ready handshake and exact complete response/data checks across all four address modes; the expanded full legal matrix passes 1,352 configurations. An independent ready-connection revert and dedicated arbitration against backpressured ordinary vector traffic remain untested. |
 | 2026-06-24 | `098fa583` | VSplit must use vector uop index | Covered, not mutated | `vector-addressing` covers split flows and all address modes, but not a multi-uop segment stream. |
 | 2026-06-20 | `5b82411e` | Misaligned vector cross-page exception address | **Reproduced and fixed** | Clean RTL reproduced the split VS-non-leaf GPA offset (`0x94001808` vs `0x94001800`); `VMergeBuffer` now suppresses the offset for `isForVSnonLeafPTE`, and the repaired deterministic plus randomized boundary tests pass. |
-| 2026-06-20 | `756bbf59` | NaN-box half FP MMIO loads | Boundary gap | MMIO and FP-destination load contracts are not modeled. |
+| 2026-06-20 | `756bbf59` | NaN-box half FP MMIO loads | Stimulus gap | `fp-loads` has a real PBMT-IO FLH producer and independent NaN-boxing/destination oracle. Its previous sole halfword payload `0x908f` has bit 15 set, so old sign extension and correct NaN boxing agree; that passing case does not establish sensitivity. A bit-15-clear IO FLH case and an independent mutation are still needed. |
 | 2026-06-20 | `9045e063` | Store exception priority by ROB/uop, not SQ index | Covered, not mutated | `exception-contracts` issues two simultaneous PBMT-NC misaligned stores whose SQ and wrapped ROB orders disagree, then requires the exported VA of the oldest ROB. Independent revert RTL is deferred until the active endurance campaign releases elaboration resources. |
 | 2026-06-20 | `7ce99d4a` | VSplit threshold must not use LSQ pointer | Covered, not mutated | Split vector traffic plus LQ/SQ and ROB wrap/pressure are checked, but the exact threshold mutation was not built. |
 | 2026-06-20 | `e42d4b51` | Cross-page SMB matching uses SQ `rdataPtr` | Covered, not mutated | Translated cross-page vector store requires exact completion, SQ drain, and readback. |
-| 2026-06-20 | `9f988c01` | Non-debug mode cannot access debug memory | Boundary gap | Debug-region PMP/PMA configuration and architectural debug-mode transitions are absent. |
-| 2026-06-17 | `22cc0b6b` | HLVX final PA execute permission | Boundary gap | HLVX and independent execute-permission PMP oracle are absent. |
+| 2026-06-20 | `9f988c01` | Non-debug mode cannot access debug memory | Covered, not mutated | `mmio-contracts` requires an access fault and zero manager requests for a non-Debug-Mode load at `0x38020010`, then enters Debug Mode and checks successful Uncache load/store; the full scenario passes. An independent guard revert, non-debug store denial, Debug Mode exit, and region-edge combinations remain untested. |
+| 2026-06-17 | `22cc0b6b` | HLVX final PA execute permission | Covered, not mutated | `hypervisor-contracts` includes HLVX PMP execute denial, the SPVP permission matrix, and fixed-PMA execute denial with exact access-fault checking; the 82-case run passes. One legal early cache request may occur before permission denial, so its absence is not the oracle. An independent execute-permission revert remains unbuilt. |
 | 2026-06-09 | `be3e3761` | VSegment load S1 data-read kill | Boundary gap | Segment takeover and DCache bank-read observation are absent. |
 | 2026-06-04 | `d1cb3398` | Misaligned vector store split logic | Covered, not mutated | `misaligned-stores`, `vector-addressing`, and mandatory mixed replay/readback. |
 | 2026-06-01 | `b28e7b40` | Killed loads must not read DCache bank | Non-functional/outside MemBlock UT | Architectural cancellation is checked; internal bank-read power behavior is not externally observable. |
