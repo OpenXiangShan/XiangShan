@@ -45,7 +45,7 @@ import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
-import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
+import xiangshan.mem.prefetch.TLBPlace
 
 trait HasMemBlockParameters extends HasXSParameter {
   val intSchdParams = backendParams.intSchdParams.get
@@ -771,46 +771,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
    *  - L1 prefetcher: fuzzer interface
    ******************************************************************/
 
-  /** prefetcher site in L1 */
+  /** prefetcher site in L1 -- prefetcher instantiation removed */
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
-  val prefetcher = Module(new PrefetcherWrapper)
-  prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
-  prefetcher.io.l2_fdbk_pf_ctrl := io.l2_fdbk_pf_ctrl
-  prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
-  prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
-  prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
-  prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
-  prefetcher.io.fromOOO.s1_loadPc := issueLda.map(x => RegNext(x.bits.pc.get)) ++ io.ooo_to_mem.hybridPc
-  prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
-  prefetcher.io.trainSource.s1_loadFireHint := newLoadUnits.map(_.io.prefetchTrainHintS1)
-  prefetcher.io.trainSource.s2_loadFireHint := newLoadUnits.map(_.io.prefetchTrainHintS2)
-  prefetcher.io.trainSource.s3_load := newLoadUnits.map(_.io.prefetchTrain)
-  prefetcher.io.trainSource.s3_ptrChasing := newLoadUnits.map(_ => false.B) // TODO: remove ptr chasing logic in prefetcher
-  prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS1)
-  prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS2)
-  prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetchTrain)
-  (0 until prefetcherNum).foreach { i => //NOTE lyq: prefetcherNum minimum is 1 for simpler code generation, which is ugly
-    prefetcher.io.tlb_req(i).req.ready := false.B
-    prefetcher.io.tlb_req(i).resp.valid := false.B
-    prefetcher.io.tlb_req(i).resp.bits := DontCare
-    prefetcher.io.pmp_resp(i) := DontCare
-  }
-  pf2tlbIndexMap.zipWithIndex.foreach{ case (k, i) =>
-    dtlb_reqs(k) <> prefetcher.io.tlb_req(i)
-    prefetcher.io.pmp_resp(i) := pmp_check(k).resp
-  }
-  l1_pf_req <> prefetcher.io.l1_pf_to_l1
-  outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
-  outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
-  outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l2.pf_source)
-  outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l2.pf_en)
-  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
-  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
-  outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l3.pf_source)
-  outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l3.pf_en)
-  XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
-  XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
-  XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
+  l1_pf_req.valid := false.B
+  l1_pf_req.bits := DontCare
 
   /** prefetcher site in L2 */
   dtlb_reqs(L2toL1DTLBPortIndex) <> io.l2_tlb_req
@@ -1310,7 +1274,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         ModuleNode(pmp)
       )
       ++ pmp_checkers.map(ModuleNode(_))
-      ++ Seq(ModuleNode(prefetcher))
     )
     val rightResetTree = ResetGenNode(
       Seq(

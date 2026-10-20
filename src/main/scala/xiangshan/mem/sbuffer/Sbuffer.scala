@@ -214,7 +214,7 @@ class Sbuffer(implicit p: Parameters)
 
   val dataModule = Module(new SbufferData)
   dataModule.io.writeReq <> DontCare
-  val prefetcher = Module(new StorePfWrapper())
+  // store prefetcher instantiation removed
   val writeReq = dataModule.io.writeReq
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
@@ -393,38 +393,11 @@ class Sbuffer(implicit p: Parameters)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
-  for (i <- 0 until EnsbufferWidth) {
-    // train
-    if (EnableStorePrefetchSPB) {
-      prefetcher.io.sbuffer_enq(i).valid := io.in.req(i).fire && io.in.req(i).bits.vecValid
-      prefetcher.io.sbuffer_enq(i).bits := DontCare
-      prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in.req(i).bits.vaddr
-    } else {
-      prefetcher.io.sbuffer_enq(i).valid := false.B
-      prefetcher.io.sbuffer_enq(i).bits := DontCare
-    }
-
-    // prefetch req
-    if (EnableStorePrefetchAtCommit) {
-      if (EnableAtCommitMissTrigger) {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire && io.in.req(i).bits.vecValid && io.in.req(i).bits.prefetch)
-      } else {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire && io.in.req(i).bits.vecValid)
-      }
-      io.store_prefetch(i).bits.paddr := DontCare
-      io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in.req(i).bits.vaddr)
-      prefetcher.io.prefetch_req(i).ready := io.store_prefetch(i).ready
-    } else {
-      if (EnableStorePrefetchSPB) {
-        io.store_prefetch(i) <> prefetcher.io.prefetch_req(i)
-      } else {
-        io.store_prefetch(i) <> DontCare
-        prefetcher.io.prefetch_req(i) <> DontCare
-      }
-    }
-    io.store_prefetch zip prefetcher.io.prefetch_req drop 2 foreach (x => x._1 <> x._2)
+  // store prefetcher instantiation removed: no store prefetch requests
+  io.store_prefetch.foreach { p =>
+    p.valid := false.B
+    p.bits := DontCare
   }
-  prefetcher.io.memSetPattenDetected := io.memSetPattenDetected
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,
