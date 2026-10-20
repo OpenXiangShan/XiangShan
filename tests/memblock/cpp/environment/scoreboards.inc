@@ -263,6 +263,16 @@ public:
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
                 transaction.rob_flag,
+                static_cast<std::uint8_t>(
+                    transaction.address_lane),
+                static_cast<std::uint8_t>(
+                    transaction.data_lane),
+                static_cast<std::uint8_t>(
+                    transaction.expected_address_writeback_lane.value_or(
+                        transaction.address_lane)),
+                static_cast<std::uint8_t>(
+                    transaction.expected_data_writeback_lane.value_or(
+                        transaction.data_lane)),
                 transaction.expected_exception_mask,
                 false,
                 false,
@@ -300,6 +310,10 @@ public:
         // therefore still be visible after an issue attempt that was stalled;
         // do not attribute that pulse until the input handshake was observed.
         if (!it->second.address_issued) {
+            return;
+        }
+        if (lane != it->second.writeback_address_lane) {
+            fail("wrong store-address writeback lane", lane, writeback);
             return;
         }
         if (sample_cycle < it->second.address_issue_cycle) {
@@ -387,6 +401,10 @@ public:
                 !it->second.data_issued) {
                 continue;
             }
+            if (lane != it->second.writeback_data_lane) {
+                fail("wrong store-data writeback lane", lane, writeback);
+                return;
+            }
             if (sample_cycle < it->second.data_issue_cycle) {
                 continue;
             }
@@ -428,6 +446,13 @@ public:
             }
             return false;
         }
+        if (static_cast<std::uint8_t>(transaction.address_lane) !=
+            it->second.issue_address_lane) {
+            if (error_.empty()) {
+                error_ = "scalar store-address issue lane differs from expectation";
+            }
+            return false;
+        }
         // A TLB miss may require the same address uop to be replayed after
         // translation.  Recording the handshake is therefore intentionally
         // idempotent; duplicate *writebacks* remain an error below.
@@ -454,6 +479,12 @@ public:
             }
             return false;
         }
+        if (lane != match->second.issue_data_lane) {
+            if (error_.empty()) {
+                error_ = "scalar store-data issue lane differs from expectation";
+            }
+            return false;
+        }
         // Store-data can likewise be retried when the SQ entry is replayed.
         // Keep the issued bit as a monotonic fact rather than rejecting a
         // legal retry; duplicate output pulses are still checked separately.
@@ -465,6 +496,10 @@ public:
 private:
     struct Expected {
         bool rob_flag;
+        std::uint8_t issue_address_lane;
+        std::uint8_t issue_data_lane;
+        std::uint8_t writeback_address_lane;
+        std::uint8_t writeback_data_lane;
         std::uint32_t exception_mask;
         bool address_seen;
         bool data_seen;

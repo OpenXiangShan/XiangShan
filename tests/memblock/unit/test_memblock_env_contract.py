@@ -1416,6 +1416,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "duplicate outstanding vector memory uop",
             "duplicate store-address writeback",
             "duplicate store-data writeback",
+            "expected_address_writeback_lane",
+            "expected_data_writeback_lane",
+            "issue_address_lane",
+            "issue_data_lane",
+            "writeback_address_lane",
+            "writeback_data_lane",
+            "wrong store-address writeback lane",
+            "wrong store-data writeback lane",
+            "scalar store-address issue lane differs from expectation",
+            "scalar store-data issue lane differs from expectation",
         ):
             self.assertIn(diagnostic, environment)
 

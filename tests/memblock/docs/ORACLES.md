@@ -124,10 +124,12 @@ The operation decoder maps each legal load/store encoding to its byte width and
 signedness. The expected value is assembled from bytes and extended to XLEN
 without consulting the DUT's internal decoder. The current response key
 primarily uses ROB value/flag plus destination and operation fields available at
-the boundary; queue/source/address identity is not always observable. A
-duplicate or unknown identity is rejected where the monitor can distinguish it,
-while unmatched output-only store-data pulses remain a documented residual
-risk.
+the boundary. Store scoreboards separately record address/data issue lanes and
+the permitted writeback lanes; ordinary stores require the same lane, while a
+misaligned store may explicitly expect the legal lane-0 address completion.
+Queue/source/address identity is not always observable. A duplicate or unknown
+identity is rejected where the monitor can distinguish it, while unmatched
+output-only store-data pulses remain a documented residual risk.
 
 ### Vector operations
 

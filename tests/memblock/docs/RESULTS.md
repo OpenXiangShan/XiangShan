@@ -4069,3 +4069,18 @@ echo the B Probe source. Local TileLink semantics and TLMonitor show that C
 source is the client's own source namespace; the observed value 17 is legal.
 The equality assumption was withdrawn and the documentation now states
 address matching without claiming B/C source equality.
+
+## Store Lane Identity
+
+On 2026-10-21, the scalar store scoreboard began recording independent address
+and data issue lanes plus their permitted writeback lanes. Ordinary stores must
+return on the expected lane; `misaligned-stores` explicitly models the legal
+MisalignBuffer behavior where an address uop issued on lane 1 completes on
+lane 0. This removes silent attribution by ROB identity alone without treating
+the legal lane remap as an RTL failure.
+
+`store-rdata-order`, `queue-pressure`, `memory-violation`, `misaligned-stores`,
+`exception-contracts`, `uncache-widths`, and `atomic-contracts` pass with the
+stricter monitor. The remaining limitation is unchanged: unmatched
+output-only data pulses and the absence of a complete store payload monitor are
+retained as explicit risk rather than counted as semantic coverage.
