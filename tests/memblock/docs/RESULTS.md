@@ -4213,8 +4213,17 @@ zero MMIO DCache requests, five successful FLH and five successful FLW cases,
 and sign bins 3/2 for each width. FLD and the denied/corrupt and earlier fault
 suppression cases still pass. The execution is retained in
 `build/memblock/canonical-regression/schema49-fp-loads.log`. This closes a
-stimulus false-negative risk; it is not yet independent RTL-mutation evidence
-for historical `756bbf59`.
+stimulus false-negative risk. An isolated equivalent RTL revert of historical
+`756bbf59` subsequently confirms sensitivity: the shared LoadUnit MMIO LH
+branch sign-extends instead of NaN-boxing, and both initial and frozen replay
+runs fail at cycle 128. The first `0x0000` FLH returns `0x0` rather than
+`0xffffffffffff0000`, with the correct successful FP-only write enable and
+MMIO classification at lane 2/ROB 0/pdest 21. One Uncache request and zero
+DCache requests were observed. The same-source clean run passes all payload
+and fault bins. The source snapshot, exact patch, isolated dependencies,
+build provenance, clean/mutant/replay logs, and structured results are in
+`build/memblock/fp-boxing-mutation/`. This is historical mutation evidence,
+not a newly discovered CPU bug.
 
 The subsequent queue-oracle check removes the legacy model-only cancellation
 fallback for faulting MMIO FP loads. Each denied/corrupt load must drain the
