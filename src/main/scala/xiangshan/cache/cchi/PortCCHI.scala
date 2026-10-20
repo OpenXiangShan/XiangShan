@@ -189,7 +189,7 @@ object DCacheCCHI {
       fillUpDat(dat, tgtId, srcId, traceTag)
       dat.Opcode := CCHIOpcode.CopyBackWrData.U
       dat.TxnID := dbid
-      dat.Resp := 0.U(3.W)
+      dat.Resp := 0b110.U(3.W) // WriteBackFull: CopyBackWrData_UD_PD
       dat.DataID := dataId
       dat.Data := beatData
       // FlitUpDAT.BE is one bit per byte of a Data_Width beat
