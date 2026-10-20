@@ -24,7 +24,7 @@ def test_vector_vtype_bin_trace(env) -> None:
     checker = VTypeChecker.from_golden_trace(trace)
     checker.bind_env(env)
     config_pcs = {pc for pc, result in checker.expected_by_pc.items() if result.kind != "ordinary"}
-    assert len(config_pcs) == 4
+    assert len(config_pcs) == 6
     config_by_cycle: dict[int, set[int]] = {}
     stalled_pcs: set[int] = set()
     stalled_slots: dict[int, tuple[int, ...]] = {}

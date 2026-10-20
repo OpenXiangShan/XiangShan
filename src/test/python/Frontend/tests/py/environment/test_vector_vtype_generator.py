@@ -38,3 +38,5 @@ def test_vector_vtype_generator_is_deterministic_and_covers_config_forms(
         "vsetvli t0, t1, e64, m4, ta, mu",
         "vsetivli zero, 0, e8, mf2, tu, ma",
     ]
+    for _name, instruction in generate_vector_vtype_cases.EDGE_CASES:
+        assert instruction in rendered

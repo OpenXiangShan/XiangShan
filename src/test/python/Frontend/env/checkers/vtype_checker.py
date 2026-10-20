@@ -37,7 +37,22 @@ class VTypeChecker:
                         raise ValueError(
                             f"vtype check requires vtype_after at trace index={entry.index} pc=0x{pc:x}"
                         )
-                    state = self._decode_vtype(int(entry.vtype_after))
+                    raw_state = self._decode_vtype(int(entry.vtype_after))
+                    if kind == "vsetvl":
+                        state = raw_state
+                    else:
+                        # NEMU records the architectural CSR and canonicalizes
+                        # an illegal result to vill.  VTypeGen's frontend
+                        # bundle retains the candidate fields when vill comes
+                        # only from the keep-vl/VLMAX correction.  Recompute
+                        # that frontend representation from the instruction,
+                        # while keeping NEMU as the source for the illegal bit
+                        # and all ordinary legal results.
+                        candidate = model.step(entry.instr).vtype
+                        state = (
+                            candidate if raw_state.illegal and candidate.illegal else raw_state
+                        )
+                    model.state = state
                 transition = VTypeTransition(
                     instruction=int(entry.instr),
                     kind=kind or "ordinary",

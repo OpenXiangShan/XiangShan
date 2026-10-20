@@ -14,6 +14,11 @@ CASES = (
     ("e8_mf2_tu_ma", "vsetivli zero, 0, e8, mf2, tu, ma"),
 )
 
+EDGE_CASES = (
+    ("keep_vl_vill", ".word 0x0d807057"),
+    ("reserved_vtype", ".word 0x1d0072d7"),
+)
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -46,6 +51,14 @@ def _render(case_name: str) -> str:
         "    li t1, 8",
     ]
     for _, instruction in CASES:
+        lines.extend(
+            [
+                f"    # {instruction}",
+                f"    {instruction}",
+                "    nop",
+            ]
+        )
+    for _, instruction in EDGE_CASES:
         lines.extend(
             [
                 f"    # {instruction}",

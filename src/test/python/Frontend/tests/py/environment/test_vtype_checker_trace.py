@@ -4,19 +4,34 @@ from env.checkers.vtype_checker import VTypeChecker
 from env.model.backend_runtime import CfVecCycleSnapshot, CfVecSlotSnapshot
 from env.model.backend_state import PATH_STATE_CORRECT, ROB_COMMIT_STATE_COMMITTED, QueueInstr
 from env.model.golden_trace import GoldenTrace, TraceEntry
+from env.model.vtype import VTypeState
 
 
-def _slot(cycle: int, pc: int, instr: int, raw_vtype: int) -> CfVecCycleSnapshot:
-    fields = dict(
-        illegal=bool(raw_vtype >> 63),
-        vma=bool(raw_vtype & 0x80),
-        vta=bool(raw_vtype & 0x40),
-        vsew=(raw_vtype >> 3) & 7,
-        vlmul=raw_vtype & 7,
-    )
+def _slot(
+    cycle: int,
+    pc: int,
+    instr: int,
+    raw_vtype: int,
+    *,
+    raw_specvtype: int | None = None,
+) -> CfVecCycleSnapshot:
+    def _fields(raw: int) -> dict[str, int | bool]:
+        return dict(
+            illegal=bool(raw >> 63),
+            vma=bool(raw & 0x80),
+            vta=bool(raw & 0x40),
+            vsew=(raw >> 3) & 7,
+            vlmul=raw & 7,
+        )
     values = {
         f"{prefix}_{name}": value
-        for prefix in ("vtype", "specvtype")
+        for prefix, fields in (
+            ("vtype", _fields(raw_vtype)),
+            (
+                "specvtype",
+                _fields(raw_vtype if raw_specvtype is None else raw_specvtype),
+            ),
+        )
         for name, value in fields.items()
     }
     return CfVecCycleSnapshot(cycle, (CfVecSlotSnapshot(slot=0, valid=True, instr=instr, **values),))
@@ -45,6 +60,33 @@ def test_repeated_pc_uses_dynamic_trace_index() -> None:
         snapshot = _slot(cycle, 0x104, nop, raw)
         checker.check_cycle(snapshot, [_queue(cycle, 0x104, nop, index)], lambda _: 0x104, cursor=index + 1)
     assert checker.checked_indices == {1, 3}
+
+
+def test_keep_vl_trace_preserves_frontend_candidate_fields() -> None:
+    config = 0x0D0072D7
+    keep_vl = 0x0D807057
+    reserved = 0x1D0072D7
+    nop = 0x13
+    trace = GoldenTrace([
+        TraceEntry(0, 0x100, config, 4, vtype_after=0x87),
+        TraceEntry(1, 0x104, keep_vl, 4, vtype_after=1 << 63),
+        TraceEntry(2, 0x108, nop, 4),
+        TraceEntry(3, 0x10C, reserved, 4, vtype_after=1 << 63),
+    ])
+    checker = VTypeChecker.from_golden_trace(trace)
+
+    expected = checker._expected[1]
+    assert expected.vtype == VTypeState(True, True, True, 0b011, 0)
+    assert checker._expected[2].specvtype == expected.vtype
+    assert checker._expected[3].vtype == VTypeState.initial()
+
+    checker.check_cycle(
+        _slot(1, 0x104, keep_vl, (1 << 63) | 0xD8, raw_specvtype=0x87),
+        [_queue(1, 0x104, keep_vl, 1)],
+        lambda _: 0x104,
+        cursor=2,
+    )
+    assert checker.checked_indices == {1}
 
 
 def test_uncommitted_vsetvl_younger_output_waits_for_replay() -> None:
