@@ -893,6 +893,9 @@ def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
         stall_snapshot_formatter=_format_stall_snapshot,
     )
     setattr(env, "_last_run_until_golden_result", result)
+    checker = getattr(env.backend_model, "vtype_checker", None)
+    if checker is not None and result.completed and result.ok:
+        checker.check_completion(cycle=env.backend_model.current_cycle, cursor=result.cursor)
     return bool(result.ok)
 
 

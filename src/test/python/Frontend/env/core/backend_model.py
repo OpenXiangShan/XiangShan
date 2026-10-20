@@ -9,6 +9,7 @@ from typing import Callable, Deque, Dict, Optional
 from toffee.bundle import DummySignal
 
 from ..agents.backend_agent import BackendAgent
+from ..checkers.vtype_checker import VTypeChecker
 from ..bundles import (
     BackendCfVecBundle,
     BackendFromFtqBundle,
@@ -120,6 +121,7 @@ class BackendModel:
         self._hardware_reset_active = False
         self.last_events: Deque[dict] = deque(maxlen=64)
         self.golden_trace: Optional[GoldenTrace] = None
+        self.vtype_checker: Optional[VTypeChecker] = None
         self._explicit_injection_enabled = True
         self._explicit_injection_block_reason = ""
         self.backend_mode = "auto_python"
@@ -3067,6 +3069,11 @@ class BackendModel:
 
     def set_golden_trace(self, trace: Optional[GoldenTrace], *, start_cursor: int = 0) -> None:
         self.golden_trace = trace
+        self.vtype_checker = (
+            VTypeChecker.from_golden_trace(trace, start_cursor=start_cursor)
+            if trace is not None and any(entry.vtype_after is not None for entry in trace.entries)
+            else None
+        )
         self._clear_active_wrong_path_episode()
         self._last_correct_cfi_context = None
         self._cycle_start_golden_pc = None
@@ -5090,6 +5097,14 @@ class BackendModel:
         commit_entry = None if exception_redirect else self._plan_commit_entry_for_cycle(apply=False)
         call_ret_commit_group = self._current_semantic_call_ret_commit_group()
         self._schedule_next_queue_call_ret_commit_group()
+        if self.vtype_checker is not None and self._cfvec_cycle_snapshot is not None:
+            snapshot = self._cfvec_cycle_snapshot
+            self.vtype_checker.check_cycle(
+                snapshot,
+                self._cfvec_queue,
+                lambda slot: self.observed_cfvec_snapshot_pc(snapshot, slot),
+                cursor=self.current_golden_cursor(),
+            )
         return BackendCycleActions(
             can_accept=self.can_accept,
             backend_empty=self.backend_empty_for_dut(),

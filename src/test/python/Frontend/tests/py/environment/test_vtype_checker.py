@@ -82,7 +82,8 @@ def test_vtype_checker_rejects_wrong_instruction_at_expected_pc() -> None:
     assert checker.last_error["actual"] == 0x00000093
 
 
-def test_vtype_checker_rejects_duplicate_trace_pc() -> None:
+def test_vtype_checker_requires_dynamic_index_for_duplicate_trace_pc() -> None:
     entries = [TraceEntry(i, 0x80001000, 0x00000013, 4) for i in range(2)]
-    with pytest.raises(ValueError, match="duplicate pc"):
-        VTypeChecker(entries)
+    checker = VTypeChecker(entries)
+    with pytest.raises(ValueError, match="dynamic index for duplicate pc"):
+        checker.check_snapshot(_snapshot(0x00000013), lambda _: 0x80001000)
