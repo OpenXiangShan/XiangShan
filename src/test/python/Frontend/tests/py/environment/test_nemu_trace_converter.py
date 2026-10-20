@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from env.nemu.trace_converter import convert_nemu_log_lines
+from env.model.golden_trace import GoldenTrace
 
 
 def test_convert_nemu_log_lines_keeps_debug_after_interleaved_execute_lines() -> None:
@@ -53,3 +58,38 @@ def test_convert_execute_only_log_decodes_instructions_from_bin() -> None:
             "target_pc": "0x8000000c",
         },
     ]
+
+
+def test_vsetvl_results_follow_dynamic_executions(tmp_path) -> None:
+    lines = [
+        "[vcommon.c:129,set_vtype_vl] frontend_vtype pc=0x80000000 instr=0x80007057 vtype=0xd1",
+        "[cpu-exec.c:519,execute] prev pc = 0x80000000, pc = 0x80000000",
+        "[cpu-exec.c:84,debug_hook] (M)0x80000000: 57 70 00 80 vsetvl",
+        "[vcommon.c:129,set_vtype_vl] frontend_vtype pc=0x80000000 instr=0x80007057 vtype=0x8000000000000000",
+        "[cpu-exec.c:519,execute] prev pc = 0x80000000, pc = 0x80000004",
+        "[cpu-exec.c:84,debug_hook] (M)0x80000000: 57 70 00 80 vsetvl",
+    ]
+
+    rows = convert_nemu_log_lines(lines)
+    assert [row["vtype_after"] for row in rows] == ["0xd1", "0x8000000000000000"]
+
+    trace_path = tmp_path / "trace.jsonl"
+    trace_path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    trace = GoldenTrace.from_file(str(trace_path))
+    assert [entry.vtype_after for entry in trace.entries] == [0xD1, 1 << 63]
+
+
+def test_vsetvl_requires_matching_nemu_result() -> None:
+    lines = [
+        "[cpu-exec.c:519,execute] prev pc = 0x80000000, pc = 0x80000004",
+        "[cpu-exec.c:84,debug_hook] (M)0x80000000: 57 70 00 80 vsetvl",
+    ]
+    with pytest.raises(ValueError, match="lacks vtype result"):
+        convert_nemu_log_lines(lines)
+
+    mismatched = [
+        "[vcommon.c:129,set_vtype_vl] frontend_vtype pc=0x80000004 instr=0x80007057 vtype=0xd1",
+        *lines,
+    ]
+    with pytest.raises(ValueError, match="does not match"):
+        convert_nemu_log_lines(mismatched)

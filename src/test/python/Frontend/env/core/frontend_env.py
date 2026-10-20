@@ -493,6 +493,8 @@ class FrontendEnv:
     def _drive_backend_cycle(self, cycle: int) -> None:
         actions = self.backend_model.plan_cycle_actions()
         self.backend_agent.start_cycle(actions.can_accept, actions.wfi_req, actions.backend_empty)
+        if self.backend_model.backend_mode == "auto_bin":
+            self.backend_agent.drive_vtype_commit(actions.vtype_commit)
         self.backend_agent.drive_commit(actions.commit_entry)
         if hasattr(self.backend_model, "commit_entry_driven"):
             self.backend_model.commit_entry_driven(actions.commit_entry)

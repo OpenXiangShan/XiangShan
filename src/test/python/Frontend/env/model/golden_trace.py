@@ -18,6 +18,7 @@ class TraceEntry:
     taken: bool = False
     target_pc: Optional[int] = None
     exception: Optional[int] = None
+    vtype_after: Optional[int] = None
 
 
 def _parse_trace_int(value: int | str) -> int:
@@ -141,6 +142,11 @@ class GoldenTrace:
                         None
                         if ent.get("exception") is None
                         else _parse_trace_int(ent["exception"])
+                    ),
+                    vtype_after=(
+                        None
+                        if ent.get("vtype_after") is None
+                        else _parse_trace_int(ent["vtype_after"])
                     ),
                 )
             )

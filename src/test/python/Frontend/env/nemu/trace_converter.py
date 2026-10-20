@@ -20,6 +20,9 @@ _EXEC_LINE_RE = re.compile(
 _DEBUG_LINE_RE = re.compile(
     r"debug_hook\]\s+\([^)]+\)0x([0-9a-fA-F]+):\s*(.*)$"
 )
+_VTYPE_LINE_RE = re.compile(
+    r"frontend_vtype pc=0x([0-9a-fA-F]+) instr=0x([0-9a-fA-F]+) vtype=0x([0-9a-fA-F]+)"
+)
 _BYTE_RE = re.compile(r"^[0-9a-fA-F]{2}$")
 
 _COND_BRANCH_MNEMONICS = {
@@ -103,6 +106,17 @@ def _parse_exec_line(raw_line: str) -> Optional[tuple[int, int]]:
     return prev_pc, next_pc
 
 
+def _parse_vtype_line(raw_line: str) -> Optional[tuple[int, int, int]]:
+    match = _VTYPE_LINE_RE.search(_strip_ansi(raw_line))
+    if match is None:
+        return None
+    return tuple(int(group, 16) for group in match.groups())
+
+
+def _is_vsetvl(instr: int) -> bool:
+    return (int(instr) & 0xFE00707F) == 0x80007057
+
+
 def _parse_debug_line(raw_line: str) -> Optional[dict]:
     line = _strip_ansi(raw_line).strip()
     m = _DEBUG_LINE_RE.search(line)
@@ -161,7 +175,15 @@ def convert_nemu_log_lines(
 ) -> List[dict]:
     parsed: List[dict] = []
     pending_execs: List[tuple[int, int]] = []
+    pending_vtype: Optional[tuple[int, int, int]] = None
     for line in lines:
+        vtype_info = _parse_vtype_line(line)
+        if vtype_info is not None:
+            if pending_vtype is not None:
+                raise ValueError("NEMU vtype result was not matched to an executed instruction")
+            pending_vtype = vtype_info
+            continue
+
         exec_info = _parse_exec_line(line)
         if exec_info is not None:
             pending_execs.append(exec_info)
@@ -170,6 +192,17 @@ def convert_nemu_log_lines(
         item = _parse_debug_line(line)
         if item is None:
             continue
+
+        if pending_vtype is not None:
+            pc, instr, vtype = pending_vtype
+            if (item["pc"], item["instr"]) != (pc, instr):
+                raise ValueError(
+                    "NEMU vtype result does not match the next executed instruction: "
+                    f"result=(0x{pc:x},0x{instr:x}) instruction="
+                    f"(0x{item['pc']:x},0x{item['instr']:x})"
+                )
+            item["vtype_after"] = vtype
+            pending_vtype = None
 
         item["next_pc"] = None
         if pending_execs:
@@ -181,6 +214,9 @@ def convert_nemu_log_lines(
                 _prev_pc, next_pc = pending_execs.pop(int(match_index))
                 item["next_pc"] = int(next_pc)
         parsed.append(item)
+
+    if pending_vtype is not None:
+        raise ValueError("NEMU vtype result was not matched to an executed instruction")
 
     if not parsed and binary_image is not None:
         for prev_pc, next_pc in pending_execs:
@@ -199,6 +235,11 @@ def convert_nemu_log_lines(
 
     out: List[dict] = []
     for i, cur in enumerate(parsed):
+        if _is_vsetvl(cur["instr"]) and "vtype_after" not in cur:
+            raise ValueError(
+                f"NEMU trace lacks vtype result for vsetvl at pc=0x{cur['pc']:x}; "
+                "use a NEMU executable with frontend_vtype logging"
+            )
         next_pc = cur["next_pc"]
         if next_pc is None:
             continue
@@ -217,17 +258,18 @@ def convert_nemu_log_lines(
             taken = True
             target_pc = int(next_pc)
 
-        out.append(
-            {
-                "index": i,
-                "pc": hex(int(cur["pc"])),
-                "instr": hex(int(cur["instr"])),
-                "size": int(cur["size"]),
-                "kind": kind,
-                "taken": bool(taken),
-                "target_pc": hex(target_pc) if target_pc is not None else None,
-            }
-        )
+        row = {
+            "index": i,
+            "pc": hex(int(cur["pc"])),
+            "instr": hex(int(cur["instr"])),
+            "size": int(cur["size"]),
+            "kind": kind,
+            "taken": bool(taken),
+            "target_pc": hex(target_pc) if target_pc is not None else None,
+        }
+        if "vtype_after" in cur:
+            row["vtype_after"] = hex(cur["vtype_after"])
+        out.append(row)
     return out
 
 

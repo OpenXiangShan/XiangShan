@@ -107,6 +107,11 @@ def generate_nemu_trace_from_bin(
             memory_base=int(memory_base),
         )
     )
+    if trace_entries == 0:
+        raise ValueError(
+            f"NEMU produced an empty golden trace for {bin_path}; "
+            f"check the binary load address and NEMU start PC in {log_path}"
+        )
 
     out = dict(run_out)
     out["trace_output_path"] = str(trace_file)

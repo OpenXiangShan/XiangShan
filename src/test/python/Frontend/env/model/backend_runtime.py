@@ -102,6 +102,7 @@ class BackendCycleActions:
     call_ret_commit_group: tuple = ()
     ftq_idx_ahead: Optional[FtqIdxAheadTxn] = None
     redirect_payload: Optional[dict] = None
+    vtype_commit: Optional[tuple[int, bool]] = None
 
 
 __all__ = [

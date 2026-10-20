@@ -3477,13 +3477,84 @@ class BackendModel:
             self._cfvec_queue_mark_committed(int(queue_index), int(instr))
         self._apply_backend_state()
 
-    def _plan_instruction_commits_for_cycle(self) -> int:
-        committed = 0
+    @staticmethod
+    def _is_vector_config(instr: int) -> bool:
+        return (int(instr) & 0x707F) == 0x7057
+
+    @staticmethod
+    def _is_vsetvl(instr: int) -> bool:
+        return (int(instr) & 0xFE00707F) == 0x80007057
+
+    def _fail_vtype_stimulus(self, reason: str) -> None:
+        cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
+        message = f"backend vtype stimulus cycle={self.current_cycle} cursor={cursor}: {reason}"
+        self.logger.error(message)
+        raise AssertionError(message)
+
+    def _committed_vtype_from_trace(self, queue_entry: QueueInstr) -> int:
+        trace = self.golden_trace
+        golden_index = queue_entry.golden_index
+        if trace is None or golden_index is None or not 0 <= int(golden_index) < len(trace.entries):
+            self._fail_vtype_stimulus(f"committed vector config has no golden instance: pc=0x{queue_entry.pc:x}")
+        golden_entry = trace.entries[int(golden_index)]
+        if (int(golden_entry.pc), int(golden_entry.instr)) != (int(queue_entry.pc), int(queue_entry.instr)):
+            self._fail_vtype_stimulus(f"committed vector config has mismatched golden instance: pc=0x{queue_entry.pc:x}")
+        if golden_entry.vtype_after is None:
+            self._fail_vtype_stimulus(
+                f"golden trace lacks vtype_after for committed vector config: pc=0x{queue_entry.pc:x} "
+                f"index={int(golden_index)}"
+            )
+        return int(golden_entry.vtype_after)
+
+    def _plan_instruction_commits_for_cycle(
+        self, *, allow_vsetvl: bool = True
+    ) -> tuple[Optional[tuple[int, bool]], Optional[QueueInstr]]:
+        vtype_commit = None
+        vsetvl_source = None
         for queue_index in self._queue_instruction_commit_candidate_indices():
             queue_entry = self._cfvec_queue[int(queue_index)]
+            is_vsetvl = self.backend_mode == "auto_bin" and self._is_vsetvl(queue_entry.instr)
+            if is_vsetvl and not allow_vsetvl:
+                break
+            if self.backend_mode == "auto_bin" and self._is_vector_config(queue_entry.instr):
+                vtype_commit = (self._committed_vtype_from_trace(queue_entry), is_vsetvl)
             self._record_instruction_commit(int(queue_index), int(queue_entry.instr))
-            committed += 1
-        return int(committed)
+            if is_vsetvl:
+                vsetvl_source = queue_entry
+                break
+        return vtype_commit, vsetvl_source
+
+    def _plan_vsetvl_redirect(self, source: QueueInstr) -> dict:
+        if self.golden_trace is None or source.golden_index is None:
+            self._fail_vtype_stimulus(f"vsetvl redirect has no golden instance: pc=0x{source.pc:x}")
+        next_index = int(source.golden_index) + 1
+        target_pc = (
+            int(self.golden_trace.entries[next_index].pc)
+            if next_index < len(self.golden_trace.entries)
+            else self._sequential_next_pc(source.pc, source.is_rvc)
+        )
+        self._queue_redirect_event(
+            target_pc=target_pc,
+            reason="vsetvl_commit_redirect",
+            delay_cycles=0,
+            flush_on_drive=True,
+            payload_extra={
+                "source_bound": True,
+                "pc": int(source.pc),
+                "ftq_flag": int(source.ftq_flag),
+                "ftq_value": int(source.ftq_value),
+                "ftq_offset": int(source.ftq_offset),
+                "is_rvc": int(source.is_rvc),
+                "taken": 0,
+                "level": 0,
+                "redirect_class": BackendRedirectClass.OTHER,
+            },
+        )
+        redirect = self._ready_redirect_for_cycle()
+        if redirect is None:
+            self._fail_vtype_stimulus(f"vsetvl commit did not produce a redirect: pc=0x{source.pc:x}")
+        self.golden_trace.reset(next_index)
+        return redirect
 
     def _schedule_next_queue_call_ret_commit_group(self) -> None:
         self._sync_backend_state().schedule_next_queue_call_ret_commit_group()
@@ -4999,7 +5070,13 @@ class BackendModel:
         ftq_idx_ahead = self._ready_ftq_idx_ahead_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
-        self._plan_instruction_commits_for_cycle()
+        vtype_commit, vsetvl_source = self._plan_instruction_commits_for_cycle(
+            allow_vsetvl=redirect_payload is None and not any(
+                event.kind in ("redirect", "exception") for event in self.pending_events
+            )
+        )
+        if vsetvl_source is not None:
+            redirect_payload = self._plan_vsetvl_redirect(vsetvl_source)
         exception_redirect = bool(
             redirect_payload is not None
             and (
@@ -5022,6 +5099,7 @@ class BackendModel:
             call_ret_commit_group=call_ret_commit_group,
             ftq_idx_ahead=ftq_idx_ahead,
             redirect_payload=redirect_payload,
+            vtype_commit=vtype_commit,
         )
 
     def on_clock_edge(self, cycle: int) -> None:
@@ -5049,6 +5127,8 @@ class BackendModel:
         self.consume_backend_observation(snapshot.backend)
         self.accept_cfvec_snapshot(snapshot.cfvec)
         actions = self.plan_cycle_actions()
+        if self.backend_mode == "auto_bin":
+            agent.drive_vtype_commit(actions.vtype_commit)
         agent.drive_ftq_idx_ahead(actions.ftq_idx_ahead)
         agent.drive_resolves(actions.resolve_entries)
         agent.drive_call_ret_commit(actions.call_ret_commit_group)

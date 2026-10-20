@@ -99,6 +99,27 @@ class BackendAgent:
         self.clear_one_shot_signals()
         self._write(self._wfi_if.wfi_req, 1 if int(wfi_req) else 0)
 
+    def drive_vtype_commit(self, commit: Optional[tuple[int, bool]]) -> None:
+        assert self._to_ibuf_if is not None
+        self._write(self._to_ibuf_if.commit_vtype_valid, 0)
+        self._write(self._to_ibuf_if.commit_vtype_has_vsetvl, 0)
+        if commit is None:
+            return
+        raw, has_vsetvl = commit
+        fields = {
+            "illegal": (int(raw) >> 63) & 1,
+            "vma": (int(raw) >> 7) & 1,
+            "vta": (int(raw) >> 6) & 1,
+            "vsew": (int(raw) >> 3) & 0x7,
+            "vlmul": int(raw) & 0x7,
+        }
+        for name, value in fields.items():
+            self._write(getattr(self._to_ibuf_if, f"commit_vtype_bits_{name}"), value)
+            if has_vsetvl:
+                self._write(getattr(self._to_ibuf_if, f"vsetvl_vtype_{name}"), value)
+        self._write(self._to_ibuf_if.commit_vtype_valid, 1)
+        self._write(self._to_ibuf_if.commit_vtype_has_vsetvl, int(has_vsetvl))
+
     def drive_ftq_idx_ahead(self, txn: Optional[FtqIdxAheadTxn]) -> None:
         assert self._drive_if is not None
         if txn is None:

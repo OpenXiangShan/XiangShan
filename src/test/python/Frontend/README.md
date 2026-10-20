@@ -217,6 +217,11 @@ def test_generated_stream(env):
   - 调用前需要先激活 frontend Python/runtime 环境；脚本本身不写死 venv 路径
   - 可用 `NEMU_EXEC=/path/to/riscv64-nemu-interpreter` 手动指定 NEMU；
     默认使用 `ready-to-run/riscv64-nemu-interpreter`
+  - 向量配置指令的 trace 行可携带 `vtype_after`（NEMU 执行后的原始 CSR 值）。
+    生成该字段需要使用包含 `frontend_vtype` 日志的 NEMU 构建，并开启
+    `CONFIG_RVV`、`CONFIG_DEBUG` 和 `CONFIG_TRACE_INST`。`vsetvl` 缺少该结果时，trace 转换会报错。
+    `run_bin_trace_pipeline.sh` 使用 `TB_NEMU_EXEC=/path/to/riscv64-nemu-interpreter`
+    指定这样的可执行文件
   - 最终 `.bin` 已经是 NEMU 可跑格式，不生成 `_padded` 文件名
 
 ## 常用工具
